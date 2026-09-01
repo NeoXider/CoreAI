@@ -192,8 +192,12 @@ namespace CoreAI.Chat
                 throw new ArgumentNullException(nameof(request));
             }
 
+            request.CallerCancellationToken = ct;
+            request.DeadlineCancellationToken = CancellationToken.None;
+
             float timeoutSec = 0f;
             CancellationTokenSource timeoutCts = null;
+            CancellationTokenSource deadlineCts = null;
             IdleTimeoutDeadline deadline = null;
             CancellationToken effectiveCt = ct;
             Action<LlmToolCallStarted> onToolStarted = null;
@@ -204,8 +208,10 @@ namespace CoreAI.Chat
                 timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
                 if (timeoutSec > 0)
                 {
-                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    deadline = new IdleTimeoutDeadline(timeoutCts, timeoutSec);
+                    deadlineCts = new CancellationTokenSource();
+                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, deadlineCts.Token);
+                    deadline = new IdleTimeoutDeadline(deadlineCts, timeoutSec);
+                    request.DeadlineCancellationToken = deadlineCts.Token;
                     effectiveCt = timeoutCts.Token;
 
                     // WHY: a tool-call for THIS turn's role is progress and re-arms the idle deadline. A
@@ -250,7 +256,10 @@ namespace CoreAI.Chat
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 return result ?? "";
             }
-            catch (OperationCanceledException) when (timeoutSec > 0f && !ct.IsCancellationRequested)
+            catch (OperationCanceledException) when (
+                deadlineCts != null &&
+                deadlineCts.IsCancellationRequested &&
+                !ct.IsCancellationRequested)
             {
                 // Linked-token / CancelAfterSlim may not set CTS.IsCancellationRequested in the same
                 // and the caller token instead of probing the linked source.
@@ -275,6 +284,7 @@ namespace CoreAI.Chat
 
                 deadline?.Dispose();
                 timeoutCts?.Dispose();
+                deadlineCts?.Dispose();
             }
         }
 
@@ -327,8 +337,12 @@ namespace CoreAI.Chat
                 throw new ArgumentNullException(nameof(request));
             }
 
+            request.CallerCancellationToken = ct;
+            request.DeadlineCancellationToken = CancellationToken.None;
+
             float timeoutSec = 0f;
             CancellationTokenSource timeoutCts = null;
+            CancellationTokenSource deadlineCts = null;
             IdleTimeoutDeadline deadline = null;
             CancellationToken effectiveCt = ct;
             IAsyncEnumerator<LlmStreamChunk> streamEnumerator = null;
@@ -337,8 +351,10 @@ namespace CoreAI.Chat
                 timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
                 if (timeoutSec > 0)
                 {
-                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    deadline = new IdleTimeoutDeadline(timeoutCts, timeoutSec);
+                    deadlineCts = new CancellationTokenSource();
+                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, deadlineCts.Token);
+                    deadline = new IdleTimeoutDeadline(deadlineCts, timeoutSec);
+                    request.DeadlineCancellationToken = deadlineCts.Token;
                     effectiveCt = timeoutCts.Token;
                 }
 
@@ -352,7 +368,10 @@ namespace CoreAI.Chat
                         {
                             hasNext = await streamEnumerator.MoveNextAsync();
                         }
-                        catch (OperationCanceledException) when (timeoutSec > 0f && !ct.IsCancellationRequested)
+                        catch (OperationCanceledException) when (
+                            deadlineCts != null &&
+                            deadlineCts.IsCancellationRequested &&
+                            !ct.IsCancellationRequested)
                         {
                             throw new LlmOperationTimeoutException();
                         }
@@ -362,8 +381,21 @@ namespace CoreAI.Chat
                             break;
                         }
 
+                        LlmStreamChunk chunk = streamEnumerator.Current;
+                        if (chunk?.ErrorCode == LlmErrorCode.Cancelled)
+                        {
+                            if (deadlineCts != null &&
+                                deadlineCts.IsCancellationRequested &&
+                                !ct.IsCancellationRequested)
+                            {
+                                throw new LlmOperationTimeoutException();
+                            }
+
+                            throw new OperationCanceledException(chunk.Error ?? "cancelled", effectiveCt);
+                        }
+
                         deadline?.Rearm();
-                        yield return streamEnumerator.Current;
+                        yield return chunk;
                     }
                 }
                 finally
@@ -378,6 +410,7 @@ namespace CoreAI.Chat
             {
                 deadline?.Dispose();
                 timeoutCts?.Dispose();
+                deadlineCts?.Dispose();
             }
         }
 

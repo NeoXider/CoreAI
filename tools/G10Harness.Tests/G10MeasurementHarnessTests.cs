@@ -2,7 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Diagnostics.G10;
 using Xunit;
 
@@ -137,6 +140,142 @@ namespace CoreAI.Tools.G10.Tests
                 Assert.Equal(
                     world.MeasurementGuardedInstructionSteps,
                     world.MeasurementGuardedStepHistogram.Sum(pair => pair.Key * pair.Value));
+            }
+        }
+
+        [Fact]
+        public async Task ProductionComposition_ClassifiesCancellationApartFromProviderFailure()
+        {
+            G10MeasurementConfiguration configuration = new G10MeasurementConfiguration
+            {
+                WarmupSeconds = 0.2d,
+                MeasurementSeconds = 1d,
+                FrameRate = 60,
+                Provider = new G10ProviderConfiguration
+                {
+                    ProviderMode = G10ProviderMode.ScriptedStub,
+                    OrchestratorConcurrency = 1,
+                    RequestTimeoutSeconds = 10,
+                    StubLatencyMilliseconds = 0,
+                    Temperature = 0f
+                }
+            };
+            CancellationOutcomeLlmClient provider = new CancellationOutcomeLlmClient();
+            InMemoryAiOrchestrationMetrics metrics = new InMemoryAiOrchestrationMetrics();
+
+            using G10MeasurementSession session = G10MeasurementComposition.Compose(
+                configuration,
+                provider,
+                metrics);
+            ActorContext actor = session.ActorIdentityProvider.GetActorContext(
+                BuiltInAgentRoleIds.SmartChat);
+
+            Task<string> replaced = session.Orchestrator.RunTaskAsync(
+                BuildRequest(actor, "replacement-first"));
+            await provider.FirstCancellationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Task<string> replacement = session.Orchestrator.RunTaskAsync(
+                BuildRequest(actor, "replacement-second"));
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await replaced);
+            Assert.Equal("ok", await replacement);
+
+            using CancellationTokenSource deadline = new CancellationTokenSource();
+            AiTaskRequest deadlineRequest = BuildRequest(actor, "deadline");
+            deadlineRequest.DeadlineCancellationToken = deadline.Token;
+            Task<string> deadlineCancellation = session.Orchestrator.RunTaskAsync(
+                deadlineRequest,
+                deadline.Token);
+            await provider.DeadlineCancellationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            deadline.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await deadlineCancellation);
+
+            string providerFailure = await session.Orchestrator.RunTaskAsync(
+                BuildRequest(actor, "provider-failure"));
+            Assert.Null(providerFailure);
+
+            Assert.Equal(4, metrics.TotalCompletions);
+            Assert.Equal(1, metrics.SuccessfulCompletions);
+            Assert.Equal(1, metrics.ProviderFailures);
+            Assert.Equal(2, metrics.CancelledCompletions);
+            Assert.Equal(1, metrics.ReplacedCompletions);
+            Assert.Equal(1, metrics.DeadlineCancelledCompletions);
+
+            IReadOnlyList<G10ProviderObservation> observations = session.ProviderProbe.Snapshot();
+            Assert.Equal(2, observations.Count(observation => observation.Cancelled));
+            Assert.Equal(1, observations.Count(observation =>
+                !observation.Succeeded && !observation.Cancelled));
+        }
+
+        private static AiTaskRequest BuildRequest(ActorContext actor, string traceId)
+        {
+            return new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.SmartChat,
+                Hint = traceId,
+                TraceId = traceId,
+                ActorContext = actor,
+                CancellationScope = actor.SessionId,
+                MaxToolCallRoundtrips = 0
+            };
+        }
+
+        private sealed class CancellationOutcomeLlmClient : ILlmClient
+        {
+            private int _callCount;
+
+            public TaskCompletionSource<bool> FirstCancellationStarted { get; } =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public TaskCompletionSource<bool> DeadlineCancellationStarted { get; } =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public async Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                int call = Interlocked.Increment(ref _callCount);
+                if (call == 1)
+                {
+                    FirstCancellationStarted.TrySetResult(true);
+                    return await WaitForCancellationResultAsync(cancellationToken);
+                }
+
+                if (call == 2)
+                {
+                    return new LlmCompletionResult { Ok = true, Content = "ok" };
+                }
+
+                if (call == 3)
+                {
+                    DeadlineCancellationStarted.TrySetResult(true);
+                    return await WaitForCancellationResultAsync(cancellationToken);
+                }
+
+                return new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = "provider rejected request",
+                    ErrorCode = LlmErrorCode.ProviderError
+                };
+            }
+
+            private static async Task<LlmCompletionResult> WaitForCancellationResultAsync(
+                CancellationToken cancellationToken)
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                return new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = "cancelled",
+                    ErrorCode = LlmErrorCode.Cancelled
+                };
             }
         }
     }

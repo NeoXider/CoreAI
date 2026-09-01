@@ -43,6 +43,28 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void CompleteAsync_ProviderCancellation_PropagatesOperationCanceledException()
+        {
+            MeaiLlmClient client = new(
+                new CancellingChatClient(),
+                GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(),
+                null);
+            CancellationTokenSource cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            Assert.CatchAsync<OperationCanceledException>(async () =>
+                await client.CompleteAsync(new LlmCompletionRequest
+                {
+                    AgentRoleId = "Role",
+                    SystemPrompt = "sys",
+                    UserPayload = "hi"
+                }, cancellation.Token));
+
+            cancellation.Dispose();
+        }
+
+        [Test]
         public void BuildAIFunctions_ShouldCreateMemoryTool()
         {
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
@@ -1098,6 +1120,34 @@ namespace CoreAI.Tests.EditMode
 
             public IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
                 IEnumerable<MEAI.ChatMessage> chatMessages, MEAI.ChatOptions options = null,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        private sealed class CancellingChatClient : MEAI.IChatClient
+        {
+            public Task<MEAI.ChatResponse> GetResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                CancellationToken cancellationToken = default)
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
+
+            public IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
                 CancellationToken cancellationToken = default)
             {
                 throw new NotSupportedException();

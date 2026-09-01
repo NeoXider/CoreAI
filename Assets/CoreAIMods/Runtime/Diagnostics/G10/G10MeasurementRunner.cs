@@ -462,6 +462,7 @@ namespace CoreAI.Diagnostics.G10
                     TraceId = record.TraceId,
                     ActorContext = actor.Context,
                     CancellationScope = SharedCancellationScope,
+                    DeadlineCancellationToken = cancellationToken,
                     MaxToolCallRoundtrips = 0
                 }, cancellationToken);
                 record.ReturnedContent = response ?? "";

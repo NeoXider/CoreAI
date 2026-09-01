@@ -1,0 +1,16 @@
+{
+  "_comment": "G10 real-provider run, frozen 2026-09-01 before measuring, per MVP2_ACCEPTANCE_MANIFEST.md §3. endpoint/modelId/contextCapTokens/backendConcurrency are what LM Studio actually serves (lms ps: context 131072, parallel 1). outputCapTokens, orchestratorConcurrency and requestTimeoutSeconds are deliberate configuration choices for this run, not measurements.",
+  "provider": {
+    "providerMode": "RealProvider",
+    "endpoint": "http://127.0.0.1:1234/v1",
+    "apiKey": "lm-studio",
+    "modelId": "ling-3.0-tiny",
+    "contextCapTokens": 131072,
+    "outputCapTokens": 512,
+    "backendConcurrency": 1,
+    "orchestratorConcurrency": 4,
+    "requestTimeoutSeconds": 120,
+    "temperature": 0.0,
+    "extraBodyJson": ""
+  }
+}

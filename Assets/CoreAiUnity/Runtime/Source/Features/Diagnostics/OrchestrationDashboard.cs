@@ -170,7 +170,10 @@ namespace CoreAI.Diagnostics
 
             _scratch.Clear();
             _scratch.AppendLine(
-                $"  Completions: {_metrics.TotalCompletions} (OK: {_metrics.SuccessfulCompletions}, Fail: {_metrics.FailedCompletions})");
+                $"  Completions: {_metrics.TotalCompletions} " +
+                $"(OK: {_metrics.SuccessfulCompletions}, Provider fail: {_metrics.ProviderFailures}, " +
+                $"Cancelled: {_metrics.CancelledCompletions}, Replaced: {_metrics.ReplacedCompletions}, " +
+                $"Deadline: {_metrics.DeadlineCancelledCompletions})");
             _scratch.AppendLine($"  Avg Latency: {_metrics.AverageLatencyMs:F0} ms");
             _scratch.AppendLine($"  Retries:     {_metrics.StructuredRetries}");
             _scratch.AppendLine($"  Published:   {_metrics.CommandsPublished}");
@@ -186,7 +189,9 @@ namespace CoreAI.Diagnostics
             {
                 InMemoryAiOrchestrationMetrics.RoleMetrics rm = kvp.Value;
                 _roleLines.Add(
-                    $"  {kvp.Key}: {rm.Successes}/{rm.Completions} OK, {rm.AverageLatencyMs:F0}ms avg");
+                    $"  {kvp.Key}: {rm.Successes}/{rm.Completions} OK, {rm.Failures} provider fail, " +
+                    $"{rm.Cancellations} cancelled ({rm.Replacements} replaced, " +
+                    $"{rm.DeadlineCancellations} deadline), {rm.AverageLatencyMs:F0}ms avg");
             }
         }
 

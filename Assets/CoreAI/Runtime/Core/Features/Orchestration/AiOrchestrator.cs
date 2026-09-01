@@ -329,23 +329,11 @@ namespace CoreAI.Ai
                     chatHistory = bundle.ChatHistory;
                     maxOutputTokens = ResolveMaxOutputTokens(task.MaxOutputTokens, roleConfig.MaxOutputTokens);
 
-                    Stopwatch sw = Stopwatch.StartNew();
-                    try
-                    {
-                        // WHY: Streaming by default (CompleteForTaskAsync): task execution runs through the
-                        // same execute-as-you-stream tool path as chat when EnableStreaming is on, and
-                        // falls back to non-streaming CompleteAsync otherwise. The helper handles the
-                        // WebGL SynchronizationContext discipline internally.
-                        result = await CompleteForTaskAsync(
-                            BuildCompletionRequest(bundle, task, user, maxOutputTokens),
-                            cancellationToken);
-                    }
-                    finally
-                    {
-                        sw.Stop();
-                        _metrics.RecordLlmCompletion(bundle.ActorId, roleId, traceId, result != null && result.Ok,
-                            sw.Elapsed.TotalMilliseconds);
-                    }
+                    result = await CompleteMeasuredForTaskAsync(
+                        bundle,
+                        task,
+                        BuildCompletionRequest(bundle, task, user, maxOutputTokens),
+                        cancellationToken);
 
                     if (result != null && result.Ok)
                     {
@@ -438,13 +426,11 @@ namespace CoreAI.Ai
                 _metrics.RecordStructuredRetry(bundle.ActorId, roleId, traceId, failReason ?? "");
                 AiTaskRequest retryTask = CloneTaskWithStructuredHint(task, failReason);
                 string userRetry = _promptComposer.BuildUserPayload(bundle.Snapshot, retryTask);
-                Stopwatch sw = Stopwatch.StartNew();
-                LlmCompletionResult second = await CompleteForTaskAsync(
+                LlmCompletionResult second = await CompleteMeasuredForTaskAsync(
+                    bundle,
+                    task,
                     BuildCompletionRequest(bundle, task, userRetry, maxOutputTokens),
                     cancellationToken);
-                sw.Stop();
-                _metrics.RecordLlmCompletion(bundle.ActorId, roleId, traceId, second != null && second.Ok,
-                    sw.Elapsed.TotalMilliseconds);
 
                 if (second == null || !second.Ok || string.IsNullOrEmpty(second.Content))
                 {
@@ -586,6 +572,11 @@ namespace CoreAI.Ai
                     enumerator = _llm.CompleteStreamingAsync(req, cancellationToken)
                         .GetAsyncEnumerator(cancellationToken);
                 }
+                catch (OperationCanceledException ex)
+                {
+                    initError = ex.Message;
+                    initErrorCode = LlmErrorCode.Cancelled;
+                }
                 catch (LlmClientException ex)
                 {
                     initError = ex.Message;
@@ -605,14 +596,18 @@ namespace CoreAI.Ai
                         initErrorCode,
                         initHttpStatus,
                         initRetryAfterSeconds);
+                    _metrics.RecordLlmCompletion(
+                        bundle.ActorId,
+                        bundle.RoleId,
+                        bundle.TraceId,
+                        ClassifyCompletionOutcome(task, initFailure),
+                        0d);
                     bool canRetryInitOverflow = _compactionCoordinator.ShouldRetryAfterContextOverflow(
                         initFailure,
                         contextOverflowPasses,
                         maxContextOverflowRetries);
                     if (canRetryInitOverflow)
                     {
-                        _metrics.RecordLlmCompletion(
-                            bundle.ActorId, bundle.RoleId, bundle.TraceId, false, 0d);
                         contextOverflowPasses++;
                         contextPass = contextOverflowPasses;
                         continue;
@@ -816,8 +811,16 @@ namespace CoreAI.Ai
                     // synthesized from the executed calls right after this block.
                     bool producedContent = !string.IsNullOrWhiteSpace(accumulated.ToString()) ||
                                            (executedToolCalls != null && executedToolCalls.Count > 0);
-                    _metrics.RecordLlmCompletion(bundle.ActorId, bundle.RoleId, bundle.TraceId,
-                        string.IsNullOrEmpty(terminalError) && producedContent,
+                    AiLlmCompletionOutcome outcome = terminalErrorCode == LlmErrorCode.Cancelled
+                        ? ResolveCancellationOutcome(task, null)
+                        : string.IsNullOrEmpty(terminalError) && producedContent
+                            ? AiLlmCompletionOutcome.Succeeded
+                            : AiLlmCompletionOutcome.ProviderFailure;
+                    _metrics.RecordLlmCompletion(
+                        bundle.ActorId,
+                        bundle.RoleId,
+                        bundle.TraceId,
+                        outcome,
                         sw.Elapsed.TotalMilliseconds);
                 }
 
@@ -932,6 +935,77 @@ namespace CoreAI.Ai
 
                 yield break;
             }
+        }
+
+        /// <summary>Runs one task completion, records its typed outcome, and preserves cancellation.</summary>
+        private async Task<LlmCompletionResult> CompleteMeasuredForTaskAsync(
+            RequestBundle bundle,
+            AiTaskRequest task,
+            LlmCompletionRequest request,
+            CancellationToken cancellationToken)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            AiLlmCompletionOutcome outcome = AiLlmCompletionOutcome.ProviderFailure;
+            try
+            {
+                LlmCompletionResult result = await CompleteForTaskAsync(request, cancellationToken);
+                outcome = ClassifyCompletionOutcome(task, result);
+                if (outcome == AiLlmCompletionOutcome.Cancelled ||
+                    outcome == AiLlmCompletionOutcome.Replaced ||
+                    outcome == AiLlmCompletionOutcome.DeadlineCancellation)
+                {
+                    throw new OperationCanceledException(result?.Error ?? "cancelled", cancellationToken);
+                }
+
+                return result;
+            }
+            catch (OperationCanceledException ex)
+            {
+                outcome = ResolveCancellationOutcome(task, ex);
+                throw;
+            }
+            finally
+            {
+                stopwatch.Stop();
+                _metrics.RecordLlmCompletion(
+                    bundle.ActorId,
+                    bundle.RoleId,
+                    bundle.TraceId,
+                    outcome,
+                    stopwatch.Elapsed.TotalMilliseconds);
+            }
+        }
+
+        private static AiLlmCompletionOutcome ClassifyCompletionOutcome(
+            AiTaskRequest task,
+            LlmCompletionResult result)
+        {
+            if (result != null && result.Ok)
+            {
+                return AiLlmCompletionOutcome.Succeeded;
+            }
+
+            return result?.ErrorCode == LlmErrorCode.Cancelled
+                ? ResolveCancellationOutcome(task, null)
+                : AiLlmCompletionOutcome.ProviderFailure;
+        }
+
+        private static AiLlmCompletionOutcome ResolveCancellationOutcome(
+            AiTaskRequest task,
+            OperationCanceledException exception)
+        {
+            if (exception is LlmOperationTimeoutException)
+            {
+                return AiLlmCompletionOutcome.DeadlineCancellation;
+            }
+
+            CancellationToken callerCancellationToken =
+                task?.CallerCancellationToken ?? CancellationToken.None;
+            CancellationToken deadlineCancellationToken =
+                task?.DeadlineCancellationToken ?? CancellationToken.None;
+            return AiCancellationAttributionContext.Resolve(
+                callerCancellationToken,
+                deadlineCancellationToken);
         }
 
         /// <summary>

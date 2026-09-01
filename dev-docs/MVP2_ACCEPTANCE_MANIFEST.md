@@ -34,12 +34,23 @@ Thresholds apply to this machine. Other hardware is reported, never gated.
 
 ## 3. Provider — frozen
 
-| Field | Value |
-|---|---|
-| Model id | **NOT MEASURED** — the real provider-backed run has not happened |
-| Context cap / output cap | **NOT MEASURED** — no provider/model caps have been recorded |
-| Backend concurrency | **NOT MEASURED** — no provider concurrency has been recorded |
-| Deterministic backend | a scripted stub for queue/latency separation, **plus** one real provider-backed run; real-provider configuration is **NOT MEASURED** |
+The real-provider configuration is frozen in `tools/G10Harness/g10.real-provider.local.json`. The
+classification column is normative: it prevents facts observed from LM Studio from being blurred with
+parameters deliberately chosen for this run.
+
+| Field | Frozen value | Classification |
+|---|---|---|
+| Provider mode | `RealProvider` | chosen harness mode |
+| Endpoint | `http://127.0.0.1:1234/v1` | observed LM Studio service fact |
+| API key value | `lm-studio` | chosen local compatibility placeholder, not a measurement |
+| Model id | `ling-3.0-tiny` | observed LM Studio service fact |
+| Context cap | 131072 tokens | observed LM Studio service fact |
+| Backend concurrency | 1 | observed LM Studio service fact (`lms ps`: parallel 1) |
+| Output cap | 512 tokens | chosen run parameter, **not a measurement** |
+| Orchestrator concurrency | 4 | chosen run parameter, **not a measurement** |
+| Request timeout | 120 s | chosen run parameter, **not a measurement** |
+| Temperature / extra body | 0.0 / empty | chosen run parameters |
+| Deterministic backend | scripted stub, recorded separately in §5.1 | queue/latency control, not provider capacity evidence |
 
 ## 3b. Production-path rule (added after the phase-1 QA)
 
@@ -57,7 +68,8 @@ A run reporting zero for any of these **fails**, regardless of its timings:
 - thread resumes
 - events delivered to subscribers
 - chat responses actually produced by the provider (not stubbed) in the provider-backed run
-- discovered tests: expected count **NOT MEASURED** — the discovery run has not happened; **skips = 0**
+- discovered tests: STUB-MODE harness **6 discovered, 0 skipped**; real-provider-backed run
+  discovery is **NOT MEASURED**
 
 ## 5. Gates — every one with a negative twin
 
@@ -75,6 +87,86 @@ A run reporting zero for any of these **fails**, regardless of its timings:
 | G10 chat throughput | ≥95% of offered load served, p95 ≤ 5 s | 0 cross-actor cancellations; no actor starved > 60 s |
 | G11 WebGL | §6.5 checklist in a real browser run | a static checklist alone does not satisfy G11 |
 | G12 corpus | exact frozen fixture ids listed below, ≥30% unmodified; catalog measured 2026-09-01: **17/20 = 85%** (0 modified, 3 failing) | — |
+
+### 5.1 G10 STUB-MODE measurement record — not a G10 result
+
+The scripted stub harness ran end-to-end through production composition. These measurements establish
+queue/scheduler behavior under deterministic stub latency; they do **not** establish real-provider
+capacity or pass G10.
+
+Evidence: `Temp/G10/g10-stub-manifest.json` and `Temp/G10/TestResults/g10-tests.trx`.
+
+| Arrival pattern | Served | Served fraction | p95 service wait | Cross-actor cancellations | Starvation | Per-actor maximum waits |
+|---|---:|---:|---:|---:|---|---|
+| Staggered | 40/40 | 1.0 | 109.9214 ms | 0 | none beyond 60 s | 0.1066–0.1144 s |
+| Synchronized burst | 40/40 | 1.0 | 1075.1702 ms | 0 | none beyond 60 s | 0.1069–1.0942 s |
+
+Each world run recorded **3,284,440 guarded steps**, **5,280 completed Lua operations**, **420 thread
+resumes**, and **1,800 events delivered**. Test discovery recorded **6 discovered, 0 skipped**. Independent
+G6 evidence recorded **1,200 intended subscriber writes** and **0 non-subscriber invocations across
+22,800 checks**.
+
+The calibrated Lua body is **580 guarded instructions**, derived from observed guard samples of
+**576–580**. It is nine instructions below the manifest's measured **589-instruction** frame capacity.
+
+**STUB-MODE status:** this record does not satisfy G10. The real-provider result is recorded below.
+
+### 5.2 G10 REAL-PROVIDER measurement record — failed
+
+Measured 2026-09-01 with 20 actors, a 30 s warm-up, and a 60 s measurement window. Evidence:
+`artifacts/g10-real.json`, `artifacts/g10-real.err`, and the frozen configuration in §3. The run recorded
+**50 chat responses actually produced by the provider** across both warm-ups and measurement phases.
+Test discovery and skip counts were not measured by this process.
+
+| Arrival pattern | Offered | Served | Fraction | p95 end-to-end | p95 queue | p95 provider | Reported provider failures | Same-actor cancellations | Harness deadline cancellations | Cross-actor cancellations | Admission failures |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Staggered | 40 | 10 | 0.25 | 72,009.8 ms | 46,153.1 ms | 38,465.5 ms | 23 | 0 | 11 | 0 | 0 |
+| Synchronized burst | 40 | 23 | 0.575 | 52,358.9 ms | 45,093.4 ms | 17,445.0 ms | 9 | 17 | 3 | 0 | 0 |
+
+**Gate verdict: FAILED.** Both patterns fail served fraction, p95 end-to-end latency, and the 60 s
+starvation requirement. This is not a pass. With backend parallelism 1 and p95 provider latency of
+17.445–38.466 s, forty requests cannot be served inside a 60 s window. The binding capacity constraint
+in this run is the AI backend, not CoreAI. Zero cross-actor cancellations and zero admission failures
+show that the queue admitted and isolated actors correctly; it had no faster provider to dispatch to.
+
+**The staggered `providerFailures = 23` count is a CoreAI defect, not an LM Studio failure.** LM Studio's
+server log for 12:55:27–12:57:56 accepted 53 staggered requests and logged no provider error, HTTP 429
+or other concurrency rejection, context overrun, or malformed response. Successful predictions used
+643 prompt tokens, far below the 131072-token context cap. No request reached the chosen 120 s request
+timeout. Instead, the server recorded 19 client disconnects as the second measurement wave replaced
+still-active requests for the same actors, then 4 more active disconnects at the harness starvation
+deadline: **19 + 4 = 23**. Seven additional requests were still pending at that deadline, so **4 + 7 =
+11** harness-deadline cancellations.
+
+The classification is lost at the CoreAI client/probe boundary. `MeaiLlmClient.FromException` converts
+`OperationCanceledException` into an unsuccessful `LlmCompletionResult` with
+`ErrorCode = Cancelled`; `G10MeasuredLlmClient` treats every returned unsuccessful result as a
+non-cancelled provider failure and only recognizes cancellation when an exception escapes. Thus the
+same-actor and deadline cancellations above were serialized as provider failures. That measurement
+bug is CoreAI's fault and must be fixed before the failure counters are used again. It does not change
+the capacity verdict: the correctly measured served fractions and latencies still fail G10 because of
+the single-lane backend.
+
+#### Defensible 20-actor claim: numerical requirements
+
+The offered rate is 40/60 = 0.667 requests/s, and a 95% pass requires 38/60 = 0.633 completions/s.
+These are measurement-derived sizing thresholds before transport and scheduling overhead. The lane
+estimate assumes the observed p95 is representative per lane and remains stable under parallel load;
+a claimed configuration needs additional headroom and a new measurement.
+
+- At the observed 17.445–38.466 s provider p95, throughput alone requires
+  `ceil(38 × latency / 60)` = **12–25 backend lanes**, with orchestrator concurrency raised from the
+  chosen 4 to at least the lane count. This still cannot pass the 5 s p95 gate because one provider
+  response already takes longer than 5 s.
+- Keeping four-way orchestration requires a real backend parallelism of 4 and provider p95 **≤1.0 s**
+  to put the 19th request of each 20-request synchronized burst through within 5 s. At provider p95
+  2.5 s the burst needs at least **10 lanes**; at 5.0 s it needs at least **19 lanes**. With one backend
+  lane, the same burst requires provider p95 **≤5/19 = 0.263 s**.
+- A workload-only claim on this one-lane model cannot retain G10. The observed latency supports only
+  `floor(60 / latency)` = **1–3 total requests/minute**, rather than 40; shared fairly across 20 actors,
+  that is roughly one request per actor every **7–20 minutes**, and the latency SLO would have to be
+  relaxed to at least the observed 17.445–38.466 s. To retain the 5 s gate, the workload must instead
+  reduce per-request generation enough to meet the latency/parallelism bounds above and be remeasured.
 
 **G2 scope.** G2's cross-actor refusal security claim applies only to worlds with an explicit ACL
 version. Legacy worlds whose ACL version is missing or `null` remain in compatibility mode: they do

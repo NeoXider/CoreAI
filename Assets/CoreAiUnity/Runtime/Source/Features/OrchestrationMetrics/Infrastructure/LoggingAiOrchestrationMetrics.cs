@@ -17,7 +17,12 @@ namespace CoreAI.Infrastructure.Ai
         }
 
         /// <inheritdoc />
-        public void RecordLlmCompletion(string actorId, string roleId, string traceId, bool ok, double wallMs)
+        public void RecordLlmCompletion(
+            string actorId,
+            string roleId,
+            string traceId,
+            AiLlmCompletionOutcome outcome,
+            double wallMs)
         {
             if (_settings == null || !_settings.ShouldLog(GameLogFeature.Metrics, GameLogLevel.Info))
             {
@@ -27,8 +32,16 @@ namespace CoreAI.Infrastructure.Ai
             string a = string.IsNullOrWhiteSpace(actorId) ? "-" : actorId.Trim();
             string r = string.IsNullOrWhiteSpace(roleId) ? "-" : roleId.Trim();
             string t = string.IsNullOrWhiteSpace(traceId) ? "-" : traceId.Trim();
+            string outcomeName = outcome switch
+            {
+                AiLlmCompletionOutcome.Succeeded => "success",
+                AiLlmCompletionOutcome.ProviderFailure => "provider_failure",
+                AiLlmCompletionOutcome.Replaced => "replacement",
+                AiLlmCompletionOutcome.DeadlineCancellation => "deadline_cancellation",
+                _ => "cancelled"
+            };
             _logger.LogInfo(GameLogFeature.Metrics,
-                $"[ai-metrics] llm actor={a} role={r} traceId={t} ok={ok} wallMs={wallMs:F0}");
+                $"[ai-metrics] llm actor={a} role={r} traceId={t} outcome={outcomeName} wallMs={wallMs:F0}");
         }
 
         /// <inheritdoc />

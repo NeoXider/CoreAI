@@ -192,6 +192,10 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.LogInfo(GameLogFeature.Llm,
                     $"MeaiLlmClient: GetResponseAsync completed, has {response.Messages?.Count ?? 0} messages in response");
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmClient: {ex.Message}");
@@ -292,18 +296,6 @@ namespace CoreAI.Infrastructure.Llm
                     Ok = false,
                     Error = ex.Message,
                     ErrorCode = LlmErrorCode.Timeout,
-                    Model = ResolveModelName(),
-                    ExecutedToolCalls = executedToolCalls ?? Array.Empty<LlmToolCallTrace>()
-                };
-            }
-
-            if (ex is OperationCanceledException)
-            {
-                return new LlmCompletionResult
-                {
-                    Ok = false,
-                    Error = ex.Message,
-                    ErrorCode = LlmErrorCode.Cancelled,
                     Model = ResolveModelName(),
                     ExecutedToolCalls = executedToolCalls ?? Array.Empty<LlmToolCallTrace>()
                 };

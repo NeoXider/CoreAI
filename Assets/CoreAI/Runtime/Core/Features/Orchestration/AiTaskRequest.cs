@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 using CoreAI.Authority;
 
 namespace CoreAI.Ai
@@ -81,6 +82,18 @@ namespace CoreAI.Ai
 
         /// <summary>Logical latest-wins cancellation scope for legacy callers.</summary>
         public string CancellationScope { get; set; } = "";
+
+        /// <summary>
+        /// Optional original caller token used only to keep caller cancellation distinct when a deadline
+        /// token is also signalled during teardown.
+        /// </summary>
+        public CancellationToken CallerCancellationToken { get; set; }
+
+        /// <summary>
+        /// Optional caller-owned deadline token used only to attribute cancellation metrics. The operation's
+        /// actual cancellation remains controlled by the token passed to the orchestration method.
+        /// </summary>
+        public CancellationToken DeadlineCancellationToken { get; set; }
 
         /// <summary>
         /// Lua script version key.

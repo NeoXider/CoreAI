@@ -195,7 +195,12 @@ namespace CoreAI.Ai
             if (cancellationToken.IsCancellationRequested)
             {
                 RecordUnstartedTurn(work, "pre-cancelled stream");
-                yield return new LlmStreamChunk { IsDone = true, Error = "cancelled" };
+                yield return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = "cancelled",
+                    ErrorCode = LlmErrorCode.Cancelled
+                };
                 yield break;
             }
 
@@ -401,6 +406,7 @@ namespace CoreAI.Ai
             CancellationTokenSource linkedCts = null;
             try
             {
+                using (AiCancellationAttributionContext.Push(w.CancellationAttribution))
                 using (w.ActorContext.HasValue
                            ? AgentMemoryScopeExecutionContext.Push(w.ActorContext.Value)
                            : AgentMemoryScopeExecutionContext.Push(w.MemoryScope))
@@ -459,6 +465,7 @@ namespace CoreAI.Ai
             CancellationTokenSource linkedCts = null;
             try
             {
+                using (AiCancellationAttributionContext.Push(w.CancellationAttribution))
                 using (w.ActorContext.HasValue
                            ? AgentMemoryScopeExecutionContext.Push(w.ActorContext.Value)
                            : AgentMemoryScopeExecutionContext.Push(w.MemoryScope))
@@ -476,7 +483,12 @@ namespace CoreAI.Ai
                     if (token.IsCancellationRequested)
                     {
                         RecordUnstartedTurn(w, "stream cancelled after queue claim");
-                        w.Queue.Write(new LlmStreamChunk { IsDone = true, Error = "cancelled" });
+                        w.Queue.Write(new LlmStreamChunk
+                        {
+                            IsDone = true,
+                            Error = "cancelled",
+                            ErrorCode = LlmErrorCode.Cancelled
+                        });
                         w.Queue.Complete();
                         return;
                     }
@@ -491,7 +503,12 @@ namespace CoreAI.Ai
             }
             catch (Exception ex) when (IsCancellationLike(ex))
             {
-                w.Queue.Write(new LlmStreamChunk { IsDone = true, Error = "cancelled" });
+                w.Queue.Write(new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = "cancelled",
+                    ErrorCode = LlmErrorCode.Cancelled
+                });
                 w.Queue.Complete();
             }
             catch (Exception ex)
@@ -527,6 +544,7 @@ namespace CoreAI.Ai
             public string ActorId;
             public AgentMemoryScope MemoryScope;
             public int UnstartedPersistenceAttempted;
+            public readonly AiCancellationAttribution CancellationAttribution = new();
         }
 
         private sealed class StreamWorkItem
@@ -543,6 +561,7 @@ namespace CoreAI.Ai
             public string ActorId;
             public AgentMemoryScope MemoryScope;
             public int UnstartedPersistenceAttempted;
+            public readonly AiCancellationAttribution CancellationAttribution = new();
 
             // WHY: Cancelled by the public RunStreamingAsync iterator's finally when the consumer stops
             // enumerating (including an early break that does not cancel its own token). The producer
@@ -566,6 +585,7 @@ namespace CoreAI.Ai
             public string RoleId;
             public ActorContext? ActorContext;
             public CancellationTokenSource Cancellation;
+            public AiCancellationAttribution CancellationAttribution;
         }
 
         /// <inheritdoc />
@@ -818,6 +838,7 @@ namespace CoreAI.Ai
 
                         if (_scopeTokens.TryGetValue(scopeKey, out ScopeEntry previous))
                         {
+                            previous.CancellationAttribution.MarkReplaced();
                             activeToCancel = previous.Cancellation;
                         }
 
@@ -841,7 +862,8 @@ namespace CoreAI.Ai
                         _scopeTokens[scopeKey] = CreateScopeEntry(
                             work.Task,
                             work.ActorContext,
-                            work.ScopeCancellation);
+                            work.ScopeCancellation,
+                            work.CancellationAttribution);
                     }
 
                     InsertSorted(_pending, work, WorkItemComparer);
@@ -870,7 +892,12 @@ namespace CoreAI.Ai
             {
                 work.PendingCancellation.Dispose();
                 RecordUnstartedTurn(work, "cancelled before stream admission");
-                work.Queue.Write(new LlmStreamChunk { IsDone = true, Error = "cancelled" });
+                work.Queue.Write(new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = "cancelled",
+                    ErrorCode = LlmErrorCode.Cancelled
+                });
                 work.Queue.Complete();
                 return;
             }
@@ -912,6 +939,7 @@ namespace CoreAI.Ai
 
                         if (_scopeTokens.TryGetValue(scopeKey, out ScopeEntry previous))
                         {
+                            previous.CancellationAttribution.MarkReplaced();
                             activeToCancel = previous.Cancellation;
                         }
 
@@ -935,7 +963,8 @@ namespace CoreAI.Ai
                         _scopeTokens[scopeKey] = CreateScopeEntry(
                             work.Task,
                             work.ActorContext,
-                            work.ScopeCancellation);
+                            work.ScopeCancellation,
+                            work.CancellationAttribution);
                     }
 
                     InsertSorted(_streamPending, work, StreamWorkItemComparer);
@@ -1046,7 +1075,8 @@ namespace CoreAI.Ai
         private static ScopeEntry CreateScopeEntry(
             AiTaskRequest task,
             ActorContext? actorContext,
-            CancellationTokenSource cancellation)
+            CancellationTokenSource cancellation,
+            AiCancellationAttribution cancellationAttribution)
         {
             return new ScopeEntry
             {
@@ -1055,7 +1085,8 @@ namespace CoreAI.Ai
                     : task.CancellationScope.Trim(),
                 RoleId = NormalizeRoleId(task.RoleId),
                 ActorContext = actorContext,
-                Cancellation = cancellation
+                Cancellation = cancellation,
+                CancellationAttribution = cancellationAttribution
             };
         }
 
@@ -1100,7 +1131,12 @@ namespace CoreAI.Ai
             {
                 ReleaseScopeToken(work.ScopeKey, work.ScopeCancellation);
                 RecordUnstartedTurn(work, "pending stream cancelled");
-                work.Queue.Write(new LlmStreamChunk { IsDone = true, Error = "cancelled" });
+                work.Queue.Write(new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = "cancelled",
+                    ErrorCode = LlmErrorCode.Cancelled
+                });
                 work.Queue.Complete();
             }
         }
@@ -1127,7 +1163,12 @@ namespace CoreAI.Ai
                     w.PendingCancellation.Dispose();
                     ReleaseScopeToken(w.ScopeKey, w.ScopeCancellation);
                     RecordUnstartedTurn(w, "pending scoped stream cancelled");
-                    w.Queue.Write(new LlmStreamChunk { IsDone = true, Error = "cancelled" });
+                    w.Queue.Write(new LlmStreamChunk
+                    {
+                        IsDone = true,
+                        Error = "cancelled",
+                        ErrorCode = LlmErrorCode.Cancelled
+                    });
                     w.Queue.Complete();
                 }
             }

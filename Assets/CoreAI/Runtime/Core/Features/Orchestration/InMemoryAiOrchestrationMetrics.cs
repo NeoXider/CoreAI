@@ -73,8 +73,20 @@ namespace CoreAI.Ai
         /// <summary>Number of successful LLM completions.</summary>
         public int SuccessfulCompletions { get; private set; }
 
-        /// <summary>Number of failed LLM completions.</summary>
-        public int FailedCompletions { get; private set; }
+        /// <summary>Number of LLM completions that failed at the provider boundary.</summary>
+        public int ProviderFailures { get; private set; }
+
+        /// <summary>Number of LLM completions that failed at the provider boundary.</summary>
+        public int FailedCompletions => ProviderFailures;
+
+        /// <summary>Number of cancelled LLM completions, including replacements and deadlines.</summary>
+        public int CancelledCompletions { get; private set; }
+
+        /// <summary>Number of LLM completions superseded by newer work in the same scope.</summary>
+        public int ReplacedCompletions { get; private set; }
+
+        /// <summary>Number of LLM completions cancelled by a caller-owned deadline.</summary>
+        public int DeadlineCancelledCompletions { get; private set; }
 
         /// <summary>Number of structured-response retries.</summary>
         public int StructuredRetries { get; private set; }
@@ -124,29 +136,77 @@ namespace CoreAI.Ai
         /// <summary>Records an LLM completion without an actor dimension.</summary>
         public void RecordLlmCompletion(string roleId, string traceId, bool ok, double wallMs)
         {
-            RecordLlmCompletion("", roleId, traceId, ok, wallMs);
+            RecordLlmCompletion(
+                "",
+                roleId,
+                traceId,
+                ok ? AiLlmCompletionOutcome.Succeeded : AiLlmCompletionOutcome.ProviderFailure,
+                wallMs);
+        }
+
+        /// <summary>Records a typed LLM completion without an actor dimension.</summary>
+        public void RecordLlmCompletion(
+            string roleId,
+            string traceId,
+            AiLlmCompletionOutcome outcome,
+            double wallMs)
+        {
+            RecordLlmCompletion("", roleId, traceId, outcome, wallMs);
+        }
+
+        /// <summary>Records a boolean LLM completion for compatibility with direct collector callers.</summary>
+        public void RecordLlmCompletion(
+            string actorId,
+            string roleId,
+            string traceId,
+            bool ok,
+            double wallMs)
+        {
+            RecordLlmCompletion(
+                actorId,
+                roleId,
+                traceId,
+                ok ? AiLlmCompletionOutcome.Succeeded : AiLlmCompletionOutcome.ProviderFailure,
+                wallMs);
         }
 
         /// <inheritdoc />
-        public void RecordLlmCompletion(string actorId, string roleId, string traceId, bool ok, double wallMs)
+        public void RecordLlmCompletion(
+            string actorId,
+            string roleId,
+            string traceId,
+            AiLlmCompletionOutcome outcome,
+            double wallMs)
         {
             lock (_lock)
             {
                 TotalCompletions++;
                 TotalLatencyMs += wallMs;
-                if (ok)
+                switch (outcome)
                 {
-                    SuccessfulCompletions++;
-                    _lastSuccessUtc = DateTime.UtcNow;
-                }
-                else
-                {
-                    FailedCompletions++;
+                    case AiLlmCompletionOutcome.Succeeded:
+                        SuccessfulCompletions++;
+                        _lastSuccessUtc = DateTime.UtcNow;
+                        break;
+                    case AiLlmCompletionOutcome.ProviderFailure:
+                        ProviderFailures++;
+                        break;
+                    case AiLlmCompletionOutcome.Replaced:
+                        CancelledCompletions++;
+                        ReplacedCompletions++;
+                        break;
+                    case AiLlmCompletionOutcome.DeadlineCancellation:
+                        CancelledCompletions++;
+                        DeadlineCancelledCompletions++;
+                        break;
+                    default:
+                        CancelledCompletions++;
+                        break;
                 }
 
                 ActorMetrics actorMetrics = GetOrCreateActor(actorId, roleId);
-                actorMetrics?.RecordCompletion(ok, wallMs);
-                GetOrCreateRole(roleId).RecordCompletion(ok, wallMs);
+                actorMetrics?.RecordCompletion(outcome, wallMs);
+                GetOrCreateRole(roleId).RecordCompletion(outcome, wallMs);
             }
         }
 
@@ -247,7 +307,10 @@ namespace CoreAI.Ai
             {
                 TotalCompletions = 0;
                 SuccessfulCompletions = 0;
-                FailedCompletions = 0;
+                ProviderFailures = 0;
+                CancelledCompletions = 0;
+                ReplacedCompletions = 0;
+                DeadlineCancelledCompletions = 0;
                 StructuredRetries = 0;
                 CommandsPublished = 0;
                 TotalDenials = 0;
@@ -366,8 +429,17 @@ namespace CoreAI.Ai
             /// <summary>Number of successful completions.</summary>
             public int Successes { get; private set; }
 
-            /// <summary>Number of failed completions.</summary>
+            /// <summary>Number of provider-failed completions.</summary>
             public int Failures { get; private set; }
+
+            /// <summary>Number of cancelled completions, including replacements and deadlines.</summary>
+            public int Cancellations { get; private set; }
+
+            /// <summary>Number of completions superseded by newer work in the same scope.</summary>
+            public int Replacements { get; private set; }
+
+            /// <summary>Number of completions cancelled by a caller-owned deadline.</summary>
+            public int DeadlineCancellations { get; private set; }
 
             /// <summary>Number of structured-response retries.</summary>
             public int StructuredRetries { get; private set; }
@@ -419,17 +491,29 @@ namespace CoreAI.Ai
                 LastTouchOrder = touchOrder;
             }
 
-            internal void RecordCompletion(bool ok, double wallMs)
+            internal void RecordCompletion(AiLlmCompletionOutcome outcome, double wallMs)
             {
                 Completions++;
                 TotalLatencyMs += wallMs;
-                if (ok)
+                switch (outcome)
                 {
-                    Successes++;
-                }
-                else
-                {
-                    Failures++;
+                    case AiLlmCompletionOutcome.Succeeded:
+                        Successes++;
+                        break;
+                    case AiLlmCompletionOutcome.ProviderFailure:
+                        Failures++;
+                        break;
+                    case AiLlmCompletionOutcome.Replaced:
+                        Cancellations++;
+                        Replacements++;
+                        break;
+                    case AiLlmCompletionOutcome.DeadlineCancellation:
+                        Cancellations++;
+                        DeadlineCancellations++;
+                        break;
+                    default:
+                        Cancellations++;
+                        break;
                 }
             }
 
@@ -487,8 +571,17 @@ namespace CoreAI.Ai
             /// <summary>Number of successful completions.</summary>
             public int Successes { get; private set; }
 
-            /// <summary>Number of failed completions.</summary>
+            /// <summary>Number of provider-failed completions.</summary>
             public int Failures { get; private set; }
+
+            /// <summary>Number of cancelled completions, including replacements and deadlines.</summary>
+            public int Cancellations { get; private set; }
+
+            /// <summary>Number of completions superseded by newer work in the same scope.</summary>
+            public int Replacements { get; private set; }
+
+            /// <summary>Number of completions cancelled by a caller-owned deadline.</summary>
+            public int DeadlineCancellations { get; private set; }
 
             /// <summary>Number of structured-response retries.</summary>
             public int StructuredRetries { get; private set; }
@@ -518,17 +611,29 @@ namespace CoreAI.Ai
                 LastTouchOrder = touchOrder;
             }
 
-            internal void RecordCompletion(bool ok, double wallMs)
+            internal void RecordCompletion(AiLlmCompletionOutcome outcome, double wallMs)
             {
                 Completions++;
                 TotalLatencyMs += wallMs;
-                if (ok)
+                switch (outcome)
                 {
-                    Successes++;
-                }
-                else
-                {
-                    Failures++;
+                    case AiLlmCompletionOutcome.Succeeded:
+                        Successes++;
+                        break;
+                    case AiLlmCompletionOutcome.ProviderFailure:
+                        Failures++;
+                        break;
+                    case AiLlmCompletionOutcome.Replaced:
+                        Cancellations++;
+                        Replacements++;
+                        break;
+                    case AiLlmCompletionOutcome.DeadlineCancellation:
+                        Cancellations++;
+                        DeadlineCancellations++;
+                        break;
+                    default:
+                        Cancellations++;
+                        break;
                 }
             }
 

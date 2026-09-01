@@ -279,7 +279,13 @@ namespace CoreAI.Diagnostics.G10
             try
             {
                 LlmCompletionResult result = await _inner.CompleteAsync(request, cancellationToken);
+                bool cancelled = result?.ErrorCode == LlmErrorCode.Cancelled;
                 bool succeeded = result != null && result.Ok && !string.IsNullOrWhiteSpace(result.Content);
+                if (cancelled)
+                {
+                    throw new OperationCanceledException(result?.Error ?? "cancelled", cancellationToken);
+                }
+
                 _probe.RecordCompleted(traceId, succeeded, false, result?.Error ?? "");
                 return result;
             }
@@ -379,6 +385,15 @@ namespace CoreAI.Diagnostics.G10
         /// <summary>Creates one isolated production composition for a required arrival pattern.</summary>
         public static G10MeasurementSession Compose(G10MeasurementConfiguration configuration)
         {
+            return Compose(configuration, null, null);
+        }
+
+        /// <summary>Creates production composition with optional deterministic diagnostics overrides.</summary>
+        public static G10MeasurementSession Compose(
+            G10MeasurementConfiguration configuration,
+            ILlmClient providerOverride,
+            IAiOrchestrationMetrics metricsOverride)
+        {
             if (configuration == null)
             {
                 throw new ArgumentNullException(nameof(configuration));
@@ -394,7 +409,7 @@ namespace CoreAI.Diagnostics.G10
             CoreAISettingsOptions settings = BuildCoreSettings(providerConfiguration);
             G10SilentGameLogger logger = new G10SilentGameLogger();
             G10ProviderProbe providerProbe = new G10ProviderProbe();
-            ILlmClient provider = BuildProvider(providerConfiguration, settings, logger);
+            ILlmClient provider = providerOverride ?? BuildProvider(providerConfiguration, settings, logger);
             G10MeasuredLlmClient measuredProvider = new G10MeasuredLlmClient(provider, providerProbe);
             G10MemoryLuaModStore modStore = new G10MemoryLuaModStore();
             G10RuntimeObservability observability = new G10RuntimeObservability();
@@ -404,7 +419,8 @@ namespace CoreAI.Diagnostics.G10
             builder.RegisterInstance<ILog>(NullLog.Instance);
             builder.RegisterInstance<ICoreAISettings>(settings);
             builder.RegisterInstance<ILlmClient>(measuredProvider);
-            builder.RegisterInstance<IAiOrchestrationMetrics>(new NullAiOrchestrationMetrics());
+            builder.RegisterInstance<IAiOrchestrationMetrics>(
+                metricsOverride ?? new NullAiOrchestrationMetrics());
             builder.RegisterInstance<IAuthorityHost>(new SoloAuthorityHost());
             builder.RegisterInstance<IAiGameCommandSink>(new G10NoopCommandSink());
             builder.RegisterInstance<IAgentSystemPromptProvider>(new G10PromptProvider());

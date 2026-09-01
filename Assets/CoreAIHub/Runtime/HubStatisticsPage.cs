@@ -69,7 +69,7 @@ namespace CoreAI.Hub.UI
 
             body.Add(HubPageWidgets.MakeSection("Throughput and reliability"));
             body.Add(HubPageWidgets.MakeRow("Completions", "0", out _completions));
-            body.Add(HubPageWidgets.MakeRow("Success / fail", "0 / 0", out _successFail));
+            body.Add(HubPageWidgets.MakeRow("Success / provider fail / cancelled", "0 / 0 / 0", out _successFail));
             body.Add(HubPageWidgets.MakeRow("Success rate", "-", out _successRate));
             body.Add(HubPageWidgets.MakeRow("Avg latency", "-", out _avgLatency));
             body.Add(HubPageWidgets.MakeRow("Structured retry pressure", "-", out _retryPressure));
@@ -151,10 +151,18 @@ namespace CoreAI.Hub.UI
 
             int total = _metrics.TotalCompletions;
             int ok = _metrics.SuccessfulCompletions;
-            int failed = _metrics.FailedCompletions;
+            int failed = _metrics.ProviderFailures;
+            int cancelled = _metrics.CancelledCompletions;
 
             _completions.text = total.ToString(CultureInfo.InvariantCulture);
-            _successFail.text = string.Format(CultureInfo.InvariantCulture, "{0} / {1}", ok, failed);
+            _successFail.text = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} / {1} / {2} ({3} replaced, {4} deadline)",
+                ok,
+                failed,
+                cancelled,
+                _metrics.ReplacedCompletions,
+                _metrics.DeadlineCancelledCompletions);
             _successRate.text = total == 0 ? "no completions yet" : Percent(ok, total);
             _avgLatency.text = total == 0
                 ? "-"
@@ -202,11 +210,15 @@ namespace CoreAI.Hub.UI
                 InMemoryAiOrchestrationMetrics.RoleMetrics rm = kvp.Value;
                 string value = string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0}/{1} OK ({2}), {3} fail, {4} ms avg, {5} retries, {6} cmds",
+                    "{0}/{1} OK ({2}), {3} provider fail, {4} cancelled ({5} replaced, {6} deadline), " +
+                    "{7} ms avg, {8} retries, {9} cmds",
                     rm.Successes,
                     rm.Completions,
                     Percent(rm.Successes, rm.Completions),
                     rm.Failures,
+                    rm.Cancellations,
+                    rm.Replacements,
+                    rm.DeadlineCancellations,
                     rm.AverageLatencyMs.ToString("0", CultureInfo.InvariantCulture),
                     rm.StructuredRetries,
                     rm.CommandsPublished);

@@ -123,7 +123,8 @@ namespace CoreAI.Core.Tests.EditMode
             Assert.AreEqual("empty response", traceSink.Traces[0].Error);
             Assert.AreEqual(
                 1, metrics.Completions.Count);
-            Assert.IsFalse(
+            Assert.AreEqual(
+                AiLlmCompletionOutcome.ProviderFailure,
                 metrics.Completions[0],
                 "An empty answer was counted as a successful completion in the metrics.");
         }
@@ -143,7 +144,7 @@ namespace CoreAI.Core.Tests.EditMode
 
             Assert.IsTrue(chunks.Exists(c => c.Text == "hello"));
             Assert.AreEqual(1, metrics.Completions.Count);
-            Assert.IsTrue(metrics.Completions[0]);
+            Assert.AreEqual(AiLlmCompletionOutcome.Succeeded, metrics.Completions[0]);
         }
 
         [Test]
@@ -634,17 +635,17 @@ namespace CoreAI.Core.Tests.EditMode
         {
             public List<string> ActorIds { get; } = new();
 
-            public List<bool> Completions { get; } = new();
+            public List<AiLlmCompletionOutcome> Completions { get; } = new();
 
             public void RecordLlmCompletion(
                 string actorId,
                 string roleId,
                 string traceId,
-                bool ok,
+                AiLlmCompletionOutcome outcome,
                 double wallMs)
             {
                 ActorIds.Add(actorId);
-                Completions.Add(ok);
+                Completions.Add(outcome);
             }
 
             public void RecordStructuredRetry(string actorId, string roleId, string traceId, string reason)
