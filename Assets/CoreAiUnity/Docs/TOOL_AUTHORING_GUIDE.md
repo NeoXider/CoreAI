@@ -38,6 +38,7 @@ From `ILlmTool.cs`:
 | `Description` | abstract | One short paragraph; list the actions. Reaches the model on **both** paths. |
 | `ParametersSchema` | virtual, default `"{}"` | Text-path only. Keep in sync with the attributes. `JsonParams(...)` helper builds it. |
 | `AllowDuplicates` | virtual, default `false` | `false` is correct for almost every tool — see below. |
+| `ToolTimeoutMsOverride` | virtual, default `null` | `null` = the global `DefaultToolTimeoutMs`. Only a tool that **waits for a human** needs its own — see below. |
 | `CreateAIFunction()` | `IAIFunctionLlmTool` | Builds the `AIFunction` via `AIFunctionFactory.Create`. |
 
 Implement `IAIFunctionLlmTool` for one function, or `IAIFunctionsLlmTool` when one tool exposes several
@@ -128,6 +129,35 @@ true` to "allow many calls" — you only need it if the *same call with the same
 once (genuinely rare; a truly idempotent-to-repeat action). Leaving the default `false` is correct for nearly
 every tool, and is essential for spammy spawn-style tools: it stops a model from looping on the exact same
 spawn forever.
+
+### Understanding `ToolTimeoutMsOverride` (tools that wait for a human)
+
+`DefaultToolTimeoutMs` (30 s by default) is sized for a **hung** tool — an HTTP call to a dead server. A tool
+whose body *waits for a person* (a quiz card, a drag-and-drop exercise, a confirmation prompt) is idle by
+design for as long as that person is thinking, so the same budget cuts it off mid-question and hands the model
+`Error: Tool 'x' timed out` while the user is still reading the card. Declare the tool's own budget instead:
+
+```csharp
+// The card returns the student's answer as its own result and waits up to 120 s for it.
+// 150 s leaves the meaningful "did not answer in time" result room to fire FIRST, while still
+// landing under the turn's own idle deadline (LlmRequestTimeoutSeconds).
+public override int? ToolTimeoutMsOverride => 150_000;
+```
+
+Rules of thumb:
+
+- **Order the ladder deliberately:** the tool's own "the human did not respond" answer must fire *before* this
+  budget, and this budget *before* `LlmRequestTimeoutSeconds`. A named result beats a tool-level error, and a
+  tool-level error beats an anonymous cancelled turn.
+- **Prefer a large finite value to `0`.** `0` (or negative) genuinely removes the per-call deadline. The
+  request-level `LlmRequestTimeoutSeconds` still ends the turn in normal operation, but two paths have nothing
+  left above: `LlmRequestTimeoutSeconds <= 0`, and the mid-stream-abort drain in `CompleteStreamedTurnAsync`,
+  which passes `CancellationToken.None` on purpose.
+- **Do not raise the global setting instead.** That takes the protection away from every other tool at once, so
+  one hung HTTP call then holds the whole turn for the waiting tool's budget.
+- The override is resolved **by name** from the role's tool list, so it applies where the policy invokes the
+  tool itself. A tool executed inside another tool's body (behind `call_skill_tool`) runs under the wrapper's
+  budget.
 
 ## Common pitfalls
 

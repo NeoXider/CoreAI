@@ -81,6 +81,99 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("correct", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
         }
 
+        [Test]
+        public async Task CompleteStreamedTurnAsync_ToolWithLongerOwnTimeout_DrainWaitsPastTheGlobalOne()
+        {
+            // The drain is ONE deadline over every in-flight call, so it has to follow the same per-tool
+            // override the call itself got. Global budget 200 ms (+1 s drain margin) versus a card the
+            // student finishes at ~1.5 s: with the drain still reading the global setting the slot would
+            // collate as "did not complete" and the model would be told the quiz failed while the student
+            // was answering it.
+            PolicyStubSettings settings = new() { MaxParallelToolCalls = 4, DefaultToolTimeoutMsValue = 200 };
+            ToolExecutionPolicy policy = new(new PolicyStubLogger(), settings,
+                new List<ILlmTool>
+                {
+                    new PolicyStubTool { Name = "spawn_quiz", ToolTimeoutMsOverride = 30000 }
+                },
+                false, "test", 3);
+
+            TaskCompletionSource<string> release = new();
+            Func<CancellationToken, Task<string>> body = _ => release.Task;
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(body,
+                new MEAI.AIFunctionFactoryOptions { Name = "spawn_quiz", Description = "blocks" }));
+
+            MEAI.FunctionCallContent call =
+                new("call-quiz", "spawn_quiz", new Dictionary<string, object> { { "q", 1 } });
+
+            using CancellationTokenSource requestCts = new();
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(turn, call, opts, requestCts.Token);
+
+            Task<ToolExecutionPolicy.BatchToolCallResult> completion =
+                policy.CompleteStreamedTurnAsync(turn, requestCts.Token);
+
+            Task releaser = Task.Run(async () =>
+            {
+                await Task.Delay(1500);
+                release.TrySetResult("{\"Success\":true,\"answer\":\"correct\"}");
+            });
+
+            Task finished = await Task.WhenAny(completion, Task.Delay(20000));
+            Assert.AreSame(completion, finished, "CompleteStreamedTurnAsync never returned.");
+
+            await releaser;
+            ToolExecutionPolicy.BatchToolCallResult batch = await completion;
+            Assert.IsFalse(batch.AnyFailed,
+                "The drain abandoned a tool that declared a longer budget than the global default.");
+            StringAssert.Contains("correct", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
+        }
+
+        [Test]
+        public async Task CompleteStreamedTurnAsync_ToolWithTimeoutDisabled_UncancellableDrainStillWaits()
+        {
+            // Mid-stream-abort shape: finalization passes CancellationToken.None on purpose. With the
+            // deadline switched off per tool this is the branch that waits for natural completion, and it
+            // is the one place where "no timeout" really does mean "nothing above will end this call".
+            PolicyStubSettings settings = new() { MaxParallelToolCalls = 4, DefaultToolTimeoutMsValue = 200 };
+            ToolExecutionPolicy policy = new(new PolicyStubLogger(), settings,
+                new List<ILlmTool>
+                {
+                    new PolicyStubTool { Name = "spawn_drag_and_drop", ToolTimeoutMsOverride = 0 }
+                },
+                false, "test", 3);
+
+            TaskCompletionSource<string> release = new();
+            Func<CancellationToken, Task<string>> body = _ => release.Task;
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(body,
+                new MEAI.AIFunctionFactoryOptions { Name = "spawn_drag_and_drop", Description = "blocks" }));
+
+            MEAI.FunctionCallContent call =
+                new("call-dnd", "spawn_drag_and_drop", new Dictionary<string, object> { { "z", 1 } });
+
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(turn, call, opts, CancellationToken.None);
+
+            Task<ToolExecutionPolicy.BatchToolCallResult> completion =
+                policy.CompleteStreamedTurnAsync(turn, CancellationToken.None);
+
+            Task releaser = Task.Run(async () =>
+            {
+                await Task.Delay(600);
+                release.TrySetResult("{\"Success\":true,\"placed\":\"all\"}");
+            });
+
+            Task finished = await Task.WhenAny(completion, Task.Delay(20000));
+            Assert.AreSame(completion, finished, "CompleteStreamedTurnAsync never returned.");
+
+            await releaser;
+            ToolExecutionPolicy.BatchToolCallResult batch = await completion;
+            Assert.IsFalse(batch.AnyFailed,
+                "A tool whose deadline is disabled must be drained to its natural completion.");
+            StringAssert.Contains("placed", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
+        }
+
         // ============ client-loop level: does a SECOND request happen? ============
 
         [Test]
@@ -276,6 +369,9 @@ namespace CoreAI.Tests.EditMode
             public string Description => "Test tool";
             public string ParametersSchema { get; set; } = "{}";
             public bool AllowDuplicates { get; set; } = true;
+
+            /// <summary>Per-tool budget; <c>null</c> leaves the tool on the global setting.</summary>
+            public int? ToolTimeoutMsOverride { get; set; }
         }
 
         private sealed class PolicyStubSettings : ICoreAISettings
