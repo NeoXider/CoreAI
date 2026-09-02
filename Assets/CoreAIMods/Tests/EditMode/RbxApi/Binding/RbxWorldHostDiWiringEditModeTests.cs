@@ -603,6 +603,7 @@ end)",
                 outgoingRuntime.Tick(actor, 1d);
                 Assert.DoesNotThrow(() => outgoingRbxApi.Scheduler.Advance(1d));
                 Assert.DoesNotThrow(() => outgoingRbxApi.PumpHeartbeat(1f));
+                network.RegisterActor("network-teardown-client");
                 network.EmitEvent(new RbxNetworkEventMessage(
                     outgoingRemote.Id,
                     RbxNetworkDirection.ClientToServer,
@@ -1788,7 +1789,9 @@ camera_follow(p)"),
 
             public RbxNetworkTopology Topology => RbxNetworkTopology.Host;
 
-            public IReadOnlyList<string> ActorIds => System.Array.Empty<string>();
+            private readonly List<string> _actorIds = new();
+
+            public IReadOnlyList<string> ActorIds => _actorIds;
 
             public int EventSubscriberCount { get; private set; }
 
@@ -1838,10 +1841,15 @@ camera_follow(p)"),
             public void RegisterActor(string actorId)
             {
                 RegisterCalls++;
+                if (!_actorIds.Contains(actorId))
+                {
+                    _actorIds.Add(actorId);
+                }
             }
 
             public void UnregisterActor(string actorId)
             {
+                _actorIds.Remove(actorId);
             }
 
             public void SendEvent(RbxNetworkEventMessage message)

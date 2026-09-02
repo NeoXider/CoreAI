@@ -395,6 +395,11 @@ p.Parent = workspace",
 
         private sealed class RecordingPackageStore : IRbxWorldPackageStore
         {
+            public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+            {
+                return Array.Empty<RbxAutoSaveInfo>();
+            }
+
             public List<string> AutoTriggers { get; } = new();
 
             public RbxWorldPackagePayload LastAutoPayload { get; private set; }

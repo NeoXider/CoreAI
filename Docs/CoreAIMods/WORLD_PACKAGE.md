@@ -23,9 +23,13 @@ Capture and `ExportSnapshot` project the live DataModel to world-owned state bef
 properties. Any node with non-null `OwnerModId` starts a mod-ephemeral subtree; that node and every
 descendant are omitted even when a descendant's own `OwnerModId` is null. Package validation rejects
 an injected mod-owned node. Retained Parent references are therefore closed over the retained tree.
-A retained world-owned Model that names an excluded PrimaryPart fails capture: version 1 never
-silently clears a durable `PrimaryPart` reference. The caller must clear the reference or promote the
-complete referenced subtree to world ownership.
+A retained world-owned Model that names an excluded (mod-ephemeral or otherwise missing) PrimaryPart
+does not fail capture: the snapshot alone clears that `PrimaryPart` reference to null and records a
+versioned additive `diagnostics` entry (`model_id`, `dropped_primary_part_id`, `reason` where reason
+is `mod-ephemeral` or `missing`) in the package manifest. Old packages without `diagnostics` remain
+readable because the field is optional. The live instance tree is untouched; only the captured payload
+is adjusted, so the next gated `execute_lua` is not blocked by a dangling reference. An injected
+mod-owned node in a package is still rejected.
 
 `Player` nodes, BaseParts without readable property state, mod-owned nodes injected into a package,
 mods without source, non-finite values, invalid origin tags, dangling durable references, and

@@ -349,7 +349,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void ExecuteLua_ProductionToolEntry_UsesMutationEnvelopeAndReplaysFirstResult()
+        public void ExecuteLua_ProductionToolEntry_UsesServerGeneratedEnvelope()
         {
             const string actorId = "production-envelope-actor";
             CoreAISettingsOptions settings = new();
@@ -400,21 +400,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                         local target = workspace:FindFirstChild('ProductionEnvelopeTarget')
                         local count = target:GetAttribute('Count') or 0
                         target:SetAttribute('Count', count + 1)
-                        return target:GetAttribute('Count')",
-                    ["operation_id"] = "production-entry-operation",
-                    ["target_instance_id"] = target.Id.Value.ToString(),
-                    ["expected_revision"] = initialRevision
+                        return target:GetAttribute('Count')"
                 };
 
-                object firstRaw = function.InvokeAsync(arguments).GetAwaiter().GetResult();
-                object replayRaw = function.InvokeAsync(arguments).GetAwaiter().GetResult();
-                JObject first = JObject.Parse(firstRaw.ToString());
-                JObject replay = JObject.Parse(replayRaw.ToString());
+                object resultRaw = function.InvokeAsync(arguments).GetAwaiter().GetResult();
+                JObject result = JObject.Parse(resultRaw.ToString());
 
-                Assert.IsTrue(first.Value<bool>("Success"), first.ToString());
-                Assert.IsTrue(replay.Value<bool>("Success"), replay.ToString());
-                Assert.AreEqual("1", first.Value<string>("Output"));
-                Assert.AreEqual("1", replay.Value<string>("Output"));
+                Assert.IsTrue(result.Value<bool>("Success"), result.ToString());
+                Assert.AreEqual("1", result.Value<string>("Output"));
                 Assert.AreEqual(1d, target.GetAttribute("Count"));
                 Assert.AreEqual(initialRevision + 1L, Record(registry, target).Revision);
                 Assert.AreEqual(1, registry.RetainedMutationOperationCount);

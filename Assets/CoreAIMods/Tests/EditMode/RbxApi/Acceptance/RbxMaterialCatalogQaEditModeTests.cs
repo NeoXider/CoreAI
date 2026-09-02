@@ -33,6 +33,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [SetUp]
         public void SetUp()
         {
+            RbxTextureMaterialProvider.IgnoreProjectOverrideForTests = true;
             RbxTextureMaterialProvider.ResetSharedCacheForTests();
             RbxProceduralMaterialProvider.ResetSharedCacheForTests();
         }
@@ -40,6 +41,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [TearDown]
         public void TearDown()
         {
+            RbxTextureMaterialProvider.IgnoreProjectOverrideForTests = false;
             RbxTextureMaterialProvider.ResetSharedCacheForTests();
             RbxProceduralMaterialProvider.ResetSharedCacheForTests();
         }

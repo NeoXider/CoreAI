@@ -100,7 +100,8 @@ namespace CoreAI.Ai.Hub
                     {
                         window.SetCollapsed(false);
                         window.ActivatePage(HubModsPages.WorldLoadsPageId);
-                    });
+                    },
+                    actorContext: actorContext);
             }
 
             if (window.Registry == null)

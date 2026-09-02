@@ -92,6 +92,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private RbxInstance _worldRoot;
         private RbxInstance _sceneRoot;
+        private MutationEnvelopeScope _mutationEnvelopeScope;
 
         public InstanceRegistry(ClassCatalog catalog = null, IInstanceBackingBinder binder = null,
             InstanceIdAllocator allocator = null, int? worldAclVersion = null, string worldId = "",
@@ -289,6 +290,121 @@ namespace CoreAI.Mods.Rbx.Instances
                 RetainMutationOperation(envelope.ActorId, key);
                 return result;
             }
+        }
+
+        /// <summary>Runs one production entry batch under a server-generated ambient envelope.</summary>
+        public T ApplyServerGeneratedMutation<T>(string actorId, bool actorIsUnrestricted,
+            string actorWorldId, string operation, Func<T> mutation)
+        {
+            if (mutation == null)
+            {
+                throw new ArgumentNullException(nameof(mutation));
+            }
+
+            string actor = string.IsNullOrWhiteSpace(actorId)
+                ? throw RbxError.BadArgument(
+                    "actor id is required for a mutation envelope",
+                    "use the durable actor id from the trusted identity provider")
+                : actorId.Trim();
+            if (HasActiveMutationEnvelope(actor))
+            {
+                return mutation();
+            }
+
+            InstanceRecord anchor = ResolveMutationAnchor(actor, operation);
+            MutationEnvelope envelope = new MutationEnvelope(
+                actor,
+                anchor.Id,
+                Guid.NewGuid().ToString("N"),
+                anchor.Revision);
+            using (BeginMutationEnvelopeScope(
+                       envelope, actorIsUnrestricted, actorWorldId))
+            {
+                return ApplyMutation(envelope, mutation);
+            }
+        }
+
+        /// <summary>Pushes an instance-bound ambient envelope for one trusted production entry.</summary>
+        public MutationEnvelopeScope BeginMutationEnvelopeScope(MutationEnvelope envelope,
+            bool actorIsUnrestricted, string actorWorldId)
+        {
+            MutationEnvelopeScope scope = new MutationEnvelopeScope(
+                this,
+                envelope,
+                actorIsUnrestricted,
+                actorWorldId,
+                _mutationEnvelopeScope);
+            _mutationEnvelopeScope = scope;
+            return scope;
+        }
+
+        /// <summary>Refuses mutation code reached without the matching actor's ambient envelope.</summary>
+        public void DemandMutationEnvelope(string actorId, string operation)
+        {
+            if (!IsWorldAclEnabled)
+            {
+                return;
+            }
+
+            string actor = actorId?.Trim() ?? "";
+            MutationEnvelopeScope scope = _mutationEnvelopeScope;
+            if (scope != null
+                && string.Equals(scope.Envelope.ActorId, actor, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            string reason = scope == null
+                ? "no server-generated mutation envelope is active"
+                : "the active mutation envelope belongs to actor '"
+                  + scope.Envelope.ActorId + "'";
+            throw RbxError.BadArgument(
+                "actor '" + actor + "' cannot " + operation
+                + " without a mutation envelope in an ACL-versioned world: " + reason,
+                "execute the operation through a server-enveloped production entry point");
+        }
+
+        /// <summary>Reports whether this registry currently has an envelope for the actor.</summary>
+        public bool HasActiveMutationEnvelope(string actorId)
+        {
+            MutationEnvelopeScope scope = _mutationEnvelopeScope;
+            return scope != null
+                   && string.Equals(scope.Envelope.ActorId, actorId?.Trim() ?? "",
+                       StringComparison.Ordinal);
+        }
+
+        internal void EndMutationEnvelopeScope(MutationEnvelopeScope scope)
+        {
+            if (!ReferenceEquals(_mutationEnvelopeScope, scope))
+            {
+                throw new InvalidOperationException(
+                    "Mutation envelope scopes must be disposed in LIFO order.");
+            }
+
+            _mutationEnvelopeScope = scope.Previous;
+        }
+
+        private InstanceRecord ResolveMutationAnchor(string actorId, string operation)
+        {
+            if (_worldRoot != null
+                && !_worldRoot.IsDestroyed
+                && _byId.TryGetValue(_worldRoot.Id, out InstanceRecord worldRecord))
+            {
+                return worldRecord;
+            }
+
+            foreach (InstanceRecord record in _byId.Values)
+            {
+                if (!record.Instance.IsDestroyed)
+                {
+                    return record;
+                }
+            }
+
+            throw RbxError.BadArgument(
+                "actor '" + actorId + "' cannot " + operation
+                + ": the world has no live mutation anchor",
+                "bootstrap the DataModel before running production Lua");
         }
 
         private void RetainMutationOperation(string actorId, MutationOperationKey key)
@@ -594,6 +710,14 @@ namespace CoreAI.Mods.Rbx.Instances
         public void SetAccessControl(RbxInstance root, string ownerActorId,
             InstanceAccessScope accessScope, bool recursive)
         {
+            SetAccessControl(root, ownerActorId, accessScope, recursive, null, true, "");
+        }
+
+        /// <summary>Actor-checked reattribute; refuses an unauthorized caller by actor identity.</summary>
+        public void SetAccessControl(RbxInstance root, string ownerActorId,
+            InstanceAccessScope accessScope, bool recursive, string callerActorId,
+            bool callerIsUnrestricted, string callerWorldId)
+        {
             if (root == null)
             {
                 throw new ArgumentNullException(nameof(root));
@@ -604,6 +728,25 @@ namespace CoreAI.Mods.Rbx.Instances
                 throw RbxError.BadArgument(
                     "access control can only be set on a live instance in this registry",
                     "pass a live instance owned by this world");
+            }
+
+            if (IsWorldAclEnabled && callerActorId != null)
+            {
+                AuthorizeMutation(callerActorId, callerIsUnrestricted, callerWorldId,
+                    root, WorldAclDecision.MutateMetadata, "set access control");
+                if (recursive)
+                {
+                    foreach (RbxInstance descendant in root.GetDescendants())
+                    {
+                        AuthorizeMutation(callerActorId, callerIsUnrestricted,
+                            callerWorldId, descendant,
+                            WorldAclDecision.MutateMetadata, "set access control");
+                    }
+                }
+            }
+            else if (IsWorldAclEnabled && callerActorId == null)
+            {
+                // WHY: legacy call without actor is treated as host for backward compat; new code must use the actor overload.
             }
 
             string normalizedActorId = string.IsNullOrWhiteSpace(ownerActorId)
@@ -619,6 +762,36 @@ namespace CoreAI.Mods.Rbx.Instances
             {
                 SetRecordAccessControl(descendant, normalizedActorId, accessScope);
             }
+        }
+
+        /// <summary>Engine-free ACL check used by tests and the disconnect seam.</summary>
+        public void AuthorizeMutation(string callerActorId, bool callerIsUnrestricted,
+            string callerWorldId, RbxInstance target, WorldAclDecision decision,
+            string operation)
+        {
+            WorldAclAuthorizer.Demand(this, callerActorId, callerIsUnrestricted,
+                callerWorldId, target, decision, operation);
+            DemandMutationEnvelope(callerActorId, operation);
+        }
+
+        /// <summary>Actor-checked destroy entry point.</summary>
+        public void DestroyInstance(RbxInstance instance, string callerActorId,
+            bool callerIsUnrestricted, string callerWorldId)
+        {
+            if (instance == null)
+            {
+                throw new ArgumentNullException(nameof(instance));
+            }
+
+            AuthorizeMutation(callerActorId, callerIsUnrestricted, callerWorldId,
+                instance, WorldAclDecision.Destroy, "destroy");
+            foreach (RbxInstance descendant in instance.GetDescendants())
+            {
+                WorldAclAuthorizer.Demand(this, callerActorId, callerIsUnrestricted,
+                    callerWorldId, descendant, WorldAclDecision.Destroy, "destroy");
+            }
+
+            instance.Destroy();
         }
 
         private void SetRecordAccessControl(RbxInstance instance, string ownerActorId,
@@ -756,6 +929,18 @@ namespace CoreAI.Mods.Rbx.Instances
                 {
                     result.Add(record.Instance);
                 }
+            }
+
+            return result;
+        }
+
+        /// <summary>Returns a stable snapshot of every live instance in this registry.</summary>
+        public IReadOnlyList<RbxInstance> GetLiveInstances()
+        {
+            List<RbxInstance> result = new(_byId.Count);
+            foreach (InstanceRecord record in _byId.Values)
+            {
+                result.Add(record.Instance);
             }
 
             return result;

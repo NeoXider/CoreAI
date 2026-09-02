@@ -52,12 +52,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
-        public void AuthorizeMutation_OwnedWrite_ByOwner_Succeeds()
+        public void AuthorizeMutation_EnvelopedOwnedWrite_ByOwner_Succeeds()
         {
             InstanceRegistry registry = new(worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
             RbxInstance owned = registry.Create("Folder", ownerActorId: "actor-a", accessScope: InstanceAccessScope.Owned);
-            Assert.DoesNotThrow(() =>
-                registry.AuthorizeMutation("actor-a", false, "", owned, WorldAclDecision.WriteProperty, "write property"));
+            Assert.DoesNotThrow(() => registry.ApplyServerGeneratedMutation(
+                "actor-a", false, "", "write property", () =>
+                {
+                    registry.AuthorizeMutation(
+                        "actor-a", false, "", owned,
+                        WorldAclDecision.WriteProperty, "write property");
+                    return true;
+                }));
         }
     }
 }

@@ -8,63 +8,88 @@ using Object = UnityEngine.Object;
 
 namespace CoreAI.Mods.Rbx.Rendering
 {
-    /// <summary>Runtime hybrid material catalog. Selected Rbx materials use shared CC0 PBR
-    /// textures; every other canonical material delegates to the procedural catalog.</summary>
+    /// <summary>Runtime catalog provider that overlays textured Rbx materials on the complete
+    /// procedural catalog.</summary>
     public sealed class RbxTextureMaterialProvider : IRbxMaterialProvider<Material>
     {
+        internal const string DefaultCatalogResource =
+            "CoreAIRbxTextures/RbxMaterialTextureCatalog";
+        internal const string OverrideCatalogResource = "CoreAIRbxTextureCatalogOverride";
         private const string ShaderResource = "CoreAIRbxMaterials/RbxTexturedSurface";
         private const string ShaderName = "CoreAI/Rbx/Textured Surface";
-        private const string TextureResourceRoot = "CoreAIRbxTextures/";
         private const string MetallicMapKeyword = "_RBX_METALLIC_MAP";
+        private const string OcclusionMapKeyword = "_RBX_OCCLUSION_MAP";
+        private const string DirectXNormalKeyword = "_RBX_NORMAL_DIRECTX";
 
-        private static readonly TextureDefinition[] Definitions =
-        {
-            new("Wood", 512, "Wood095", 10f, 0.65f, 0.75f, false),
-            new("WoodPlanks", 528, "Wood095", 8f, 0.65f, 0.78f, false),
-            new("Brick", 848, "Bricks104", 10f, 0.6f, 0.82f, false),
-            new("Cobblestone", 880, "PavingStones151", 14f, 0.7f, 0.72f, false),
-            new("Metal", 1088, "Metal063", 3.5f, 0.45f, 0.68f, true),
-            new("Grass", 1280, "Grass005", 7f, 0.7f, 0.78f, false)
-        };
-
-        private static readonly Dictionary<int, TextureDefinition> DefinitionsByValue =
-            BuildDefinitionLookup();
-
-        private static readonly ReadOnlyCollection<RbxMaterialId> TexturedMaterialIds =
-            Array.AsReadOnly(BuildTexturedMaterialIds());
+        private static readonly ReadOnlyCollection<RbxMaterialId> PackagedTexturedMaterialIds =
+            Array.AsReadOnly(new[]
+            {
+                new RbxMaterialId("Wood", 512),
+                new RbxMaterialId("WoodPlanks", 528),
+                new RbxMaterialId("Brick", 848),
+                new RbxMaterialId("Cobblestone", 880),
+                new RbxMaterialId("Metal", 1088),
+                new RbxMaterialId("Grass", 1280)
+            });
 
         private static Dictionary<int, Material> _sharedMaterials;
-        private static bool _textureCatalogPresent;
+        private static Dictionary<int, RbxMaterialTextureCatalog.Entry> _effectiveEntries;
         private static int _sharedMaterialAllocationCount;
         private static float _cachedMetersPerStud;
 
         private readonly RbxProceduralMaterialProvider _proceduralProvider;
+        private readonly Func<string, RbxMaterialTextureCatalog> _catalogLoader;
         private readonly Func<string, Texture2D> _textureLoader;
+        private readonly RbxMaterialTextureCatalog _providedDefaultCatalog;
+        private readonly RbxMaterialTextureCatalog _providedOverrideCatalog;
+        private readonly Shader _providedShader;
+        private readonly bool _catalogInputsProvided;
+        private readonly bool _forceCompatibilityEntries;
 
-        /// <summary>Creates the runtime hybrid provider backed by package Resources.</summary>
+        /// <summary>Creates the runtime hybrid provider backed by package and project Resources.</summary>
         public RbxTextureMaterialProvider()
-            : this(new RbxProceduralMaterialProvider(), Resources.Load<Texture2D>)
+            : this(new RbxProceduralMaterialProvider(), Resources.Load<RbxMaterialTextureCatalog>,
+                Resources.Load<Texture2D>, null, null, null, false, false)
         {
         }
 
         internal RbxTextureMaterialProvider(Func<string, Texture2D> textureLoader)
-            : this(new RbxProceduralMaterialProvider(), textureLoader)
+            : this(new RbxProceduralMaterialProvider(), Resources.Load<RbxMaterialTextureCatalog>,
+                textureLoader, null, null, null, false, true)
+        {
+        }
+
+        internal RbxTextureMaterialProvider(RbxMaterialTextureCatalog defaultCatalog,
+            RbxMaterialTextureCatalog overrideCatalog, Shader shader)
+            : this(new RbxProceduralMaterialProvider(), null, Resources.Load<Texture2D>,
+                defaultCatalog, overrideCatalog, shader, true, false)
         {
         }
 
         private RbxTextureMaterialProvider(RbxProceduralMaterialProvider proceduralProvider,
-            Func<string, Texture2D> textureLoader)
+            Func<string, RbxMaterialTextureCatalog> catalogLoader,
+            Func<string, Texture2D> textureLoader,
+            RbxMaterialTextureCatalog providedDefaultCatalog,
+            RbxMaterialTextureCatalog providedOverrideCatalog, Shader providedShader,
+            bool catalogInputsProvided, bool forceCompatibilityEntries)
         {
             _proceduralProvider = proceduralProvider ??
                 throw new ArgumentNullException(nameof(proceduralProvider));
+            _catalogLoader = catalogLoader;
             _textureLoader = textureLoader ?? throw new ArgumentNullException(nameof(textureLoader));
+            _providedDefaultCatalog = providedDefaultCatalog;
+            _providedOverrideCatalog = providedOverrideCatalog;
+            _providedShader = providedShader;
+            _catalogInputsProvided = catalogInputsProvided;
+            _forceCompatibilityEntries = forceCompatibilityEntries;
         }
 
         /// <summary>The same conspicuous diagnostic material used by the procedural catalog.</summary>
         public Material FallbackMaterial => _proceduralProvider.FallbackMaterial;
 
-        /// <summary>Canonical ids of the entries rendered from the CC0 texture sets.</summary>
-        internal static IReadOnlyList<RbxMaterialId> TexturedMaterials => TexturedMaterialIds;
+        /// <summary>Canonical ids of the six texture sets packaged with CoreAI.</summary>
+        internal static IReadOnlyList<RbxMaterialId> TexturedMaterials =>
+            PackagedTexturedMaterialIds;
 
         /// <summary>Cycles per metre for a tile width authored in studs, so one full texture
         /// spans <paramref name="tileWidthStuds"/> studs horizontally at the given session scale.</summary>
@@ -77,29 +102,35 @@ namespace CoreAI.Mods.Rbx.Rendering
         /// <summary>Resolves a process-wide shared textured or procedural material handle.</summary>
         public bool TryGetMaterial(in RbxMaterialId material, out Material visualMaterial)
         {
-            if (!DefinitionsByValue.TryGetValue(material.Value, out TextureDefinition definition))
+            EnsureSharedCache();
+            if (!_effectiveEntries.TryGetValue(material.Value,
+                    out RbxMaterialTextureCatalog.Entry entry))
             {
                 return _proceduralProvider.TryGetMaterial(in material, out visualMaterial);
             }
 
-            EnsureSharedCache();
-            if (!_textureCatalogPresent)
+            if (!string.Equals(entry.MaterialName, material.Name, StringComparison.Ordinal))
             {
                 return _proceduralProvider.TryGetMaterial(in material, out visualMaterial);
             }
 
             SyncTextureScaleToSessionScale();
-            if (string.Equals(definition.Name, material.Name, StringComparison.Ordinal)
-                && _sharedMaterials.TryGetValue(material.Value, out visualMaterial))
+            if (_sharedMaterials.TryGetValue(material.Value, out visualMaterial))
             {
                 return true;
             }
 
-            visualMaterial = FallbackMaterial;
-            return false;
+            return _proceduralProvider.TryGetMaterial(in material, out visualMaterial);
         }
 
         internal static int SharedMaterialAllocationCount => _sharedMaterialAllocationCount;
+
+        /// <summary>
+        /// Test seam: when true the project-local override catalog is ignored so fixtures that pin
+        /// the packaged CC0 sets stay deterministic on a machine with a local 2K catalog installed.
+        /// Production never sets it.
+        /// </summary>
+        internal static bool IgnoreProjectOverrideForTests { get; set; }
 
         internal static void ResetSharedCacheForTests()
         {
@@ -112,14 +143,12 @@ namespace CoreAI.Mods.Rbx.Rendering
             }
 
             _sharedMaterials = null;
-            _textureCatalogPresent = false;
+            _effectiveEntries = null;
             _sharedMaterialAllocationCount = 0;
             _cachedMetersPerStud = 0f;
         }
 
-        // WHY: a world package can replace the session scale after the process-wide cache exists;
-        // tile widths are authored in studs, so cycles per metre must follow RbxSpace rather than
-        // the scale that happened to be active when the first part was materialised.
+        /// <summary>Resynchronizes stud-authored tile widths after a session-scale change.</summary>
         private static void SyncTextureScaleToSessionScale()
         {
             float metersPerStud = RbxSpace.MetersPerStud;
@@ -130,10 +159,10 @@ namespace CoreAI.Mods.Rbx.Rendering
 
             foreach (KeyValuePair<int, Material> pair in _sharedMaterials)
             {
-                TextureDefinition definition = DefinitionsByValue[pair.Key];
+                RbxMaterialTextureCatalog.Entry entry = _effectiveEntries[pair.Key];
                 float textureAspect = pair.Value.GetFloat(PropertyIds.TextureAspect);
                 pair.Value.SetFloat(PropertyIds.TextureScale,
-                    ComputeTextureScale(textureAspect, definition.TileWidthStuds, metersPerStud));
+                    ComputeTextureScale(textureAspect, entry.TileWidthStuds, metersPerStud));
             }
 
             _cachedMetersPerStud = metersPerStud;
@@ -146,133 +175,176 @@ namespace CoreAI.Mods.Rbx.Rendering
                 return;
             }
 
-            Shader shader = Resources.Load<Shader>(ShaderResource);
-            shader = shader != null ? shader : Shader.Find(ShaderName);
-            Dictionary<int, LoadedTextureSet> loadedSets = LoadTextureSets();
-            Dictionary<int, Material> materials = new(Definitions.Length);
-            bool anyTextureLoaded = false;
+            bool compatibilityEntries;
+            Dictionary<int, RbxMaterialTextureCatalog.Entry> entries =
+                LoadMergedEntries(out compatibilityEntries);
+            Dictionary<int, Material> materials = new(entries.Count);
+            _effectiveEntries = entries;
+            _sharedMaterials = materials;
 
-            foreach (LoadedTextureSet loadedSet in loadedSets.Values)
-            {
-                anyTextureLoaded |= loadedSet.AnyTextureLoaded;
-            }
-
-            _textureCatalogPresent = anyTextureLoaded;
-            if (!anyTextureLoaded)
+            if (compatibilityEntries && !AnyTextureAssigned(entries.Values))
             {
                 Debug.LogWarning(
                     "[CoreAI.RbxApi] No texture-backed material resources were found; the complete " +
                     "procedural catalog remains active.");
-                _sharedMaterials = materials;
+                entries.Clear();
                 return;
+            }
+
+            if (entries.Count == 0)
+            {
+                return;
+            }
+
+            Shader shader = _providedShader;
+            if (shader == null)
+            {
+                shader = Resources.Load<Shader>(ShaderResource);
+                shader = shader != null ? shader : Shader.Find(ShaderName);
             }
 
             if (shader == null)
             {
                 Debug.LogError(
-                    "[CoreAI.RbxApi] Texture-backed material resources are present but shader '" +
-                    ShaderName + "' is missing; affected materials will use the visible diagnostic " +
-                    "fallback.");
-                _sharedMaterials = materials;
+                    "[CoreAI.RbxApi] Textured material catalog entries are present but shader '" +
+                    ShaderName + "' is missing; affected materials will use procedural surfaces.");
                 return;
             }
 
             float metersPerStud = RbxSpace.MetersPerStud;
-            foreach (TextureDefinition definition in Definitions)
+            foreach (KeyValuePair<int, RbxMaterialTextureCatalog.Entry> pair in entries)
             {
-                LoadedTextureSet loadedSet = loadedSets[definition.Value];
-                if (!loadedSet.IsComplete)
+                RbxMaterialTextureCatalog.Entry entry = pair.Value;
+                RbxMaterialId id = new(entry.MaterialName, entry.MaterialValue);
+                if (!RbxProceduralMaterialProvider.TryGetPartColorContract(in id, out _, out _))
                 {
                     Debug.LogError(
-                        "[CoreAI.RbxApi] Incomplete PBR texture set for Enum.Material." +
-                        definition.Name + " (" + definition.TextureStem +
-                        "); the visible diagnostic fallback will be used.");
+                        "[CoreAI.RbxApi] Catalog entry '" + entry.MaterialName + "' (" +
+                        entry.MaterialValue + ") is not a canonical Enum.Material item; using " +
+                        "procedural material for that value.");
                     continue;
                 }
 
-                Material material = CreateSharedMaterial(shader, in definition, in loadedSet,
-                    metersPerStud);
-                materials.Add(definition.Value, material);
+                if (!entry.HasRequiredTextures)
+                {
+                    Debug.LogError(
+                        "[CoreAI.RbxApi] Catalog entry for Enum.Material." + entry.MaterialName +
+                        " is missing required albedo, normal, or roughness/smoothness texture; " +
+                        "using procedural material.");
+                    continue;
+                }
+
+                if (entry.TileWidthStuds <= 0f)
+                {
+                    Debug.LogError(
+                        "[CoreAI.RbxApi] Catalog entry for Enum.Material." + entry.MaterialName +
+                        " has a non-positive tile width; using procedural material.");
+                    continue;
+                }
+
+                Material material = CreateSharedMaterial(shader, entry, metersPerStud);
+                materials.Add(pair.Key, material);
             }
 
-            _sharedMaterials = materials;
             _cachedMetersPerStud = metersPerStud;
         }
 
-        private Dictionary<int, LoadedTextureSet> LoadTextureSets()
+        private Dictionary<int, RbxMaterialTextureCatalog.Entry> LoadMergedEntries(
+            out bool compatibilityEntries)
         {
-            Dictionary<int, LoadedTextureSet> loadedSets = new(Definitions.Length);
-            foreach (TextureDefinition definition in Definitions)
+            RbxMaterialTextureCatalog defaultCatalog = _providedDefaultCatalog;
+            RbxMaterialTextureCatalog overrideCatalog = _providedOverrideCatalog;
+            compatibilityEntries = false;
+
+            if (!_catalogInputsProvided && !_forceCompatibilityEntries)
             {
-                string prefix = TextureResourceRoot + definition.TextureStem + "_1K-JPG_";
-                Texture2D color = _textureLoader(prefix + "Color");
-                Texture2D normal = _textureLoader(prefix + "NormalGL");
-                Texture2D roughness = _textureLoader(prefix + "Roughness");
-                Texture2D metallic = definition.HasMetallicMap
-                    ? _textureLoader(prefix + "Metalness")
-                    : null;
-                loadedSets.Add(definition.Value,
-                    new LoadedTextureSet(color, normal, roughness, metallic,
-                        definition.HasMetallicMap));
+                defaultCatalog = _catalogLoader(DefaultCatalogResource);
+                overrideCatalog = IgnoreProjectOverrideForTests
+                    ? null
+                    : _catalogLoader(OverrideCatalogResource);
             }
 
-            return loadedSets;
+            IEnumerable<RbxMaterialTextureCatalog.Entry> packagedEntries;
+            if (defaultCatalog != null)
+            {
+                packagedEntries = defaultCatalog.Entries;
+            }
+            else if (!_catalogInputsProvided || _forceCompatibilityEntries)
+            {
+                packagedEntries = RbxMaterialTextureCatalog.CreatePackagedCompatibilityEntries(
+                    _textureLoader);
+                compatibilityEntries = true;
+            }
+            else
+            {
+                packagedEntries = Array.Empty<RbxMaterialTextureCatalog.Entry>();
+            }
+
+            IEnumerable<RbxMaterialTextureCatalog.Entry> overrideEntries = overrideCatalog != null
+                ? overrideCatalog.Entries
+                : Array.Empty<RbxMaterialTextureCatalog.Entry>();
+            return RbxMaterialTextureCatalog.MergeEntries(packagedEntries, overrideEntries);
+        }
+
+        private static bool AnyTextureAssigned(
+            IEnumerable<RbxMaterialTextureCatalog.Entry> entries)
+        {
+            foreach (RbxMaterialTextureCatalog.Entry entry in entries)
+            {
+                if (entry.HasAnyTexture)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static Material CreateSharedMaterial(Shader shader,
-            in TextureDefinition definition, in LoadedTextureSet loadedSet, float metersPerStud)
+            RbxMaterialTextureCatalog.Entry entry, float metersPerStud)
         {
             Material material = new(shader)
             {
-                name = "CoreAiRbxTextureMaterial_" + definition.Name,
+                name = "CoreAiRbxTextureMaterial_" + entry.MaterialName,
                 hideFlags = HideFlags.HideAndDontSave,
                 enableInstancing = true
             };
-            material.SetColor(PropertyIds.BaseColor, Color.white);
+            Color intrinsicColor = entry.IntrinsicColor;
+            material.SetColor(PropertyIds.BaseColor, intrinsicColor);
             material.SetColor(PropertyIds.Color, Color.white);
-            material.SetColor(PropertyIds.MaterialColor, Color.white);
-            material.SetFloat(PropertyIds.PartColorInfluence, definition.PartColorInfluence);
+            material.SetColor(PropertyIds.MaterialColor, intrinsicColor);
+            material.SetFloat(PropertyIds.PartColorInfluence,
+                Mathf.Clamp01(entry.PartColorInfluence));
             material.SetFloat(PropertyIds.NeutralDefaultPartColor, 1f);
-            float textureAspect = (float)loadedSet.Color.width / loadedSet.Color.height;
-            float textureScale = ComputeTextureScale(textureAspect, definition.TileWidthStuds,
-                metersPerStud);
-            material.SetFloat(PropertyIds.TextureScale, textureScale);
+            float textureAspect = (float)entry.Albedo.width / entry.Albedo.height;
+            material.SetFloat(PropertyIds.TextureScale,
+                ComputeTextureScale(textureAspect, entry.TileWidthStuds, metersPerStud));
             material.SetFloat(PropertyIds.TextureAspect, textureAspect);
-            material.SetFloat(PropertyIds.BumpScale, definition.BumpScale);
-            material.SetTexture(PropertyIds.BaseMap, loadedSet.Color);
-            material.SetTexture(PropertyIds.BumpMap, loadedSet.Normal);
-            material.SetTexture(PropertyIds.RoughnessMap, loadedSet.Roughness);
-            if (definition.HasMetallicMap)
+            material.SetFloat(PropertyIds.BumpScale, Mathf.Max(0f, entry.NormalStrength));
+            material.SetFloat(PropertyIds.RoughnessScale, Mathf.Max(0f, entry.RoughnessScale));
+            material.SetFloat(PropertyIds.InvertRoughness, entry.IsSmoothnessMap ? 1f : 0f);
+            material.SetTexture(PropertyIds.BaseMap, entry.Albedo);
+            material.SetTexture(PropertyIds.BumpMap, entry.Normal);
+            material.SetTexture(PropertyIds.RoughnessMap, entry.RoughnessOrSmoothness);
+            if (!entry.IsOpenGlNormal)
             {
-                material.SetTexture(PropertyIds.MetallicMap, loadedSet.Metallic);
+                material.EnableKeyword(DirectXNormalKeyword);
+            }
+
+            if (entry.Metalness != null)
+            {
+                material.SetTexture(PropertyIds.MetallicMap, entry.Metalness);
                 material.EnableKeyword(MetallicMapKeyword);
+            }
+
+            if (entry.AmbientOcclusion != null)
+            {
+                material.SetTexture(PropertyIds.OcclusionMap, entry.AmbientOcclusion);
+                material.EnableKeyword(OcclusionMapKeyword);
             }
 
             _sharedMaterialAllocationCount++;
             return material;
-        }
-
-        private static Dictionary<int, TextureDefinition> BuildDefinitionLookup()
-        {
-            Dictionary<int, TextureDefinition> lookup = new(Definitions.Length);
-            foreach (TextureDefinition definition in Definitions)
-            {
-                lookup.Add(definition.Value, definition);
-            }
-
-            return lookup;
-        }
-
-        private static RbxMaterialId[] BuildTexturedMaterialIds()
-        {
-            RbxMaterialId[] ids = new RbxMaterialId[Definitions.Length];
-            for (int index = 0; index < Definitions.Length; index++)
-            {
-                TextureDefinition definition = Definitions[index];
-                ids[index] = new RbxMaterialId(definition.Name, definition.Value);
-            }
-
-            return ids;
         }
 
         private static void DestroyMaterial(Material material)
@@ -292,8 +364,7 @@ namespace CoreAI.Mods.Rbx.Rendering
             }
         }
 
-        // WHY: the catalog table must stay readable without the native engine (engine-free
-        // contract tests); native property-id lookups therefore initialise lazily, on first use.
+        /// <summary>Lazily initialized native shader property identifiers.</summary>
         private static class PropertyIds
         {
             public static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
@@ -305,58 +376,13 @@ namespace CoreAI.Mods.Rbx.Rendering
             public static readonly int TextureScale = Shader.PropertyToID("_TextureScale");
             public static readonly int TextureAspect = Shader.PropertyToID("_TextureAspect");
             public static readonly int BumpScale = Shader.PropertyToID("_BumpScale");
+            public static readonly int RoughnessScale = Shader.PropertyToID("_RoughnessScale");
+            public static readonly int InvertRoughness = Shader.PropertyToID("_InvertRoughness");
             public static readonly int BaseMap = Shader.PropertyToID("_BaseMap");
             public static readonly int BumpMap = Shader.PropertyToID("_BumpMap");
             public static readonly int RoughnessMap = Shader.PropertyToID("_RoughnessMap");
             public static readonly int MetallicMap = Shader.PropertyToID("_MetallicMap");
-        }
-
-        private readonly struct TextureDefinition
-        {
-            public readonly string Name;
-            public readonly int Value;
-            public readonly string TextureStem;
-            public readonly float TileWidthStuds;
-            public readonly float BumpScale;
-            public readonly float PartColorInfluence;
-            public readonly bool HasMetallicMap;
-
-            public TextureDefinition(string name, int value, string textureStem, float tileWidthStuds,
-                float bumpScale, float partColorInfluence, bool hasMetallicMap)
-            {
-                Name = name;
-                Value = value;
-                TextureStem = textureStem;
-                TileWidthStuds = tileWidthStuds;
-                BumpScale = bumpScale;
-                PartColorInfluence = partColorInfluence;
-                HasMetallicMap = hasMetallicMap;
-            }
-        }
-
-        private readonly struct LoadedTextureSet
-        {
-            public readonly Texture2D Color;
-            public readonly Texture2D Normal;
-            public readonly Texture2D Roughness;
-            public readonly Texture2D Metallic;
-            public readonly bool RequiresMetallic;
-
-            public LoadedTextureSet(Texture2D color, Texture2D normal, Texture2D roughness,
-                Texture2D metallic, bool requiresMetallic)
-            {
-                Color = color;
-                Normal = normal;
-                Roughness = roughness;
-                Metallic = metallic;
-                RequiresMetallic = requiresMetallic;
-            }
-
-            public bool AnyTextureLoaded => Color != null || Normal != null || Roughness != null ||
-                                            Metallic != null;
-
-            public bool IsComplete => Color != null && Normal != null && Roughness != null &&
-                                      (!RequiresMetallic || Metallic != null);
+            public static readonly int OcclusionMap = Shader.PropertyToID("_OcclusionMap");
         }
     }
 }

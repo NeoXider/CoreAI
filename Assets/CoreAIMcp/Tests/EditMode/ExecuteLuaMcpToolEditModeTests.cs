@@ -1,6 +1,8 @@
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Mcp.Protocol;
 using CoreAI.Mcp.Tools;
 using NUnit.Framework;
@@ -67,5 +69,33 @@ namespace CoreAI.Mcp.Tests
             Assert.IsTrue(result.IsError);
             Assert.IsNull(executor.LastCode, "executor must not run without code.");
         }
+
+        [Test]
+        public async Task Invoke_WithIdentity_UsesServerGeneratedEnvelopeOverload()
+        {
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(
+                new LuaCsModStackOptions());
+            LocalActorIdentityProvider identity = new(
+                "mcp-actor",
+                "mcp-session",
+                "mcp-world",
+                ActorGrantSet.None,
+                AgentMemoryScope.Empty);
+            ExecuteLuaMcpTool tool = new(
+                stack.ToolExecutor, identity, BuiltInAgentRoleIds.Programmer);
+
+            McpToolResult result = await tool.InvokeAsync(
+                new JObject { ["code"] = "return 42" },
+                CancellationToken.None);
+
+            Assert.IsTrue(result.IsError);
+            StringAssert.Contains(
+                "production Rbx mutation surface is not configured",
+                result.Content[0].Text);
+            Assert.IsFalse(tool.InputSchemaJson.Contains("operation_id"));
+            Assert.IsFalse(tool.InputSchemaJson.Contains("target_instance_id"));
+            Assert.IsFalse(tool.InputSchemaJson.Contains("expected_revision"));
+        }
+
     }
 }

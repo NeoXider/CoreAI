@@ -146,10 +146,10 @@ namespace CoreAI.Composition
                     asyncMarshaler), Lifetime.Singleton);
 #endif
 
-            int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 2;
+            int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 4;
             builder.RegisterInstance(new AiOrchestrationQueueOptions
             {
-                MaxConcurrent = maxConcurrent < 1 ? 1 : maxConcurrent
+                MaxConcurrent = maxConcurrent < 4 ? 4 : maxConcurrent
             });
 
             bool logMetrics = settings != null && settings.LogOrchestrationMetrics;

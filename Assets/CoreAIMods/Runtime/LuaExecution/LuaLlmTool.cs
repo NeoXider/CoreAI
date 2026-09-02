@@ -46,23 +46,12 @@ namespace CoreAI.Ai
         public string Description => LuaTool.ExecuteLuaDescription;
 
         /// <inheritdoc />
-        public string ParametersSchema => _actorIdentityProvider == null
-            ? "{" +
+        public string ParametersSchema => "{" +
               "  \"type\": \"object\"," +
               "  \"properties\": {" +
               "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Build world objects Roblox-style (Instance.new('Part'), game/workspace) - see read_skill('Rbx API'). Inspect the scene with coreai_world_find(pattern), coreai_world_pos(name), coreai_world_exists(name). Full reflection is a rarely-needed backup - see read_skill('Full Lua'). Return compact JSON/string for diagnostics. Example: logic_define('loot_formula', function(bossMaxHp) return 1000 end) report('Boss reward set to 1000 coins')\" }" +
               "  }," +
               "  \"required\": [\"code\"]" +
-              "}"
-            : "{" +
-              "  \"type\": \"object\"," +
-              "  \"properties\": {" +
-              "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute against the declared mutation target.\" }," +
-              "    \"operation_id\": { \"type\": \"string\", \"description\": \"Caller-generated idempotency key unique for this actor and logical operation.\" }," +
-              "    \"target_instance_id\": { \"type\": \"string\", \"description\": \"Stable target InstanceId encoded as an unsigned decimal string.\" }," +
-              "    \"expected_revision\": { \"type\": \"integer\", \"minimum\": 0, \"description\": \"Target revision observed before submitting this operation.\" }" +
-              "  }," +
-              "  \"required\": [\"code\", \"operation_id\", \"target_instance_id\", \"expected_revision\"]" +
               "}";
 
         /// <summary>

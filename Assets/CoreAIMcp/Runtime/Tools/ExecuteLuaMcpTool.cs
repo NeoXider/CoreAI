@@ -17,11 +17,31 @@ namespace CoreAI.Mcp.Tools
     public sealed class ExecuteLuaMcpTool : IMcpTool
     {
         private readonly LuaTool.ILuaExecutor _executor;
+        private readonly LuaTool.IMutationExecutor _mutationExecutor;
+        private readonly CoreAI.Authority.IActorIdentityProvider _identityProvider;
+        private readonly string _roleId;
 
         /// <param name="executor">The shared one-off Lua executor resolved from the mod stack.</param>
         public ExecuteLuaMcpTool(LuaTool.ILuaExecutor executor)
         {
             _executor = executor ?? throw new ArgumentNullException(nameof(executor));
+        }
+
+        /// <param name="executor">Shared executor plus actor identity for server-generated envelope.</param>
+        public ExecuteLuaMcpTool(LuaTool.ILuaExecutor executor,
+            CoreAI.Authority.IActorIdentityProvider identityProvider, string roleId = null)
+        {
+            _executor = executor ?? throw new ArgumentNullException(nameof(executor));
+            _mutationExecutor = executor as LuaTool.IMutationExecutor;
+            _identityProvider = identityProvider
+                ?? throw new ArgumentNullException(nameof(identityProvider));
+            _roleId = roleId;
+            if (_mutationExecutor == null)
+            {
+                throw new ArgumentException(
+                    "Actor-scoped MCP execute_lua requires a mutation-envelope executor.",
+                    nameof(executor));
+            }
         }
 
         /// <inheritdoc />
@@ -54,7 +74,25 @@ namespace CoreAI.Mcp.Tools
                 return McpToolResult.Failure("execute_lua: 'code' is required.");
             }
 
-            LuaTool.LuaResult result = await _executor.ExecuteAsync(code, cancellationToken).ConfigureAwait(false);
+            LuaTool.LuaResult result;
+            if (_identityProvider != null && _mutationExecutor != null)
+            {
+                CoreAI.Authority.ActorContext actorContext;
+                try
+                {
+                    actorContext = _identityProvider.GetActorContext(_roleId);
+                }
+                catch (Exception ex)
+                {
+                    return McpToolResult.Failure(ex.Message);
+                }
+
+                result = await _mutationExecutor.ExecuteAsync(code, actorContext, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                result = await _executor.ExecuteAsync(code, cancellationToken).ConfigureAwait(false);
+            }
             string payload = JsonConvert.SerializeObject(result ?? new LuaTool.LuaResult
             {
                 Success = false,

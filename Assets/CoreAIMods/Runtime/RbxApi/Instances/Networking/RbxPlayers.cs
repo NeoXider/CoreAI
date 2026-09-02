@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Mods.Rbx.Datatypes;
 
 namespace CoreAI.Mods.Rbx.Instances.Networking
 {
@@ -105,13 +106,19 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
 
         public bool RemoveActor(string actorId)
         {
+            return RemoveActor(actorId, null);
+        }
+
+        /// <summary>Fires PlayerRemoving before detaching the Player, with the documented reason.</summary>
+        public bool RemoveActor(string actorId, RbxEnumItem reason)
+        {
             string actor = RequireActorId(actorId);
             if (!_byActor.TryGetValue(actor, out RbxPlayer player))
             {
                 return false;
             }
 
-            PlayerRemoving.Fire(player);
+            PlayerRemoving.FireForDestruction(player, player, reason);
             _byActor.Remove(actor);
             _players.Remove(player);
             player.Destroy();

@@ -1,90 +1,77 @@
 # TODO
 
-> Updated 2026-09-01. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-09-02. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Prepared: 7.1.0 (2026-08-30, all six packages in lockstep; UNCOMMITTED, release pending the EditMode gate).
-> Released: 7.0.7 (2026-08-27, all six packages in lockstep); 7.0.0 (2026-08-01) added `McpServerInfo.Version`.
+> Released: 7.1.1 (2026-08-31, `com.neoxider.coreai` + `.coreaiunity`); 7.1.0 (2026-08-30, all six packages
+> in lockstep); 7.0.7 (2026-08-27); 7.0.0 (2026-08-01) added `McpServerInfo.Version`. Next: 7.2.0 in lockstep
+> once the MVP2.5 persistence release below passes its browser gate.
 > Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
 > 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
-## MVP2 acceptance-gate remediation (2026-09-01) — uncommitted
+## MVP2.5 persistence release — status 2026-09-02
 
-- [x] G7 now inspects both compiled emit entry paths through the per-subscriber `Enqueue` boundary,
-      rejects process-wide synchronization before that boundary, and separately permits the target
-      mod's queue lock. A deliberate static emit lock made the compiled structural gate fail and was
-      removed; the lock-free production route is restored.
-- [x] G12 now freezes all 20 exact Tier-A ids and enforces the ≥30% Unmodified threshold. The manifest
-      records the actual 17 Unmodified / 0 Modified / 3 Failing catalog and lists every frozen id.
-- [x] The acceptance manifest scopes G2 to ACL-versioned worlds, explicitly excludes legacy missing/null
-      ACL worlds from the cross-actor refusal security claim, and marks the unrun machine/provider/test
-      discovery/RSS fields `NOT MEASURED` instead of inventing values.
-- [ ] **Verification gate — fresh post-fix Unity EditMode suite.** `g6.xml` is green at
-      3076 total / 3067 passed / 0 failed / 9 skipped, but predates the current WebGL/Llama and world
-      package changes and is not evidence for them. Current generated-project compile gates are green.
-- [~] **G11 LLMUnity/WebGL containment:** code review is green after restricting the Cecil rewrite to
-      the current `Temp/StagingArea/Data/Managed` DLL; persistent Bee caches are explicitly rejected.
-      Remaining evidence: fresh EditMode, clean + incremental WebGL builds, then the browser checks.
-- [ ] **G11 browser interaction gate:** the previous player was built and launched, but the fresh
-      post-fix player still needs the §6.5 interaction/console pass.
+Verified on the merged tree (commit `8579d319`, Unity 6000.3.14f1 Editor test runner):
+full EditMode **3204 total / 3195 passed / 0 failed / 9 skipped**; full PlayMode with the live
+`ling-3.0-tiny` model **113 / 110 / 0 / 3 skipped by design**; Node jslib tests 6/6 and SSE 12/12.
+Independent QA rounds (world package, materials, WebGL, demos, docs, architecture) are recorded in
+`PROGRESS.qa-*.md` and `dev-docs/ARCH_AUDIT_ONLINE_2026-09-02.md`, `dev-docs/DOCS_AUDIT_2026-09-02.md`.
 
-## MVP3 world package first vertical (2026-09-01) — uncommitted
-
-- [~] **W3.1 codec slice:** engine-free versioned package, fresh-registry restore, stable
-      server-authority ids, hostile-input quotas, world-owned projection, and the regression fixture
-      are implemented. Capture/`ExportSnapshot` omit every non-null-`OwnerModId` subtree including
-      descendants without their own owner; injected mod-owned nodes and a retained Model pointing at
-      an excluded PrimaryPart fail closed. The roadmap restart gate remains open until a production
-      host actually swaps sessions and applies all settings.
-- [ ] Move world-owned projection into an ownership-aware capture traversal so an excluded
-      mod-ephemeral subtree is skipped before it consumes snapshot depth/count/materialization work.
-- [x] **W3.2 codec architecture:** disk encode/decode and `ExportSnapshot` share one canonical payload
-      and one instance-tree mapper.
-- [ ] **Verification gate — owner-run Unity EditMode suite.** Generated-project builds are green;
-      pure outside-Unity regressions are green, while Lua-authored cases require the open Editor.
-      Unity/Bee compilation now pins the direct `CoreAI.Mods` -> `CoreAI.RbxApi.Unity` asmdef reference;
-      generated csproj compilation had masked that dependency through a transitive reference.
-- [~] **W3.3 implementation complete; Unity acceptance pending:** production composition resolves
-      stable runtime/executor/stack/logic/source facades over a mutable session controller. Confirmed
-      load durably prepares exact sources before a zero-await fresh-host swap, starts active mods once
-      after the tree and dormant mods zero times, buffers staged mod-data writes, then makes the old
-      VM/hooks/connections/scheduler/registry inert. `save_world` and fail-closed `load_world` share
-      the runtime service; only host/UI confirmation consumes a one-use expiring load request. Exact
-      sources use collision-safe case-insensitive names and post-write verification; staged camera,
-      logic declarations, revisions, network output, and mod data have rollback/publish boundaries.
-      Active `Full` packages fail before staging because arbitrary Unity side effects cannot be
-      isolated. Persistent mod-data files hash the exact UTF-8 mod id, preventing ordinal `Case`/`case`
-      ids from aliasing on Windows; legacy sanitized files are one-time claimed and migrated by the
-      first exact id. The built-player Hub now exposes pending metadata with one-shot Confirm/Reject actions,
-      and the FullAccess WebGL harness drives marker creation, save, and request-only load through the
-      production seams without a confirmation bypass. Owner-run positive and negative Unity tests and
-      browser interaction remain required before PASS.
-- [ ] **W3.5 startup selection residue:** persist an explicit selected world/autoload pointer with a
-      crash-safe world+source protocol. Until then restart intentionally selects the prior world and
-      default source set; isolated loaded-session versions are not inferred as startup state.
-- [~] **W3.4 implementation complete; Unity acceptance pending:** autosave insertion and ring deletion have separate durability
-      confirmations, exact rollback journalling, serialized mutations, and reload-model regressions.
-      One reusable async single-flight gate now spans capture -> confirmed autosave -> mutation;
-      `execute_lua` and all six mutating `manage_mods` actions (`load`, `reload`, `unload`, `import`,
-      `forget`, `revert`) fail without mutation on false, exception, or cancellation. Production
-      composition injects the same gate instance into both tool paths. The behavioral matrix preserves
-      live/source-store/revision/manual state exactly; read-only actions bypass backup; cross-tool order
-      remains serialized. Owner-run focused/full Unity verification remains before PASS.
-- [~] **W3.5 implementation complete; browser acceptance pending:** the world store uses a real
-      WebGL `syncfs` success/error callback, finite realtime timeout/cancellation, and never treats
-      request issuance as durability. Node bridge tests and deterministic volatile/durable reload
-      tests are green. Remaining gate: real WebGL save -> callback -> page reload, including console
-      and within-budget responsiveness evidence.
+- [x] W3.1–W3.4 world package: codec, one serializer, clean mod restart, backup safety — implemented,
+      EditMode green, QA blocker (bare `Instance.new('Part')` locking every gated tool) fixed with a
+      red-first test.
+- [x] All 45 `Enum.Material` mapped at runtime; public Lua sets `Material` and an independent
+      `Part.Color`; Neon follows `Part.Color`; fallback is the visible magenta hazard. Judging rig
+      dumps `MATERIAL_CATALOG complete slots=46 mapped=45 fallback=1 failures=0 result=PASS` in the
+      Editor (Editor.log, 2026-09-02). Every material was inspected face-on and grazing at 1200px:
+      no seams, no NaN, no pink.
+- [x] Hub World page reports `Has saved state` only from the `FS.syncfs` callback (W3.5 code side).
+- [x] 15 frozen demo scenes in `EditorBuildSettings`; smoke test pinned to the frozen list.
+- [ ] **W3.5 browser acceptance** — real WebGL build (`CoreAIG11WebGlBuild.Build`), save → callback →
+      reload → `Has saved state: Yes`, Reset → `No`, plus the full §6.5 checklist (Lua self-test,
+      Tetris, real-provider nonce through `tools/G11Proxy`, 503 retry, terminal error, recovery).
+- [x] **Material quality pass (owner decision 2026-09-02) — Editor side DONE.** Catalog-driven
+      `RbxTextureMaterialProvider` (`RbxMaterialTextureCatalog` + project-local override),
+      `RbxTexturedSurface` AO + DirectX-normal keyword, Editor menus
+      `CoreAI/Materials/Import Bridge-Megascans folder...` and `Download CC0 texture sets (ambientCG)...`.
+      Packaged default catalog materialized (6 × 1K CC0); local override holds 36 ambientCG 2K sets
+      (476 MB, gitignored, LICENSE with provenance). Judging rig evidence with the override:
+      `MATERIAL_CATALOG complete slots=46 mapped=45 fallback=1 failures=0 result=PASS`, 36 slots on the
+      textured shader, 9 procedural. Every slot inspected face-on and grazing at 900 px: no seams, no
+      pink, no NaN; three ids corrected after the pass (`Slate=Rock022`, `Rock=Rock028`, `Salt` back to
+      procedural). Fab/Megascans: local use only (`dev-docs/SHADER_SOURCES_RESEARCH_2026-09-02.md`).
+      OPEN: the same 46-slot evidence and a visual pass in the WebGL player (G11).
+- [x] **Rung zero (MVP2 entry gates, from the architecture audit) — landed (`PROGRESS.rungzero.md`,
+      24 focused tests green off-device):** ACL in the engine-free registry, server-generated
+      envelopes on every production Lua entry (execute_lua plain/MCP, mod chunks, scheduler resumes,
+      signal/remote dispatch, cross-mod calls), disconnect seam firing `PlayerRemoving` once,
+      inbound `SenderActorId` cannot create identity, `PAYLOAD_TOO_LARGE` at a frozen 65,536-byte cap.
+- [ ] **Rung zero residue — host restore envelope.** World-package restore writes
+      (`RbxWorldPackageSerializer.cs:274`, `RbxWorldPackageContracts.cs:568`, `RbxWorldHost.cs`) do not
+      yet run under a host envelope; they were out of the rung-zero task's file scope. Add the host
+      scope with a RED test that restores an ACL-versioned package through production composition.
+- [x] **World package follow-ups (`PROGRESS.wffin.md`, 6 new tests green off-device):** dangling
+      `PrimaryPart` is dropped in the snapshot only and recorded in the manifest `diagnostics` array
+      (capture never fails, the AI is never locked out), `list_autosaves` / `load_autosave` through the
+      same confirm/reject pool as manual slots, pre-load safety autosave `load_world-pre`, reserved
+      Windows device names rejected. Hub World Loads page lists autosaves and routes `Load...` through the
+      same confirmation pool (task `hub6`, UI tests need the Editor run).
+- [x] **Scale characterization 20/50/100/200 actors** measured through production composition with a
+      frozen workload (`tools/ScaleHarness`, `dev-docs/SCALE_CHARACTERIZATION.md`, host CoreCLR, not
+      the player): frame-only budget holds 100 actors in 4 ms and 200 in 16 ms; the chat gate fails
+      from 100 actors (admission cap `MaxPending`/`MaxConcurrent` — an actor-count-scaled ceiling was
+      attempted and reverted after it broke the `MaxPending_*` refusal tests; still OPEN) and the heap
+      budget fails already at 20 (~4.5 KB/actor/frame allocations — OPEN, `alloc-fix`). No capacity claim until both pass and the
+      staircase is repeated in a Standalone player.
+- [ ] Demo scene-level fixes needing the Editor: orphan `ChatPromptButtonsController` in
+      LiveMechanicsModsChatDemo / MiniRpgModsDemo / ModdableUnitsDemo (enable the chat example menu
+      or remove), `DemoHubPagesBinder.EnableExamplePrompts()` no-op in WaveAutoBattlerModsDemo.
+- [ ] IMGUI migration backlog: 13 files remain on the `ImguiBanRatchetEditModeTests` allowlist (10
+      demo controllers, 3 diagnostics overlays); the ratchet only shrinks.
 - [ ] Incrementally encode/decode JSON/ZIP on WebGL. The current player path yields chunked file I/O
-      and fails fast beyond a 4 MiB / 4,096-instance / bounded-collection budget; within-budget browser
-      responsiveness still needs G11 evidence.
-- [~] **WebGL Rbx material catalog evidence:** the frozen render-supported set is 22 of the 45 public
-      `Enum.Material` items; the remaining 23 stay on the visible diagnostic fallback and are not
-      claimed as supported. Exhaustive public-Lua binder and showcase-driver regressions are in place.
-      Remaining gate: run `DumpMaterialApiEvidence` in the actual WebGL player and retain the ordered
-      23-slot PASS summary plus a visual pass confirming no supported slot renders pink.
+      and fails fast beyond a 4 MiB / 4,096-instance / bounded-collection budget.
 - [ ] Stream or quota JSON token materialization before semantic tree validation to cap hostile
       browser peak memory, and enforce hostile-reader preorder/sorted collection canonicality.
 

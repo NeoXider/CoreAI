@@ -1062,6 +1062,7 @@ namespace CoreAI.Mods.WorldPackages
     {
         private const int MaximumPendingLoadRequests = 8;
         private static readonly TimeSpan DefaultPendingLoadTimeToLive = TimeSpan.FromMinutes(2d);
+        private const string PreLoadAutosaveTrigger = "load_world-pre";
 
         private readonly object _gate = new();
         private readonly IRbxWorldSessionHost _host;
@@ -1184,6 +1185,12 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
+        public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+        {
+            DemandActive();
+            return _packageStore.ListAutoSaves();
+        }
+
         internal void ConfigurePendingLoadClockForTests(
             Func<DateTime> utcNow,
             TimeSpan timeToLive)
@@ -1240,6 +1247,47 @@ namespace CoreAI.Mods.WorldPackages
                     requestId,
                     caller.ActorId,
                     slot,
+                    payload,
+                    requestedAtUtc,
+                    requestedAtUtc + _pendingLoadTimeToLive);
+                _pendingLoads.Add(requestId, pending);
+                publicRequest = pending.ToPublicRequest();
+            }
+
+            RaiseManualLoadConfirmationRequested(publicRequest);
+            return new RbxWorldLoadRequest(
+                publicRequest.RequestId,
+                publicRequest.Slot,
+                publicRequest.WorldId,
+                publicRequest.RequestedAtUtc,
+                publicRequest.ExpiresAtUtc);
+        }
+
+        public async UniTask<RbxWorldLoadRequest> RequestAutoLoadAsync(
+            ActorContext caller,
+            string autoFileName,
+            CancellationToken cancellationToken = default)
+        {
+            DemandTrusted(caller);
+            RbxWorldPackagePayload payload = await _packageStore.LoadAutoAsync(
+                autoFileName, cancellationToken);
+            string requestId = Guid.NewGuid().ToString("N");
+            RbxPendingWorldLoadRequest publicRequest;
+            lock (_gate)
+            {
+                DemandActiveLocked();
+                DateTime requestedAtUtc = _utcNow();
+                RemoveExpiredPendingLoadsLocked(requestedAtUtc);
+                RemovePendingSlotLocked(autoFileName);
+                if (_pendingLoads.Count >= MaximumPendingLoadRequests)
+                {
+                    RemoveOldestPendingLoadLocked();
+                }
+
+                PendingLoad pending = new(
+                    requestId,
+                    caller.ActorId,
+                    autoFileName,
                     payload,
                     requestedAtUtc,
                     requestedAtUtc + _pendingLoadTimeToLive);
@@ -1339,6 +1387,34 @@ namespace CoreAI.Mods.WorldPackages
             bool published = false;
             try
             {
+                RbxWorldPackagePayload currentPayload;
+                try
+                {
+                    currentPayload = CaptureCurrent();
+                }
+                catch (Exception ex)
+                {
+                    return new RbxWorldLoadResult(
+                        false,
+                        "Pre-load safety autosave capture failed: " + ex.Message,
+                        0);
+                }
+
+                RbxWorldPackageWriteResult safetyAutosave = await _packageStore.CreateAutoAsync(
+                    PreLoadAutosaveTrigger,
+                    currentPayload,
+                    cancellationToken);
+                if (safetyAutosave == null || !safetyAutosave.Success)
+                {
+                    string reason = safetyAutosave == null || string.IsNullOrWhiteSpace(safetyAutosave.Error)
+                        ? "durability not confirmed"
+                        : safetyAutosave.Error;
+                    return new RbxWorldLoadResult(
+                        false,
+                        "Pre-load safety autosave '" + PreLoadAutosaveTrigger + "' failed: " + reason,
+                        0);
+                }
+
                 sourceReplacement = await _transactionalSourceStore.PrepareExactReplacementAsync(
                     payload.Mods, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
@@ -2259,6 +2335,15 @@ namespace CoreAI.Mods.WorldPackages
             {
                 return _owner.Current.Stack.ToolExecutor.ExecuteAsync(
                     code, actorContext, mutationEnvelope, cancellationToken);
+            }
+
+            public Task<LuaTool.LuaResult> ExecuteAsync(
+                string code,
+                ActorContext actorContext,
+                CancellationToken cancellationToken)
+            {
+                return _owner.Current.Stack.ToolExecutor.ExecuteAsync(
+                    code, actorContext, cancellationToken);
             }
         }
 

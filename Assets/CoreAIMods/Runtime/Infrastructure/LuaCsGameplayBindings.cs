@@ -164,6 +164,13 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Registers the one-off Rbx surface for a trusted actor mutation envelope.</summary>
         public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
+            string ownerModId, ActorContext actorContext)
+        {
+            RegisterCore(registry, capabilities, ownerModId, actorContext, null);
+        }
+
+        /// <summary>Registers the one-off Rbx surface for a trusted actor mutation envelope.</summary>
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
             string ownerModId, ActorContext actorContext, MutationEnvelope mutationEnvelope)
         {
             RegisterCore(registry, capabilities, ownerModId, actorContext, mutationEnvelope);
@@ -187,10 +194,18 @@ namespace CoreAI.Ai.LuaCs
             // and threads the owner mod id so created instances land in the ownership ledger.
             if (_roblox != null)
             {
-                if (actorContext.HasValue && mutationEnvelope.HasValue)
+                if (actorContext.HasValue)
                 {
-                    _roblox.Register(registry, effective, ownerModId,
-                        actorContext.Value, mutationEnvelope.Value);
+                    if (mutationEnvelope.HasValue)
+                    {
+                        _roblox.Register(registry, effective, ownerModId,
+                            actorContext.Value, mutationEnvelope.Value);
+                    }
+                    else
+                    {
+                        _roblox.Register(registry, effective, ownerModId,
+                            actorContext.Value);
+                    }
                 }
                 else
                 {

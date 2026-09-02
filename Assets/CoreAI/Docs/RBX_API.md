@@ -60,12 +60,20 @@ soon as its `Parent` is set into the world.
 
 ### `BasePart.Material` and `Part.Color`
 
-`Material` takes an `Enum.Material` item and **every one of the 45 enum items renders**. Six of them
-— `Brick`, `Wood`, `WoodPlanks`, `Grass`, `Cobblestone`, `Metal` — resolve CC0 textured PBR surfaces
-through `RbxTextureMaterialProvider`; the other 39 are procedural surfaces from
-`RbxProceduralMaterialProvider` (opaque, metallic, organic, transparent, neon, and force-field shader
-paths). A material id that is not in the catalog resolves to an opaque **magenta diagnostic
-material** instead of failing quietly, so a wrong value is visible on the first frame.
+`Material` takes an `Enum.Material` item and **every one of the 45 enum items renders**.
+`RbxTextureMaterialProvider` is catalog-driven: the packaged `RbxMaterialTextureCatalog` ships six CC0
+texture-backed surfaces (`Brick`, `Wood`, `WoodPlanks`, `Grass`, `Cobblestone`, `Metal`, 1K), and a
+project-local override catalog (`Assets/CoreAIRbxTexturesLocal/Resources/CoreAIRbxTextureCatalogOverride`,
+written by the Editor menus `CoreAI/Materials/Download CC0 texture sets (ambientCG)...` and
+`CoreAI/Materials/Import Bridge-Megascans folder...`) can give **any** of the 45 items a 2K–4K PBR set
+with normal, roughness, optional AO and metalness maps; the override wins per material. Items without
+a catalog entry are procedural surfaces from `RbxProceduralMaterialProvider` (opaque, metallic,
+organic, transparent, neon, and force-field shader paths). A catalog entry with a missing texture falls
+back to the procedural surface with one logged error, never to Unity's pink error shader, and a
+material id that is not in the catalog resolves to an opaque **magenta diagnostic material** instead of
+failing quietly, so a wrong value is visible on the first frame. Quixel Bridge / Fab (Megascans) sets
+may be imported into your own project this way, but their licence forbids redistributing them inside a
+package — only the CC0 sets ship with CoreAI.
 
 ```lua
 local slab = Instance.new("Part")
@@ -148,6 +156,33 @@ player where an unbounded loopback request would otherwise leave the Lua caller 
 Late responses are ignored. Use `RemoteEvent` when no response is required, and wrap a fallible invocation
 in `pcall` when the mod can recover.
 
+## Mutation envelopes, access control and disconnects
+
+Every production path that can mutate the world runs under a **server-generated mutation envelope**:
+the `execute_lua` tool (plain and MCP), a mod's main chunk, every scheduler resume
+(`task.wait`/`task.spawn`/`task.delay`, `Heartbeat`, `RenderStepped`), deferred signal and
+`RemoteEvent`/`RemoteFunction` handler dispatch, and cross-mod calls (which run under the callee's
+actor). The AI never supplies an operation id, target instance id or expected revision — the tool
+schemas expose only `code`. In an ACL-versioned world a caller that reaches the instance registry with
+no envelope at all is refused with `BAD_ARGUMENT`, a duplicate operation id applies once, and the
+engine-free `WorldAclAuthorizer` inside `CoreAI.RbxApi.Instances` refuses `SetAccessControl`, parent,
+property and `Destroy` mutations by actor identity — the Lua bindings are no longer the only guard.
+
+Inbound network input never creates identity: a `RemoteEvent`/`RemoteFunction` message from a sender
+that the bridge has not admitted is refused with a structured error before any lookup, decoding or
+`Player` allocation.
+
+`RemoteEvent` and `RemoteFunction` argument envelopes have a fixed **65,536-byte UTF-8** wire limit.
+CoreAI rejects larger inbound or outbound envelopes with `PAYLOAD_TOO_LARGE` and never truncates
+them; inbound size is checked before the UTF-8/JSON string is materialised. Split large application
+payloads across several events.
+
+Disconnecting an actor is one production seam: it unregisters the actor from the bridge, fires
+`Players.PlayerRemoving` **exactly once** (with the documented `PlayerExitReason`), releases the actor's
+chat service, kills the actor's scheduler threads and drops its rate windows and client signals. A
+second disconnect is a no-op, and other actors are untouched; 200 connect/disconnect cycles leave no
+retained state.
+
 ## Saving and loading a world
 
 A world is one `.world` ZIP container (`manifest.json` + `world.json` + indexed `Mods/NNNN/`
@@ -155,6 +190,11 @@ entries) holding the **world-owned** instance tree, world settings including `me
 optional camera state, and the exact Lua mod sources. Mod-ephemeral subtrees (anything under a node
 with an `OwnerModId`) are deliberately excluded: mods restart clean and recreate their own objects
 after a load.
+
+**Deviation from Roblox — `Archivable`.** Roblox omits instances with `Archivable = false` when a
+place is saved. The CoreAI world package keeps them (the flag round-trips as durable state) so a
+runtime restart reproduces the exact world an AI built; nothing is silently dropped on the way to
+disk. Filter such instances yourself before `save_world` if you rely on the Roblox behaviour.
 
 Two AI-facing tools live on that format:
 

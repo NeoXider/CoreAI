@@ -206,6 +206,13 @@ namespace CoreAI.Composition
                         log: msg => rbxLog.Warn("[CoreAI.RbxApi] " + msg, Logging.LogTag.World));
                 }
 
+                IInGameLlmChatServiceFactory chatFactory =
+                    c.ResolveOrDefault<IInGameLlmChatServiceFactory>();
+                if (chatFactory != null)
+                {
+                    rbxApi.AttachChatFactory(chatFactory);
+                }
+
                 rbxApiHolder[0] = rbxApi;
 
                 LuaCsModStack luaCsStack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
@@ -225,6 +232,11 @@ namespace CoreAI.Composition
                     ExecutionObserver = c.ResolveOrDefault<ILuaExecutionObserver>(),
                     Observability = observability,
                     WorldMutationGate = c.Resolve<IConfirmedWorldMutationGate>(),
+                    // WHY: demos and host self-tests call the plain execute seam; in an ACL-versioned world
+                    // that call still needs a server-generated envelope, issued for the trusted host actor.
+                    LocalActorResolver = () =>
+                        (c.ResolveOrDefault<IActorIdentityProvider>() ?? fallbackHostIdentityProvider)
+                        .GetActorContext(BuiltInAgentRoleIds.Programmer),
                     Capabilities = scriptCapabilities,
                     OneOffCapabilities = oneOffCapabilities,
                     // WHY: one shared Roblox world too — persistent mods and one-off execute_lua resolve
@@ -319,20 +331,31 @@ namespace CoreAI.Composition
                 INetworkBridge networkBridge = c.ResolveOrDefault<INetworkBridge>()
                     ?? new NullNetworkBridge();
                 System.Func<IRbxWorldSessionCandidate, INetworkBridge, LuaCsRbxApiBindings>
-                    rbxApiFactory = (candidate, stagedNetwork) => new LuaCsRbxApiBindings(
-                        candidate.Registry,
-                        candidate.Game,
-                        partSink: candidate.PartSink,
-                        cameraRig: candidate.CameraRig,
-                        inputSource: candidate.InputSource,
-                        pickSource: candidate.PickSource,
-                        observability: c.ResolveOrDefault<IRbxRuntimeObservabilitySink>()
-                            ?? NullRbxRuntimeObservabilitySink.Instance,
-                        networkBridge: stagedNetwork,
-                        log: message => (c.ResolveOrDefault<Logging.ILog>()
-                            ?? Logging.Log.Instance).Warn(
-                                "[CoreAI.RbxApi] " + message,
-                                Logging.LogTag.World));
+                    rbxApiFactory = (candidate, stagedNetwork) =>
+                    {
+                        LuaCsRbxApiBindings stagedApi = new LuaCsRbxApiBindings(
+                            candidate.Registry,
+                            candidate.Game,
+                            partSink: candidate.PartSink,
+                            cameraRig: candidate.CameraRig,
+                            inputSource: candidate.InputSource,
+                            pickSource: candidate.PickSource,
+                            observability: c.ResolveOrDefault<IRbxRuntimeObservabilitySink>()
+                                ?? NullRbxRuntimeObservabilitySink.Instance,
+                            networkBridge: stagedNetwork,
+                            log: message => (c.ResolveOrDefault<Logging.ILog>()
+                                ?? Logging.Log.Instance).Warn(
+                                    "[CoreAI.RbxApi] " + message,
+                                    Logging.LogTag.World));
+                        IInGameLlmChatServiceFactory chatFactory =
+                            c.ResolveOrDefault<IInGameLlmChatServiceFactory>();
+                        if (chatFactory != null)
+                        {
+                            stagedApi.AttachChatFactory(chatFactory);
+                        }
+
+                        return stagedApi;
+                    };
                 System.Func<LuaCsRbxApiBindings, ILuaModSourceStore, ILuaModStore,
                     ILuaScriptVersionStore, LuaCsModStack>
                     stackFactory = (rbxApi, sourceStore, modStore, versionStore) => CreateSessionStack(
@@ -529,6 +552,16 @@ namespace CoreAI.Composition
                             container.Resolve<IRbxWorldRuntimeService>(),
                             actorIdentityProvider,
                             BuiltInAgentRoleIds.Programmer));
+                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
+                        new ListAutoSavesLlmTool(
+                            container.Resolve<IRbxWorldRuntimeService>(),
+                            actorIdentityProvider,
+                            BuiltInAgentRoleIds.Programmer));
+                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
+                        new LoadAutoSaveLlmTool(
+                            container.Resolve<IRbxWorldRuntimeService>(),
+                            actorIdentityProvider,
+                            BuiltInAgentRoleIds.Programmer));
 
                     string skillOverride = skillTextProvider != null
                         ? skillTextProvider("AgentSkills/LuaModding")
@@ -592,6 +625,10 @@ namespace CoreAI.Composition
                 Observability = container.ResolveOrDefault<IRbxRuntimeObservabilitySink>()
                     ?? NullRbxRuntimeObservabilitySink.Instance,
                 WorldMutationGate = container.Resolve<IConfirmedWorldMutationGate>(),
+                LocalActorResolver = () =>
+                    (container.ResolveOrDefault<IActorIdentityProvider>()
+                     ?? CoreServicesInstaller.DefaultLocalHostIdentityProvider)
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer),
                 Capabilities = scriptCapabilities,
                 OneOffCapabilities = oneOffCapabilities,
                 RbxApi = rbxApi,

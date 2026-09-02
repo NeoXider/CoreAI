@@ -94,6 +94,9 @@ namespace CoreAI.Ai.LuaCs
             _log = log;
         }
 
+        /// <summary>Frozen byte cap for remote payloads; payloads larger than this are refused with PAYLOAD_TOO_LARGE before materializing the whole string.</summary>
+        public const int MaxPayloadBytes = 65536;
+
         public byte[] EncodeArguments(IReadOnlyList<LuaValue> arguments)
         {
             JArray root = new();
@@ -108,12 +111,26 @@ namespace CoreAI.Ai.LuaCs
             }
 
             string json = root.ToString(Formatting.None);
-            return Utf8.GetBytes(json);
+            byte[] bytes = Utf8.GetBytes(json);
+            if (bytes.Length > MaxPayloadBytes)
+            {
+                throw new RbxError(RbxErrorCode.PayloadTooLarge,
+                    "remote payload exceeds " + MaxPayloadBytes + " bytes (" + bytes.Length + " bytes)",
+                    "send a smaller payload or split the request");
+            }
+            return bytes;
         }
 
         public object[] DecodeArguments(byte[] payload)
         {
-            string json = Utf8.GetString(payload ?? Array.Empty<byte>());
+            byte[] checkedPayload = payload ?? Array.Empty<byte>();
+            if (checkedPayload.Length > MaxPayloadBytes)
+            {
+                throw new RbxError(RbxErrorCode.PayloadTooLarge,
+                    "remote payload exceeds " + MaxPayloadBytes + " bytes (" + checkedPayload.Length + " bytes)",
+                    "send a smaller payload or split the request");
+            }
+            string json = Utf8.GetString(checkedPayload);
             JToken token;
             try
             {

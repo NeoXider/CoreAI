@@ -31,6 +31,22 @@ namespace CoreAI.Tests.EditMode
     {
         private sealed class RecordingWorldRuntimeService : IRbxWorldRuntimeService
         {
+            public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+            {
+                return AutoSaves.ToArray();
+            }
+
+            public UniTask<RbxWorldLoadRequest> RequestAutoLoadAsync(
+                ActorContext caller,
+                string autoFileName,
+                CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                AutoLoadCallers.Add(caller);
+                RequestedAutoFiles.Add(autoFileName);
+                return QueuePending(autoFileName);
+            }
+
             private readonly List<RbxPendingWorldLoadRequest> _pending = new();
             private int _nextRequest;
 
@@ -42,6 +58,12 @@ namespace CoreAI.Tests.EditMode
             public int ConfirmCalls { get; private set; }
 
             public int AppliedCount { get; private set; }
+
+            public List<RbxAutoSaveInfo> AutoSaves { get; } = new();
+
+            public List<ActorContext> AutoLoadCallers { get; } = new();
+
+            public List<string> RequestedAutoFiles { get; } = new();
 
             public List<string> SavedSlots { get; } = new();
 
@@ -87,6 +109,11 @@ namespace CoreAI.Tests.EditMode
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 RequestedSlots.Add(slot);
+                return QueuePending(slot);
+            }
+
+            private UniTask<RbxWorldLoadRequest> QueuePending(string slot)
+            {
                 _nextRequest++;
                 string requestId = "request-" + _nextRequest;
                 DateTime expiresAtUtc = UtcNow.AddMinutes(1);
@@ -260,6 +287,151 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsNull(root.Q<VisualElement>("coreai-world-load-row-" + request.RequestId));
                 Assert.AreEqual(0, service.GetPendingManualLoads().Count);
                 Assert.AreEqual(0, service.AppliedCount);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        [Test]
+        public void WorldLoadPage_Autosaves_RenderMetadataAndRefreshToEmptyState()
+        {
+            RecordingWorldRuntimeService service = new();
+            DateTime timestampUtc = new(2035, 2, 3, 4, 5, 6, DateTimeKind.Utc);
+            service.AutoSaves.Add(new RbxAutoSaveInfo(
+                "auto-001.world.json",
+                "manual-save",
+                timestampUtc,
+                1536));
+
+            HubWorldLoadConfirmationPage page = new(service);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+                VisualElement row = root.Q<VisualElement>("coreai-autosave-row-auto-001.world.json");
+                Assert.IsNotNull(row, "Autosaves returned by the runtime service must be rendered.");
+                string[] labels = row.Query<Label>().ToList().Select(label => label.text).ToArray();
+                CollectionAssert.Contains(labels, "Name: auto-001.world.json");
+                CollectionAssert.Contains(labels, "Trigger: manual-save");
+                CollectionAssert.Contains(
+                    labels,
+                    "Saved: " + timestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"));
+                CollectionAssert.Contains(labels, "Size: 1.5 KB");
+
+                service.AutoSaves.Clear();
+                page.OnActivated();
+
+                Assert.IsNull(root.Q<VisualElement>("coreai-autosave-row-auto-001.world.json"));
+                Assert.IsNotNull(root.Q<Label>("coreai-autosaves-empty"));
+                Assert.AreEqual(
+                    "No autosaves are available.",
+                    root.Q<Label>("coreai-autosaves-empty").text);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        [Test]
+        public void WorldLoadPage_AutoLoadRequestsExistingConfirmation_AndRejectsWithoutMutation()
+        {
+            RecordingWorldRuntimeService service = new();
+            ActorContext actor = new LocalActorIdentityProvider("hub-autosave-ui-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            service.AutoSaves.Add(new RbxAutoSaveInfo(
+                "auto-reject.world.json",
+                "interval",
+                service.UtcNow,
+                2048));
+            int revisionBefore = service.Revision;
+            string markerBefore = service.WorldMarker;
+            string[] ledgerBefore = service.Ledger.ToArray();
+
+            HubWorldLoadConfirmationPage page = new(service, actorContext: actor);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+                Button load = root.Q<Button>("coreai-autosave-load-auto-reject.world.json");
+                Assert.IsNotNull(load);
+
+                InvokeButton(load);
+
+                CollectionAssert.AreEqual(
+                    new[] { "auto-reject.world.json" },
+                    service.RequestedAutoFiles);
+                Assert.AreEqual(actor.ActorId, service.AutoLoadCallers.Single().ActorId);
+                Assert.AreEqual(1, service.GetPendingManualLoads().Count);
+                RbxPendingWorldLoadRequest pending = service.GetPendingManualLoads()[0];
+                Button reject = root.Q<Button>("coreai-world-load-reject-" + pending.RequestId);
+                Assert.IsNotNull(reject,
+                    "Autosave loads must appear in the existing pending confirmation UI.");
+                Assert.AreEqual(0, service.AppliedCount,
+                    "Requesting an autosave load must not apply it directly.");
+
+                InvokeButton(reject);
+
+                Assert.AreEqual(0, service.AppliedCount);
+                Assert.AreEqual(revisionBefore, service.Revision);
+                Assert.AreEqual(markerBefore, service.WorldMarker);
+                CollectionAssert.AreEqual(ledgerBefore, service.Ledger);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        [Test]
+        public void WorldLoadPage_AutosaveFormatting_UsesLocalTimeAndKilobytes()
+        {
+            DateTime timestampUtc = new(2035, 2, 3, 4, 5, 6, DateTimeKind.Utc);
+            MethodInfo formatTimestamp = typeof(HubWorldLoadConfirmationPage).GetMethod(
+                "FormatAutoSaveTimestamp",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo formatKilobytes = typeof(HubWorldLoadConfirmationPage).GetMethod(
+                "FormatKilobytes",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.IsNotNull(formatTimestamp,
+                "The autosave presenter must expose its local timestamp formatter to the callback tests.");
+            Assert.IsNotNull(formatKilobytes,
+                "The autosave presenter must expose its KB formatter to the callback tests.");
+
+            Assert.AreEqual(
+                timestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
+                formatTimestamp.Invoke(null, new object[] { timestampUtc }));
+            Assert.AreEqual("1.5 KB", formatKilobytes.Invoke(null, new object[] { 1536L }));
+        }
+
+        [Test]
+        public void WorldLoadPage_AutoLoadController_UsesCurrentActorAndQueuesPendingWithoutMutation()
+        {
+            RecordingWorldRuntimeService service = new();
+            ActorContext actor = new LocalActorIdentityProvider("hub-autosave-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            HubWorldLoadConfirmationPage page = new(service);
+            MethodInfo requestAutoLoad = typeof(HubWorldLoadConfirmationPage).GetMethod(
+                "RequestAutoLoad",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(ActorContext), typeof(string) },
+                null);
+            Assert.IsNotNull(requestAutoLoad,
+                "Autosave Load must use a controller callback that can be tested without attached UI.");
+
+            try
+            {
+                requestAutoLoad.Invoke(page, new object[] { actor, "auto-controller.world.json" });
+
+                CollectionAssert.AreEqual(
+                    new[] { "auto-controller.world.json" },
+                    service.RequestedAutoFiles);
+                Assert.AreEqual(actor.ActorId, service.AutoLoadCallers.Single().ActorId);
+                Assert.AreEqual(1, service.GetPendingManualLoads().Count,
+                    "The autosave request must enter the shared pending confirmation pool.");
+                Assert.AreEqual(0, service.AppliedCount,
+                    "The autosave callback must never apply a world directly.");
             }
             finally
             {

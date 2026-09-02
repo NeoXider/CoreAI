@@ -14,6 +14,19 @@ families. `CoreAiRbxMaterial_FALLBACK_UNMAPPED` is reserved for invalid or misma
 EditMode acceptance test assigns every item through public Lua `BasePart.Material`, assigns an independent
 `Part.Color` to the same part, and rejects missing, unsupported, error-shader, or fallback handles.
 
+## 2K texture sets and the override catalog
+
+The rig renders whatever `RbxTextureMaterialProvider` resolves, so it doubles as the judging surface for
+the project-local override catalog. Run `CoreAI/Materials/Download CC0 texture sets (ambientCG)...`
+(36 API-verified ambientCG ids at 1K/2K/4K, CC0, provenance written to
+`Assets/CoreAIRbxTexturesLocal/ambientCG/LICENSE.md`) or `CoreAI/Materials/Import Bridge-Megascans
+folder...` (your own Quixel Bridge / Fab export; DirectX normals are detected from the metadata), then
+enter Play Mode: every catalogued item switches from the procedural shader to `CoreAI/Rbx/Textured
+Surface`, and `DumpMaterialApiEvidence` reports the shader per slot. With the full ambientCG override
+the evidence line is still `MATERIAL_CATALOG complete slots=46 mapped=45 fallback=1 failures=0
+result=PASS` with 36 textured and 9 procedural slots; `Salt`, `Glacier`, `Air`, `Water`, `Glass`,
+`ForceField`, `Neon`, `Plastic` and `SmoothPlastic` stay procedural by design.
+
 ## Build the scene
 
 Unity must create the scene and generated text assets so no `.unity` YAML is maintained by hand. Run:

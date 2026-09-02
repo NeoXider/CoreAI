@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -11,6 +14,8 @@ using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
 using Cysharp.Threading.Tasks;
+using Microsoft.Extensions.AI;
+using Newtonsoft.Json;
 
 namespace CoreAI.Mods.WorldPackages
 {
@@ -113,6 +118,9 @@ namespace CoreAI.Ai.LuaCs
     {
         InstanceRegistry MutationRegistry { get; }
 
+        void RegisterGameplayApis(LuaCsApiRegistry registry,
+            ActorContext actorContext);
+
         void RegisterGameplayApis(LuaCsApiRegistry registry, ActorContext actorContext,
             MutationEnvelope mutationEnvelope);
     }
@@ -147,6 +155,12 @@ namespace CoreAI.Ai.LuaCs
         private readonly ILuaCsGameRuntimeBindings _bindings;
         private readonly ILuaExecutionObserver _observer;
         private readonly IConfirmedWorldMutationGate _worldMutationGate;
+
+        /// <summary>
+        /// Trusted host/local actor for the plain <see cref="ExecuteAsync(string, CancellationToken)"/>
+        /// seam. Production composition supplies it; a null resolver keeps the ACL-world refusal.
+        /// </summary>
+        public Func<ActorContext> LocalActorResolver { get; set; }
 
         /// <summary>
         /// Raised after <c>execute_lua</c> successfully runs a chunk. Mirrors
@@ -209,6 +223,23 @@ namespace CoreAI.Ai.LuaCs
             string code,
             CancellationToken cancellationToken)
         {
+            if (_bindings is IActorScopedLuaCsGameRuntimeBindings scopedCheck
+                && scopedCheck.MutationRegistry != null
+                && scopedCheck.MutationRegistry.IsWorldAclEnabled)
+            {
+                ActorContext localActor = LocalActorResolver != null
+                    ? LocalActorResolver()
+                    : default;
+                if (!localActor.IsTrusted)
+                {
+                    return CreateFailure(
+                        "world mutation requires an actor-scoped envelope in this ACL-versioned world: " +
+                        "no trusted local actor resolver is configured for the plain execute seam");
+                }
+
+                return await ExecuteAsync(code, localActor, cancellationToken).ConfigureAwait(false);
+            }
+
             try
             {
                 return await ExecuteWithBackupAsync(
@@ -217,6 +248,43 @@ namespace CoreAI.Ai.LuaCs
                         token,
                         _bindings.RegisterGameplayApis)),
                     cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return CreateFailure(ex.Message);
+            }
+        }
+
+        /// <summary>Server-generated envelope execution used by production Lua tools.</summary>
+        public async Task<LuaTool.LuaResult> ExecuteAsync(string code, ActorContext actorContext,
+            CancellationToken cancellationToken)
+        {
+            if (!actorContext.IsTrusted)
+            {
+                return CreateFailure(
+                    "actor '<untrusted>' cannot execute Lua: actor context was not issued by an identity provider");
+            }
+
+            if (!(_bindings is IActorScopedLuaCsGameRuntimeBindings scopedBindings)
+                || scopedBindings.MutationRegistry == null)
+            {
+                return CreateFailure(
+                    "actor '" + actorContext.ActorId + "' cannot execute Lua: the production Rbx mutation surface is not configured");
+            }
+
+            try
+            {
+                return await ExecuteWithBackupAsync(
+                    token => Task.FromResult(
+                        scopedBindings.MutationRegistry.ApplyServerGeneratedMutation(
+                            actorContext.ActorId,
+                            actorContext.Grants.IsUnrestricted,
+                            actorContext.WorldId,
+                            "execute_lua",
+                            () => ExecuteCore(code, token,
+                                registry => scopedBindings.RegisterGameplayApis(
+                                    registry, actorContext)))),
+                    cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -261,11 +329,23 @@ namespace CoreAI.Ai.LuaCs
             try
             {
                 return await ExecuteWithBackupAsync(
-                    token => Task.FromResult(scopedBindings.MutationRegistry.ApplyMutation(
-                        mutationEnvelope,
-                        () => ExecuteCore(code, token,
-                            registry => scopedBindings.RegisterGameplayApis(
-                                registry, actorContext, mutationEnvelope)))),
+                    token => Task.FromResult(
+                        scopedBindings.MutationRegistry.ApplyMutation(
+                            mutationEnvelope,
+                            () =>
+                            {
+                                using (scopedBindings.MutationRegistry
+                                           .BeginMutationEnvelopeScope(
+                                               mutationEnvelope,
+                                               actorContext.Grants.IsUnrestricted,
+                                               actorContext.WorldId))
+                                {
+                                    return ExecuteCore(code, token,
+                                        registry => scopedBindings.RegisterGameplayApis(
+                                            registry, actorContext,
+                                            mutationEnvelope));
+                                }
+                            })),
                     cancellationToken);
             }
             catch (Exception ex)
@@ -401,6 +481,113 @@ namespace CoreAI.Ai.LuaCs
             }
 
             return value.Substring(0, maxLength) + " ...(truncated)";
+        }
+    }
+}
+
+namespace CoreAI.Mods.WorldPackages
+{
+    /// <summary>AI tool that lists autosave packages with metadata.</summary>
+    public sealed class ListAutoSavesLlmTool : LlmToolBase, IAIFunctionLlmTool
+    {
+        private readonly IRbxWorldRuntimeService _service;
+        private readonly IActorIdentityProvider _identityProvider;
+        private readonly string _roleId;
+
+        public ListAutoSavesLlmTool(
+            IRbxWorldRuntimeService service,
+            IActorIdentityProvider identityProvider,
+            string roleId)
+        {
+            _service = service ?? throw new ArgumentNullException(nameof(service));
+            _identityProvider = identityProvider ?? throw new ArgumentNullException(nameof(identityProvider));
+            _roleId = roleId ?? BuiltInAgentRoleIds.Programmer;
+        }
+
+        public override string Name => "list_autosaves";
+
+        public override string Description =>
+            "List timestamped, trigger-labelled autosave world packages with name, trigger, timestamp and size.";
+
+        public override string ParametersSchema => JsonParams();
+
+        public AIFunction CreateAIFunction()
+        {
+            Func<CancellationToken, Task<string>> function = ExecuteAsync;
+            return AIFunctionFactory.Create(function, new AIFunctionFactoryOptions
+            {
+                Name = Name,
+                Description = Description
+            });
+        }
+
+        public Task<string> ExecuteAsync(CancellationToken cancellationToken = default)
+        {
+            _identityProvider.GetActorContext(_roleId);
+            IReadOnlyList<RbxAutoSaveInfo> autosaves = _service.ListAutoSaves();
+            return Task.FromResult(Newtonsoft.Json.JsonConvert.SerializeObject(new
+            {
+                autosaves = System.Linq.Enumerable.Select(autosaves, info => new
+                {
+                    name = info.FileName,
+                    trigger = info.Trigger,
+                    timestamp = info.TimestampUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                    size = info.SizeBytes
+                })
+            }));
+        }
+    }
+
+    /// <summary>AI tool that requests a confirmed load of a named autosave.</summary>
+    public sealed class LoadAutoSaveLlmTool : LlmToolBase, IAIFunctionLlmTool
+    {
+        private readonly IRbxWorldRuntimeService _service;
+        private readonly IActorIdentityProvider _identityProvider;
+        private readonly string _roleId;
+
+        public LoadAutoSaveLlmTool(
+            IRbxWorldRuntimeService service,
+            IActorIdentityProvider identityProvider,
+            string roleId)
+        {
+            _service = service ?? throw new ArgumentNullException(nameof(service));
+            _identityProvider = identityProvider ?? throw new ArgumentNullException(nameof(identityProvider));
+            _roleId = roleId ?? BuiltInAgentRoleIds.Programmer;
+        }
+
+        public override string Name => "load_autosave";
+
+        public override string Description =>
+            "Request loading a named autosave package. This never applies directly; the player must confirm the returned request.";
+
+        public override string ParametersSchema => JsonParams(
+            ("name", "string", true, "Autosave file name (e.g. 20260902T120000000Z-0000-execute_lua.world)."));
+
+        public AIFunction CreateAIFunction()
+        {
+            Func<string, CancellationToken, Task<string>> function = ExecuteAsync;
+            return AIFunctionFactory.Create(function, new AIFunctionFactoryOptions
+            {
+                Name = Name,
+                Description = Description
+            });
+        }
+
+        public async Task<string> ExecuteAsync(
+            [System.ComponentModel.Description("Autosave file name.")] string name,
+            CancellationToken cancellationToken = default)
+        {
+            CoreAI.Authority.ActorContext actor = _identityProvider.GetActorContext(_roleId);
+            RbxWorldLoadRequest request = await _service.RequestAutoLoadAsync(actor, name, cancellationToken);
+            return Newtonsoft.Json.JsonConvert.SerializeObject(new
+            {
+                success = false,
+                status = "player_confirmation_required",
+                player_confirmation_required = request.PlayerConfirmationRequired,
+                request_id = request.RequestId,
+                slot = request.Slot,
+                world_id = request.WorldId
+            });
         }
     }
 }

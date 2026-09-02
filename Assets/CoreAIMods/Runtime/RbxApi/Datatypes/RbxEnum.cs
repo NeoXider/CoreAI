@@ -154,6 +154,8 @@ namespace CoreAI.Mods.Rbx.Datatypes
                 ("Begin", 0), ("Change", 1), ("End", 2), ("Cancel", 3), ("None", 4)));
             registry.Register(new RbxEnum("MouseBehavior",
                 ("Default", 0), ("LockCenter", 1), ("LockCurrentPosition", 2)));
+            registry.Register(new RbxEnum("PlayerExitReason",
+                ("Unknown", 0), ("PlatformKick", 1), ("CreatorKick", 2)));
             return registry;
         }
 

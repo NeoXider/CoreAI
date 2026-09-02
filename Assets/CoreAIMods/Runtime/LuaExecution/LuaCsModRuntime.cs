@@ -1932,7 +1932,27 @@ namespace CoreAI.Ai.LuaCs
             PushTransactionScope();
             try
             {
-                _handlerGuard.Invoke(mod.State, fn, CancellationToken.None, args);
+                if (_rbxApi == null)
+                {
+                    _handlerGuard.Invoke(
+                        mod.State, fn, CancellationToken.None, args);
+                }
+                else
+                {
+                    ActorContext actorContext =
+                        _rbxApi.ResolveOwnerActorContext(mod.Id);
+                    _rbxApi.Registry.ApplyServerGeneratedMutation(
+                        actorContext.ActorId,
+                        actorContext.Grants.IsUnrestricted,
+                        actorContext.WorldId,
+                        "dispatch handler owned by mod '" + mod.Id + "'",
+                        () =>
+                        {
+                            _handlerGuard.Invoke(
+                                mod.State, fn, CancellationToken.None, args);
+                            return true;
+                        });
+                }
 
                 mod.ErrorCount = 0;
             }
@@ -2407,8 +2427,25 @@ namespace CoreAI.Ai.LuaCs
                 PushTransactionScope();
                 try
                 {
-                    object[] results =
-                        _handlerGuard.Invoke(target.State, export, CancellationToken.None, marshalled);
+                    object[] results;
+                    if (_rbxApi == null)
+                    {
+                        results = _handlerGuard.Invoke(
+                            target.State, export, CancellationToken.None, marshalled);
+                    }
+                    else
+                    {
+                        ActorContext targetActor =
+                            _rbxApi.ResolveOwnerActorContext(target.Id);
+                        results = _rbxApi.Registry.ApplyServerGeneratedMutation(
+                            targetActor.ActorId,
+                            targetActor.Grants.IsUnrestricted,
+                            targetActor.WorldId,
+                            "invoke export owned by mod '" + target.Id + "'",
+                            () => _handlerGuard.Invoke(
+                                target.State, export, CancellationToken.None, marshalled));
+                    }
+
                     object first = results.Length > 0 ? results[0] : null;
 
                     return ScriptCallResult.Return(

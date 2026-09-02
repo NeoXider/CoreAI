@@ -53,6 +53,8 @@ namespace CoreAI.Mods.WorldPackages
         IReadOnlyList<string> ListManualSlots();
 
         IReadOnlyList<string> ListAutoFiles();
+
+        IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves();
     }
 
     /// <summary>Filesystem seam used to verify volatile-versus-durable world-package behavior.</summary>
@@ -350,6 +352,72 @@ namespace CoreAI.Mods.WorldPackages
 
             names.Sort(StringComparer.Ordinal);
             return names;
+        }
+
+        public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+        {
+            if (!_fileSystem.DirectoryExists(_autoDirectory))
+            {
+                return Array.Empty<RbxAutoSaveInfo>();
+            }
+
+            IReadOnlyList<string> paths = _fileSystem.GetFiles(_autoDirectory, Extension);
+            List<RbxAutoSaveInfo> infos = new(paths.Count);
+            foreach (string path in paths)
+            {
+                string fileName = Path.GetFileName(path);
+                long size = 0L;
+                try
+                {
+                    size = _fileSystem.GetFileLength(path);
+                }
+                catch
+                {
+                }
+
+                string trigger = ParseTrigger(fileName);
+                DateTime timestamp = ParseTimestamp(fileName);
+                infos.Add(new RbxAutoSaveInfo(fileName, trigger, timestamp, size));
+            }
+
+            infos.Sort((a, b) => string.CompareOrdinal(a.FileName, b.FileName));
+            return infos;
+        }
+
+        private static string ParseTrigger(string fileName)
+        {
+            string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+            string[] parts = nameWithoutExt.Split('-');
+            if (parts.Length < 3)
+            {
+                return "";
+            }
+
+            return string.Join("-", parts, 2, parts.Length - 2);
+        }
+
+        private static DateTime ParseTimestamp(string fileName)
+        {
+            string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+            int firstDash = nameWithoutExt.IndexOf('-');
+            if (firstDash <= 0)
+            {
+                return default;
+            }
+
+            string timestampText = nameWithoutExt.Substring(0, firstDash);
+            if (DateTime.TryParseExact(
+                    timestampText,
+                    "yyyyMMdd'T'HHmmssfff'Z'",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal
+                    | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                    out DateTime result))
+            {
+                return result;
+            }
+
+            return default;
         }
 
         private async UniTask<RbxWorldPackageWriteResult> WriteCreateOnceAsync(
@@ -754,6 +822,13 @@ namespace CoreAI.Mods.WorldPackages
             return fileName;
         }
 
+        private static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+        };
+
         private static string ValidateName(string value, string field)
         {
             string trimmed = value?.Trim();
@@ -761,6 +836,20 @@ namespace CoreAI.Mods.WorldPackages
             {
                 throw new ArgumentException(
                     field + " must contain 1-" + MaximumNameLength + " characters.",
+                    nameof(value));
+            }
+
+            string baseName = trimmed;
+            int dotIndex = trimmed.IndexOf('.');
+            if (dotIndex >= 0)
+            {
+                baseName = trimmed.Substring(0, dotIndex);
+            }
+
+            if (ReservedDeviceNames.Contains(baseName))
+            {
+                throw new ArgumentException(
+                    field + " '" + trimmed + "' is a reserved device name.",
                     nameof(value));
             }
 

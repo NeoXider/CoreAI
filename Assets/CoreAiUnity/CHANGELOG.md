@@ -4,6 +4,24 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Added
+
+- 15 замороженных демо-сцен G11 добавлены в `EditorBuildSettings` (были только три); smoke-тест
+  `CoreAiDemoScenesSmokePlayModeTests` закреплён на том же замороженном списке и сверяет его со
+  сборочной точкой входа.
+- `README.md` для `MultiplayerFoundationDemo` и `CoreAiChatDemo`; инвентарь демо пересобран по
+  YAML сцен (UI-технология, `storeId`, WebGL-раздел).
+- Тесты `CoreAiWebGlQaEditModeTests`: страница мира не объявляет сохранение до колбэка
+  `FS.syncfs`, охранник LLMUnity не пересканирует сцену каждый кадр.
+
+### Fixed
+
+- Qwen-демо в браузере сразу показывают документированное ограничение локальной модели вместо
+  120-секундного ожидания несуществующего `LLMUnity.LLM`.
+- `DGF_SPEC.md` приведён к решению дорожной карты: транспорт-референс — Mirror за engine-free
+  `INetworkBridge`, NGO — альтернатива.
+
+
 ## [7.1.1] - 2026-08-31
 
 ### Added

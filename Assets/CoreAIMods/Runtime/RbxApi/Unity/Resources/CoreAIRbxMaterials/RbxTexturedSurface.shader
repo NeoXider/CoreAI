@@ -9,9 +9,12 @@ Shader "CoreAI/Rbx/Textured Surface"
         [HideInInspector] _PartColorInfluence("Part Color Influence", Range(0,1)) = 0.75
         [HideInInspector] _NeutralDefaultPartColor("Neutral Default Part Color", Float) = 1
         [Normal] _BumpMap("Normal Map", 2D) = "bump" {}
-        _BumpScale("Normal Strength", Range(0,2)) = 0.7
+        _BumpScale("Normal Strength", Range(0,2)) = 1.0
         _RoughnessMap("Roughness Map", 2D) = "white" {}
+        _RoughnessScale("Roughness Scale", Range(0,2)) = 1.0
+        [Toggle] _InvertRoughness("Map Stores Smoothness", Float) = 0
         _MetallicMap("Metalness Map", 2D) = "black" {}
+        _OcclusionMap("Ambient Occlusion Map", 2D) = "white" {}
         _TextureScale("Texture Scale", Float) = 1
         _TextureAspect("Texture Aspect", Float) = 1
         [HideInInspector] _Cutoff("Alpha Cutoff", Range(0,1)) = 0.5
@@ -40,7 +43,9 @@ Shader "CoreAI/Rbx/Textured Surface"
             #pragma target 3.0
             #pragma vertex RbxTexturedVertex
             #pragma fragment RbxTexturedFragment
-            #pragma shader_feature_local_fragment _ _RBX_METALLIC_MAP
+            #pragma multi_compile_local_fragment _ _RBX_METALLIC_MAP
+            #pragma multi_compile_local_fragment _ _RBX_OCCLUSION_MAP
+            #pragma multi_compile_local_fragment _ _RBX_NORMAL_DIRECTX
             #pragma multi_compile_instancing
             #pragma multi_compile_fog
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
@@ -61,6 +66,8 @@ Shader "CoreAI/Rbx/Textured Surface"
             SAMPLER(sampler_RoughnessMap);
             TEXTURE2D(_MetallicMap);
             SAMPLER(sampler_MetallicMap);
+            TEXTURE2D(_OcclusionMap);
+            SAMPLER(sampler_OcclusionMap);
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
@@ -70,6 +77,8 @@ Shader "CoreAI/Rbx/Textured Surface"
                 float _TextureScale;
                 float _TextureAspect;
                 float _BumpScale;
+                float _RoughnessScale;
+                float _InvertRoughness;
             CBUFFER_END
 
             struct Attributes
@@ -148,15 +157,22 @@ Shader "CoreAI/Rbx/Textured Surface"
             void RbxAccumulateTextureProjection(RbxProjectionCoordinates projection, float weight,
                 float3 baseNormalWS, float3 positionDerivativeX, float3 positionDerivativeY,
                 inout half3 textureColor, inout half roughness, inout float3 mappedNormalWS,
-                inout half metallic)
+                inout half metallic, inout half occlusion)
             {
                 half3 axisColor = SAMPLE_TEXTURE2D_GRAD(_BaseMap, sampler_BaseMap, projection.uv,
                     projection.derivativeX, projection.derivativeY).rgb;
-                half axisRoughness = SAMPLE_TEXTURE2D_GRAD(_RoughnessMap, sampler_RoughnessMap,
+                half axisRoughnessSample = SAMPLE_TEXTURE2D_GRAD(_RoughnessMap,
+                    sampler_RoughnessMap,
                     projection.uv, projection.derivativeX, projection.derivativeY).r;
+                half axisRoughness = lerp(axisRoughnessSample, 1.0h - axisRoughnessSample,
+                    saturate(_InvertRoughness));
+                axisRoughness = saturate(axisRoughness * _RoughnessScale);
                 half3 normalTS = UnpackNormalScale(SAMPLE_TEXTURE2D_GRAD(_BumpMap,
                     sampler_BumpMap, projection.uv, projection.derivativeX,
                     projection.derivativeY), _BumpScale);
+                #if defined(_RBX_NORMAL_DIRECTX)
+                    normalTS.y = -normalTS.y;
+                #endif
                 float3 axisNormalWS = RbxNormalFromDerivatives(baseNormalWS, positionDerivativeX,
                     positionDerivativeY, projection.derivativeX, projection.derivativeY, normalTS);
                 half axisMetallic = 0.0h;
@@ -164,11 +180,17 @@ Shader "CoreAI/Rbx/Textured Surface"
                     axisMetallic = SAMPLE_TEXTURE2D_GRAD(_MetallicMap, sampler_MetallicMap,
                         projection.uv, projection.derivativeX, projection.derivativeY).r;
                 #endif
+                half axisOcclusion = 1.0h;
+                #if defined(_RBX_OCCLUSION_MAP)
+                    axisOcclusion = SAMPLE_TEXTURE2D_GRAD(_OcclusionMap, sampler_OcclusionMap,
+                        projection.uv, projection.derivativeX, projection.derivativeY).r;
+                #endif
 
                 textureColor += axisColor * weight;
                 roughness += axisRoughness * weight;
                 mappedNormalWS += axisNormalWS * weight;
                 metallic += axisMetallic * weight;
+                occlusion += axisOcclusion * weight;
             }
 
             Varyings RbxTexturedVertex(Attributes input)
@@ -210,24 +232,25 @@ Shader "CoreAI/Rbx/Textured Surface"
                 half roughness = 0.0h;
                 float3 mappedNormalWS = float3(0.0, 0.0, 0.0);
                 half metallic = 0.0h;
+                half occlusion = 0.0h;
 
                 UNITY_BRANCH if (projectionWeights.x > 0.0)
                 {
                     RbxAccumulateTextureProjection(projectionX, projectionWeights.x, baseNormalWS,
                         positionDerivativeX, positionDerivativeY, textureColor, roughness,
-                        mappedNormalWS, metallic);
+                        mappedNormalWS, metallic, occlusion);
                 }
                 UNITY_BRANCH if (projectionWeights.y > 0.0)
                 {
                     RbxAccumulateTextureProjection(projectionY, projectionWeights.y, baseNormalWS,
                         positionDerivativeX, positionDerivativeY, textureColor, roughness,
-                        mappedNormalWS, metallic);
+                        mappedNormalWS, metallic, occlusion);
                 }
                 UNITY_BRANCH if (projectionWeights.z > 0.0)
                 {
                     RbxAccumulateTextureProjection(projectionZ, projectionWeights.z, baseNormalWS,
                         positionDerivativeX, positionDerivativeY, textureColor, roughness,
-                        mappedNormalWS, metallic);
+                        mappedNormalWS, metallic, occlusion);
                 }
 
                 half3 partModulation = lerp(half3(1.0h, 1.0h, 1.0h),
@@ -242,7 +265,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 surfaceData.smoothness = saturate(1.0h - roughness);
                 surfaceData.normalTS = half3(0.0h, 0.0h, 1.0h);
                 surfaceData.emission = half3(0.0h, 0.0h, 0.0h);
-                surfaceData.occlusion = 1.0h;
+                surfaceData.occlusion = occlusion;
                 surfaceData.alpha = 1.0h;
 
                 InputData inputData = (InputData)0;

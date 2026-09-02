@@ -496,9 +496,10 @@ Ordering changes vs. the seed roadmap, with justification:
   have landed, together with the shared JSON contract / `HttpService` JSON members, loopback
   `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction`, absent-child `WaitForChild` yield (with
   the 5 s infinite-yield warning and the timeout overload), the `Model`/`PVInstance` pivot slice,
-  and the **complete materials catalog** — all 45 `Enum.Material` items render (six CC0
-  texture-backed via `RbxTextureMaterialProvider`, the other 39 procedural via
-  `RbxProceduralMaterialProvider`) with an opaque magenta diagnostic material for an unmapped id.
+  and the **complete materials catalog** — all 45 `Enum.Material` items render (catalog-driven
+  `RbxTextureMaterialProvider`: six packaged CC0 sets, any item overridable from a project-local 2K–4K
+  catalog via the Editor menus; the rest procedural via `RbxProceduralMaterialProvider`) with an opaque
+  magenta diagnostic material for an unmapped id.
   Clocks, the RunService topology queries, `Workspace:GetServerTimeNow`, and the Tier-A corpus
   gate remain.
 - **Goal**: time and events — `task.*`, `RunService`, the clock surface,

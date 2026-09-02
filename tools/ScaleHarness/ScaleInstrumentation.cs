@@ -351,6 +351,11 @@ namespace CoreAI.Tools.Scale
     /// </summary>
     public sealed class ScaleWorldPackageStore : IRbxWorldPackageStore
     {
+        public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+        {
+            return Array.Empty<RbxAutoSaveInfo>();
+        }
+
         public UniTask<RbxWorldPackageWriteResult> CreateManualAsync(string slot,
             RbxWorldPackagePayload payload, CancellationToken cancellationToken = default)
         {

@@ -4,6 +4,7 @@
   <Project Path="RuntimeInspector.Runtime.csproj" />
   <Project Path="CoreAI.Core.csproj" />
   <Project Path="CoreAI.RbxApi.Instances.csproj" />
+  <Project Path="CoreAI.Mods.Tests.csproj" />
   <Project Path="CoreAI.Tests.csproj" />
   <Project Path="CoreAI.Mcp.csproj" />
   <Project Path="CoreAI.Demos.csproj" />
@@ -12,7 +13,6 @@
   <Project Path="CoreAI.ExampleGame.csproj" />
   <Project Path="CoreAI.RbxApi.Unity.csproj" />
   <Project Path="CoreAI.Benchmarking.csproj" />
-  <Project Path="CoreAI.Mods.Tests.csproj" />
   <Project Path="CoreAI.Benchmark.Tests.csproj" />
   <Project Path="CoreAI.RbxApi.Binding.csproj" />
   <Project Path="CoreAI.Mcp.Tests.csproj" />
@@ -20,9 +20,9 @@
   <Project Path="CoreAI.Tests.PlayMode.LlmVerification.csproj" />
   <Project Path="CoreAI.RbxApi.Datatypes.csproj" />
   <Project Path="CoreAI.Tests.PlayMode.LlmInfra.csproj" />
+  <Project Path="CoreAI.Mods.Editor.csproj" />
   <Project Path="Assembly-CSharp-firstpass.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
-  <Project Path="CoreAI.Mods.Editor.csproj" />
   <Project Path="CoreAI.Hub.UI.csproj" />
   <Project Path="CoreAI.ExampleGame.Tests.csproj" />
   <Project Path="CoreAI.LuauDownlevel.csproj" />

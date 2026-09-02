@@ -76,6 +76,9 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
 
         public IReadOnlyList<string> ActorIds => _actorOrder.AsReadOnly();
 
+        /// <summary>Current actor rate-window count for bounded-churn verification.</summary>
+        public int RateWindowCount => _rateWindows.Count;
+
         public event Action<RbxNetworkEventMessage> EventReceived;
 
         public event Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> RequestReceived;
@@ -99,6 +102,14 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
 
             _actorOrder.Remove(actor);
             _rateWindows.Remove(actor);
+            if (_heldUnreliableEvent != null
+                && (string.Equals(_heldUnreliableEvent.SenderActorId, actor,
+                        StringComparison.Ordinal)
+                    || string.Equals(_heldUnreliableEvent.RecipientActorId, actor,
+                        StringComparison.Ordinal)))
+            {
+                _heldUnreliableEvent = null;
+            }
         }
 
         public void SendEvent(RbxNetworkEventMessage message)

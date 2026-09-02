@@ -6,6 +6,8 @@ using CoreAI.Composition;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using RegistryWorldAclAuthorizer = CoreAI.Mods.Rbx.Instances.WorldAclAuthorizer;
+using RegistryWorldAclDecision = CoreAI.Mods.Rbx.Instances.WorldAclDecision;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using Lua;
 using Lua.Runtime;
@@ -21,19 +23,20 @@ namespace CoreAI.Ai.LuaCs
     internal sealed class LuaCsRbxModContext
     {
         private readonly MutationEnvelope? _mutationEnvelope;
+        private readonly bool _serverGeneratesMutationEnvelopes;
         private readonly Dictionary<RbxInstance, LuaValue> _proxyCache = new();
         private readonly LuaTable _instanceMeta;
 
         public LuaCsRbxModContext(LuaCsRbxApiBindings bindings, LuaCapabilities capabilities,
             string ownerModId, string originTag)
             : this(bindings, capabilities, ownerModId, originTag,
-                ResolveActorContext(bindings, ownerModId, originTag))
+                ResolveActorContext(bindings, ownerModId, originTag), null, false)
         {
         }
 
         public LuaCsRbxModContext(LuaCsRbxApiBindings bindings, LuaCapabilities capabilities,
             string ownerModId, string originTag, ActorContext actorContext)
-            : this(bindings, capabilities, ownerModId, originTag, actorContext, null)
+            : this(bindings, capabilities, ownerModId, originTag, actorContext, null, true)
         {
         }
 
@@ -41,13 +44,13 @@ namespace CoreAI.Ai.LuaCs
             string ownerModId, string originTag, ActorContext actorContext,
             MutationEnvelope mutationEnvelope)
             : this(bindings, capabilities, ownerModId, originTag, actorContext,
-                (MutationEnvelope?)mutationEnvelope)
+                (MutationEnvelope?)mutationEnvelope, false)
         {
         }
 
         private LuaCsRbxModContext(LuaCsRbxApiBindings bindings, LuaCapabilities capabilities,
             string ownerModId, string originTag, ActorContext actorContext,
-            MutationEnvelope? mutationEnvelope)
+            MutationEnvelope? mutationEnvelope, bool serverGeneratesMutationEnvelopes)
         {
             if (!actorContext.IsTrusted)
             {
@@ -72,6 +75,7 @@ namespace CoreAI.Ai.LuaCs
             OriginTag = originTag;
             ActorContext = actorContext;
             _mutationEnvelope = mutationEnvelope;
+            _serverGeneratesMutationEnvelopes = serverGeneratesMutationEnvelopes;
             if (!IsHost)
             {
                 bindings.Registry.BindActorAttribution(ownerModId, originTag, actorContext.ActorId);
@@ -85,7 +89,7 @@ namespace CoreAI.Ai.LuaCs
             _instanceMeta = LuaCsRbxInstanceBindings.BuildInstanceMeta(this);
         }
 
-        private static ActorContext ResolveActorContext(LuaCsRbxApiBindings bindings,
+        internal static ActorContext ResolveActorContext(LuaCsRbxApiBindings bindings,
             string ownerModId, string originTag)
         {
             if (bindings.Registry.TryGetActorAttribution(
@@ -214,30 +218,35 @@ namespace CoreAI.Ai.LuaCs
             }
 
             RequireMutationTarget(target, "write property");
-            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
-                WorldAclDecision.WriteProperty, "write property");
+            Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
+                ActorContext.Grants.IsUnrestricted, ActorContext.WorldId, target,
+                RegistryWorldAclDecision.WriteProperty, "write property");
         }
 
         public void RequireMetadataMutation(RbxInstance target, string operation)
         {
             RequireWorldEdit(operation);
             RequireMutationTarget(target, operation);
-            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
-                WorldAclDecision.MutateMetadata, operation);
+            Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
+                ActorContext.Grants.IsUnrestricted, ActorContext.WorldId, target,
+                RegistryWorldAclDecision.MutateMetadata, operation);
         }
 
         public void RequirePivotMutation(RbxInstance target)
         {
             RequireWorldEdit(target.ClassName + ":PivotTo");
             RequireMutationTarget(target, "pivot");
-            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
-                WorldAclDecision.WriteProperty, "pivot");
+            Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
+                ActorContext.Grants.IsUnrestricted, ActorContext.WorldId, target,
+                RegistryWorldAclDecision.WriteProperty, "pivot");
             foreach (RbxInstance descendant in target.GetDescendants())
             {
                 if (descendant.IsA("PVInstance"))
                 {
-                    WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, descendant,
-                        WorldAclDecision.WriteProperty, "pivot descendant");
+                    Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
+                        ActorContext.Grants.IsUnrestricted, ActorContext.WorldId,
+                        descendant,
+                        RegistryWorldAclDecision.WriteProperty, "pivot descendant");
                 }
             }
         }
@@ -252,18 +261,24 @@ namespace CoreAI.Ai.LuaCs
             }
 
             RbxInstance sourceContainer = target.Parent;
-            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
-                WorldAclDecision.ReparentSelf, "reparent source");
+            Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
+                ActorContext.Grants.IsUnrestricted, ActorContext.WorldId, target,
+                RegistryWorldAclDecision.ReparentSelf, "reparent source");
             if (sourceContainer != null && !ReferenceEquals(sourceContainer, destination))
             {
-                WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, sourceContainer,
-                    WorldAclDecision.AcceptChild, "reparent source container");
+                Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
+                    ActorContext.Grants.IsUnrestricted, ActorContext.WorldId,
+                    sourceContainer,
+                    RegistryWorldAclDecision.AcceptChild,
+                    "reparent source container");
             }
 
             if (destination != null)
             {
-                WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, destination,
-                    WorldAclDecision.AcceptChild, "reparent destination");
+                Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
+                    ActorContext.Grants.IsUnrestricted, ActorContext.WorldId,
+                    destination,
+                    RegistryWorldAclDecision.AcceptChild, "reparent destination");
             }
         }
 
@@ -271,8 +286,10 @@ namespace CoreAI.Ai.LuaCs
         {
             RequireWorldEdit("Instance.new parent assignment");
             RequireMutationTarget(destination, "create child");
-            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, destination,
-                WorldAclDecision.AcceptChild, "create child");
+            Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
+                ActorContext.Grants.IsUnrestricted, ActorContext.WorldId,
+                destination,
+                RegistryWorldAclDecision.AcceptChild, "create child");
         }
 
         /// <summary>
@@ -304,12 +321,16 @@ namespace CoreAI.Ai.LuaCs
         {
             RequireWorldEdit(operation);
             RequireMutationTarget(target, operation);
-            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
-                WorldAclDecision.Destroy, operation);
+            Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
+                ActorContext.Grants.IsUnrestricted, ActorContext.WorldId, target,
+                RegistryWorldAclDecision.Destroy, operation);
             foreach (RbxInstance descendant in target.GetDescendants())
             {
-                WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, descendant,
-                    WorldAclDecision.Destroy, operation);
+                RegistryWorldAclAuthorizer.Demand(Bindings.Registry,
+                    ActorContext.ActorId,
+                    ActorContext.Grants.IsUnrestricted, ActorContext.WorldId,
+                    descendant,
+                    RegistryWorldAclDecision.Destroy, operation);
             }
         }
 
@@ -318,17 +339,24 @@ namespace CoreAI.Ai.LuaCs
         {
             RequireWorldEdit(operation);
             RequireMutationTarget(container, operation);
-            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, container,
-                WorldAclDecision.AcceptChild, operation + " container");
+            Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
+                ActorContext.Grants.IsUnrestricted, ActorContext.WorldId,
+                container,
+                RegistryWorldAclDecision.AcceptChild, operation + " container");
             for (int rootIndex = 0; rootIndex < roots.Count; rootIndex++)
             {
                 RbxInstance root = roots[rootIndex];
-                WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, root,
-                    WorldAclDecision.Destroy, operation);
+                RegistryWorldAclAuthorizer.Demand(Bindings.Registry,
+                    ActorContext.ActorId,
+                    ActorContext.Grants.IsUnrestricted, ActorContext.WorldId, root,
+                    RegistryWorldAclDecision.Destroy, operation);
                 foreach (RbxInstance descendant in root.GetDescendants())
                 {
-                    WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, descendant,
-                        WorldAclDecision.Destroy, operation);
+                    RegistryWorldAclAuthorizer.Demand(Bindings.Registry,
+                        ActorContext.ActorId,
+                        ActorContext.Grants.IsUnrestricted, ActorContext.WorldId,
+                        descendant,
+                        RegistryWorldAclDecision.Destroy, operation);
                 }
             }
         }
@@ -337,6 +365,8 @@ namespace CoreAI.Ai.LuaCs
         {
             if (!_mutationEnvelope.HasValue)
             {
+                Bindings.Registry.DemandMutationEnvelope(
+                    ActorContext.ActorId, operation);
                 return;
             }
 
@@ -356,127 +386,24 @@ namespace CoreAI.Ai.LuaCs
                 "submit a separate mutation envelope for each target instance");
         }
 
+        public T ApplyServerGeneratedMutation<T>(string operation, Func<T> mutation)
+        {
+            if (!_serverGeneratesMutationEnvelopes)
+            {
+                return mutation();
+            }
+
+            return Bindings.Registry.ApplyServerGeneratedMutation(
+                ActorContext.ActorId,
+                ActorContext.Grants.IsUnrestricted,
+                ActorContext.WorldId,
+                operation,
+                mutation);
+        }
+
         public void RecordMutation(RbxInstance target)
         {
             Bindings.Registry.AdvanceRevision(target.Id);
-        }
-    }
-
-    internal enum WorldAclDecision
-    {
-        WriteProperty,
-        MutateMetadata,
-        ReparentSelf,
-        AcceptChild,
-        Destroy
-    }
-
-    internal static class WorldAclAuthorizer
-    {
-        public static void Demand(InstanceRegistry registry, ActorContext actorContext,
-            RbxInstance target, WorldAclDecision decision, string operation)
-        {
-            if (!registry.IsWorldAclEnabled)
-            {
-                return;
-            }
-
-            // WHY: host authority means the right to WRITE host-protected properties, not the right
-            // to destroy or reparent world-lifetime singletons — conflating the two let host Lua
-            // delete Lighting once the ACL was enabled, which is weaker than the pre-ACL guards.
-            if (actorContext.Grants.IsUnrestricted)
-            {
-                if (target != null
-                    && registry.TryGetRecord(target.Id, out InstanceRecord hostRecord)
-                    && hostRecord.AccessScope == InstanceAccessScope.HostProtected
-                    && (decision == WorldAclDecision.Destroy
-                        || decision == WorldAclDecision.ReparentSelf))
-                {
-                    Deny(actorContext, target, operation,
-                        "world-lifetime singletons are HostProtected against destroy and reparent, "
-                        + "including for unrestricted actors");
-                }
-
-                return;
-            }
-
-            if (registry.WorldId.Length > 0
-                && !string.Equals(registry.WorldId, actorContext.WorldId, StringComparison.Ordinal))
-            {
-                Deny(actorContext, target, operation,
-                    "the actor belongs to world '" + actorContext.WorldId
-                    + "', not world '" + registry.WorldId + "'");
-            }
-
-            if (!registry.TryGetRecord(target.Id, out InstanceRecord record))
-            {
-                Deny(actorContext, target, operation,
-                    "the target has no live access-control record");
-                return;
-            }
-
-            if (record.AccessScope == InstanceAccessScope.Owned)
-            {
-                if (record.OwnerActorId != null
-                    && string.Equals(record.OwnerActorId, actorContext.ActorId,
-                        StringComparison.Ordinal))
-                {
-                    return;
-                }
-
-                Deny(actorContext, target, operation,
-                    record.OwnerActorId == null
-                        ? "the target is Owned by the host"
-                        : "the target is Owned by actor '" + record.OwnerActorId + "'");
-            }
-
-            if (record.AccessScope == InstanceAccessScope.SharedWritable)
-            {
-                if (decision != WorldAclDecision.Destroy)
-                {
-                    return;
-                }
-
-                if (record.OwnerActorId != null
-                    && string.Equals(record.OwnerActorId, actorContext.ActorId,
-                        StringComparison.Ordinal))
-                {
-                    return;
-                }
-
-                Deny(actorContext, target, operation,
-                    "SharedWritable destruction is limited to its owner or the host");
-            }
-
-            if (record.AccessScope == InstanceAccessScope.HostProtected)
-            {
-                if (decision == WorldAclDecision.WriteProperty)
-                {
-                    return;
-                }
-
-                if (decision == WorldAclDecision.AcceptChild
-                    && target.ClassName == "Workspace")
-                {
-                    return;
-                }
-
-                Deny(actorContext, target, operation,
-                    "the target is HostProtected for this operation");
-            }
-
-            Deny(actorContext, target, operation,
-                "the target has an unsupported access scope");
-        }
-
-        private static void Deny(ActorContext actorContext, RbxInstance target,
-            string operation, string reason)
-        {
-            throw RbxError.BadArgument(
-                "actor '" + actorContext.ActorId + "' cannot " + operation + " on "
-                + target.ClassName + " '" + target.GetFullName() + "': " + reason,
-                "use an object owned by actor '" + actorContext.ActorId
-                + "' or ask the owner/host to perform the operation");
         }
     }
 
@@ -603,19 +530,21 @@ namespace CoreAI.Ai.LuaCs
 
             meta[Metamethods.NewIndex] = Fn("Instance.__newindex", ctx =>
             {
-                RbxInstance self = Self(ctx, context);
-                string key = ReadString(ctx, 1, "Instance member assignment");
-                LuaValue value = Arg(ctx, 2);
-                ThrowIfStubServiceForLua(self, key);
-
-                switch (key)
+                return context.ApplyServerGeneratedMutation("write instance member", () =>
                 {
-                    case "Name":
-                        ThrowIfDestroyedForLua(self, key);
-                        context.RequireWorldEditForWrite(self, "Name");
-                        self.Name = ReadString(ctx, 2, "Instance.Name assignment");
-                        return LuaValue.Nil;
-                    case "Parent":
+                    RbxInstance self = Self(ctx, context);
+                    string key = ReadString(ctx, 1, "Instance member assignment");
+                    LuaValue value = Arg(ctx, 2);
+                    ThrowIfStubServiceForLua(self, key);
+
+                    switch (key)
+                    {
+                        case "Name":
+                            ThrowIfDestroyedForLua(self, key);
+                            context.RequireWorldEditForWrite(self, "Name");
+                            self.Name = ReadString(ctx, 2, "Instance.Name assignment");
+                            return LuaValue.Nil;
+                        case "Parent":
                         // WHY: no destroyed pre-check here — the Domain setter raises the exact
                         // D6 PARENT_LOCKED message for destroyed instances.
                         RbxInstance destination = ReadOptionalInstance(
@@ -630,21 +559,21 @@ namespace CoreAI.Ai.LuaCs
                                 "services and workspace.CurrentCamera are fixed for the world's lifetime");
                         }
 
-                        context.RequireReparent(self, destination);
-                        self.Parent = destination;
-                        return LuaValue.Nil;
-                    case "Archivable":
-                        ThrowIfDestroyedForLua(self, key);
-                        context.RequireWorldEditForWrite(self, "Archivable");
-                        self.Archivable = value.ToBoolean();
-                        return LuaValue.Nil;
-                }
+                            context.RequireReparent(self, destination);
+                            self.Parent = destination;
+                            return LuaValue.Nil;
+                        case "Archivable":
+                            ThrowIfDestroyedForLua(self, key);
+                            context.RequireWorldEditForWrite(self, "Archivable");
+                            self.Archivable = value.ToBoolean();
+                            return LuaValue.Nil;
+                    }
 
-                ThrowIfDestroyedForLua(self, key);
-                if (TryWriteNetworkMember(context, self, key, ctx.State, value))
-                {
-                    return LuaValue.Nil;
-                }
+                    ThrowIfDestroyedForLua(self, key);
+                    if (TryWriteNetworkMember(context, self, key, ctx.State, value))
+                    {
+                        return LuaValue.Nil;
+                    }
 
                 if (TryWriteCamera(context, self, key, value))
                 {
@@ -679,10 +608,11 @@ namespace CoreAI.Ai.LuaCs
                     throw knownMemberError;
                 }
 
-                throw RbxError.BadArgument(
-                    key + " is not a valid member of " + self.ClassName + " \"" + self.GetFullName() + "\"",
-                    "set a writable Instance property (Name, Parent, Archivable, or a BasePart " +
-                    "spatial property like Position/Size/CFrame/Color) or use SetAttribute");
+                    throw RbxError.BadArgument(
+                        key + " is not a valid member of " + self.ClassName + " \"" + self.GetFullName() + "\"",
+                        "set a writable Instance property (Name, Parent, Archivable, or a BasePart " +
+                        "spatial property like Position/Size/CFrame/Color) or use SetAttribute");
+                });
             }, context);
 
             meta[Metamethods.Eq] = Fn("Instance.__eq", ctx =>
@@ -859,7 +789,14 @@ namespace CoreAI.Ai.LuaCs
                     {
                         RbxInstance self = Self(ctx, context);
                         ThrowIfDestroyedForLua(self, name);
-                        return body(ctx, self);
+                        if (!IsMutatingMethod(name))
+                        {
+                            return body(ctx, self);
+                        }
+
+                        return context.ApplyServerGeneratedMutation(
+                            "invoke Instance:" + name,
+                            () => body(ctx, self));
                     }, context));
                 methods[name] = new RbxMethodBinding(value, declaringClassName);
             }
@@ -1066,6 +1003,17 @@ namespace CoreAI.Ai.LuaCs
             }, "BaseRemoteEvent");
 
             return methods;
+        }
+
+        private static bool IsMutatingMethod(string name)
+        {
+            return name == "Clone"
+                   || name == "Destroy"
+                   || name == "ClearAllChildren"
+                   || name == "SetAttribute"
+                   || name == "AddTag"
+                   || name == "RemoveTag"
+                   || name == "PivotTo";
         }
 
         private static RbxPlayer ReadPlayer(LuaFunctionExecutionContext ctx,

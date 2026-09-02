@@ -154,21 +154,33 @@ namespace CoreAI.Ai.LuaCs
 
         private readonly IScriptEngine _scriptEngine;
         private readonly IRbxRuntimeObservabilitySink _observability;
+        private readonly Func<string, Func<ScriptResumeResult>, ScriptResumeResult>
+            _resumeEnvelope;
         private LuaCsRbxScriptThread _currentThread;
 
         public LuaCsRbxScriptThreadFactory(IScriptEngine scriptEngine = null,
-            IRbxRuntimeObservabilitySink observability = null)
+            IRbxRuntimeObservabilitySink observability = null,
+            Func<string, Func<ScriptResumeResult>, ScriptResumeResult> resumeEnvelope = null)
         {
             _observability = observability != null && observability.IsEnabled
                 ? observability
                 : null;
             _scriptEngine = scriptEngine ?? new LuaCsScriptEngine(observability: _observability);
+            _resumeEnvelope = resumeEnvelope;
         }
 
         /// <summary>The scheduler-owned thread currently executing a Lua host callback.</summary>
         public IRbxScriptThread CurrentThread => _currentThread;
 
         internal bool IsObservabilityEnabled => _observability != null;
+
+        internal ScriptResumeResult Resume(string ownerModId,
+            Func<ScriptResumeResult> resume)
+        {
+            return _resumeEnvelope == null
+                ? resume()
+                : _resumeEnvelope(ownerModId, resume);
+        }
 
         /// <inheritdoc />
         public IRbxScriptThread Create(string ownerModId, object callable)
@@ -372,7 +384,8 @@ namespace CoreAI.Ai.LuaCs
                     _coroutine = CreateCoroutine(_resumeArguments);
                 }
 
-                ScriptResumeResult result = _coroutine.Resume();
+                ScriptResumeResult result = _factory.Resume(
+                    OwnerModId, () => _coroutine.Resume());
                 if (result.Ok)
                 {
                     return RbxScriptThreadResumeResult.Success();

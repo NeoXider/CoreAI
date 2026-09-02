@@ -1,0 +1,99 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4f421e6371d547b89c1b6d5ac88e43cd, type: 3}
+  m_Name: RbxMaterialTextureCatalog
+  m_EditorClassIdentifier: CoreAI.RbxApi.Unity::CoreAI.Mods.Rbx.Rendering.RbxMaterialTextureCatalog
+  _entries:
+  - _materialName: Wood
+    _materialValue: 512
+    _albedo: {fileID: 2800000, guid: 2500000000000000000000000000000e, type: 3}
+    _normal: {fileID: 2800000, guid: 2500000000000000000000000000000f, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 25000000000000000000000000000010, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 10
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.65
+    _roughnessScale: 0.75
+    _normalStrength: 1
+  - _materialName: WoodPlanks
+    _materialValue: 528
+    _albedo: {fileID: 2800000, guid: 2500000000000000000000000000000e, type: 3}
+    _normal: {fileID: 2800000, guid: 2500000000000000000000000000000f, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 25000000000000000000000000000010, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 8
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.65
+    _roughnessScale: 0.78
+    _normalStrength: 1
+  - _materialName: Brick
+    _materialValue: 848
+    _albedo: {fileID: 2800000, guid: 25000000000000000000000000000001, type: 3}
+    _normal: {fileID: 2800000, guid: 25000000000000000000000000000002, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 25000000000000000000000000000003, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 10
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.6
+    _roughnessScale: 0.82
+    _normalStrength: 1
+  - _materialName: Cobblestone
+    _materialValue: 880
+    _albedo: {fileID: 2800000, guid: 2500000000000000000000000000000b, type: 3}
+    _normal: {fileID: 2800000, guid: 2500000000000000000000000000000c, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 2500000000000000000000000000000d, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 14
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.72
+    _normalStrength: 1
+  - _materialName: Metal
+    _materialValue: 1088
+    _albedo: {fileID: 2800000, guid: 25000000000000000000000000000007, type: 3}
+    _normal: {fileID: 2800000, guid: 25000000000000000000000000000009, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 2500000000000000000000000000000a, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 2800000, guid: 25000000000000000000000000000008, type: 3}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 3.5
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.45
+    _roughnessScale: 0.68
+    _normalStrength: 1
+  - _materialName: Grass
+    _materialValue: 1280
+    _albedo: {fileID: 2800000, guid: 25000000000000000000000000000004, type: 3}
+    _normal: {fileID: 2800000, guid: 25000000000000000000000000000005, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 25000000000000000000000000000006, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 7
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.78
+    _normalStrength: 1

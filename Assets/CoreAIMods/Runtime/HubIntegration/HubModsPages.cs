@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Hub;
@@ -97,14 +98,15 @@ namespace CoreAI.Ai.Hub
             HubPageRegistry registry,
             IRbxWorldRuntimeService service,
             Action attentionRequested = null,
-            int order = DefaultWorldLoadsOrder)
+            int order = DefaultWorldLoadsOrder,
+            ActorContext actorContext = default)
         {
             if (registry == null)
             {
                 throw new ArgumentNullException(nameof(registry));
             }
 
-            HubWorldLoadConfirmationPage page = new(service, attentionRequested, order);
+            HubWorldLoadConfirmationPage page = new(service, attentionRequested, order, actorContext);
             registry.Register(WorldLoadsPageId, () => page, order);
             return page;
         }
@@ -115,9 +117,12 @@ namespace CoreAI.Ai.Hub
     {
         private readonly IRbxWorldRuntimeService _service;
         private readonly Action _attentionRequested;
+        private readonly ActorContext _actorContext;
+        private readonly HashSet<string> _autoLoadsInFlight = new(StringComparer.Ordinal);
         private readonly HashSet<string> _inFlight = new(StringComparer.Ordinal);
 
         private VisualElement _root;
+        private VisualElement _autoSaveRows;
         private VisualElement _rows;
         private Label _status;
         private IVisualElementScheduledItem _refreshSchedule;
@@ -128,10 +133,12 @@ namespace CoreAI.Ai.Hub
         public HubWorldLoadConfirmationPage(
             IRbxWorldRuntimeService service,
             Action attentionRequested = null,
-            int order = HubModsPages.DefaultWorldLoadsOrder)
+            int order = HubModsPages.DefaultWorldLoadsOrder,
+            ActorContext actorContext = default)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             _attentionRequested = attentionRequested;
+            _actorContext = actorContext;
             Order = order;
             Subscribe();
         }
@@ -196,7 +203,12 @@ namespace CoreAI.Ai.Hub
                 name = "coreai-hub-world-loads-scroll"
             };
             scroll.style.flexGrow = 1f;
-            _rows = scroll.contentContainer;
+            scroll.contentContainer.Add(HubModWidgets.MakeTitle("Autosaves"));
+            _autoSaveRows = new VisualElement { name = "coreai-autosaves-rows" };
+            scroll.contentContainer.Add(_autoSaveRows);
+            scroll.contentContainer.Add(HubModWidgets.MakeTitle("Pending confirmation"));
+            _rows = new VisualElement { name = "coreai-world-load-pending-rows" };
+            scroll.contentContainer.Add(_rows);
             _root.Add(scroll);
 
             _refreshSchedule = _root.schedule.Execute(() => Refresh(false)).Every(1000);
@@ -244,6 +256,8 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
+            RefreshAutoSaves();
+
             IReadOnlyList<RbxPendingWorldLoadRequest> pending;
             try
             {
@@ -289,6 +303,118 @@ namespace CoreAI.Ai.Hub
             if (focusFirstDecision && firstDecision != null)
             {
                 firstDecision.Focus();
+            }
+        }
+
+        private void RefreshAutoSaves()
+        {
+            if (_destroyed || _autoSaveRows == null)
+            {
+                return;
+            }
+
+            _autoSaveRows.Clear();
+            IReadOnlyList<RbxAutoSaveInfo> autoSaves;
+            try
+            {
+                autoSaves = _service.ListAutoSaves();
+            }
+            catch (Exception ex)
+            {
+                Label error = HubModWidgets.MakeNote("Could not read autosaves: " + ex.Message);
+                error.name = "coreai-autosaves-error";
+                _autoSaveRows.Add(error);
+                return;
+            }
+
+            List<RbxAutoSaveInfo> ordered = new(autoSaves ?? Array.Empty<RbxAutoSaveInfo>());
+            ordered.Sort(CompareAutoSaves);
+            bool hasRows = false;
+            for (int index = 0; index < ordered.Count; index++)
+            {
+                RbxAutoSaveInfo autoSave = ordered[index];
+                if (autoSave == null)
+                {
+                    continue;
+                }
+
+                _autoSaveRows.Add(BuildAutoSaveRow(autoSave));
+                hasRows = true;
+            }
+
+            if (!hasRows)
+            {
+                Label empty = HubModWidgets.MakeNote("No autosaves are available.");
+                empty.name = "coreai-autosaves-empty";
+                _autoSaveRows.Add(empty);
+            }
+        }
+
+        private VisualElement BuildAutoSaveRow(RbxAutoSaveInfo autoSave)
+        {
+            VisualElement panel = HubModWidgets.MakePanel();
+            panel.name = "coreai-autosave-row-" + autoSave.FileName;
+
+            Label name = HubModWidgets.MakeFieldLabel("Name: " + autoSave.FileName);
+            name.style.unityFontStyleAndWeight = FontStyle.Bold;
+            panel.Add(name);
+            panel.Add(HubModWidgets.MakeMutedLabel("Trigger: " + autoSave.Trigger));
+            panel.Add(HubModWidgets.MakeMutedLabel(
+                "Saved: " + FormatAutoSaveTimestamp(autoSave.TimestampUtc)));
+            panel.Add(HubModWidgets.MakeMutedLabel("Size: " + FormatKilobytes(autoSave.SizeBytes)));
+
+            string fileName = autoSave.FileName;
+            Button loadButton = HubModWidgets.MakeButton(
+                "Load...",
+                () => RequestAutoLoad(_actorContext, fileName));
+            loadButton.name = "coreai-autosave-load-" + fileName;
+            loadButton.tooltip = "Request this autosave, then review it in Pending confirmation.";
+            loadButton.SetEnabled(!_autoLoadsInFlight.Contains(fileName));
+            panel.Add(loadButton);
+            return panel;
+        }
+
+        private void RequestAutoLoad(ActorContext actorContext, string autoFileName)
+        {
+            if (_destroyed
+                || string.IsNullOrEmpty(autoFileName)
+                || !_autoLoadsInFlight.Add(autoFileName))
+            {
+                return;
+            }
+
+            Button button = _autoSaveRows?.Q<Button>("coreai-autosave-load-" + autoFileName);
+            button?.SetEnabled(false);
+            RequestAutoLoadAsync(actorContext, autoFileName);
+        }
+
+        private async void RequestAutoLoadAsync(ActorContext actorContext, string autoFileName)
+        {
+            bool requestQueued = false;
+            try
+            {
+                await _service.RequestAutoLoadAsync(actorContext, autoFileName);
+                requestQueued = true;
+            }
+            catch (Exception ex)
+            {
+                if (!_destroyed && _status != null)
+                {
+                    _status.text = "Autosave load request failed: " + ex.Message;
+                    _status.style.color = HubModWidgets.Danger;
+                }
+            }
+            finally
+            {
+                _autoLoadsInFlight.Remove(autoFileName);
+                if (requestQueued)
+                {
+                    Refresh(true);
+                }
+                else
+                {
+                    RefreshAutoSaves();
+                }
             }
         }
 
@@ -416,6 +542,42 @@ namespace CoreAI.Ai.Hub
             return requestedComparison != 0
                 ? requestedComparison
                 : string.Compare(left.RequestId, right.RequestId, StringComparison.Ordinal);
+        }
+
+        private static int CompareAutoSaves(RbxAutoSaveInfo left, RbxAutoSaveInfo right)
+        {
+            if (ReferenceEquals(left, right))
+            {
+                return 0;
+            }
+
+            if (left == null)
+            {
+                return 1;
+            }
+
+            if (right == null)
+            {
+                return -1;
+            }
+
+            int timestampComparison = right.TimestampUtc.CompareTo(left.TimestampUtc);
+            return timestampComparison != 0
+                ? timestampComparison
+                : string.Compare(left.FileName, right.FileName, StringComparison.Ordinal);
+        }
+
+        private static string FormatAutoSaveTimestamp(DateTime timestampUtc)
+        {
+            return timestampUtc.ToLocalTime().ToString(
+                "yyyy-MM-dd HH:mm:ss",
+                CultureInfo.InvariantCulture);
+        }
+
+        private static string FormatKilobytes(long sizeBytes)
+        {
+            double kilobytes = Math.Max(0L, sizeBytes) / 1024d;
+            return kilobytes.ToString("0.##", CultureInfo.InvariantCulture) + " KB";
         }
 
         private static string FormatUtc(DateTime value)

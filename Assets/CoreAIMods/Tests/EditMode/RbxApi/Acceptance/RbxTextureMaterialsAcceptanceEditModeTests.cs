@@ -75,6 +75,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [SetUp]
         public void SetUp()
         {
+            RbxTextureMaterialProvider.IgnoreProjectOverrideForTests = true;
             RbxTextureMaterialProvider.ResetSharedCacheForTests();
             RbxProceduralMaterialProvider.ResetSharedCacheForTests();
         }
@@ -82,6 +83,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [TearDown]
         public void TearDown()
         {
+            RbxTextureMaterialProvider.IgnoreProjectOverrideForTests = false;
             RbxTextureMaterialProvider.ResetSharedCacheForTests();
             RbxProceduralMaterialProvider.ResetSharedCacheForTests();
         }
@@ -415,11 +417,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
-        public void PartialTextureSet_UsesVisibleFallbackThroughLuaBinderPath()
+        public void PartialTextureSet_UsesProceduralFallbackThroughLuaBinderPath()
         {
             LogAssert.Expect(LogType.Error,
-                new Regex("Incomplete PBR texture set for Enum\\.Material\\.Brick.*" +
-                          "visible diagnostic fallback"));
+                new Regex("Catalog entry for Enum\\.Material\\.Brick.*missing required.*" +
+                          "using procedural", RegexOptions.IgnoreCase));
             RbxTextureMaterialProvider provider = new(LoadWithoutBrickNormal);
             using (Mvp1AcceptanceWorld world = new(materialProvider: provider))
             {
@@ -431,9 +433,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 RbxInstance part = world.Workspace.FindFirstChild("BrokenBrick");
                 Material material = world.BoundObject(part).GetComponent<Renderer>().sharedMaterial;
 
-                Assert.AreSame(provider.FallbackMaterial, material);
-                Assert.AreEqual("CoreAiRbxMaterial_FALLBACK_UNMAPPED", material.name);
-                Assert.AreEqual("CoreAI/Rbx/Material Fallback", material.shader.name);
+                Assert.AreEqual("CoreAiRbxMaterial_Brick", material.name);
+                Assert.AreEqual("CoreAI/Rbx/Procedural Surface", material.shader.name);
+                Assert.AreNotEqual("Hidden/InternalErrorShader", material.shader.name);
             }
         }
 
@@ -521,10 +523,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 "float2\\s+uvScale\\s*=\\s*float2\\(\\s*_TextureScale\\s*/\\s*" +
                 "max\\(_TextureAspect,\\s*0\\.0001\\),\\s*_TextureScale\\s*\\)", source);
             StringAssert.Contains("#if defined(_RBX_METALLIC_MAP)", source);
+            StringAssert.Contains("#if defined(_RBX_OCCLUSION_MAP)", source);
+            StringAssert.Contains("#if defined(_RBX_NORMAL_DIRECTX)", source);
             StringAssert.DoesNotContain("RbxDominantAxisUv", source);
             StringAssert.DoesNotContain("Parallax", source);
-            Assert.AreEqual(4, Regex.Matches(source, "SAMPLE_TEXTURE2D_GRAD\\(").Count,
-                "one projection reads three maps; Metal063 enables the fourth read");
+            Assert.AreEqual(5, Regex.Matches(source, "SAMPLE_TEXTURE2D_GRAD\\(").Count,
+                "one projection reads three required maps and two optional data maps");
             Assert.AreEqual(0, Regex.Matches(source, "SAMPLE_TEXTURE2D\\(").Count);
         }
 

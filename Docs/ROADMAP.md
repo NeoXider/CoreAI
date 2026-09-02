@@ -95,8 +95,8 @@ unified deferred signal path, yieldable signal handlers, and deferred-placeholde
 contract have now landed within the MVP2 work. The MVP2 scheduler is wired and live (`task.*`, the
 R4.2 frame pipeline, deferred signal drains at the nine R5.5 resumption points), loopback
 `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction` are creatable classes, and the
-`Enum.Material` catalog is complete: all **45** items render (six CC0 texture-backed, the rest
-procedural) with a magenta diagnostic fallback for an unmapped id, alongside `BasePart.Orientation`/
+`Enum.Material` catalog is complete: all **45** items render (catalog-driven texture provider: six packaged CC0 sets, any item
+overridable from a project-local 2K–4K catalog through the Editor menus, the rest procedural) with a magenta diagnostic fallback for an unmapped id, alongside `BasePart.Orientation`/
 `Rotation` and the real `CornerWedge` mesh.
 
 **Next milestones.** Finish the remaining MVP2 items (clocks, the shared JSON contract, and the

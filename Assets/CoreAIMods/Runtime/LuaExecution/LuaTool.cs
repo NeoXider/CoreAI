@@ -7,7 +7,6 @@ using Microsoft.Extensions.AI;
 using CoreAI.Logging;
 using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Instances;
-using System.Globalization;
 
 namespace CoreAI.Ai
 {
@@ -68,18 +67,6 @@ namespace CoreAI.Ai
         /// <summary>Builds the MEAI tool surface for <c>execute_lua</c>.</summary>
         public AIFunction CreateAIFunction()
         {
-            if (_actorIdentityProvider != null)
-            {
-                Func<string, string, string, long, CancellationToken, Task<string>> mutationFunc =
-                    ExecuteMutationAsync;
-                AIFunctionFactoryOptions mutationOptions = new()
-                {
-                    Name = ExecuteLuaToolName,
-                    Description = ExecuteLuaDescription
-                };
-                return AIFunctionFactory.Create(mutationFunc, mutationOptions);
-            }
-
             Func<string, CancellationToken, Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
@@ -98,63 +85,27 @@ namespace CoreAI.Ai
             string code,
             CancellationToken cancellationToken = default)
         {
-            return await ExecuteCoreAsync(
-                code,
-                token => _executor.ExecuteAsync(code, token),
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        /// <summary>Runs an actor-scoped Lua mutation under optimistic concurrency and idempotency checks.</summary>
-        public async Task<string> ExecuteMutationAsync(
-            [Description("Lua code to execute against the declared mutation target.")]
-            string code,
-            [Description("Caller-generated idempotency key, unique for this actor and logical operation.")]
-            string operation_id,
-            [Description("Stable target InstanceId encoded as an unsigned decimal string.")]
-            string target_instance_id,
-            [Description("Target revision observed before submitting this operation.")]
-            long expected_revision,
-            CancellationToken cancellationToken = default)
-        {
-            if (_actorIdentityProvider == null || _mutationExecutor == null)
+            if (_actorIdentityProvider != null && _mutationExecutor != null)
             {
-                return SerializeResult(new LuaResult
+                ActorContext actorContext;
+                try
                 {
-                    Success = false,
-                    Error = "Actor-scoped execute_lua is not configured."
-                });
-            }
-
-            if (!ulong.TryParse(target_instance_id, NumberStyles.None,
-                    CultureInfo.InvariantCulture, out ulong targetValue)
-                || targetValue == 0UL)
-            {
-                return SerializeResult(new LuaResult
+                    actorContext = _actorIdentityProvider.GetActorContext(_roleId);
+                }
+                catch (Exception ex)
                 {
-                    Success = false,
-                    Error = "target_instance_id must be a non-zero unsigned decimal InstanceId."
-                });
-            }
+                    return SerializeResult(new LuaResult { Success = false, Error = ex.Message });
+                }
 
-            ActorContext actorContext;
-            MutationEnvelope envelope;
-            try
-            {
-                actorContext = _actorIdentityProvider.GetActorContext(_roleId);
-                envelope = new MutationEnvelope(
-                    actorContext.ActorId,
-                    new InstanceId(targetValue),
-                    operation_id,
-                    expected_revision);
-            }
-            catch (Exception ex)
-            {
-                return SerializeResult(new LuaResult { Success = false, Error = ex.Message });
+                return await ExecuteCoreAsync(
+                    code,
+                    token => _mutationExecutor.ExecuteAsync(code, actorContext, token),
+                    cancellationToken).ConfigureAwait(false);
             }
 
             return await ExecuteCoreAsync(
                 code,
-                token => _mutationExecutor.ExecuteAsync(code, actorContext, envelope, token),
+                token => _executor.ExecuteAsync(code, token),
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -266,6 +217,9 @@ namespace CoreAI.Ai
         {
             Task<LuaResult> ExecuteAsync(string code, ActorContext actorContext,
                 MutationEnvelope mutationEnvelope, CancellationToken cancellationToken);
+
+            Task<LuaResult> ExecuteAsync(string code, ActorContext actorContext,
+                CancellationToken cancellationToken);
         }
     }
 }

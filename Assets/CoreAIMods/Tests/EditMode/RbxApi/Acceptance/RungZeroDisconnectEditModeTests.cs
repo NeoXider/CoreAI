@@ -1,139 +1,270 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
+using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
-using CoreAI.Mods.Rbx.Instances.Scheduling;
+using Lua;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 {
-    /// <summary>Rung-zero 0.3 and Finding #9: disconnect/teardown seam and leak check.</summary>
+    /// <summary>Production teardown and bounded actor-churn coverage.</summary>
     [TestFixture]
     public sealed class RungZeroDisconnectEditModeTests
     {
-        private sealed class NoopFactory : IRbxScriptThreadFactory
-        {
-            public IRbxScriptThread Create(string ownerModId, object callable) => new NoopThread(ownerModId);
-        }
+        private const LuaCapabilities Capabilities =
+            LuaCapabilities.Read | LuaCapabilities.WorldEdit;
 
-        private sealed class NoopThread : IRbxScriptThread
+        [Test]
+        public void ConnectDisconnect_UsesProductionSeam_IsIdempotentAndIsolated()
         {
-            public NoopThread(string owner) { OwnerModId = owner; }
-            public string OwnerModId { get; }
-            public bool IsDead => false;
-            public RbxScriptThreadStatus Status => RbxScriptThreadStatus.Suspended;
-            public Exception LastException => null;
-            public RbxError LastFailure => null;
-            public RbxScriptThreadResumeResult Resume(object[] args) => RbxScriptThreadResumeResult.Success();
-            public void Kill() { }
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actorA = harness.Actor("disconnect-a");
+            ActorContext actorB = harness.Actor("disconnect-b");
+            Dictionary<string, int> added = new(StringComparer.Ordinal);
+            Dictionary<string, int> removing = new(StringComparer.Ordinal);
+            RbxEnumItem removalReason = null;
+            harness.Bindings.Players.PlayerAdded.Connect(
+                (Action<object[]>)(arguments =>
+                {
+                    RbxPlayer player = (RbxPlayer)arguments[0];
+                    Increment(added, player.NetworkActorId);
+                }));
+            harness.Bindings.Players.PlayerRemoving.Connect(
+                (Action<object[]>)(arguments =>
+                {
+                    RbxPlayer player = (RbxPlayer)arguments[0];
+                    removalReason = (RbxEnumItem)arguments[1];
+                    Increment(removing, player.NetworkActorId);
+                }));
+
+            harness.Bindings.ConnectActor(actorA);
+            harness.Bindings.ConnectActor(actorA);
+            harness.Bindings.ConnectActor(actorB);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            RbxRemoteEvent remote =
+                (RbxRemoteEvent)harness.Registry.Create("RemoteEvent");
+            remote.GetOnClientEvent(actorA.ActorId);
+            remote.GetOnClientEvent(actorB.ActorId);
+            harness.SendClientEvent(remote, actorA.ActorId);
+            harness.SendClientEvent(remote, actorB.ActorId);
+            harness.Stack.Runtime.LoadMod(actorA, "disconnect-mod-a", @"
+                task.spawn(function()
+                    task.wait(1000)
+                end)", persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorB, "disconnect-mod-b", @"
+                task.spawn(function()
+                    task.wait(1000)
+                end)", persistToStore: false);
+            int threadsBeforeDisconnect =
+                harness.Bindings.Scheduler.LiveThreadCount;
+
+            Assert.IsTrue(harness.Bindings.DisconnectActor(actorA));
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual(1, added[actorA.ActorId]);
+            Assert.AreEqual(1, removing[actorA.ActorId]);
+            Assert.AreEqual("PlayerExitReason", removalReason.EnumType.Name);
+            Assert.AreEqual("Unknown", removalReason.Name);
+            Assert.IsFalse(harness.Bindings.Players.TryGetByActorId(
+                actorA.ActorId, out _));
+            Assert.IsTrue(harness.Bindings.Players.TryGetByActorId(
+                actorB.ActorId, out _));
+            CollectionAssert.DoesNotContain(
+                harness.Bridge.ActorIds, actorA.ActorId);
+            CollectionAssert.Contains(harness.Bridge.ActorIds, actorB.ActorId);
+            Assert.AreEqual(1, remote.ClientSignalCount);
+            Assert.IsFalse(remote.HasActor(actorA.ActorId));
+            Assert.IsTrue(remote.HasActor(actorB.ActorId));
+            Assert.AreEqual(1, harness.Bridge.RateWindowCount);
+            Assert.Less(
+                harness.Bindings.Scheduler.LiveThreadCount,
+                threadsBeforeDisconnect);
+            Assert.Greater(harness.Bindings.Scheduler.LiveThreadCount, 0);
+            Assert.AreEqual(1, harness.ChatFactory.ReleaseCount);
+
+            Assert.IsFalse(harness.Bindings.DisconnectActor(actorA));
+            harness.Bindings.Scheduler.Advance(0d);
+            Assert.AreEqual(1, removing[actorA.ActorId]);
+            Assert.AreEqual(1, harness.ChatFactory.ReleaseCount);
+            Assert.IsTrue(harness.Bindings.Players.TryGetByActorId(
+                actorB.ActorId, out _));
         }
 
         [Test]
-        public void ConnectDisconnect_FiresPlayerAddedOnceAndPlayerRemovingOnce_AndCleansState()
+        public void RepeatedConnectDisconnect200Actors_LeavesNoRuntimeGrowth()
         {
-            InstanceRegistry registry = new();
-            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
-            NullNetworkBridge bridge = new();
-            ModScheduler scheduler = new(new NoopFactory(), new RbxAccumulatingTimeSource());
-            RbxPlayers players = (RbxPlayers)game.GetService("Players");
-            // Simulate connect via bindings helper: use bridge + players directly
-            string actorId = "actor-disconnect";
-            int added = 0, removing = 0;
-            players.PlayerAdded.Connect((Action<object[]>)(_ => added++));
-            players.PlayerRemoving.Connect((Action<object[]>)(_ => removing++));
+            using ProductionHarness harness = new ProductionHarness();
+            RbxRemoteEvent remote =
+                (RbxRemoteEvent)harness.Registry.Create("RemoteEvent");
 
-            // Connect
-            players.EnsureActor(registry, actorId);
-            bridge.RegisterActor(actorId);
-            RbxRemoteEvent remote = (RbxRemoteEvent)registry.Create("RemoteEvent");
-            remote.AttachScheduler(scheduler);
-            RbxScriptSignal sig = remote.GetOnClientEvent(actorId);
-            Assert.IsNotNull(sig);
-            // Add rate window by sending event
-            bridge.SendEvent(new RbxNetworkEventMessage(remote.Id, RbxNetworkDirection.ClientToServer, RbxNetworkReliability.ReliableOrdered, actorId, null, new byte[] { 1 }));
-            scheduler.Spawn("mod-" + actorId, (Action)(() => { }), Array.Empty<object>());
+            for (int index = 0; index < 200; index++)
+            {
+                ActorContext actor = harness.Actor("churn-" + index);
+                harness.Bindings.ConnectActor(actor);
+                remote.GetOnClientEvent(actor.ActorId);
+                harness.SendClientEvent(remote, actor.ActorId);
+                Assert.IsTrue(harness.Bindings.DisconnectActor(actor));
+            }
 
-            // Disconnect via seam (we test registry + bridge + players + scheduler + remote cleanup)
-            bool first = Disconnect(registry, bridge, players, scheduler, new[] { remote }, actorId);
-            Assert.IsTrue(first);
-            Assert.AreEqual(1, added);
-            Assert.AreEqual(1, removing);
-            Assert.IsEmpty(bridge.ActorIds);
-            // Rate windows should be empty via reflection check: try sending again must fail with NotAuthority
-            RbxError notAuth = Assert.Throws<RbxError>(() =>
-                bridge.SendEvent(new RbxNetworkEventMessage(remote.Id, RbxNetworkDirection.ClientToServer, RbxNetworkReliability.ReliableOrdered, actorId, null, new byte[] { 2 })));
-            Assert.AreEqual(RbxErrorCode.NotAuthority, notAuth.Code);
-            // Second disconnect idempotent
-            bool second = Disconnect(registry, bridge, players, scheduler, new[] { remote }, actorId);
-            Assert.IsFalse(second);
-            Assert.AreEqual(1, removing);
+            harness.Bindings.Scheduler.Advance(0d);
+            Assert.IsEmpty(harness.Bridge.ActorIds);
+            Assert.AreEqual(0, harness.Bridge.RateWindowCount);
+            Assert.AreEqual(0, remote.ClientSignalCount);
+            Assert.AreEqual(0, harness.Bindings.Scheduler.LiveThreadCount);
+            Assert.IsEmpty(harness.Bindings.Players.GetPlayers());
+            Assert.AreEqual(200, harness.ChatFactory.ReleaseCount);
         }
 
-        [Test]
-        public void RepeatedConnectDisconnect200Actors_LeavesNoGrowthInRemoteAndRateCollections()
+        private static void Increment(Dictionary<string, int> counts, string actorId)
         {
-            InstanceRegistry registry = new();
-            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
-            NullNetworkBridge bridge = new();
-            ModScheduler scheduler = new(new NoopFactory(), new RbxAccumulatingTimeSource());
-            RbxPlayers players = (RbxPlayers)game.GetService("Players");
-            RbxRemoteEvent remote = (RbxRemoteEvent)registry.Create("RemoteEvent");
-            remote.AttachScheduler(scheduler);
-
-            for (int i = 0; i < 200; i++)
-            {
-                string actor = "actor-" + i;
-                players.EnsureActor(registry, actor);
-                bridge.RegisterActor(actor);
-                remote.GetOnClientEvent(actor);
-                bridge.SendEvent(new RbxNetworkEventMessage(remote.Id, RbxNetworkDirection.ClientToServer, RbxNetworkReliability.ReliableOrdered, actor, null, new byte[] { 1 }));
-                scheduler.Spawn("mod-" + actor, (Action)(() => { }), Array.Empty<object>());
-                Disconnect(registry, bridge, players, scheduler, new[] { remote }, actor);
-            }
-
-            Assert.IsEmpty(bridge.ActorIds);
-            // Client signals for disconnected actors should be gone
-            // We check by inspecting private _clientSignals count via reflection
-            System.Reflection.FieldInfo f = typeof(RbxRemoteEvent).GetField("_clientSignals", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var dict = (System.Collections.Generic.Dictionary<string, RbxScriptSignal>)f.GetValue(remote);
-            Assert.IsEmpty(dict, "remote client signals leaked across 200 churns");
-            Assert.AreEqual(0, scheduler.LiveThreadCount, "scheduler threads leaked");
+            counts[actorId] = counts.TryGetValue(actorId, out int count)
+                ? count + 1
+                : 1;
         }
 
-        private static bool Disconnect(InstanceRegistry registry, NullNetworkBridge bridge, RbxPlayers players, ModScheduler scheduler, IReadOnlyList<RbxRemoteEvent> remotes, string actorId)
+        private sealed class ProductionHarness : IDisposable
         {
-            bool hadPlayer = players.TryGetByActorId(actorId, out _);
-            if (!hadPlayer && bridge.ActorIds.Count == 0)
+            public ProductionHarness()
             {
-                // Check if actor was already removed
-                return false;
+                Registry = new InstanceRegistry(
+                    worldAclVersion: InstanceRegistry.CurrentWorldAclVersion,
+                    worldId: "disconnect-world");
+                RbxDataModel game = DataModelBootstrap.CreateGame(Registry);
+                Bridge = new NullNetworkBridge();
+                Bindings = new LuaCsRbxApiBindings(
+                    Registry, game, networkBridge: Bridge);
+                ChatFactory = new RecordingChatFactory();
+                Bindings.AttachChatFactory(ChatFactory);
+                Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+                {
+                    Logger = new SilentGameLogger(),
+                    ModStore = new MemoryStore(),
+                    Capabilities = Capabilities,
+                    OneOffCapabilities = Capabilities,
+                    RbxApi = Bindings
+                });
             }
-            // Unregister bridge first
-            bridge.UnregisterActor(actorId);
-            // Remove player (fires PlayerRemoving once)
-            bool removed = players.RemoveActor(actorId);
-            // Kill owned scheduler threads
-            scheduler.KillOwnedBy("mod-" + actorId);
-            // Remove client signals
-            foreach (RbxRemoteEvent remote in remotes)
+
+            public InstanceRegistry Registry { get; }
+
+            public NullNetworkBridge Bridge { get; }
+
+            public LuaCsRbxApiBindings Bindings { get; }
+
+            public RecordingChatFactory ChatFactory { get; }
+
+            public LuaCsModStack Stack { get; }
+
+            public ActorContext Actor(string actorId)
             {
-                System.Reflection.MethodInfo m = typeof(RbxRemoteEvent).GetMethod("RemoveActor", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-                if (m != null)
+                return new LocalActorIdentityProvider(
+                        actorId,
+                        "session-" + actorId,
+                        Registry.WorldId,
+                        ActorGrantSet.None,
+                        AgentMemoryScope.Empty)
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            }
+
+            public void SendClientEvent(RbxRemoteEvent remote, string actorId)
+            {
+                LuaCsRbxNetworkCodec codec = new(
+                    Registry, RbxEnumRegistry.CreateWithBuiltins(), null);
+                byte[] payload = codec.EncodeArguments(new List<LuaValue>());
+                remote.FireServer(Bridge, actorId, payload);
+            }
+
+            public void Dispose()
+            {
+                Bindings.Dispose();
+            }
+        }
+
+        private sealed class RecordingChatFactory : IInGameLlmChatServiceFactory
+        {
+            public int ReleaseCount { get; private set; }
+
+            public IInGameLlmChatService Resolve(ActorContext actorContext)
+            {
+                return null;
+            }
+
+            public bool ReleaseActor(ActorContext actorContext)
+            {
+                ReleaseCount++;
+                return true;
+            }
+        }
+
+        private sealed class MemoryStore : ILuaModStore
+        {
+            private readonly Dictionary<(string ModId, string Key), string> _values = new();
+
+            public string Get(string modId, string key)
+            {
+                return _values.TryGetValue(
+                    (modId, key), out string value) ? value : "";
+            }
+
+            public void Set(string modId, string key, string value)
+            {
+                if (value == null)
                 {
-                    m.Invoke(remote, new object[] { actorId });
+                    _values.Remove((modId, key));
+                    return;
                 }
-                else
+
+                _values[(modId, key)] = value;
+            }
+
+            public void Clear(string modId)
+            {
+                List<(string ModId, string Key)> removed = new();
+                foreach ((string ModId, string Key) key in _values.Keys)
                 {
-                    // Fallback: try via reflection on dictionary
-                    System.Reflection.FieldInfo f = typeof(RbxRemoteEvent).GetField("_clientSignals", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    var dict = (System.Collections.Generic.Dictionary<string, RbxScriptSignal>)f.GetValue(remote);
-                    dict.Remove(actorId);
+                    if (string.Equals(key.ModId, modId,
+                            StringComparison.Ordinal))
+                    {
+                        removed.Add(key);
+                    }
+                }
+
+                for (int index = 0; index < removed.Count; index++)
+                {
+                    _values.Remove(removed[index]);
                 }
             }
-            // Release chat service would be here (factory.ReleaseActorById)
-            return removed;
+        }
+
+        private sealed class SilentGameLogger : IGameLogger
+        {
+            public void LogDebug(GameLogFeature feature, string message,
+                UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogInfo(GameLogFeature feature, string message,
+                UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogWarning(GameLogFeature feature, string message,
+                UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogError(GameLogFeature feature, string message,
+                UnityEngine.Object context = null)
+            {
+            }
         }
     }
 }

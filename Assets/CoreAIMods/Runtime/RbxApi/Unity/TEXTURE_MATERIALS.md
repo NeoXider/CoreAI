@@ -1,73 +1,100 @@
-# Texture-backed Rbx material catalog
+# Texture-backed Rbx material catalogs
 
-`RbxTextureMaterialProvider` is the runtime default behind `InstanceGameObjectBinder`. It implements
-`IRbxMaterialProvider<Material>` alongside `RbxProceduralMaterialProvider`: Brick, Wood, WoodPlanks,
-Grass, Cobblestone, and Metal resolve shared PBR materials, while all other canonical enums delegate to
-the procedural catalog.
+`RbxTextureMaterialProvider` is the built-player material path used by
+`InstanceGameObjectBinder`. It loads a packaged `RbxMaterialTextureCatalog` from
+`Resources/CoreAIRbxTextures/RbxMaterialTextureCatalog.asset`, then loads the optional project catalog
+`Resources/CoreAIRbxTextureCatalogOverride.asset`. Override entries replace packaged entries by
+`Enum.Material` value. Any of the 45 canonical materials can be textured; materials without a valid
+entry remain on `RbxProceduralMaterialProvider`.
 
-The runtime mapping is:
+The package still includes six 1K CC0 sets: Wood, WoodPlanks, Brick, Cobblestone, Metal, and Grass.
+Because the catalog asset must be produced by Unity and is not present in source-only installations,
+the provider has a compatibility catalog for those six sets. This keeps existing players working until
+the packaged asset is materialized. New local catalogs and all override behavior use the serialized
+catalog path.
 
-| CC0 set | Enum.Material |
-|---|---|
-| Bricks104 | Brick |
-| Wood095 | Wood, WoodPlanks |
-| Grass005 | Grass |
-| PavingStones151 | Cobblestone |
-| Metal063 | Metal |
+## Catalog entry contract
 
-Each mapping stores the width of its complete source image in Roblox studs:
+Each `RbxMaterialTextureCatalog.Entry` stores:
 
-| Enum.Material | Full-image span | Physical scale check |
+- canonical material name and enum value;
+- albedo, normal, and roughness-or-smoothness textures;
+- normal convention (`IsOpenGlNormal`); DirectX maps are flipped once in the shader;
+- whether the scalar surface map stores smoothness rather than roughness;
+- optional metalness and ambient-occlusion textures;
+- tile width in studs, intrinsic colour, Part.Color influence, roughness scale, and normal strength.
+
+Albedo, normal, and roughness/smoothness are required. An incomplete entry logs one error while the
+shared cache is built and falls back to that material's procedural surface. It never returns Unity's
+pink error shader. Optional metalness and AO maps enable local shader variants. The runtime-created
+variants use local multi-compile keywords so player builds cannot strip the only usable DirectX/AO/
+metalness combinations.
+
+Tile width is authored in studs. `_TextureScale` is recomputed whenever the session metres-per-stud
+scale changes, without reallocating shared materials. Object-aligned box projection and the verified
+`0.10` axis blend band are unchanged.
+
+## Import Bridge or Fab downloads
+
+Bridge/Fab files must already be under this Unity project's `Assets` directory; the importer copies
+nothing. Recommended export:
+
+1. Use the Unity / metalness workflow.
+2. Export 2K or 4K individual JPG maps, not a packed ORM texture.
+3. Include Albedo or BaseColor, DirectX Normal, Roughness, AO, and Metalness when available.
+4. Put each surface in its own subfolder under
+   `Assets/CoreAIRbxTexturesLocal/Megascans/`.
+5. Run **CoreAI > Materials > Import Bridge-Megascans folder...**.
+6. Review the auto-suggested `Enum.Material` mapping for every subfolder and import selected rows.
+
+The scanner recognizes common Albedo/BaseColor, Normal/NormalDX/NormalGL, Roughness/Smoothness, AO,
+Metalness, and Displacement suffixes. Megascans normals default to DirectX; `NormalGL` or JSON metadata
+can select OpenGL. Displacement is detected but not used by the seam-free box-projection shader.
+
+The importer applies these settings:
+
+| Map | sRGB | Import type |
 |---|---:|---|
-| Brick | 10 x 5 studs | Ten visible courses make each course 0.5 stud high. |
-| Wood | 10 x 5 studs | Grain and knots read at long furniture/top scale. |
-| WoodPlanks | 8 x 4 studs | The same grain reads at a tighter plank scale. |
-| Grass | 7 x 7 studs | Blades remain small but resolvable instead of mip-filtered haze. |
-| Cobblestone | 14 x 14 studs | Roughly 35 stones across make each paver about 0.4 stud wide. |
-| Metal | 3.5 x 3.5 studs | Weathering spans about one square metre at the default scale. |
+| Albedo/BaseColor | Yes | Default |
+| Normal | No | Normal Map, no importer green flip |
+| Roughness/Smoothness, AO, Metalness | No | Default |
 
-The runtime converts each span through the session's metres-per-stud boundary and source aspect ratio.
-At the default 0.28 m/stud, Grass therefore covers 1.96 m per tile. A three-stud square Brick face
-projects 0.3 image widths and 0.6 image heights, exposing six readable mortar courses.
+All maps use mipmaps, Repeat wrap, anisotropic level 8, no Crunch, a 4096 desktop maximum, and a 1024
+WebGL override. The merged catalog is written to
+`Assets/CoreAIRbxTexturesLocal/Resources/CoreAIRbxTextureCatalogOverride.asset`.
 
-The package Resources path is the built-player path; it does not use `AssetDatabase` or editor-time
-material generation. Import metadata keeps Color maps in sRGB, Roughness and Metalness maps linear,
-and NormalGL maps as tangent-space normal maps with the OpenGL green channel unchanged. The original
-CC0 dedication and provenance remain in `Resources/CoreAIRbxTextures/LICENSE.md`.
+## Download ambientCG CC0 sets
 
-## Projection and WebGL cost
+Run **CoreAI > Materials > Download CC0 texture sets (ambientCG)...**, select 1K, 2K, or 4K, choose
+the mappings, and press **Download selected**. Downloads are sequential `UnityWebRequest` operations
+driven by `EditorApplication.update`; the Editor is not blocked. Only Color, NormalGL, Roughness,
+AmbientOcclusion, and Metalness files are extracted.
 
-`RbxTexturedSurface.shader` uses object-aligned box projection in physical world units. Projection
-weights come only from the interpolated geometric normal, before the sampled normal map affects
-lighting. A `0.10` normal-component band blends across axis boundaries; on a two-axis arc this is about
-8.1 degrees total, or 4.1 degrees on either side of 45 degrees.
+Expected output:
 
-Outside the band, nonmetal materials perform one Color, one Roughness, and one Normal read. The band
-activates a second projection for six reads, while the small region where all three axis components are
-within the band performs nine. Metal063 adds one Metalness read per active projection, producing four,
-eight, or rarely twelve reads. Explicit texture gradients are calculated before the dynamic branches,
-preserving mip selection on WebGL. There is no parallax, height loop, or tessellation. A sharp mesh edge
-still has discontinuous geometric normals; use a bevel or shared smooth normals when the transition
-itself must cross that edge.
+- `Assets/CoreAIRbxTexturesLocal/ambientCG/<AssetId>/` for each successful set;
+- the merged local override catalog in the Resources path above;
+- `Assets/CoreAIRbxTexturesLocal/ambientCG/LICENSE.md` with CC0 1.0, asset IDs, resolution,
+  download date, and source URLs.
 
-## Tint and shared handles
+The frozen mappings were verified against ambientCG's exact `id=` API filter on 2026-09-02. Five old
+base IDs now require the `A` variant: RoofingTiles014A, RoofingTiles012A, Granite001A, Asphalt025A,
+and Snow010A. The API's `q=<compactId>` form tokenizes many IDs and is not a valid exact-ID check.
 
-The binder assigns only `Renderer.sharedMaterial`. The provider constructs six process-wide native
-materials on first textured lookup, and later part lookups return the same handles. `Part.Color` and
-transparency stay per renderer in the binder's reused `MaterialPropertyBlock`; `_Color` modulates the
-sampled albedo without cloning or mutating the shared material. An untouched textured part uses white
-as its renderer tint, leaving the authored Color map unchanged while its stored Roblox `Part.Color`
-remains medium stone grey. Assigning `Part.Color` marks it explicit and restores tint modulation.
+## Licensing and repository hygiene
 
-## Fallback behavior
+ambientCG sets are CC0 and may be redistributed with their provenance record. Fab/Megascans assets
+are licensed for the owner's project and must not be committed into this redistributable package.
+`.gitignore` excludes `Assets/CoreAIRbxTexturesLocal/` and its folder meta. Keep all Bridge/Fab exports
+and generated local catalogs there.
 
-If the complete texture catalog is absent, the hybrid provider logs once and delegates to the complete
-procedural catalog, so a texture-free package remains renderable. If any texture exists but a requested
-PBR set is incomplete, that enum returns `false` with the animated magenta/black diagnostic fallback.
-It never substitutes another texture set or silently presents a partial material. Callers must assign
-the returned handle even when `TryGetMaterial` returns `false`.
+The packaged ambientCG source record remains at
+`Resources/CoreAIRbxTextures/LICENSE.md`. Local downloader provenance is regenerated independently.
 
-`RbxTextureMaterialsAcceptanceEditModeTests` drives Lua `Part.Material` and `Part.Color` through the
-registry and `InstanceGameObjectBinder` into a real Renderer. It covers every mapping, tint property
-blocks, reference-identical shared handles, native material allocation count, texture-free procedural
-behavior, partial-set diagnostic fallback, importer color spaces, and the projection/read-count policy.
+## Verification
+
+`RbxMaterialTextureCatalogEditModeTests` covers catalog override precedence, textured promotion of a
+previously procedural material, DirectX keyword selection, incomplete-entry procedural fallback,
+shader contract, Megascans scanning, and the frozen ambientCG mapping. Catalog merge, shader-source,
+scanner, and mapping tests run off-device. `Material`, `Shader`, `Texture2D`, import settings, and log
+assertions require the Unity Editor.

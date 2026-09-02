@@ -263,7 +263,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
-        public void Capture_DurableModelReferencingModEphemeralPrimaryPart_FailsClosed()
+        public void Capture_DurableModelReferencingModEphemeralPrimaryPart_DropsReferenceAndEmitsDiagnostic()
         {
             InstanceRegistry registry = new(worldId: WorldId);
             RbxDataModel game = DataModelBootstrap.CreateGame(registry);
@@ -282,17 +282,33 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             PartProperties ephemeralProperties = PartProperties.CreateDefault();
             partSink.SetPartProperties(ephemeralPart.Id, in ephemeralProperties);
 
-            RbxWorldPackageException exception = Assert.Throws<RbxWorldPackageException>(() =>
-                RbxWorldPackageSerializer.Capture(
-                    new RbxWorldPackageCaptureContext(
-                        registry,
-                        game,
-                        partSink,
-                        NewSettings(),
-                        capturedAtUtc: CapturedAtUtc)));
+            RbxWorldPackagePayload payload = RbxWorldPackageSerializer.Capture(
+                new RbxWorldPackageCaptureContext(
+                    registry,
+                    game,
+                    partSink,
+                    NewSettings(),
+                    capturedAtUtc: CapturedAtUtc));
 
-            StringAssert.Contains("PrimaryPart", exception.Message);
-            StringAssert.Contains("mod-ephemeral", exception.Message);
+            InstanceSnapshot capturedModel = null;
+            foreach (InstanceSnapshot node in payload.Tree.Instances)
+            {
+                if (node.Id == durableModel.Id.Value)
+                {
+                    capturedModel = node;
+                    break;
+                }
+            }
+
+            Assert.IsNotNull(capturedModel);
+            Assert.IsNotNull(capturedModel.Model);
+            Assert.AreEqual(0UL, capturedModel.Model.PrimaryPartId);
+            Assert.AreEqual(1, payload.Diagnostics.Count);
+            Assert.AreEqual(durableModel.Id.Value, payload.Diagnostics[0].ModelId);
+            Assert.AreEqual(ephemeralPart.Id.Value, payload.Diagnostics[0].DroppedPrimaryPartId);
+            StringAssert.Contains("mod-ephemeral", payload.Diagnostics[0].Reason);
+            Assert.IsNotNull(durableModel.PrimaryPart);
+            Assert.AreEqual(ephemeralPart.Id, durableModel.PrimaryPart.Id);
         }
 
         [Test]
@@ -1842,6 +1858,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         private sealed class DelegateWorldPackageStore : IRbxWorldPackageStore
         {
+            public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+            {
+                return Array.Empty<RbxAutoSaveInfo>();
+            }
+
             private readonly Func<string, RbxWorldPackagePayload, CancellationToken,
                 UniTask<RbxWorldPackageWriteResult>> _createAutoAsync;
             private readonly IReadOnlyList<string> _manualSlots = new[] { "golden-slot" };

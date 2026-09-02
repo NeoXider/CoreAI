@@ -92,6 +92,28 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             GetOnClientEvent(actorId).Fire(arguments ?? Array.Empty<object>());
         }
 
+        /// <summary>Removes per-actor client signal state; used by the disconnect seam.</summary>
+        public bool RemoveActor(string actorId)
+        {
+            string actor = RequireActorId(actorId);
+            if (_clientSignals.TryGetValue(actor, out RbxScriptSignal signal))
+            {
+                signal.DisconnectAll();
+                return _clientSignals.Remove(actor);
+            }
+
+            return false;
+        }
+
+        /// <summary>Current per-actor signal count for leak tests.</summary>
+        public int ClientSignalCount => _clientSignals.Count;
+
+        /// <summary>Reports whether this remote retains a client signal for the actor.</summary>
+        public bool HasActor(string actorId)
+        {
+            return _clientSignals.ContainsKey(RequireActorId(actorId));
+        }
+
         private static INetworkBridge RequireBridge(INetworkBridge bridge)
         {
             return bridge ?? throw new ArgumentNullException(nameof(bridge));

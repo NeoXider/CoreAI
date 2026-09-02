@@ -134,6 +134,14 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Confirmed pre-mutation backup gate shared by runtime mutation tools.</summary>
         public IConfirmedWorldMutationGate WorldMutationGate;
 
+        /// <summary>
+        /// Resolves the trusted host/local actor used when a caller runs Lua through the plain
+        /// <c>ExecuteAsync(code, token)</c> seam (demos, self-tests, host scripts). In an ACL-versioned
+        /// world that path needs a server-generated envelope like every other production entry; without
+        /// a resolver such calls are refused.
+        /// </summary>
+        public Func<ActorContext> LocalActorResolver;
+
         // ---- Capability ceilings & guard budgets ------------------------------------------------
 
         /// <summary>
@@ -348,6 +356,7 @@ namespace CoreAI.Ai.LuaCs
                 options.ExecutionObserver ?? new NullLuaExecutionObserver(),
                 options.Observability,
                 options.WorldMutationGate);
+            executor.LocalActorResolver = options.LocalActorResolver;
 
             return new LuaCsModStack(runtime, executor, bindings);
         }
@@ -381,6 +390,13 @@ namespace CoreAI.Ai.LuaCs
             }
 
             public InstanceRegistry MutationRegistry => _bindings.RbxApi?.Registry;
+
+            public void RegisterGameplayApis(LuaCsApiRegistry registry,
+                ActorContext actorContext)
+            {
+                _bindings.Register(registry, _capabilities, null, actorContext);
+                _additional?.Invoke(registry, _capabilities);
+            }
 
             public void RegisterGameplayApis(LuaCsApiRegistry registry,
                 ActorContext actorContext, MutationEnvelope mutationEnvelope)

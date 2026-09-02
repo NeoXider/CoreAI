@@ -422,7 +422,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
         }
 
-        internal int LiveThreadCount => _records.Count;
+        /// <summary>Current live thread count for lifecycle and bounded-churn verification.</summary>
+        public int LiveThreadCount => _records.Count;
 
         /// <summary>Raised at each observable phase boundary in canonical pipeline order.</summary>
         public event Action<SchedulerPhase, double> PhaseReached;

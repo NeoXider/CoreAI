@@ -118,7 +118,10 @@ namespace CoreAI.Ai.LuaCs
             new(StringComparer.Ordinal);
         private readonly Dictionary<string, ExecutingScriptBacking> _executingScriptsByMod =
             new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ActorContext> _actorContextsByOwnerModId =
+            new(StringComparer.Ordinal);
         private readonly Action<string> _log;
+        private CoreAI.Ai.IInGameLlmChatServiceFactory _chatFactory;
         private int _consoleInvocationCounter;
         private float _runServiceElapsed;
         private bool _disposed;
@@ -153,7 +156,8 @@ namespace CoreAI.Ai.LuaCs
                 ? observability
                 : null;
             _schedulerThreadFactory = new LuaCsRbxScriptThreadFactory(
-                observability: resolvedObservability);
+                observability: resolvedObservability,
+                resumeEnvelope: ResumeSchedulerThread);
             _scheduler = new ModScheduler(
                 _schedulerThreadFactory, new RbxAccumulatingTimeSource());
             // WHY: no camera/physics behind the headless default, so clicks resolve to nothing until
@@ -341,6 +345,101 @@ namespace CoreAI.Ai.LuaCs
             return count;
         }
 
+        /// <summary>Attaches the actor-keyed chat factory released on disconnect.</summary>
+        public void AttachChatFactory(CoreAI.Ai.IInGameLlmChatServiceFactory chatFactory)
+        {
+            _chatFactory = chatFactory;
+        }
+
+        /// <summary>Admits a trusted actor to the loopback bridge and creates its Player once.</summary>
+        public RbxPlayer ConnectActor(ActorContext actorContext)
+        {
+            if (!actorContext.IsTrusted)
+            {
+                throw new RbxError(
+                    RbxErrorCode.NotAuthority,
+                    "an untrusted actor cannot connect to the network bridge",
+                    "use an ActorContext issued by the configured identity provider");
+            }
+
+            return EnsureNetworkActor(actorContext.ActorId);
+        }
+
+        /// <summary>Disconnects one admitted actor and releases every actor-owned runtime resource.</summary>
+        public bool DisconnectActor(ActorContext actorContext)
+        {
+            if (!actorContext.IsTrusted)
+            {
+                throw new RbxError(
+                    RbxErrorCode.NotAuthority,
+                    "an untrusted actor cannot disconnect a network identity",
+                    "use an ActorContext issued by the configured identity provider");
+            }
+
+            string actorId = actorContext.ActorId;
+            bool hadPlayer = _players.TryGetByActorId(actorId, out _);
+            bool hadBridge = IsNetworkActorAdmitted(actorId);
+            List<string> ownerModIds = new();
+            foreach (KeyValuePair<string, ActorContext> pair
+                     in _actorContextsByOwnerModId)
+            {
+                if (string.Equals(pair.Value.ActorId, actorId,
+                        StringComparison.Ordinal))
+                {
+                    ownerModIds.Add(pair.Key);
+                }
+            }
+
+            IReadOnlyList<RbxInstance> instances = _registry.GetLiveInstances();
+            bool hadRemoteState = false;
+            for (int index = 0; index < instances.Count; index++)
+            {
+                if (instances[index] is RbxRemoteEvent remote
+                    && remote.HasActor(actorId))
+                {
+                    hadRemoteState = true;
+                    break;
+                }
+            }
+
+            bool hadState = hadPlayer || hadBridge || hadRemoteState
+                            || ownerModIds.Count > 0;
+            if (!hadState)
+            {
+                return false;
+            }
+
+            _networkBridge.UnregisterActor(actorId);
+            RbxEnumItem reason = _enums.Get("PlayerExitReason")["Unknown"];
+            _players.RemoveActor(actorId, reason);
+            _chatFactory?.ReleaseActor(actorContext);
+
+            for (int index = 0; index < ownerModIds.Count; index++)
+            {
+                string ownerModId = ownerModIds[index];
+                KillAllScheduledOwnedBy(ownerModId);
+                _connections.DisconnectOwnedBy(ownerModId);
+                _registry.ClearActorAttribution(
+                    ownerModId, OriginTag.FromMod(ownerModId));
+            }
+
+            for (int index = 0; index < instances.Count; index++)
+            {
+                if (instances[index] is RbxRemoteEvent remote)
+                {
+                    remote.RemoveActor(actorId);
+                }
+            }
+
+            foreach (Dictionary<string, RemoteFunctionCallbackRegistration> callbacks
+                     in _clientRemoteCallbacks.Values)
+            {
+                callbacks.Remove(actorId);
+            }
+
+            return true;
+        }
+
         /// <summary>Releases bridge subscriptions, scheduler work, and captured Lua callback state.</summary>
         public void Dispose()
         {
@@ -369,6 +468,7 @@ namespace CoreAI.Ai.LuaCs
             _remoteFunctionWaitGenerations.Clear();
             _scheduledThreadsByMod.Clear();
             _currentSchedulerGenerationByMod.Clear();
+            _actorContextsByOwnerModId.Clear();
         }
 
         internal ModLoadCandidate BeginModLoadCandidate(string ownerModId)
@@ -464,6 +564,24 @@ namespace CoreAI.Ai.LuaCs
             }
 
             TrackScheduledThread(owner, generation, thread);
+        }
+
+        private ScriptResumeResult ResumeSchedulerThread(string ownerModId,
+            Func<ScriptResumeResult> resume)
+        {
+            ActorContext actorContext = ResolveOwnerActorContext(ownerModId);
+            return _registry.ApplyServerGeneratedMutation(
+                actorContext.ActorId,
+                actorContext.Grants.IsUnrestricted,
+                actorContext.WorldId,
+                "resume Lua scheduler thread owned by mod '" + ownerModId + "'",
+                resume);
+        }
+
+        internal ActorContext ResolveOwnerActorContext(string ownerModId)
+        {
+            return LuaCsRbxModContext.ResolveActorContext(
+                this, ownerModId, OriginTag.FromMod(ownerModId));
         }
 
         internal LuaState ResolveSchedulerOwnerState(LuaState fallbackState)
@@ -626,12 +744,38 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        private bool IsNetworkActorAdmitted(string actorId)
+        {
+            foreach (string admittedActorId in _networkBridge.ActorIds)
+            {
+                if (string.Equals(admittedActorId, actorId,
+                        StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private void DeliverNetworkEvent(RbxNetworkEventMessage message)
         {
             try
             {
-                if (message == null
-                    || !_registry.TryGet(message.RemoteId, out RbxInstance instance)
+                if (message == null)
+                {
+                    _log?.Invoke("Network event message was null.");
+                    return;
+                }
+
+                string admittedSender = null;
+                if (message.Direction == RbxNetworkDirection.ClientToServer)
+                {
+                    admittedSender = DemandAdmittedNetworkSender(
+                        message.SenderActorId, "deliver a network event");
+                }
+
+                if (!_registry.TryGet(message.RemoteId, out RbxInstance instance)
                     || !(instance is RbxRemoteEvent remote)
                     || remote.IsDestroyed)
                 {
@@ -651,7 +795,7 @@ namespace CoreAI.Ai.LuaCs
                 switch (message.Direction)
                 {
                     case RbxNetworkDirection.ClientToServer:
-                        RbxPlayer player = EnsureNetworkActor(message.SenderActorId);
+                        RbxPlayer player = EnsureNetworkActor(admittedSender);
                         remote.DeliverToServer(player, arguments);
                         return;
                     case RbxNetworkDirection.ServerToClient:
@@ -669,6 +813,10 @@ namespace CoreAI.Ai.LuaCs
                         _log?.Invoke("Network event has an unknown delivery direction.");
                         return;
                 }
+            }
+            catch (RbxError)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -708,8 +856,20 @@ namespace CoreAI.Ai.LuaCs
 
             try
             {
-                if (message == null
-                    || !_registry.TryGet(message.RemoteId, out RbxInstance instance)
+                if (message == null)
+                {
+                    responder.Fail("RemoteFunction request message was null");
+                    return;
+                }
+
+                string admittedSender = null;
+                if (message.Direction == RbxNetworkDirection.ClientToServer)
+                {
+                    admittedSender = DemandAdmittedNetworkSender(
+                        message.SenderActorId, "invoke a remote function");
+                }
+
+                if (!_registry.TryGet(message.RemoteId, out RbxInstance instance)
                     || !(instance is RbxRemoteFunction remote)
                     || remote.IsDestroyed)
                 {
@@ -735,7 +895,7 @@ namespace CoreAI.Ai.LuaCs
                 if (prefixCount == 1)
                 {
                     callbackArguments[0] = registration.Context.WrapInstance(
-                        EnsureNetworkActor(message.SenderActorId));
+                        EnsureNetworkActor(admittedSender));
                     destinationIndex = 1;
                 }
 
@@ -754,6 +914,22 @@ namespace CoreAI.Ai.LuaCs
                     responder.Fail(ex.Message);
                 }
             }
+        }
+
+        private string DemandAdmittedNetworkSender(string senderActorId,
+            string operation)
+        {
+            string sender = senderActorId?.Trim() ?? "";
+            if (sender.Length > 0 && IsNetworkActorAdmitted(sender))
+            {
+                return sender;
+            }
+
+            throw new RbxError(
+                RbxErrorCode.NotAuthority,
+                "actor '" + sender + "' cannot " + operation
+                + ": sender was not admitted through the network bridge",
+                "admit the trusted actor before accepting its network message");
         }
 
         private RemoteFunctionCallbackRegistration ResolveRemoteFunctionCallback(
@@ -1017,6 +1193,16 @@ namespace CoreAI.Ai.LuaCs
         /// ownerless registration signature used by consumers that do not submit envelopes.
         /// </summary>
         public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
+            string ownerModId, ActorContext actorContext)
+        {
+            RegisterCore(registry, capabilities, ownerModId, actorContext, null);
+        }
+
+        /// <summary>
+        /// Registers an actor-scoped one-off mutation surface without changing the legacy
+        /// ownerless registration signature used by consumers that do not submit envelopes.
+        /// </summary>
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
             string ownerModId, ActorContext actorContext, MutationEnvelope mutationEnvelope)
         {
             RegisterCore(registry, capabilities, ownerModId, actorContext, mutationEnvelope);
@@ -1050,17 +1236,29 @@ namespace CoreAI.Ai.LuaCs
                 : OriginTag.FromConsole(
                     "session-" + Interlocked.Increment(ref _consoleInvocationCounter));
 
-            LuaCsRbxModContext context = actorContext.HasValue && mutationEnvelope.HasValue
-                ? new LuaCsRbxModContext(
-                    this, capabilities, ownerModId, originTag,
-                    actorContext.Value, mutationEnvelope.Value)
-                : new LuaCsRbxModContext(this, capabilities, ownerModId, originTag);
+            LuaCsRbxModContext context;
+            if (actorContext.HasValue)
+            {
+                context = mutationEnvelope.HasValue
+                    ? new LuaCsRbxModContext(
+                        this, capabilities, ownerModId, originTag,
+                        actorContext.Value, mutationEnvelope.Value)
+                    : new LuaCsRbxModContext(
+                        this, capabilities, ownerModId, originTag,
+                        actorContext.Value);
+            }
+            else
+            {
+                context = new LuaCsRbxModContext(
+                    this, capabilities, ownerModId, originTag);
+            }
             if (!context.IsNetworkServer)
             {
                 EnsureNetworkActor(context.ActorContext.ActorId);
             }
             if (!string.IsNullOrWhiteSpace(ownerModId))
             {
+                _actorContextsByOwnerModId[ownerModId] = context.ActorContext;
                 _currentSchedulerGenerationByMod[ownerModId] =
                     context.ConnectionGeneration;
             }
@@ -1823,6 +2021,7 @@ namespace CoreAI.Ai.LuaCs
             RemoveRemoteFunctionCallbacksOwnedBy(ownerModId, null);
             _scheduledThreadsByMod.Remove(ownerModId);
             _currentSchedulerGenerationByMod.Remove(ownerModId);
+            _actorContextsByOwnerModId.Remove(ownerModId);
             return killed;
         }
 

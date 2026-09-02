@@ -44,7 +44,12 @@ namespace CoreAI.Mcp.Server
 
             if (luaExecutor != null)
             {
-                tools.Add(new ExecuteLuaMcpTool(luaExecutor));
+                tools.Add(modActorIdentityProvider == null
+                    ? new ExecuteLuaMcpTool(luaExecutor)
+                    : new ExecuteLuaMcpTool(
+                        luaExecutor,
+                        modActorIdentityProvider,
+                        BuiltInAgentRoleIds.Programmer));
             }
 
             if (modRuntime != null && settings != null && logger != null && modActorIdentityProvider != null)
