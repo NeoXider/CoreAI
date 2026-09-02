@@ -11,6 +11,21 @@ namespace CoreAI.Tests.EditMode
     [Category("Chat")]
     public sealed class ChatScrollAnchorEditModeTests
     {
+        /// <summary>
+        /// The reason <see cref="ChatScrollAnchor.KeepPosition"/> exists: a reader who scrolled up to
+        /// re-read something must not be dragged down by anything the assistant writes — not a message,
+        /// not a tool line, not a revealed card. The other two modes do move the view, each in its way.
+        /// </summary>
+        [TestCase(ChatScrollAnchor.Bottom, true)]
+        [TestCase(ChatScrollAnchor.AssistantMessageStart, true)]
+        [TestCase(ChatScrollAnchor.KeepPosition, false)]
+        public void AssistantContent_MovesTheView_OnlyOutsideKeepPosition(
+            ChatScrollAnchor anchor,
+            bool expected)
+        {
+            Assert.AreEqual(expected, CoreAiChatPanel.MovesViewForAssistantContent(anchor));
+        }
+
         [Test]
         public void RowStart_PinsRowTop_WithinScrollerRange()
         {
