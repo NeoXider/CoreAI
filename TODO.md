@@ -13,11 +13,13 @@
 
 ## MVP2.5 persistence release — status 2026-09-02
 
-Verified on the merged tree (commit `8579d319`, Unity 6000.3.14f1 Editor test runner):
-full EditMode **3204 total / 3195 passed / 0 failed / 9 skipped**; full PlayMode with the live
-`ling-3.0-tiny` model **113 / 110 / 0 / 3 skipped by design**; Node jslib tests 6/6 and SSE 12/12.
-Independent QA rounds (world package, materials, WebGL, demos, docs, architecture) are recorded in
-`PROGRESS.qa-*.md` and `dev-docs/ARCH_AUDIT_ONLINE_2026-09-02.md`, `dev-docs/DOCS_AUDIT_2026-09-02.md`.
+Verified on the merged tree (commit `5c62c43d`, Unity 6000.3.14f1 batchmode, XML in
+`artifacts/testresults/`): full EditMode **3256 total / 3247 passed / 0 failed / 9 skipped**
+(`g9.xml`); full PlayMode with the live `ling-3.0-tiny` model **114 total / 110 passed / 0 failed / 4 skipped**
+(`pm4.xml`); Node jslib tests 6/6 and SSE 12/12; ScaleHarness quick smoke green after the rung-zero
+envelope fix. Independent QA rounds (world package, materials, WebGL, demos, docs, architecture,
+texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
+`dev-docs/ARCH_AUDIT_ONLINE_2026-09-02.md`, `dev-docs/DOCS_AUDIT_2026-09-02.md`.
 
 - [x] W3.1–W3.4 world package: codec, one serializer, clean mod restart, backup safety — implemented,
       EditMode green, QA blocker (bare `Instance.new('Part')` locking every gated tool) fixed with a

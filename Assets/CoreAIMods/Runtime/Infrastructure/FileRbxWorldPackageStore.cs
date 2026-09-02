@@ -4,6 +4,8 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using CoreAI.Infrastructure;
+using CoreAI.Mods.Rbx.Binding;
+using CoreAI.Mods.Rbx.Instances;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 

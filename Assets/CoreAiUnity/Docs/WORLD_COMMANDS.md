@@ -204,7 +204,8 @@ coreai_component_set_vector("Trigger", "boxcollider", "size", 2, 3, 2)
 > **Not the same thing as the Rbx `.world` package.** This section covers the legacy
 > `world_command` object persistence (`WorldStateManager` → `world_state.json`). The Roblox-style
 > Rbx API has its own save format — a `.world` ZIP with the world-owned Instance tree plus the mod
-> sources, written by `save_world` and restored through the confirm-before-restore `load_world`
+> sources, written by `save_world` and restored through the confirm-before-restore `load_world` (the
+> autosave ring is listed by `list_autosaves` and restored the same way by `load_autosave`)
 > flow, with an autosave taken before every AI mutation. See
 > [WORLD_PACKAGE.md](../../../Docs/CoreAIMods/WORLD_PACKAGE.md) and
 > [RBX_API.md](../../CoreAI/Docs/RBX_API.md#saving-and-loading-a-world).
