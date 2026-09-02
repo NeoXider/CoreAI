@@ -93,9 +93,11 @@ Shader "CoreAI/Rbx/Procedural Neon"
                     input.positionWS * (_PatternScale * 3.2), cellularVisibility);
                 half pulse = 0.97h + sin(_Time.y * 2.0) * 0.03h;
                 half intensity = (half)_EmissionStrength * pulse * (0.9h + cellular * 0.12h + fresnel * 0.2h);
-                half3 materialColor = RbxComposeMaterialColor(_Color.rgb, _MaterialColor.rgb,
-                    _PartColorInfluence);
-                return half4(materialColor * intensity, 1.0h);
+                // WHY: the glow is Part.Color itself (Roblox Neon has no palette), so the shared
+                // albedo compose helper's 1.15 tint boost and floor must not shift the hue here.
+                half3 emissionColor = _MaterialColor.rgb * lerp(half3(1.0h, 1.0h, 1.0h), _Color.rgb,
+                    (half)saturate(_PartColorInfluence));
+                return half4(emissionColor * intensity, 1.0h);
             }
             ENDHLSL
         }

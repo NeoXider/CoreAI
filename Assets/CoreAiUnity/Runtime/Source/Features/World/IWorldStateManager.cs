@@ -29,5 +29,15 @@ namespace CoreAI.Infrastructure.World
         /// need this to override the interval for a specific scene.
         /// </summary>
         void StartAutoSave(float intervalSeconds);
+
+        /// <summary>
+        /// Reports whether the writes this manager has just performed are durable, so a caller may
+        /// claim "saved" only once the platform confirms it. On WebGL the callback runs from the
+        /// matching browser <c>FS.syncfs</c> completion — never at request-issuance time, which
+        /// MVP2.5 gate W3.5 fails as "reporting success before sync". On other platforms the file
+        /// write is already durable and the callback runs with <c>true</c> (synchronously). Never
+        /// throws: a failed, timed-out or cancelled flush reports <c>false</c>.
+        /// </summary>
+        void ConfirmDurability(Action<bool> onConfirmed);
     }
 }

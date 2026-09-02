@@ -17,7 +17,7 @@ MonoBehaviour:
   autoPriority: 0
   apiBaseUrl: http://127.0.0.1:1234/v1
   apiKey:
-  modelName: qwen3.5-4b-mtp
+  modelName: ling-3.0-tiny
   visionSupport: 0
   enableTemperatureOverriding: 0
   temperature: 0.2

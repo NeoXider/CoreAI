@@ -859,19 +859,30 @@ namespace CoreAI.Demos.ProceduralMaterials
             return text;
         }
 
+        /// <summary>
+        /// Builds the ordered selection list: one slot per distinct catalog entry. The wall repeats
+        /// Glass and ForceField near the transparency backdrop, but the judging rig and the evidence
+        /// dump must count each material exactly once (45 + the diagnostic fallback = 46).
+        /// </summary>
         private static RbxProceduralMaterialsShowcase.MaterialSelection[]
             CreateMaterialSelections()
         {
-            RbxProceduralMaterialsShowcase.MaterialSelection[] selections =
-                new RbxProceduralMaterialsShowcase.MaterialSelection[Swatches.Length];
+            List<RbxProceduralMaterialsShowcase.MaterialSelection> selections =
+                new List<RbxProceduralMaterialsShowcase.MaterialSelection>(Swatches.Length);
+            HashSet<int> seenValues = new HashSet<int>();
             for (int index = 0; index < Swatches.Length; index++)
             {
                 SwatchSpec spec = Swatches[index];
-                selections[index] = new RbxProceduralMaterialsShowcase.MaterialSelection(
-                    spec.MaterialName, spec.MaterialValue);
+                if (!seenValues.Add(spec.MaterialValue))
+                {
+                    continue;
+                }
+
+                selections.Add(new RbxProceduralMaterialsShowcase.MaterialSelection(
+                    spec.MaterialName, spec.MaterialValue));
             }
 
-            return selections;
+            return selections.ToArray();
         }
 
         private static int FindMaterialIndex(string materialName)

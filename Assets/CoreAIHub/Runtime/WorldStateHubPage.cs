@@ -10,12 +10,33 @@ namespace CoreAI.Hub.UI
     {
         public const string DefaultPageId = "coreai.hub.worldstate";
 
+        /// <summary>Prefix of the saved-state line asserted by the G11 §6.5 browser run.</summary>
+        internal const string SavedStatePrefix = "Has saved state: ";
+
+        /// <summary>Shown while the browser has been asked to flush but has not answered yet.</summary>
+        public const string FlushPendingText =
+            "Browser storage: flushing — not durable yet.";
+
+        /// <summary>Shown once the browser's syncfs callback reported success.</summary>
+        public const string FlushConfirmedText =
+            "Browser storage: flush confirmed — this state survives a reload.";
+
+        /// <summary>Shown when the browser's syncfs callback reported a failure.</summary>
+        public const string FlushUnconfirmedText =
+            "Browser storage: flush NOT confirmed — this change may not survive a reload.";
+
         private readonly IWorldStateManager _manager;
 
         private Label _statusLabel;
+        private Label _durabilityLabel;
         private Button _resetButton;
         private Button _saveButton;
         private bool _subscribed;
+
+        // WHY: G11 §6.5 / W3.5 — "Has saved state" must never flip on IDBFS request issuance, only
+        // once the browser's FS.syncfs completion callback answers. While this is true the status
+        // label keeps its last confirmed value.
+        private bool _flushPending;
 
         public WorldStateHubPage(IWorldStateManager manager,
             string pageId = DefaultPageId,
@@ -46,7 +67,8 @@ namespace CoreAI.Hub.UI
             title.style.marginBottom = 8f;
             panel.Add(title);
 
-            _statusLabel = new Label("Has saved state: " + (_manager != null && _manager.HasSavedState ? "Yes" : "No"))
+            _statusLabel = new Label(
+                ComposeStatusText(false, string.Empty, _manager != null && _manager.HasSavedState))
             {
                 name = "coreai-hub-worldstate-status"
             };
@@ -92,6 +114,21 @@ namespace CoreAI.Hub.UI
 
             panel.Add(actions);
 
+            _durabilityLabel = new Label(_flushPending ? FlushPendingText : string.Empty)
+            {
+                name = "coreai-hub-worldstate-durability"
+            };
+            _durabilityLabel.style.color = new Color(0.7f, 0.7f, 0.7f, 1f);
+            _durabilityLabel.style.fontSize = 12f;
+            _durabilityLabel.style.whiteSpace = WhiteSpace.Normal;
+            panel.Add(_durabilityLabel);
+
+            if (_flushPending)
+            {
+                _saveButton.SetEnabled(false);
+                _resetButton.SetEnabled(false);
+            }
+
             // WHY: Guarded subscribe + the OnDestroyed unsubscribe below: without them every page
             // rebuild added another handler and the DI-singleton manager pinned dead VisualElement
             // trees through the event delegate.
@@ -115,23 +152,51 @@ namespace CoreAI.Hub.UI
 
         private void OnResetClicked()
         {
-            if (_manager == null)
+            if (_manager == null || _flushPending)
             {
                 return;
             }
 
+            // WHY: BeginFlush before Reset — Reset raises StateReset synchronously, and the handler
+            // would otherwise publish "No" before the browser deleted anything durably.
+            BeginFlush();
             _manager.Reset();
-            RefreshStatus();
+            _manager.ConfirmDurability(OnDurabilityConfirmed);
         }
 
         private void OnSaveClicked()
         {
-            if (_manager == null)
+            if (_manager == null || _flushPending)
             {
                 return;
             }
 
+            BeginFlush();
             _manager.Save();
+            _manager.ConfirmDurability(OnDurabilityConfirmed);
+        }
+
+        private void BeginFlush()
+        {
+            _flushPending = true;
+            _saveButton?.SetEnabled(false);
+            _resetButton?.SetEnabled(false);
+            if (_durabilityLabel != null)
+            {
+                _durabilityLabel.text = FlushPendingText;
+            }
+        }
+
+        private void OnDurabilityConfirmed(bool durable)
+        {
+            _flushPending = false;
+            _saveButton?.SetEnabled(true);
+            _resetButton?.SetEnabled(true);
+            if (_durabilityLabel != null)
+            {
+                _durabilityLabel.text = durable ? FlushConfirmedText : FlushUnconfirmedText;
+            }
+
             RefreshStatus();
         }
 
@@ -140,12 +205,32 @@ namespace CoreAI.Hub.UI
             RefreshStatus();
         }
 
+        /// <summary>
+        /// Status-text policy. While a browser flush is in flight the label must keep its last
+        /// confirmed text: G11 §6.5 and MVP2.5 gate W3.5 fail a page that reports a durable save at
+        /// IDBFS request-issuance time, before the <c>FS.syncfs</c> completion callback answers.
+        /// </summary>
+        internal static string ComposeStatusText(
+            bool flushPending,
+            string lastConfirmedText,
+            bool hasSavedState)
+        {
+            return flushPending
+                ? lastConfirmedText
+                : SavedStatePrefix + (hasSavedState ? "Yes" : "No");
+        }
+
         private void RefreshStatus()
         {
-            if (_statusLabel != null)
+            if (_statusLabel == null)
             {
-                _statusLabel.text = "Has saved state: " + (_manager != null && _manager.HasSavedState ? "Yes" : "No");
+                return;
             }
+
+            _statusLabel.text = ComposeStatusText(
+                _flushPending,
+                _statusLabel.text,
+                _manager != null && _manager.HasSavedState);
         }
     }
 }

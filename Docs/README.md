@@ -36,6 +36,19 @@ Use these paths when you have a concrete task:
 | Expose Lua or AI-authored scripts | Lua sandbox security -> runtime binding code -> sandbox tests |
 | Decide what to build next | Module audit -> TODO -> orchestration plan |
 
+## Roblox-style mod API (Rbx)
+
+The Lua surface a mod builds worlds with, and the artifacts it produces:
+
+| Document | Purpose |
+|---|---|
+| [Assets/CoreAI/Docs/RBX_API.md](../Assets/CoreAI/Docs/RBX_API.md) | User-facing reference: `Instance.new`, datatypes, services, `BasePart.Material` and `Part.Color`, saving/loading a world, the documented `RemoteFunction` timeout deviation. |
+| [CoreAIMods/WORLD_PACKAGE.md](CoreAIMods/WORLD_PACKAGE.md) | The `.world` package format, validation limits, manual slots vs. the autosave ring, the confirm/reject load flow, and runtime session replacement. |
+| [Assets/CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md](../Assets/CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md) | The procedural shader catalog behind `Enum.Material`: it defines all 45 items and the magenta diagnostic fallback; six of them are overridden by the texture catalog at runtime. |
+| [Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md](../Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md) | The six CC0 texture-backed materials (Brick, Wood, WoodPlanks, Grass, Cobblestone, Metal) and their projection/tint rules. |
+| [CoreAIMods/RBX_API_SKILL.md](CoreAIMods/RBX_API_SKILL.md) | How the agent-facing `Rbx API` skill text is produced and kept in sync. |
+| [CoreAIMods/ROBLOX_API_ROADMAP.md](CoreAIMods/ROBLOX_API_ROADMAP.md) | The definitive MVP0–MVP17 ladder and every locked API decision. |
+
 ## Product And Planning
 
 | Document | Purpose |

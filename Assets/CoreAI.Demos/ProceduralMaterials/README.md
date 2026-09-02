@@ -4,7 +4,9 @@ This demo compares all 45 runtime `Enum.Material` mappings plus the visible inva
 controlled URP setup. It uses the same process-wide `RbxTextureMaterialProvider` hybrid handles as a
 built player: six entries use their CC0 PBR sets and the others delegate to
 `RbxProceduralMaterialProvider`. Every judging sample starts with the same neutral-white `Part.Color`;
-the rig does not brighten, recolour, or otherwise compensate the texture data.
+the rig does not brighten, recolour, or otherwise compensate the texture data. Neon therefore glows
+white here: its emission is `Part.Color` itself, as in Roblox, so a red part glows red and the default
+grey part glows grey.
 
 The public Lua enum contains 45 items and every item has a runtime render mapping. The catalog includes
 opaque, metallic, organic, terrain, transparent, force-field, air/water, and recent Roblox surface
@@ -74,6 +76,9 @@ Normal once normally, twice inside the approximately 8.1-degree two-axis band, a
 triple-axis junctions; Metal adds Metalness. None uses parallax.
 The host-authored showcase applies a per-renderer scale override so one displayed sample unit is treated
 as one stud; runtime-bound Parts continue to use `Size * MetersPerStud` without that override.
+The runtime textured handles re-derive `_TextureScale` whenever a world package replaces
+`RbxSpace.MetersPerStud`, so stud-authored tile widths survive a session-scale change; the showcase
+override multiplies by the current scale and stays consistent with it.
 
 Physical directionally projected procedural materials use object-aligned, world-size coordinates and the
 same narrow geometric-normal transition before analytical relief perturbs the lighting normal.

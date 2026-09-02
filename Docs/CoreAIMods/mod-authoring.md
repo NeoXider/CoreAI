@@ -84,9 +84,10 @@ order is not part of the CoreAI or Roblox authoring contract.
 ## Roblox services and deferred placeholders
 
 In the standard runtime, `game:GetService()` resolves these tree-backed services: `Workspace`,
-`Lighting`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`,
-`UserInputService`, and `RunService`. A tree-backed service can still have service-specific members
-that have not landed; resolution alone does not promise that every Roblox member exists.
+`Lighting`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `Players`,
+`HttpService`, `UserInputService`, and `RunService`. A tree-backed service can still have
+service-specific members that have not landed; resolution alone does not promise that every Roblox
+member exists.
 
 A known catalog service without an implementation also resolves successfully. It returns a
 placeholder, and the first member read, write, or method lookup raises `NOT_IMPLEMENTED` with the
@@ -94,8 +95,6 @@ delivery rung recorded by `ServiceCatalog`:
 
 | Service | Catalog delivery rung |
 |---|---|
-| `HttpService` | MVP2 |
-| `Players` | MVP8 |
 | `TweenService` | MVP8 |
 | `CollectionService` | MVP8 |
 | `Debris` | MVP8 |

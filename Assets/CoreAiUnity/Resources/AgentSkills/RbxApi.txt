@@ -70,18 +70,23 @@ buttons live at 1000+).
 ## 4. Instances
 
 - `Instance.new("Class"[, parent])` — creatable classes are "Part", "Folder", "Model",
-  "ClickDetector". Any other name errors. The parent argument is deprecated (logs once); set
-  `.Parent` after configuring instead.
+  "ClickDetector", "RemoteEvent", "UnreliableRemoteEvent", "RemoteFunction". Any other name
+  errors (a Camera is not creatable — reach the world camera through `workspace.CurrentCamera`).
+  The parent argument is deprecated (logs once); set `.Parent` after configuring instead.
+- `RemoteEvent`/`UnreliableRemoteEvent` fire one-way. `RemoteFunction:InvokeServer/InvokeClient`
+  yields for a reply and is bounded to 30 scheduler seconds: a missing or stalled receiver raises
+  an error instead of yielding forever (a deliberate deviation from Roblox). Wrap a fallible
+  invoke in `pcall`.
 - `ClickDetector` — parent one under a Part to make that 3D part clickable:
   `local cd = Instance.new("ClickDetector"); cd.Parent = part; cd.MouseClick:Connect(function() ... end)`.
   MouseClick fires (no args) when the user clicks THAT part with the mouse and it is within
   `cd.MaxActivationDistance` studs (default 32). Only the part under the cursor fires.
 - `game:GetService("Name")` — the standard runtime has live tree-backed `Workspace`, `Lighting`,
-  `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`,
-  `UserInputService`, and `RunService` services.
-- The catalog's 13 registrations/rungs are: `RunService` (MVP2; fallback), `HttpService`
-  (MVP2), `Players` (MVP8), `TweenService` (MVP8), `CollectionService` (MVP8), `Debris`
-  (MVP8), `DataStoreService` (MVP9), `UserInputService` (MVP10; fallback),
+  `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `Players`,
+  `HttpService`, `UserInputService`, and `RunService` services.
+- The catalog's 13 registrations are: `HttpService` and `Players` (tree-backed), `RunService`
+  (MVP2; fallback), `UserInputService` (MVP10; fallback), `TweenService` (MVP8),
+  `CollectionService` (MVP8), `Debris` (MVP8), `DataStoreService` (MVP9),
   `ContextActionService` (MVP10), `SoundService` (MVP15), `AIService`
   (`a future MVP (reserved)`), `PathfindingService` (`no planned MVP (not planned)`), and
   `MarketplaceService` (`no planned MVP (not planned)`). The standard runtime replaces the
@@ -116,12 +121,19 @@ Pivot/property writes need WorldEdit. BaseParts also support `GetPivot()` and `P
 
 Read+write (writes need WorldEdit): `Position`, `Size`, `CFrame` (Vector3/Vector3/CFrame),
 `Color` (Color3), `Transparency` (0..1), `Anchored` (bool), `CanCollide` (bool),
-`Shape` (Enum.PartType).
-Setting `Position` keeps the part's rotation; setting `CFrame` sets position AND rotation.
-`Shape` accepts `Enum.PartType.Ball`, `.Block`, `.Cylinder`, `.Wedge` (each materializes its
-real mesh); `.CornerWedge` is accepted but currently draws as a Block until its mesh lands.
-`Material`, `Orientation`, `Rotation` are NOT implemented yet and raise NOT_IMPLEMENTED loudly
-— use CFrame for rotation until then.
+`Shape` (Enum.PartType), `Material` (Enum.Material), `Orientation` and `Rotation` (Vector3 of
+degrees; Orientation is YXZ, Rotation is XYZ).
+Setting `Position` keeps the part's rotation; setting `CFrame` sets position AND rotation;
+setting `Orientation` or `Rotation` sets the rotation and keeps the position.
+`Shape` accepts `Enum.PartType.Ball`, `.Block`, `.Cylinder`, `.Wedge`, `.CornerWedge` — every
+one of them materializes its real mesh.
+`Material` accepts any of the 45 `Enum.Material` items and all 45 render. Brick, Wood,
+WoodPlanks, Grass, Cobblestone and Metal use textured PBR surfaces; the rest are procedural.
+A material id outside the enum resolves to a magenta diagnostic material instead of failing
+quietly, so a wrong value is visible at once.
+`Color` is an independent Roblox-style tint. A part whose `Color` was never assigned shows the
+material's own albedo; assigning `Color` modulates that albedo from then on. `Neon` is the one
+material with no palette of its own — its emission IS `Part.Color`, so set `Color` to pick the glow.
 
 ## 6. Input (UserInputService)
 
@@ -190,8 +202,9 @@ the current world, so report it instead of retrying the spawn.
 
 ## 10. Not implemented (raise NOT_IMPLEMENTED — do not use)
 
-- `WaitForChild(name)` when the child is absent, `Instance.fromExisting` (use `Clone`).
-- Part `Material`, `Orientation`, `Rotation` properties (Shape DOES work now — see section 5).
+- `Instance.fromExisting` (use `Clone`).
+- Part `Shape`, `Material`, `Orientation` and `Rotation` ALL work now — see section 5. So does
+  `WaitForChild(name)` for an absent child: it yields through the scheduler bridge.
 - Luau syntax IS accepted and auto-downleveled to Lua 5.2 before compiling: `+=` (and
   `-=/*=//=/%=/^=/..=`), `continue`, `` `str{}` `` interpolation, if-then-else expressions, and
   type annotations/casts all work. Plain Lua 5.2 is unaffected.

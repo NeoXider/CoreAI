@@ -17,6 +17,29 @@ namespace CoreAI.Tests.PlayMode
 {
     public sealed class CoreAiDemoScenesSmokePlayModeTests
     {
+        // WHY: the published QA matrix is the frozen G11 WebGL scene list owned by
+        // CoreAIG11WebGlBuild.FrozenScenePaths (Assets/CoreAiUnity/Editor/CoreAIBuildMenu.cs). Pinning it
+        // here — instead of globbing the demo folder — makes this smoke cover exactly the scenes that
+        // ship. FrozenList_MatchesBuildEntryPointAndProjectScenes below fails the moment the two drift.
+        private static readonly string[] FrozenDemoScenePaths =
+        {
+            "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity",
+            "Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity",
+            "Assets/CoreAI.Demos/LiveMechanics/LiveMechanicsDemo.unity",
+            "Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity",
+            "Assets/CoreAI.Demos/LiveMechanicsMods/WaveAutoBattlerModsDemo.unity",
+            "Assets/CoreAI.Demos/LuaMods/LuaModsDemo.unity",
+            "Assets/CoreAI.Demos/MiniRpg/MiniRpgModsDemo.unity",
+            "Assets/CoreAI.Demos/ModdableUnits/ModdableUnitsDemo.unity",
+            "Assets/CoreAI.Demos/MultiplayerFoundation/MultiplayerFoundationDemo.unity",
+            "Assets/CoreAI.Demos/ProceduralMaterials/ProceduralMaterialsShowcase.unity",
+            "Assets/CoreAI.Demos/QwenDemo/QwenGenieDemo.unity",
+            "Assets/CoreAI.Demos/QwenDemo/QwenSpellcraftDemo.unity",
+            "Assets/CoreAI.Demos/Skills/SkillsDemo.unity",
+            "Assets/CoreAI.Demos/WorldCommands/WorldCommandsDemo.unity",
+            "Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity"
+        };
+
         private Application.LogCallback _capture;
         private bool _previousIgnoreFailingMessages;
         private CoreAISettingsAsset _sharedSettings;
@@ -65,12 +88,11 @@ namespace CoreAI.Tests.PlayMode
             _capture = capture;
             Application.logMessageReceived += capture;
 
-            IReadOnlyList<string> scenePaths = FindFirstPartyDemoScenePaths();
             Assert.AreEqual(
                 15,
-                scenePaths.Count,
+                FrozenDemoScenePaths.Length,
                 "Published first-party demo inventory changed; update the G11 build matrix and QA evidence.");
-            foreach (string scenePath in scenePaths)
+            foreach (string scenePath in FrozenDemoScenePaths)
             {
                 currentScene = scenePath;
                 AssertSerializedAssetReferencesResolve(scenePath);
@@ -142,6 +164,63 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsTrue(
                 material.shader.isSupported,
                 $"{owner} uses unsupported shader '{material.shader.name}' in {scenePath}.");
+        }
+
+        /// <summary>
+        /// Keeps the pinned QA matrix, the G11 WebGL build entry point and the scenes actually present in
+        /// the project in lockstep. Any of the three drifting is a real defect: a scene the player build
+        /// ships but the smoke never loads, or a demo scene nobody added to the build matrix.
+        /// </summary>
+        [Test]
+        public void FrozenList_MatchesBuildEntryPointAndProjectScenes()
+        {
+            foreach (string scenePath in FrozenDemoScenePaths)
+            {
+                Assert.IsTrue(
+                    File.Exists(Path.GetFullPath(scenePath)),
+                    $"Frozen demo scene is missing from the project: {scenePath}");
+            }
+
+            CollectionAssert.AreEqual(
+                FrozenDemoScenePaths,
+                ReadBuildEntryPointFrozenScenePaths(),
+                "The pinned QA matrix and CoreAIG11WebGlBuild.FrozenScenePaths disagree. Both must list " +
+                "the same scenes in the same order.");
+
+            CollectionAssert.AreEquivalent(
+                FrozenDemoScenePaths,
+                FindFirstPartyDemoScenePaths(),
+                "First-party demo scenes on disk differ from the frozen G11 matrix. Add the new scene to " +
+                "CoreAIG11WebGlBuild.FrozenScenePaths and to this test, or delete the stale scene.");
+        }
+
+        /// <summary>
+        /// Reads the build matrix from <c>CoreAIG11WebGlBuild</c> by reflection: the FastNoLlm test
+        /// assembly deliberately does not reference CoreAI.Editor, and an asmdef reference just to read a
+        /// string array is not worth the coupling.
+        /// </summary>
+        private static string[] ReadBuildEntryPointFrozenScenePaths()
+        {
+            const string typeName = "CoreAI.Editor.CoreAIG11WebGlBuild";
+            System.Type buildType = null;
+            foreach (System.Reflection.Assembly assembly in
+                     System.AppDomain.CurrentDomain.GetAssemblies())
+            {
+                buildType = assembly.GetType(typeName, false);
+                if (buildType != null)
+                {
+                    break;
+                }
+            }
+
+            Assert.IsNotNull(buildType, $"{typeName} was not found; the G11 WebGL build entry point moved.");
+            System.Reflection.MethodInfo method = buildType.GetMethod(
+                "GetFrozenScenePaths",
+                System.Reflection.BindingFlags.Static
+                | System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Public);
+            Assert.IsNotNull(method, $"{typeName}.GetFrozenScenePaths() was not found.");
+            return (string[])method.Invoke(null, null);
         }
 
         private static IReadOnlyList<string> FindFirstPartyDemoScenePaths()

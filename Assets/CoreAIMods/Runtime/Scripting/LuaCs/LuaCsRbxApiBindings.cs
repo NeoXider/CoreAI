@@ -1246,6 +1246,15 @@ namespace CoreAI.Ai.LuaCs
                     className, context.OwnerModId, context.OriginTag);
                 try
                 {
+                    // WHY: the sink answers reads with Roblox defaults for an unpushed Part, but the
+                    // world package refuses to capture a BasePart without stored state; seeding the
+                    // default bundle here keeps every scripted Part capturable from its first frame.
+                    if (instance.IsA("BasePart"))
+                    {
+                        PartProperties defaults = PartProperties.CreateDefault();
+                        _partSink.SetPartProperties(instance.Id, in defaults);
+                    }
+
                     if (parentInstance != null)
                     {
                         instance.Parent = parentInstance;

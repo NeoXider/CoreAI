@@ -32,9 +32,9 @@ Same pattern as the Lua Modding skill:
   Programmer role (`AddSkillForRole`), loading the Resources override if present and the built-in
   constant otherwise. `read_skill` resolves the skill by its name, `"Rbx API"`.
 
-The Rbx Lua bindings themselves live in `Assets/CoreAIMods/Runtime/Scripting/LuaCs/LuaCsRoblox*`
+The Rbx Lua bindings themselves live in `Assets/CoreAIMods/Runtime/Scripting/LuaCs/LuaCsRbx*`
 (namespaces `CoreAI.Mods.Rbx.*`, assemblies `CoreAI.RbxApi.*`) and are enabled through
-`LuaCsModStackOptions.RobloxApi`, which the same installer wires by default.
+`LuaCsModStackOptions.RbxApi`, which the same installer wires by default.
 
 ## Current shipped scheduler, signal, and service behavior
 
@@ -51,3 +51,22 @@ rung. See the exact current service table and author-facing examples in
 
 For the full picture of what has landed and what is planned, see
 [`ROBLOX_API_ROADMAP.md`](ROBLOX_API_ROADMAP.md).
+
+## What the skill text currently claims
+
+Keep these in step with the runtime when the skill text is edited:
+
+- Creatable classes are `Part`, `Folder`, `Model`, `ClickDetector`, `RemoteEvent`,
+  `UnreliableRemoteEvent`, and `RemoteFunction`. `Camera` is not creatable — a mod reaches the
+  world camera through `workspace.CurrentCamera`.
+- `BasePart` exposes `Shape`, `Material`, `Orientation`, and `Rotation` in addition to the MVP1
+  set. All 45 `Enum.Material` items render; an unmapped id resolves to a magenta diagnostic
+  material. `Part.Color` stays an independent tint over the material's own albedo.
+- `WaitForChild` yields for an absent child, warns after five seconds, and honours a timeout
+  overload.
+- `RemoteFunction` invocation is bounded to 30 scheduler seconds — a documented deviation from
+  Roblox, detailed in [`RBX_API.md`](../../Assets/CoreAI/Docs/RBX_API.md).
+
+The user-facing companion to this skill is
+[`Assets/CoreAI/Docs/RBX_API.md`](../../Assets/CoreAI/Docs/RBX_API.md); world saving/loading is
+specified in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md).

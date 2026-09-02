@@ -66,6 +66,11 @@ namespace CoreAI.Tests.EditMode
             public void StartAutoSave(float intervalSeconds)
             {
             }
+
+            public void ConfirmDurability(Action<bool> onConfirmed)
+            {
+                onConfirmed?.Invoke(true);
+            }
         }
 
         [Test]

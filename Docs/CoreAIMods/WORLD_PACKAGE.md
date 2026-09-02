@@ -30,6 +30,9 @@ complete referenced subtree to world ownership.
 `Player` nodes, BaseParts without readable property state, mod-owned nodes injected into a package,
 mods without source, non-finite values, invalid origin tags, dangling durable references, and
 unsupported class/state combinations are rejected instead of being silently discarded.
+`Instance.new` seeds every scripted BasePart with the Roblox default Part bundle the moment it is
+created, so a Part that never had a property written is still readable state for capture; only a
+missing sink or a host-created BasePart whose state was never pushed is rejected.
 `UDim.Offset` is parsed as an exact invariant Int32, not through float.
 
 ## Validation and limits
@@ -60,8 +63,9 @@ transactional adapters before exposing it; the codec does not claim general roll
 
 `FileRbxWorldPackageStore` is a storage primitive, not production save/load orchestration. Manual slots
 are create-once. Autosaves use timestamp/sequence/trigger names and rotate only after the new file's
-persistence callback reports success. Store mutations are serialized so two saves cannot interleave
-their durability phases. Manual bytes are never rotated.
+persistence callback reports success. The just-confirmed autosave is never a rotation candidate, so a
+host clock that moved backwards cannot make a successful backup delete itself. Store mutations are
+serialized so two saves cannot interleave their durability phases. Manual bytes are never rotated.
 
 Autosave rotation is a two-phase durability protocol. The first browser callback confirms the new
 file. Old files are then journalled before deletion, and a second callback confirms the frozen ring.
@@ -109,7 +113,12 @@ still requires the owner-run focused/full EditMode gate.
 and frame pump. `ILuaModRuntime`, `LuaTool.ILuaExecutor`, `LuaCsModStack`, `LuaCsLogicSlots`, and
 `ILuaModSourceStore` are stable facades: consumers may retain them while every call resolves the
 published session. The scene adapter stages a fresh inactive hierarchy; headless players use the
-same controller with an engine-free host adapter.
+same controller with an engine-free host adapter. Capture always carries a camera pose because the
+Lua surface falls back to an in-memory rig, so both adapters stage a rig for every package: the
+engine-free adapter restores Part state into an in-memory sink and camera state into an in-memory
+rig that the replacement session's bindings read, and a scene host without a camera stages the same
+in-memory rig instead of refusing the package it captured itself. Publication applies the staged
+pose to the live camera only when the scene has one.
 
 Confirmed loading first writes the package's exact source set into an isolated version directory
 and awaits a successful `SyncAsync` completion. No world scale or camera state changes before that

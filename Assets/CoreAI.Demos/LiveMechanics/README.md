@@ -1,4 +1,7 @@
-﻿# Live Mechanics Demo - Real LLM Changes Mechanics Through Chat
+# Live Mechanics Demo - Real LLM Changes Mechanics Through Chat
+
+**What you will see:** you ask for a critical-hit rule in plain language, the model writes the Lua, and the
+fight in front of you starts landing crits — no recompile, no restart.
 
 Scene: `Assets/CoreAI.Demos/LiveMechanics/LiveMechanicsDemo.unity`
 

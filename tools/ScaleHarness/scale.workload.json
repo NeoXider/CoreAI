@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "scale-staircase-v1",
+  "frozenUtc": "2026-09-02T00:00:00Z",
+  "rationale": "Frozen BEFORE the first measurement and never tuned afterwards. Per actor: one client Lua mod doing a fixed 32-iteration loop per RunService.Heartbeat (the smallest realistic per-frame body: read, loop, write), one persistent task.wait loop (keeps a live scheduler thread per actor, as real Roblox scripts do), one RemoteEvent round trip every 6 frames (10 Hz per actor, answered by the host server mod with a targeted FireClient), and one Part spawn/destroy every 30 frames through the ACL/quota-checked registry. Chat: production QueuedAiOrchestrator with the production default MaxPending (64) and the G10-frozen concurrency (4) over a fixed 100 ms scripted provider; one synchronized burst (all actors at measurement frame 0) and one staggered wave (each actor once, uniformly over the second half of the window). Frames are logical 1/60 s, paced to wall clock; per-frame CPU is measured regardless of pacing.",
+  "staircase": [20, 50, 100, 200],
+  "repeats": 3,
+  "frameRate": 60,
+  "warmupFrames": 120,
+  "measurementFrames": 600,
+  "drainFramesMax": 900,
+  "snapshotEventName": "scale.snapshot",
+  "perActor": {
+    "modsPerActor": 1,
+    "heartbeatLoopIterations": 32,
+    "persistentWaitLoops": 1,
+    "persistentWaitSeconds": 0.25,
+    "remoteFireEveryFrames": 6,
+    "partSpawnEveryFrames": 30,
+    "phaseOffsetByActorIndex": true
+  },
+  "chat": {
+    "orchestratorMaxConcurrent": 4,
+    "orchestratorMaxPending": 64,
+    "stubLatencyMilliseconds": 100,
+    "synchronizedBurstAtFrame": 0,
+    "staggeredWindowStartFrame": 300,
+    "staggeredWindowEndFrame": 600,
+    "p95EndToEndBudgetMilliseconds": 5000
+  },
+  "network": {
+    "loopbackMaxClientRequestsPerSecond": 500
+  },
+  "budgets": {
+    "frameMilliseconds": [4, 16],
+    "passRule": "A step passes a frame budget only when EVERY repeat's median main-thread frame time is within the budget, every frozen work counter is non-zero, the chat gate holds (0 admission refusals, all offered requests served, p95 end-to-end <= p95EndToEndBudgetMilliseconds for both patterns) and the managed heap slope is within heapSlopeMegabytesPerMinuteMax. Worst frames and p99 are reported, never hidden.",
+    "heapSlopeMegabytesPerMinuteMax": 1,
+    "fairnessMaxMinRatioMax": 2
+  },
+  "nonZeroCounters": [
+    "guardedSteps",
+    "threadResumes",
+    "heartbeats",
+    "remoteSent",
+    "serverReceived",
+    "acks",
+    "packetsSent",
+    "packetsDelivered",
+    "payloadBytes",
+    "partsSpawned",
+    "waitLoopResumes",
+    "snapshotEventsDelivered",
+    "chatServed",
+    "syncContextContinuations"
+  ]
+}

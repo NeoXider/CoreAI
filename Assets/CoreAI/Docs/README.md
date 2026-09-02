@@ -32,7 +32,7 @@ Russian files are kept only when the filename is explicitly marked `_RU`.
 | [LESSON_ORCHESTRATION.md](LESSON_ORCHESTRATION.md) | Lesson/practice hooks: runtime context, tool policy, tests |
 | [LLM_ROUTING.md](LLM_ROUTING.md) | Execution modes, portable routing contracts, usage sinks, timeouts |
 | [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, removed APIs, execution limits, binding rules, and escape-test checklist |
-| [RBX_API.md](RBX_API.md) | Roblox-style API a mod builds with: `Instance.new`, datatypes, services, samples |
+| [RBX_API.md](RBX_API.md) | Roblox-style API a mod builds with: `Instance.new`, datatypes, services, `BasePart.Material` / `Part.Color`, saving and loading a world, samples |
 | [LUA_GAME_API.md](LUA_GAME_API.md) | Game Lua API reference: capabilities, mods, world, Full, LLM tools |
 | [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) | Best practices and anti-patterns for Lua in games |
 | [LUA_NATIVE_APIS.md](LUA_NATIVE_APIS.md) | Lua native APIs vs CoreAI wrappers |
@@ -41,6 +41,14 @@ Russian files are kept only when the filename is explicitly marked `_RU`.
 | [MEAI_TOOL_CALLING.md](MEAI_TOOL_CALLING.md) | MEAI pipeline: `ILlmTool` to `AIFunction`, forced tool modes |
 | [MEAI_TOKENS_FACT_VS_ESTIMATE.md](MEAI_TOKENS_FACT_VS_ESTIMATE.md) | Provider `usage` vs client estimates; SSE `include_usage`; HTTP vs orchestrator timeouts |
 | [SERVER_MANAGED_PROTOCOL.md](SERVER_MANAGED_PROTOCOL.md) | Server-managed API contract, auth flow, request shape, and response handling |
+
+## Related documents outside this package
+
+| File | Topic |
+|------|--------|
+| [Docs/CoreAIMods/WORLD_PACKAGE.md](../../../Docs/CoreAIMods/WORLD_PACKAGE.md) | The `.world` package format, validation limits, manual slots vs. the autosave ring, the confirm/reject load flow, runtime session replacement |
+| [PROCEDURAL_MATERIALS.md](../../CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md) | Procedural shader catalog behind `Enum.Material` (all 45 items + the magenta diagnostic fallback) |
+| [TEXTURE_MATERIALS.md](../../CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md) | The six CC0 texture-backed materials and their projection/tint rules |
 
 ## Maintenance Notes
 
@@ -52,3 +60,4 @@ Russian files are kept only when the filename is explicitly marked `_RU`.
 
 Related entry points: root [README.md](../../../README.md)
 and [CoreAiUnity DOCS_INDEX.md](../../CoreAiUnity/Docs/DOCS_INDEX.md).
+

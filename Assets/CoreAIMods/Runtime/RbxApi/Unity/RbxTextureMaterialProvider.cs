@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Spatial;
 using UnityEngine;
@@ -16,21 +17,6 @@ namespace CoreAI.Mods.Rbx.Rendering
         private const string TextureResourceRoot = "CoreAIRbxTextures/";
         private const string MetallicMapKeyword = "_RBX_METALLIC_MAP";
 
-        private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
-        private static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
-        private static readonly int MaterialColorPropertyId = Shader.PropertyToID("_MaterialColor");
-        private static readonly int PartColorInfluencePropertyId =
-            Shader.PropertyToID("_PartColorInfluence");
-        private static readonly int NeutralDefaultPartColorPropertyId =
-            Shader.PropertyToID("_NeutralDefaultPartColor");
-        private static readonly int TextureScalePropertyId = Shader.PropertyToID("_TextureScale");
-        private static readonly int TextureAspectPropertyId = Shader.PropertyToID("_TextureAspect");
-        private static readonly int BumpScalePropertyId = Shader.PropertyToID("_BumpScale");
-        private static readonly int BaseMapPropertyId = Shader.PropertyToID("_BaseMap");
-        private static readonly int BumpMapPropertyId = Shader.PropertyToID("_BumpMap");
-        private static readonly int RoughnessMapPropertyId = Shader.PropertyToID("_RoughnessMap");
-        private static readonly int MetallicMapPropertyId = Shader.PropertyToID("_MetallicMap");
-
         private static readonly TextureDefinition[] Definitions =
         {
             new("Wood", 512, "Wood095", 10f, 0.65f, 0.75f, false),
@@ -44,9 +30,13 @@ namespace CoreAI.Mods.Rbx.Rendering
         private static readonly Dictionary<int, TextureDefinition> DefinitionsByValue =
             BuildDefinitionLookup();
 
+        private static readonly ReadOnlyCollection<RbxMaterialId> TexturedMaterialIds =
+            Array.AsReadOnly(BuildTexturedMaterialIds());
+
         private static Dictionary<int, Material> _sharedMaterials;
         private static bool _textureCatalogPresent;
         private static int _sharedMaterialAllocationCount;
+        private static float _cachedMetersPerStud;
 
         private readonly RbxProceduralMaterialProvider _proceduralProvider;
         private readonly Func<string, Texture2D> _textureLoader;
@@ -73,6 +63,17 @@ namespace CoreAI.Mods.Rbx.Rendering
         /// <summary>The same conspicuous diagnostic material used by the procedural catalog.</summary>
         public Material FallbackMaterial => _proceduralProvider.FallbackMaterial;
 
+        /// <summary>Canonical ids of the entries rendered from the CC0 texture sets.</summary>
+        internal static IReadOnlyList<RbxMaterialId> TexturedMaterials => TexturedMaterialIds;
+
+        /// <summary>Cycles per metre for a tile width authored in studs, so one full texture
+        /// spans <paramref name="tileWidthStuds"/> studs horizontally at the given session scale.</summary>
+        internal static float ComputeTextureScale(float textureAspect, float tileWidthStuds,
+            float metersPerStud)
+        {
+            return textureAspect / (tileWidthStuds * metersPerStud);
+        }
+
         /// <summary>Resolves a process-wide shared textured or procedural material handle.</summary>
         public bool TryGetMaterial(in RbxMaterialId material, out Material visualMaterial)
         {
@@ -87,6 +88,7 @@ namespace CoreAI.Mods.Rbx.Rendering
                 return _proceduralProvider.TryGetMaterial(in material, out visualMaterial);
             }
 
+            SyncTextureScaleToSessionScale();
             if (string.Equals(definition.Name, material.Name, StringComparison.Ordinal)
                 && _sharedMaterials.TryGetValue(material.Value, out visualMaterial))
             {
@@ -112,6 +114,29 @@ namespace CoreAI.Mods.Rbx.Rendering
             _sharedMaterials = null;
             _textureCatalogPresent = false;
             _sharedMaterialAllocationCount = 0;
+            _cachedMetersPerStud = 0f;
+        }
+
+        // WHY: a world package can replace the session scale after the process-wide cache exists;
+        // tile widths are authored in studs, so cycles per metre must follow RbxSpace rather than
+        // the scale that happened to be active when the first part was materialised.
+        private static void SyncTextureScaleToSessionScale()
+        {
+            float metersPerStud = RbxSpace.MetersPerStud;
+            if (ScaleMath.Approximately(metersPerStud, _cachedMetersPerStud))
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<int, Material> pair in _sharedMaterials)
+            {
+                TextureDefinition definition = DefinitionsByValue[pair.Key];
+                float textureAspect = pair.Value.GetFloat(PropertyIds.TextureAspect);
+                pair.Value.SetFloat(PropertyIds.TextureScale,
+                    ComputeTextureScale(textureAspect, definition.TileWidthStuds, metersPerStud));
+            }
+
+            _cachedMetersPerStud = metersPerStud;
         }
 
         private void EnsureSharedCache()
@@ -152,6 +177,7 @@ namespace CoreAI.Mods.Rbx.Rendering
                 return;
             }
 
+            float metersPerStud = RbxSpace.MetersPerStud;
             foreach (TextureDefinition definition in Definitions)
             {
                 LoadedTextureSet loadedSet = loadedSets[definition.Value];
@@ -164,11 +190,13 @@ namespace CoreAI.Mods.Rbx.Rendering
                     continue;
                 }
 
-                Material material = CreateSharedMaterial(shader, in definition, in loadedSet);
+                Material material = CreateSharedMaterial(shader, in definition, in loadedSet,
+                    metersPerStud);
                 materials.Add(definition.Value, material);
             }
 
             _sharedMaterials = materials;
+            _cachedMetersPerStud = metersPerStud;
         }
 
         private Dictionary<int, LoadedTextureSet> LoadTextureSets()
@@ -192,7 +220,7 @@ namespace CoreAI.Mods.Rbx.Rendering
         }
 
         private static Material CreateSharedMaterial(Shader shader,
-            in TextureDefinition definition, in LoadedTextureSet loadedSet)
+            in TextureDefinition definition, in LoadedTextureSet loadedSet, float metersPerStud)
         {
             Material material = new(shader)
             {
@@ -200,23 +228,23 @@ namespace CoreAI.Mods.Rbx.Rendering
                 hideFlags = HideFlags.HideAndDontSave,
                 enableInstancing = true
             };
-            material.SetColor(BaseColorPropertyId, Color.white);
-            material.SetColor(ColorPropertyId, Color.white);
-            material.SetColor(MaterialColorPropertyId, Color.white);
-            material.SetFloat(PartColorInfluencePropertyId, definition.PartColorInfluence);
-            material.SetFloat(NeutralDefaultPartColorPropertyId, 1f);
+            material.SetColor(PropertyIds.BaseColor, Color.white);
+            material.SetColor(PropertyIds.Color, Color.white);
+            material.SetColor(PropertyIds.MaterialColor, Color.white);
+            material.SetFloat(PropertyIds.PartColorInfluence, definition.PartColorInfluence);
+            material.SetFloat(PropertyIds.NeutralDefaultPartColor, 1f);
             float textureAspect = (float)loadedSet.Color.width / loadedSet.Color.height;
-            float textureScale = textureAspect /
-                                 RbxSpace.LengthToUnity(definition.TileWidthStuds);
-            material.SetFloat(TextureScalePropertyId, textureScale);
-            material.SetFloat(TextureAspectPropertyId, textureAspect);
-            material.SetFloat(BumpScalePropertyId, definition.BumpScale);
-            material.SetTexture(BaseMapPropertyId, loadedSet.Color);
-            material.SetTexture(BumpMapPropertyId, loadedSet.Normal);
-            material.SetTexture(RoughnessMapPropertyId, loadedSet.Roughness);
+            float textureScale = ComputeTextureScale(textureAspect, definition.TileWidthStuds,
+                metersPerStud);
+            material.SetFloat(PropertyIds.TextureScale, textureScale);
+            material.SetFloat(PropertyIds.TextureAspect, textureAspect);
+            material.SetFloat(PropertyIds.BumpScale, definition.BumpScale);
+            material.SetTexture(PropertyIds.BaseMap, loadedSet.Color);
+            material.SetTexture(PropertyIds.BumpMap, loadedSet.Normal);
+            material.SetTexture(PropertyIds.RoughnessMap, loadedSet.Roughness);
             if (definition.HasMetallicMap)
             {
-                material.SetTexture(MetallicMapPropertyId, loadedSet.Metallic);
+                material.SetTexture(PropertyIds.MetallicMap, loadedSet.Metallic);
                 material.EnableKeyword(MetallicMapKeyword);
             }
 
@@ -235,6 +263,18 @@ namespace CoreAI.Mods.Rbx.Rendering
             return lookup;
         }
 
+        private static RbxMaterialId[] BuildTexturedMaterialIds()
+        {
+            RbxMaterialId[] ids = new RbxMaterialId[Definitions.Length];
+            for (int index = 0; index < Definitions.Length; index++)
+            {
+                TextureDefinition definition = Definitions[index];
+                ids[index] = new RbxMaterialId(definition.Name, definition.Value);
+            }
+
+            return ids;
+        }
+
         private static void DestroyMaterial(Material material)
         {
             if (material == null)
@@ -250,6 +290,25 @@ namespace CoreAI.Mods.Rbx.Rendering
             {
                 Object.DestroyImmediate(material);
             }
+        }
+
+        // WHY: the catalog table must stay readable without the native engine (engine-free
+        // contract tests); native property-id lookups therefore initialise lazily, on first use.
+        private static class PropertyIds
+        {
+            public static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
+            public static readonly int Color = Shader.PropertyToID("_Color");
+            public static readonly int MaterialColor = Shader.PropertyToID("_MaterialColor");
+            public static readonly int PartColorInfluence = Shader.PropertyToID("_PartColorInfluence");
+            public static readonly int NeutralDefaultPartColor =
+                Shader.PropertyToID("_NeutralDefaultPartColor");
+            public static readonly int TextureScale = Shader.PropertyToID("_TextureScale");
+            public static readonly int TextureAspect = Shader.PropertyToID("_TextureAspect");
+            public static readonly int BumpScale = Shader.PropertyToID("_BumpScale");
+            public static readonly int BaseMap = Shader.PropertyToID("_BaseMap");
+            public static readonly int BumpMap = Shader.PropertyToID("_BumpMap");
+            public static readonly int RoughnessMap = Shader.PropertyToID("_RoughnessMap");
+            public static readonly int MetallicMap = Shader.PropertyToID("_MetallicMap");
         }
 
         private readonly struct TextureDefinition

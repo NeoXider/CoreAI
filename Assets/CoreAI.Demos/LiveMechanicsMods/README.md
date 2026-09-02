@@ -1,31 +1,51 @@
 # Live Mechanics Mods Demos
 
+**What you will see:** you ask the model in chat for a new rule, it writes a Lua mod, and the running
+battle changes on the spot — then the mod is still there after you restart the scene.
+
 Folder: `Assets/CoreAI.Demos/LiveMechanicsMods/`
 
 This folder contains two chat-driven Lua mod demos. Both use `manage_mods`, persist successful mod
-sources, expose a runtime mod manager panel, and opt in to Full Lua scene-object APIs so the
-Programmer can inspect and modify live GameObjects after a diagnostic `execute_lua` call.
+sources, expose a runtime mod manager, and opt in to Full Lua scene-object APIs so the Programmer can
+inspect and modify live GameObjects after a diagnostic `execute_lua` call.
 
 ## Scenes
 
-| Scene | Purpose |
-|---|---|
-| `LiveMechanicsModsChatDemo.unity` | Boss-rule sandbox based on `LiveMechanicsDemo`: quick mods for boss reward and attack interval. |
-| `WaveAutoBattlerModsDemo.unity` | Full auto-battler: our hero fights scaling enemy waves, levels up, earns gold, and Lua mods change real combat rules. |
+| Scene | Purpose | UI |
+|---|---|---|
+| `LiveMechanicsModsChatDemo.unity` | Boss-rule sandbox based on `LiveMechanicsDemo`: quick mods for boss reward and attack interval. | UITK chat panel + IMGUI mod manager (`F9`) and Token Budget overlay (`F10`) |
+| `WaveAutoBattlerModsDemo.unity` | Full auto-battler: our hero fights scaling enemy waves, levels up, earns gold, and Lua mods change real combat rules. | UI Toolkit Hub only — no IMGUI |
 
-## On-screen panels
+## On-screen surfaces
 
-Each mods scene shows two independent, draggable IMGUI windows plus the prompt buttons:
+The two scenes no longer share one UI. `WaveAutoBattlerModsDemo` was migrated to the UI Toolkit Hub;
+`LiveMechanicsModsChatDemo` still uses the legacy IMGUI windows.
+
+### `WaveAutoBattlerModsDemo` — UI Toolkit Hub tabs
+
+The scene hosts `CoreAiHubWindow` with `CoreAiHubDemo` (built-in Chat / Settings / Statistics),
+`CoreAiModsHubBinder` (live Mods page) and `DemoHubPagesBinder`, which registers:
+
+| Tab | Source | Purpose |
+|---|---|---|
+| **Auto-Battler** | `WaveAutoBattlerHubPage` | Status, hero/battle stats, per-slot override flags, loaded mods and the battle log, polled live. |
+| **Token Budget** | `TokenBudgetHubPage` | Model, token counts and estimated session cost — the retained-mode replacement for the old `F10` overlay. |
+| **Mods** | `CoreAiModsHubBinder` | Active / saved mods, activate, deactivate, edit and reload. |
+| **Chat** | Hub built-in | Embeds `CoreAiChatPanel`; ready-made prompts live in the chat's own `≡` examples menu. |
+
+There are no `F9` / `F10` hotkeys and no draggable IMGUI windows in this scene.
+
+### `LiveMechanicsModsChatDemo` — chat panel plus IMGUI windows
 
 | Panel | Hotkey | Purpose |
 |---|---|---|
 | Mod manager | `F9` | Active / saved mods, with `active N / inactive N` in the title bar. |
 | Token Budget / usage overlay | `F10` | Model, token counts and estimated session cost. |
-| Prompt buttons | n/a | Bottom-anchored next to the chat, so they no longer overlap the other panels. |
+| Prompt buttons | n/a | Bottom-anchored next to the chat, so they do not overlap the other panels. |
 
 Both windows can be dragged by their title bar and toggled with their hotkey.
 
-## Mod Manager Panel
+## Mod Manager Panel (`LiveMechanicsModsChatDemo`)
 
 - Toggle: `F9` (drag by the title bar to move it).
 - The title bar shows a live `active N / inactive N` summary.
@@ -106,7 +126,7 @@ Events emitted to mods:
 | `hero_level_up` | `heroLevel` |
 | `hero_died` | `wave` |
 
-Ready prompt buttons insert prompts into the chat input:
+Ready-made prompts live in the Hub Chat tab's `≡` examples menu:
 
 - Add healer aura: creates a regen + wave-cleared hook mod.
 - Make waves harder: changes enemy count, HP, damage and rewards.
@@ -130,7 +150,8 @@ This is still useful as a small boss-rule sandbox. Prompt buttons insert ready r
 - Modifying the existing boss reward mod.
 - Fast Attacks.
 
-The mod manager panel works the same way as in the auto-battler scene.
+This is the scene that keeps the `F9` mod manager panel described above; the auto-battler uses the
+Hub **Mods** tab instead.
 
 ## Persistence
 

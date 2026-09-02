@@ -5,8 +5,11 @@
 > [`TODO.md`](../TODO.md); shipped work in the package changelogs
 > (e.g. [`Assets/CoreAI/CHANGELOG.md`](../Assets/CoreAI/CHANGELOG.md)).
 
-Last updated: 2026-08-30. Latest RELEASED lockstep version: **7.0.7**; **7.1.0 is prepared in the working tree and not yet committed or released** (`TODO.md` carries its status).
-The patch keeps provider reasoning diagnostic-only instead of promoting it to visible or persistent content; see [Release plan](#4-release-plan).
+Last updated: 2026-09-02. Released tags: **v7.1.0** and **v7.1.1**. Package manifests currently read
+**7.1.1** for `com.neoxider.coreai` / `com.neoxider.coreaiunity` and **7.1.0** for the other four; the
+next release bumps all six back into lockstep. Work landed since v7.1.1 — the MVP2 scheduler, the full
+45-item material catalog, and the MVP3 world package — is in the tree and unreleased (`TODO.md` carries
+its status).
 
 ---
 
@@ -52,7 +55,7 @@ world state, mods, memories, (soon) UI — is versioned, persisted, revertible, 
 
 ## 2. Package map
 
-Six UPM packages, released in lockstep. Last released together at 7.0.7; the working tree carries the prepared, uncommitted 7.1.0:
+Six UPM packages, released in lockstep (see the version note above):
 
 | Package | What it is |
 |---|---|
@@ -89,12 +92,18 @@ acceptance gate green**, including the pulled-forward Roblox-1:1 `UserInputServi
 `workspace.CurrentCamera`, and `Part.Shape`. Sample needs also pulled forward `RbxScriptSignal`
 dispatch for RunService, UserInputService, and ClickDetector plus `ModConnectionRegistry`. The
 unified deferred signal path, yieldable signal handlers, and deferred-placeholder `ServiceCatalog`
-contract have now landed within the MVP2 work.
+contract have now landed within the MVP2 work. The MVP2 scheduler is wired and live (`task.*`, the
+R4.2 frame pipeline, deferred signal drains at the nine R5.5 resumption points), loopback
+`RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction` are creatable classes, and the
+`Enum.Material` catalog is complete: all **45** items render (six CC0 texture-backed, the rest
+procedural) with a magenta diagnostic fallback for an unmapped id, alongside `BasePart.Orientation`/
+`Rotation` and the real `CornerWedge` mesh.
 
-**Next milestones.** Continue MVP2 (clocks, materials catalog, shared JSON contract, loopback
-remotes), then the ladder through MVP17 (world files, RBXL, mod UX, skill-as-docs, gameplay services,
-DataStore, input, Mirror, replication, dedicated server, GUI, audio/FX, in-game console,
-performance/WebGL).
+**Next milestones.** Finish the remaining MVP2 items (clocks, the shared JSON contract, and the
+Tier-A corpus gate), then the ladder through MVP17 (RBXL, mod UX,
+skill-as-docs, gameplay services, DataStore, input, Mirror, replication, dedicated server, GUI,
+audio/FX, in-game console, performance/WebGL). MVP3 (the world/place package) has landed — see
+Track C.
 
 **Detail:** [`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md`](CoreAIMods/ROBLOX_API_ROADMAP.md)
 (the definitive MVP0–MVP17 ladder and all locked decisions) ·
@@ -136,12 +145,19 @@ existing Roblox places a content on-ramp.
 
 **Current state.** World state persistence (`WorldStateManager`), versioned mod source stores
 with revert, and the self-contained shareable mod bundle (`ExportMod`/import with capability
-masking) are shipped. The unified place package, backup tiers, and RBXL are not yet built.
+masking) are shipped. **MVP3 has landed:** the `.world` ZIP place package (deterministic
+`manifest.json` + `world.json` + indexed `Mods/`), `FileRbxWorldPackageStore` with create-once
+manual slots and a two-phase-durable autosave ring, `ConfirmedWorldMutationGate` in front of every
+`execute_lua` and every mutating `manage_mods` action, `RbxWorldRuntimeSessionController` for
+transactional session replacement, the `save_world`/`load_world` tools with the
+confirm-before-restore flow, and the built-player **Hub → World Loads** page. Unity and browser
+acceptance runs for that rung are owned outside this document. RBXL is not built.
 
-**Next milestones.** MVP3 (place package + two-tier backups), MVP4 (RBXL import/export),
-MVP9 (DataStoreService on the shared JSON contract).
+**Next milestones.** MVP4 (RBXL import/export), MVP9 (DataStoreService on the shared JSON
+contract); persisting world selection/autoload across a process restart (the W3.5 tail).
 
-**Detail:** ROBLOX_API_ROADMAP §MVP3/§MVP4/§MVP9 ·
+**Detail:** [`Docs/CoreAIMods/WORLD_PACKAGE.md`](CoreAIMods/WORLD_PACKAGE.md) (the shipped format,
+limits, durability, and session-replacement contract) · ROBLOX_API_ROADMAP §MVP3/§MVP4/§MVP9 ·
 [`Docs/CoreAIMods/MOD_SHARING.md`](CoreAIMods/MOD_SHARING.md) (shipped bundle format + the
 community-gallery proposal).
 
@@ -228,8 +244,13 @@ step/time/allocation guards, coroutine resume guards, Lua generation rate limits
 
 **Current state.** Lua-CSharp is managed and AOT/WebGL-safe; sandbox budgets and the coroutine
 guard are shipped and adversarially audited; WebGL persistence syncs through
-`CoreAiWebGlPersistence`; the benchmark package (G1–G8, six-dimension scoring, role fitness,
-model leaderboard) is the standing conformance/quality instrument, runnable in players.
+`CoreAiWebGlPersistence`, whose `SyncAsync()` completes only from the matching `FS.syncfs`
+success/error callback (a cancellation or 30-second timeout drops the pending call and a late
+callback is ignored), so a durability result is a real one; local GGUF models are unavailable in a
+browser player and return a documented limitation message instead of failing obscurely
+([KNOWN_ISSUES.md](../Assets/CoreAiUnity/Docs/KNOWN_ISSUES.md)); the benchmark package (G1–G8,
+six-dimension scoring, role fitness, model leaderboard) is the standing conformance/quality
+instrument, runnable in players.
 
 **Next milestones.** CI player builds (Standalone/WebGL IL2CPP) once a licensed runner exists
 (F-12); `File.Replace`-on-WebGL verification; IL2CPP verification of the `DelegateLlmTool`
@@ -243,7 +264,12 @@ ROBLOX_API_ROADMAP §MVP17/§6.5.
 
 ## 4. Release plan
 
-- **7.0.7 (latest released, 2026-08-27).** Patch release keeping OpenAI-compatible reasoning fields
+- **7.1.1 (latest released, 2026-08-31).** Patch release for `com.neoxider.coreai` /
+  `com.neoxider.coreaiunity`: `call_skill_tool` now falls through to the role's own top-level tools
+  instead of answering a miss with a plain "not found" result, and a rejected tool call is logged.
+- **7.1.0 (2026-08-30).** MVP1 tails closed and the MVP2 scheduler core laid in: Roblox-shaped
+  rotation properties on parts, corrected game samples, refreshed docs.
+- **7.0.7 (2026-08-27).** Patch release keeping OpenAI-compatible reasoning fields
   diagnostic-only: neither non-streaming nor SSE reasoning is promoted into the visible response
   or carried into persistent history and other long-lived records.
 - **7.0.0 (2026-08-01).** Breaking migration to independent positive

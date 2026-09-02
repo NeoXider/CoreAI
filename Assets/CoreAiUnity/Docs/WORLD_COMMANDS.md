@@ -201,6 +201,14 @@ coreai_component_set_vector("Trigger", "boxcollider", "size", 2, 3, 2)
 
 ## 7. World State Persistence (auto-save/load)
 
+> **Not the same thing as the Rbx `.world` package.** This section covers the legacy
+> `world_command` object persistence (`WorldStateManager` → `world_state.json`). The Roblox-style
+> Rbx API has its own save format — a `.world` ZIP with the world-owned Instance tree plus the mod
+> sources, written by `save_world` and restored through the confirm-before-restore `load_world`
+> flow, with an autosave taken before every AI mutation. See
+> [WORLD_PACKAGE.md](../../../Docs/CoreAIMods/WORLD_PACKAGE.md) and
+> [RBX_API.md](../../CoreAI/Docs/RBX_API.md#saving-and-loading-a-world).
+
 All AI-spawned objects (primitives and prefabs) are automatically tracked for save/load.
 
 ### How it works
@@ -244,6 +252,14 @@ The **World** tab in the CoreAI Hub shows:
 - Current saved-state status ("Has saved state: Yes / No")
 - **Reset World** — destroys all tracked objects and deletes the save file
 - **Save Now** — trigger a manual save at any time
+- A browser-storage line reporting whether the platform confirmed durability
+
+Both buttons run a *confirmed* flush. They disable themselves, leave the saved-state line at its
+last confirmed value, and update it only from `IWorldStateManager.ConfirmDurability`. On WebGL that
+callback fires from the matching browser `FS.syncfs` completion — never at IDBFS request-issuance
+time, which MVP2.5 gate W3.5 fails as "reporting success before sync"; on desktop the file write is
+already durable, so the callback runs immediately. A flush the browser reports as failed (quota,
+blocked storage) shows "flush NOT confirmed" instead of being hidden behind a green status.
 
 ### Save format
 

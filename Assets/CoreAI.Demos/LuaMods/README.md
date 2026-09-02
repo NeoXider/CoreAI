@@ -1,5 +1,8 @@
 # Demo: Lua Mods
 
+**What you will see:** the mod runtime the AI drives, with no AI in the room — load a Lua mod, watch it
+spawn a wave and override the damage formula, unload it, and see the C# default come back.
+
 Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used by AI.
 
 ## What Is Inside

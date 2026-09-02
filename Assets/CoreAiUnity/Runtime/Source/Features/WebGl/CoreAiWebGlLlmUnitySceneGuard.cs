@@ -139,6 +139,28 @@ namespace CoreAI.WebGl
     [DefaultExecutionOrder(-5000)]
     public sealed class CoreAiWebGlLlmUnitySceneGuard : MonoBehaviour
     {
+        /// <summary>Frames after a scene change during which every frame still rescans.</summary>
+        internal const int SettlingFrames = 10;
+
+        /// <summary>Seconds between rescans once the settling window has elapsed.</summary>
+        internal const float RescanIntervalSeconds = 5f;
+
+        private static int _framesSinceSceneChange;
+
+        private float _lastScanTime;
+
+        /// <summary>
+        /// Rescan policy. A full <c>FindObjectsByType&lt;MonoBehaviour&gt;</c> sweep costs O(all
+        /// components) and allocates an array, so the browser player must not run it on every frame;
+        /// it runs densely only while a freshly loaded scene is still spawning, then on an interval
+        /// so a late additive load is still contained.
+        /// </summary>
+        internal static bool ShouldRescan(int framesSinceSceneChange, float secondsSinceLastScan)
+        {
+            return framesSinceSceneChange < SettlingFrames
+                   || secondsSinceLastScan >= RescanIntervalSeconds;
+        }
+
         private void Awake()
         {
             if (LocalModelPlatformSupport.IsSupported(Application.platform))
@@ -151,11 +173,25 @@ namespace CoreAI.WebGl
             SceneManager.sceneLoaded -= HandleSceneLoaded;
             SceneManager.sceneLoaded += HandleSceneLoaded;
             LocalModelPlatformSupport.LogUnavailableOnce(Application.platform);
+            _framesSinceSceneChange = 0;
+            _lastScanTime = Time.realtimeSinceStartup;
             DisableLoadedLlmUnityBehaviours();
         }
 
         private void Update()
         {
+            if (_framesSinceSceneChange < int.MaxValue)
+            {
+                _framesSinceSceneChange++;
+            }
+
+            float now = Time.realtimeSinceStartup;
+            if (!ShouldRescan(_framesSinceSceneChange, now - _lastScanTime))
+            {
+                return;
+            }
+
+            _lastScanTime = now;
             DisableLoadedLlmUnityBehaviours();
         }
 
@@ -166,6 +202,7 @@ namespace CoreAI.WebGl
 
         private static void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            _framesSinceSceneChange = 0;
             DisableLoadedLlmUnityBehaviours();
         }
 

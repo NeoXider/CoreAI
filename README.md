@@ -59,7 +59,7 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 
 ⭐ **If CoreAI saves you time — [star the repo](https://github.com/NeoXider/CoreAI)!** It's the main way other Unity devs find it.
 
-> 🗺️ **Where this is going:** a Roblox-like Lua API written by the in-game AI, live multiplayer co-creation (the game *is* the editor), shareable world packages, and drop-in embedding into existing Unity games — the full plan with tracks and milestones lives in the **[Framework Roadmap](Docs/ROADMAP.md)**.
+> 🗺️ **Where this is going:** a Roblox-like Lua API written by the in-game AI (already shipping — `Instance.new`, datatypes, services, the full 45-item `Enum.Material` catalog, and shareable `.world` packages with confirm-before-restore), live multiplayer co-creation (the game *is* the editor), and drop-in embedding into existing Unity games — the full plan with tracks and milestones lives in the **[Framework Roadmap](Docs/ROADMAP.md)**.
 
 ### Why not just call the API yourself?
 
@@ -683,6 +683,8 @@ Start from the index and pick the level that matches your goal:
 | 🌊 [STREAMING_ARCHITECTURE.md](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → filters → UI · orchestrator streaming |
 | 📊 [MEAI_TOKENS_FACT_VS_ESTIMATE.md](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | Provider `usage` vs pre-flight estimates; SSE `include_usage`; HTTP vs orchestrator timeouts |
 | 🔒 [LUA_SANDBOX_SECURITY.md](Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, removed APIs, execution limits, binding rules |
+| 🧱 [RBX_API.md](Assets/CoreAI/Docs/RBX_API.md) | The Roblox-style API a mod builds worlds with: `Instance.new`, datatypes, services, `BasePart.Material` / `Part.Color`, saving and loading a world |
+| 🌍 [WORLD_PACKAGE.md](Docs/CoreAIMods/WORLD_PACKAGE.md) | The `.world` package format, manual slots vs. the autosave ring, and the confirm-before-restore load flow |
 
 ### Tools, memory, roles
 

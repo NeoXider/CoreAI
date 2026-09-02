@@ -77,7 +77,9 @@ Package manifests:
 | [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | Provider usage facts, client estimates, SSE usage, timeout boundaries. |
 | [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, escape tests, binding rules, host checklist. |
 | [FIRST_MOD](../../CoreAI/Docs/FIRST_MOD.md) | Your first Lua mod in 5 minutes: load via agent/C#/TextAsset, persistence, sharing. |
-| [RBX_API](../../CoreAI/Docs/RBX_API.md) | The Roblox-style API a mod builds with: `Instance.new`, datatypes, services, bundled samples. |
+| [RBX_API](../../CoreAI/Docs/RBX_API.md) | The Roblox-style API a mod builds with: `Instance.new`, datatypes, services, `BasePart.Material` / `Part.Color`, saving and loading a world, bundled samples. |
+| [WORLD_PACKAGE](../../../Docs/CoreAIMods/WORLD_PACKAGE.md) | The `.world` package format, validation limits, manual slots vs. the autosave ring, the confirm/reject load flow, and runtime session replacement. |
+| [PROCEDURAL_MATERIALS](../../CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md) · [TEXTURE_MATERIALS](../../CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md) | The `Enum.Material` render catalogs: all 45 items, six of them CC0 texture-backed, plus the magenta diagnostic fallback. |
 | [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md) | Capabilities, mods, world API, Full tier, `execute_lua` / `manage_mods`, persistence & sharing. |
 | [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md) | Do's and don'ts: slots, extensions, Lua-CSharp, LLM context. |
 | [LUA_NATIVE_APIS](../../CoreAI/Docs/LUA_NATIVE_APIS.md) | Native Lua-CSharp vs custom CoreAI code. |

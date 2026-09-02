@@ -17,17 +17,23 @@ Each shared handle owns an intrinsic `_MaterialColor`, mirrors that identity int
 `_BaseColor`, and owns `_PartColorInfluence`. The shaders modulate the intrinsic palette with the
 per-renderer `_Color` tint channel, so setting only `Part.Material` produces a recognizable surface
 while later `Part.Color` writes tint it without erasing wood, brick, grass, metal, or stone identity.
-The binder writes both standard color property names for compatibility, but the provider-owned
-`_MaterialColor` remains a shared-material property. `MaterialPropertyBlock` renderers use Unity's
-standard SRP path rather than the SRP Batcher path; the values remain valid overrides.
+Neon is the one entry without an intrinsic palette: its `_MaterialColor` is white and its
+`_PartColorInfluence` is 1, and the Neon shader multiplies them without the albedo-oriented tint
+boost, so the emission is `Part.Color` itself as in Roblox (a default grey part glows grey, a red
+part glows red). The binder writes both standard color property names for compatibility, but the
+provider-owned `_MaterialColor` remains a shared-material property. `MaterialPropertyBlock`
+renderers use Unity's standard SRP path rather than the SRP Batcher path; the values remain valid
+overrides.
 
-The current catalog maps:
+The catalog maps all 45 public `Enum.Material` items, grouped by shader family:
 
-- Plastic, SmoothPlastic, Neon, ForceField, Glass;
-- Wood, WoodPlanks;
-- Metal, DiamondPlate, CorrodedMetal;
-- Marble, Slate, Concrete, Brick, Cobblestone, Rock;
-- Grass, Sand, Ground, Ice, Snow, Fabric.
+- Surface (opaque PBR, 38 entries over modes 0-17): Plastic, SmoothPlastic, Rubber; Wood,
+  WoodPlanks, RoofShingles; Metal, Foil, DiamondPlate, CorrodedMetal; Marble, Granite, Slate,
+  Concrete, Limestone, Asphalt, Plaster, Brick, ClayRoofTiles, Pavement, Pebble, Cobblestone,
+  CeramicTiles, Basalt, CrackedLava, Rock; Grass, LeafyGrass, Sandstone, Sand, Mud, Ground, Snow,
+  Salt, Fabric, Cardboard, Carpet, Leather;
+- Neon (HDR unlit emissive): Neon;
+- Transparent (mode 0 additive, 1 smooth, 2 fractured): ForceField; Glass, Air; Ice, Glacier, Water.
 
 Opaque materials use procedural albedo, metallic, smoothness, occlusion, and height-derived normals.
 Organic low-frequency relief uses NoiseShader's analytical 3D simplex derivatives; authored masks such
@@ -65,7 +71,10 @@ courses on that face; plank rows are about 15 cm, and Cobblestone shows about 24
 blade grid is about 10.6 cm with centimetre-wide silhouettes, while Fabric uses a 2.5 cm display weave
 with about 34 periods across. Sand ripples remain about 10.5 cm. These are stable defaults rather than
 patterns auto-fitted to each part; the separate CC0 texture-backed catalog retains its own tested physical
-tiling. Neon, Glass, and Ice also consume their provider scale instead of ignoring that preset contract.
+tiling. That catalog authors tile widths in studs and re-derives its cycles-per-metre `_TextureScale`
+on the same shared handles whenever `RbxSpace.MetersPerStud` changes, because a world package can
+replace the session scale after the shared cache exists. Neon, Glass, and Ice also consume their
+provider scale instead of ignoring that preset contract.
 
 Cell edges, periodic waves, tread masks, blades, cracks, and pebbles widen from their projected `fwidth`.
 Value-noise and analytical-simplex FBM attenuate unresolved octaves toward their mean and skip their
@@ -99,7 +108,7 @@ silently leaving the previous material in place.
 `PartProperties.Material`: Plastic and Wood must resolve to different shared handles, invalid or
 name/value-mismatched ids must resolve to the visible fallback, and every catalog entry must load the
 expected shader family. It also requires all 45 entries to own distinct intrinsic colors and verifies
-that the 18 opaque entries map one-to-one onto modes 0 through 17.
+that the 38 Surface entries cover all 18 surface modes.
 
 The production-path scale gates derive feature sizes from each shared material's `_PatternScale` and the
 matching shader kernel. A three-stud DiamondPlate face must contain 20-40 tread cells in total; companion
@@ -107,6 +116,13 @@ gates keep brick courses, plank rows, cobblestones, fabric weave, and the denses
 readable count ranges. The hybrid texture tests separately retain the six-Brick-course gate.
 Source-contract tests also require the filtered roughness bands, octave pruning, dielectric clamp, and
 near-one metallic response.
+
+`RbxMaterialCatalogQaEditModeTests` adds the adversarial gates: the catalog and the public enum must
+match one-to-one without duplicates, Neon's Part.Color contract and its shader emission line, a lint
+that every `pow` base in the catalog shaders is clamped, the stud-authored texture-scale formula, a
+session-scale replacement that re-derives `_TextureScale` on the same shared handle without
+allocation, Material/Color independence across reassignment through public Lua, and a mismatched id
+resolving to the visible fallback through the binder.
 
 The no-per-part-allocation gate warms the cache and lookup path, then resolves the same part material
 4,096 times. It requires every result to be reference-identical, checks that the provider's native
@@ -116,8 +132,8 @@ managed allocation.
 
 ## Source and licensing
 
-The enum names and values follow the offline mirrors in `D:/Git/RobloxDocs` and
-`Docs/CoreAIMods/RobloxReference/`. The six HLSL library sources under
+The enum names and values follow the offline Roblox mirror in `D:/Git/RobloxDocs`
+(`creator-docs/content/en-us/reference/engine/enums/Material.yaml`, 45 items). The six HLSL library sources under
 `Resources/CoreAIRbxMaterials/NoiseShader/` come from `keijiro/NoiseShader` commit
 `550100d4a74de1ba90eb1b8e90f25f9dbeec28d2`, itself an HLSL port of `stegu/webgl-noise`. Both are MIT;
 the complete upstream notice is preserved verbatim in `NoiseShader/LICENSE`, and `NoiseShader/UPSTREAM.md`

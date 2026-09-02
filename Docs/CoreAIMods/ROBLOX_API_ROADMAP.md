@@ -12,6 +12,11 @@ camera slice (§MVP1); the Lua log service core has **landed** in
 `Assets/CoreAIMods/Runtime/Logging/`, editor Lua/Luau syntax highlighting has **shipped
 (editor-side)**, and the three normative Roblox-behavior reference docs are **complete** in
 `Docs/CoreAIMods/RobloxReference/` (§2.1).
+Since then **MVP2 has largely landed** (scheduler, deferred signals, services framework, loopback
+remotes, the shared JSON contract, the Model pivot slice, and the complete 45-item `Enum.Material`
+catalog — see §MVP2 for the remaining items) and **MVP3 (the world/place package) is implemented**;
+its contract is specified in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md), and its Unity/browser
+acceptance runs are owned outside this document.
 
 **Architecture (normative)**: every deliverable in this ladder is built to
 `Docs/ARCHITECTURE_RULES.md` — engine-free Domain assemblies (`noEngineReferences: true`),
@@ -401,7 +406,7 @@ the MVP1–MVP5 surface.
 | MVP0 | Engine abstraction seam *(landed 2026-07-22)* | — | M |
 | MVP1 | Instance/DataModel core + pure-spec datatypes + RobloxSpace + identity *(landed 6.3.0; §5.1.8 gate green)* | MVP0 | L |
 | MVP2 | Scheduler, signals, clocks, services/materials framework, loopback remotes | MVP1 | L |
-| MVP3 | World file (place package) + two-tier backups | MVP1, MVP2 | M |
+| MVP3 | World file (place package) + two-tier backups *(implemented; acceptance runs owned outside this doc)* | MVP1, MVP2 | M |
 | MVP4 | RBXL import/export (round trip both directions; scripts arrive as disabled mods) | MVP1, MVP2, MVP3 | M |
 | MVP5 | Mod system UX (hierarchy, contexts, hot reload, AI tools) | MVP2 + preprocessor *(landed — mini-rewriter, Q1)* | M |
 | MVP6 | AI Lua skill = the documentation (+ generated API manifest) | MVP2; co-evolves with MVP5 | M |
@@ -488,8 +493,14 @@ Ordering changes vs. the seed roadmap, with justification:
 
 - **Current state (partial)**: `ModScheduler`, `task.*` plus the legacy aliases, general deferred
   signal dispatch, yieldable signal handlers, and `ServiceCatalog` with member-access loud stubs
-  have landed. Clocks, JSON/`HttpService`, loopback remotes, absent-child `WaitForChild` yield, the
-  Tier-A corpus, and the materials catalog remain.
+  have landed, together with the shared JSON contract / `HttpService` JSON members, loopback
+  `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction`, absent-child `WaitForChild` yield (with
+  the 5 s infinite-yield warning and the timeout overload), the `Model`/`PVInstance` pivot slice,
+  and the **complete materials catalog** — all 45 `Enum.Material` items render (six CC0
+  texture-backed via `RbxTextureMaterialProvider`, the other 39 procedural via
+  `RbxProceduralMaterialProvider`) with an opaque magenta diagnostic material for an unmapped id.
+  Clocks, the RunService topology queries, `Workspace:GetServerTimeNow`, and the Tier-A corpus
+  gate remain.
 - **Goal**: time and events — `task.*`, `RunService`, the clock surface,
   `RBXScriptSignal`/connections, `game:GetService` with the loud-stub catalog, the materials
   catalog, the shared JSON contract, and loopback remotes. Conformance targets:
@@ -501,7 +512,17 @@ Ordering changes vs. the seed roadmap, with justification:
   runs unmodified (§6.4).
 - **Effort**: L.
 
-### MVP3 — World file (place package) + two-tier backups
+### MVP3 — World file (place package) + two-tier backups *(implemented)*
+
+- **Current state (implemented)**: the deliverables below are built and covered by EditMode tests.
+  The `.world` ZIP container, `FileRbxWorldPackageStore` (create-once manual slots + the two-phase
+  durable autosave ring), `ConfirmedWorldMutationGate` in front of every `execute_lua` and every
+  mutating `manage_mods` action, `RbxWorldRuntimeSessionController` transactional session
+  replacement, the `save_world`/`load_world` tools with the confirm-before-restore flow, and the
+  built-player **Hub → World Loads** page all exist. The shipped contract, its validation limits,
+  and the WebGL execution budget are specified in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). Unity and
+  browser acceptance runs for this rung are owned outside this document; the remaining open tail is
+  persisting world selection/autoload across a process restart.
 
 - **Goal**: the world is a savable, shareable artifact — the single serializer that disk save,
   backups, and (later) the multiplayer join snapshot all share (§2, world file / backups).
@@ -1094,12 +1115,12 @@ Globals installed: `game`, `workspace` (== `game.Workspace`), `Instance`, `Vecto
 | Class | Lua members shipped by the current release | Planned loud stubs (has rung) | Backlog loud errors (no rung) | Unsupported loud errors (deliberate) |
 |---|---|---|---|---|
 | `Instance` (static) | `Instance.new(className)`; deprecated second `parent` arg accepted with a once-per-mod log | — | `Instance.fromExisting` | — |
-| `Instance` (members) | §5.1.2 navigation/lifecycle/attributes/tags; immediate-child `WaitForChild`; general Instance-tree signals | absent-child `WaitForChild` → MVP2 | — | — |
+| `Instance` (members) | §5.1.2 navigation/lifecycle/attributes/tags; `WaitForChild` including the absent-child yield, 5 s infinite-yield warning and timeout overload; general Instance-tree signals | — | — | — |
 | `Folder` | pure container | — | — | — |
-| `PVInstance` descendants | ancestry/API shape only | `PivotTo`, `GetPivot` → **MVP2 (Model pivot)** | — | — |
-| `Model` | pure container | `PrimaryPart`, `WorldPivot` → **MVP2 (Model pivot)** | — | — |
-| `BasePart`/`Part` | `Position`, `Size`, `CFrame`, `Orientation`, `Rotation`, `Color`, `Transparency`, `Anchored`, `CanCollide`, `Shape` | `Material` → **MVP2 (materials catalog)** ([research](../../dev-docs/MATERIALS_RESEARCH.md)) | `Velocity`, `AssemblyLinearVelocity`, `AssemblyAngularVelocity`, `Massless`, `CanQuery`, `CanTouch`, `CollisionGroup`, `CustomPhysicalProperties`, six legacy surface properties | — |
-| `Workspace` | child navigation; `CurrentCamera`; `SignalBehavior` reads `Enum.SignalBehavior.Deferred` (D4) | inherited `PivotTo`/`GetPivot` → **MVP2 (Model pivot)**; `Raycast`/`Gravity` → MVP8; `GetServerTimeNow` → MVP2 | — | `Terrain`; setting `SignalBehavior` (Deferred-only, D4) |
+| `PVInstance` descendants | ancestry/API shape plus `PivotTo`, `GetPivot` | — | — | — |
+| `Model` | container plus `PrimaryPart`, `WorldPivot`, `GetPivot`, `PivotTo` | — | — | — |
+| `BasePart`/`Part` | `Position`, `Size`, `CFrame`, `Orientation`, `Rotation`, `Color`, `Transparency`, `Anchored`, `CanCollide`, `Shape`, `Material` (all 45 `Enum.Material` items render; unmapped ids fall back to a magenta diagnostic material) | — | `Velocity`, `AssemblyLinearVelocity`, `AssemblyAngularVelocity`, `Massless`, `CanQuery`, `CanTouch`, `CollisionGroup`, `CustomPhysicalProperties`, six legacy surface properties | — |
+| `Workspace` | child navigation; `CurrentCamera`; `SignalBehavior` reads `Enum.SignalBehavior.Deferred` (D4); inherited `PivotTo`/`GetPivot` | `Raycast`/`Gravity` → MVP8; `GetServerTimeNow` → MVP2 | — | `Terrain`; setting `SignalBehavior` (Deferred-only, D4) |
 | `Camera` | `CFrame`, `CameraType`, `CameraSubject` | — | — | — |
 | `DataModel` (`game`) | class-scoped `GetService`/`FindService`; `GetService` resolves tree-backed services and registered placeholders; placeholder member access raises `NOT_IMPLEMENTED` with its rung; `FindService` returns nil for a registered placeholder not yet resolved; unknown names raise `UNKNOWN_SERVICE` | class-scoped `BindToClose` → MVP5 | — | — |
 | containers | `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer` tree nodes | — | — | — |
@@ -1223,15 +1244,15 @@ records its C# marker; scheduled stubs normally use `// TODO: MVP<n> — ...`.
 
 | Status | Surface | Phase / meaning | Source |
 |---|---|---|---|
-| planned | `PVInstance:PivotTo/GetPivot`; `Model.PrimaryPart/WorldPivot` | **MVP2 (Model pivot)** | `ClassCatalog` |
+| shipped | `PVInstance:PivotTo/GetPivot`; `Model.PrimaryPart/WorldPivot` | landed in the MVP2 Model-pivot slice; no longer a stub | `ClassCatalog` |
 | planned | `WorldRoot:Raycast`; `Workspace.Gravity` | MVP8 | `ClassCatalog` |
 | planned | `Workspace:GetServerTimeNow` | MVP2 | `ClassCatalog` |
-| planned | `BasePart.Material` | **MVP2 (materials catalog)** ([research](../../dev-docs/MATERIALS_RESEARCH.md)) | `ClassCatalog` |
+| shipped | `BasePart.Material` | landed: all 45 `Enum.Material` items render, unmapped ids resolve to a magenta diagnostic material ([research](../../dev-docs/MATERIALS_RESEARCH.md)) | `ClassCatalog` |
 | planned | six RunService query/render-step methods | MVP2 | `ClassCatalog` |
 | backlog | BasePart velocity, mass, collision-query, physical-properties, and legacy-surface members listed in §5.1.3 | known member; no rung assigned | `ClassCatalog` |
 | backlog | `Lighting.ClockTime/Ambient/GeographicLatitude` | known member; no rung assigned | `ClassCatalog` |
 | unsupported | `Workspace.Terrain` | deliberate non-goal; use Parts | `ClassCatalog` |
-| planned | absent-child `WaitForChild` | MVP2 scheduler yield | Lua binding |
+| shipped | absent-child `WaitForChild` | landed: scheduler yield, 5 s infinite-yield warning, timeout overload | Lua binding |
 | planned | `game:BindToClose` | MVP5 | DataModel binding |
 | backlog | `Instance.fromExisting` | not scheduled; use `Clone()` | Lua binding |
 
@@ -1281,6 +1302,11 @@ return Deferred, while writes are deliberately unsupported per D4.
 
 #### 5.2.1 Task breakdown
 
+Tasks 1-3 and 6-10 plus 12 and 13 have landed, and 5 is wired for the frame signals (its topology
+query methods are still loud stubs). Task 4 (the clock surface) and task 11 (the Tier-A corpus gate)
+remain. File paths below are the original plan; the shipped code uses the `RbxApi` namespace and
+folder layout.
+
 | # | Task | Files |
 |---|------|-------|
 | 1 | `RbxScriptSignal` / `RbxScriptConnection` + deferred queue (R5.x) | `RobloxApi/Events/RbxScriptSignal.cs` |
@@ -1294,8 +1320,8 @@ return Deferred, while writes are deliberately unsupported per D4.
 | 9 | Absent-child `WaitForChild` yield, 5 s warning, and timeout overload (the immediate-child path shipped in MVP1); `signal:Wait()`; `Destroying`-order guarantees | edits in `RbxInstance` |
 | 10 | Error formatter finalized + budget-kill integration | `RobloxApi/RbxError.cs`; edits `Scripting/LuaCs/LuaCsExecutionGuard.cs` adapter |
 | 11 | Tier-A corpus harness (20 fixtures) | `Assets/CoreAIMods/Tests/EditMode/RobloxApi/Corpus/` (+`Fixtures/`) |
-| 12 | `BasePart.Material` materials catalog, following the [materials research](../../dev-docs/MATERIALS_RESEARCH.md) | `RobloxApi/Materials/`; part binder + Lua bindings |
-| 13 | `Model` pivot — **MVP2 (Model pivot)**: `PivotTo`/`GetPivot` aggregating child-part CFrames, plus `PrimaryPart` (today neither wired nor stubbed) | `RbxApi/Instances/RbxModel.cs`; Lua bindings |
+| 12 | `BasePart.Material` materials catalog, following the [materials research](../../dev-docs/MATERIALS_RESEARCH.md) — **landed** as `RbxProceduralMaterialProvider` + `RbxTextureMaterialProvider` (all 45 items, magenta fallback) | `RbxApi/Unity/Rbx*MaterialProvider.cs`; part binder + Lua bindings |
+| 13 | `Model` pivot — **landed**: `PivotTo`/`GetPivot` aggregating child-part CFrames, plus `PrimaryPart`/`WorldPivot` | `RbxApi/Instances/RbxModel.cs`; Lua bindings |
 
 #### 5.2.2 Public C# API sketch
 
@@ -1658,7 +1684,7 @@ versions/revert/diagnostics; `GetModLogsLlmTool` (built, awaiting wiring); plus 
 
 | MVP | Tool additions |
 |---|---|
-| 3 | `save_world`/`load_world` (place package + two-tier backups, §2; AI-initiated restore of a manual slot requires player confirmation) |
+| 3 | `save_world`/`load_world` — **shipped**: `save_world` writes a create-once manual slot; `load_world` never applies a package, it returns `player_confirmation_required` plus a one-use request id that the player accepts or rejects through the Hub World Loads page ([WORLD_PACKAGE.md](WORLD_PACKAGE.md)) |
 | 4 | `import_rbxl`/`export_rbxl` (scripts arrive as disabled mod entries; asset placeholders reported) |
 | 5 | `list_mods` (id, enabled, contexts, load order, error count), `enable_mod`/`disable_mod`, `GetModLogsLlmTool` wired (filters: mod, level, since, code; coalesced via `LuaLogFormatter`), `get_api_surface` (machine-readable: every class/member → implemented / stub-with-phase — **kills hallucinated-API loops**, the tool answers "can I call this" without trial-and-error) |
 | 6 | the skill itself ships (the biggest "tool": correct priors incl. the active `RobloxSpace` scale); `get_api_surface` and the skill manifest are generated from the same catalogs |

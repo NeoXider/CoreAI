@@ -28,6 +28,65 @@ namespace CoreAI.Infrastructure.World
         internal Func<bool> WebGlFlushSync { get; set; } = CoreAiWebGlPersistence.Sync;
 
         /// <summary>
+        /// Confirmed WebGL IDBFS→IndexedDB flush: the task completes only from the matching browser
+        /// <c>FS.syncfs</c> callback (see <c>WORLD_PACKAGE.md</c> "Persistence status"). Internal set
+        /// accessor is the test seam (InternalsVisibleTo) used to release the callback without a browser.
+        /// </summary>
+        internal Func<UniTask<bool>> WebGlFlushAsync { get; set; } =
+            () => CoreAiWebGlPersistence.SyncAsync();
+
+        /// <inheritdoc />
+        public void ConfirmDurability(Action<bool> onConfirmed)
+        {
+            if (_disposed)
+            {
+                InvokeDurabilityCallback(onConfirmed, false);
+                return;
+            }
+
+            // WHY: this is a second flush after the fire-and-forget one Save()/Reset() already issued.
+            // The jslib queue serialises requests, so this one's FS.syncfs starts after that one
+            // finishes and its callback is a strict superset of it — the cheap way to get a confirmed
+            // answer without changing the unattended autosave/quit paths.
+            ConfirmDurabilityAsync(onConfirmed).Forget();
+        }
+
+        private async UniTaskVoid ConfirmDurabilityAsync(Action<bool> onConfirmed)
+        {
+            bool durable;
+            try
+            {
+                durable = await WebGlFlushAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                // WHY: a cancelled flush is not a durable one — the browser never confirmed the write.
+                durable = false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(GameLogFeature.Core,
+                    $"[WorldState] IndexedDB flush confirmation failed: {ex.Message}");
+                durable = false;
+            }
+
+            InvokeDurabilityCallback(onConfirmed, durable);
+        }
+
+        private void InvokeDurabilityCallback(Action<bool> onConfirmed, bool durable)
+        {
+            try
+            {
+                onConfirmed?.Invoke(durable);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(GameLogFeature.Core,
+                    $"[WorldState] Durability confirmation handler threw: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// On WebGL pushes the in-memory IDBFS tree into IndexedDB after a save so it survives a
         /// reload/tab close. Returns false when the flush threw (the save reached IDBFS memory only),
         /// so the caller can report the save honestly instead of claiming durable success.

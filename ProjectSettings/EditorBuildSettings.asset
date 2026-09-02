@@ -12,6 +12,42 @@ EditorBuildSettings:
     path: Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity
     guid: 0fa1ad60474e1354d87844cc6983a349
   - enabled: 1
+    path: Assets/CoreAI.Demos/LiveMechanics/LiveMechanicsDemo.unity
+    guid: 2889a7b39e1c7d44294bcf3c390f0282
+  - enabled: 1
+    path: Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity
+    guid: ad1c82fcec250a443ad8bbf4dd90d745
+  - enabled: 1
+    path: Assets/CoreAI.Demos/LiveMechanicsMods/WaveAutoBattlerModsDemo.unity
+    guid: 08243b3a2f8e70a40aa35491912c3d8b
+  - enabled: 1
+    path: Assets/CoreAI.Demos/LuaMods/LuaModsDemo.unity
+    guid: 27e6a2be3f936714d9e3115b437cfc2a
+  - enabled: 1
+    path: Assets/CoreAI.Demos/MiniRpg/MiniRpgModsDemo.unity
+    guid: 367cfeb1c3565514c9c933a39f3043c6
+  - enabled: 1
+    path: Assets/CoreAI.Demos/ModdableUnits/ModdableUnitsDemo.unity
+    guid: 0d1364ac5ec04dd780650f9b6670f37c
+  - enabled: 1
+    path: Assets/CoreAI.Demos/MultiplayerFoundation/MultiplayerFoundationDemo.unity
+    guid: 7c2ef9e88b821044299106cd1d1dc261
+  - enabled: 1
+    path: Assets/CoreAI.Demos/ProceduralMaterials/ProceduralMaterialsShowcase.unity
+    guid: d864a83043480a147bc2c860bf353519
+  - enabled: 1
+    path: Assets/CoreAI.Demos/QwenDemo/QwenGenieDemo.unity
+    guid: 389ea7886d292014681fb6959e72bd7e
+  - enabled: 1
+    path: Assets/CoreAI.Demos/QwenDemo/QwenSpellcraftDemo.unity
+    guid: aac8fd939074b3242bd09d1b17812c31
+  - enabled: 1
+    path: Assets/CoreAI.Demos/Skills/SkillsDemo.unity
+    guid: b2b04b954764d5a4d8ee70d63b72dd51
+  - enabled: 1
+    path: Assets/CoreAI.Demos/WorldCommands/WorldCommandsDemo.unity
+    guid: defa059128a7e244f91dcb811ecc96f4
+  - enabled: 1
     path: Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity
     guid: f59034d50b0ddf34b8161745236be0d0
   m_configObjects:

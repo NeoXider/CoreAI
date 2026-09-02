@@ -313,7 +313,9 @@ namespace CoreAI.Composition
                     ? new RbxWorldSessionHostAdapter(sceneHost)
                     : new HeadlessRbxWorldSessionHost(
                         initial.RbxApi.Registry,
-                        initial.RbxApi.Game);
+                        initial.RbxApi.Game,
+                        partSink: initial.RbxApi.PartSink,
+                        cameraRig: initial.RbxApi.CameraRig);
                 INetworkBridge networkBridge = c.ResolveOrDefault<INetworkBridge>()
                     ?? new NullNetworkBridge();
                 System.Func<IRbxWorldSessionCandidate, INetworkBridge, LuaCsRbxApiBindings>

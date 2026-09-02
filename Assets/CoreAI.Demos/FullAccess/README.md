@@ -1,5 +1,8 @@
 # CoreAI — Live Full Access Demo
 
+**What you will see:** you ask the model in chat to move a cube, and it reaches straight into the live
+scene through Lua reflection to do it — then a pure-Lua Tetris proves a whole game can live in a mod.
+
 Demonstrates the **Full tier** (`LuaCapabilities.Full`): through the Programmer role the LLM
 can reach arbitrary scene `GameObject`s and components via reflection bindings
 (`unity_find`, `unity_set_position`, `unity_set_member`, `unity_get_member`,
@@ -64,11 +67,14 @@ local desc = unity_describe_object(matches[1].id)
 return '{"found":true,"path":"' .. desc.path .. '","children":' .. desc.child_count .. '}'
 ```
 
-## Lua Platform Example (F6)
+## Lua Platform Example (Hub tab)
 
 `LuaPlatformExampleController` (also on the `FullAccessDemo` scene) is a no-LLM reference for what a
-Lua mod can do on its own: it writes and loads its Lua sources itself, no chat/model involved. Toggle
-its panel with **F6**.
+Lua mod can do on its own: it writes and loads its Lua sources itself, no chat/model involved. The
+controller is GUI-less; its UI is the **Lua Platform** tab registered by `FullAccessHubDemoController`
+into the scene's `CoreAiHubWindow` (`LuaPlatformHubPage`, which replaced the old `F6` IMGUI window).
+The same host also registers the **Full Access** info tab and a **Token Budget** tab, alongside the
+built-in Chat / Settings / Statistics and the live Mods page.
 
 - **Run self-test** — loads a two-mod pair that checks timers, the `hooks_on('tick')` alias,
   variables/closures, varargs, coroutines, the `store_*` roundtrip, cross-mod events, and the

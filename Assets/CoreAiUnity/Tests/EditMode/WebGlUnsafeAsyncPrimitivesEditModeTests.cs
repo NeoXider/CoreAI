@@ -67,7 +67,10 @@ namespace CoreAI.Tests.EditMode
         private static readonly string[] ScannedRoots =
         {
             "Assets/CoreAI/Runtime",
-            "Assets/CoreAiUnity/Runtime"
+            "Assets/CoreAiUnity/Runtime",
+            // Слепое пятно, закрытое QA-проходом по G11 §6.5: сборка CoreAI.Mods тоже попадает в
+            // WebGL-плеер и несёт весь Lua/Rbx-контур, который гейт как раз и прогоняет в браузере.
+            "Assets/CoreAIMods/Runtime"
         };
 
         /// <summary>
@@ -119,7 +122,13 @@ namespace CoreAI.Tests.EditMode
                 "на проде, поэтому вынесен в отдельную задачу, а не правится вслепую",
             [("Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/UnityWebRequestOpenAiTransport.cs",
                 Primitive.PoolContinuations)] =
-                "унаследовано: транспорт на UnityWebRequest, в браузере вместо него FetchSseOpenAiTransport"
+                "унаследовано: транспорт на UnityWebRequest, в браузере вместо него FetchSseOpenAiTransport",
+            [("Assets/CoreAIMods/Runtime/Diagnostics/G10/G10MeasurementComposition.cs", Primitive.TaskDelay)] =
+                "унаследовано (найдено при добавлении корня CoreAIMods): стенд замера G10. Из плеера " +
+                "недостижим — на эти типы нет ни одной ссылки вне самого каталога Diagnostics/G10, — " +
+                "но в WebGL-сборку компилируется. Перевод на host-scheduled задержку — отдельная задача",
+            [("Assets/CoreAIMods/Runtime/Diagnostics/G10/G10MeasurementRunner.cs", Primitive.TaskDelay)] =
+                "унаследовано (найдено при добавлении корня CoreAIMods): тот же стенд G10, те же условия"
         };
 
         [Test]

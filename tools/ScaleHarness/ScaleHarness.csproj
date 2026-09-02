@@ -1,0 +1,83 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Scale staircase harness. Builds itself in Release on the 64-bit host dotnet and links the
+    engine-free CoreAI assemblies the same way tools/G10Harness does, with two deliberate differences:
+    1. the Unity-generated csprojs only define a Debug configuration, so every reference is pinned to
+       Configuration=Debug (their DefineConstants live there) while Optimize=true is forced so the JIT
+       optimises the measured code (Unity player builds are optimised too);
+    2. the optimised outputs go to Temp/Bin/ScaleOptimized and obj/ScaleOptimized so they never
+       collide with the editor-style Debug builds other tooling produces.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <LangVersion>9.0</LangVersion>
+    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+    <CoreAiRefProps>Optimize=true;OutputPath=Temp\Bin\ScaleOptimized\;BaseIntermediateOutputPath=obj\ScaleOptimized\</CoreAiRefProps>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="C:/Program Files/Unity/Hub/Editor/6000.3.14f1/Editor/Data/Managed/UnityEngine/*.dll"
+          Link="%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="scale.workload.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="scale_actor.lua" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="scale_server.lua" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="../../CoreAI.Mods.csproj" SetConfiguration="Configuration=Debug" AdditionalProperties="$(CoreAiRefProps)" />
+    <ProjectReference Include="../../CoreAI.Source.csproj" SetConfiguration="Configuration=Debug" AdditionalProperties="$(CoreAiRefProps)" />
+    <ProjectReference Include="../../CoreAI.Core.csproj" SetConfiguration="Configuration=Debug" AdditionalProperties="$(CoreAiRefProps)" />
+    <ProjectReference Include="../../CoreAI.RbxApi.Datatypes.csproj" SetConfiguration="Configuration=Debug" AdditionalProperties="$(CoreAiRefProps)" />
+    <ProjectReference Include="../../CoreAI.RbxApi.Instances.csproj" SetConfiguration="Configuration=Debug" AdditionalProperties="$(CoreAiRefProps)" />
+    <ProjectReference Include="../../CoreAI.RbxApi.Binding.csproj" SetConfiguration="Configuration=Debug" AdditionalProperties="$(CoreAiRefProps)" />
+    <ProjectReference Include="../../CoreAI.RbxApi.Unity.csproj" SetConfiguration="Configuration=Debug" AdditionalProperties="$(CoreAiRefProps)" />
+    <ProjectReference Include="../../CoreAI.LuauDownlevel.csproj" SetConfiguration="Configuration=Debug" AdditionalProperties="$(CoreAiRefProps)" />
+    <Reference Include="UniTask">
+      <HintPath>../../Library/ScriptAssemblies/UniTask.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="VContainer">
+      <HintPath>../../Library/ScriptAssemblies/VContainer.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>C:/Program Files/Unity/Hub/Editor/6000.3.14f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Lua">
+      <HintPath>../../Assets/CoreAIMods/Plugins/Lua.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="MessagePipe">
+      <HintPath>../../Library/ScriptAssemblies/MessagePipe.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="MessagePipe.VContainer">
+      <HintPath>../../Library/ScriptAssemblies/MessagePipe.VContainer.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.AI">
+      <HintPath>../../Assets/Packages/Microsoft.Extensions.AI.10.7.0/lib/netstandard2.0/Microsoft.Extensions.AI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.AI.Abstractions">
+      <HintPath>../../Assets/Packages/Microsoft.Extensions.AI.Abstractions.10.7.0/lib/netstandard2.0/Microsoft.Extensions.AI.Abstractions.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Bcl.AsyncInterfaces">
+      <HintPath>../../Assets/Packages/Microsoft.Bcl.AsyncInterfaces.10.0.9/lib/netstandard2.1/Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Bcl.TimeProvider">
+      <HintPath>../../Assets/Packages/Microsoft.Bcl.TimeProvider.10.0.9/lib/netstandard2.0/Microsoft.Bcl.TimeProvider.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>../../Library/PackageCache/com.unity.nuget.newtonsoft-json@4dfd81071c64/Runtime/Newtonsoft.Json.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

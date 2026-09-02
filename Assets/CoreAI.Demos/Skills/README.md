@@ -1,4 +1,7 @@
-﻿# Demo: Skills (SkillSet + AgentBuilder)
+# Demo: Skills (SkillSet + AgentBuilder)
+
+**What you will see:** one Game Master agent that only ever sees two tools, yet crafts a sword and attacks
+a dummy — because it loads the schema for the skill it needs, when it needs it.
 
 Scene: `SkillsDemo.unity`. A **configured LLM backend** is required in `CoreAISettings`
 (LLMUnity model or HTTP API: LM Studio, OpenAI, etc.).

@@ -325,10 +325,32 @@ namespace CoreAI.Demos.QwenDemo
     /// <summary>Waits for both the native LLMUnity host and its OpenAI-compatible HTTP socket.</summary>
     public static class QwenDemoReadiness
     {
+        /// <summary>
+        /// Returns the platform limitation when this player can never host the local Qwen GGUF, or
+        /// <c>null</c> when the native runtime is at least possible here. WebGL is the case that matters:
+        /// LlamaLib has no browser build, so the demo must state the documented limitation immediately
+        /// instead of polling for a host that can never appear.
+        /// </summary>
+        public static string GetPlatformLimitation()
+        {
+            return LocalModelPlatformSupport.IsSupported(Application.platform)
+                ? null
+                : LocalModelPlatformSupport.GetUnavailableMessage(Application.platform);
+        }
+
         public static async Task<string> WaitUntilReadyAsync(
             float timeoutSeconds = 120f,
             CancellationToken cancellationToken = default)
         {
+            // WHY: in the browser the local GGUF backend cannot exist. Without this early exit the demo
+            // polls for the whole timeout and then reports a misleading "did not become ready" message
+            // instead of the documented browser limitation.
+            string platformLimitation = GetPlatformLimitation();
+            if (platformLimitation != null)
+            {
+                return platformLimitation;
+            }
+
             float startedAt = Time.realtimeSinceStartup;
             while (Time.realtimeSinceStartup - startedAt < Mathf.Max(1f, timeoutSeconds))
             {

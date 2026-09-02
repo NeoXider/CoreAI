@@ -23,24 +23,14 @@ namespace CoreAI.Mods.Rbx.Rendering
         private const string TransparentShaderName = "CoreAI/Rbx/Procedural Transparent";
         private const string FallbackShaderName = "CoreAI/Rbx/Material Fallback";
 
-        private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
-        private static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
-        private static readonly int MaterialColorPropertyId = Shader.PropertyToID("_MaterialColor");
-        private static readonly int PartColorInfluencePropertyId = Shader.PropertyToID("_PartColorInfluence");
-        private static readonly int MaterialModePropertyId = Shader.PropertyToID("_MaterialMode");
-        private static readonly int PatternScalePropertyId = Shader.PropertyToID("_PatternScale");
-        private static readonly int BumpStrengthPropertyId = Shader.PropertyToID("_BumpStrength");
-        private static readonly int SrcBlendPropertyId = Shader.PropertyToID("_SrcBlend");
-        private static readonly int DstBlendPropertyId = Shader.PropertyToID("_DstBlend");
-
         private static readonly CatalogDefinition[] Definitions =
         {
             new("Plastic", 256, ShaderKind.Surface, 0, 1f, 0.08f,
                 new Color(0.72f, 0.71f, 0.7f), 0.82f),
             new("SmoothPlastic", 272, ShaderKind.Surface, 1, 1f, 0.015f,
                 new Color(0.76f, 0.75f, 0.74f), 0.82f),
-            new("Neon", 288, ShaderKind.Neon, 0, 1f, 0f,
-                new Color(0.06f, 0.82f, 1f), 0.62f),
+            // WHY: Roblox Neon has no intrinsic palette; the emission is Part.Color itself.
+            new("Neon", 288, ShaderKind.Neon, 0, 1f, 0f, Color.white, 1f),
             new("Wood", 512, ShaderKind.Surface, 2, 12f, 0.22f,
                 new Color(0.5f, 0.22f, 0.055f), 0.32f),
             new("WoodPlanks", 528, ShaderKind.Surface, 3, 5f, 0.34f,
@@ -139,6 +129,25 @@ namespace CoreAI.Mods.Rbx.Rendering
 
         /// <summary>Canonical material ids implemented by this catalog.</summary>
         public static IReadOnlyList<RbxMaterialId> SupportedMaterials => SupportedMaterialIds;
+
+        /// <summary>Engine-free view of one entry's Part.Color contract: the intrinsic colour the
+        /// shader multiplies and how strongly the per-renderer tint replaces it (0 = ignore
+        /// Part.Color, 1 = Part.Color multiplies the intrinsic colour fully).</summary>
+        internal static bool TryGetPartColorContract(in RbxMaterialId material,
+            out Color intrinsicColor, out float partColorInfluence)
+        {
+            if (DefinitionsByValue.TryGetValue(material.Value, out CatalogDefinition definition)
+                && string.Equals(definition.Name, material.Name, StringComparison.Ordinal))
+            {
+                intrinsicColor = definition.MaterialColor;
+                partColorInfluence = definition.PartColorInfluence;
+                return true;
+            }
+
+            intrinsicColor = default;
+            partColorInfluence = 0f;
+            return false;
+        }
 
         /// <summary>Opaque magenta/black diagnostic material returned for an invalid or unmapped id.</summary>
         public Material FallbackMaterial
@@ -239,21 +248,21 @@ namespace CoreAI.Mods.Rbx.Rendering
                 hideFlags = HideFlags.HideAndDontSave,
                 enableInstancing = true
             };
-            material.SetColor(BaseColorPropertyId, definition.MaterialColor);
-            material.SetColor(ColorPropertyId, Color.white);
-            material.SetColor(MaterialColorPropertyId, definition.MaterialColor);
-            material.SetFloat(PartColorInfluencePropertyId, definition.PartColorInfluence);
-            material.SetFloat(MaterialModePropertyId, definition.Mode);
-            material.SetFloat(PatternScalePropertyId, definition.PatternScale);
-            material.SetFloat(BumpStrengthPropertyId, definition.BumpStrength);
+            material.SetColor(PropertyIds.BaseColor, definition.MaterialColor);
+            material.SetColor(PropertyIds.Color, Color.white);
+            material.SetColor(PropertyIds.MaterialColor, definition.MaterialColor);
+            material.SetFloat(PropertyIds.PartColorInfluence, definition.PartColorInfluence);
+            material.SetFloat(PropertyIds.MaterialMode, definition.Mode);
+            material.SetFloat(PropertyIds.PatternScale, definition.PatternScale);
+            material.SetFloat(PropertyIds.BumpStrength, definition.BumpStrength);
 
             if (definition.Kind == ShaderKind.Transparent)
             {
                 BlendMode destinationBlend = definition.Mode == 0
                     ? BlendMode.One
                     : BlendMode.OneMinusSrcAlpha;
-                material.SetFloat(SrcBlendPropertyId, (float)BlendMode.SrcAlpha);
-                material.SetFloat(DstBlendPropertyId, (float)destinationBlend);
+                material.SetFloat(PropertyIds.SrcBlend, (float)BlendMode.SrcAlpha);
+                material.SetFloat(PropertyIds.DstBlend, (float)destinationBlend);
                 material.renderQueue = (int)RenderQueue.Transparent;
             }
 
@@ -330,6 +339,21 @@ namespace CoreAI.Mods.Rbx.Rendering
             Surface,
             Neon,
             Transparent
+        }
+
+        // WHY: the catalog table must stay readable without the native engine (engine-free
+        // contract tests); native property-id lookups therefore initialise lazily, on first use.
+        private static class PropertyIds
+        {
+            public static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
+            public static readonly int Color = Shader.PropertyToID("_Color");
+            public static readonly int MaterialColor = Shader.PropertyToID("_MaterialColor");
+            public static readonly int PartColorInfluence = Shader.PropertyToID("_PartColorInfluence");
+            public static readonly int MaterialMode = Shader.PropertyToID("_MaterialMode");
+            public static readonly int PatternScale = Shader.PropertyToID("_PatternScale");
+            public static readonly int BumpStrength = Shader.PropertyToID("_BumpStrength");
+            public static readonly int SrcBlend = Shader.PropertyToID("_SrcBlend");
+            public static readonly int DstBlend = Shader.PropertyToID("_DstBlend");
         }
 
         private readonly struct CatalogDefinition

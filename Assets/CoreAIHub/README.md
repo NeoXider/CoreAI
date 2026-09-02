@@ -82,11 +82,12 @@ of throwing.
 | Statistics | `coreai.hub.statistics` | `Statistics` | 200 | Orchestration metrics (completions, tool calls, …) from an optional `InMemoryAiOrchestrationMetrics`. |
 | About | `coreai.hub.about` | `About` | 1000 | Opt-in (off by default in `CoreAiHubDemo`) so the tab bar stays focused on functional pages. |
 | World state | `coreai.hub.worldstate` | `World` | — | Saved-state status plus Reset World / Save Now controls (see [WORLD_COMMANDS.md](../CoreAiUnity/Docs/WORLD_COMMANDS.md) §7). The page class ships here, but it is registered on demand by `WorldStateHubBinder` in the optional mods package, not by `RegisterAll`. |
+| World Loads | `coreai.hub.world-loads` | `World Loads` | 250 | Player confirmation surface for AI-requested world restores. `load_world` never applies a package: it returns `player_confirmation_required` plus a one-use request id, and this page renders the pending request metadata and calls `ConfirmManualLoadAsync(requestId, true|false)`. It never receives package bytes and exposes no direct-load action. Registered by the mods package when `IRbxWorldRuntimeService` is available — see [WORLD_PACKAGE.md](../../Docs/CoreAIMods/WORLD_PACKAGE.md). |
 
 The **Chat / Settings / Statistics** trio comes from `HubBuiltInPages.RegisterAll`; **About** is
 opt-in via `CoreAiHubDemo`. The **Mods** and **World** tabs are not registered by this package: when
 `com.neoxider.coreaimods` is installed, the setup menu adds its `CoreAiModsHubBinder` (resolved by name
-from the `CoreAI.Mods.Hub` assembly) and its binders register the Mods and World pages into the same
+from the `CoreAI.Mods.Hub` assembly) and its binders register the Mods, World state, and World Loads pages into the same
 registry — features light up when their packages appear.
 
 ## Collapse and Escape

@@ -51,7 +51,8 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             InstanceTreeSnapshot capturedTree = InstanceTreeSerializer.Capture(context.Game);
-            InstanceTreeSnapshot tree = ProjectWorldOwnedTree(capturedTree, context.Registry);
+            List<RbxWorldPackageDiagnostic> diagnostics = new();
+            InstanceTreeSnapshot tree = ProjectWorldOwnedTree(capturedTree, context.Registry, diagnostics);
             Dictionary<InstanceId, PartProperties> parts = new();
             foreach (InstanceSnapshot node in tree.Instances)
             {
@@ -105,14 +106,16 @@ namespace CoreAI.Mods.WorldPackages
                 tree,
                 parts,
                 cameraCFrame,
-                mods);
+                mods,
+                diagnostics);
             ValidatePayload(payload, context.Registry.Catalog);
             return payload;
         }
 
         private static InstanceTreeSnapshot ProjectWorldOwnedTree(
             InstanceTreeSnapshot capturedTree,
-            InstanceRegistry registry)
+            InstanceRegistry registry,
+            List<RbxWorldPackageDiagnostic> diagnostics)
         {
             InstanceTreeSnapshot projectedTree = new()
             {
@@ -155,11 +158,11 @@ namespace CoreAI.Mods.WorldPackages
                 string classification = excludedIds.Contains(node.Model.PrimaryPartId)
                     ? "mod-ephemeral"
                     : "missing";
-                throw new RbxWorldPackageException(
-                    "World-owned Model instance id " + node.Id + " references "
-                    + classification + " PrimaryPart id " + node.Model.PrimaryPartId
-                    + "; clear the reference or promote the complete referenced subtree "
-                    + "to world ownership before capture.");
+                diagnostics?.Add(new RbxWorldPackageDiagnostic(
+                    node.Id,
+                    node.Model.PrimaryPartId,
+                    classification));
+                node.Model.PrimaryPartId = 0UL;
             }
 
             return projectedTree;
@@ -385,7 +388,8 @@ namespace CoreAI.Mods.WorldPackages
                 ApiVersion = CurrentApiVersion,
                 CreatedUtc = payload.CapturedAtUtc.ToString("O", CultureInfo.InvariantCulture),
                 WorldEntry = WorldEntryName,
-                Mods = new List<PackageModIndexDto>(payload.Mods.Count)
+                Mods = new List<PackageModIndexDto>(payload.Mods.Count),
+                Diagnostics = BuildDiagnosticDtos(payload.Diagnostics)
             };
             for (int index = 0; index < payload.Mods.Count; index++)
             {
@@ -399,6 +403,48 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             return manifest;
+        }
+
+        private static List<PackageDiagnosticDto> BuildDiagnosticDtos(
+            IReadOnlyList<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            if (diagnostics == null || diagnostics.Count == 0)
+            {
+                return null;
+            }
+
+            List<PackageDiagnosticDto> result = new(diagnostics.Count);
+            foreach (RbxWorldPackageDiagnostic diagnostic in diagnostics)
+            {
+                result.Add(new PackageDiagnosticDto
+                {
+                    ModelId = U(diagnostic.ModelId),
+                    DroppedPrimaryPartId = U(diagnostic.DroppedPrimaryPartId),
+                    Reason = diagnostic.Reason
+                });
+            }
+
+            return result;
+        }
+
+        private static IReadOnlyList<RbxWorldPackageDiagnostic> BuildDiagnostics(
+            List<PackageDiagnosticDto> dtos)
+        {
+            if (dtos == null || dtos.Count == 0)
+            {
+                return Array.Empty<RbxWorldPackageDiagnostic>();
+            }
+
+            List<RbxWorldPackageDiagnostic> result = new(dtos.Count);
+            foreach (PackageDiagnosticDto dto in dtos)
+            {
+                result.Add(new RbxWorldPackageDiagnostic(
+                    ParseUlong(dto.ModelId, "diagnostic model_id"),
+                    ParseUlong(dto.DroppedPrimaryPartId, "diagnostic dropped_primary_part_id"),
+                    dto.Reason));
+            }
+
+            return result;
         }
 
         private static WorldFileDto BuildWorldDto(RbxWorldPackagePayload payload)
@@ -569,8 +615,9 @@ namespace CoreAI.Mods.WorldPackages
             RbxCFrame? cameraCFrame = world.CameraCFrame != null
                 ? BuildCFrame(world.CameraCFrame, "camera_cframe")
                 : (RbxCFrame?)null;
+            IReadOnlyList<RbxWorldPackageDiagnostic> diagnostics = BuildDiagnostics(manifest.Diagnostics);
             return new RbxWorldPackagePayload(
-                NormalizeUtc(capturedAtUtc), settings, tree, parts, cameraCFrame, mods);
+                NormalizeUtc(capturedAtUtc), settings, tree, parts, cameraCFrame, mods, diagnostics);
         }
 
         private static InstanceSnapshot BuildInstanceSnapshot(WorldInstanceDto dto)
@@ -1336,6 +1383,22 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("mods", Required = Required.Always)]
             public List<PackageModIndexDto> Mods;
+
+            [JsonProperty("diagnostics", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public List<PackageDiagnosticDto> Diagnostics;
+        }
+
+        [Serializable]
+        private sealed class PackageDiagnosticDto
+        {
+            [JsonProperty("model_id", Required = Required.Always)]
+            public string ModelId;
+
+            [JsonProperty("dropped_primary_part_id", Required = Required.Always)]
+            public string DroppedPrimaryPartId;
+
+            [JsonProperty("reason", Required = Required.Always)]
+            public string Reason;
         }
 
         [Serializable]

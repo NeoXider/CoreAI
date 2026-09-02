@@ -1,4 +1,7 @@
-﻿# Demo: World Commands
+# Demo: World Commands
+
+**What you will see:** the plumbing every AI action rides on, with the AI removed — press a button, an
+envelope goes through the real router, and an object spawns, moves, changes colour or disappears.
 
 Scene: `WorldCommandsDemo.unity`. No LLM or Lua required.
 

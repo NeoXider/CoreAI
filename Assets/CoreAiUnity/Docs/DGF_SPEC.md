@@ -206,7 +206,7 @@ flowchart LR
 
 ### 5.1 Recommended network stack for the template (library choice)
 
-**Default recommendation: Netcode for GameObjects (NGO)** — Unity package (`com.unity.netcode.gameobjects`), free, evolves with editor versions, fits **host / server + clients**. For CoreAI: **on the host** run the AI orchestrator and LLM; clients receive **agreed** `NetworkVariable` / RPC / custom messages with wave and rule parameters. Optionally later — **Unity Gaming Services** (Relay, Lobby) without changing the base authority model.
+**Historical recommendation (superseded): Netcode for GameObjects (NGO).** The project decision recorded in `Docs/ROADMAP.md` Track B and `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §2 is **Mirror, designed-first and stubbed** behind the engine-free `INetworkBridge` seam; NGO remains an alternative transport behind the same seam. The paragraph below is kept as the original comparison. — Unity package (`com.unity.netcode.gameobjects`), free, evolves with editor versions, fits **host / server + clients**. For CoreAI: **on the host** run the AI orchestrator and LLM; clients receive **agreed** `NetworkVariable` / RPC / custom messages with wave and rule parameters. Optionally later — **Unity Gaming Services** (Relay, Lobby) without changing the base authority model.
 
 | Option | Pros for the template | Cons / when not to use |
 |--------|----------------------|------------------------|
@@ -218,7 +218,7 @@ flowchart LR
 
 **Conclusion:** for **free**, **capable within Unity**, and aligned with “**host authority for AI**” — **NGO**. **Mirror** is a reasonable alternative if you deliberately avoid the Unity Multiplayer ecosystem. **Photon** makes sense when you need **managed relay/matchmaking** and accept limits/pricing, not as a “simple free NGO replacement.”
 
-Core interfaces (`INetworkAuthority` / `IsServer` / `IsHost`) shall allow **substituting** transport if strictly necessary (e.g. tests or a Mirror-based project), but the **reference implementation** in the repository is **NGO**.
+Core interfaces (`INetworkAuthority` / `IsServer` / `IsHost`) shall allow **substituting** transport if strictly necessary (e.g. tests or a Mirror-based project), but the **reference implementation** planned for the repository is **Mirror** (see `Docs/ROADMAP.md` Track B); today only `NullNetworkBridge` (loopback) exists.
 
 ### 5.2 Builds without AI models (roadmap, HostAuthoritative)
 

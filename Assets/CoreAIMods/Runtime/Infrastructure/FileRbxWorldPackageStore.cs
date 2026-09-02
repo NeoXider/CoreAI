@@ -395,7 +395,7 @@ namespace CoreAI.Mods.WorldPackages
                 }
                 if (rotateAutoRing)
                 {
-                    await RotateAutoRingAsync(rotatedFiles, cancellationToken);
+                    await RotateAutoRingAsync(path, rotatedFiles, cancellationToken);
                     if (rotatedFiles.Count > 0)
                     {
                         bool rotationCompleted = await _persistenceSyncAsync(cancellationToken);
@@ -619,13 +619,29 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         private async UniTask RotateAutoRingAsync(
+            string retainedPath,
             List<RotatedFile> rollbackJournal,
             CancellationToken cancellationToken)
         {
             IReadOnlyList<string> discovered = _fileSystem.GetFiles(_autoDirectory, Extension);
-            List<string> paths = new(discovered);
+            string retainedFullPath = Path.GetFullPath(retainedPath);
+            List<string> paths = new(discovered.Count);
+            foreach (string discoveredPath in discovered)
+            {
+                // WHY: a host clock that moved backwards sorts the just-confirmed autosave before
+                // the ring; it must never be its own rotation victim, or the caller proceeds with a
+                // success result that names a deleted backup.
+                if (!string.Equals(
+                        Path.GetFullPath(discoveredPath),
+                        retainedFullPath,
+                        StringComparison.Ordinal))
+                {
+                    paths.Add(discoveredPath);
+                }
+            }
+
             paths.Sort(StringComparer.Ordinal);
-            int removeCount = paths.Count - _autoBackupCapacity;
+            int removeCount = paths.Count - (_autoBackupCapacity - 1);
             for (int index = 0; index < removeCount; index++)
             {
                 string path = paths[index];

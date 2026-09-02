@@ -50,6 +50,23 @@ namespace CoreAI.Mods.WorldPackages
         public string Source { get; }
     }
 
+    /// <summary>Diagnostic emitted when capture drops a dangling durable reference in the snapshot.</summary>
+    public sealed class RbxWorldPackageDiagnostic
+    {
+        public RbxWorldPackageDiagnostic(ulong modelId, ulong droppedPrimaryPartId, string reason)
+        {
+            ModelId = modelId;
+            DroppedPrimaryPartId = droppedPrimaryPartId;
+            Reason = reason ?? "";
+        }
+
+        public ulong ModelId { get; }
+
+        public ulong DroppedPrimaryPartId { get; }
+
+        public string Reason { get; }
+    }
+
     /// <summary>Canonical in-memory payload shared by package files and future join snapshots.</summary>
     public sealed class RbxWorldPackagePayload
     {
@@ -60,6 +77,18 @@ namespace CoreAI.Mods.WorldPackages
             IReadOnlyDictionary<InstanceId, PartProperties> parts,
             RbxCFrame? cameraCFrame,
             IReadOnlyList<RbxWorldModSource> mods)
+            : this(capturedAtUtc, settings, tree, parts, cameraCFrame, mods, null)
+        {
+        }
+
+        public RbxWorldPackagePayload(
+            DateTime capturedAtUtc,
+            RbxWorldSettings settings,
+            InstanceTreeSnapshot tree,
+            IReadOnlyDictionary<InstanceId, PartProperties> parts,
+            RbxCFrame? cameraCFrame,
+            IReadOnlyList<RbxWorldModSource> mods,
+            IReadOnlyList<RbxWorldPackageDiagnostic> diagnostics)
         {
             CapturedAtUtc = capturedAtUtc;
             Settings = settings;
@@ -67,6 +96,7 @@ namespace CoreAI.Mods.WorldPackages
             Parts = parts;
             CameraCFrame = cameraCFrame;
             Mods = mods;
+            Diagnostics = diagnostics ?? Array.Empty<RbxWorldPackageDiagnostic>();
         }
 
         public DateTime CapturedAtUtc { get; }
@@ -80,6 +110,8 @@ namespace CoreAI.Mods.WorldPackages
         public RbxCFrame? CameraCFrame { get; }
 
         public IReadOnlyList<RbxWorldModSource> Mods { get; }
+
+        public IReadOnlyList<RbxWorldPackageDiagnostic> Diagnostics { get; }
     }
 
     /// <summary>Inputs used to capture the running Rbx composition without depending on file I/O.</summary>
@@ -291,6 +323,26 @@ namespace CoreAI.Mods.WorldPackages
         public DateTime ExpiresAtUtc { get; }
     }
 
+    /// <summary>Metadata for one autosave file without exposing its bytes.</summary>
+    public sealed class RbxAutoSaveInfo
+    {
+        public RbxAutoSaveInfo(string fileName, string trigger, DateTime timestampUtc, long sizeBytes)
+        {
+            FileName = fileName ?? "";
+            Trigger = trigger ?? "";
+            TimestampUtc = timestampUtc;
+            SizeBytes = sizeBytes;
+        }
+
+        public string FileName { get; }
+
+        public string Trigger { get; }
+
+        public DateTime TimestampUtc { get; }
+
+        public long SizeBytes { get; }
+    }
+
     /// <summary>Production save/load seam shared by AI requests and confirmed host actions.</summary>
     public interface IRbxWorldRuntimeService
     {
@@ -300,6 +352,8 @@ namespace CoreAI.Mods.WorldPackages
 
         IReadOnlyList<RbxPendingWorldLoadRequest> GetPendingManualLoads();
 
+        IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves();
+
         UniTask<RbxWorldPackageWriteResult> SaveManualAsync(
             ActorContext caller,
             string slot,
@@ -308,6 +362,11 @@ namespace CoreAI.Mods.WorldPackages
         UniTask<RbxWorldLoadRequest> RequestManualLoadAsync(
             ActorContext caller,
             string slot,
+            CancellationToken cancellationToken = default);
+
+        UniTask<RbxWorldLoadRequest> RequestAutoLoadAsync(
+            ActorContext caller,
+            string autoFileName,
             CancellationToken cancellationToken = default);
 
         UniTask<RbxWorldLoadResult> ConfirmManualLoadAsync(
@@ -494,20 +553,15 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             Camera sceneCamera = _host.SceneCamera;
-            if (payload.CameraCFrame.HasValue && sceneCamera == null)
-            {
-                throw new RbxWorldPackageException(
-                    "The staged world contains camera state but the RbxWorldHost has no camera.");
-            }
-
             GameObject stagingRoot = new("CoreAI_RbxWorld_Staging");
             stagingRoot.transform.SetParent(_host.transform, false);
             stagingRoot.SetActive(false);
             InstanceGameObjectBinder stagedBinder = new(stagingRoot.transform);
-            PublishableCameraRig stagedCamera = sceneCamera != null
-                ? new PublishableCameraRig(
-                    _host.CameraRig?.GetCFrame() ?? RbxCFrame.Identity)
-                : null;
+            // WHY: capture always reads a camera pose (the Lua surface falls back to an in-memory
+            // rig), so a camera-less scene must stage the same in-memory rig instead of refusing
+            // the package it produced itself; publication skips the live camera when none exists.
+            PublishableCameraRig stagedCamera = new(
+                _host.CameraRig?.GetCFrame() ?? RbxCFrame.Identity);
             Action rollbackScale = null;
             try
             {
@@ -850,15 +904,21 @@ namespace CoreAI.Mods.WorldPackages
     {
         private InstanceRegistry _registry;
         private RbxDataModel _game;
+        private IPartPropertySink _partSink;
+        private IRbxCameraRig _cameraRig;
         private RbxWorldSettings _settings;
 
         public HeadlessRbxWorldSessionHost(
             InstanceRegistry registry,
             RbxDataModel game,
-            RbxWorldSettings settings = null)
+            RbxWorldSettings settings = null,
+            IPartPropertySink partSink = null,
+            IRbxCameraRig cameraRig = null)
         {
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
             _game = game ?? throw new ArgumentNullException(nameof(game));
+            _partSink = partSink;
+            _cameraRig = cameraRig;
             _settings = CloneSettings(settings ?? new RbxWorldSettings
             {
                 WorldId = registry.WorldId
@@ -869,9 +929,11 @@ namespace CoreAI.Mods.WorldPackages
 
         public RbxDataModel Game => _game;
 
-        public IPartPropertySink PartSink => null;
+        /// <summary>Sink the published session reads Part state through; null until one is supplied or published.</summary>
+        public IPartPropertySink PartSink => _partSink;
 
-        public IRbxCameraRig CameraRig => null;
+        /// <summary>Rig the published session reads camera state through; null until one is supplied or published.</summary>
+        public IRbxCameraRig CameraRig => _cameraRig;
 
         public IInputSource InputSource => null;
 
@@ -881,8 +943,17 @@ namespace CoreAI.Mods.WorldPackages
 
         public IRbxWorldSessionCandidate Stage(RbxWorldPackagePayload payload)
         {
-            RbxWorldPackageRestoreResult restored = RbxWorldPackageSerializer.RestoreFresh(payload);
-            return new Candidate(this, restored, CloneSettings(payload.Settings));
+            // WHY: the Lua surface reads Part and camera state through the sink and rig handed to
+            // its bindings, so the candidate must expose the exact objects restore populated; a
+            // fresh in-memory rig keeps packaged camera state loadable without an engine.
+            InMemoryCameraRig stagedCamera = new();
+            RbxWorldPackageRestoreResult restored = RbxWorldPackageSerializer.RestoreFresh(
+                payload,
+                new RbxWorldPackageRestoreOptions
+                {
+                    CameraRig = stagedCamera
+                });
+            return new Candidate(this, restored, stagedCamera, CloneSettings(payload.Settings));
         }
 
         private static RbxWorldSettings CloneSettings(RbxWorldSettings source)
@@ -905,11 +976,14 @@ namespace CoreAI.Mods.WorldPackages
             public Candidate(
                 HeadlessRbxWorldSessionHost owner,
                 RbxWorldPackageRestoreResult restored,
+                IRbxCameraRig cameraRig,
                 RbxWorldSettings settings)
             {
                 _owner = owner;
                 Registry = restored.Registry;
                 Game = restored.Game;
+                PartSink = restored.PartSink;
+                CameraRig = cameraRig;
                 Settings = CloneSettings(settings);
             }
 
@@ -917,9 +991,9 @@ namespace CoreAI.Mods.WorldPackages
 
             public RbxDataModel Game { get; }
 
-            public IPartPropertySink PartSink => null;
+            public IPartPropertySink PartSink { get; }
 
-            public IRbxCameraRig CameraRig => null;
+            public IRbxCameraRig CameraRig { get; }
 
             public IInputSource InputSource => null;
 
@@ -943,6 +1017,8 @@ namespace CoreAI.Mods.WorldPackages
                 RbxDataModel outgoingGame = _owner._game;
                 _owner._registry = Registry;
                 _owner._game = Game;
+                _owner._partSink = PartSink;
+                _owner._cameraRig = CameraRig;
                 _owner._settings = CloneSettings(Settings);
                 _committed = true;
                 try

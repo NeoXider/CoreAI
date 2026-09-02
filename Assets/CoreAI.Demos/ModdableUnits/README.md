@@ -1,5 +1,8 @@
 # CoreAI — Unit Forge (mod-driven game)
 
+**What you will see:** an arena with nothing in it, and an AI that fills it with units, armies and endless
+waves — every one of them defined by a Lua mod written on the spot.
+
 > An arena that ships **empty**. There are no units, no waves and no behaviour in the
 > scene — **every bit of gameplay is added by Lua mods** written through chat. Ask the
 > AI to forge a unit type, deploy an army, and stream reinforcements; the host only runs
@@ -53,7 +56,9 @@ bindings are authored but not yet threaded into the mod runtime, so this demo is
 
 ## Try it
 
-Press Play and use the **Unit Forge mod prompts** buttons (or type your own):
+Press Play and type the requests into the chat panel (the scene's `ChatPromptButtonsController` is a
+GUI-less driver that nothing renders, and this scene does not enable the chat's example-prompt menu, so
+there are currently no ready-made prompt buttons on screen):
 
 1. **Starter armies** — forges `knight` (ally) and `goblin` (enemy) and deploys both sides.
 2. **Archers and ogre boss** — adds a long-range `archer` and a heavy `ogre`.
