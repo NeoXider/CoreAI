@@ -31,9 +31,17 @@ texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
       no seams, no NaN, no pink.
 - [x] Hub World page reports `Has saved state` only from the `FS.syncfs` callback (W3.5 code side).
 - [x] 15 frozen demo scenes in `EditorBuildSettings`; smoke test pinned to the frozen list.
-- [ ] **W3.5 browser acceptance** — real WebGL build (`CoreAIG11WebGlBuild.Build`), save → callback →
-      reload → `Has saved state: Yes`, Reset → `No`, plus the full §6.5 checklist (Lua self-test,
-      Tetris, real-provider nonce through `tools/G11Proxy`, 503 retry, terminal error, recovery).
+- [x] **W3.5 / G11 browser acceptance — PASS on the rebuilt player `c38fe6fe` (`dev-docs/G11_RUN_RECORD_2026-09-02.md`).**
+      Real WebGL build (`CoreAIG11WebGlBuild.Build`, 15 scenes, 103 MB) served on `127.0.0.1:8777` and
+      driven in the in-app Chromium: boot ✓, Lua self-test `SELFTEST_DONE checks=16 fails=0` ✓, Tetris
+      ✓, `Save Now` → `Yes` → reload → `Yes` and `Reset World` → `No` → reload → `No` ✓, real-provider
+      nonce answer through the G11 proxy ✓, 46-slot material evidence `result=PASS` with 36 textured
+      slots ✓, all 15 demos boot with 0 console errors ✓. FOUND AND FIXED: a single retryable 503 left
+      the chat on the typing indicator forever (`Task.Delay` in `MeaiOpenAiChatClient` never completes
+      on WebGL; now `ILlmAsyncMarshaler.DelayAsync`). Re-run on the rebuilt player: 503 retried
+      (attempt 2 → 200 → nonce), persistent block → terminal error in 46 s with controls re-enabled,
+      recovery without reload ✓. Not run: MCP loopback / mod HTTP probes; template crops the fixed
+      960×600 canvas at 768 px (responsive template recommended).
 - [x] **Material quality pass (owner decision 2026-09-02) — Editor side DONE.** Catalog-driven
       `RbxTextureMaterialProvider` (`RbxMaterialTextureCatalog` + project-local override),
       `RbxTexturedSurface` AO + DirectX-normal keyword, Editor menus
