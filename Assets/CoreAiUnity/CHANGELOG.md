@@ -4,6 +4,8 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.3.0] - 2026-09-02
+
 ### Added
 
 - 15 замороженных демо-сцен G11 добавлены в `EditorBuildSettings` (были только три); smoke-тест

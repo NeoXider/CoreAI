@@ -2,9 +2,8 @@
 
 > Updated 2026-09-02. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 7.1.1 (2026-08-31, `com.neoxider.coreai` + `.coreaiunity`); 7.1.0 (2026-08-30, all six packages
-> in lockstep); 7.0.7 (2026-08-27); 7.0.0 (2026-08-01) added `McpServerInfo.Version`. Next: 7.2.0 in lockstep
-> once the MVP2.5 persistence release below passes its browser gate.
+> Released: 7.3.0 (2026-09-02, all six packages in lockstep — MVP2.5 persistence release); 7.2.0 (2026-09-02, `com.neoxider.coreai` + `.coreaiunity` only); 7.1.1 (2026-08-31, `com.neoxider.coreai` + `.coreaiunity`); 7.1.0 (2026-08-30, all six packages
+> in lockstep); 7.0.7 (2026-08-27); 7.0.0 (2026-08-01) added `McpServerInfo.Version`. The browser gate passed on 2026-09-02; see the section below.
 > Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
 > 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
@@ -84,6 +83,17 @@ texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
       and fails fast beyond a 4 MiB / 4,096-instance / bounded-collection budget.
 - [ ] Stream or quota JSON token materialization before semantic tree validation to cap hostile
       browser peak memory, and enforce hostile-reader preorder/sorted collection canonicality.
+
+- [ ] **Weak tests flagged by the independent final QA (`dev-docs/FINAL_QA_2026-09-02.md`).**
+      `Lint_BinderOutput_IsExactlyRobloxSpaceOutput` computes actual and expected through the same
+      `RbxSpace` helper (a symmetric sign/scale bug passes; only the chirality goldens catch it);
+      `Lua_InstanceNew_DeprecatedParentArgument_WorksAndLogsOnce` invokes twice inside one load, so a
+      once-per-load implementation would also pass (needs a reload twin); `AssetRule_At1To1_*` proves
+      the second scale per shape only. Rewrite each with an independent oracle or a negative twin.
+- [ ] **Final QA verdict (2026-09-02):** MVP2 G10 (chat throughput with a real provider, admission cap
+      `MaxPending=64`), the heap-slope budget and the host-restore envelope stay open; every other
+      G1–G12 / P1–P5 / W3.1–W3.5 row is PASS on `g11.xml` + the browser record. See the reconciliation
+      section at the end of the QA report for the findings that were stale against `g11.xml`.
 
 ## MVP1 residue closed + MVP2 scheduler core (2026-08-30) — 7.1.0 prepared
 
