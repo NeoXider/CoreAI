@@ -4,6 +4,19 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.3.1] - 2026-09-02
+
+### Added
+
+- `MeaiLlmClient` под `LogMeaiToolCallingSteps` пишет `native tool batch complete (streamed=…,
+  anyFailed=…, allFailed=…); continuing the turn` — граница между исполнением инструментов и вторым
+  запросом к модели в трассе хода.
+- Страж `WebGlUnsafeAsyncPrimitivesEditModeTests` знает пятый примитив — `ConfigureAwait(false)`
+  (причина — запись о зависании tool-call в WebGL в `com.neoxider.coreai`): новое вхождение в
+  чистом файле любого из трёх runtime-корней краснеет; 19 унаследованных файлов заморожены в
+  списке исключений с причиной, путь `execute_lua` / `manage_mods` в него не входит. Подсадная
+  проба и декои расширены.
+
 ## [7.3.0] - 2026-09-02
 
 ### Added

@@ -2,7 +2,7 @@
 
 > Updated 2026-09-02. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 7.3.0 (2026-09-02, all six packages in lockstep — MVP2.5 persistence release); 7.2.0 (2026-09-02, `com.neoxider.coreai` + `.coreaiunity` only); 7.1.1 (2026-08-31, `com.neoxider.coreai` + `.coreaiunity`); 7.1.0 (2026-08-30, all six packages
+> Released: 7.3.1 (2026-09-02, all six packages in lockstep — WebGL tool-turn fix); 7.3.0 (2026-09-02, lockstep — MVP2.5 persistence release); 7.2.0 (2026-09-02, `com.neoxider.coreai` + `.coreaiunity` only); 7.1.1 (2026-08-31, `com.neoxider.coreai` + `.coreaiunity`); 7.1.0 (2026-08-30, all six packages
 > in lockstep); 7.0.7 (2026-08-27); 7.0.0 (2026-08-01) added `McpServerInfo.Version`. The browser gate passed on 2026-09-02; see the section below.
 > Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
 > 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
@@ -84,6 +84,20 @@ texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
 - [ ] Stream or quota JSON token materialization before semantic tree validation to cap hostile
       browser peak memory, and enforce hostile-reader preorder/sorted collection canonicality.
 
+- [x] **WebGL native tool-call turn (7.3.1).** The 7.3.0 player dead-waited after `execute_lua`
+      (reproduced with the proxy's scripted replies, `dev-docs/G11_RUN_RECORD_2026-09-02.md`). Fixed:
+      no `ConfigureAwait(false)` on the tool path, `MeaiToolTaskBridge.Publish` at the MEAI boundary,
+      guard primitive in `WebGlUnsafeAsyncPrimitivesEditModeTests`; §6.5 MCP loopback (N/A) and
+      outbound mod HTTP (refused) probed in the browser on the fixed player.
+- [ ] **Inherited `ConfigureAwait(false)` sites (19 files) frozen in the WebGL guard allowlist.** The
+      agent-memory contour, the `ILlmClient` decorators/orchestrator and five tool bodies
+      (Inventory / Memory / GameConfig / CallSkillTool / Wait) still carry the primitive; none is on
+      the browser-verified path. Convert each to host-context awaits (plus
+      `MeaiToolTaskBridge.Publish` for tool bodies), then drop its allowlist entry.
+- [ ] **Browser-gate harness: keep the pane painted.** With the in-app browser pane hidden the player
+      runs at ~1 frame/s (no `requestAnimationFrame`), after five minutes Chrome stalls it; timings in
+      the record are dilated and a 30 s tool timeout can trip inside the autosave. Add a visibility /
+      frame-rate check to the G11 protocol before any timed row.
 - [ ] **Weak tests flagged by the independent final QA (`dev-docs/FINAL_QA_2026-09-02.md`).**
       `Lint_BinderOutput_IsExactlyRobloxSpaceOutput` computes actual and expected through the same
       `RbxSpace` helper (a symmetric sign/scale bug passes; only the chirality goldens catch it);

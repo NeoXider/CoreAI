@@ -45,7 +45,8 @@ namespace CoreAI.Tests.EditMode
             PoolContinuations,
             CancelAfter,
             TaskDelay,
-            TaskRun
+            TaskRun,
+            ConfigureAwaitFalse
         }
 
         private static readonly (Primitive Id, Regex Rx, string Why)[] Forbidden =
@@ -61,7 +62,11 @@ namespace CoreAI.Tests.EditMode
                 "тот же таймер; задержку обязан планировать хост (ILlmAsyncMarshaler.DelayAsync) или UniTask.Delay"),
             (Primitive.TaskRun,
                 new Regex(@"\bTask\.Run\s*\(", RegexOptions.Compiled),
-                "требует пула потоков, которого в WebGL нет")
+                "требует пула потоков, которого в WebGL нет"),
+            (Primitive.ConfigureAwaitFalse,
+                new Regex(@"\.ConfigureAwait\s*\(\s*false\s*\)", RegexOptions.Compiled),
+                "при UnitySynchronizationContext продолжение признаётся неинлайнимым и ставится в пул потоков — " +
+                "в WebGL его нет, ожидание вечное (7.0.5 ToolExecutionPolicy, 7.3.1 путь execute_lua)")
         };
 
         private static readonly string[] ScannedRoots =
@@ -131,7 +136,47 @@ namespace CoreAI.Tests.EditMode
                 "недостижим — на эти типы нет ни одной ссылки вне самого каталога Diagnostics/G10, — " +
                 "но в WebGL-сборку компилируется. Перевод на host-scheduled задержку — отдельная задача",
             [("Assets/CoreAIMods/Runtime/Diagnostics/G10/G10MeasurementRunner.cs", Primitive.TaskDelay)] =
-                "унаследовано (найдено при добавлении корня CoreAIMods): тот же стенд G10, те же условия"
+                "унаследовано (найдено при добавлении корня CoreAIMods): тот же стенд G10, те же условия",
+            // ConfigureAwait(false): путь execute_lua / manage_mods (LuaTool, LuaModsLlmTool,
+            // LuaCsGameToolExecutor, DelegateLlmTool) очищен в 7.3.1 и в этот список НЕ входит.
+            [("Assets/CoreAI/Runtime/Core/Features/AgentMemory/AgentConfigExtensions.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): контур памяти/контекста агента, в проверенный браузером путь G11 не входит; перевод на host-контекст — отдельная задача",
+            [("Assets/CoreAI/Runtime/Core/Features/AgentMemory/FileConversationSummaryStore.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): контур памяти/контекста агента, в проверенный браузером путь G11 не входит; перевод на host-контекст — отдельная задача",
+            [("Assets/CoreAI/Runtime/Core/Features/AgentMemory/IAgentMemoryStore.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): контур памяти/контекста агента, в проверенный браузером путь G11 не входит; перевод на host-контекст — отдельная задача",
+            [("Assets/CoreAI/Runtime/Core/Features/AgentMemory/LlmAssistedConversationContextManager.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): контур памяти/контекста агента, в проверенный браузером путь G11 не входит; перевод на host-контекст — отдельная задача",
+            [("Assets/CoreAI/Runtime/Core/Features/AgentMemory/SelectingConversationContextManager.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): контур памяти/контекста агента, в проверенный браузером путь G11 не входит; перевод на host-контекст — отдельная задача",
+            [("Assets/CoreAI/Runtime/Core/Features/AgentMemory/InventoryTool.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): тело инструмента того же класса, что execute_lua до 7.3.1 — в G11-сценах инструмент не подключён; исправляется по образцу LuaTool (снять ConfigureAwait(false) + MeaiToolTaskBridge.Publish на MEAI-границе) отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/AgentMemory/MemoryTool.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): тело инструмента того же класса, что execute_lua до 7.3.1 — в G11-сценах инструмент не подключён; исправляется по образцу LuaTool (снять ConfigureAwait(false) + MeaiToolTaskBridge.Publish на MEAI-границе) отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/Config/GameConfigTool.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): тело инструмента того же класса, что execute_lua до 7.3.1 — в G11-сценах инструмент не подключён; исправляется по образцу LuaTool (снять ConfigureAwait(false) + MeaiToolTaskBridge.Publish на MEAI-границе) отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/Llm/CallSkillToolLlmTool.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): тело инструмента того же класса, что execute_lua до 7.3.1 — в G11-сценах инструмент не подключён; исправляется по образцу LuaTool (снять ConfigureAwait(false) + MeaiToolTaskBridge.Publish на MEAI-границе) отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/Llm/WaitLlmTool.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): тело инструмента того же класса, что execute_lua до 7.3.1 — в G11-сценах инструмент не подключён; исправляется по образцу LuaTool (снять ConfigureAwait(false) + MeaiToolTaskBridge.Publish на MEAI-границе) отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/Llm/CircuitBreakerLlmClientDecorator.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/Llm/RetryingStreamingLlmClientDecorator.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/Llm/TimeoutLlmClientDecorator.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/Llm/HttpClientOpenAiReadinessProbe.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано: HttpClient-проба готовности, в браузере вместо неё UnityWebRequest/fetch-путь",
+            [("Assets/CoreAI/Runtime/Core/Features/Orchestration/AiOrchestrator.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/Orchestration/IAiOrchestrationService.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/Orchestration/ILlmClient.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/Orchestration/InGameLlmChatService.cs", Primitive.ConfigureAwaitFalse)] =
+                "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
+            [("Assets/CoreAI/Runtime/Core/Features/Orchestration/ScriptedLlmClient.cs", Primitive.ConfigureAwaitFalse)] =
+                "тестовый двойник: в реальный плеер не попадает"
         };
 
         [Test]
@@ -179,10 +224,11 @@ namespace CoreAI.Tests.EditMode
             CollectionAssert.AreEquivalent(
                 new[]
                 {
-                    Primitive.PoolContinuations, Primitive.CancelAfter, Primitive.TaskDelay, Primitive.TaskRun
+                    Primitive.PoolContinuations, Primitive.CancelAfter, Primitive.TaskDelay, Primitive.TaskRun,
+                    Primitive.ConfigureAwaitFalse
                 },
                 seeded.ConvertAll(h => h.Id),
-                "Сканер обязан находить каждый из четырёх примитивов в подсадном коде. Найдено: " +
+                "Сканер обязан находить каждый из пяти примитивов в подсадном коде. Найдено: " +
                 Describe(seeded));
 
             List<Hit> decoys = Scan(NonViolationProbe);
@@ -790,6 +836,7 @@ class Seeded
         cts.CancelAfter(1000);
         await Task.Delay(5, token);
         Task.Run(() => Work());
+        await Work().ConfigureAwait(false);
     }
 }
 ";
@@ -798,6 +845,7 @@ class Seeded
 class NotAViolation
 {
     // WHY NOT RunContinuationsAsynchronously: комментарий не код.
+    // await x.ConfigureAwait(false) в комментарии — тоже не код.
     /* Task.Delay( и cts.CancelAfter( внутри блочного комментария тоже. */
     private const string Message = ""Task.Run( внутри строки — тоже не код"";
 
@@ -807,6 +855,7 @@ class NotAViolation
         UniTask.Delay(5);
 #if UNITY_EDITOR
         Task.Run(() => Work());
+        await Work().ConfigureAwait(false);
 #endif
 #if UNITY_WEBGL && !UNITY_EDITOR
         Work();

@@ -1145,6 +1145,11 @@ namespace CoreAI.Infrastructure.Llm
                     ToolExecutionPolicy.BatchToolCallResult batch = streamedTurn != null
                         ? await policy.CompleteStreamedTurnAsync(streamedTurn, cancellationToken)
                         : await policy.ExecuteBatchAsync(nativeToolCalls, chatOptions, cancellationToken);
+                    if (_settings.LogMeaiToolCallingSteps)
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            $"MeaiLlmClient: native tool batch complete (streamed={streamedTurn != null}, anyFailed={batch.AnyFailed}, allFailed={batch.AllFailed}); continuing the turn");
+                    }
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
                     TrimStreamingToolCallHistory(chatMessages);
                     if (!batch.AllFailed)

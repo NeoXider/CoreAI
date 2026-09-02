@@ -88,6 +88,30 @@ switch (tool)
 
 `MeaiLlmClient` resolves `CreateAIFunction()` via reflection on each `ILlmTool` instance. IL2CPP can strip methods from **game** assemblies that are not preserved. For custom tools shipped outside **`CoreAI.Core`** / **`CoreAI.Source`**, mark `CreateAIFunction` with **`[UnityEngine.Scripting.Preserve]`** or add a project **`link.xml`** entry for your tool types. The CoreAI package **`link.xml`** preserves CoreAI assemblies only.
 
+### 3.2 WebGL — publishing an awaiting tool body
+
+MEAI awaits the delegate's task inside its binary with `ConfigureAwait(false)`. A Unity WebGL player
+has no thread pool, and `SynchronizationContext.Current` there is `UnitySynchronizationContext`, so
+when the tool task completes asynchronously on the player loop that continuation is queued to a pool
+that never runs: the result is never delivered, the turn shows "Processing…" forever, no second
+request is sent, no exception, no timeout. A tool that completes synchronously never hits this.
+
+Rules for every tool whose body can suspend (a confirmation card, a world autosave, an HTTP call):
+
+1. No `ConfigureAwait(false)` anywhere on the tool path — awaits resume on the host context.
+   `WebGlUnsafeAsyncPrimitivesEditModeTests` fails on a new occurrence in WebGL-reachable code.
+2. Hand the task to MEAI through `MeaiToolTaskBridge.Publish(...)`: it completes the surfaced task
+   with the context cleared, so MEAI's continuation runs inline on the completing call stack.
+
+```csharp
+public Task<string> ExecuteAsync([Description("...")] string code, CancellationToken ct = default) =>
+    MeaiToolTaskBridge.Publish(ExecuteBodyAsync(code, ct));
+```
+
+`LuaTool` (`execute_lua`) and `LuaModsLlmTool` (`manage_mods`) do this; a host async delegate given
+to `DelegateLlmTool` / `AgentBuilder.WithTool` must do the same. Reproduced and re-verified in the
+browser on 2026-09-02 (`dev-docs/G11_RUN_RECORD_2026-09-02.md`).
+
 ### 4. MEAI pipeline
 
 ```

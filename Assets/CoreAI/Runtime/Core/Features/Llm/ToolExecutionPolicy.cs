@@ -611,14 +611,17 @@ namespace CoreAI.Infrastructure.Llm
                                 async () =>
                                     await aiFunc.InvokeAsync(args, cts.Token),
                                 cts.Token);
+                        TraceStep(fc, "invoke-started", invokeTask.IsCompleted ? "sync" : "async");
 
                         await Task.WhenAny(invokeTask, timeoutDelay);
+                        TraceStep(fc, "raced", invokeTask.IsCompleted ? "invoke" : "timeout");
 
                         // Whoever lost the race stops here: on a timeout this cancellation is what makes the
                         // tool body observe the deadline, on a normal finish it releases the delay the host
                         // still has scheduled. Cancel is idempotent, so one unconditional call covers both.
                         cts.Cancel();
                         result = await invokeTask;
+                        TraceStep(fc, "result-awaited", null);
                     }
                     catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                     {
@@ -655,6 +658,7 @@ namespace CoreAI.Infrastructure.Llm
                     result = await marshaler.InvokeAsync<object>(
                         async () => await aiFunc.InvokeAsync(args, cancellationToken),
                         cancellationToken);
+                    TraceStep(fc, "result-awaited", "no-timeout");
                 }
 
                 sw.Stop();
@@ -932,6 +936,19 @@ namespace CoreAI.Infrastructure.Llm
         /// <see cref="ICoreAISettings.LogToolCalls"/> / <c>LogToolCallArguments</c> / <c>LogToolCallResults</c>
         /// switches independently of the streaming-step trace.
         /// </summary>
+        /// <summary>Per-step trace of one tool invocation, emitted only under LogMeaiToolCallingSteps.</summary>
+        private void TraceStep(MEAI.FunctionCallContent fc, string step, string detail)
+        {
+            if (!_settings.LogMeaiToolCallingSteps)
+            {
+                return;
+            }
+
+            _logger.Info(
+                $"[ToolPolicy] {fc?.Name}: step={step}{(detail == null ? "" : " " + detail)}",
+                LogTag.Llm);
+        }
+
         private void LogCallLine(MEAI.FunctionCallContent fc, bool succeeded, double durationMs, string resultText)
         {
             if (!_settings.LogToolCalls)
@@ -1422,6 +1439,7 @@ namespace CoreAI.Infrastructure.Llm
                 // Sequential fast-path: byte-identical to the pre-parallel streamed behavior.
                 ToolCallResult executed =
                     await ExecuteSingleAsync(fc, chatOptions, cancellationToken);
+                TraceStep(fc, "streamed-sequential-done", executed.Succeeded ? "ok" : "failed");
                 slot.Set(executed);
                 return executed;
             }

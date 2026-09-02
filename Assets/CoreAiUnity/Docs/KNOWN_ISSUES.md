@@ -113,3 +113,10 @@ Cause: the async store paths intentionally run on the thread pool and never touc
 Impact: warning debt only; not a runtime regression.
 
 Recommended follow-up: suppress per-file/per-call with a justification comment, or teach the analyzer to allow thread-pool-only code paths.
+
+Scope note: the analyzer covers `CoreAiUnity` only. The engine-free tool path (`CoreAI.Core`,
+`CoreAI.Mods`) is guarded by `WebGlUnsafeAsyncPrimitivesEditModeTests`, which forbids
+`ConfigureAwait(false)` in every runtime root that ships to the WebGL player; a tool body that can
+suspend must additionally publish its result through `MeaiToolTaskBridge`
+(`Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md` §3.2). The inherited stores above are frozen in that
+guard's allowlist with a reason.

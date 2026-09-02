@@ -31,6 +31,9 @@ namespace CoreAI.Ai
             "only call APIs listed by the prompt/tool contract or discovered from the environment. " +
             "Never call invented APIs such as game.rules, game_rules, game.enemies, game.create, game.destroy, or GameObject.Find from Lua.";
 
+        private const string ExecuteLuaCodeParameterDescription =
+            "Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Build world objects Roblox-style (Instance.new('Part'), game/workspace) - see read_skill('Rbx API'). Inspect the scene with coreai_world_find(pattern), coreai_world_pos(name), coreai_world_exists(name). Full reflection is a rarely-needed backup - see read_skill('Full Lua'). Return compact JSON/string for diagnostics.";
+
         private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
 
         private readonly ILuaExecutor _executor;
@@ -79,11 +82,15 @@ namespace CoreAI.Ai
         /// <summary>Runs Lua returned from the model payload.</summary>
         /// <param name="code">Source to execute.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
-        public async Task<string> ExecuteAsync(
-            [Description(
-                "Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Build world objects Roblox-style (Instance.new('Part'), game/workspace) - see read_skill('Rbx API'). Inspect the scene with coreai_world_find(pattern), coreai_world_pos(name), coreai_world_exists(name). Full reflection is a rarely-needed backup - see read_skill('Full Lua'). Return compact JSON/string for diagnostics.")]
-            string code,
-            CancellationToken cancellationToken = default)
+        // WHY: MEAI awaits this task with ConfigureAwait(false) inside its binary. In the WebGL player
+        // the result must be published with the host SynchronizationContext cleared, or the model turn
+        // never resumes after an asynchronously completed body (see MeaiToolTaskBridge).
+        public Task<string> ExecuteAsync(
+            [Description(ExecuteLuaCodeParameterDescription)] string code,
+            CancellationToken cancellationToken = default) =>
+            MeaiToolTaskBridge.Publish(ExecuteBodyAsync(code, cancellationToken));
+
+        private async Task<string> ExecuteBodyAsync(string code, CancellationToken cancellationToken)
         {
             if (_actorIdentityProvider != null && _mutationExecutor != null)
             {
@@ -100,13 +107,13 @@ namespace CoreAI.Ai
                 return await ExecuteCoreAsync(
                     code,
                     token => _mutationExecutor.ExecuteAsync(code, actorContext, token),
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken);
             }
 
             return await ExecuteCoreAsync(
                 code,
                 token => _executor.ExecuteAsync(code, token),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken);
         }
 
         private async Task<string> ExecuteCoreAsync(
@@ -144,7 +151,11 @@ namespace CoreAI.Ai
 
             try
             {
-                LuaResult result = await execute(cancellationToken).ConfigureAwait(false);
+                LuaResult result = await execute(cancellationToken);
+                if (_settings.LogToolCalls)
+                {
+                    _logger.Info($"[Tool Call] execute_lua: executor returned success={result.Success}");
+                }
 
                 if (_settings.LogToolCallResults)
                 {

@@ -33,8 +33,11 @@ namespace CoreAI.Ai.LuaCs
             local prepare = task._prepareHttpRequest
             task._prepareHttpRequest = nil
             local function invoke(operation, service, ...)
-                local responseSignal = prepare(operation, service, ...)
-                local ok, value = responseSignal:Wait()
+                local prepared = prepare(operation, service, ...)
+                if type(prepared) == 'string' then
+                    error(prepared, 2)
+                end
+                local ok, value = prepared:Wait()
                 if not ok then
                     error(value, 2)
                 end
@@ -239,6 +242,16 @@ namespace CoreAI.Ai.LuaCs
             string operation = ReadString(ctx, 0, "HttpService outbound operation");
             RequireHttpService(ctx, context, 1);
             RbxHttpRequest request = BuildRequest(operation, ctx);
+            string actorId = context.ActorContext.ActorId;
+
+            // WHY: policy, safety and rate refusals are decided synchronously. Returning them as a
+            // plain string lets the Lua bridge raise the host refusal in every execution context,
+            // including one-off execute_lua chunks that own no scheduler signal-wait bridge.
+            if (TryRefuse(actorId, request, out RbxHttpRequest approved, out RbxError refusal))
+            {
+                return new LuaValue(refusal.Message);
+            }
+
             long generation = Interlocked.Increment(ref _requestGeneration);
             RbxScriptSignal responseSignal = new(
                 "HttpService." + operation + ".Response[" + generation + "]");
@@ -247,7 +260,7 @@ namespace CoreAI.Ai.LuaCs
             // WHY: each request gets one fresh signal/generation. Its existing signal:Wait bridge
             // performs ScheduleSignalWait/ResumeSignalWait, and late completions cannot target a
             // later wait because no response signal is ever reused.
-            BeginRequest(context, operation, request, responseSignal);
+            _ = ResolveAndSendAsync(approved, operation, responseSignal, actorId);
             return wrappedSignal;
         }
 
@@ -324,11 +337,10 @@ namespace CoreAI.Ai.LuaCs
                 method, uri, headers, body, compress, timeoutSeconds);
         }
 
-        private void BeginRequest(LuaCsRbxModContext context, string operation,
-            RbxHttpRequest requested, RbxScriptSignal responseSignal)
+        private bool TryRefuse(string actorId, RbxHttpRequest requested,
+            out RbxHttpRequest approved, out RbxError refusal)
         {
-            string actorId = context.ActorContext.ActorId;
-            RbxHttpRequest approved = null;
+            approved = null;
             string refusalReason = null;
             bool authorized = _policy.IsEnabled
                               && _policy.TryAuthorize(actorId, requested,
@@ -338,33 +350,33 @@ namespace CoreAI.Ai.LuaCs
                 string reason = string.IsNullOrWhiteSpace(refusalReason)
                     ? "the host policy did not explicitly authorize the request"
                     : refusalReason;
-                EnqueueFailure(responseSignal, new RbxError(
+                refusal = new RbxError(
                     RbxErrorCode.NotAuthority,
                     "HttpService policy refused actor '" + actorId + "': " + reason,
-                    "ask the host to allowlist the exact public HTTPS origin"));
-                return;
+                    "ask the host to allowlist the exact public HTTPS origin");
+                return true;
             }
 
             if (!RbxHttpSafety.TryValidate(approved, out string safetyReason))
             {
-                EnqueueFailure(responseSignal, new RbxError(
+                refusal = new RbxError(
                     RbxErrorCode.NotAuthority,
                     "HttpService safety check refused actor '" + actorId + "': " + safetyReason,
-                    "use a public HTTPS endpoint without credentials or forbidden headers"));
-                return;
+                    "use a public HTTPS endpoint without credentials or forbidden headers");
+                return true;
             }
 
             if (!_rateLimiter.TryAcquire(actorId, out string rateReason))
             {
-                EnqueueFailure(responseSignal, new RbxError(
+                refusal = new RbxError(
                     RbxErrorCode.BudgetExceeded,
                     "HttpService rate limit refused actor '" + actorId + "': " + rateReason,
-                    "reduce this actor's request rate or wait for its window to expire"));
-                return;
+                    "reduce this actor's request rate or wait for its window to expire");
+                return true;
             }
 
-            _ = ResolveAndSendAsync(
-                approved, operation, responseSignal, actorId);
+            refusal = null;
+            return false;
         }
 
         private async Task ResolveAndSendAsync(RbxHttpRequest approved, string operation,

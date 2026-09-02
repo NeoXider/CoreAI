@@ -178,7 +178,10 @@ namespace CoreAI.Ai
         }
 
         /// <summary>Executes a mod-management action and returns a JSON result for the model.</summary>
-        public async Task<string> ExecuteAsync(
+        // WHY: MEAI awaits this task with ConfigureAwait(false) inside its binary. In the WebGL player
+        // the result must be published with the host SynchronizationContext cleared, or the model turn
+        // never resumes after an asynchronously completed body (see MeaiToolTaskBridge).
+        public Task<string> ExecuteAsync(
             [Description(
                 "One of: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics")]
             string action,
@@ -193,7 +196,11 @@ namespace CoreAI.Ai
             [Description(
                 "Revision index to roll back to for the revert action (as listed by versions; 0 is the original).")]
             int revision = -1,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default) =>
+            MeaiToolTaskBridge.Publish(ExecuteBodyAsync(action, mod_id, code, bundle, revision, cancellationToken));
+
+        private async Task<string> ExecuteBodyAsync(string action, string mod_id, string code, string bundle,
+            int revision, CancellationToken cancellationToken)
         {
             string normalized = (action ?? "").Trim().ToLowerInvariant();
             if (_settings.LogToolCalls)

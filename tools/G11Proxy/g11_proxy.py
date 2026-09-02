@@ -20,11 +20,20 @@ Control API (JSON over HTTP)::
         The next /v1 request is held that long, then answered 503. Exercises the client's
         outer request timeout.
     POST /control/reset      {"counters": false}
-        Clears every injection. Counters are kept unless ``counters`` is true.
+        Clears every injection and the reply script. Counters are kept unless ``counters`` is true.
+    POST /control/script     {"replies": [{"tool_call": {"name": "execute_lua", "arguments": {"code": "return 1"}}},
+                                          {"text": "DONE"}]}
+        Queues deterministic replies for the next chat/completions requests, one per request, in
+        order; the upstream is not contacted for them. A ``tool_call`` reply is rendered as one
+        OpenAI native tool call (``finish_reason: tool_calls``), a ``text`` reply as assistant prose
+        (``finish_reason: stop``), streamed as SSE when the request asks for ``stream: true`` and as
+        one JSON completion otherwise. Lets the browser acceptance exercise the native tool-call
+        continuation without depending on a small model choosing to call a tool.
+    GET  /control/requests   The last captured /v1 request bodies (method, path, at, body).
     GET  /control/state      Counters, last request and the current injection settings.
     GET  /health             {"ok": true, "upstream": "..."}
 
-Injection precedence is hang (one-shot) -> block -> fail-next.
+Injection precedence is hang (one-shot) -> block -> fail-next -> scripted reply.
 """
 
 from __future__ import annotations
@@ -78,6 +87,10 @@ HOP_BY_HOP = frozenset(
 
 ALLOW_METHODS = "GET, POST, OPTIONS"
 
+# Request-body capture for ``GET /control/requests``: enough to read a tool-result message back.
+CAPTURED_REQUESTS_MAX = 8
+CAPTURED_BODY_MAX_CHARS = 65536
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -130,13 +143,16 @@ class ProxyState:
             self.block_status = DEFAULT_FAIL_STATUS
             self.hang_seconds = 0.0
             self.hang_status = DEFAULT_FAIL_STATUS
+            self.script = []
             if clear_counters:
                 self.total_requests = 0
                 self.total_proxied = 0
                 self.injected_failures = 0
+                self.scripted_replies = 0
                 self.upstream_errors = 0
                 self.in_flight = 0
                 self.last = None
+                self.captured = []
 
     def set_fail_next(self, count, status, body, path):
         with self._lock:
@@ -154,6 +170,63 @@ class ProxyState:
         with self._lock:
             self.hang_seconds = max(0.0, float(seconds))
             self.hang_status = int(status)
+
+    def set_script(self, replies):
+        """Replace the reply script. Raises ValueError on a malformed entry."""
+        normalized = []
+        if not isinstance(replies, list):
+            raise ValueError("replies must be a JSON array")
+        for index, entry in enumerate(replies):
+            if not isinstance(entry, dict):
+                raise ValueError("replies[%d] must be an object" % index)
+            if "tool_call" in entry:
+                call = entry["tool_call"]
+                if not isinstance(call, dict) or not isinstance(call.get("name"), str) or not call["name"]:
+                    raise ValueError("replies[%d].tool_call needs a non-empty string name" % index)
+                arguments = call.get("arguments", {})
+                if isinstance(arguments, str):
+                    arguments_json = arguments
+                else:
+                    arguments_json = json.dumps(arguments)
+                normalized.append(
+                    {"kind": "tool_call", "name": call["name"], "arguments": arguments_json}
+                )
+            elif "text" in entry:
+                if not isinstance(entry["text"], str):
+                    raise ValueError("replies[%d].text must be a string" % index)
+                normalized.append({"kind": "text", "text": entry["text"]})
+            else:
+                raise ValueError("replies[%d] needs either tool_call or text" % index)
+        with self._lock:
+            self.script = normalized
+
+    def take_script(self, route):
+        """Claim the next scripted reply for a chat/completions request, or None."""
+        if "chat/completions" not in route:
+            return None
+        with self._lock:
+            if not self.script:
+                return None
+            reply = self.script.pop(0)
+            self.scripted_replies += 1
+            reply = dict(reply)
+            reply["sequence"] = self.scripted_replies
+            return reply
+
+    def capture_request(self, method, route, body):
+        try:
+            text = body.decode("utf-8") if body else ""
+        except UnicodeDecodeError:
+            text = body.decode("latin-1", "replace") if body else ""
+        if len(text) > CAPTURED_BODY_MAX_CHARS:
+            text = text[:CAPTURED_BODY_MAX_CHARS] + "...<truncated>"
+        with self._lock:
+            self.captured.append({"at": _utc_now(), "method": method, "path": route, "body": text})
+            del self.captured[:-CAPTURED_REQUESTS_MAX]
+
+    def captured_requests(self):
+        with self._lock:
+            return list(self.captured)
 
     def take_injection(self, route):
         """Claim a fault for this request, or return None to forward upstream."""
@@ -209,6 +282,7 @@ class ProxyState:
                     "total_requests": self.total_requests,
                     "total_proxied": self.total_proxied,
                     "injected_failures": self.injected_failures,
+                    "scripted_replies": self.scripted_replies,
                     "upstream_errors": self.upstream_errors,
                     "in_flight": self.in_flight,
                 },
@@ -221,6 +295,7 @@ class ProxyState:
                     "blocked": self.blocked,
                     "block_status": self.block_status,
                     "hang_seconds": self.hang_seconds,
+                    "script_remaining": len(self.script),
                 },
             }
 
@@ -304,6 +379,15 @@ class G11ProxyHandler(BaseHTTPRequestHandler):
             self._log(started, route, 200, size, streamed=False, injected="control")
             return
 
+        if route == "/control/requests":
+            if self.command != "GET":
+                size = self._send_json(405, {"ok": False, "error": "use GET /control/requests"})
+                self._log(started, route, 405, size, streamed=False, injected="control")
+                return
+            size = self._send_json(200, {"ok": True, "requests": self.state.captured_requests()})
+            self._log(started, route, 200, size, streamed=False, injected="control")
+            return
+
         if self.command != "POST":
             size = self._send_json(405, {"ok": False, "error": "use POST " + route})
             self._log(started, route, 405, size, streamed=False, injected="control")
@@ -337,6 +421,13 @@ class G11ProxyHandler(BaseHTTPRequestHandler):
             )
         elif route == "/control/reset":
             self.state.reset(clear_counters=bool(payload.get("counters", False)))
+        elif route == "/control/script":
+            try:
+                self.state.set_script(payload.get("replies", []))
+            except ValueError as ex:
+                size = self._send_json(400, {"ok": False, "error": str(ex)})
+                self._log(started, route, 400, size, streamed=False, injected="control")
+                return
         else:
             size = self._send_json(404, {"ok": False, "error": "unknown control route: " + route})
             self._log(started, route, 404, size, streamed=False, injected="control")
@@ -351,6 +442,7 @@ class G11ProxyHandler(BaseHTTPRequestHandler):
         # The body is drained first so an injected reply still leaves the
         # keep-alive connection correctly framed.
         body = self._read_body()
+        self.state.capture_request(self.command, route, body)
         injection = self.state.take_injection(route)
 
         if injection is not None:
@@ -360,6 +452,13 @@ class G11ProxyHandler(BaseHTTPRequestHandler):
             size = self._send_injected(status, injection["body"])
             self.state.record_last(self.command, route, status, injection["kind"])
             self._log(started, route, status, size, streamed=False, injected=injection["kind"])
+            return
+
+        scripted = self.state.take_script(route)
+        if scripted is not None:
+            streamed, size = self._send_scripted(scripted, body)
+            self.state.record_last(self.command, route, 200, "script")
+            self._log(started, route, 200, size, streamed=streamed, injected="script")
             return
 
         target = self.state.base_path + route[len("/v1"):]
@@ -463,6 +562,95 @@ class G11ProxyHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
         except OSError:
             # Client hung up (page reload / navigation) mid-stream.
+            self.close_connection = True
+        return True, total
+
+    # --------------------------------------------------------------- scripted
+
+    def _send_scripted(self, reply, request_body):
+        """Render one scripted reply in OpenAI chat-completions shape. Returns (streamed, bytes)."""
+        wants_stream = False
+        model = "g11-script"
+        try:
+            request = json.loads(request_body.decode("utf-8")) if request_body else {}
+            if isinstance(request, dict):
+                wants_stream = bool(request.get("stream", False))
+                if isinstance(request.get("model"), str) and request["model"]:
+                    model = request["model"]
+        except (ValueError, UnicodeDecodeError):
+            pass
+
+        completion_id = "chatcmpl-g11script-%d" % reply["sequence"]
+        created = int(time.time())
+        if reply["kind"] == "tool_call":
+            call_id = "call_g11script_%d" % reply["sequence"]
+            tool_call = {
+                "id": call_id,
+                "type": "function",
+                "function": {"name": reply["name"], "arguments": reply["arguments"]},
+            }
+            message = {"role": "assistant", "content": None, "tool_calls": [tool_call]}
+            finish_reason = "tool_calls"
+            streamed_call = dict(tool_call)
+            streamed_call["index"] = 0
+            deltas = [{"role": "assistant", "content": None, "tool_calls": [streamed_call]}]
+        else:
+            message = {"role": "assistant", "content": reply["text"]}
+            finish_reason = "stop"
+            deltas = [{"role": "assistant", "content": reply["text"]}]
+
+        if not wants_stream:
+            payload = {
+                "id": completion_id,
+                "object": "chat.completion",
+                "created": created,
+                "model": model,
+                "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            }
+            return False, self._send_json(200, payload)
+
+        frames = []
+        for delta in deltas:
+            frames.append(
+                {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model,
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                }
+            )
+        frames.append(
+            {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+            }
+        )
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("X-Accel-Buffering", "no")
+        self._cors_headers()
+        self.end_headers()
+        total = 0
+        try:
+            for frame in frames:
+                chunk = ("data: " + json.dumps(frame) + "\n\n").encode("utf-8")
+                self.wfile.write(b"%x\r\n" % len(chunk) + chunk + b"\r\n")
+                self.wfile.flush()
+                total += len(chunk)
+            done = b"data: [DONE]\n\n"
+            self.wfile.write(b"%x\r\n" % len(done) + done + b"\r\n")
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+            total += len(done)
+        except OSError:
             self.close_connection = True
         return True, total
 

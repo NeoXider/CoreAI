@@ -29,6 +29,10 @@ agent.WithTool(new WorldLlmTool(worldExecutor, settings, logger));
 agent.WithTool(new ComponentLlmTool(componentExecutor, settings, logger));
 ```
 
+> A tool body that can actually suspend must return its task through `MeaiToolTaskBridge.Publish(...)`
+> and must not use `ConfigureAwait(false)`; otherwise the model turn never resumes in a WebGL player.
+> See `MEAI_TOOL_CALLING.md` §3.2.
+
 | Tool | Class | Requires | Notes |
 |---|---|---|---|
 | `inventory` | `InventoryLlmTool` | `IInventoryProvider` | Game inventory read/grant. |

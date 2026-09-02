@@ -479,6 +479,7 @@ class ControlStateTests(ProxyTestBase):
                 "total_requests": 0,
                 "total_proxied": 0,
                 "injected_failures": 0,
+                "scripted_replies": 0,
                 "upstream_errors": 0,
                 "in_flight": 0,
             },
@@ -529,6 +530,101 @@ class ControlStateTests(ProxyTestBase):
         self.assertEqual(405, status)
         status, _, _ = self._request("GET", "/nope")
         self.assertEqual(404, status)
+
+
+class ScriptedReplyTests(ProxyTestBase):
+    def _script(self, replies):
+        return self._control("/control/script", {"replies": replies})
+
+    def _sse_frames(self, raw):
+        return [
+            json.loads(line[len("data: "):])
+            for line in raw.decode("utf-8").split("\n")
+            if line.startswith("data: ") and line != "data: [DONE]"
+        ]
+
+    def test_scripted_tool_call_streams_one_native_tool_call_then_done(self):
+        state = self._script(
+            [{"tool_call": {"name": "execute_lua", "arguments": {"code": "return 2 + 2"}}}]
+        )
+        self.assertEqual(1, state["settings"]["script_remaining"])
+        with self.upstream.lock:
+            before = len(self.upstream.requests)
+        status, headers, data = self._post_json(
+            "/v1/chat/completions", {"model": "fake-model", "stream": True, "messages": []}
+        )
+        self.assertEqual(200, status, data)
+        self.assertIn("text/event-stream", self._values(headers, "Content-Type")[0])
+        self._assert_cors(headers)
+        frames = self._sse_frames(data)
+        self.assertEqual(2, len(frames), data)
+        call = frames[0]["choices"][0]["delta"]["tool_calls"][0]
+        self.assertEqual("execute_lua", call["function"]["name"])
+        self.assertEqual({"code": "return 2 + 2"}, json.loads(call["function"]["arguments"]))
+        self.assertEqual(0, call["index"])
+        self.assertTrue(call["id"])
+        self.assertEqual("tool_calls", frames[1]["choices"][0]["finish_reason"])
+        self.assertTrue(data.rstrip().endswith(b"data: [DONE]"))
+        with self.upstream.lock:
+            self.assertEqual(before, len(self.upstream.requests), "scripted replies never reach upstream")
+        self.assertEqual(0, self._state()["settings"]["script_remaining"])
+        self.assertTrue(any("injected=script" in line for line in self.proxy.logger.lines), self.proxy.logger.lines)
+
+    def test_scripted_text_reply_is_a_plain_completion_when_not_streaming(self):
+        self._script([{"text": "DONE"}])
+        status, headers, data = self._post_json(
+            "/v1/chat/completions", {"model": "fake-model", "stream": False, "messages": []}
+        )
+        self.assertEqual(200, status, data)
+        self.assertIn("application/json", self._values(headers, "Content-Type")[0])
+        payload = json.loads(data.decode("utf-8"))
+        self.assertEqual("chat.completion", payload["object"])
+        self.assertEqual("fake-model", payload["model"])
+        self.assertEqual("DONE", payload["choices"][0]["message"]["content"])
+        self.assertEqual("stop", payload["choices"][0]["finish_reason"])
+
+    def test_script_is_consumed_in_order_then_requests_forward_again(self):
+        self._script([{"tool_call": {"name": "a", "arguments": {}}}, {"text": "second"}])
+        _, _, first = self._post_json("/v1/chat/completions", {"stream": False})
+        _, _, second = self._post_json("/v1/chat/completions", {"stream": False})
+        self.assertEqual("a", json.loads(first)["choices"][0]["message"]["tool_calls"][0]["function"]["name"])
+        self.assertEqual("second", json.loads(second)["choices"][0]["message"]["content"])
+        with self.upstream.lock:
+            before = len(self.upstream.requests)
+        status, _, third = self._post_json("/v1/chat/completions", {"stream": False})
+        self.assertEqual(200, status, third)
+        with self.upstream.lock:
+            self.assertEqual(before + 1, len(self.upstream.requests), "an exhausted script forwards upstream")
+        self.assertEqual(2, self._state()["counters"]["scripted_replies"])
+
+    def test_script_only_answers_chat_completions(self):
+        self._script([{"text": "never"}])
+        with self.upstream.lock:
+            before = len(self.upstream.requests)
+        self._request("GET", "/v1/models")
+        with self.upstream.lock:
+            self.assertEqual(before + 1, len(self.upstream.requests))
+        self.assertEqual(1, self._state()["settings"]["script_remaining"])
+
+    def test_script_rejects_malformed_entries(self):
+        for bad in ([{"nope": 1}], [{"tool_call": {"arguments": {}}}], "text", [{"text": 5}]):
+            status, _, data = self._post_json("/control/script", {"replies": bad})
+            self.assertEqual(400, status, data)
+        self.assertEqual(0, self._state()["settings"]["script_remaining"])
+
+    def test_control_requests_returns_captured_bodies(self):
+        self._post_json("/v1/chat/completions", {"stream": False, "messages": [{"role": "tool", "content": "HTTP_PROBE"}]})
+        status, _, data = self._request("GET", "/control/requests")
+        self.assertEqual(200, status, data)
+        captured = json.loads(data.decode("utf-8"))["requests"]
+        self.assertTrue(captured)
+        self.assertEqual("/v1/chat/completions", captured[-1]["path"])
+        self.assertIn("HTTP_PROBE", captured[-1]["body"])
+
+    def test_reset_clears_the_script(self):
+        self._script([{"text": "x"}])
+        self._control("/control/reset", {})
+        self.assertEqual(0, self._state()["settings"]["script_remaining"])
 
 
 class LoggingTests(ProxyTestBase):

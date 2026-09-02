@@ -10,6 +10,14 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// LLM tool implemented by a delegate callback.
+    /// <para>
+    /// Awaits here resume on the host <see cref="SynchronizationContext"/>: in the WebGL player a
+    /// <c>ConfigureAwait(false)</c> continuation would be queued to a thread pool that does not exist.
+    /// The delegate itself is bound by MEAI, which awaits an async delegate with
+    /// <c>ConfigureAwait(false)</c> inside its binary — a delegate whose task completes asynchronously
+    /// must therefore return it through <see cref="MeaiToolTaskBridge.Publish{T}"/>, exactly as the
+    /// built-in Lua tools do.
+    /// </para>
     /// </summary>
     public sealed class DelegateLlmTool : ILlmTool, IAIFunctionLlmTool, IJsonInvocableLlmTool
     {
@@ -59,8 +67,7 @@ namespace CoreAI.Ai
         {
             AIFunction function = CreateAIFunction();
             return await function
-                .InvokeAsync(SkillSetToolResolver.CreateArguments(argumentsJson ?? "{}"), cancellationToken)
-                .ConfigureAwait(false);
+                .InvokeAsync(SkillSetToolResolver.CreateArguments(argumentsJson ?? "{}"), cancellationToken);
         }
 
         private static AIFunction CreateAIFunction(Delegate action, string name, string description)
@@ -108,7 +115,7 @@ namespace CoreAI.Ai
                 bool completedSynchronously = invocation.IsCompleted;
                 try
                 {
-                    return await invocation.ConfigureAwait(false);
+                    return await invocation;
                 }
                 catch (OperationCanceledException)
                 {

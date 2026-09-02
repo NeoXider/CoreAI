@@ -237,7 +237,7 @@ namespace CoreAI.Ai.LuaCs
                         "no trusted local actor resolver is configured for the plain execute seam");
                 }
 
-                return await ExecuteAsync(code, localActor, cancellationToken).ConfigureAwait(false);
+                return await ExecuteAsync(code, localActor, cancellationToken);
             }
 
             try
@@ -284,7 +284,7 @@ namespace CoreAI.Ai.LuaCs
                             () => ExecuteCore(code, token,
                                 registry => scopedBindings.RegisterGameplayApis(
                                     registry, actorContext)))),
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken);
             }
             catch (Exception ex)
             {

@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+## [7.3.1] - 2026-09-02
+
+### Fixed
+
+- **Ход модели с нативным tool-call больше не зависает навсегда в WebGL-плеере после
+  `execute_lua` / `manage_mods`.** Воспроизведено в браузере на плеере 7.3.0 через скриптованный
+  ответ прокси G11 (`POST /control/script`): инструмент исполнялся (`SUM_PROBE x=4` в консоли),
+  но трасса обрывалась на `[ToolPolicy] execute_lua: step=invoke-started async` — ни результата,
+  ни второго запроса к модели, «Processing…» до ручной отмены. Причина та же, что в 7.0.5, только
+  этажом ниже: на пути `LuaTool` → `LuaCsGameToolExecutor` → `ConfirmedWorldMutationGate` тело
+  реально приостанавливается (автосейв перед мутацией идёт через `UniTask.Yield`), а продолжения
+  после него были записаны с `ConfigureAwait(false)` и уходили в несуществующий пул потоков.
+  Сняты все семь `ConfigureAwait(false)` в `LuaTool`, `LuaCsGameToolExecutor` и `DelegateLlmTool`.
+  Одного этого мало: первое продолжение после тела инструмента принадлежит MEAI
+  (`AIFunctionFactory` ждёт задачу делегата с `ConfigureAwait(false)` внутри бинаря). Новый
+  `MeaiToolTaskBridge.Publish(task)` завершает задачу, отдаваемую MEAI, со снятым
+  `SynchronizationContext`, и продолжение MEAI выполняется inline на том же стеке вызова;
+  `execute_lua` и `manage_mods` публикуют результат через мост. Хостовые асинхронные делегаты
+  `DelegateLlmTool` обязаны делать то же самое (`Docs/MEAI_TOOL_CALLING.md` §3.2).
+  Тесты: `MeaiToolTaskBridgeEditModeTests` (inline-продолжение под производным контекстом,
+  контрольный тест «без моста продолжение уходит с потока», исключения, отмена) и
+  `LuaToolWebGlPublishEditModeTests` (MEAI-вызов `execute_lua` завершается на стеке завершения
+  тела — падал до правки). Пересобранный плеер проверен в браузере тем же скриптованным
+  tool-call: результат доставлен, второй запрос ушёл, ход завершён.
+- **`HttpService` в одноразовом `execute_lua` возвращает настроенный отказ хоста, а не ошибку
+  моста ожидания.** Отказы политики / безопасности / лимита решаются синхронно в
+  `_prepareHttpRequest` и поднимаются Lua-мостом в любом контексте исполнения, включая чанки без
+  планировщика (`task._signalWaitBridge` есть только у потоков модов). Раньше одноразовый чанк
+  получал «Wait bridge is unavailable» вместо «HttpService policy refused actor …».
+  Тест: `HttpServiceOneOffRefusalEditModeTests` (падал до правки).
+
+### Added
+
+- Пошаговая трасса вызова инструмента под `LogMeaiToolCallingSteps`: `[ToolPolicy] <tool>:
+  step=invoke-started sync|async` / `raced invoke|timeout` / `result-awaited` /
+  `streamed-sequential-done`; `LuaTool` под `LogToolCalls` пишет `executor returned success=…`.
+  Именно по ней локализовано зависание выше.
+- `tools/G11Proxy`: скриптованные ответы (`POST /control/script` — очередь `text` / `tool_call`,
+  отдаётся как SSE) и захват запросов (`GET /control/requests`), чтобы проверять нативный
+  tool-call в браузере детерминированно, без участия модели (28 unittest).
+
 ## [7.3.0] - 2026-09-02
 
 Персистентность MVP3 (в проекте — MVP2.5): пакет мира, автосейвы перед каждой мутацией ИИ,

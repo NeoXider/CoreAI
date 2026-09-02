@@ -286,3 +286,14 @@ injected errors, the counters, and the log-line format.
   local blocker unrelated to this proxy — while `ling-3.0-tiny` streamed a nonce back through the
   proxy in 26 separate relayed reads. Verify the configured model actually loads before starting the
   G11 run, or the nonce turn will fail for the wrong reason.
+
+## Scripted replies (deterministic native tool calls)
+
+`POST /control/script {"replies": [...]}` queues replies for the next `chat/completions` requests, one
+per request, in order; the upstream is not contacted for them. Entries are either
+`{"tool_call": {"name": "execute_lua", "arguments": {"code": "return 1"}}}` (rendered as one OpenAI
+native tool call, `finish_reason: tool_calls`) or `{"text": "DONE"}` (assistant prose,
+`finish_reason: stop`). Streaming requests get SSE chunks, others one JSON completion. Use it to drive
+the client's native tool-call continuation without depending on a small model choosing to call a tool.
+`GET /control/requests` returns the last captured request bodies, so the follow-up request that carries
+the tool result can be asserted. `POST /control/reset` clears the script.
