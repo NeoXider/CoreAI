@@ -77,6 +77,15 @@
   игрока: типы реестра использовались без using-директив, которые редактор и EditMode не требовали.
   Добавлен `tools/webgl_define_check.py` — компиляция сборок с WebGL-дефайнами без полной сборки
   игрока, чтобы такие ошибки ловились до батч-сборки.
+- **Мёртвый ретрай LLM-клиента в браузере (найдено в приёмке G11).** После одного 503 на открытии
+  стрима `MeaiOpenAiChatClient` писал «retrying after 2000ms» и больше никогда не отправлял запрос:
+  пауза ретрая, опрос и внешний таймаут чтения шли через `Task.Delay`, у которого в однопоточном
+  WebGL нет таймера — чат висел на индикаторе набора без терминальной ошибки. Теперь все задержки
+  клиента идут через `ILlmAsyncMarshaler.DelayAsync` (инжекция в конструктор или хостовый
+  `MeaiOpenAiChatClient.DefaultAsyncMarshaler`, который выставляет Unity-инсталлер); `Task.Delay`
+  остался только переносимым fallback. Сборка `CoreAI.Core` вне области анализатора CAIU001, поэтому
+  дефект держался; закреплено `MeaiOpenAiChatClientWebGlDelayEditModeTests` и уточнённым allowlist
+  охранника небезопасных примитивов.
 - `ConfigureAwait(false)` убран с путей, достижимых в WebGL (mod HTTP, реестр клиентов);
   ретраи и таймауты LLM идут через `ILlmAsyncMarshaler.DelayAsync` (PlayerLoop).
 - Capture пакета мира больше не отказывает на world-owned `Model`, чей `PrimaryPart` указывает на

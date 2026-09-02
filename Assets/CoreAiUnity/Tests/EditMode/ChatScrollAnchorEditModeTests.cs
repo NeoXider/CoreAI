@@ -50,7 +50,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Reveal_ClampsToScrollerRange()
         {
-            Assert.AreEqual(900f, CoreAiChatPanel.ResolveRevealScrollValue(1000f, 1100f, 400f, 0f, 0f, 900f));
+            // viewport [0, 400), row [1000, 1100) -> minimal scroll would be 700, but the scroller ends
+            // at 600 (content shorter than the row's bottom), so the reveal clamps to highValue.
+            Assert.AreEqual(600f, CoreAiChatPanel.ResolveRevealScrollValue(1000f, 1100f, 400f, 0f, 0f, 600f));
+            // Within range the minimal scroll is kept as-is (bottom aligned), consistent with
+            // Reveal_ScrollsDownJustEnough_WhenRowBelowView.
+            Assert.AreEqual(700f, CoreAiChatPanel.ResolveRevealScrollValue(1000f, 1100f, 400f, 0f, 0f, 900f));
         }
     }
 }

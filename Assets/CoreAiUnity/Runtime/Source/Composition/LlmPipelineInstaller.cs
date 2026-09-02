@@ -40,6 +40,9 @@ namespace CoreAI.Composition
         {
             float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : 15f;
             ILlmAsyncMarshaler asyncMarshaler = UnityMainThreadLlmAsyncMarshaler.Instance;
+            // WHY: every OpenAI-compatible client built by the static factories (and hot-swapped ones)
+            // must back off and time out through the player loop; a Task.Delay is dead on WebGL.
+            MeaiOpenAiChatClient.DefaultAsyncMarshaler = asyncMarshaler;
 
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
             if (ShouldRegisterLocalModelProvider(platform))

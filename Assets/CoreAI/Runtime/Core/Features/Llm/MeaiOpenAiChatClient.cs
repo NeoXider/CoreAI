@@ -51,6 +51,16 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IOpenAiHttpSettings _settings;
         private readonly IOpenAiHttpTransport _transport;
         private readonly ILog _log;
+        private readonly ILlmAsyncMarshaler? _asyncMarshaler;
+
+        /// <summary>
+        /// Host-wide delay source used when a client was built without an explicit marshaler (every
+        /// static factory path, including hot-swapped endpoints). The Unity pipeline sets it to the
+        /// player-loop marshaler at composition time; portable hosts leave it null and use
+        /// <see cref="Task.Delay"/>. WHY: on WebGL a <see cref="Task.Delay"/> never completes, which
+        /// turned a single retryable 503 into a dead wait in the browser.
+        /// </summary>
+        public static ILlmAsyncMarshaler? DefaultAsyncMarshaler { get; set; }
 
         /// <summary>
         /// Starved-stream watchdog: while a streaming attempt has produced ZERO parsed deltas and the
@@ -145,10 +155,22 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         public MeaiOpenAiChatClient(IOpenAiHttpSettings settings, IOpenAiHttpTransport transport, ILog? log = null)
+            : this(settings, transport, log, null)
+        {
+        }
+
+        /// <summary>
+        /// Creates the client with a host delay source. Unity hosts pass their player-loop marshaler so
+        /// retry backoffs and the stream idle timeout never depend on <see cref="Task.Delay"/>, which
+        /// has no timer thread on the single-threaded WebGL runtime and therefore never completes there.
+        /// </summary>
+        public MeaiOpenAiChatClient(IOpenAiHttpSettings settings, IOpenAiHttpTransport transport, ILog? log,
+            ILlmAsyncMarshaler? asyncMarshaler)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _transport = transport ?? throw new ArgumentNullException(nameof(transport));
             _log = log ?? Log.Instance;
+            _asyncMarshaler = asyncMarshaler;
         }
 
 #if !UNITY_WEBGL || UNITY_EDITOR
@@ -904,7 +926,7 @@ namespace CoreAI.Infrastructure.Llm
             // across the stream (a steady leak proportional to streamed tokens).
             using CancellationTokenSource delayCts =
                 CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            Task timeoutTask = Task.Delay(timeoutMs, delayCts.Token);
+            Task timeoutTask = HostDelayAsync(null, timeoutMs, delayCts.Token);
             Task completed = await Task.WhenAny(readTask, timeoutTask);
             if (ReferenceEquals(completed, readTask))
             {
@@ -1231,14 +1253,29 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        private static async Task BackoffDelayAsync(int milliseconds, CancellationToken cancellationToken)
+        private Task BackoffDelayAsync(int milliseconds, CancellationToken cancellationToken)
         {
             if (milliseconds <= 0)
             {
-                return;
+                return Task.CompletedTask;
             }
 
-            await Task.Delay(milliseconds, cancellationToken);
+            return HostDelayAsync(milliseconds, cancellationToken);
+        }
+
+        /// <summary>Delay that completes on hosts without a timer thread (WebGL) via the marshaler.</summary>
+        private Task HostDelayAsync(int milliseconds, CancellationToken cancellationToken)
+        {
+            return HostDelayAsync(_asyncMarshaler, milliseconds, cancellationToken);
+        }
+
+        private static Task HostDelayAsync(ILlmAsyncMarshaler? marshaler, int milliseconds,
+            CancellationToken cancellationToken)
+        {
+            ILlmAsyncMarshaler? effective = marshaler ?? DefaultAsyncMarshaler;
+            return effective != null
+                ? effective.DelayAsync(milliseconds, cancellationToken)
+                : Task.Delay(milliseconds, cancellationToken);
         }
 
         private string ResolveAuthorizationHeader()

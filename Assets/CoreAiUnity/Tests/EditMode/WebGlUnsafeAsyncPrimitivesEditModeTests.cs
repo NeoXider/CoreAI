@@ -97,7 +97,10 @@ namespace CoreAI.Tests.EditMode
             [("Assets/CoreAI/Runtime/Core/Features/Llm/HttpClientOpenAiTransport.cs", Primitive.CancelAfter)] =
                 "унаследовано: не-WebGL транспорт (в браузере работает FetchSseOpenAiTransport)",
             [("Assets/CoreAI/Runtime/Core/Features/Llm/MeaiOpenAiChatClient.cs", Primitive.TaskDelay)] =
-                "унаследовано: таймаут чтения потока и пауза между ретраями, на WebGL не проверялись",
+                "ПРОВЕРЕНО в браузере 2026-09-02: ретраи и таймаут чтения идут через HostDelayAsync -> " +
+                "ILlmAsyncMarshaler.DelayAsync (DefaultAsyncMarshaler ставит Unity-инсталлер); оставшиеся " +
+                "Task.Delay — переносимый fallback внутри HostDelayAsync и ветка #else (не WebGL); " +
+                "MeaiOpenAiChatClientWebGlDelayEditModeTests закрепляет это",
             [("Assets/CoreAI/Runtime/Core/Features/Llm/WaitLlmTool.cs", Primitive.TaskDelay)] =
                 "унаследовано: инструмент «подожди», смысл которого и есть задержка",
             [("Assets/CoreAI/Runtime/Core/Features/Orchestration/QueuedAiOrchestrator.cs", Primitive.PoolContinuations)] =
