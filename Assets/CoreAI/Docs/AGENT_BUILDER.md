@@ -1223,7 +1223,7 @@ Production agents face three classes of risk: tool result overflow, tool hangs, 
 | Setting | Default | What it does |
 |---------|---------|-------------|
 | `MaxToolResultChars` | **8000** (~2000 tokens) | Soft-truncates tool results with `…[truncated: N chars → M shown]`. Prevents a single tool from overflowing the context window. |
-| `DefaultToolTimeoutMs` | **30000** (30s) | Per-tool execution timeout. If a tool body hangs (e.g. HTTP to dead server), the call is cancelled and the model receives an error. |
+| `DefaultToolTimeoutMs` | **30000** (30s) | Per-tool execution timeout. If a tool body hangs (e.g. HTTP to dead server), the call is cancelled and the model receives an error. A single tool can opt out of this value with `ILlmTool.ToolTimeoutMsOverride` (`null` = use this setting, `<= 0` = no deadline) — that is the lever for a tool that waits for a human, so raising this global one is not. |
 | `MaxResponseChars` | **0** (disabled) | Hard cap on total model response text. Set to e.g. `50000` for production NPC chat to prevent runaway generation. |
 | `MaxToolCallRoundtrips` | **20** | Maximum tool-call roundtrips per request. One roundtrip is one LLM call plus one tool-execution batch. Prevents infinite tool-calling loops. `0` = unlimited. Overridable per agent (`WithMaxToolCallRoundtrips`) and per call (`AiTaskRequest.MaxToolCallRoundtrips`); built-in Programmer/Creator roles default to unlimited. |
 | `MaxToolCallHistoryMessages` | **20** | Max tool call messages retained in the MEAI list during a single request's tool-calling loop. Prevents unbounded context growth. 0 = no limit. |

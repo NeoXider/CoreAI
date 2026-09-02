@@ -434,6 +434,61 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
+        /// Effective per-call timeout for one tool: <see cref="ILlmTool.ToolTimeoutMsOverride"/> when the
+        /// tool declares one, otherwise <see cref="ICoreAISettings.DefaultToolTimeoutMs"/>. The returned
+        /// value keeps the global meaning unchanged — positive = budget in ms, <c>&lt;= 0</c> = no
+        /// per-call deadline — so every caller stays a plain <c>&gt; 0</c> check.
+        /// <para>
+        /// Resolution is BY NAME through <see cref="GetCanonicalToolName"/> (the same case-insensitive
+        /// repair the rest of the policy uses) because the invocation site only has the model's
+        /// <see cref="MEAI.FunctionCallContent"/> and an <see cref="MEAI.AIFunction"/> resolved out of
+        /// <see cref="MEAI.ChatOptions.Tools"/> — never the <see cref="ILlmTool"/> instance. A name the
+        /// role's tool list does not contain (an unbound call, a function expanded out of
+        /// <see cref="IAIFunctionsLlmTool"/> under a different name) simply falls back to the global
+        /// setting, which is what happened before overrides existed.
+        /// </para>
+        /// </summary>
+        private int ResolveToolTimeoutMs(string toolName)
+        {
+            GetCanonicalToolName(toolName, out ILlmTool tool, out _);
+            return tool?.ToolTimeoutMsOverride ?? _settings.DefaultToolTimeoutMs;
+        }
+
+        /// <summary>
+        /// Effective grace budget for the bounded drain of one streamed turn: the LONGEST per-call
+        /// timeout among the calls scheduled into <see cref="StreamedTurn.InFlight"/>, or <c>0</c>
+        /// ("wait for natural completion") as soon as one of them runs with its deadline disabled.
+        /// <para>
+        /// The drain is a single deadline covering several concurrent calls, so it has to be the
+        /// maximum: taking the global default instead would abandon a legitimately long call (a card
+        /// the student is still answering) after the budget meant for a short one, and its slot would
+        /// collate as a "did not complete" failure while the tool was working exactly as designed.
+        /// With no overrides in play every entry equals <see cref="ICoreAISettings.DefaultToolTimeoutMs"/>,
+        /// so the value is identical to what this method replaced.
+        /// </para>
+        /// </summary>
+        private int ResolveDrainTimeoutMs(StreamedTurn turn)
+        {
+            if (turn.InFlightTimeoutsMs.Count == 0)
+            {
+                return _settings.DefaultToolTimeoutMs;
+            }
+
+            int longest = 0;
+            foreach (int timeoutMs in turn.InFlightTimeoutsMs)
+            {
+                if (timeoutMs <= 0)
+                {
+                    return 0;
+                }
+
+                longest = Math.Max(longest, timeoutMs);
+            }
+
+            return longest;
+        }
+
+        /// <summary>
         /// Execute a single tool call: resolve AIFunction, invoke, track success/failure,
         /// and send <see cref="IToolExecutionNotifier.NotifyToolExecuted"/>.
         /// </summary>
@@ -537,7 +592,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 ILlmAsyncMarshaler marshaler =
                     _settings.ToolInvocationMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
-                int toolTimeoutMs = _settings.DefaultToolTimeoutMs;
+                int toolTimeoutMs = ResolveToolTimeoutMs(fc.Name);
                 object result;
                 if (toolTimeoutMs > 0)
                 {
@@ -591,6 +646,12 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else
                 {
+                    // No per-call deadline: either globally (DefaultToolTimeoutMs <= 0) or for this tool
+                    // alone (ILlmTool.ToolTimeoutMsOverride <= 0). The body is invoked with the REQUEST
+                    // token, so LlmRequestTimeoutSeconds — an idle budget re-armed by tool-call events and
+                    // streamed chunks, enforced by TimeoutLlmClientDecorator and, on Unity, by
+                    // CoreAiChatService's PlayerLoop timer — remains the only thing that ends a tool body
+                    // that never returns.
                     result = await marshaler.InvokeAsync<object>(
                         async () => await aiFunc.InvokeAsync(args, cancellationToken),
                         cancellationToken);
@@ -1197,6 +1258,14 @@ namespace CoreAI.Infrastructure.Llm
             internal readonly List<Task> InFlight = new();
 
             /// <summary>
+            /// Effective per-call timeout of each entry in <see cref="InFlight"/>, captured at scheduling
+            /// time. The drain deadline is derived from these (see <see cref="ResolveDrainTimeoutMs"/>):
+            /// by then the tool names are no longer at hand, and a turn can mix a tool that waits for the
+            /// student with ordinary short ones, so a single shared budget has to be the longest of them.
+            /// </summary>
+            internal readonly List<int> InFlightTimeoutsMs = new();
+
+            /// <summary>
             /// Mutating calls are buffered until the complete streamed turn is known. This lets the
             /// whole-turn replay guard reject an echoed multi-call turn before any side effect runs.
             /// Production streaming always completes through <see cref="CompleteStreamedTurnAsync"/>.
@@ -1361,6 +1430,10 @@ namespace CoreAI.Infrastructure.Llm
             // mutating built-ins chain onto SerialChain so they never overlap; everything else
             // runs gate-bounded. The per-call result is deferred to CompleteStreamedTurnAsync.
             turn.Gate ??= new SemaphoreSlim(maxParallel, maxParallel);
+
+            // Captured here, not at drain time: this is the last place the call's NAME is available,
+            // and the drain deadline must cover the longest budget it scheduled.
+            turn.InFlightTimeoutsMs.Add(ResolveToolTimeoutMs(fc.Name));
             if (IsSerializedTool(fc))
             {
                 Task previous = turn.SerialChain;
@@ -1514,7 +1587,7 @@ namespace CoreAI.Infrastructure.Llm
             if (turn.InFlight.Count > 0)
             {
                 Task allInFlight = Task.WhenAll(turn.InFlight);
-                int toolTimeoutMs = _settings.DefaultToolTimeoutMs;
+                int toolTimeoutMs = ResolveDrainTimeoutMs(turn);
                 if (!allInFlight.IsCompleted && (cancellationToken.CanBeCanceled || toolTimeoutMs > 0))
                 {
                     // Bounded drain: workers observe cancellation cooperatively, but a tool body that
@@ -1525,6 +1598,9 @@ namespace CoreAI.Infrastructure.Llm
                     // covering a well-behaved per-call timeout with margin. A slot still unfinished after
                     // that collates as an explicit failure below. The deadline is what protects the
                     // CancellationToken.None abort path (a cancellation-ignoring tool can't wedge it).
+                    // The budget comes from ResolveDrainTimeoutMs, i.e. the LONGEST per-call timeout this
+                    // turn actually scheduled — a tool that declared a longer one (a card waiting for the
+                    // student) must not be cut down to a budget meant for a short tool.
                     using CancellationTokenSource deadline =
                         CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -1575,9 +1651,14 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else if (!allInFlight.IsCompleted)
                 {
-                    // Only reached when per-call tool timeouts are explicitly disabled
-                    // (DefaultToolTimeoutMs <= 0) AND the caller passed an uncancellable token: honour
-                    // the "no timeout" choice and wait for natural completion.
+                    // Only reached when per-call tool timeouts are explicitly disabled — globally
+                    // (DefaultToolTimeoutMs <= 0) or by one of this turn's tools
+                    // (ILlmTool.ToolTimeoutMsOverride <= 0) — AND the caller passed an uncancellable
+                    // token: honour the "no timeout" choice and wait for natural completion. This is the
+                    // one place where disabling the deadline can genuinely park finalization: the
+                    // mid-stream-abort call site passes CancellationToken.None on purpose, so nothing
+                    // above is left to cancel the tool. That is why a waiting tool should prefer a large
+                    // finite budget over turning the deadline off.
                     try
                     {
                         await allInFlight;

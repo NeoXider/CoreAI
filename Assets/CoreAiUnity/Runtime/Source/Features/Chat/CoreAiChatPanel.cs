@@ -16,6 +16,23 @@ using UnityEngine.UIElements;
 namespace CoreAI.Chat
 {
     /// <summary>
+    /// Where the chat scrolls when a NEW assistant message appears.
+    /// <para>
+    /// <see cref="Bottom"/> — classic chat: every message and every streamed chunk pins the view to the
+    /// bottom, so a long answer is read from its END. <see cref="AssistantMessageStart"/> — the
+    /// ChatGPT/DeepSeek pattern: the first assistant row of a turn is pinned with its TOP at the top of
+    /// the viewport and the view does not follow the streamed tail, so the reader starts from the
+    /// beginning and scrolls down at their own pace. User messages and history restore keep scrolling to
+    /// the bottom in both modes.
+    /// </para>
+    /// </summary>
+    public enum ChatScrollAnchor
+    {
+        Bottom = 0,
+        AssistantMessageStart = 1,
+    }
+
+    /// <summary>
     /// UI Toolkit chat panel that sends player text through <see cref="CoreAiChatService"/>,
     /// renders streamed or buffered assistant responses, and exposes overridable hooks for
     /// request construction, message formatting, tool-call display, and error text.
@@ -216,6 +233,18 @@ namespace CoreAI.Chat
         /// flood of <see cref="AddMessage"/> calls does not stack five scheduler jobs per message.
         /// </summary>
         private bool _scrollToBottomScheduled;
+
+        // WHY: the row the current turn is anchored to (first assistant row, or the latest revealed card),
+        // and how — pinned by its top or revealed with the minimal scroll. Reset at turn start and on
+        // every user message so the next answer anchors again. Only used when ScrollAnchor is not Bottom.
+        private VisualElement _turnAnchorRow;
+        private TurnAnchorMode _turnAnchorMode;
+
+        private enum TurnAnchorMode
+        {
+            Start,
+            Reveal,
+        }
 
         private IVisualElementScheduledItem _typingAnimation;
         private VisualElement _typingDots;
@@ -1312,6 +1341,7 @@ namespace CoreAI.Chat
             // is only about the next bind: a stuck flag would block every scroll after a UI rebuild.
             _scrollToBottomScheduled = false;
             _streamingScrollScheduled = false;
+            _turnAnchorRow = null;
         }
 
         protected virtual void ApplyConfig()
@@ -2745,6 +2775,7 @@ namespace CoreAI.Chat
             // WHY: bubbles of the PREVIOUS turn must not leak into this one — a host reading
             // TurnStreamingBubbles would re-render already finished bubbles with the new answer.
             _turnStreamingBubbles.Clear();
+            _turnAnchorRow = null;
 
             // WHY: yield so the UI thread can repaint (stop affordance) before ultra-fast stubs finish
             // the enumerator.
@@ -2907,7 +2938,7 @@ namespace CoreAI.Chat
                     FinishStreaming();
                     HideTypingIndicator();
                     UpdateSendButtonVisualState();
-                    ScrollToBottom();
+                    ScrollToTurnAnchor();
                 }
                 else
                 {
@@ -3320,7 +3351,17 @@ namespace CoreAI.Chat
 
             VisualElement bubble = CreateMessageBubble(text, isUser);
             MessageScroll.Add(bubble);
-            ScrollToBottom();
+            if (isUser)
+            {
+                // WHY: the learner's own message always lands at the bottom; the answer that follows
+                // starts a fresh anchor.
+                _turnAnchorRow = null;
+                ScrollToBottom();
+            }
+            else
+            {
+                ScrollForNewAssistantRow(bubble);
+            }
         }
 
         private void RecordRoleTranscriptMessage(string roleId, string text, bool isUser)
@@ -3966,7 +4007,7 @@ namespace CoreAI.Chat
             // just the last one (see TurnStreamingBubbles).
             _turnStreamingBubbles.Add(_streamingLabel);
             MessageScroll.Add(templateRow);
-            ScrollToBottom();
+            ScrollForNewAssistantRow(templateRow);
             return _streamingLabel;
         }
 
@@ -3991,7 +4032,10 @@ namespace CoreAI.Chat
             _streamingLabel.text =
                 AppendStreamingChunkForRender(_streamingLabel.text, chunk, out bool cappedAtLimit);
             _streamingRenderCapReached = cappedAtLimit;
-            ScheduleStreamingScrollToBottom();
+            if (ScrollAnchor == ChatScrollAnchor.Bottom)
+            {
+                ScheduleStreamingScrollToBottom();
+            }
         }
 
         /// <summary>
@@ -4154,6 +4198,160 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Scroll policy for NEW assistant messages. Override in a host to get the ChatGPT-style
+        /// "read from the start" behaviour (<see cref="ChatScrollAnchor.AssistantMessageStart"/>);
+        /// the package default keeps the classic bottom-pinned chat.
+        /// </summary>
+        protected virtual ChatScrollAnchor ScrollAnchor => ChatScrollAnchor.Bottom;
+
+        /// <summary>
+        /// Scrolls for a row that was just appended for the assistant. In <see cref="ChatScrollAnchor.Bottom"/>
+        /// this is <see cref="ScrollToBottom"/>. Otherwise the FIRST assistant row of the turn becomes the
+        /// anchor and is pinned by its top; later rows of the same turn do not move the view — the reader
+        /// must not lose their place mid-answer.
+        /// </summary>
+        protected void ScrollForNewAssistantRow(VisualElement row)
+        {
+            if (ScrollAnchor == ChatScrollAnchor.Bottom)
+            {
+                ScrollToBottom();
+                return;
+            }
+
+            if (row == null || (_turnAnchorRow != null && _turnAnchorRow.parent != null))
+            {
+                return;
+            }
+
+            _turnAnchorRow = row;
+            _turnAnchorMode = TurnAnchorMode.Start;
+            ScheduleAnchorSettleChain(row, TurnAnchorMode.Start);
+        }
+
+        /// <summary>
+        /// Reveals a row (a card, an interactive block) with the MINIMAL scroll: nothing moves when it is
+        /// already fully visible; a row taller than the viewport is pinned by its top. The row becomes the
+        /// turn anchor, so later re-snaps (<see cref="ScrollToTurnAnchor"/>) keep it in view instead of
+        /// jumping back to the message start. Falls back to <see cref="ScrollToBottom"/> in Bottom mode.
+        /// </summary>
+        protected void ScrollToRevealRow(VisualElement row)
+        {
+            if (ScrollAnchor == ChatScrollAnchor.Bottom || row == null)
+            {
+                ScrollToBottom();
+                return;
+            }
+
+            _turnAnchorRow = row;
+            _turnAnchorMode = TurnAnchorMode.Reveal;
+            ScheduleAnchorSettleChain(row, TurnAnchorMode.Reveal);
+        }
+
+        /// <summary>
+        /// Re-applies the current turn anchor after the content height changed (markdown replaced a
+        /// streamed label, a card was rebuilt). Bottom mode, or no anchor yet — <see cref="ScrollToBottom"/>.
+        /// </summary>
+        protected void ScrollToTurnAnchor()
+        {
+            if (ScrollAnchor == ChatScrollAnchor.Bottom || _turnAnchorRow == null || _turnAnchorRow.parent == null)
+            {
+                ScrollToBottom();
+                return;
+            }
+
+            ScheduleAnchorSettleChain(_turnAnchorRow, _turnAnchorMode);
+        }
+
+        /// <summary>
+        /// Same settle chain as <see cref="ScrollToBottom"/> (immediate + next pass + 80/200/500 ms):
+        /// row heights keep changing for a few layout passes after an append, so a single snap lands
+        /// on a stale position.
+        /// </summary>
+        private void ScheduleAnchorSettleChain(VisualElement row, TurnAnchorMode mode)
+        {
+            if (MessageScroll == null || row == null)
+            {
+                return;
+            }
+
+            ScheduleOnMessageScroll(() =>
+            {
+                SnapScrollToAnchor(row, mode);
+                ScheduleOnMessageScroll(() => SnapScrollToAnchor(row, mode));
+                ScheduleOnMessageScroll(() => SnapScrollToAnchor(row, mode), 80);
+                ScheduleOnMessageScroll(() => SnapScrollToAnchor(row, mode), 200);
+                ScheduleOnMessageScroll(() => SnapScrollToAnchor(row, mode), 500);
+            });
+        }
+
+        private void SnapScrollToAnchor(VisualElement row, TurnAnchorMode mode)
+        {
+            // WHY: a newer anchor (next turn, a revealed card) supersedes a chain still in flight.
+            if (MessageScroll?.verticalScroller == null || row == null || row.parent == null ||
+                !ReferenceEquals(row, _turnAnchorRow))
+            {
+                return;
+            }
+
+            Scroller vs = MessageScroll.verticalScroller;
+            Rect layout = row.layout;
+            float viewportHeight = MessageScroll.contentViewport?.layout.height ?? 0f;
+            vs.value = mode == TurnAnchorMode.Reveal
+                ? ResolveRevealScrollValue(layout.yMin, layout.yMax, viewportHeight, vs.value, vs.lowValue, vs.highValue)
+                : ResolveRowStartScrollValue(layout.yMin, vs.lowValue, vs.highValue);
+        }
+
+        /// <summary>Scroller value that puts <paramref name="rowTop"/> (content-space) at the top of the viewport.</summary>
+        public static float ResolveRowStartScrollValue(float rowTop, float lowValue, float highValue)
+        {
+            float min = Mathf.Min(lowValue, highValue);
+            float max = Mathf.Max(lowValue, highValue);
+            if (float.IsNaN(rowTop))
+            {
+                return max;
+            }
+
+            return Mathf.Clamp(rowTop, min, max);
+        }
+
+        /// <summary>
+        /// Minimal scroll that shows the whole row: unchanged when it already fits in view, its top when
+        /// it is above the view or taller than the viewport, otherwise its bottom aligned to the bottom.
+        /// </summary>
+        public static float ResolveRevealScrollValue(
+            float rowTop,
+            float rowBottom,
+            float viewportHeight,
+            float currentValue,
+            float lowValue,
+            float highValue)
+        {
+            float min = Mathf.Min(lowValue, highValue);
+            float max = Mathf.Max(lowValue, highValue);
+            if (float.IsNaN(rowTop) || float.IsNaN(rowBottom))
+            {
+                return Mathf.Clamp(currentValue, min, max);
+            }
+
+            float rowHeight = rowBottom - rowTop;
+            float target;
+            if (viewportHeight <= 0f || rowHeight >= viewportHeight || rowTop < currentValue)
+            {
+                target = rowTop;
+            }
+            else if (rowBottom > currentValue + viewportHeight)
+            {
+                target = rowBottom - viewportHeight;
+            }
+            else
+            {
+                target = currentValue;
+            }
+
+            return Mathf.Clamp(target, min, max);
+        }
+
+        /// <summary>
         /// Clears chat.
         /// </summary>
         public void ClearChat()
@@ -4188,6 +4386,7 @@ namespace CoreAI.Chat
                 // WHY: the bubbles were just removed from the tree; a host must not be handed
                 // detached elements to post-process.
                 _turnStreamingBubbles.Clear();
+                _turnAnchorRow = null;
 
                 string roleId = ActiveRoleId;
                 // WHY: keep the in-memory cache consistent with the now-empty scroll, otherwise switching

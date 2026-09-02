@@ -26,6 +26,13 @@ namespace CoreAI.Ai
 
         public bool AllowDuplicates { get; set; }
 
+        /// <summary>
+        /// Settable counterpart of <see cref="ILlmTool.ToolTimeoutMsOverride"/>, so a delegate-registered
+        /// tool that waits for a human (a confirmation prompt, an inline card) can get its own budget
+        /// without first being rewritten as a class. <c>null</c> keeps the global setting.
+        /// </summary>
+        public int? ToolTimeoutMsOverride { get; set; }
+
         public Delegate ActionDelegate { get; }
 
         public DelegateLlmTool(string name, string description, Delegate action)

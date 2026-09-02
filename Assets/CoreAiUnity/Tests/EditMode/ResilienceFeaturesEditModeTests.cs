@@ -60,6 +60,21 @@ namespace CoreAI.Tests.EditMode
             public int MaxToolCallHistoryMessages => MaxToolCallHistoryMessagesOverride;
         }
 
+        /// <summary>
+        /// Minimal tool used to give the policy something to resolve a per-tool timeout override from:
+        /// the invocation site only has the call's NAME, so the override is looked up in the role's tool
+        /// list. <see cref="ToolTimeoutMsOverride"/> left <c>null</c> reproduces a tool that declares
+        /// nothing and must keep behaving exactly as before overrides existed.
+        /// </summary>
+        private sealed class TimeoutStubTool : ILlmTool
+        {
+            public string Name { get; set; } = "test_tool";
+            public string Description => "Test tool";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => true;
+            public int? ToolTimeoutMsOverride { get; set; }
+        }
+
         private static MEAI.FunctionCallContent MakeToolCall(string name)
         {
             return new MEAI.FunctionCallContent($"call_{name}_{Guid.NewGuid():N}", name);
@@ -193,6 +208,139 @@ namespace CoreAI.Tests.EditMode
                 await policy.ExecuteSingleAsync(MakeToolCall("tool"), opts, CancellationToken.None);
 
             Assert.IsTrue(result.Succeeded);
+        }
+
+        // ==================== Per-Tool Timeout Override ====================
+        // A tool that WAITS FOR A HUMAN (quiz card, drag-and-drop) is idle by design for as long as the
+        // person thinks; the global default is sized for a hung HTTP call and cut such a tool off
+        // mid-question. These pin the per-tool lever and, just as importantly, that a tool declaring
+        // nothing is left exactly where it was.
+
+        [Test]
+        public async Task ToolTimeout_PerToolOverrideLongerThanGlobal_SurvivesGlobalDeadline()
+        {
+            ResilienceSettings settings = new() { DefaultToolTimeoutMsOverride = 200 };
+            TimeoutStubTool waitingTool = new() { Name = "spawn_quiz", ToolTimeoutMsOverride = 10_000 };
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
+                new List<ILlmTool> { waitingTool }, true, "test", 3);
+
+            // Outlives the 200 ms global budget on purpose: this is the student still reading the card.
+            Func<CancellationToken, Task<string>> func = async ct =>
+            {
+                await Task.Delay(600, ct);
+                return "student-answered";
+            };
+            MEAI.ChatOptions opts = MakeChatOptions(("spawn_quiz", func));
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("spawn_quiz"), opts, CancellationToken.None);
+
+            Assert.IsTrue(result.Succeeded, "A tool with its own longer budget must not die on the global one");
+            Assert.AreEqual("student-answered", result.Result.Result?.ToString());
+        }
+
+        [Test]
+        public async Task ToolTimeout_PerToolOverrideShorterThanGlobal_FiresAtTheOverride()
+        {
+            ResilienceSettings settings = new() { DefaultToolTimeoutMsOverride = 30_000 };
+            TimeoutStubTool impatientTool = new() { Name = "quick_tool", ToolTimeoutMsOverride = 200 };
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
+                new List<ILlmTool> { impatientTool }, true, "test", 3);
+
+            Func<CancellationToken, Task<string>> func = async ct =>
+            {
+                await Task.Delay(10_000, ct);
+                return "done";
+            };
+            MEAI.ChatOptions opts = MakeChatOptions(("quick_tool", func));
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("quick_tool"), opts, CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded, "The override must cap the call, not only extend it");
+            string text = result.Result.Result?.ToString() ?? "";
+            Assert.That(text, Does.Contain("timed out"));
+            Assert.That(text, Does.Contain("200ms"),
+                "The error must report the budget that actually fired, or the log sends debugging astray");
+        }
+
+        [Test]
+        public async Task ToolTimeout_PerToolOverrideZero_DisablesTheDeadlineForThatToolOnly()
+        {
+            ResilienceSettings settings = new() { DefaultToolTimeoutMsOverride = 200 };
+            TimeoutStubTool waitingTool = new() { Name = "spawn_drag_and_drop", ToolTimeoutMsOverride = 0 };
+            TimeoutStubTool ordinaryTool = new() { Name = "http_tool" };
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
+                new List<ILlmTool> { waitingTool, ordinaryTool }, true, "test", 3);
+
+            Func<CancellationToken, Task<string>> waiting = async ct =>
+            {
+                await Task.Delay(600, ct);
+                return "student-answered";
+            };
+            Func<CancellationToken, Task<string>> ordinary = async ct =>
+            {
+                await Task.Delay(10_000, ct);
+                return "never";
+            };
+            MEAI.ChatOptions opts =
+                MakeChatOptions(("spawn_drag_and_drop", waiting), ("http_tool", ordinary));
+
+            ToolExecutionPolicy.ToolCallResult waited = await policy.ExecuteSingleAsync(
+                MakeToolCall("spawn_drag_and_drop"), opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult capped = await policy.ExecuteSingleAsync(
+                MakeToolCall("http_tool"), opts, CancellationToken.None);
+
+            Assert.IsTrue(waited.Succeeded, "0 must mean 'no per-call deadline', same as it does globally");
+            Assert.IsFalse(capped.Succeeded,
+                "Disabling one tool's deadline must not disarm the global one for every other tool");
+        }
+
+        [Test]
+        public async Task ToolTimeout_ToolWithoutOverride_KeepsGlobalTimeout()
+        {
+            ResilienceSettings settings = new() { DefaultToolTimeoutMsOverride = 200 };
+            TimeoutStubTool plainTool = new() { Name = "slow_tool" };
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
+                new List<ILlmTool> { plainTool }, true, "test", 3);
+
+            Func<CancellationToken, Task<string>> func = async ct =>
+            {
+                await Task.Delay(10_000, ct);
+                return "done";
+            };
+            MEAI.ChatOptions opts = MakeChatOptions(("slow_tool", func));
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("slow_tool"), opts, CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded, "A tool declaring no override must behave exactly as before");
+            Assert.That(result.Result.Result?.ToString() ?? "", Does.Contain("200ms"));
+        }
+
+        [Test]
+        public async Task ToolTimeout_PerToolOverride_FoundThroughToolNameRepair()
+        {
+            // The model emits tool names with wrong casing often enough that the policy repairs them;
+            // the override is resolved BY NAME, so it has to survive the same repair or a waiting tool
+            // would silently fall back to the global budget on exactly those calls.
+            ResilienceSettings settings = new() { DefaultToolTimeoutMsOverride = 200 };
+            TimeoutStubTool waitingTool = new() { Name = "spawn_quiz", ToolTimeoutMsOverride = 10_000 };
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
+                new List<ILlmTool> { waitingTool }, true, "test", 3);
+
+            Func<CancellationToken, Task<string>> func = async ct =>
+            {
+                await Task.Delay(600, ct);
+                return "student-answered";
+            };
+            MEAI.ChatOptions opts = MakeChatOptions(("spawn_quiz", func));
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("Spawn_Quiz"), opts, CancellationToken.None);
+
+            Assert.IsTrue(result.Succeeded);
+            Assert.AreEqual("student-answered", result.Result.Result?.ToString());
         }
 
         // ==================== CoreAISettings Static Proxy ====================
