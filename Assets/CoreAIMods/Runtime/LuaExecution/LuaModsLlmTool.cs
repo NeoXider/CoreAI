@@ -142,7 +142,7 @@ namespace CoreAI.Ai
             "A mod that keeps failing is QUARANTINED, never auto-unloaded: it stays in list (quarantined=true) " +
             "with its handlers/timers suspended, and a successful reload clears the quarantine and resumes it. " +
             "Use get_source before reload to edit existing behavior. " +
-            "MoonSharp/Lua callback syntax: hooks_on('event', function(name, payload) ... end) " +
+            "Lua callback syntax: hooks_on('event', function(name, payload) ... end) " +
             "and hooks_every(seconds, function() ... end). Do not write hooks_on('event') function() ... end. " +
             "Extra globals inside mods: hooks_on('tick', fn) per-frame alias; store_set(key, value)/store_get(key) " +
             "per-mod persistent strings; events_emit(name, payload) between mods; mods_export(name, valueOrFn), " +

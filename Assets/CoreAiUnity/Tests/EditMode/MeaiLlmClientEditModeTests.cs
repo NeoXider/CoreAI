@@ -376,6 +376,32 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_EmptyTerminalResponseAfterToolUse_PreservesLastRoundtripPromptTokens()
+        {
+            ScriptedUsageChatClient inner = new(
+                ScriptedUsageChatClient.TextResponse(
+                    "{\"name\":\"explicit_tool\",\"arguments\":{}}", 50),
+                ScriptedUsageChatClient.TextResponse("", null),
+                ScriptedUsageChatClient.TextResponse("", null),
+                ScriptedUsageChatClient.TextResponse("", null),
+                ScriptedUsageChatClient.TextResponse("", null));
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Role",
+                SystemPrompt = "sys",
+                UserPayload = "hi",
+                Tools = new List<ILlmTool> { new ExplicitFunctionTool("explicit_tool") }
+            }, CancellationToken.None);
+
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.EmptyResponse, result.ErrorCode);
+            Assert.AreEqual(50, result.LastRoundtripPromptTokens,
+                "Terminal paths without usage must still carry the last roundtrip's prompt size.");
+        }
+
+        [Test]
         public async Task CompleteStreamingAsync_NoTools_YieldsOneChunkPerInnerUpdateBeforeTerminal()
         {
             StreamingScriptedChatClient inner = new(new[] { "a", "bb", "ccc" });
@@ -1026,6 +1052,61 @@ namespace CoreAI.Tests.EditMode
             {
                 yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "x");
                 await Task.Yield();
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        /// <summary>Scripted non-streaming client with per-response usage for terminal-path tests.</summary>
+        private sealed class ScriptedUsageChatClient : MEAI.IChatClient
+        {
+            private readonly Queue<MEAI.ChatResponse> _responses;
+
+            public ScriptedUsageChatClient(params MEAI.ChatResponse[] responses)
+            {
+                _responses = new Queue<MEAI.ChatResponse>(responses ?? Array.Empty<MEAI.ChatResponse>());
+            }
+
+            public static MEAI.ChatResponse TextResponse(string text, int? inputTokens)
+            {
+                MEAI.ChatResponse response =
+                    new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, text ?? string.Empty));
+                if (inputTokens.HasValue)
+                {
+                    response.Usage = new MEAI.UsageDetails
+                    {
+                        InputTokenCount = inputTokens.Value,
+                        OutputTokenCount = 5,
+                        TotalTokenCount = inputTokens.Value + 5
+                    };
+                }
+
+                return response;
+            }
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                if (_responses.Count == 0)
+                {
+                    throw new InvalidOperationException("ScriptedUsageChatClient ran out of responses.");
+                }
+
+                return Task.FromResult(_responses.Dequeue());
+            }
+
+            public IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages, MEAI.ChatOptions options = null,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
             }
 
             public object GetService(Type serviceType, object serviceKey = null)

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Remove // and /* */ comments from C# sources; keep /// XML docs and // TODO lines."""
+"""Remove // and /* */ comments from C# sources; keep /// XML docs and // TODO/WHY/HACK lines."""
 from __future__ import annotations
 
 import re
@@ -12,9 +12,9 @@ ROOTS = [
 ]
 
 
-def is_todo_comment(after_two_slashes: str) -> bool:
+def is_kept_comment(after_two_slashes: str) -> bool:
     t = after_two_slashes.lstrip()
-    return bool(re.match(r"(?i)todo\b", t))
+    return bool(re.match(r"(?i)(todo|why|hack)\b", t))
 
 
 def is_doc_comment_line(line: str, slash_pos: int) -> bool:
@@ -27,7 +27,7 @@ def is_doc_comment_line(line: str, slash_pos: int) -> bool:
 def strip_line_comment_and_blocks(line: str) -> str | None:
     """
     Returns processed line, or None to drop the entire line (blank after strip).
-    Preserves lines that are entirely XML doc (///...) or // TODO...
+    Preserves lines that are entirely XML doc (///...) or // TODO/WHY/HACK...
     """
     original = line
     ending = ""
@@ -81,7 +81,7 @@ def strip_line_comment_and_blocks(line: str) -> str | None:
                     while i < n and line[i] == "/":
                         i += 1
                     return (line[: i - (len(line) - i)] if False else None)  # noqa: dead
-                if is_todo_comment(rest_from_slash):
+                if is_kept_comment(rest_from_slash):
                     return original if ending else line
                 prefix = "".join(out) + line[:i]
                 prefix = prefix.rstrip()
@@ -198,7 +198,7 @@ def strip_line_comment_and_blocks(line: str) -> str | None:
                     while i < n and line[i] == "/":
                         i += 1
                     continue
-                if is_todo_comment(rest):
+                if is_kept_comment(rest):
                     return original if ending else line
                 i = n
                 break
@@ -269,7 +269,7 @@ def process_line(line: str) -> str | None:
     if stripped_ws.startswith("///"):
         return line
     if stripped_ws.startswith("//") and not stripped_ws.startswith("///"):
-        if is_todo_comment(stripped_ws[2:]):
+        if is_kept_comment(stripped_ws[2:]):
             return line
         return None
     processed = strip_line_comment_and_blocks(line)

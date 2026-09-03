@@ -300,13 +300,31 @@ namespace CoreAI.Infrastructure.Llm
 
                     // WHY: A terminal Cancelled chunk may be the inner client's translation of this
                     // decorator's linked-token timeout, so preserve the chunk and correct only its code.
+                    // WHY: Copy-on-write — the chunk instance may be cached or reused by the inner
+                    // client, so the correction builds a new chunk instead of mutating the received one.
                     if (current != null && current.IsDone && current.ErrorCode == LlmErrorCode.Cancelled &&
                         timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                     {
-                        current.ErrorCode = LlmErrorCode.Timeout;
-                        // WHY: The inner translation reads "cancelled", which the UI shows as if the user
-                        // pressed Stop. Correct the text alongside the code so both agree.
-                        current.Error = "LLM request timed out.";
+                        current = new LlmStreamChunk
+                        {
+                            Text = current.Text,
+                            ReasoningText = current.ReasoningText,
+                            IsDone = current.IsDone,
+                            Error = "LLM request timed out.",
+                            ErrorCode = LlmErrorCode.Timeout,
+                            HttpStatus = current.HttpStatus,
+                            RetryAfterSeconds = current.RetryAfterSeconds,
+                            Model = current.Model,
+                            PromptTokens = current.PromptTokens,
+                            LastRoundtripPromptTokens = current.LastRoundtripPromptTokens,
+                            CompletionTokens = current.CompletionTokens,
+                            TotalTokens = current.TotalTokens,
+                            CacheReadTokens = current.CacheReadTokens,
+                            CacheWriteTokens = current.CacheWriteTokens,
+                            ExecutedToolCalls = current.ExecutedToolCalls,
+                            BufferedStreamingUseToolProgressHint = current.BufferedStreamingUseToolProgressHint,
+                            BufferedStreamingNoToolBinding = current.BufferedStreamingNoToolBinding
+                        };
                     }
 
                     yield return current;

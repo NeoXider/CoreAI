@@ -30,11 +30,10 @@ namespace CoreAI.Ai.LuaCs
     }
 
     /// <summary>
-    /// Lua-CSharp (nuskey8/Lua-CSharp) persistent runtime for long-lived mods. This is the ADDITIVE
-    /// counterpart of the MoonSharp <c>CoreAI.Ai.LuaModRuntime</c>, built as part of the
-    /// MoonSharp -> Lua-CSharp migration: both VMs coexist and the tick driver can later swap
-    /// <c>LuaModRuntime</c> -> <c>LuaCsModRuntime</c> by type because the public lifecycle/tick/
-    /// diagnostics surface below mirrors the MoonSharp runtime.
+    /// Lua-CSharp (nuskey8/Lua-CSharp) persistent runtime for long-lived mods. This is the single
+    /// Lua VM since the MoonSharp removal (5.4.0): the legacy MoonSharp <c>CoreAI.Ai.LuaModRuntime</c>
+    /// is gone, and the public lifecycle/tick/diagnostics surface below mirrors its shape so the
+    /// tick driver and consumers keep working unchanged.
     ///
     /// A mod is a sandboxed Lua-CSharp <see cref="IScriptState"/> that registers hooks during load and
     /// then lives across frames:

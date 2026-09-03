@@ -35,8 +35,7 @@ namespace CoreAI.Infrastructure.Llm
         private string _currentRoleId = "";
 
         /// <summary>
-        /// When the gateway sends one long <c>delta.content</c> per frame, fan out to the consumer so UI and
-        /// Initializes a new instance of the current component.
+        /// When the gateway sends one long <c>delta.content</c> per frame, fan out to the consumer so UI updates stay incremental.
         /// </summary>
         private const int LiveUiStreamMaxCharsPerChunk = 48;
 
@@ -199,7 +198,9 @@ namespace CoreAI.Infrastructure.Llm
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmClient: {ex.Message}");
-                return FromException(ex, functionClient.LastExecutedToolCalls);
+                LlmCompletionResult failure = FromException(ex, functionClient.LastExecutedToolCalls);
+                ApplyLastRoundtripPromptTokens(failure, functionClient.LastRoundtripUsage);
+                return failure;
             }
 
             if (response.Messages != null)
@@ -249,7 +250,8 @@ namespace CoreAI.Infrastructure.Llm
                     ErrorCode = LlmErrorCode.EmptyResponse,
                     ReasoningContent = reasoningText,
                     Model = ResolveModelName(response.ModelId),
-                    ExecutedToolCalls = functionClient.LastExecutedToolCalls
+                    ExecutedToolCalls = functionClient.LastExecutedToolCalls,
+                    LastRoundtripPromptTokens = ToLastRoundtripPromptTokens(functionClient.LastRoundtripUsage)
                 };
             }
 
@@ -270,12 +272,9 @@ namespace CoreAI.Infrastructure.Llm
                 // WHY: PromptTokens stays the whole-turn CUMULATIVE sum (Prompt + Completion == Total
                 // for cost telemetry); the prompt-size calibration reads the dedicated last-roundtrip
                 // field instead. Zero counts are ignored (zero-emitting providers must not pollute it).
-                if (functionClient.LastRoundtripUsage?.InputTokenCount > 0)
-                {
-                    result.LastRoundtripPromptTokens =
-                        (int)functionClient.LastRoundtripUsage.InputTokenCount.Value;
-                }
             }
+
+            ApplyLastRoundtripPromptTokens(result, functionClient.LastRoundtripUsage);
 
             // Carry the tool-call diagnostic out of the smart-tool client so the logging
             // decorator can render the same `tools=[...]` line for stream and non-stream paths.
@@ -1596,6 +1595,36 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.LogInfo(GameLogFeature.Llm,
                     $"MeaiLlmClient: Trimmed {removed} old tool call message(s) from the streaming loop, keeping {chatMessages.Count} total.");
             }
+        }
+
+        /// <summary>
+        /// Non-streaming counterpart of <see cref="OverrideTerminalPromptTokensWithLastRoundtrip"/>:
+        /// stamps every terminal <see cref="LlmCompletionResult"/> with the last roundtrip's prompt
+        /// size, including paths whose response carries no usage object.
+        /// </summary>
+        private static void ApplyLastRoundtripPromptTokens(
+            LlmCompletionResult result,
+            MEAI.UsageDetails lastRoundtripUsage)
+        {
+            if (result == null)
+            {
+                return;
+            }
+
+            result.LastRoundtripPromptTokens = ToLastRoundtripPromptTokens(lastRoundtripUsage);
+        }
+
+        /// <summary>
+        /// Reads the calibration prompt size from the last roundtrip's usage, if reported.
+        /// </summary>
+        private static int? ToLastRoundtripPromptTokens(MEAI.UsageDetails lastRoundtripUsage)
+        {
+            if (!(lastRoundtripUsage?.InputTokenCount > 0))
+            {
+                return null;
+            }
+
+            return (int)lastRoundtripUsage.InputTokenCount.Value;
         }
 
         /// <summary>

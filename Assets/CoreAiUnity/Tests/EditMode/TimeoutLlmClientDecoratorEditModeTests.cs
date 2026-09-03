@@ -165,6 +165,22 @@ namespace CoreAI.Tests.EditMode
 
         // ---- helpers ----
 
+        [Test]
+        public async Task Streaming_Rewrite_DoesNotMutateInnerChunk()
+        {
+            CachingCancelledClient inner = new();
+            TimeoutLlmClientDecorator sut = new(inner, () => 0.03f);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(1, chunks.Count);
+            Assert.AreNotSame(inner.CachedChunk, chunks[0]);
+            Assert.AreEqual(LlmErrorCode.Timeout, chunks[0].ErrorCode);
+            Assert.AreEqual("LLM request timed out.", chunks[0].Error);
+            Assert.AreEqual(LlmErrorCode.Cancelled, inner.CachedChunk.ErrorCode);
+            Assert.AreEqual("inner cancelled", inner.CachedChunk.Error);
+        }
+
         private static LlmCompletionRequest Req()
         {
             return new LlmCompletionRequest { AgentRoleId = "Test", UserPayload = "hi" };
@@ -284,6 +300,41 @@ namespace CoreAI.Tests.EditMode
                     Model = "test-model",
                     ExecutedToolCalls = Traces
                 };
+            }
+        }
+
+        private sealed class CachingCancelledClient : ILlmClient
+        {
+            public readonly LlmStreamChunk CachedChunk = new()
+            {
+                Text = "partial",
+                IsDone = true,
+                Error = "inner cancelled",
+                ErrorCode = LlmErrorCode.Cancelled,
+                Model = "test-model"
+            };
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException("Streaming-only stub.");
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                yield return CachedChunk;
             }
         }
     }

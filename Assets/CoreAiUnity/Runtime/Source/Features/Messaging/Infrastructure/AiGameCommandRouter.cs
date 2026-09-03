@@ -19,17 +19,20 @@ namespace CoreAI.Infrastructure.Messaging
         public static event Action<ApplyAiGameCommand> CommandReceived;
 
         private static int _activeRouterCount;
+        private static long _generation;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         internal static void ResetStatics()
         {
             _activeRouterCount = 0;
+            System.Threading.Interlocked.Increment(ref _generation);
             CommandReceived = null;
         }
 
         private readonly ISubscriber<ApplyAiGameCommand> _subscriber;
         private readonly IGameLogger _logger;
         private readonly ICoreAiWorldCommandExecutor _worldExecutor;
+        private readonly long _generationToken;
         private IDisposable _subscription;
         private int _disposeState;
 
@@ -42,6 +45,7 @@ namespace CoreAI.Infrastructure.Messaging
             _subscriber = subscriber;
             _logger = logger;
             _worldExecutor = worldExecutor;
+            _generationToken = System.Threading.Volatile.Read(ref _generation);
             System.Threading.Interlocked.Increment(ref _activeRouterCount);
         }
 
@@ -96,6 +100,15 @@ namespace CoreAI.Infrastructure.Messaging
             // would survive a scene reload and receive commands routed by the next scene's router —
             // duplicate world mutations against destroyed objects. Additive/overlapping scopes can own
             // live subscribers concurrently, so only the last router may clear the shared event.
+            // WHY: The refcount alone cannot tell generations apart: a stale router disposed after a
+            // static reset (or after the next generation's router started) would observe 1 -> 0 and
+            // steal the live router's subscription. The generation token confines the clear to the
+            // current generation.
+            if (_generationToken != System.Threading.Volatile.Read(ref _generation))
+            {
+                return;
+            }
+
             int observedCount = System.Threading.Volatile.Read(ref _activeRouterCount);
             while (observedCount > 0)
             {

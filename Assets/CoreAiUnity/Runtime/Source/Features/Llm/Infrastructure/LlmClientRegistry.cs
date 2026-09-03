@@ -174,13 +174,30 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        private sealed class TrackedEndpointClient : ILlmClient
+        private sealed class TrackedEndpointClient : ILlmClient, IDisposable
         {
             private readonly RuntimeEndpoint _endpoint;
+            private int _leaseReleased;
 
             public TrackedEndpointClient(RuntimeEndpoint endpoint)
             {
                 _endpoint = endpoint;
+            }
+
+            // WHY: the lease is taken when a request actually starts, never at resolve time.
+            // RoutingLlmClient resolves a route just to read the tool contract or the context window
+            // (SupportsNativeToolCallingForRole, ResolveContextWindowTokensForRole) and neither
+            // executes nor disposes the handle, so a resolve-time lease never came back and the
+            // endpoint drain waited forever.
+            private void TakeLease()
+            {
+                Interlocked.Exchange(ref _leaseReleased, 0);
+                Interlocked.Increment(ref _endpoint.InFlightRequests);
+            }
+
+            public void Dispose()
+            {
+                ReleaseLease();
             }
 
             public bool SupportsNativeToolCallingForRole(string agentRoleId)
@@ -192,14 +209,14 @@ namespace CoreAI.Infrastructure.Llm
                 LlmCompletionRequest request,
                 CancellationToken cancellationToken = default)
             {
-                Interlocked.Increment(ref _endpoint.InFlightRequests);
+                TakeLease();
                 try
                 {
                     return await _endpoint.Client.CompleteAsync(request, cancellationToken);
                 }
                 finally
                 {
-                    Interlocked.Decrement(ref _endpoint.InFlightRequests);
+                    ReleaseLease();
                 }
             }
 
@@ -208,7 +225,7 @@ namespace CoreAI.Infrastructure.Llm
                 [System.Runtime.CompilerServices.EnumeratorCancellation]
                 CancellationToken cancellationToken = default)
             {
-                Interlocked.Increment(ref _endpoint.InFlightRequests);
+                TakeLease();
                 try
                 {
                     await foreach (LlmStreamChunk chunk in
@@ -218,6 +235,14 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
                 finally
+                {
+                    ReleaseLease();
+                }
+            }
+
+            private void ReleaseLease()
+            {
+                if (Interlocked.Exchange(ref _leaseReleased, 1) == 0)
                 {
                     Interlocked.Decrement(ref _endpoint.InFlightRequests);
                 }
@@ -258,6 +283,18 @@ namespace CoreAI.Infrastructure.Llm
             Changed = null;
         }
 
+        /// <summary>Throws when the registry scope has been disposed.</summary>
+        private void ThrowIfDisposed()
+        {
+            lock (_gate)
+            {
+                if (_disposed)
+                {
+                    throw new ObjectDisposedException(nameof(LlmClientRegistry));
+                }
+            }
+        }
+
         /// <param name="logger">The logger value.</param>
         public LlmClientRegistry(
             IGameLogger logger,
@@ -280,6 +317,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Legacy LLM client used when no route-specific client is available.</summary>
         public void SetLegacyFallback(ILlmClient legacy)
         {
+            ThrowIfDisposed();
             lock (_gate)
             {
                 _legacyFallback = legacy ?? new StubLlmClient();
@@ -306,6 +344,7 @@ namespace CoreAI.Infrastructure.Llm
             IReadOnlyList<LlmBackendProfileEntry> profiles,
             bool enableRouting = true)
         {
+            ThrowIfDisposed();
             lock (_gate)
             {
                 if (!enableRouting || routeTable == null)
@@ -368,6 +407,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public ILlmClient ResolveClientForRole(string roleId, string explicitProfileId)
         {
+            ThrowIfDisposed();
             string role = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Creator : roleId.Trim();
             lock (_gate)
             {
@@ -419,6 +459,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public int ResolveContextWindowForRole(string roleId, string explicitProfileId)
         {
+            ThrowIfDisposed();
             string role = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Creator : roleId.Trim();
             lock (_gate)
             {
@@ -466,6 +507,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public LlmExecutionMode ResolveExecutionModeForRole(string roleId, string explicitProfileId)
         {
+            ThrowIfDisposed();
             string profileId = ResolveProfileIdForRole(roleId, explicitProfileId);
             lock (_gate)
             {
@@ -493,6 +535,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public LlmRoleRouteSnapshot ResolveRouteForRole(string roleId, string explicitProfileId)
         {
+            ThrowIfDisposed();
             // WHY: one _gate acquisition (Monitor is re-entrant) so a concurrent endpoint switch
             // cannot pair endpoint A's client with endpoint B's profile/context-window/mode.
             lock (_gate)
@@ -530,6 +573,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public void ReportRouteFailure(string profileId, long generation, LlmErrorCode errorCode, string error)
         {
+            ThrowIfDisposed();
             string profile = profileId?.Trim() ?? "";
             if (profile.Length == 0 || string.Equals(profile, LegacyFallbackProfileId, StringComparison.Ordinal))
             {
@@ -578,6 +622,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public string ResolveProfileIdForRole(string roleId, string explicitProfileId)
         {
+            ThrowIfDisposed();
             string role = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Creator : roleId.Trim();
             lock (_gate)
             {
@@ -610,6 +655,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public IReadOnlyList<LlmEndpointSnapshot> GetEndpoints()
         {
+            ThrowIfDisposed();
             lock (_gate)
             {
                 return _pendingEndpoints.Values
@@ -623,6 +669,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public IReadOnlyList<LlmRuntimeProfile> GetProfiles()
         {
+            ThrowIfDisposed();
             lock (_gate)
             {
                 return _runtimeProfiles.Values.Select(FileLlmEndpointRegistryStore.CloneProfile).ToArray();
@@ -635,6 +682,7 @@ namespace CoreAI.Infrastructure.Llm
             string sessionApiKey = null,
             CancellationToken cancellationToken = default)
         {
+            ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
             if (descriptor == null || descriptor.Validate().Count > 0)
             {
@@ -771,6 +819,7 @@ namespace CoreAI.Infrastructure.Llm
             bool keepWarm = false,
             CancellationToken cancellationToken = default)
         {
+            ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
             RuntimeEndpoint runtime;
             RuntimeEndpoint release = null;
@@ -834,6 +883,7 @@ namespace CoreAI.Infrastructure.Llm
             string replacementEndpointId = null,
             CancellationToken cancellationToken = default)
         {
+            ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
             bool removed;
             RuntimeEndpoint release = null;
@@ -909,6 +959,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public void AddOrUpdateProfile(LlmRuntimeProfile profile)
         {
+            ThrowIfDisposed();
             if (profile == null || profile.Validate().Count > 0)
             {
                 throw new ArgumentException(profile == null
@@ -933,6 +984,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public bool RemoveProfile(string profileId, string replacementProfileId = null)
         {
+            ThrowIfDisposed();
             bool removed;
             lock (_gate)
             {
@@ -974,6 +1026,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public void AssignRoleProfile(string rolePattern, string profileId, int sortOrder = 0)
         {
+            ThrowIfDisposed();
             lock (_gate)
             {
                 string profile = profileId?.Trim() ?? "";
@@ -992,6 +1045,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public bool ClearRoleProfile(string rolePattern)
         {
+            ThrowIfDisposed();
             bool removed;
             lock (_gate)
             {
@@ -1011,6 +1065,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public string GetRoleProfile(string roleId)
         {
+            ThrowIfDisposed();
             lock (_gate)
             {
                 return ResolveRuntimeProfileIdLocked(roleId, "");
