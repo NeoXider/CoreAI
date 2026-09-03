@@ -727,13 +727,31 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Отменять ли активный запрос, когда панель выключается.
+        /// <para>
+        /// Пакетное значение — <c>true</c>: панель исчезла, ответ показывать некому. Но у хоста,
+        /// где чат — часть урока, выключение панели значит лишь «человек вышел из фокуса»
+        /// (в RedoSchool это Esc). Обрывать на этом ход учителя нельзя: собеседник ничего не
+        /// прерывал, а по возвращении он видел «ничего не ответили». Хост, у которого история
+        /// живёт вне панели, переопределяет свойство и получает ход, доигранный до конца.
+        /// </para>
+        /// </summary>
+        protected virtual bool CancelsActiveRequestOnDisable => true;
+
+        /// <summary>
         /// Cancels the in-flight request when the panel component is disabled, so a hidden/disabled
         /// standalone panel never keeps a zombie streaming turn alive. The Hub collapse path is
         /// unaffected: collapsing only toggles a USS class and never disables the panel GameObject,
-        /// so generation intentionally keeps running while the Hub is collapsed.
+        /// so generation intentionally keeps running while the Hub is collapsed. Hosts that own the
+        /// transcript outside the panel opt out via <see cref="CancelsActiveRequestOnDisable"/>.
         /// </summary>
         private void CancelActiveRequestOnDisable()
         {
+            if (!CancelsActiveRequestOnDisable)
+            {
+                return;
+            }
+
             CancellationTokenSource active = _activeRequestCts;
             if (!IsCancellationSourceActive(active))
             {
