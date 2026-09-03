@@ -11,6 +11,30 @@ namespace CoreAI.Tests.EditMode
     [Category("Chat")]
     public sealed class ChatScrollAnchorEditModeTests
     {
+        /// <summary>
+        /// Правило одно на все точки прокрутки. <see cref="ChatScrollAnchor.FollowIfAtBottom"/> —
+        /// поведение мессенджера: читателя, ушедшего ВВЕРХ перечитать разобранное, не тащат вниз, а
+        /// стоящего у низа лента везёт дальше, иначе ответ и карточка задания появляются под кромкой
+        /// экрана и их будто нет. <see cref="ChatScrollAnchor.KeepPosition"/> не двигает вид никогда.
+        /// </summary>
+        [TestCase(ChatScrollAnchor.Bottom, true, true)]
+        [TestCase(ChatScrollAnchor.Bottom, false, true)]
+        [TestCase(ChatScrollAnchor.AssistantMessageStart, true, true)]
+        [TestCase(ChatScrollAnchor.AssistantMessageStart, false, true)]
+        [TestCase(ChatScrollAnchor.KeepPosition, true, false)]
+        [TestCase(ChatScrollAnchor.KeepPosition, false, false)]
+        [TestCase(ChatScrollAnchor.FollowIfAtBottom, true, true)]
+        [TestCase(ChatScrollAnchor.FollowIfAtBottom, false, false)]
+        public void AssistantContent_MovesTheView_ByModeAndReaderPosition(
+            ChatScrollAnchor anchor,
+            bool readerAtBottom,
+            bool expected)
+        {
+            Assert.AreEqual(
+                expected,
+                CoreAiChatPanel.MovesViewForAssistantContent(anchor, readerAtBottom));
+        }
+
         [Test]
         public void RowStart_PinsRowTop_WithinScrollerRange()
         {

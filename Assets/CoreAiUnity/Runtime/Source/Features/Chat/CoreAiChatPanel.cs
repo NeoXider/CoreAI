@@ -21,15 +21,31 @@ namespace CoreAI.Chat
     /// <see cref="Bottom"/> — classic chat: every message and every streamed chunk pins the view to the
     /// bottom, so a long answer is read from its END. <see cref="AssistantMessageStart"/> — the
     /// ChatGPT/DeepSeek pattern: the first assistant row of a turn is pinned with its TOP at the top of
-    /// the viewport and the view does not follow the streamed tail, so the reader starts from the
-    /// beginning and scrolls down at their own pace. User messages and history restore keep scrolling to
-    /// the bottom in both modes.
+    /// the viewport and the view does not follow the streamed tail. <see cref="KeepPosition"/> — the
+    /// view is never moved for assistant content at all: whatever the reader is looking at stays under
+    /// their eyes and new messages simply grow below, exactly like a channel feed. User messages and
+    /// history restore keep scrolling to the bottom in every mode — that scroll is the reader's own
+    /// action, not an interruption.
+    /// </para>
+    /// <para>
+    /// <see cref="KeepPosition"/> exists because even a top-pinned new answer is an interruption when
+    /// the reader deliberately scrolled UP: a learner re-reading the theory above a quiz was dragged
+    /// down by every message the teacher wrote and had to scroll back by hand.
     /// </para>
     /// </summary>
     public enum ChatScrollAnchor
     {
         Bottom = 0,
         AssistantMessageStart = 1,
+        KeepPosition = 2,
+
+        /// <summary>
+        /// Поведение мессенджера: лента едет за новым содержимым, ПОКА читатель стоит у низа, и
+        /// перестаёт, как только он ушёл вверх. Безусловное <see cref="KeepPosition"/> оказалось
+        /// слишком строгим: ученик, только что отправивший сообщение, стоит внизу, и ответ вместе с
+        /// карточкой задания появлялся у него под кромкой экрана — то есть его будто и не было.
+        /// </summary>
+        FollowIfAtBottom = 3,
     }
 
     /// <summary>
@@ -3350,12 +3366,15 @@ namespace CoreAI.Chat
             }
 
             VisualElement bubble = CreateMessageBubble(text, isUser);
+            RememberReaderPositionBeforeAppend();
             MessageScroll.Add(bubble);
             if (isUser)
             {
                 // WHY: the learner's own message always lands at the bottom; the answer that follows
-                // starts a fresh anchor.
+                // starts a fresh anchor. Sending is also a deliberate return to the bottom, so the
+                // reader is following again — whatever they were reading before, they left it.
                 _turnAnchorRow = null;
+                _readerFollowsBottom = true;
                 ScrollToBottom();
             }
             else
@@ -3518,8 +3537,12 @@ namespace CoreAI.Chat
             label.AddToClassList("coreai-tool-call-message");
 
             row.Add(label);
+            RememberReaderPositionBeforeAppend();
             MessageScroll.Add(row);
-            ScrollToBottom();
+            // WHY: a tool-call line is assistant content like any other, so it obeys the same scroll
+            // policy — an unconditional jump to the bottom here would take the view away from a reader
+            // who is deliberately looking further up.
+            ScrollForNewAssistantRow(row);
         }
 
         public void SetSendEnabled(bool enabled)
@@ -4006,6 +4029,7 @@ namespace CoreAI.Chat
             // WHY: record the bubble in open order — after the turn a host needs EVERY segment, not
             // just the last one (see TurnStreamingBubbles).
             _turnStreamingBubbles.Add(_streamingLabel);
+            RememberReaderPositionBeforeAppend();
             MessageScroll.Add(templateRow);
             ScrollForNewAssistantRow(templateRow);
             return _streamingLabel;
@@ -4029,10 +4053,18 @@ namespace CoreAI.Chat
                 return;
             }
 
+            // WHY: следование за хвостом переоценивается на КАЖДОМ чанке. Ученик, отошедший вверх
+            // посреди ответа, тем самым перестал следовать — и лента обязана его отпустить.
+            if (ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom && _readerFollowsBottom)
+            {
+                _readerFollowsBottom = IsReaderAtBottom();
+            }
+
             _streamingLabel.text =
                 AppendStreamingChunkForRender(_streamingLabel.text, chunk, out bool cappedAtLimit);
             _streamingRenderCapReached = cappedAtLimit;
-            if (ScrollAnchor == ChatScrollAnchor.Bottom)
+            if (ScrollAnchor == ChatScrollAnchor.Bottom
+                || (ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom && _readerFollowsBottom))
             {
                 ScheduleStreamingScrollToBottom();
             }
@@ -4197,22 +4229,80 @@ namespace CoreAI.Chat
             vs.value = vs.highValue;
         }
 
+        [Header("Scroll")]
+        [SerializeField]
+        [Tooltip(
+            "Where the chat scrolls when the assistant writes. Bottom — classic chat that follows the " +
+            "answer. AssistantMessageStart — the new answer is pinned by its top. KeepPosition — the " +
+            "view is never moved, new messages grow below.")]
+        private ChatScrollAnchor scrollAnchor = ChatScrollAnchor.Bottom;
+
         /// <summary>
-        /// Scroll policy for NEW assistant messages. Override in a host to get the ChatGPT-style
-        /// "read from the start" behaviour (<see cref="ChatScrollAnchor.AssistantMessageStart"/>);
-        /// the package default keeps the classic bottom-pinned chat.
+        /// Scroll policy for NEW assistant messages. Comes from the inspector; a host that owns the
+        /// policy in code overrides this property — then the inspector value is ignored.
         /// </summary>
-        protected virtual ChatScrollAnchor ScrollAnchor => ChatScrollAnchor.Bottom;
+        protected virtual ChatScrollAnchor ScrollAnchor => scrollAnchor;
+
+        /// <summary>
+        /// Does this policy move the view when the ASSISTANT produces content? Pure and public so the
+        /// rule is testable and states itself in one place: <see cref="ChatScrollAnchor.KeepPosition"/>
+        /// never moves the view, <see cref="ChatScrollAnchor.FollowIfAtBottom"/> moves it only while
+        /// the reader is standing at the bottom, the other modes always do.
+        /// </summary>
+        /// <param name="readerAtBottom">Where the reader stood BEFORE the content was appended.</param>
+        public static bool MovesViewForAssistantContent(ChatScrollAnchor anchor, bool readerAtBottom) =>
+            anchor switch
+            {
+                ChatScrollAnchor.KeepPosition => false,
+                ChatScrollAnchor.FollowIfAtBottom => readerAtBottom,
+                _ => true,
+            };
+
+        /// <summary>Порог «лента у низа» в единицах прокрутки (пиксели контента).</summary>
+        private const float AtBottomEpsilon = 8f;
+
+        // WHY: где читатель стоял ДО вставки. После вставки высота контента уже выросла, и отличить
+        // «он внизу» от «он ушёл вверх» по самому скроллеру уже нельзя.
+        private bool _readerFollowsBottom = true;
+
+        /// <summary>Стоит ли лента у низа прямо сейчас.</summary>
+        protected bool IsReaderAtBottom()
+        {
+            Scroller vs = MessageScroll?.verticalScroller;
+            if (vs == null)
+            {
+                return true;
+            }
+
+            return vs.highValue <= 0f || vs.value >= vs.highValue - AtBottomEpsilon;
+        }
+
+        /// <summary>
+        /// Запоминает место читателя перед добавлением строки. Зовётся ДО <c>MessageScroll.Add</c>:
+        /// после вставки ответ на этот вопрос уже недоступен.
+        /// </summary>
+        private void RememberReaderPositionBeforeAppend() => _readerFollowsBottom = IsReaderAtBottom();
+
+        /// <summary>Двигать ли вид под содержимое ассистента прямо сейчас.</summary>
+        private bool ShouldMoveViewForAssistantContent() =>
+            MovesViewForAssistantContent(ScrollAnchor, _readerFollowsBottom);
 
         /// <summary>
         /// Scrolls for a row that was just appended for the assistant. In <see cref="ChatScrollAnchor.Bottom"/>
-        /// this is <see cref="ScrollToBottom"/>. Otherwise the FIRST assistant row of the turn becomes the
-        /// anchor and is pinned by its top; later rows of the same turn do not move the view — the reader
-        /// must not lose their place mid-answer.
+        /// this is <see cref="ScrollToBottom"/>; in <see cref="ChatScrollAnchor.KeepPosition"/> nothing
+        /// moves at all. Otherwise the FIRST assistant row of the turn becomes the anchor and is pinned by
+        /// its top; later rows of the same turn do not move the view — the reader must not lose their
+        /// place mid-answer.
         /// </summary>
         protected void ScrollForNewAssistantRow(VisualElement row)
         {
-            if (ScrollAnchor == ChatScrollAnchor.Bottom)
+            if (!ShouldMoveViewForAssistantContent())
+            {
+                return;
+            }
+
+            if (ScrollAnchor == ChatScrollAnchor.Bottom
+                || ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom)
             {
                 ScrollToBottom();
                 return;
@@ -4232,11 +4322,20 @@ namespace CoreAI.Chat
         /// Reveals a row (a card, an interactive block) with the MINIMAL scroll: nothing moves when it is
         /// already fully visible; a row taller than the viewport is pinned by its top. The row becomes the
         /// turn anchor, so later re-snaps (<see cref="ScrollToTurnAnchor"/>) keep it in view instead of
-        /// jumping back to the message start. Falls back to <see cref="ScrollToBottom"/> in Bottom mode.
+        /// jumping back to the message start. Falls back to <see cref="ScrollToBottom"/> in Bottom mode,
+        /// and moves nothing in <see cref="ChatScrollAnchor.KeepPosition"/> — a card the reader has not
+        /// scrolled to yet is still not a reason to take the view away from them.
         /// </summary>
         protected void ScrollToRevealRow(VisualElement row)
         {
-            if (ScrollAnchor == ChatScrollAnchor.Bottom || row == null)
+            if (!ShouldMoveViewForAssistantContent())
+            {
+                return;
+            }
+
+            if (ScrollAnchor == ChatScrollAnchor.Bottom
+                || ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom
+                || row == null)
             {
                 ScrollToBottom();
                 return;
@@ -4249,11 +4348,20 @@ namespace CoreAI.Chat
 
         /// <summary>
         /// Re-applies the current turn anchor after the content height changed (markdown replaced a
-        /// streamed label, a card was rebuilt). Bottom mode, or no anchor yet — <see cref="ScrollToBottom"/>.
+        /// streamed label, a card was rebuilt). Bottom mode, or no anchor yet — <see cref="ScrollToBottom"/>;
+        /// <see cref="ChatScrollAnchor.KeepPosition"/> — nothing moves.
         /// </summary>
         protected void ScrollToTurnAnchor()
         {
-            if (ScrollAnchor == ChatScrollAnchor.Bottom || _turnAnchorRow == null || _turnAnchorRow.parent == null)
+            if (!ShouldMoveViewForAssistantContent())
+            {
+                return;
+            }
+
+            if (ScrollAnchor == ChatScrollAnchor.Bottom
+                || ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom
+                || _turnAnchorRow == null
+                || _turnAnchorRow.parent == null)
             {
                 ScrollToBottom();
                 return;
