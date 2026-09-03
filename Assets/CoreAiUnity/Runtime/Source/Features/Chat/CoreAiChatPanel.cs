@@ -4301,6 +4301,23 @@ namespace CoreAI.Chat
         /// </summary>
         private void RememberReaderPositionBeforeAppend() => _readerFollowsBottom = IsReaderAtBottom();
 
+        /// <summary>
+        /// Учащийся действовал прямо в ленте — ответил на встроенную карточку, нажал кнопку внутри
+        /// сообщения, — и ждёт продолжения так же, как после отправки своего сообщения.
+        /// <para>
+        /// Такое действие не создаёт пузыря пользователя, поэтому обычный путь
+        /// <c>AppendMessageBubble(isUser: true)</c> его не ловит: флаг следования оставался тем, каким
+        /// был во время чтения карточки. Карточка выше ленты на целый экран — читатель почти никогда
+        /// не «у низа» в момент нажатия, и ответ приходил за пределами видимой области.
+        /// </para>
+        /// </summary>
+        public void FollowFeedAfterLearnerAction()
+        {
+            _turnAnchorRow = null;
+            _readerFollowsBottom = true;
+            ScrollToBottom();
+        }
+
         /// <summary>Двигать ли вид под содержимое ассистента прямо сейчас.</summary>
         private bool ShouldMoveViewForAssistantContent() =>
             MovesViewForAssistantContent(ScrollAnchor, _readerFollowsBottom);
