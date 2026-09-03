@@ -36,6 +36,14 @@ namespace CoreAI.Chat
         Bottom = 0,
         AssistantMessageStart = 1,
         KeepPosition = 2,
+
+        /// <summary>
+        /// Поведение мессенджера: лента едет за новым содержимым, ПОКА читатель стоит у низа, и
+        /// перестаёт, как только он ушёл вверх. Безусловное <see cref="KeepPosition"/> оказалось
+        /// слишком строгим: ученик, только что отправивший сообщение, стоит внизу, и ответ вместе с
+        /// карточкой задания появлялся у него под кромкой экрана — то есть его будто и не было.
+        /// </summary>
+        FollowIfAtBottom = 3,
     }
 
     /// <summary>
@@ -3309,12 +3317,15 @@ namespace CoreAI.Chat
             }
 
             VisualElement bubble = CreateMessageBubble(text, isUser);
+            RememberReaderPositionBeforeAppend();
             MessageScroll.Add(bubble);
             if (isUser)
             {
                 // WHY: the learner's own message always lands at the bottom; the answer that follows
-                // starts a fresh anchor.
+                // starts a fresh anchor. Sending is also a deliberate return to the bottom, so the
+                // reader is following again — whatever they were reading before, they left it.
                 _turnAnchorRow = null;
+                _readerFollowsBottom = true;
                 ScrollToBottom();
             }
             else
@@ -3477,10 +3488,11 @@ namespace CoreAI.Chat
             label.AddToClassList("coreai-tool-call-message");
 
             row.Add(label);
+            RememberReaderPositionBeforeAppend();
             MessageScroll.Add(row);
-            // A tool-call line is assistant content like any other, so it obeys the same scroll policy —
-            // an unconditional jump to the bottom here would take the view away from a reader who is
-            // deliberately looking further up.
+            // WHY: a tool-call line is assistant content like any other, so it obeys the same scroll
+            // policy — an unconditional jump to the bottom here would take the view away from a reader
+            // who is deliberately looking further up.
             ScrollForNewAssistantRow(row);
         }
 
@@ -3968,6 +3980,7 @@ namespace CoreAI.Chat
             // WHY: record the bubble in open order — after the turn a host needs EVERY segment, not
             // just the last one (see TurnStreamingBubbles).
             _turnStreamingBubbles.Add(_streamingLabel);
+            RememberReaderPositionBeforeAppend();
             MessageScroll.Add(templateRow);
             ScrollForNewAssistantRow(templateRow);
             return _streamingLabel;
@@ -3991,10 +4004,18 @@ namespace CoreAI.Chat
                 return;
             }
 
+            // WHY: следование за хвостом переоценивается на КАЖДОМ чанке. Ученик, отошедший вверх
+            // посреди ответа, тем самым перестал следовать — и лента обязана его отпустить.
+            if (ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom && _readerFollowsBottom)
+            {
+                _readerFollowsBottom = IsReaderAtBottom();
+            }
+
             _streamingLabel.text =
                 AppendStreamingChunkForRender(_streamingLabel.text, chunk, out bool cappedAtLimit);
             _streamingRenderCapReached = cappedAtLimit;
-            if (ScrollAnchor == ChatScrollAnchor.Bottom)
+            if (ScrollAnchor == ChatScrollAnchor.Bottom
+                || (ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom && _readerFollowsBottom))
             {
                 ScheduleStreamingScrollToBottom();
             }
@@ -4176,10 +4197,46 @@ namespace CoreAI.Chat
         /// <summary>
         /// Does this policy move the view when the ASSISTANT produces content? Pure and public so the
         /// rule is testable and states itself in one place: <see cref="ChatScrollAnchor.KeepPosition"/>
-        /// never moves the view, the other modes do.
+        /// never moves the view, <see cref="ChatScrollAnchor.FollowIfAtBottom"/> moves it only while
+        /// the reader is standing at the bottom, the other modes always do.
         /// </summary>
-        public static bool MovesViewForAssistantContent(ChatScrollAnchor anchor) =>
-            anchor != ChatScrollAnchor.KeepPosition;
+        /// <param name="readerAtBottom">Where the reader stood BEFORE the content was appended.</param>
+        public static bool MovesViewForAssistantContent(ChatScrollAnchor anchor, bool readerAtBottom) =>
+            anchor switch
+            {
+                ChatScrollAnchor.KeepPosition => false,
+                ChatScrollAnchor.FollowIfAtBottom => readerAtBottom,
+                _ => true,
+            };
+
+        /// <summary>Порог «лента у низа» в единицах прокрутки (пиксели контента).</summary>
+        private const float AtBottomEpsilon = 8f;
+
+        // WHY: где читатель стоял ДО вставки. После вставки высота контента уже выросла, и отличить
+        // «он внизу» от «он ушёл вверх» по самому скроллеру уже нельзя.
+        private bool _readerFollowsBottom = true;
+
+        /// <summary>Стоит ли лента у низа прямо сейчас.</summary>
+        protected bool IsReaderAtBottom()
+        {
+            Scroller vs = MessageScroll?.verticalScroller;
+            if (vs == null)
+            {
+                return true;
+            }
+
+            return vs.highValue <= 0f || vs.value >= vs.highValue - AtBottomEpsilon;
+        }
+
+        /// <summary>
+        /// Запоминает место читателя перед добавлением строки. Зовётся ДО <c>MessageScroll.Add</c>:
+        /// после вставки ответ на этот вопрос уже недоступен.
+        /// </summary>
+        private void RememberReaderPositionBeforeAppend() => _readerFollowsBottom = IsReaderAtBottom();
+
+        /// <summary>Двигать ли вид под содержимое ассистента прямо сейчас.</summary>
+        private bool ShouldMoveViewForAssistantContent() =>
+            MovesViewForAssistantContent(ScrollAnchor, _readerFollowsBottom);
 
         /// <summary>
         /// Scrolls for a row that was just appended for the assistant. In <see cref="ChatScrollAnchor.Bottom"/>
@@ -4190,12 +4247,13 @@ namespace CoreAI.Chat
         /// </summary>
         protected void ScrollForNewAssistantRow(VisualElement row)
         {
-            if (!MovesViewForAssistantContent(ScrollAnchor))
+            if (!ShouldMoveViewForAssistantContent())
             {
                 return;
             }
 
-            if (ScrollAnchor == ChatScrollAnchor.Bottom)
+            if (ScrollAnchor == ChatScrollAnchor.Bottom
+                || ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom)
             {
                 ScrollToBottom();
                 return;
@@ -4221,12 +4279,14 @@ namespace CoreAI.Chat
         /// </summary>
         protected void ScrollToRevealRow(VisualElement row)
         {
-            if (!MovesViewForAssistantContent(ScrollAnchor))
+            if (!ShouldMoveViewForAssistantContent())
             {
                 return;
             }
 
-            if (ScrollAnchor == ChatScrollAnchor.Bottom || row == null)
+            if (ScrollAnchor == ChatScrollAnchor.Bottom
+                || ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom
+                || row == null)
             {
                 ScrollToBottom();
                 return;
@@ -4244,12 +4304,15 @@ namespace CoreAI.Chat
         /// </summary>
         protected void ScrollToTurnAnchor()
         {
-            if (!MovesViewForAssistantContent(ScrollAnchor))
+            if (!ShouldMoveViewForAssistantContent())
             {
                 return;
             }
 
-            if (ScrollAnchor == ChatScrollAnchor.Bottom || _turnAnchorRow == null || _turnAnchorRow.parent == null)
+            if (ScrollAnchor == ChatScrollAnchor.Bottom
+                || ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom
+                || _turnAnchorRow == null
+                || _turnAnchorRow.parent == null)
             {
                 ScrollToBottom();
                 return;
