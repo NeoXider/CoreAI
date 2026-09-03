@@ -450,8 +450,9 @@ namespace CoreAI.Tests.PlayMode
             ignoreReason = "COREAI_LLM is not set: HTTP LLM clients are excluded from the build.";
             return false;
 #else
-            // Unified resolution surface: env vars > gitignored local file > project defaults (opt-in).
-            // Env/file overrides the settings asset; the asset is the auto-detect fallback below.
+            // Unified resolution surface: env vars > project CoreAISettings asset (base URL + model) >
+            // gitignored local file > project defaults (opt-in). The asset branch below only remains for
+            // an asset that drives HTTP without a model of its own (server-managed choice).
             PlayModeOpenAiTestConfig.ResolvedConfig config = PlayModeOpenAiTestConfig.Resolve(modelOverride);
 
             // 1) Explicit env/file configuration wins (and is the only place streaming/native-tools toggles live).

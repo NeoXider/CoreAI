@@ -12,10 +12,15 @@ The one version that also lives in C# — McpServerInfo.Version, advertised to e
 MCP client during `initialize` — is rewritten from the same input, so it can no
 longer drift behind the manifest (McpPackageVersionEditModeTests guards it).
 
+The two documents that state the current release in prose - the ROADMAP package map and the
+Developer Guide footer - are rewritten from the same input as well, with today's date. The
+`check_positive_module_opt_in.py` gate reads both back and fails the build when either drifts.
+
 Usage:
     python tools/bump_version.py 6.2.1     # write the bump to every package.json
     python tools/bump_version.py --check   # verify lockstep only, no writes
 """
+import datetime
 import glob
 import json
 import os
@@ -28,6 +33,15 @@ INTERNAL_PIN = re.compile(r'("com\.neoxider\.[a-z0-9.]+"\s*:\s*")[^"]*(")')
 
 MCP_VERSION_FILE = "Assets/CoreAIMcp/Runtime/Protocol/McpMethods.cs"
 MCP_VERSION_CONST = re.compile(r'(public const string Version = ")[^"]*(";)')
+
+# Prose that names the current release. check_positive_module_opt_in.py reads both back and fails the
+# build when either drifts, so a bump has to rewrite them or the next run of that gate goes red.
+VERSIONED_DOCS = (
+    ("Docs/ROADMAP.md",
+     re.compile(r"(Six UPM packages, released in lockstep \(all currently )[^)]*(\):)")),
+    ("Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md",
+     re.compile(r"(\*\*Version of this guide:\*\* )\d+\.\d+\.\d+ \(\d{4}-\d{2}-\d{2}(\))")),
+)
 
 
 def package_files():
@@ -55,6 +69,27 @@ def bump_mcp_const(version):
         with open(MCP_VERSION_FILE, "w", encoding="utf-8", newline="") as f:
             f.write(text)
     return n
+
+
+def bump_versioned_docs(version, release_date):
+    """Rewrite the release line in each doc the opt-in gate checks. Returns (path, count) pairs."""
+    results = []
+    for path, pattern in VERSIONED_DOCS:
+        if not os.path.exists(path):
+            results.append((path, 0))
+            continue
+        with open(path, encoding="utf-8", newline="") as f:
+            text = f.read()
+        if "Version of this guide" in pattern.pattern:
+            replacement = r"\g<1>" + f"{version} ({release_date}" + r"\g<2>"
+        else:
+            replacement = r"\g<1>" + version + r"\g<2>"
+        text, n = pattern.subn(replacement, text, count=1)
+        if n:
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+        results.append((path, n))
+    return results
 
 
 def mcp_const_version():
@@ -121,6 +156,9 @@ def main(argv):
         print(f"  {path}: version x{n_version}, internal pins x{n_pins}")
     print(f"bumped {len(files)} packages to {version} ({total_pins} internal pins)")
     print(f"  {MCP_VERSION_FILE}: McpServerInfo.Version x{bump_mcp_const(version)}")
+    release_date = datetime.date.today().isoformat()
+    for path, n in bump_versioned_docs(version, release_date):
+        print(f"  {path}: release line x{n}")
 
     if not check():
         print("LOCKSTEP CHECK FAILED after bump")

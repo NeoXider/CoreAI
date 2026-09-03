@@ -547,6 +547,21 @@ namespace CoreAI.Tests.EditMode
         /// Executes the suite through the Test Runner. <paramref name="revealOnFinish"/> opens the result
         /// folder; <paramref name="exitOnFinish"/> quits the editor with a status code (batchmode/CI).
         /// </summary>
+        /// <summary>
+        /// Batchmode entry point: <c>-executeMethod ...RunHeadless</c>.
+        /// <para>
+        /// WHY: the suite test is <c>[Explicit]</c>, and Unity's <c>-runTests</c> CLI never selects an
+        /// explicit test — a name or category filter returns "No tests were executed". The Test Runner
+        /// API does select it, so a headless run goes through the same path the menu uses. Saved editor
+        /// prefs are deliberately NOT applied here: a headless run is configured by the
+        /// <c>COREAI_TEST_*</c> / <c>COREAI_BENCHMARK_*</c> environment variables alone.
+        /// </para>
+        /// </summary>
+        public static void RunHeadless()
+        {
+            RunViaTestRunner(false, true);
+        }
+
         public static void RunViaTestRunner(bool revealOnFinish, bool exitOnFinish)
         {
             if (IsRunning)

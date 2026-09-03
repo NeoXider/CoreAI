@@ -1101,6 +1101,33 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return new LuaLlmTool(Lua, Settings, Logging.NullLog.Instance);
             }
 
+            /// <summary>
+            /// The Roblox-API world for visual scenarios: <c>execute_lua</c> over a live
+            /// <c>RbxWorldHost</c>, where materials and every <c>Enum.PartType</c> shape exist. Created
+            /// on first use and parented under the visual root so the hero screenshot frames it.
+            /// </summary>
+            public RbxBenchmarkWorld RbxWorld
+            {
+                get
+                {
+                    return _rbxWorld ??= new RbxBenchmarkWorld(
+                        Settings,
+                        (World as VisualBenchmarkWorldExecutor)?.Root);
+                }
+            }
+
+            /// <summary>Whether an Rbx world was actually built (grading must not create one).</summary>
+            public bool HasRbxWorld => _rbxWorld != null;
+
+            private RbxBenchmarkWorld _rbxWorld;
+
+            /// <summary>Tears the Rbx world down between scenarios.</summary>
+            public void DisposeRbxWorld()
+            {
+                _rbxWorld?.Dispose();
+                _rbxWorld = null;
+            }
+
             public WorldLlmTool WorldTool()
             {
                 return new WorldLlmTool(World, Settings, new NullGameLogger(), TimeRemainingNote);
@@ -1473,6 +1500,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             if (config == null)
             {
                 (env.World as VisualBenchmarkWorldExecutor)?.Cleanup();
+                env.DisposeRbxWorld();
                 onResult?.Invoke(FailedResult(scenario, modelId, FailureAttribution.Framework,
                     $"setup failed: {setupError}"));
                 yield break;
@@ -1630,6 +1658,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             catch (Exception ex)
             {
                 (env.World as VisualBenchmarkWorldExecutor)?.Cleanup();
+                env.DisposeRbxWorld();
                 onResult?.Invoke(FailedResult(scenario, modelId, FailureAttribution.Framework,
                     $"grading failed: {ex.Message}"));
                 yield break;

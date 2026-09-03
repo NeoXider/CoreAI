@@ -287,7 +287,7 @@ namespace CoreAI.Editor.RbxMaterials
             string roughness = ImportMap(surface.RoughnessPath, false, false);
             string metalness = ImportOptionalMap(surface.MetalnessPath);
             string occlusion = ImportOptionalMap(surface.AmbientOcclusionPath);
-            _completedEntries.Add(new RbxTextureCatalogEntryData
+            RbxTextureCatalogEntryData entry = new()
             {
                 MaterialName = mapping.MaterialName,
                 MaterialValue = RbxMaterialCatalogEditorUtility.MaterialValue(mapping.MaterialName),
@@ -298,7 +298,9 @@ namespace CoreAI.Editor.RbxMaterials
                 IsSmoothnessMap = false,
                 MetalnessAssetPath = metalness,
                 AmbientOcclusionAssetPath = occlusion
-            });
+            };
+            RbxMaterialSurfaceProfiles.Apply(entry);
+            _completedEntries.Add(entry);
             _completedMappings.Add(mapping);
         }
 

@@ -1,43 +1,47 @@
 {
-  "name": "CoreAI.Benchmark.Tests",
-  "rootNamespace": "",
-  "references": [
-    "CoreAI.Tests.PlayMode.Shared",
-    "CoreAI.Tests.PlayMode.LlmInfra",
-    "CoreAI.Benchmarking",
-    "CoreAI.Core",
-    "CoreAI.Mods",
-    "CoreAI.Source",
-    "MessagePipe",
-    "undream.llmunity.Runtime",
-    "VContainer",
-    "UniTask",
-    "UnityEngine.TestRunner",
-    "UnityEditor.TestRunner"
-  ],
-  "includePlatforms": [],
-  "excludePlatforms": [],
-  "allowUnsafeCode": false,
-  "overrideReferences": true,
-  "precompiledReferences": [
-    "nunit.framework.dll",
-    "Newtonsoft.Json.dll",
-    "Microsoft.Extensions.AI.dll",
-    "Microsoft.Extensions.AI.Abstractions.dll",
-    "Microsoft.Bcl.AsyncInterfaces.dll",
-    "System.Text.Json.dll",
-    "Lua.dll"
-  ],
-  "autoReferenced": false,
-  "defineConstraints": [
-    "UNITY_INCLUDE_TESTS"
-  ],
-  "versionDefines": [
-    {
-      "name": "ai.undream.llm",
-      "expression": "1.0.0",
-      "define": "COREAI_HAS_LLMUNITY"
-    }
-  ],
-  "noEngineReferences": false
+    "name": "CoreAI.Benchmark.Tests",
+    "rootNamespace": "",
+    "references": [
+        "CoreAI.Tests.PlayMode.Shared",
+        "CoreAI.Tests.PlayMode.LlmInfra",
+        "CoreAI.Benchmarking",
+        "CoreAI.Core",
+        "CoreAI.Mods",
+        "CoreAI.Source",
+        "MessagePipe",
+        "undream.llmunity.Runtime",
+        "VContainer",
+        "UniTask",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "CoreAI.RbxApi.Datatypes",
+        "CoreAI.RbxApi.Instances",
+        "CoreAI.RbxApi.Binding",
+        "CoreAI.RbxApi.Unity"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "Newtonsoft.Json.dll",
+        "Microsoft.Extensions.AI.dll",
+        "Microsoft.Extensions.AI.Abstractions.dll",
+        "Microsoft.Bcl.AsyncInterfaces.dll",
+        "System.Text.Json.dll",
+        "Lua.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [
+        {
+            "name": "ai.undream.llm",
+            "expression": "1.0.0",
+            "define": "COREAI_HAS_LLMUNITY"
+        }
+    ],
+    "noEngineReferences": false
 }

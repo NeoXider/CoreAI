@@ -306,7 +306,7 @@ namespace CoreAI.Editor.RbxMaterials
             string roughness = ImportMap(surface.RoughnessPath, false, false);
             string metalness = ImportOptionalMap(surface.MetalnessPath);
             string occlusion = ImportOptionalMap(surface.AmbientOcclusionPath);
-            return new RbxTextureCatalogEntryData
+            RbxTextureCatalogEntryData entry = new()
             {
                 MaterialName = surface.SelectedMaterialName,
                 MaterialValue = RbxMaterialCatalogEditorUtility.MaterialValue(
@@ -319,6 +319,8 @@ namespace CoreAI.Editor.RbxMaterials
                 MetalnessAssetPath = metalness,
                 AmbientOcclusionAssetPath = occlusion
             };
+            RbxMaterialSurfaceProfiles.Apply(entry);
+            return entry;
         }
 
         private static string ImportOptionalMap(string absolutePath)

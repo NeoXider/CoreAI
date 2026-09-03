@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -29,8 +30,6 @@ HISTORICAL_FILES = {
 }
 DGF_SPEC = Path("Assets/CoreAiUnity/Docs/DGF_SPEC.md")
 DGF_HISTORY_HEADING = "## 15. Document revision history"
-LOCKSTEP_VERSION = "7.0.3"
-LOCKSTEP_DATE = "2026-08-12"
 PACKAGE_JSON_FILES = (
     Path("Assets/CoreAI/package.json"),
     Path("Assets/CoreAiUnity/package.json"),
@@ -39,6 +38,10 @@ PACKAGE_JSON_FILES = (
     Path("Assets/CoreAIBenchmark/package.json"),
     Path("Assets/CoreAIMcp/package.json"),
 )
+DEVELOPER_GUIDE = Path("Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md")
+GUIDE_VERSION_PREFIX = "**Version of this guide:**"
+GUIDE_VERSION_PATTERN = re.compile(
+    r"\*\*Version of this guide:\*\* (?P<version>\d+\.\d+\.\d+) \((?P<date>\d{4}-\d{2}-\d{2})\)")
 INPUT_SYSTEM_ASMDEFS = (
     Path("Assets/CoreAiUnity/Runtime/Source/CoreAI.Source.asmdef"),
     Path("Assets/CoreAIMods/Runtime/CoreAI.Mods.asmdef"),
@@ -225,11 +228,27 @@ def verify_project_baseline() -> None:
         fail(f"repository full-demo baseline lacks COREAI_LLM + COREAI_LUA: {', '.join(missing)}")
 
 
+def lockstep_version() -> str:
+    """The one version the six packages share, read from the core manifest.
+
+    WHY: this used to be a constant in this file, so every release left the gate asserting a version
+    the repository had already moved past. The manifest is what `tools/bump_version.py` writes, so it
+    is the only source that cannot drift.
+    """
+    core = json.loads((ROOT / PACKAGE_JSON_FILES[0]).read_text(encoding="utf-8-sig"))
+    version = core.get("version")
+    if not isinstance(version, str) or not version:
+        fail(f"{PACKAGE_JSON_FILES[0].as_posix()} has no version to lock the other packages to")
+
+    return version
+
+
 def verify_current_release_docs() -> None:
+    expected_version = lockstep_version()
     for relative in PACKAGE_JSON_FILES:
         package = json.loads((ROOT / relative).read_text(encoding="utf-8-sig"))
-        if package.get("version") != LOCKSTEP_VERSION:
-            fail(f"{relative.as_posix()} is not at lockstep version {LOCKSTEP_VERSION}")
+        if package.get("version") != expected_version:
+            fail(f"{relative.as_posix()} is not at lockstep version {expected_version}")
 
     core_description = json.loads((ROOT / PACKAGE_JSON_FILES[0]).read_text(encoding="utf-8-sig"))["description"]
     unity_description = json.loads((ROOT / PACKAGE_JSON_FILES[1]).read_text(encoding="utf-8-sig"))["description"]
@@ -251,16 +270,21 @@ def verify_current_release_docs() -> None:
             fail(f"{relative.as_posix()} does not document both positive module symbols")
 
     roadmap = (ROOT / "Docs/ROADMAP.md").read_text(encoding="utf-8-sig")
-    if f"Six UPM packages, released in lockstep (all currently {LOCKSTEP_VERSION}):" not in roadmap:
-        fail("roadmap package count/version is stale")
+    if f"Six UPM packages, released in lockstep (all currently {expected_version}):" not in roadmap:
+        fail(f"roadmap package count/version is stale (expected {expected_version})")
     if "Five UPM packages" in roadmap or "CoreAI 5.9 uses" in roadmap:
         fail("roadmap still contains a stale current release statement")
 
-    guide = (ROOT / "Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md").read_text(encoding="utf-8-sig")
+    guide = (ROOT / DEVELOPER_GUIDE).read_text(encoding="utf-8-sig")
     if not guide.startswith("# CoreAI Developer Guide") or "CoreAI 7.0 uses endpoint/profile/role separation" not in guide:
         fail("developer guide current-version introduction is stale")
-    if f"**Version of this guide:** {LOCKSTEP_VERSION} ({LOCKSTEP_DATE})" not in guide:
-        fail("developer guide footer is not current")
+    # WHY: the release date is whatever the guide itself states, so only the version has to track
+    # the manifest; pinning the date here is half of what made this check go stale.
+    footer = GUIDE_VERSION_PATTERN.search(guide)
+    if footer is None:
+        fail(f"developer guide has no '{GUIDE_VERSION_PREFIX} <version> (<yyyy-mm-dd>)' footer")
+    if footer.group("version") != expected_version:
+        fail(f"developer guide footer says {footer.group('version')}, not {expected_version}")
 
     for relative in (Path("Assets/CoreAI/CHANGELOG.md"), Path("Assets/CoreAiUnity/CHANGELOG.md")):
         changelog = (ROOT / relative).read_text(encoding="utf-8-sig")

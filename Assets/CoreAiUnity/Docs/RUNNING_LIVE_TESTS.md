@@ -19,13 +19,17 @@ are resolved by `PlayModeOpenAiTestConfig` and consumed by
 ### Resolution precedence (highest wins, field by field)
 
 1. **Environment variables** (`COREAI_TEST_*`) — best for CI and shell-driven runs.
-2. **Gitignored local config file** — `coreai-live-tests.local.json` at the project root.
-3. **Auto-detect** from the project's `CoreAISettingsAsset` (only when it is a fully configured
-   HTTP backend).
+2. **The project's `CoreAISettingsAsset`** (`Assets/Resources/CoreAISettings`) — when it drives an HTTP
+   backend with a model, its base URL and model are what the live suite uses. Pick the model in the
+   asset, press Run in the Test Runner, and the tests talk to that model; nothing else to set up.
+3. **Gitignored local config file** — `coreai-live-tests.local.json` at the project root: the API key,
+   streaming / native-tools toggles and provider body fields, plus base URL and model when the asset
+   does not provide them (offline or local-model asset).
+4. Hard-coded LM Studio fallbacks, only with the explicit legacy opt-in.
 
-So **env overrides the local file, and the local file overrides the settings asset / auto-detect.**
-Each field is resolved independently — you can keep the base URL + key in the local file and override
-just the model from the shell.
+So **env overrides the asset, and the asset overrides the local file for base URL and model.** Each field
+is resolved independently — keep the key in the local file, select the model in the asset, and override
+just the model from the shell when needed.
 
 > **Security — never commit API keys to the Resources asset.** The `CoreAISettingsAsset` under a
 > `Resources/` folder is packed into every player build, and the key string is trivially recoverable
@@ -172,3 +176,23 @@ Live tests skip with a clear, actionable reason:
   contract instead of native function calling — handy for local models with flaky native tool support.
 - Backend selection (HTTP vs LLMUnity vs offline) is still controlled by `COREAI_PLAYMODE_LLM_BACKEND`
   and/or the `CoreAISettingsAsset` backend type; this surface configures the OpenAI-compatible HTTP path.
+- `ProgrammerLiveHarness` builds a real `RbxWorldHost`, so what a live run creates through the Rbx API
+  becomes actual GameObjects. Tests that photograph the result (`RbxCastleMaterialsShowcase…`) frame the
+  built geometry's bounds, so the hero shot works whatever footprint the model chooses.
+
+---
+
+## Picking a model for the building tests
+
+The castle showcase asks for 40+ parts across eight sections, which is a long agentic run. Measured on
+this machine against LM Studio (timings from a logging proxy in front of the server):
+
+| Model | Result |
+|---|---|
+| `claude-sonnet-5` via `agent.sh openai-server -e claude` | passes — 86 parts, 15 materials, all 5 shapes, ~11 turns |
+| `qwen_qwen3.5-2b` | fast (~27 s/turn) but too weak: Luau syntax errors, burns its error budget on exploration |
+| `ling-3.0-tiny` | native tool calls work, but 376–602 s per turn on the ~5k-token Programmer prompt — it cannot finish inside any sane budget |
+| `qwen3.8-27b-*`, `ornith-1.5-35b-a3b-*` | fail to load in LM Studio (`LM Link peer_keepalive_timeout`, `Engine protocol startup was aborted`) |
+
+If a run stalls with `Request timed out at the transport`, check the model's per-turn latency first: the
+per-request budget is 600 s, and a small local model can spend all of it on one generation.

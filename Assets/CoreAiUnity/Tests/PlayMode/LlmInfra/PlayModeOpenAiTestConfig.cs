@@ -15,14 +15,19 @@ namespace CoreAI.Tests.PlayMode
     /// <para>Resolution precedence (highest wins), evaluated field-by-field:</para>
     /// <list type="number">
     ///   <item>Environment variables (CI / shell): <c>COREAI_TEST_*</c> (canonical) and legacy aliases.</item>
-    ///   <item>Optional gitignored local config file (JSON) — see <see cref="LocalConfigFileName"/>.</item>
-    ///   <item>Auto-detect from the project's <c>CoreAISettingsAsset</c> (only when explicitly opted in;
-    ///         the factory already prefers a fully configured asset on its own).</item>
+    ///   <item>The project's <c>CoreAISettingsAsset</c> (<c>Resources/CoreAISettings</c>) when it drives an
+    ///         HTTP backend with a model: its base URL and model are what the editor runs the game with,
+    ///         so a live test launched from the Test Runner talks to the same model without any extra
+    ///         setup. The asset never carries the API key (a build guard forbids it).</item>
+    ///   <item>Optional gitignored local config file (JSON) — see <see cref="LocalConfigFileName"/>:
+    ///         the key, the streaming / native-tools toggles and provider body fields, plus base URL and
+    ///         model when the asset does not provide them.</item>
+    ///   <item>Hard-coded LM Studio fallbacks, only when explicitly opted in.</item>
     /// </list>
     ///
-    /// <para>So: <b>env overrides the local file, the local file overrides the asset/auto-detect.</b>
+    /// <para>So: <b>env overrides the asset, the asset overrides the local file for base URL and model.</b>
     /// Each field resolves independently, so you can set only <c>COREAI_TEST_MODEL</c> in the shell
-    /// while keeping base URL + key in the local file.</para>
+    /// while keeping the key in the local file and the base URL in the asset.</para>
     ///
     /// <para>Canonical env vars:</para>
     /// <list type="bullet">
@@ -68,6 +73,19 @@ namespace CoreAI.Tests.PlayMode
         /// <summary>Default when neither the legacy opt-in env nor a file/env value is present.</summary>
         private const bool UseProjectDefaults = false;
 
+        /// <summary>
+        /// Test seam: where the project's settings asset comes from. Production resolution loads
+        /// <c>Resources/CoreAISettings</c>; precedence tests substitute an in-memory asset.
+        /// </summary>
+        internal static Func<CoreAISettingsAsset> ProjectSettingsProvider { get; set; } = LoadProjectSettings;
+
+        /// <summary>Base URL and model the project asset contributes, or <c>null</c> when it drives no HTTP model.</summary>
+        private sealed class ProjectAssetConfig
+        {
+            public string BaseUrl;
+            public string Model;
+        }
+
         /// <summary>Immutable snapshot of the resolved live-test configuration.</summary>
         public sealed class ResolvedConfig
         {
@@ -109,10 +127,12 @@ namespace CoreAI.Tests.PlayMode
         public static ResolvedConfig Resolve(string modelOverride = null)
         {
             LocalFileConfig file = LoadLocalFile();
+            ProjectAssetConfig asset = LoadProjectAssetConfig();
 
             string baseUrl = FirstNonEmpty(
                 GetEnv(EnvBaseUrl),
                 GetEnv(LegacyEnvBase),
+                asset?.BaseUrl,
                 file?.BaseUrl,
                 ProjectDefaultsEnabled() ? FallbackLmStudioBaseUrl : null);
             baseUrl = NormalizeBaseUrl(baseUrl);
@@ -126,6 +146,7 @@ namespace CoreAI.Tests.PlayMode
                 modelOverride,
                 GetEnv(EnvModel),
                 GetEnv(LegacyEnvModel),
+                asset?.Model,
                 file?.Model,
                 ProjectDefaultsEnabled() ? FallbackLmStudioModelId : null);
             model = model?.Trim();
@@ -164,7 +185,8 @@ namespace CoreAI.Tests.PlayMode
                 $"or create a gitignored '{LocalConfigFileName}' at the project root " +
                 $"(see Assets/CoreAiUnity/Docs/RUNNING_LIVE_TESTS.md). " +
                 $"Optional fields: {EnvStreaming}, {EnvNativeTools}, {EnvExtraBodyJson}. " +
-                $"A fully configured CoreAISettingsAsset (HTTP backend) is also honored automatically.";
+                "Or select an HTTP backend with a model in the project's CoreAISettings asset " +
+                "(Resources/CoreAISettings): the live suite follows that asset's base URL and model.";
         }
 
         // ---------------------------------------------------------------------
@@ -186,6 +208,46 @@ namespace CoreAI.Tests.PlayMode
         // ---------------------------------------------------------------------
         // Internals
         // ---------------------------------------------------------------------
+
+        private static CoreAISettingsAsset LoadProjectSettings()
+        {
+            return Resources.Load<CoreAISettingsAsset>("CoreAISettings");
+        }
+
+        /// <summary>
+        /// The project asset contributes base URL + model only when it drives an HTTP backend with a
+        /// model of its own; a local-model or offline asset contributes nothing, so env/file keep working.
+        /// </summary>
+        private static ProjectAssetConfig LoadProjectAssetConfig()
+        {
+            CoreAISettingsAsset settings;
+            try
+            {
+                settings = ProjectSettingsProvider?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[PlayModeOpenAiTestConfig] project CoreAISettings asset unavailable: {ex.Message}");
+                return null;
+            }
+
+            if (settings == null || !settings.UseHttpApi)
+            {
+                return null;
+            }
+
+            string model = settings.ModelName;
+            if (string.IsNullOrWhiteSpace(model))
+            {
+                return null;
+            }
+
+            return new ProjectAssetConfig
+            {
+                BaseUrl = settings.ApiBaseUrl,
+                Model = model.Trim()
+            };
+        }
 
         private static bool ProjectDefaultsEnabled()
         {

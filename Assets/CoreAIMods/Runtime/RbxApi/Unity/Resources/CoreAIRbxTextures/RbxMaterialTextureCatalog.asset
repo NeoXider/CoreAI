@@ -26,7 +26,7 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.65
     _roughnessScale: 0.75
-    _normalStrength: 1
+    _normalStrength: 1.2
   - _materialName: WoodPlanks
     _materialValue: 528
     _albedo: {fileID: 2800000, guid: 2500000000000000000000000000000e, type: 3}
@@ -40,7 +40,7 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.65
     _roughnessScale: 0.78
-    _normalStrength: 1
+    _normalStrength: 1.25
   - _materialName: Brick
     _materialValue: 848
     _albedo: {fileID: 2800000, guid: 25000000000000000000000000000001, type: 3}
@@ -54,7 +54,7 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.6
     _roughnessScale: 0.82
-    _normalStrength: 1
+    _normalStrength: 1.3
   - _materialName: Cobblestone
     _materialValue: 880
     _albedo: {fileID: 2800000, guid: 2500000000000000000000000000000b, type: 3}
@@ -68,7 +68,7 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.72
-    _normalStrength: 1
+    _normalStrength: 1.5
   - _materialName: Metal
     _materialValue: 1088
     _albedo: {fileID: 2800000, guid: 25000000000000000000000000000007, type: 3}
@@ -82,7 +82,7 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.45
     _roughnessScale: 0.68
-    _normalStrength: 1
+    _normalStrength: 0.85
   - _materialName: Grass
     _materialValue: 1280
     _albedo: {fileID: 2800000, guid: 25000000000000000000000000000004, type: 3}
@@ -96,4 +96,4 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.78
-    _normalStrength: 1
+    _normalStrength: 1.25

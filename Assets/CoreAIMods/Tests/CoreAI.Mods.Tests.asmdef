@@ -13,6 +13,7 @@
     "CoreAI.Tests",
     "CoreAI.Benchmarking",
     "CoreAI.Core",
+    "CoreAI.Mods.Editor",
     "CoreAI.Editor",
     "CoreAI.ExampleGame",
     "CoreAI.Source",
