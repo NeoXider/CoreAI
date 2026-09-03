@@ -4,6 +4,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.8.0] - 2026-09-04
+
+Версия выровнена с `com.neoxider.coreai` 7.8.0 (диагностика аллоулиста, вырезавшего входы в скиллы, —
+изменение ядра). Собственных изменений слоя Unity в этом выпуске нет.
+
 ## [7.7.0] - 2026-09-04
 
 ### Added

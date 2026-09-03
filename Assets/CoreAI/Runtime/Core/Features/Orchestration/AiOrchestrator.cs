@@ -1710,18 +1710,39 @@ namespace CoreAI.Ai
             }
 
             List<ILlmTool> filtered = new();
+            bool hadSkillMetaTools = false;
+            bool keptSkillEntryPoint = false;
             foreach (ILlmTool tool in tools)
             {
+                bool isSkillMetaTool = tool is ISkillSetMetaLlmTool;
+                hadSkillMetaTools |= isSkillMetaTool;
                 if (tool != null && allowed.Contains(tool.Name))
                 {
                     filtered.Add(tool);
+                    keptSkillEntryPoint |= isSkillMetaTool;
                     continue;
                 }
 
                 if (tool is ISkillSetMetaLlmTool skillMetaTool && IntersectsSkillToolAllowlist(skillMetaTool, allowed))
                 {
                     filtered.Add(skillMetaTool.RestrictTo(allowed));
+                    keptSkillEntryPoint = true;
                 }
+            }
+
+            // WHY: the skill catalog lives in the CACHEABLE system prefix and keeps telling the model to
+            // reach skills through `call_skill_tool`. A per-request allowlist that names neither the
+            // meta-tools nor any skill's own tool silently contradicts that instruction: the model obeys
+            // the prefix, the call comes back "Unknown tool", and the turn is spent — the person waiting
+            // sees only that nothing happened. The request stays exactly as the host asked; the host just
+            // hears about the contradiction instead of finding it in a play session.
+            if (hadSkillMetaTools && !keptSkillEntryPoint)
+            {
+                Log.Instance.Warn(
+                    $"[AiOrchestrator] request allowlist [{string.Join(", ", allowed)}] removed every skill " +
+                    "entry point while the system prompt still advertises skills: the model is told to use " +
+                    "`call_skill_tool` and cannot. Allow it, or allow the skill's own tool names.",
+                    LogTag.Llm);
             }
 
             return filtered;
