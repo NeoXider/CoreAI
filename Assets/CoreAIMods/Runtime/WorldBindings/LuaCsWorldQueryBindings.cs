@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.Infrastructure.World;
+using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using UnityEngine;
@@ -54,12 +56,13 @@ namespace CoreAI.Ai.LuaCs
                     return null;
                 }
 
-                Vector3 position = target.transform.position;
+                // WHY: Lua-facing positions are studs; the transform is metres.
+                RbxVector3 studs = RbxSpace.FromUnity(target.transform.position);
                 return new Dictionary<string, object>
                 {
-                    { "x", (double)position.x },
-                    { "y", (double)position.y },
-                    { "z", (double)position.z }
+                    { "x", (double)studs.X },
+                    { "y", (double)studs.Y },
+                    { "z", (double)studs.Z }
                 };
             }));
 
@@ -110,27 +113,32 @@ namespace CoreAI.Ai.LuaCs
                         throw new ArgumentException("raycast: arguments must be finite.");
                     }
 
-                    Vector3 direction = new(ToFiniteFloat(dx), ToFiniteFloat(dy), ToFiniteFloat(dz));
+                    // WHY: Lua-facing raycast is studs throughout: origin scales, direction
+                    // mirrors without scaling, maxDistance is a studs length.
+                    Vector3 origin = RbxSpace.ToUnity(new RbxVector3(
+                        ToFiniteFloat(ox), ToFiniteFloat(oy), ToFiniteFloat(oz)));
+                    Vector3 direction = RbxSpace.DirectionToUnity(new RbxVector3(
+                        ToFiniteFloat(dx), ToFiniteFloat(dy), ToFiniteFloat(dz)));
                     if (direction == Vector3.zero)
                     {
                         throw new ArgumentException("raycast: direction must be non-zero.");
                     }
 
-                    Vector3 origin = new(ToFiniteFloat(ox), ToFiniteFloat(oy), ToFiniteFloat(oz));
-                    float distance = (float)Math.Min(Math.Max(maxDistance, 0.0001d), 1000d);
+                    float distance = RbxSpace.LengthToUnity(
+                        (float)Math.Min(Math.Max(maxDistance, 0.0001d), 1000d));
                     if (!Physics.Raycast(origin, direction.normalized, out RaycastHit hit, distance))
                     {
                         return null;
                     }
 
-                    Vector3 point = hit.point;
+                    RbxVector3 point = RbxSpace.FromUnity(hit.point);
                     return new Dictionary<string, object>
                     {
                         { "name", hit.collider.gameObject.name },
-                        { "x", (double)point.x },
-                        { "y", (double)point.y },
-                        { "z", (double)point.z },
-                        { "distance", (double)hit.distance }
+                        { "x", (double)point.X },
+                        { "y", (double)point.Y },
+                        { "z", (double)point.Z },
+                        { "distance", (double)RbxSpace.LengthFromUnity(hit.distance) }
                     };
                 }));
         }

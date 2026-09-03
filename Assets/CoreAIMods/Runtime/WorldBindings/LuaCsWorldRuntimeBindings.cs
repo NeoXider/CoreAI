@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
+using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Scripting;
 using UnityEngine;
 using static CoreAI.Messaging.AiGameCommandTypeIds;
@@ -464,7 +466,8 @@ namespace CoreAI.Ai.LuaCs
                     $"world position must be finite and within +/-{MaxCoordinate:0} per axis.");
             }
 
-            return new Vector3(fx, fy, fz);
+            // WHY: Lua-facing positions are studs; the envelope carries Unity metres.
+            return RbxSpace.ToUnity(new RbxVector3(fx, fy, fz));
         }
 
         private static Vector3 ValidateEulerAngles(double x, double y, double z)
