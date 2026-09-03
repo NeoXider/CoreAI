@@ -1,12 +1,22 @@
 # Megascans (Fab) shopping list for the Rbx material catalog — 2026-09-02
 
-Purpose: the owner downloads FREE Quixel Megascans **surfaces** from fab.com by hand (own Epic
-account, Fab Standard License) and imports them locally with
+> **Проверено 2026-09-03: «бесплатные Megascans» на Fab больше не бесплатны.** Раздача всей
+> библиотеки закончилась 31.12.2024; сейчас поверхности продаются поштучно или идут по подписке Fab,
+> а бесплатным остался только стартовый набор (~1500 ассетов). Список ниже применим в одном из двух
+> случаев: (а) библиотека была забрана в аккаунт до 01.01.2025 — тогда она навсегда ваша и качается
+> из **My Library**, а не из каталога; (б) нужный материал попал в бесплатный стартовый набор.
+> Для остальных строк придётся брать другой бесплатный источник (ambientCG, Poly Haven) или платить.
+> Проверять цену нужно на каждой странице: «Megascans» больше не означает «бесплатно».
+
+Purpose: the owner downloads Quixel Megascans **surfaces** from fab.com by hand (own Epic
+account, Fab Standard License — see the availability note above) and imports them locally with
 `CoreAI/Materials/Import Bridge-Megascans folder...` (`RbxMegascansCatalogImporter`). The result is a
 **project-local override catalog**; the committed package keeps the CC0 ambientCG sets.
 
 No URLs are listed on purpose: Fab asset URLs carry opaque ids that cannot be verified offline. Use the
-search phrase in the fab.com search box with the filters **Megascans · Surfaces · Free**.
+search phrase in the fab.com search box — with the filter **Megascans · Surfaces · Free** if you are
+looking for what is still free today, or inside **My Library** if you claimed the library before it
+went paid.
 
 ## What to pick for each `Enum.Material`
 
