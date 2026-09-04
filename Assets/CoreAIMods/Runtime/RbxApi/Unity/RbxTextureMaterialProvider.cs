@@ -29,7 +29,37 @@ namespace CoreAI.Mods.Rbx.Rendering
                 new RbxMaterialId("Brick", 848),
                 new RbxMaterialId("Cobblestone", 880),
                 new RbxMaterialId("Metal", 1088),
-                new RbxMaterialId("Grass", 1280)
+                new RbxMaterialId("Grass", 1280),
+                new RbxMaterialId("Slate", 800),
+                new RbxMaterialId("Limestone", 820),
+                new RbxMaterialId("Sandstone", 912),
+                new RbxMaterialId("Granite", 832),
+                new RbxMaterialId("Basalt", 788),
+                new RbxMaterialId("Rock", 896),
+                new RbxMaterialId("Concrete", 816),
+                new RbxMaterialId("Marble", 784),
+                new RbxMaterialId("Plaster", 2310),
+                new RbxMaterialId("Pavement", 836),
+                new RbxMaterialId("Pebble", 864),
+                new RbxMaterialId("CeramicTiles", 2306),
+                new RbxMaterialId("ClayRoofTiles", 2307),
+                new RbxMaterialId("RoofShingles", 2308),
+                new RbxMaterialId("CorrodedMetal", 1040),
+                new RbxMaterialId("DiamondPlate", 1056),
+                new RbxMaterialId("Foil", 1072),
+                new RbxMaterialId("LeafyGrass", 1284),
+                new RbxMaterialId("Ground", 1360),
+                new RbxMaterialId("Mud", 1344),
+                new RbxMaterialId("Sand", 1296),
+                new RbxMaterialId("Snow", 1328),
+                new RbxMaterialId("Ice", 1536),
+                new RbxMaterialId("CrackedLava", 804),
+                new RbxMaterialId("Asphalt", 1376),
+                new RbxMaterialId("Fabric", 1312),
+                new RbxMaterialId("Carpet", 2305),
+                new RbxMaterialId("Leather", 2309),
+                new RbxMaterialId("Cardboard", 2304),
+                new RbxMaterialId("Rubber", 2311)
             });
 
         private static Dictionary<int, Material> _sharedMaterials;
@@ -87,7 +117,7 @@ namespace CoreAI.Mods.Rbx.Rendering
         /// <summary>The same conspicuous diagnostic material used by the procedural catalog.</summary>
         public Material FallbackMaterial => _proceduralProvider.FallbackMaterial;
 
-        /// <summary>Canonical ids of the six texture sets packaged with CoreAI.</summary>
+        /// <summary>Canonical ids of the 36 texture sets packaged with CoreAI.</summary>
         internal static IReadOnlyList<RbxMaterialId> TexturedMaterials =>
             PackagedTexturedMaterialIds;
 

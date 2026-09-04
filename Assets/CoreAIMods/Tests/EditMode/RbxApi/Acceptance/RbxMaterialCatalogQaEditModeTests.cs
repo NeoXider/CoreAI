@@ -27,7 +27,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         private static readonly string[] ExpectedTexturedNames =
         {
-            "Wood", "WoodPlanks", "Brick", "Cobblestone", "Metal", "Grass"
+            "Wood", "WoodPlanks", "Brick", "Cobblestone", "Metal", "Grass", "Slate",
+            "Limestone", "Sandstone", "Granite", "Basalt", "Rock", "Concrete", "Marble",
+            "Plaster", "Pavement", "Pebble", "CeramicTiles", "ClayRoofTiles", "RoofShingles",
+            "CorrodedMetal", "DiamondPlate", "Foil", "LeafyGrass", "Ground", "Mud", "Sand",
+            "Snow", "Ice", "CrackedLava", "Asphalt", "Fabric", "Carpet", "Leather",
+            "Cardboard", "Rubber"
         };
 
         [SetUp]
@@ -83,7 +88,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
-        public void TexturedCatalog_SixEntriesAreCanonicalEnumItemsWithProceduralTwins()
+        public void TexturedCatalog_AllEntriesAreCanonicalEnumItemsWithProceduralTwins()
         {
             RbxEnum materialEnum = RbxEnumRegistry.CreateWithBuiltins().Get("Material");
             IReadOnlyList<RbxMaterialId> textured = RbxTextureMaterialProvider.TexturedMaterials;
@@ -98,6 +103,47 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 Assert.IsTrue(
                     RbxProceduralMaterialProvider.TryGetPartColorContract(in id, out _, out _),
                     id.Name + " must keep a procedural twin for the texture-free fallback path");
+            }
+        }
+
+        [Test]
+        public void PackagedTexturedCatalog_MatchesRuntimeTexturedListExactly()
+        {
+            // WHY: the ambientCG downloader mapping drifted apart from the local importer table
+            // silently once before, so this hand-maintained runtime list beside the generated
+            // packaged asset gets an exact-equality gate instead of trust.
+            RbxMaterialTextureCatalog catalog = Resources.Load<RbxMaterialTextureCatalog>(
+                "CoreAIRbxTextures/RbxMaterialTextureCatalog");
+            Assert.NotNull(catalog, "packaged textured catalog asset must load from Resources");
+            IReadOnlyList<RbxMaterialTextureCatalog.Entry> entries = catalog.Entries;
+            IReadOnlyList<RbxMaterialId> textured = RbxTextureMaterialProvider.TexturedMaterials;
+            Assert.AreEqual(entries.Count, textured.Count,
+                "packaged catalog and runtime textured list sizes");
+            Dictionary<int, string> catalogByValue = new(entries.Count);
+            for (int index = 0; index < entries.Count; index++)
+            {
+                RbxMaterialTextureCatalog.Entry entry = entries[index];
+                Assert.IsFalse(catalogByValue.ContainsKey(entry.MaterialValue),
+                    "duplicate packaged catalog value " + entry.MaterialValue);
+                catalogByValue.Add(entry.MaterialValue, entry.MaterialName);
+            }
+
+            HashSet<int> texturedValues = new();
+            for (int index = 0; index < textured.Count; index++)
+            {
+                RbxMaterialId id = textured[index];
+                Assert.IsTrue(texturedValues.Add(id.Value), "duplicate runtime value " + id.Value);
+                Assert.IsTrue(catalogByValue.TryGetValue(id.Value, out string catalogName),
+                    id.Name + " (" + id.Value + ") has no packaged catalog entry");
+                Assert.AreEqual(catalogName, id.Name, "catalog name for value " + id.Value);
+            }
+
+            for (int index = 0; index < entries.Count; index++)
+            {
+                RbxMaterialTextureCatalog.Entry entry = entries[index];
+                Assert.IsTrue(texturedValues.Contains(entry.MaterialValue),
+                    entry.MaterialName + " (" + entry.MaterialValue +
+                    ") is packaged but missing from the runtime list");
             }
         }
 
@@ -270,6 +316,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [Test]
         public void LuaPart_MaterialReassignmentKeepsColorAndColorReassignmentKeepsMaterial()
         {
+            // WHY: Concrete now ships a packaged texture set and resolves to the textured handle.
+            // SmoothPlastic has no set in RbxCc0TextureSets.Sets, so it keeps this test's
+            // procedural leg — including the swap-back leg, which asserts a textured material is
+            // tinted "too" and only makes sense across both render paths.
             using (Mvp1AcceptanceWorld world = new())
             {
                 world.Stack.Runtime.LoadMod("swap-material", @"
@@ -277,18 +327,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     part.Name = 'Swap'
                     part.Material = Enum.Material.Brick
                     part.Color = Color3.fromRGB(32, 160, 224)
-                    part.Material = Enum.Material.Concrete");
+                    part.Material = Enum.Material.SmoothPlastic");
 
                 RbxInstance part = world.Workspace.FindFirstChild("Swap");
                 Renderer renderer = world.BoundObject(part).GetComponent<Renderer>();
-                Assert.AreEqual("CoreAiRbxMaterial_Concrete", renderer.sharedMaterial.name);
+                Assert.AreEqual("CoreAiRbxMaterial_SmoothPlastic", renderer.sharedMaterial.name);
                 AssertTint(renderer, 32, 160, 224, "Material reassignment must keep Part.Color");
 
                 world.Stack.Runtime.LoadMod("swap-color", @"
                     local part = workspace:FindFirstChild('Swap')
                     part.Color = Color3.fromRGB(200, 40, 40)");
 
-                Assert.AreEqual("CoreAiRbxMaterial_Concrete", renderer.sharedMaterial.name,
+                Assert.AreEqual("CoreAiRbxMaterial_SmoothPlastic", renderer.sharedMaterial.name,
                     "Color reassignment must keep Part.Material");
                 AssertTint(renderer, 200, 40, 40, "Color reassignment must reach the renderer");
 

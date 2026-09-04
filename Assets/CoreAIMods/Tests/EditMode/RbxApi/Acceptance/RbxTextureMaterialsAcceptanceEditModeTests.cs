@@ -8,6 +8,7 @@ using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Rendering;
 using CoreAI.Mods.Rbx.Spatial;
+using CoreAI.Editor.RbxMaterials;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -170,7 +171,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         [TestCase("Brick", 848, "Bricks104", 10f)]
         [TestCase("Wood", 512, "Wood095", 10f)]
-        [TestCase("WoodPlanks", 528, "Wood095", 8f)]
+        [TestCase("WoodPlanks", 528, "WoodFloor034", 9f)]
         [TestCase("Grass", 1280, "Grass004", 4.5f)]
         [TestCase("Cobblestone", 880, "PavingStones151", 14f)]
         [TestCase("Metal", 1088, "Metal063", 3.5f)]
@@ -221,7 +222,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [TestCase("Brick", 10f, 0.28f)]
         [TestCase("Brick", 10f, 0.5f)]
         [TestCase("Wood", 10f, 0.28f)]
-        [TestCase("WoodPlanks", 8f, 0.28f)]
+        [TestCase("WoodPlanks", 9f, 0.28f)]
         [TestCase("Grass", 4.5f, 0.28f)]
         [TestCase("Cobblestone", 14f, 0.28f)]
         [TestCase("Metal", 3.5f, 0.28f)]
@@ -268,11 +269,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [Test]
         public void LuaDiamondPlate_ThreeStudFaceKeepsReadableTreadCount()
         {
-            const float diamondCellsPerPatternUnit = 1.35f;
-            const float diamondHalfWidthInCell = 0.28f;
-            string commonPath = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
-                "Unity", "Resources", "CoreAIRbxMaterials", "RbxProceduralCommon.hlsl");
-            string commonSource = File.ReadAllText(commonPath);
+            const float partSizeStuds = 3f;
+            // WHY: DiamondPlate now ships a packaged texture set (ambientCG/DiamondPlate008C), so
+            // it takes the textured path instead of the procedural tread pattern. Readability now
+            // means the face spans a fraction of one tile instead of minified tread haze; the tile
+            // width comes from the surface-profile table so a retune moves the expectation with it.
+            float diamondTileWidthStuds =
+                RbxMaterialSurfaceProfiles.For("DiamondPlate").TileWidthStuds;
             using (Mvp1AcceptanceWorld world = new())
             {
                 world.Stack.Runtime.LoadMod("diamond-scale", @"
@@ -284,27 +287,27 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 RbxInstance part = world.Workspace.FindFirstChild("ScaledDiamondPlate");
                 Renderer renderer = world.BoundObject(part).GetComponent<Renderer>();
                 Material material = renderer.sharedMaterial;
-                float patternScale = material.GetFloat("_PatternScale");
-                float cellSpacingMeters = 1f / (patternScale * diamondCellsPerPatternUnit);
-                float treadWidthMeters = 2f * diamondHalfWidthInCell /
-                                         (patternScale * diamondCellsPerPatternUnit);
-                float faceWidthMeters = renderer.transform.localToWorldMatrix
-                    .MultiplyVector(Vector3.right).magnitude;
-                float cellsPerEdge = faceWidthMeters / cellSpacingMeters;
-                float estimatedTreadCountOnFace = cellsPerEdge * cellsPerEdge;
+                float textureAspect = material.GetFloat("_TextureAspect");
+                float textureScale = material.GetFloat("_TextureScale");
+                Matrix4x4 objectToWorld = renderer.transform.localToWorldMatrix;
+                float faceWidthMeters = objectToWorld.MultiplyVector(Vector3.right).magnitude;
+                float faceHeightMeters = objectToWorld.MultiplyVector(Vector3.up).magnitude;
+                float horizontalTileCount = faceWidthMeters * textureScale / textureAspect;
+                float verticalTileCount = faceHeightMeters * textureScale;
 
-                Assert.AreEqual("CoreAI/Rbx/Procedural Surface", material.shader.name);
-                StringAssert.Contains("float2 plateCell = frac(uv * 1.35)", commonSource);
-                StringAssert.Contains(
-                    "RbxFilteredInsideMask(diamondDistance, 0.28, 0.06, distanceFootprint)",
-                    commonSource);
-                Assert.That(faceWidthMeters, Is.EqualTo(0.84f).Within(0.0001f));
-                Assert.That(patternScale, Is.EqualTo(5f).Within(0.0001f));
-                Assert.That(cellSpacingMeters, Is.EqualTo(0.1481f).Within(0.0001f));
-                Assert.That(treadWidthMeters, Is.EqualTo(0.083f).Within(0.0001f));
-                Assert.That(cellsPerEdge, Is.EqualTo(5.67f).Within(0.0001f));
-                Assert.That(estimatedTreadCountOnFace, Is.InRange(20f, 40f),
-                    "A three-stud face must show readable diamonds instead of filtered tread haze.");
+                Assert.AreEqual("CoreAI/Rbx/Textured Surface", material.shader.name);
+                Assert.That(faceWidthMeters,
+                    Is.EqualTo(partSizeStuds * RbxSpace.MetersPerStud).Within(0.0001f));
+                Assert.That(faceHeightMeters,
+                    Is.EqualTo(partSizeStuds * RbxSpace.MetersPerStud).Within(0.0001f));
+                Assert.That(horizontalTileCount,
+                    Is.EqualTo(partSizeStuds / diamondTileWidthStuds).Within(0.0001f));
+                Assert.That(verticalTileCount,
+                    Is.EqualTo(partSizeStuds * textureAspect / diamondTileWidthStuds)
+                        .Within(0.0001f));
+                Assert.That(horizontalTileCount, Is.LessThan(1f),
+                    "A three-stud face must show part of one tread tile instead of " +
+                    "filtered tread haze.");
             }
         }
 
@@ -362,19 +365,27 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [Test]
         public void LuaProceduralPart_DefaultColorBehaviorIsUnchanged()
         {
+            // WHY: Concrete now ships a packaged texture set, so it resolves to the textured
+            // handle with a white neutral tint. SmoothPlastic has no set in
+            // RbxCc0TextureSets.Sets and still takes the procedural path this test pins; the
+            // expected tint is Roblox's default Part.Color, which the procedural path passes
+            // through untouched for every material, so it is read from the part defaults.
             using (Mvp1AcceptanceWorld world = new())
             {
                 world.Stack.Runtime.LoadMod("procedural-default-color", @"
                     local part = Instance.new('Part', workspace)
-                    part.Name = 'DefaultConcrete'
-                    part.Material = Enum.Material.Concrete");
+                    part.Name = 'DefaultSmoothPlastic'
+                    part.Material = Enum.Material.SmoothPlastic");
 
-                RbxInstance part = world.Workspace.FindFirstChild("DefaultConcrete");
+                RbxInstance part = world.Workspace.FindFirstChild("DefaultSmoothPlastic");
                 Renderer renderer = world.BoundObject(part).GetComponent<Renderer>();
                 MaterialPropertyBlock block = new();
                 renderer.GetPropertyBlock(block);
-                Color expected = new(163f / 255f, 162f / 255f, 165f / 255f, 1f);
+                RbxColor3 defaultColor = PartProperties.CreateDefault().Color;
+                Color expected = new(defaultColor.R, defaultColor.G, defaultColor.B, 1f);
 
+                Assert.AreEqual("CoreAI/Rbx/Procedural Surface",
+                    renderer.sharedMaterial.shader.name);
                 Assert.AreEqual(expected, block.GetColor("_Color"));
                 Assert.AreEqual(expected, block.GetColor("_BaseColor"));
                 Assert.IsFalse(world.Binder.GetPartPropertiesOrDefault(part.Id)
@@ -394,7 +405,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 RbxInstance firstPart = world.Workspace.FindFirstChild("Wood0");
                 Material expected = world.BoundObject(firstPart).GetComponent<Renderer>().sharedMaterial;
                 int allocationsBefore = RbxTextureMaterialProvider.SharedMaterialAllocationCount;
-                Assert.AreEqual(6, allocationsBefore);
+                // WHY: the warmed cache holds one native Material per packaged texture set, and
+                // the set table now covers the whole catalog; the invariant under test is that
+                // part count never grows that number, so the baseline is read from the table.
+                Assert.AreEqual(RbxCc0TextureSets.Sets.Count, allocationsBefore,
+                    "warming the cache must allocate exactly one native Material per " +
+                    "packaged texture set");
 
                 world.Stack.Runtime.LoadMod("texture-many", @"
                     for index = 1, 64 do

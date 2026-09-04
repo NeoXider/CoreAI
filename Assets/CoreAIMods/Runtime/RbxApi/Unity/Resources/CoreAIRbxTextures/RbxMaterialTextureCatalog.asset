@@ -29,18 +29,18 @@ MonoBehaviour:
     _normalStrength: 1.2
   - _materialName: WoodPlanks
     _materialValue: 528
-    _albedo: {fileID: 2800000, guid: 2500000000000000000000000000000e, type: 3}
-    _normal: {fileID: 2800000, guid: 2500000000000000000000000000000f, type: 3}
+    _albedo: {fileID: 2800000, guid: 8d02393c3f801aa46ab6d51ec7f9cf4f, type: 3}
+    _normal: {fileID: 2800000, guid: 79f33156deb005f4f94685a1ce415118, type: 3}
     _isOpenGlNormal: 1
-    _roughnessOrSmoothness: {fileID: 2800000, guid: 25000000000000000000000000000010, type: 3}
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 3847b7d5fbf4d214f8b2a1d9a17c2ff0, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
     _ambientOcclusion: {fileID: 0}
-    _tileWidthStuds: 8
+    _tileWidthStuds: 9
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.65
     _roughnessScale: 0.78
-    _normalStrength: 1.25
+    _normalStrength: 1.4
   - _materialName: Brick
     _materialValue: 848
     _albedo: {fileID: 2800000, guid: 25000000000000000000000000000001, type: 3}
@@ -97,3 +97,423 @@ MonoBehaviour:
     _partColorInfluence: 0.7
     _roughnessScale: 0.78
     _normalStrength: 1.4
+  - _materialName: Slate
+    _materialValue: 800
+    _albedo: {fileID: 2800000, guid: a293f3b1b85ae8044a06ba7a9ba4d751, type: 3}
+    _normal: {fileID: 2800000, guid: 3108158adc2a8754a8863c7273ac20a5, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 294548388b4acb64ab0ab627916e9207, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 10
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.65
+    _roughnessScale: 0.8
+    _normalStrength: 1.25
+  - _materialName: Limestone
+    _materialValue: 820
+    _albedo: {fileID: 2800000, guid: 83d12a60d6a7d98498d313382d8227e6, type: 3}
+    _normal: {fileID: 2800000, guid: bb2bd1dc579a9af4b957aa3515a3e639, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 77427e06c8903d74183a6715df7fadc1, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 12
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.82
+    _normalStrength: 1.15
+  - _materialName: Sandstone
+    _materialValue: 912
+    _albedo: {fileID: 2800000, guid: fe1aa7fec703d284e9e43b43dcfb667c, type: 3}
+    _normal: {fileID: 2800000, guid: 32178f5e35cabd5438aa90e1bfede9dd, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 57400ab12fc8cf348aec2c7c1ee6be18, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 10
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.85
+    _normalStrength: 1.35
+  - _materialName: Granite
+    _materialValue: 832
+    _albedo: {fileID: 2800000, guid: ece18027f54fbbc4e9b42bd960de26b6, type: 3}
+    _normal: {fileID: 2800000, guid: bad05ea3c546e1f4597a163d959ff5cb, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 0e0049b6466a1bd45aaeaa625b7ccc11, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 12
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.65
+    _roughnessScale: 0.78
+    _normalStrength: 1.15
+  - _materialName: Basalt
+    _materialValue: 788
+    _albedo: {fileID: 2800000, guid: 6fba1114db9565049a6d3d724e68de54, type: 3}
+    _normal: {fileID: 2800000, guid: 0469ba1a7fbd42249aa7374cb7e7571f, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 183909a5621dc80408159058eef42f35, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 13
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.55
+    _roughnessScale: 0.8
+    _normalStrength: 1.3
+  - _materialName: Rock
+    _materialValue: 896
+    _albedo: {fileID: 2800000, guid: 1192c906279ab1d46b64632000c554a0, type: 3}
+    _normal: {fileID: 2800000, guid: 56e4a44a3540b2c45b5f8cedd8e85827, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: a786878990d6c9c4a8ee49b46f1a4372, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 18
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.65
+    _roughnessScale: 0.85
+    _normalStrength: 1.4
+  - _materialName: Concrete
+    _materialValue: 816
+    _albedo: {fileID: 2800000, guid: b8c363d1c9b40a54bb5cb296b50a0981, type: 3}
+    _normal: {fileID: 2800000, guid: 5ecf6f37269cadd4f8bb4bcf620f7587, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: a3ee4ff562670054196a12a2784f8a89, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 14
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.75
+    _roughnessScale: 0.85
+    _normalStrength: 1
+  - _materialName: Marble
+    _materialValue: 784
+    _albedo: {fileID: 2800000, guid: 9da5664453415d64fa48c14a39b4e9b6, type: 3}
+    _normal: {fileID: 2800000, guid: 095f5cb07ae2f4b419d609c763e651fe, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 0b5937271f2f24b4791fce9e446e3c86, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 12
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.55
+    _normalStrength: 0.55
+  - _materialName: Plaster
+    _materialValue: 2310
+    _albedo: {fileID: 2800000, guid: 8a6e4826163916144b1e183c29b60cb2, type: 3}
+    _normal: {fileID: 2800000, guid: a62759056fcfdda4790f534fa149ac47, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 1c89e5e0462ca134da9533b296ce39ab, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 8
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.85
+    _roughnessScale: 0.9
+    _normalStrength: 1.1
+  - _materialName: Pavement
+    _materialValue: 836
+    _albedo: {fileID: 2800000, guid: 434a5660ee287fb4aaa4d049f0dc3a2c, type: 3}
+    _normal: {fileID: 2800000, guid: 1ef6b9c44fe2c84478ee85bddd2fa892, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: ce28f45a6144faa4f9de7c80a07b9d52, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 12
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.8
+    _normalStrength: 1.25
+  - _materialName: Pebble
+    _materialValue: 864
+    _albedo: {fileID: 2800000, guid: d7ba46629a4718549bed04bd210aafe3, type: 3}
+    _normal: {fileID: 2800000, guid: 2fae303096c617a4f86b3f4e5046074a, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 18dc1d1f462cbcd4eaa19c067fbd2e9b, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 9
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.8
+    _normalStrength: 1.45
+  - _materialName: CeramicTiles
+    _materialValue: 2306
+    _albedo: {fileID: 2800000, guid: 7399132fb6cbe4f4ca5ae0e362aedc93, type: 3}
+    _normal: {fileID: 2800000, guid: f61ee6977072d9c4981a00d301aa3bcd, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: deb674811c4565645b30c125518b848f, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 6
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.8
+    _roughnessScale: 0.7
+    _normalStrength: 0.95
+  - _materialName: ClayRoofTiles
+    _materialValue: 2307
+    _albedo: {fileID: 2800000, guid: 166bcd395fc758d40bf477e1106b729f, type: 3}
+    _normal: {fileID: 2800000, guid: cdf1fc2795f63c64aa5a4c0b17d77554, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: b83ea6a4d6fcc404bbd3d0c74f9c66c6, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 7
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.8
+    _normalStrength: 1.45
+  - _materialName: RoofShingles
+    _materialValue: 2308
+    _albedo: {fileID: 2800000, guid: 899ed44a7b89fe84bb0fdaa2da2b2b7e, type: 3}
+    _normal: {fileID: 2800000, guid: e61be25506802b342afde6f05040d186, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 555462a3102109944951202751f5d6ab, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 7
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.85
+    _normalStrength: 1.5
+  - _materialName: CorrodedMetal
+    _materialValue: 1040
+    _albedo: {fileID: 2800000, guid: e59871d962eda1246a1cf9956d1263b8, type: 3}
+    _normal: {fileID: 2800000, guid: 98e912471169ff346b92f77dacecf32c, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: ad5d4f12b939df645b4913d500b0822f, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 2800000, guid: b72df922c1efd014ea18d39520ebeb91, type: 3}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 6
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.5
+    _roughnessScale: 0.85
+    _normalStrength: 1.3
+  - _materialName: DiamondPlate
+    _materialValue: 1056
+    _albedo: {fileID: 2800000, guid: b25fd3e5a1075fe45917d46469ac2a4a, type: 3}
+    _normal: {fileID: 2800000, guid: 20730c75ef41440419d667bdab118f2d, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 316d52771f005324b84fee0d6c6b83c1, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 2800000, guid: 6f86fcdc12fbbfa408925f1c871cce16, type: 3}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 6
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.5
+    _roughnessScale: 0.72
+    _normalStrength: 1.5
+  - _materialName: Foil
+    _materialValue: 1072
+    _albedo: {fileID: 2800000, guid: a9648a12dd1dfca45948d90805346ed3, type: 3}
+    _normal: {fileID: 2800000, guid: aecd90f316cb3524f9ff7cb4be0dc09d, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 2aff7ba820892734e9d748cf55c18949, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 2800000, guid: 3791431da3331254789adcc61d2844d1, type: 3}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 3
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.5
+    _roughnessScale: 0.55
+    _normalStrength: 1.15
+  - _materialName: LeafyGrass
+    _materialValue: 1284
+    _albedo: {fileID: 2800000, guid: 7fc818363c9464d4eb9a340837fb9656, type: 3}
+    _normal: {fileID: 2800000, guid: 63d033884f32ee141b18d6a29e8e8fd9, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: e2312af09cb20024abae07fdfda205e4, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 5
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.8
+    _normalStrength: 1.4
+  - _materialName: Ground
+    _materialValue: 1360
+    _albedo: {fileID: 2800000, guid: c9a8e419552fb69418d780effd71cbc4, type: 3}
+    _normal: {fileID: 2800000, guid: 89535ed4785044e45a1c079167b7dc8a, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 7cd1c98f735fdb840b73494c0a6774fe, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 16
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.88
+    _normalStrength: 1.35
+  - _materialName: Mud
+    _materialValue: 1344
+    _albedo: {fileID: 2800000, guid: d4307bb5247ecda47a1d44194a60eacd, type: 3}
+    _normal: {fileID: 2800000, guid: 7765bf8ee1ba3974dbbd46d70b336a7e, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: c684bfc21b9012445a97cf9005992ebb, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 15
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.7
+    _roughnessScale: 0.85
+    _normalStrength: 1.3
+  - _materialName: Sand
+    _materialValue: 1296
+    _albedo: {fileID: 2800000, guid: c29f1af7a6f2fc446944e75fa5f6c7ed, type: 3}
+    _normal: {fileID: 2800000, guid: d607d5e1c3348dc40a69c2199ca687d3, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 212bf6e756167d24594104f2ebf57e2b, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 7
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.75
+    _roughnessScale: 0.9
+    _normalStrength: 1.2
+  - _materialName: Snow
+    _materialValue: 1328
+    _albedo: {fileID: 2800000, guid: 974422cb80ccb2e44b59e6762e910c9e, type: 3}
+    _normal: {fileID: 2800000, guid: 496b9767b23196f4c922ee368a4c1fb3, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 34a5d916853ec6c4fa385c2af78bc81e, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 9
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.8
+    _roughnessScale: 0.8
+    _normalStrength: 1.2
+  - _materialName: Ice
+    _materialValue: 1536
+    _albedo: {fileID: 2800000, guid: f1c3fad0aae1b0745b8b443b0949911f, type: 3}
+    _normal: {fileID: 2800000, guid: 7107ef29b973b1f4b9a8d27f7241f108, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: eb7f019716cff88409e9ead3c928fc5a, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 14
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.8
+    _roughnessScale: 0.45
+    _normalStrength: 0.85
+  - _materialName: CrackedLava
+    _materialValue: 804
+    _albedo: {fileID: 2800000, guid: 034243393fd643d4ca970daa467e7f8c, type: 3}
+    _normal: {fileID: 2800000, guid: 91611d0e475c38d4f826e3c9fd67e071, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 53e107541a6f121469554d4f0dbcea50, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 13
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.6
+    _roughnessScale: 0.85
+    _normalStrength: 1.5
+  - _materialName: Asphalt
+    _materialValue: 1376
+    _albedo: {fileID: 2800000, guid: ec260ff28628a3041b5ba9a3d7064e61, type: 3}
+    _normal: {fileID: 2800000, guid: 2d9f34c84c0b6bf40999dec15e78bc93, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 5e3c69d7efb87f3409d467b808733902, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 8
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.6
+    _roughnessScale: 0.85
+    _normalStrength: 1.3
+  - _materialName: Fabric
+    _materialValue: 1312
+    _albedo: {fileID: 2800000, guid: d66c060d54f28994ab7f93a851a0c610, type: 3}
+    _normal: {fileID: 2800000, guid: 3302a31a0af0428429bf7006a8985559, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 30fa48fad84a7ec4ca1d8caf150a5cb5, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 2.5
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.9
+    _roughnessScale: 0.9
+    _normalStrength: 1.3
+  - _materialName: Carpet
+    _materialValue: 2305
+    _albedo: {fileID: 2800000, guid: 8e5b581526bf17c4aa81dc8e49dee4c2, type: 3}
+    _normal: {fileID: 2800000, guid: 7386abeac451fff44a51f204104d116f, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: b1a73657270606f4296124c300473e8f, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 3
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.9
+    _roughnessScale: 0.95
+    _normalStrength: 1.35
+  - _materialName: Leather
+    _materialValue: 2309
+    _albedo: {fileID: 2800000, guid: 4516c8aaf790f5b44b4fd27534e4b770, type: 3}
+    _normal: {fileID: 2800000, guid: 48234b7935dd9fa44a479ccff02e86c1, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 20b0d46816c62384392cb17baa7e1225, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 2.5
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.85
+    _roughnessScale: 0.8
+    _normalStrength: 1.25
+  - _materialName: Cardboard
+    _materialValue: 2304
+    _albedo: {fileID: 2800000, guid: 9b9b81cd0555c9842981283cbfa6333e, type: 3}
+    _normal: {fileID: 2800000, guid: d740204718e41b440a7410d97ed54a7a, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: 595813b6bd49ad841bff904e624e750a, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 3
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.8
+    _roughnessScale: 0.9
+    _normalStrength: 1.2
+  - _materialName: Rubber
+    _materialValue: 2311
+    _albedo: {fileID: 2800000, guid: adc2039d2046867449a0e95e276bee47, type: 3}
+    _normal: {fileID: 2800000, guid: 19d330b04c1514d42b29d10d2de4049e, type: 3}
+    _isOpenGlNormal: 1
+    _roughnessOrSmoothness: {fileID: 2800000, guid: a3534f0a359fdaf4a9fc6055a9b86ec4, type: 3}
+    _isSmoothnessMap: 0
+    _metalness: {fileID: 0}
+    _ambientOcclusion: {fileID: 0}
+    _tileWidthStuds: 3
+    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _partColorInfluence: 0.85
+    _roughnessScale: 0.9
+    _normalStrength: 1.2

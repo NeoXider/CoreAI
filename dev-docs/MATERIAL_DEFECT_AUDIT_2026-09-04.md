@@ -67,3 +67,35 @@ featureless. The current values are listed in
 - The name-matching in `GroupBounds` had to be exact rather than a prefix: `Mat_Sandstone` starts with
   `Mat_Sand`, so the Sand group's bounds stretched across the whole row and that frame photographed all
   36 materials at once.
+
+## Bundling all 36 into the package (2026-09-04, later)
+
+The catalog that ships inside the package described six materials while the project-local override
+described all thirty-six, so anything a consumer did not import themselves fell back to the procedural
+shader. All 36 sets are now bundled at 1K (Color, NormalGL, Roughness, plus Metalness where the source
+provides one) and `RbxMaterialTextureCatalog.asset` describes all of them.
+
+Verified by moving the project-local override catalog out of the project entirely and re-rendering every
+material: all 36 still photographed correctly from the package alone, so nothing was silently being
+supplied by the gitignored 2K folder.
+
+`CoreAI/Materials/Rebuild packaged catalog from packaged textures` regenerates the shipped asset from
+whatever maps are in the folder, so adding a set is: drop the maps in, run the command.
+
+### Cost this carries
+
+| | Before (6 sets) | After (36 sets) |
+|---|---:|---:|
+| On disk / in git history | 15 MB | 113 MB |
+| Resident once loaded (BC compressed, mips on) | ~15 MB | ~99 MB |
+
+The repository does not use Git LFS, and deliberately so: the package is consumed by UPM git URL, and a
+consumer without LFS installed would receive pointer files instead of textures — the materials would
+fail silently. Plain git costs history size but cannot break that way.
+
+TODO: `RbxTextureMaterialProvider.EnsureSharedCache` builds one shared `Material` for **every** catalog
+entry the first time any Rbx part is created, and the catalog asset holds direct `Texture2D` references,
+so loading it pulls every texture in. That was ~15 MB and is now ~99 MB, paid whether a scene uses one
+material or all of them. Storing asset paths in the catalog and loading a texture on first use of its
+material would make the cost proportional to what a scene actually touches. Worth doing before the
+WebGL build target is taken seriously.

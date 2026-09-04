@@ -127,15 +127,30 @@ namespace CoreAI.Editor.RbxMaterials
         internal static ScriptableObject MergeOverrideCatalog(
             IEnumerable<RbxTextureCatalogEntryData> incomingEntries)
         {
+            return MergeCatalogAt(OverrideCatalogAssetPath, incomingEntries);
+        }
+
+        /// <summary>
+        /// Merges entries into the catalog asset at <paramref name="catalogAssetPath" />, creating it
+        /// when it does not exist yet.
+        /// </summary>
+        /// <remarks>
+        /// WHY: the same merge serves two catalogs — the gitignored project override and the one that
+        /// ships inside the package. They differ only in where the asset lives, so the path is a
+        /// parameter rather than a second copy of this code.
+        /// </remarks>
+        internal static ScriptableObject MergeCatalogAt(string catalogAssetPath,
+            IEnumerable<RbxTextureCatalogEntryData> incomingEntries)
+        {
             Type catalogType = FindCatalogType();
-            Directory.CreateDirectory(Path.GetDirectoryName(OverrideCatalogAssetPath));
+            Directory.CreateDirectory(Path.GetDirectoryName(catalogAssetPath));
             AssetDatabase.Refresh();
             ScriptableObject catalog = AssetDatabase.LoadAssetAtPath(
-                OverrideCatalogAssetPath, catalogType) as ScriptableObject;
+                catalogAssetPath, catalogType) as ScriptableObject;
             if (catalog == null)
             {
                 catalog = ScriptableObject.CreateInstance(catalogType);
-                AssetDatabase.CreateAsset(catalog, OverrideCatalogAssetPath);
+                AssetDatabase.CreateAsset(catalog, catalogAssetPath);
             }
 
             SerializedObject serializedCatalog = new(catalog);
