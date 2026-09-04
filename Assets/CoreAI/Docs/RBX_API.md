@@ -37,7 +37,7 @@ nil value".
 
 ## Classes
 
-`Instance.new` accepts: **`Part`**, **`Folder`**, **`Model`**, **`ClickDetector`**,
+`Instance.new` accepts: **`Part`**, **`Folder`**, **`Model`**, **`ClickDetector`**, **`MaterialVariant`**,
 **`RemoteEvent`**, **`UnreliableRemoteEvent`**, and **`RemoteFunction`**. `Camera` is not
 creatable — the world's one camera is `workspace.CurrentCamera`.
 The class ancestry (`BasePart`, `PVInstance`, `WorldRoot`, …) is data-driven through `ClassCatalog`,
@@ -46,11 +46,11 @@ so `IsA` works the way it does in Roblox.
 Services reachable via `game:GetService`: `RunService`, `UserInputService`, `Players`,
 `CollectionService`, `TweenService`, `SoundService`, `Lighting`, `Debris`, `HttpService`,
 `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `ContextActionService`,
-`PathfindingService`, `MarketplaceService`, `DataStoreService`, and CoreAI's own `AIService`.
+`PathfindingService`, `MarketplaceService`, `DataStoreService`, `MaterialService`, and CoreAI's own `AIService`.
 
 ### Part properties
 
-`Name`, `Parent`, `Position`, `CFrame`, `Size`, `Color`, `Material`, `Orientation`, `Rotation`,
+`Name`, `Parent`, `Position`, `CFrame`, `Size`, `Color`, `Material`, `MaterialVariant` (string, `""` for none), `Orientation`, `Rotation`,
 `Anchored`, `Transparency`, `CanCollide`, and `Shape` (`Ball`, `Block`, `Cylinder`, `Wedge`,
 `CornerWedge` — each one materializes its own mesh). A `Part` materializes as a real GameObject as
 soon as its `Parent` is set into the world.

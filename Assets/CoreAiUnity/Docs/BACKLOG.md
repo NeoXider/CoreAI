@@ -46,15 +46,16 @@ Items here are intentionally not active TODO checkboxes.
 
 ## Skill System (before MVP2)
 
-- **Multi-file skills the model can browse structurally.** Today one `SkillSet` = one `Instructions`
-  string, and `read_skill(name)` returns the whole blob. Add a third disclosure level like Claude Code
-  (a main doc + `references/*` read lazily): a skill assembled from several files/sections, the model
-  SEES the whole structure (index/table of contents) up front, and READS only the file/section it needs
-  on demand (e.g. `read_skill_section(name, section)` or a sub-doc index). Lets big references (the Rbx
-  API skill is already large) load in pieces instead of one dump.
+- **Structural browsing of a multi-file skill.** The assembly half shipped in 7.11.0: a `SkillSet` can
+  take its `Instructions` from several sources via `FromFiles`/`FromTextParts`, joined under
+  `## name` headings. What is still missing is the third disclosure level, as in Claude Code (a main
+  doc plus `references/*` read lazily): the model SEES the structure — an index or table of contents —
+  up front, and READS only the section it needs, e.g. `read_skill_section(name, section)`. Today
+  `read_skill(name)` still returns the whole assembled document, so a large reference (the Rbx API
+  skill is already large) arrives as one dump.
 - **Skill self-improvement.** A mechanism for a skill to update/augment its own instructions from
   experience (learned corrections, new patterns the agent discovered at runtime). Design after the
-  multi-file work; both land before MVP2.
+  structural-browsing work; both land before MVP2.
 
 ## UX / Mobile
 

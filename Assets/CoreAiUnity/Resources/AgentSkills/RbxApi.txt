@@ -70,7 +70,8 @@ buttons live at 1000+).
 ## 4. Instances
 
 - `Instance.new("Class"[, parent])` — creatable classes are "Part", "Folder", "Model",
-  "ClickDetector", "RemoteEvent", "UnreliableRemoteEvent", "RemoteFunction". Any other name
+  "ClickDetector", "RemoteEvent", "UnreliableRemoteEvent", "RemoteFunction",
+  "MaterialVariant". Any other name
   errors (a Camera is not creatable — reach the world camera through `workspace.CurrentCamera`).
   The parent argument is deprecated (logs once); set `.Parent` after configuring instead.
 - `RemoteEvent`/`UnreliableRemoteEvent` fire one-way. `RemoteFunction:InvokeServer/InvokeClient`
@@ -83,7 +84,7 @@ buttons live at 1000+).
   `cd.MaxActivationDistance` studs (default 32). Only the part under the cursor fires.
 - `game:GetService("Name")` — the standard runtime has live tree-backed `Workspace`, `Lighting`,
   `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `Players`,
-  `HttpService`, `UserInputService`, and `RunService` services.
+  `HttpService`, `UserInputService`, `RunService`, and `MaterialService` services.
 - The catalog's 13 registrations are: `HttpService` and `Players` (tree-backed), `RunService`
   (MVP2; fallback), `UserInputService` (MVP10; fallback), `TweenService` (MVP8),
   `CollectionService` (MVP8), `Debris` (MVP8), `DataStoreService` (MVP9),
@@ -121,14 +122,26 @@ Pivot/property writes need WorldEdit. BaseParts also support `GetPivot()` and `P
 
 Read+write (writes need WorldEdit): `Position`, `Size`, `CFrame` (Vector3/Vector3/CFrame),
 `Color` (Color3), `Transparency` (0..1), `Anchored` (bool), `CanCollide` (bool),
-`Shape` (Enum.PartType), `Material` (Enum.Material), `Orientation` and `Rotation` (Vector3 of
+`Shape` (Enum.PartType), `Material` (Enum.Material), `MaterialVariant` (string, "" for none),
+`Orientation` and `Rotation` (Vector3 of
 degrees; Orientation is YXZ, Rotation is XYZ).
 Setting `Position` keeps the part's rotation; setting `CFrame` sets position AND rotation;
 setting `Orientation` or `Rotation` sets the rotation and keeps the position.
 `Shape` accepts `Enum.PartType.Ball`, `.Block`, `.Cylinder`, `.Wedge`, `.CornerWedge` — every
 one of them materializes its real mesh.
-`Material` accepts any of the 45 `Enum.Material` items and all 45 render. Brick, Wood,
-WoodPlanks, Grass, Cobblestone and Metal use textured PBR surfaces; the rest are procedural.
+`Material` accepts any of the 45 `Enum.Material` items and all 45 render. Thirty-six of them
+use textured PBR surfaces shipped inside the package; the rest are procedural.
+`MaterialVariant` is how you use YOUR OWN textures instead of the built-in ones: create a
+`MaterialVariant` under `MaterialService`, point it at your texture paths, then name it on a part.
+  local mv = Instance.new("MaterialVariant")
+  mv.Name = "MossyBrick"; mv.BaseMaterial = Enum.Material.Brick
+  mv.ColorMap = "MyGame/Textures/mossy_color"   -- a Resources path in your project
+  mv.NormalMap = "MyGame/Textures/mossy_normal"; mv.StudsPerTile = 8
+  mv.Parent = game:GetService("MaterialService")
+  wall.MaterialVariant = "MossyBrick"    -- swap on; wall.MaterialVariant = "" swaps back
+A map you leave empty is inherited from `BaseMaterial`, so recolouring a surface is three lines.
+Editing a live variant repaints every part already wearing it. Naming a variant that does not
+exist renders the plain `Material` — that is not an error.
 A material id outside the enum resolves to a magenta diagnostic material instead of failing
 quietly, so a wrong value is visible at once.
 `Color` is an independent Roblox-style tint. A part whose `Color` was never assigned shows the

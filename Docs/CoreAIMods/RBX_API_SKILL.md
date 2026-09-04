@@ -56,12 +56,12 @@ For the full picture of what has landed and what is planned, see
 
 Keep these in step with the runtime when the skill text is edited:
 
-- Creatable classes are `Part`, `Folder`, `Model`, `ClickDetector`, `RemoteEvent`,
+- Creatable classes are `Part`, `Folder`, `Model`, `ClickDetector`, `MaterialVariant`, `RemoteEvent`,
   `UnreliableRemoteEvent`, and `RemoteFunction`. `Camera` is not creatable — a mod reaches the
   world camera through `workspace.CurrentCamera`.
-- `BasePart` exposes `Shape`, `Material`, `Orientation`, and `Rotation` in addition to the MVP1
+- `BasePart` exposes `Shape`, `Material`, `MaterialVariant` (string; `""` for none), `Orientation`, and `Rotation` in addition to the MVP1
   set. All 45 `Enum.Material` items render; an unmapped id resolves to a magenta diagnostic
-  material. `Part.Color` stays an independent tint over the material's own albedo.
+  material. `Part.Color` stays an independent tint over the material's own albedo. `MaterialService` is a tree-backed service.
 - `WaitForChild` yields for an absent child, warns after five seconds, and honours a timeout
   overload.
 - `RemoteFunction` invocation is bounded to 30 scheduler seconds — a documented deviation from

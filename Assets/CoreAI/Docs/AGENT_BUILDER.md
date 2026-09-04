@@ -225,7 +225,10 @@ so the conversation stays clean. Returns `false` for a null store/skill or a bla
 | `ToolNames` | `string[]` of tool names |
 | `MergeToolNames(params SkillSet[])` | Merge names from multiple skills |
 | `FromFile(name, desc, path, tools)` | Create from file |
+| `FromFiles(name, desc, paths, tools)` | Create from several files, joined under `## name` headings |
 | `FromTextContent(name, desc, text, tools)` | Create from text |
+| `FromTextParts(name, desc, namedParts, tools)` | Create from several named parts, joined under `## name` headings |
+| `JoinInstructionParts(namedParts)` | Join named parts under `## name` headings |
 | `IJsonInvocableLlmTool` | Optional direct JSON invocation contract for skill proxy tools |
 
 ### Best practices — when to use skills vs direct tools

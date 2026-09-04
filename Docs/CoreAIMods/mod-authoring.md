@@ -85,7 +85,7 @@ order is not part of the CoreAI or Roblox authoring contract.
 
 In the standard runtime, `game:GetService()` resolves these tree-backed services: `Workspace`,
 `Lighting`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `Players`,
-`HttpService`, `UserInputService`, and `RunService`. A tree-backed service can still have
+`HttpService`, `UserInputService`, `MaterialService`, and `RunService`. A tree-backed service can still have
 service-specific members that have not landed; resolution alone does not promise that every Roblox
 member exists.
 

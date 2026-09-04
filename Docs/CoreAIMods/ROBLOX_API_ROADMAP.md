@@ -1120,7 +1120,7 @@ Globals installed: `game`, `workspace` (== `game.Workspace`), `Instance`, `Vecto
 | `Folder` | pure container | — | — | — |
 | `PVInstance` descendants | ancestry/API shape plus `PivotTo`, `GetPivot` | — | — | — |
 | `Model` | container plus `PrimaryPart`, `WorldPivot`, `GetPivot`, `PivotTo` | — | — | — |
-| `BasePart`/`Part` | `Position`, `Size`, `CFrame`, `Orientation`, `Rotation`, `Color`, `Transparency`, `Anchored`, `CanCollide`, `Shape`, `Material` (all 45 `Enum.Material` items render; unmapped ids fall back to a magenta diagnostic material) | — | `Velocity`, `AssemblyLinearVelocity`, `AssemblyAngularVelocity`, `Massless`, `CanQuery`, `CanTouch`, `CollisionGroup`, `CustomPhysicalProperties`, six legacy surface properties | — |
+| `BasePart`/`Part` | `Position`, `Size`, `CFrame`, `Orientation`, `Rotation`, `Color`, `Transparency`, `Anchored`, `CanCollide`, `Shape`, `Material` (all 45 `Enum.Material` items render; unmapped ids fall back to a magenta diagnostic material), `MaterialVariant` (string; `""` for none; an unknown name renders the plain `Material`, not an error) | — | `Velocity`, `AssemblyLinearVelocity`, `AssemblyAngularVelocity`, `Massless`, `CanQuery`, `CanTouch`, `CollisionGroup`, `CustomPhysicalProperties`, six legacy surface properties | — |
 | `Workspace` | child navigation; `CurrentCamera`; `SignalBehavior` reads `Enum.SignalBehavior.Deferred` (D4); inherited `PivotTo`/`GetPivot` | `Raycast`/`Gravity` → MVP8; `GetServerTimeNow` → MVP2 | — | `Terrain`; setting `SignalBehavior` (Deferred-only, D4) |
 | `Camera` | `CFrame`, `CameraType`, `CameraSubject` | — | — | — |
 | `DataModel` (`game`) | class-scoped `GetService`/`FindService`; `GetService` resolves tree-backed services and registered placeholders; placeholder member access raises `NOT_IMPLEMENTED` with its rung; `FindService` returns nil for a registered placeholder not yet resolved; unknown names raise `UNKNOWN_SERVICE` | class-scoped `BindToClose` → MVP5 | — | — |
@@ -1249,6 +1249,7 @@ records its C# marker; scheduled stubs normally use `// TODO: MVP<n> — ...`.
 | planned | `WorldRoot:Raycast`; `Workspace.Gravity` | MVP8 | `ClassCatalog` |
 | planned | `Workspace:GetServerTimeNow` | MVP2 | `ClassCatalog` |
 | shipped | `BasePart.Material` | landed: all 45 `Enum.Material` items render, unmapped ids resolve to a magenta diagnostic material ([research](../../dev-docs/MATERIALS_RESEARCH.md)) | `ClassCatalog` |
+| shipped | `MaterialVariant` / `MaterialService` | landed in 7.10.0: `Instance.new("MaterialVariant")` parented to `MaterialService`; parts wear one via the string property `BasePart.MaterialVariant` (`""` for none); an unknown name renders the plain `Material`, not an error | `ClassCatalog` |
 | planned | six RunService query/render-step methods | MVP2 | `ClassCatalog` |
 | backlog | BasePart velocity, mass, collision-query, physical-properties, and legacy-surface members listed in §5.1.3 | known member; no rung assigned | `ClassCatalog` |
 | backlog | `Lighting.ClockTime/Ambient/GeographicLatitude` | known member; no rung assigned | `ClassCatalog` |
@@ -1491,7 +1492,7 @@ Notes:
   stays loud-stubbed as not-planned (no open internet egress — Non-goals).
 - `game:GetService(name)`: tree-backed services in the standard runtime are `Workspace`,
   `Lighting`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`,
-  `UserInputService`, and `RunService`. Registered placeholder names also resolve, but return a
+  `UserInputService`, `MaterialService`, and `RunService`. Registered placeholder names also resolve, but return a
   placeholder whose first member access raises `NOT_IMPLEMENTED` with its catalog rung:
   `HttpService` (MVP2); `Players`, `TweenService`, `CollectionService`, and `Debris` (MVP8);
   `DataStoreService` (MVP9); `ContextActionService` (MVP10); `SoundService` (MVP15);

@@ -22,7 +22,7 @@ CoreAI uses **Options + ScriptableObject wrapper** for Unity-authored settings.
 | `AiPermissionsAsset` | CoreAiUnity | `IAiPermissions`, `AiPermissionsOptions`, `ToOptions()`, `ApplyOptions(...)` | Dashboard/runtime code can use the interface/options. |
 | `LlmRoutingManifest` | CoreAiUnity | `LlmRouteTable`, `ToRouteTable()`, `ToOptions()` | Manifest stays Unity authoring storage. Runtime routing uses the portable route table. Backend construction may still use Unity profile entries in composition. |
 | `AgentPromptsManifest` | CoreAiUnity | `AgentPromptsDefinition`, `ToDefinition()` | Reads `TextAsset.text` into plain strings. Prompt providers consume the snapshot. |
-| `SkillSetAsset` | CoreAiUnity | `SkillSetDefinition`, `ToSkillDefinition()`, `ApplyDefinition(...)` | `TextAsset`/inline instructions become a portable skill definition; tools are supplied by code. `ApplyDefinition(...)` lets editor/bootstrap code create or update skill assets without private-field reflection. |
+| `SkillSetAsset` | CoreAiUnity | `SkillSetDefinition`, `ToSkillDefinition()`, `ApplyDefinition(...)` | `TextAsset`/inline instructions become a portable skill definition; tools are supplied by code. Extra instruction files in `additionalInstructionAssets` are joined in order under `## filename` headings. `ApplyDefinition(...)` lets editor/bootstrap code create or update skill assets without private-field reflection. |
 | `CoreAiPrefabRegistryAsset` | CoreAiUnity | `ICoreAiPrefabRegistry` | Not portable because it stores `GameObject` prefab references. Consumers depend on the Unity-side interface. |
 
 ## How to use from runtime code
