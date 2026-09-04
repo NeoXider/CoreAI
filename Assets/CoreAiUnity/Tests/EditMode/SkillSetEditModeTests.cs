@@ -639,6 +639,122 @@ namespace CoreAI.Tests.EditMode
                 SkillSet.FromFile("Test", "desc", null, MakeTool("t")));
         }
 
+        [Test]
+        public void FromTextParts_ThreeParts_JoinInOrderWithHeadings()
+        {
+            List<KeyValuePair<string, string>> parts = new()
+            {
+                new KeyValuePair<string, string>("a.md", "Alpha"),
+                new KeyValuePair<string, string>("b.md", "Beta"),
+                new KeyValuePair<string, string>("c.md", "Gamma"),
+            };
+
+            SkillSet skill = SkillSet.FromTextParts("Multi", "desc", parts);
+
+            Assert.AreEqual("## a.md\nAlpha\n\n## b.md\nBeta\n\n## c.md\nGamma", skill.Instructions);
+        }
+
+        [Test]
+        public void FromTextParts_EmptyContent_SkippedEntirely()
+        {
+            List<KeyValuePair<string, string>> parts = new()
+            {
+                new KeyValuePair<string, string>("a.md", "Alpha"),
+                new KeyValuePair<string, string>("empty.md", ""),
+                new KeyValuePair<string, string>("blank.md", "   "),
+                new KeyValuePair<string, string>("b.md", "Beta"),
+            };
+
+            SkillSet skill = SkillSet.FromTextParts("Multi", "desc", parts);
+
+            Assert.AreEqual("## a.md\nAlpha\n\n## b.md\nBeta", skill.Instructions);
+        }
+
+        [Test]
+        public void FromTextContent_SingleSource_AddsNoHeading()
+        {
+            string instructions = "## not-a-heading\nJust content.";
+            SkillSet skill = SkillSet.FromTextContent("Test", "desc", instructions);
+
+            Assert.AreEqual(instructions, skill.Instructions);
+        }
+
+        [Test]
+        public void FromTextParts_NullCollection_Throws()
+        {
+            Assert.Throws<ArgumentNullException>(() =>
+                SkillSet.FromTextParts("Test", "desc", (IEnumerable<KeyValuePair<string, string>>)null));
+        }
+
+        [Test]
+        public void FromTextParts_EmptyCollection_Throws()
+        {
+            Assert.Throws<ArgumentException>(() =>
+                SkillSet.FromTextParts("Test", "desc", new List<KeyValuePair<string, string>>()));
+        }
+
+        [Test]
+        public void FromTextParts_NullPartName_Throws()
+        {
+            List<KeyValuePair<string, string>> parts = new()
+            {
+                new KeyValuePair<string, string>("a.md", "Alpha"),
+                new KeyValuePair<string, string>(null, "Beta"),
+            };
+
+            Assert.Throws<ArgumentException>(() =>
+                SkillSet.FromTextParts("Test", "desc", parts));
+        }
+
+        [Test]
+        public void FromFiles_ReadsTempFiles_MatchesFromTextParts()
+        {
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.IO.Path.GetRandomFileName());
+            System.IO.Directory.CreateDirectory(dir);
+            try
+            {
+                string fileA = System.IO.Path.Combine(dir, "overview.md");
+                string fileB = System.IO.Path.Combine(dir, "details.md");
+                System.IO.File.WriteAllText(fileA, "Alpha");
+                System.IO.File.WriteAllText(fileB, "Beta");
+
+                SkillSet fromFiles = SkillSet.FromFiles("Multi", "desc", new[] { fileA, fileB });
+                SkillSet fromParts = SkillSet.FromTextParts("Multi", "desc", new[]
+                {
+                    new KeyValuePair<string, string>("overview.md", "Alpha"),
+                    new KeyValuePair<string, string>("details.md", "Beta"),
+                });
+
+                Assert.AreEqual(fromParts.Instructions, fromFiles.Instructions);
+                Assert.AreEqual("## overview.md\nAlpha\n\n## details.md\nBeta", fromFiles.Instructions);
+            }
+            finally
+            {
+                System.IO.Directory.Delete(dir, true);
+            }
+        }
+
+        [Test]
+        public void FromFiles_NullCollection_Throws()
+        {
+            Assert.Throws<ArgumentNullException>(() =>
+                SkillSet.FromFiles("Test", "desc", (IEnumerable<string>)null));
+        }
+
+        [Test]
+        public void FromFiles_EmptyCollection_Throws()
+        {
+            Assert.Throws<ArgumentException>(() =>
+                SkillSet.FromFiles("Test", "desc", new string[0]));
+        }
+
+        [Test]
+        public void FromFiles_NullEntry_Throws()
+        {
+            Assert.Throws<ArgumentException>(() =>
+                SkillSet.FromFiles("Test", "desc", new string[] { null }));
+        }
+
         private sealed class ExplicitFunctionSkillTool : LlmToolBase, IAIFunctionLlmTool
         {
             public ExplicitFunctionSkillTool(string name)

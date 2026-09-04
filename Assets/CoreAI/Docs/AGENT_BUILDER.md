@@ -87,6 +87,37 @@ var quiz = SkillSet.FromFile("Quiz", "Quizzes and tests",
 var quiz = SkillSet.FromTextContent("Quiz", "Quizzes", textAsset.text, tool1, tool2);
 ```
 
+A skill too long for one document can be written across several. The parts join in the order given,
+each under a `## name` heading so the model can tell the sections apart; an empty part is skipped.
+
+```csharp
+var quiz = SkillSet.FromFiles("Quiz", "Quizzes and tests",
+    new[] { "Assets/Skills/quiz-overview.md",
+            "Assets/Skills/quiz-scoring.md",
+            "Assets/Skills/quiz-edge-cases.md" },
+    tool1, tool2);
+
+// No file system (Unity TextAssets, WebGL): supply the parts by name
+var quiz = SkillSet.FromTextParts("Quiz", "Quizzes and tests",
+    new[]
+    {
+        new KeyValuePair<string, string>("overview.md", overviewAsset.text),
+        new KeyValuePair<string, string>("scoring.md", scoringAsset.text)
+    },
+    tool1, tool2);
+```
+
+A skill built from exactly **one** source keeps its text unchanged and gets no heading, so `FromFile`
+and `FromTextContent` behave exactly as they always did.
+
+### Tools do not depend on reading the skill
+
+`read_skill` defers the **instructions**, never the ability to invoke. A skill's tools are callable at
+any point: a model that already knows the tool name can call it without reading the skill first,
+reading one skill never gates another's tools, and a skill registered mid-session — including one the
+model authored for itself — is invocable immediately. The catalog in the system prompt carries only
+names and one-line descriptions; the body arrives solely through `read_skill`.
+
 ### SkillSetAsset — via Inspector
 
 `Create → CoreAI → Skill Set Asset` — ScriptableObject for designers.
@@ -96,7 +127,11 @@ var quiz = SkillSet.FromTextContent("Quiz", "Quizzes", textAsset.text, tool1, to
 | **Skill Name** | Name shown in the catalog |
 | **Description** | Short one-liner |
 | **Instructions Asset** | `.txt` / `.md` TextAsset with full instructions |
-| **Inline Instructions** | Or type directly in Inspector (used if TextAsset is null) |
+| **Additional Instruction Assets** | More files for a skill written across several documents; they follow the one above, in list order |
+| **Inline Instructions** | Or type directly in Inspector (used if no TextAsset is assigned) |
+
+With more than one file assigned, each is introduced by a `## filename` heading. A single file keeps
+its text exactly as written.
 
 ```csharp
 [SerializeField] SkillSetAsset craftingAsset;

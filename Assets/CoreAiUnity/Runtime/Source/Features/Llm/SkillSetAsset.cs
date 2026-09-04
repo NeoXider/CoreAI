@@ -1,4 +1,6 @@
-﻿using CoreAI.Ai;
+﻿using System;
+using System.Collections.Generic;
+using CoreAI.Ai;
 using UnityEngine;
 
 namespace CoreAI.Unity
@@ -37,7 +39,13 @@ namespace CoreAI.Unity
         [SerializeField]
         private TextAsset instructionsAsset;
 
-        [Tooltip("Alternative: type instructions directly (used if TextAsset is null).")]
+        [Tooltip("Extra instruction files, for a skill written across several documents. They follow " +
+                 "the file above, in this order. Once more than one file is in play each is introduced " +
+                 "by a '## filename' heading so the model can tell the sections apart.")]
+        [SerializeField]
+        private TextAsset[] additionalInstructionAssets = Array.Empty<TextAsset>();
+
+        [Tooltip("Alternative: type instructions directly (used if no TextAsset is assigned).")]
         [TextArea(3, 15)]
         [SerializeField]
         private string inlineInstructions = "";
@@ -49,11 +57,53 @@ namespace CoreAI.Unity
         public string Description => description;
 
         /// <summary>
-        /// Full on-demand instructions supplied to <c>read_skill</c>, loaded from the
-        /// assigned <see cref="TextAsset"/> when present or from the inline field otherwise.
+        /// Full on-demand instructions supplied to <c>read_skill</c>: the assigned
+        /// <see cref="TextAsset"/>s joined in Inspector order, or the inline field when none is set.
         /// </summary>
-        public string Instructions =>
-            instructionsAsset != null ? instructionsAsset.text : inlineInstructions;
+        /// <remarks>
+        /// WHY: a single assigned file keeps its exact text — adding a heading to a one-file skill
+        /// would silently rewrite every existing asset's instructions. Headings appear only once there
+        /// is more than one document to tell apart, which is the case they exist for.
+        /// </remarks>
+        public string Instructions
+        {
+            get
+            {
+                List<KeyValuePair<string, string>> parts = CollectInstructionParts();
+                if (parts.Count == 0)
+                {
+                    return inlineInstructions;
+                }
+
+                return parts.Count == 1
+                    ? parts[0].Value
+                    : SkillSet.JoinInstructionParts(parts);
+            }
+        }
+
+        /// <summary>Assigned instruction files in Inspector order, skipping empty slots.</summary>
+        private List<KeyValuePair<string, string>> CollectInstructionParts()
+        {
+            List<KeyValuePair<string, string>> parts = new();
+            AddPart(parts, instructionsAsset);
+            if (additionalInstructionAssets != null)
+            {
+                foreach (TextAsset asset in additionalInstructionAssets)
+                {
+                    AddPart(parts, asset);
+                }
+            }
+
+            return parts;
+        }
+
+        private static void AddPart(List<KeyValuePair<string, string>> parts, TextAsset asset)
+        {
+            if (asset != null)
+            {
+                parts.Add(new KeyValuePair<string, string>(asset.name, asset.text));
+            }
+        }
 
         /// <summary>
         /// Builds a Unity-free skill definition snapshot without TextAsset references.
@@ -82,7 +132,10 @@ namespace CoreAI.Unity
             skillName = string.IsNullOrWhiteSpace(definition.Name) ? "NewSkill" : definition.Name.Trim();
             description = definition.Description ?? "";
             inlineInstructions = definition.Instructions ?? "";
+            // WHY: the definition carries the whole body inline, so every file reference must go —
+            // leaving the extra ones behind would append stale documents to the new instructions.
             instructionsAsset = null;
+            additionalInstructionAssets = Array.Empty<TextAsset>();
         }
 
         /// <summary>

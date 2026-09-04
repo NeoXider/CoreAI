@@ -217,5 +217,111 @@ namespace CoreAI.Ai
         {
             return new SkillSet(name, description, instructionsContent, tools);
         }
+
+        /// <summary>
+        /// Creates a skill set from several named instruction parts (e.g. Unity <c>TextAsset</c>
+        /// name/text pairs where there is no file system). Parts join in order, each under a
+        /// <c>## partName</c> heading; empty parts are skipped.
+        /// </summary>
+        /// <param name="name">Skill name.</param>
+        /// <param name="description">Short one-line description for catalog.</param>
+        /// <param name="namedParts">Ordered (partName, content) pairs.</param>
+        /// <param name="tools">Tools that belong to this skill.</param>
+        public static SkillSet FromTextParts(string name, string description,
+            IEnumerable<KeyValuePair<string, string>> namedParts, params ILlmTool[] tools)
+        {
+            if (namedParts == null)
+            {
+                throw new ArgumentNullException(nameof(namedParts));
+            }
+
+            List<KeyValuePair<string, string>> parts = new(namedParts);
+            if (parts.Count == 0)
+            {
+                throw new ArgumentException("At least one instruction part is required.", nameof(namedParts));
+            }
+
+            for (int i = 0; i < parts.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(parts[i].Key))
+                {
+                    throw new ArgumentException($"Part name at index {i} must not be empty.", nameof(namedParts));
+                }
+            }
+
+            return new SkillSet(name, description, JoinInstructionParts(parts), tools);
+        }
+
+        /// <summary>
+        /// Joins named instruction parts into one <c>read_skill</c> body: every non-empty part under a
+        /// <c>## partName</c> heading, in order, separated by a blank line.
+        /// </summary>
+        /// <remarks>
+        /// WHY: exposed so a host that assembles a multi-part skill outside this class — the Unity
+        /// <c>SkillSetAsset</c> joining several TextAssets, for one — produces a body identical to
+        /// <see cref="FromTextParts"/>. Two joining rules would drift, and the model would then read a
+        /// different document depending on which door the same skill came through.
+        /// </remarks>
+        public static string JoinInstructionParts(IEnumerable<KeyValuePair<string, string>> namedParts)
+        {
+            if (namedParts == null)
+            {
+                throw new ArgumentNullException(nameof(namedParts));
+            }
+
+            List<string> blocks = new();
+            foreach (KeyValuePair<string, string> part in namedParts)
+            {
+                if (string.IsNullOrWhiteSpace(part.Value))
+                {
+                    continue;
+                }
+
+                blocks.Add("## " + part.Key + "\n" + part.Value);
+            }
+
+            return string.Join("\n\n", blocks);
+        }
+
+        /// <summary>
+        /// Creates a skill set by loading instructions from several text files at runtime.
+        /// Files read in the given order; each file becomes a <c>## filename</c> section.
+        /// </summary>
+        /// <param name="name">Skill name.</param>
+        /// <param name="description">Short one-line description for catalog.</param>
+        /// <param name="instructionFilePaths">Ordered paths to instruction files.</param>
+        /// <param name="tools">Tools that belong to this skill.</param>
+        public static SkillSet FromFiles(string name, string description,
+            IEnumerable<string> instructionFilePaths, params ILlmTool[] tools)
+        {
+            if (instructionFilePaths == null)
+            {
+                throw new ArgumentNullException(nameof(instructionFilePaths));
+            }
+
+            List<string> paths = new(instructionFilePaths);
+            if (paths.Count == 0)
+            {
+                throw new ArgumentException("At least one instruction file is required.", nameof(instructionFilePaths));
+            }
+
+            for (int i = 0; i < paths.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(paths[i]))
+                {
+                    throw new ArgumentException($"File path at index {i} must not be empty.", nameof(instructionFilePaths));
+                }
+            }
+
+            // WHY: Read here and delegate to FromTextParts so the joining rule lives in one place.
+            List<KeyValuePair<string, string>> parts = new(paths.Count);
+            foreach (string path in paths)
+            {
+                string content = System.IO.File.ReadAllText(path);
+                parts.Add(new KeyValuePair<string, string>(System.IO.Path.GetFileName(path), content));
+            }
+
+            return FromTextParts(name, description, parts, tools);
+        }
     }
 }

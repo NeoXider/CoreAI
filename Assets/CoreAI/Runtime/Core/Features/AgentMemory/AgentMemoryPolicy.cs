@@ -34,13 +34,26 @@ namespace CoreAI.Ai
 
                 if (_roleSkillCatalogs.TryGetValue(roleId, out MutableSkillCatalog catalog))
                 {
-                    replacement.RemoveAll(tool => tool != null &&
-                                                  (string.Equals(tool.Name, "read_skill",
-                                                       StringComparison.OrdinalIgnoreCase) ||
-                                                   string.Equals(tool.Name, "call_skill_tool",
-                                                       StringComparison.OrdinalIgnoreCase)));
+                    RemoveSkillMetaTools(replacement);
                     replacement.Add(ReadSkillLlmTool.Create(catalog));
                     replacement.Add(CallSkillToolLlmTool.Create(catalog, DirectToolsProviderFor(roleId)));
+                }
+                else
+                {
+                    // WHY: an agent built with WithSkill() but WITHOUT skill authoring registers no
+                    // live catalog — its read_skill / call_skill_tool were appended through
+                    // AddToolForRole. Replacing the role's tools then dropped both, and every skill
+                    // the agent was built with silently stopped being callable: call_skill_tool
+                    // answers a missing tool with an ordinary RESULT, so the model reads "not found",
+                    // apologises in prose and moves on, with nothing thrown and nothing logged.
+                    // Carrying the existing proxies across keeps skills reachable for the whole life
+                    // of the role, whatever a host does to its tool list afterwards.
+                    List<ILlmTool> carried = CarriedSkillMetaTools(roleId, replacement);
+                    if (carried.Count > 0)
+                    {
+                        RemoveSkillMetaTools(replacement);
+                        replacement.AddRange(carried);
+                    }
                 }
 
                 if (replacement.Count == 0)
@@ -52,6 +65,52 @@ namespace CoreAI.Ai
                     _customTools[roleId] = replacement;
                 }
             }
+        }
+
+        /// <summary>True for the two skill proxies that must never be lost from a role.</summary>
+        private static bool IsSkillMetaTool(ILlmTool tool)
+        {
+            return tool != null &&
+                   (string.Equals(tool.Name, "read_skill", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(tool.Name, "call_skill_tool", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static void RemoveSkillMetaTools(List<ILlmTool> tools)
+        {
+            tools.RemoveAll(IsSkillMetaTool);
+        }
+
+        /// <summary>
+        /// The role's currently registered skill proxies, preferring any the caller already supplied.
+        /// </summary>
+        private List<ILlmTool> CarriedSkillMetaTools(string roleId, List<ILlmTool> replacement)
+        {
+            List<ILlmTool> carried = new();
+            foreach (ILlmTool tool in replacement)
+            {
+                if (IsSkillMetaTool(tool))
+                {
+                    carried.Add(tool);
+                }
+            }
+
+            if (carried.Count > 0)
+            {
+                return carried;
+            }
+
+            if (roleId != null && _customTools.TryGetValue(roleId, out List<ILlmTool> existing))
+            {
+                foreach (ILlmTool tool in existing)
+                {
+                    if (IsSkillMetaTool(tool))
+                    {
+                        carried.Add(tool);
+                    }
+                }
+            }
+
+            return carried;
         }
 
         /// <summary>
