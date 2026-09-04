@@ -22,12 +22,14 @@ namespace CoreAI.Scripting.LuaCs
         }
 
         public LuaCsScriptExecutionGuard(IExecutionBudget budget,
-            IRbxRuntimeObservabilitySink observability = null)
+            IRbxRuntimeObservabilitySink observability = null,
+            ILuaCsGuardObserver guardObserver = null)
             : this(new LuaCsExecutionGuard(
                 budget?.TimeoutMs ?? ExecutionBudget.DefaultTimeoutMs,
                 budget?.MaxSteps ?? ExecutionBudget.DefaultMaxSteps,
                 budget?.MaxAllocatedBytes ?? ExecutionBudget.DefaultMaxAllocatedBytes,
-                observability))
+                observability,
+                guardObserver))
         {
         }
 

@@ -15,14 +15,17 @@ namespace CoreAI.Scripting.LuaCs
     {
         private readonly LuaCsSecureEnvironment _environment;
         private readonly IRbxRuntimeObservabilitySink _observability;
+        private readonly ILuaCsGuardObserver _guardObserver;
 
         public LuaCsScriptEngine(LuaCsSecureEnvironment environment = null,
-            IRbxRuntimeObservabilitySink observability = null)
+            IRbxRuntimeObservabilitySink observability = null,
+            ILuaCsGuardObserver guardObserver = null)
         {
             _environment = environment ?? new LuaCsSecureEnvironment();
             _observability = observability != null && observability.IsEnabled
                 ? observability
                 : null;
+            _guardObserver = guardObserver;
         }
 
         /// <summary>The wrapped secure environment (adapter-internal).</summary>
@@ -54,7 +57,7 @@ namespace CoreAI.Scripting.LuaCs
         /// <inheritdoc />
         public IScriptExecutionGuard CreateGuard(IExecutionBudget budget = null)
         {
-            return new LuaCsScriptExecutionGuard(budget, _observability);
+            return new LuaCsScriptExecutionGuard(budget, _observability, _guardObserver);
         }
 
         /// <inheritdoc />
@@ -85,11 +88,12 @@ namespace CoreAI.Scripting.LuaCs
         {
             LuaState lua = LuaCsScriptState.Unwrap(state);
             LuaCsExecutionGuard luaGuard = (guard as LuaCsScriptExecutionGuard)?.Inner;
-            if (luaGuard == null && _observability != null)
+            if (luaGuard == null && (_observability != null || _guardObserver != null))
             {
                 luaGuard = new LuaCsExecutionGuard(
                     maxSteps: LuaCsSecureEnvironment.OneShotHardLimitSteps,
-                    observability: _observability);
+                    observability: _observability,
+                    guardObserver: _guardObserver);
             }
 
             LuaValue[] results = _environment.RunChunk(

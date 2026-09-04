@@ -138,14 +138,26 @@ still-active requests for the same actors, then 4 more active disconnects at the
 deadline: **19 + 4 = 23**. Seven additional requests were still pending at that deadline, so **4 + 7 =
 11** harness-deadline cancellations.
 
-The classification is lost at the CoreAI client/probe boundary. `MeaiLlmClient.FromException` converts
+The classification was lost at the CoreAI client/probe boundary. `MeaiLlmClient.FromException` converts
 `OperationCanceledException` into an unsuccessful `LlmCompletionResult` with
-`ErrorCode = Cancelled`; `G10MeasuredLlmClient` treats every returned unsuccessful result as a
-non-cancelled provider failure and only recognizes cancellation when an exception escapes. Thus the
-same-actor and deadline cancellations above were serialized as provider failures. That measurement
-bug is CoreAI's fault and must be fixed before the failure counters are used again. It does not change
-the capacity verdict: the correctly measured served fractions and latencies still fail G10 because of
-the single-lane backend.
+`ErrorCode = Cancelled`; `G10MeasuredLlmClient` treated every returned unsuccessful result as a
+non-cancelled provider failure and recognized cancellation only when an exception escaped. Thus the
+same-actor and deadline cancellations above were serialized as provider failures. That measurement bug
+was CoreAI's fault. It did not change the capacity verdict: the correctly measured served fractions and
+latencies still fail G10 because of the single-lane backend.
+
+**Status: fixed and pinned.** `G10MeasuredLlmClient.CompleteAsync` now inspects
+`result.ErrorCode == LlmErrorCode.Cancelled` and raises the cancellation itself, so the probe records
+it as a cancellation rather than a provider failure (`c39222a8`, the same day as the run above — the
+table's failure column is therefore a record of the defect, not of the current code). It landed
+without a regression test, which is why `G10CancellationClassificationEditModeTests` now pins all four
+outcomes at that boundary: a `Cancelled` result counts as cancelled, a genuine backend error still
+counts as a failure, a real completion counts as served, and an `Ok` result with an empty body does
+**not** count as served — an empty answer would otherwise inflate the served fraction the gate is
+judged on.
+
+**The numbers in the table above were produced by the defective build and must not be reused.** Any
+future citation of provider-failure counts requires a fresh run on the fixed classifier.
 
 #### Defensible 20-actor claim: numerical requirements
 

@@ -195,6 +195,29 @@ budget. A result with zero relevant work is a failure, not a fast pass.
 
 ## 7. Decisions required from the owner
 
+> **DECIDED 2026-09-04 by the owner.** All five are settled. Build against this block; the numbered
+> recommendations below it are kept as the reasoning that produced these answers.
+>
+> 1. **Authentication** — host-supplied provider plus a Mirror admission adapter. **No anonymous
+>    online fallback.** CoreAI owns the admission seam only; it never owns accounts.
+> 2. **Mirror packaging** — a **separate optional package**. The solo build keeps no hard Mirror
+>    dependency, and NeoxiderTools reflection sync / context relay is not the bridge.
+> 3. **`Open` write policy** — **removed as it stands**, replaced by an explicit host-granted,
+>    server-mediated write authority. The owner's intent is that a host can grant a *named* client the
+>    right to change the world — co-building, an authoring client, a client driving mods through its
+>    own model. That intent is preserved in full; what goes away is the unchecked path. The client
+>    sends a request, the server checks the grant, the server applies and replicates: the host decides
+>    who may write, the server is still the one that writes. **The host itself holds every right by
+>    default** and needs no grant — it *is* the authority; grants exist only to extend that authority
+>    to a named client. Today the grant is not checked at all,
+>    which is both the exploit surface and the parity break — in Roblox a direct client write simply
+>    does not replicate, so a script written against the current forwarding behaves differently there.
+>    Direct client-authoritative forwarding is never to be called Roblox parity.
+> 4. **Release promise** — hold the **20-client bar** before the scale manifest is frozen. No
+>    concurrency number is claimed publicly until the staircase measurement proves it.
+> 5. **Physics and streaming scope** — server-owned physics in MVP12; hostile physics authority and
+>    streaming / interest management deferred to measured later work.
+
 1. **Authentication owner and credential.** Choose the concrete provider: host-signed token, Mirror
    authenticator, or external identity provider, including reconnect and simultaneous-session policy.
    Recommendation: host-supplied provider plus a Mirror admission adapter, with no anonymous online

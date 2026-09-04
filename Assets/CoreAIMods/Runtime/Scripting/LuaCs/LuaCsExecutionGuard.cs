@@ -25,6 +25,67 @@ namespace CoreAI.Sandbox.LuaCs
     }
 
     /// <summary>
+    /// Classifies how one guarded execution ended, so a measurement host can tell a normal finish
+    /// from a guard trip without parsing exception messages.
+    /// </summary>
+    public enum LuaCsGuardTripKind
+    {
+        /// <summary>The execution finished (or threw) without any guard budget tripping.</summary>
+        None,
+
+        /// <summary>The instruction-step budget tripped.</summary>
+        Steps,
+
+        /// <summary>The wall-clock timeout tripped.</summary>
+        Timeout,
+
+        /// <summary>The process-heap allocation budget tripped.</summary>
+        Memory,
+    }
+
+    /// <summary>
+    /// The cost of one completed guarded execution, delivered to
+    /// <see cref="ILuaCsGuardObserver"/> exactly once per <see cref="LuaCsExecutionGuard"/> call.
+    /// </summary>
+    public readonly struct LuaCsGuardExecutionRecord
+    {
+        /// <summary>Guarded instructions charged to the step budget by this execution.</summary>
+        public long Steps { get; }
+
+        /// <summary>Wall-clock <see cref="Stopwatch"/> ticks spent inside this execution.</summary>
+        public long ElapsedTicks { get; }
+
+        /// <summary>False when the execution ended by throwing (guard trip or script error alike).</summary>
+        public bool Completed { get; }
+
+        /// <summary>Which guard budget tripped, or <see cref="LuaCsGuardTripKind.None"/>.</summary>
+        public LuaCsGuardTripKind TrippedBudget { get; }
+
+        /// <param name="steps">Guarded instructions charged to the step budget.</param>
+        /// <param name="elapsedTicks">Wall-clock <see cref="Stopwatch"/> ticks for the execution.</param>
+        /// <param name="completed">False when the execution ended by throwing.</param>
+        /// <param name="trippedBudget">Which guard budget tripped, if any.</param>
+        public LuaCsGuardExecutionRecord(long steps, long elapsedTicks, bool completed, LuaCsGuardTripKind trippedBudget)
+        {
+            Steps = steps;
+            ElapsedTicks = elapsedTicks;
+            Completed = completed;
+            TrippedBudget = trippedBudget;
+        }
+    }
+
+    /// <summary>
+    /// Receives the cost of one completed guarded execution. The observation port for frame-gate
+    /// measurement: a host supplies an instance through production composition (guard constructor
+    /// or property) instead of reading the pooled hook's counters by reflection.
+    /// </summary>
+    public interface ILuaCsGuardObserver
+    {
+        /// <param name="record">The cost of the execution that just completed.</param>
+        void OnGuardedExecutionCompleted(in LuaCsGuardExecutionRecord record);
+    }
+
+    /// <summary>
     /// Runs Lua-CSharp chunks/functions with timeout, instruction-step, and total-allocation limits.
     /// <para>
     /// All three limits are enforced from a single count-hook installed via <see cref="LuaState.SetHook"/>.
@@ -106,6 +167,18 @@ namespace CoreAI.Sandbox.LuaCs
         private readonly long _maxSteps;
         private readonly long _maxAllocatedBytes;
         private readonly IRbxRuntimeObservabilitySink _observability;
+        private ILuaCsGuardObserver _guardObserver;
+
+        /// <summary>
+        /// Per-execution observer receiving one <see cref="LuaCsGuardExecutionRecord"/> per call.
+        /// Null by default (no cost); set before use — a host supplies it through production
+        /// composition rather than reading pooled hook state by reflection.
+        /// </summary>
+        public ILuaCsGuardObserver GuardObserver
+        {
+            get => _guardObserver;
+            set => _guardObserver = value;
+        }
 
         /// <param name="timeoutMs">Maximum wall-clock time allowed for one guarded call.</param>
         /// <param name="maxSteps">Maximum Lua-CSharp instruction steps allowed for one guarded call.</param>
@@ -114,13 +187,18 @@ namespace CoreAI.Sandbox.LuaCs
         /// instruction. Defaults to <see cref="DefaultMaxAllocatedBytesBudget"/> (256MB).
         /// <c>&lt;= 0</c> disables the check.
         /// </param>
+        /// <param name="guardObserver">
+        /// Optional per-execution observer. Null by default: with no observer the behaviour is identical
+        /// and the only added cost is one null check per execution.
+        /// </param>
         // WHY: Roblox parity — a Luau script is only terminated after ~10 s of continuous execution, so the
         // guard's defaults match that (wall-clock is the real limiter; maxSteps is a high secondary net).
         public LuaCsExecutionGuard(
             int timeoutMs = 10_000,
             long maxSteps = 50_000_000,
             long maxAllocatedBytes = DefaultMaxAllocatedBytesBudget,
-            IRbxRuntimeObservabilitySink observability = null)
+            IRbxRuntimeObservabilitySink observability = null,
+            ILuaCsGuardObserver guardObserver = null)
         {
             _timeoutMs = timeoutMs;
             _maxSteps = maxSteps;
@@ -128,6 +206,7 @@ namespace CoreAI.Sandbox.LuaCs
             _observability = observability != null && observability.IsEnabled
                 ? observability
                 : null;
+            _guardObserver = guardObserver;
         }
 
         /// <summary>Runs a loaded Lua-CSharp chunk synchronously under the guard.</summary>
@@ -144,9 +223,12 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             GuardHook hook = BeginGuard(state, out Stack<GuardHook> installed);
+            bool completed = false;
             try
             {
-                return state.ExecuteAsync(closure, cancellationToken).GetAwaiter().GetResult();
+                LuaValue[] results = state.ExecuteAsync(closure, cancellationToken).GetAwaiter().GetResult();
+                completed = true;
+                return results;
             }
             catch (LuaRuntimeException)
             {
@@ -154,7 +236,7 @@ namespace CoreAI.Sandbox.LuaCs
             }
             finally
             {
-                EndGuard(state, installed, hook);
+                EndGuard(state, installed, hook, completed);
             }
         }
 
@@ -177,10 +259,13 @@ namespace CoreAI.Sandbox.LuaCs
 
             args ??= Array.Empty<LuaValue>();
             GuardHook hook = BeginGuard(state, out Stack<GuardHook> installed);
+            bool completed = false;
             try
             {
-                return state.CallAsync(new LuaValue(function), args.AsSpan(), cancellationToken)
+                LuaValue[] results = state.CallAsync(new LuaValue(function), args.AsSpan(), cancellationToken)
                     .GetAwaiter().GetResult();
+                completed = true;
+                return results;
             }
             catch (LuaRuntimeException)
             {
@@ -188,7 +273,7 @@ namespace CoreAI.Sandbox.LuaCs
             }
             finally
             {
-                EndGuard(state, installed, hook);
+                EndGuard(state, installed, hook, completed);
             }
         }
 
@@ -213,7 +298,7 @@ namespace CoreAI.Sandbox.LuaCs
             return hook;
         }
 
-        private void EndGuard(LuaState state, Stack<GuardHook> installed, GuardHook hook)
+        private void EndGuard(LuaState state, Stack<GuardHook> installed, GuardHook hook, bool completed)
         {
             installed.Pop();
             try
@@ -242,6 +327,30 @@ namespace CoreAI.Sandbox.LuaCs
                 }
                 catch
                 {
+                }
+            }
+
+            // WHY: Read Steps/ElapsedTicks/Trip BEFORE ReturnHook — the pooled hook is zeroed by
+            // Reset on its next rent, so reading after the return would report zero.
+            ILuaCsGuardObserver observer = _guardObserver;
+            if (observer != null)
+            {
+                LuaCsGuardExecutionRecord record = new(
+                    hook.Steps,
+                    hook.ElapsedTicks,
+                    completed,
+                    completed ? LuaCsGuardTripKind.None : hook.Trip);
+                try
+                {
+                    observer.OnGuardedExecutionCompleted(in record);
+                }
+                catch
+                {
+                    // WHY: swallowed deliberately and without logging. This runs in the finally of the
+                    // hottest path in the project, once per guarded execution; a measurement sink that
+                    // throws must never turn into a mod failure, and logging here would let a broken
+                    // observer flood the log at execution frequency. An observer that needs to report
+                    // its own faults owns that channel itself.
                 }
             }
 
@@ -278,9 +387,20 @@ namespace CoreAI.Sandbox.LuaCs
             private int _timeoutMs;
             private long _maxAllocatedBytes;
             private long _allocBaseline;
+            private LuaCsGuardTripKind _trip;
 
             /// <summary>Instruction steps accumulated by the current guarded execution.</summary>
             public long Steps => _steps;
+
+            /// <summary>Wall-clock <see cref="Stopwatch"/> ticks elapsed since <see cref="Reset"/>.</summary>
+            public long ElapsedTicks => Stopwatch.GetTimestamp() - _startTimestamp;
+
+            /// <summary>
+            /// Which guard budget tripped during the current execution, or
+            /// <see cref="LuaCsGuardTripKind.None"/>. Recorded by the hook itself at throw time so the
+            /// reporter never classifies a mod's own <c>error()</c> text as a budget trip.
+            /// </summary>
+            public LuaCsGuardTripKind Trip => _trip;
 
             public GuardHook()
             {
@@ -291,6 +411,7 @@ namespace CoreAI.Sandbox.LuaCs
             public void Reset(long maxSteps, int timeoutMs, long maxAllocatedBytes)
             {
                 _steps = 0;
+                _trip = LuaCsGuardTripKind.None;
                 _maxSteps = maxSteps < 1 ? 1 : maxSteps;
                 _timeoutMs = timeoutMs < 1 ? 1 : timeoutMs;
 
@@ -318,6 +439,7 @@ namespace CoreAI.Sandbox.LuaCs
                 _steps += HookInstructionBatch;
                 if (_steps > _maxSteps)
                 {
+                    _trip = LuaCsGuardTripKind.Steps;
                     throw new LuaRuntimeException(ctx.State,
                         new InvalidOperationException(
                             $"LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS ({_maxSteps})"));
@@ -329,6 +451,7 @@ namespace CoreAI.Sandbox.LuaCs
                 // writes) can blow a per-frame budget while hitting the sampling threshold zero times.
                 if (Stopwatch.GetTimestamp() - _startTimestamp > _timeoutTicks)
                 {
+                    _trip = LuaCsGuardTripKind.Timeout;
                     throw new LuaRuntimeException(ctx.State,
                         new TimeoutException($"Lua exceeded {_timeoutMs} ms."));
                 }
@@ -348,6 +471,7 @@ namespace CoreAI.Sandbox.LuaCs
                     long allocated = GC.GetTotalMemory(false) - _allocBaseline;
                     if (allocated > _maxAllocatedBytes)
                     {
+                        _trip = LuaCsGuardTripKind.Memory;
                         throw new LuaRuntimeException(ctx.State,
                             new LuaMemoryBudgetException(
                                 $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({_maxAllocatedBytes} bytes)"));
