@@ -1,5 +1,6 @@
 using System;
 using CoreAI.Logging;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Mods.Rbx.Instances;
 using UnityEngine;
@@ -104,6 +105,8 @@ namespace CoreAI.Mods.Rbx.Binding
             // learns about UnityEngine or the logging stack. Resolved per call, so a later SetLog wins.
             Registry.Diagnostics = message => Logger.Error(message, LogTag.World);
             Game = DataModelBootstrap.CreateGame(Registry);
+            Binder.MaterialVariantSource =
+                Game.GetService("MaterialService") as IRbxMaterialVariantSource;
             // WHY: the camera reference is resolved ONCE here at composition; Lua camera writes
             // must never pay a scene search per call.
             Camera sceneCamera = _camera != null ? _camera : Camera.main;
@@ -141,6 +144,8 @@ namespace CoreAI.Mods.Rbx.Binding
             Registry = registry;
             Game = game;
             Binder = binder;
+            Binder.MaterialVariantSource =
+                game.GetService("MaterialService") as IRbxMaterialVariantSource;
             CameraRig = cameraRig;
             InputSource = inputSource;
             PickSource = pickSource;

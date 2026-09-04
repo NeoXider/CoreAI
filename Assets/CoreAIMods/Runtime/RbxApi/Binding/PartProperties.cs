@@ -16,6 +16,9 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <summary>Part.Material (Enum.Material); the render adapter resolves it through its catalog.</summary>
         public RbxMaterialId Material;
 
+        /// <summary>Part.MaterialVariant override name; null renders the plain Material.</summary>
+        public string MaterialVariant;
+
         /// <summary>World-space CFrame in Roblox coordinates (right-handed, studs).</summary>
         public RbxCFrame CFrame;
 
@@ -62,6 +65,7 @@ namespace CoreAI.Mods.Rbx.Binding
             {
                 Shape = RbxPartShape.Block,
                 Material = RbxMaterialId.Plastic,
+                MaterialVariant = null,
                 CFrame = RbxCFrame.Identity,
                 Size = new RbxVector3(4f, 1f, 2f),
                 Color = RbxColor3.FromRGB(163f, 162f, 165f),

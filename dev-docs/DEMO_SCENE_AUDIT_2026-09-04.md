@@ -44,6 +44,20 @@ demo controllers, which is exactly where the bar says IMGUI must not appear.
   `66c209b338895c54aa8e4fd52c8b9c34`; serialized `_walkSpeed: 4.5`, `_runSpeed: 10`, `_jumpImpulse: 7`).
   In the editor these are two `Missing (Mono Script)` slots, so the Hub demo cannot be walked. Verified by
   a repository-wide search of every `.meta`.
+
+  **Root cause found 2026-09-04.** The scripts are not lost, they belong to a package CoreAI does not
+  depend on: `4ef82c39…` is `PlayerController3DAnimatorDriver` and `66c209b3…` is
+  `PlayerController3DPhysics`, both from **NeoxiderTools**
+  (`Assets/Neoxider/Scripts/Tools/Move/`, alongside its `First Person Controller.prefab`). The scene
+  was authored in a project that had that package installed and committed here without it, so it can
+  never resolve in this repository as it stands.
+
+  Three ways out, in order of preference: give the demo a first-person controller of CoreAI's own
+  (the demo needs walk/run/jump and a camera pivot, not the whole Neoxider movement stack); take a
+  dependency on NeoxiderTools, which is a heavy ask for one demo scene; or drop the walkable
+  controller from the Hub demo entirely. The same two GUIDs are also dangling in
+  `CoreAI.Demos/MiniRpg/MiniRpgModsDemo.unity`, which the first audit pass missed — whatever fixes
+  Hub must fix MiniRpg too.
 - **`CoreAI.Demos/ModdableUnits/ModdableUnitsDemo.unity`** — two `Prompt:` fields are empty where the copy
   `"Start a battle"` / `"Endless waves"` is expected.
 

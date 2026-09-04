@@ -512,6 +512,22 @@ namespace CoreAI.Mods.WorldPackages
                     };
                 }
 
+                if (node.MaterialVariant != null)
+                {
+                    dto.MaterialVariant = new WorldMaterialVariantDto
+                    {
+                        BaseMaterial = node.MaterialVariant.BaseMaterial,
+                        BaseMaterialValue = node.MaterialVariant.BaseMaterialValue,
+                        ColorMap = node.MaterialVariant.ColorMap ?? string.Empty,
+                        NormalMap = node.MaterialVariant.NormalMap ?? string.Empty,
+                        RoughnessMap = node.MaterialVariant.RoughnessMap ?? string.Empty,
+                        MetalnessMap = node.MaterialVariant.MetalnessMap ?? string.Empty,
+                        StudsPerTile = float.Parse(
+                            node.MaterialVariant.StudsPerTile,
+                            CultureInfo.InvariantCulture)
+                    };
+                }
+
                 world.Instances.Add(dto);
             }
 
@@ -545,6 +561,9 @@ namespace CoreAI.Mods.WorldPackages
                 ShapeValue = (int)part.Shape,
                 Material = part.Material.Name,
                 MaterialValue = part.Material.Value,
+                MaterialVariant = string.IsNullOrEmpty(part.MaterialVariant)
+                    ? null
+                    : part.MaterialVariant,
                 CFrame = part.CFrame.GetComponents(),
                 Size = new[] { part.Size.X, part.Size.Y, part.Size.Z },
                 Color = new[] { part.Color.R, part.Color.G, part.Color.B },
@@ -679,6 +698,21 @@ namespace CoreAI.Mods.WorldPackages
                 };
             }
 
+            if (dto.MaterialVariant != null)
+            {
+                node.MaterialVariant = new MaterialVariantSnapshot
+                {
+                    BaseMaterial = dto.MaterialVariant.BaseMaterial,
+                    BaseMaterialValue = dto.MaterialVariant.BaseMaterialValue,
+                    ColorMap = dto.MaterialVariant.ColorMap ?? string.Empty,
+                    NormalMap = dto.MaterialVariant.NormalMap ?? string.Empty,
+                    RoughnessMap = dto.MaterialVariant.RoughnessMap ?? string.Empty,
+                    MetalnessMap = dto.MaterialVariant.MetalnessMap ?? string.Empty,
+                    StudsPerTile = dto.MaterialVariant.StudsPerTile.ToString(
+                        "R", CultureInfo.InvariantCulture)
+                };
+            }
+
             return node;
         }
 
@@ -731,6 +765,9 @@ namespace CoreAI.Mods.WorldPackages
             {
                 Shape = shape,
                 Material = new RbxMaterialId(dto.Material, dto.MaterialValue),
+                MaterialVariant = string.IsNullOrEmpty(dto.MaterialVariant)
+                    ? null
+                    : dto.MaterialVariant,
                 CFrame = BuildCFrame(dto.CFrame, "Part.CFrame"),
                 Size = new RbxVector3(dto.Size[0], dto.Size[1], dto.Size[2]),
                 Color = new RbxColor3(dto.Color[0], dto.Color[1], dto.Color[2]),
@@ -870,6 +907,28 @@ namespace CoreAI.Mods.WorldPackages
                 ValidatePart(entry.Key, in properties);
             }
 
+            HashSet<string> variantNames = new(StringComparer.Ordinal);
+            foreach (InstanceSnapshot node in payload.Tree.Instances)
+            {
+                if (string.Equals(
+                        node.ClassName, "MaterialVariant", StringComparison.Ordinal))
+                {
+                    variantNames.Add(node.Name);
+                    ValidateMaterialVariant(node);
+                }
+            }
+
+            foreach (KeyValuePair<InstanceId, PartProperties> entry in payload.Parts)
+            {
+                string variantName = entry.Value.MaterialVariant;
+                if (!string.IsNullOrEmpty(variantName) && !variantNames.Contains(variantName))
+                {
+                    throw new RbxWorldPackageException(
+                        "Part " + entry.Key.Value + " names undefined MaterialVariant '"
+                        + variantName + "'.");
+                }
+            }
+
             if (payload.CameraCFrame.HasValue)
             {
                 ValidateFinite(payload.CameraCFrame.Value.GetComponents(), "Camera.CFrame");
@@ -960,6 +1019,33 @@ namespace CoreAI.Mods.WorldPackages
             {
                 throw new RbxWorldPackageException(
                     "Part " + id.Value + " Transparency must be within [0, 1].");
+            }
+        }
+
+        private static void ValidateMaterialVariant(InstanceSnapshot node)
+        {
+            MaterialVariantSnapshot snapshot = node.MaterialVariant;
+            if (snapshot == null)
+            {
+                throw new RbxWorldPackageException(
+                    "MaterialVariant " + node.Id + " is missing its variant state.");
+            }
+
+            RbxEnum materialEnum = RbxEnumRegistry.CreateWithBuiltins().Get("Material");
+            if (string.IsNullOrWhiteSpace(snapshot.BaseMaterial)
+                || !materialEnum.TryGetItem(snapshot.BaseMaterial, out RbxEnumItem materialItem)
+                || materialItem.Value != snapshot.BaseMaterialValue)
+            {
+                throw new RbxWorldPackageException(
+                    "MaterialVariant " + node.Id + " has unsupported or mismatched BaseMaterial '"
+                    + snapshot.BaseMaterial + "' (" + snapshot.BaseMaterialValue + ").");
+            }
+
+            float studs = float.Parse(snapshot.StudsPerTile, CultureInfo.InvariantCulture);
+            if (float.IsNaN(studs) || float.IsInfinity(studs) || studs <= 0f)
+            {
+                throw new RbxWorldPackageException(
+                    "MaterialVariant " + node.Id + " StudsPerTile must be a positive finite number.");
             }
         }
 
@@ -1496,6 +1582,9 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("click_detector")]
             public WorldClickDetectorDto ClickDetector;
+
+            [JsonProperty("material_variant")]
+            public WorldMaterialVariantDto MaterialVariant;
         }
 
         [Serializable]
@@ -1545,6 +1634,9 @@ namespace CoreAI.Mods.WorldPackages
             [JsonProperty("material_value", Required = Required.Always)]
             public int MaterialValue;
 
+            [JsonProperty("material_variant", Required = Required.Default)]
+            public string MaterialVariant;
+
             [JsonProperty("cframe", Required = Required.Always)]
             public float[] CFrame;
 
@@ -1572,6 +1664,31 @@ namespace CoreAI.Mods.WorldPackages
         {
             [JsonProperty("max_activation_distance", Required = Required.Always)]
             public double MaxActivationDistance;
+        }
+
+        [Serializable]
+        private sealed class WorldMaterialVariantDto
+        {
+            [JsonProperty("base_material", Required = Required.Always)]
+            public string BaseMaterial;
+
+            [JsonProperty("base_material_value", Required = Required.Always)]
+            public int BaseMaterialValue;
+
+            [JsonProperty("color_map", Required = Required.Always)]
+            public string ColorMap;
+
+            [JsonProperty("normal_map", Required = Required.Always)]
+            public string NormalMap;
+
+            [JsonProperty("roughness_map", Required = Required.Always)]
+            public string RoughnessMap;
+
+            [JsonProperty("metalness_map", Required = Required.Always)]
+            public string MetalnessMap;
+
+            [JsonProperty("studs_per_tile", Required = Required.Always)]
+            public float StudsPerTile;
         }
     }
 }

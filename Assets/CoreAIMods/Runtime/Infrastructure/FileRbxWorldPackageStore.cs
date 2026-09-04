@@ -621,6 +621,12 @@ namespace CoreAI.Mods.WorldPackages
                 AddTextLength(ref textCharacters, node.OwnerActorId);
                 AddTextLength(ref textCharacters, node.Model?.StoredWorldPivot);
                 AddTextLength(ref textCharacters, node.ClickDetector?.MaxActivationDistance);
+                AddTextLength(ref textCharacters, node.MaterialVariant?.BaseMaterial);
+                AddTextLength(ref textCharacters, node.MaterialVariant?.ColorMap);
+                AddTextLength(ref textCharacters, node.MaterialVariant?.NormalMap);
+                AddTextLength(ref textCharacters, node.MaterialVariant?.RoughnessMap);
+                AddTextLength(ref textCharacters, node.MaterialVariant?.MetalnessMap);
+                AddTextLength(ref textCharacters, node.MaterialVariant?.StudsPerTile);
                 if (node.Attributes != null)
                 {
                     foreach (AttributeSnapshot attribute in node.Attributes)
@@ -663,6 +669,7 @@ namespace CoreAI.Mods.WorldPackages
             foreach (KeyValuePair<InstanceId, PartProperties> part in payload.Parts)
             {
                 AddTextLength(ref textCharacters, part.Value.Material.Name);
+                AddTextLength(ref textCharacters, part.Value.MaterialVariant);
             }
 
             if (collectionItems > MaximumWebGlSafeCollectionItems

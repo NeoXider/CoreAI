@@ -437,6 +437,233 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void WorldPackage_MaterialVariant_RoundTripsVariantStateAndPartReference()
+        {
+            VariantWorld world = BuildVariantWorld("MossyRock");
+            RbxWorldPackagePayload captured = RbxWorldPackageSerializer.Capture(
+                new RbxWorldPackageCaptureContext(
+                    world.Registry,
+                    world.Game,
+                    world.PartSink,
+                    NewSettings(),
+                    capturedAtUtc: CapturedAtUtc));
+            byte[] firstBytes = RbxWorldPackageSerializer.WritePackage(captured);
+            RbxWorldPackagePayload decoded = RbxWorldPackageSerializer.ReadPackage(firstBytes);
+
+            RbxEnum materialEnum = RbxEnumRegistry.CreateWithBuiltins().Get("Material");
+            Assert.IsTrue(materialEnum.TryGetItem("Rock", out RbxEnumItem rock));
+            InstanceSnapshot variantNode = FindNode(decoded, "MossyRock");
+            Assert.IsNotNull(variantNode.MaterialVariant);
+            Assert.AreEqual("Rock", variantNode.MaterialVariant.BaseMaterial);
+            Assert.AreEqual(rock.Value, variantNode.MaterialVariant.BaseMaterialValue);
+            Assert.AreEqual("rbxasset://mossy_albedo", variantNode.MaterialVariant.ColorMap);
+            Assert.AreEqual("rbxasset://mossy_normal", variantNode.MaterialVariant.NormalMap);
+            Assert.AreEqual("rbxasset://mossy_rough", variantNode.MaterialVariant.RoughnessMap);
+            Assert.AreEqual("rbxasset://mossy_metal", variantNode.MaterialVariant.MetalnessMap);
+            Assert.AreEqual("2.5", variantNode.MaterialVariant.StudsPerTile);
+            Assert.AreEqual(
+                "MossyRock",
+                decoded.Parts[world.Part.Id].MaterialVariant);
+
+            RbxWorldPackageRestoreResult restored = RbxWorldPackageSerializer.RestoreFresh(
+                decoded,
+                new RbxWorldPackageRestoreOptions { CameraRig = new InMemoryCameraRig() });
+            _games.Add(restored.Game);
+
+            RbxMaterialVariant restoredVariant =
+                (RbxMaterialVariant)restored.Game.FindFirstChildOfClass("MaterialService")
+                    .FindFirstChild("MossyRock");
+            Assert.IsNotNull(restoredVariant);
+            Assert.AreEqual("Rock", restoredVariant.BaseMaterial.Name);
+            Assert.AreEqual(rock.Value, restoredVariant.BaseMaterial.Value);
+            Assert.AreEqual("rbxasset://mossy_albedo", restoredVariant.ColorMap);
+            Assert.AreEqual("rbxasset://mossy_normal", restoredVariant.NormalMap);
+            Assert.AreEqual("rbxasset://mossy_rough", restoredVariant.RoughnessMap);
+            Assert.AreEqual("rbxasset://mossy_metal", restoredVariant.MetalnessMap);
+            Assert.AreEqual(2.5f, restoredVariant.StudsPerTile);
+            Assert.IsTrue(restored.PartSink.TryGetPartProperties(
+                world.Part.Id, out PartProperties restoredProperties));
+            Assert.AreEqual("MossyRock", restoredProperties.MaterialVariant);
+
+            CollectionAssert.AreEqual(
+                firstBytes,
+                RbxWorldPackageSerializer.WritePackage(
+                    RbxWorldPackageSerializer.ReadPackage(firstBytes)),
+                "decode -> encode must preserve the canonical package bytes.");
+        }
+
+        [Test]
+        public void ReadPackage_WorldJsonWithoutMaterialVariantKeys_DeserializesWithNullVariant()
+        {
+            RuntimeWorld source = BuildAuthoredWorld();
+            byte[] package = RbxWorldPackageSerializer.WritePackage(Capture(source, CapturedAtUtc));
+            byte[] legacy = StripMaterialVariantKeys(package);
+            RbxWorldPackagePayload decoded = RbxWorldPackageSerializer.ReadPackage(legacy);
+
+            foreach (KeyValuePair<InstanceId, PartProperties> entry in decoded.Parts)
+            {
+                Assert.IsNull(entry.Value.MaterialVariant);
+            }
+
+            foreach (InstanceSnapshot node in decoded.Tree.Instances)
+            {
+                Assert.IsNull(node.MaterialVariant);
+            }
+        }
+
+        [Test]
+        public void WritePackage_PartWithUndefinedMaterialVariant_IsRejectedWithNamedError()
+        {
+            RuntimeWorld source = BuildAuthoredWorld();
+            RbxWorldPackagePayload payload = Capture(source, CapturedAtUtc);
+            InstanceSnapshot partNode = FindNode(payload, "PrimaryPart");
+            Dictionary<InstanceId, PartProperties> parts =
+                payload.Parts as Dictionary<InstanceId, PartProperties>;
+            Assert.IsNotNull(parts);
+            InstanceId partId = new(partNode.Id);
+            PartProperties properties = parts[partId];
+            properties.MaterialVariant = "GhostVariant";
+            parts[partId] = properties;
+
+            RbxWorldPackageException exception = Assert.Throws<RbxWorldPackageException>(() =>
+                RbxWorldPackageSerializer.WritePackage(payload));
+
+            StringAssert.Contains(partId.Value.ToString(), exception.Message);
+            StringAssert.Contains("GhostVariant", exception.Message);
+        }
+
+        [Test]
+        public void WritePackage_MaterialVariantWithBogusBaseMaterial_IsRejectedWithNamedError()
+        {
+            VariantWorld world = BuildVariantWorld("BogusBase");
+            RbxWorldPackagePayload payload = RbxWorldPackageSerializer.Capture(
+                new RbxWorldPackageCaptureContext(
+                    world.Registry,
+                    world.Game,
+                    world.PartSink,
+                    NewSettings(),
+                    capturedAtUtc: CapturedAtUtc));
+            InstanceSnapshot variantNode = FindNode(payload, "BogusBase");
+            variantNode.MaterialVariant.BaseMaterial = "NotAMaterial";
+            variantNode.MaterialVariant.BaseMaterialValue = 12345;
+
+            RbxWorldPackageException exception = Assert.Throws<RbxWorldPackageException>(() =>
+                RbxWorldPackageSerializer.WritePackage(payload));
+
+            StringAssert.Contains("BaseMaterial", exception.Message);
+            StringAssert.Contains("NotAMaterial", exception.Message);
+        }
+
+        [Test]
+        public void WritePackage_MaterialVariantWithNonPositiveStudsPerTile_IsRejected()
+        {
+            VariantWorld world = BuildVariantWorld("FlatVariant");
+            RbxWorldPackagePayload payload = RbxWorldPackageSerializer.Capture(
+                new RbxWorldPackageCaptureContext(
+                    world.Registry,
+                    world.Game,
+                    world.PartSink,
+                    NewSettings(),
+                    capturedAtUtc: CapturedAtUtc));
+            InstanceSnapshot variantNode = FindNode(payload, "FlatVariant");
+            variantNode.MaterialVariant.StudsPerTile = "0";
+
+            RbxError exception = Assert.Throws<RbxError>(() =>
+                RbxWorldPackageSerializer.WritePackage(payload));
+
+            StringAssert.Contains("StudsPerTile", exception.Message);
+        }
+
+        private VariantWorld BuildVariantWorld(string variantName)
+        {
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            InMemoryPartPropertySink partSink = new();
+            RbxInstance materialService = game.FindFirstChildOfClass("MaterialService");
+            Assert.IsNotNull(materialService);
+            RbxEnum materialEnum = RbxEnumRegistry.CreateWithBuiltins().Get("Material");
+            Assert.IsTrue(materialEnum.TryGetItem("Rock", out RbxEnumItem rock));
+            RbxMaterialVariant variant = (RbxMaterialVariant)registry.Create("MaterialVariant");
+            variant.Name = variantName;
+            variant.BaseMaterial = new RbxMaterialId(rock.Name, rock.Value);
+            variant.ColorMap = "rbxasset://mossy_albedo";
+            variant.NormalMap = "rbxasset://mossy_normal";
+            variant.RoughnessMap = "rbxasset://mossy_rough";
+            variant.MetalnessMap = "rbxasset://mossy_metal";
+            variant.StudsPerTile = 2.5f;
+            variant.Parent = materialService;
+            RbxInstance part = registry.Create("Part");
+            part.Name = "VariantPart";
+            part.Parent = registry.WorldRoot;
+            PartProperties properties = PartProperties.CreateDefault();
+            properties.MaterialVariant = variantName;
+            partSink.SetPartProperties(part.Id, in properties);
+            return new VariantWorld
+            {
+                Registry = registry,
+                Game = game,
+                PartSink = partSink,
+                Part = part,
+                Variant = variant
+            };
+        }
+
+        private static byte[] StripMaterialVariantKeys(byte[] package)
+        {
+            using MemoryStream input = new(package, false);
+            using ZipArchive source = new(input, ZipArchiveMode.Read, false);
+            using MemoryStream output = new();
+            using (ZipArchive destination = new(output, ZipArchiveMode.Create, true))
+            {
+                foreach (ZipArchiveEntry sourceEntry in source.Entries)
+                {
+                    byte[] bytes;
+                    using (Stream entryStream = sourceEntry.Open())
+                    using (MemoryStream entryBytes = new())
+                    {
+                        entryStream.CopyTo(entryBytes);
+                        bytes = entryBytes.ToArray();
+                    }
+
+                    if (string.Equals(
+                            sourceEntry.FullName,
+                            RbxWorldPackageSerializer.WorldEntryName,
+                            StringComparison.Ordinal))
+                    {
+                        string text = new UTF8Encoding(false, true).GetString(bytes);
+                        Assert.IsTrue(
+                            text.Contains("\"material_variant\""),
+                            "The fixture package must carry material_variant keys before stripping.");
+                        JObject world = JObject.Parse(text);
+                        List<JToken> doomed = new();
+                        foreach (JToken token in world.SelectTokens("$..material_variant"))
+                        {
+                            doomed.Add(token);
+                        }
+
+                        foreach (JToken token in doomed)
+                        {
+                            ((JProperty)token.Parent).Remove();
+                        }
+
+                        string stripped = world.ToString(Newtonsoft.Json.Formatting.None);
+                        Assert.IsFalse(stripped.Contains("material_variant"));
+                        bytes = new UTF8Encoding(false, true).GetBytes(stripped);
+                    }
+
+                    ZipArchiveEntry destinationEntry = destination.CreateEntry(
+                        sourceEntry.FullName, CompressionLevel.Optimal);
+                    destinationEntry.LastWriteTime = sourceEntry.LastWriteTime;
+                    using Stream destinationStream = destinationEntry.Open();
+                    destinationStream.Write(bytes, 0, bytes.Length);
+                }
+            }
+
+            return output.ToArray();
+        }
+
+        [Test]
         public void RestoreFresh_NonFiniteDatatypeComponent_IsRejectedBeforeAdaptersRun()
         {
             RuntimeWorld source = BuildAuthoredWorld();
@@ -1745,6 +1972,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             return output.ToArray();
         }
 
+        private sealed class VariantWorld
+        {
+            public InstanceRegistry Registry;
+
+            public RbxDataModel Game;
+
+            public InMemoryPartPropertySink PartSink;
+
+            public RbxInstance Part;
+
+            public RbxMaterialVariant Variant;
+        }
+
         private sealed class RuntimeWorld
         {
             public RuntimeWorld(string worldId)
@@ -2204,6 +2444,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
 
             public void SetMaterial(InstanceId id, in RbxMaterialId material)
+            {
+                throw new NotSupportedException();
+            }
+
+            public void SetMaterialVariant(InstanceId id, string variantName)
+            {
+                throw new NotSupportedException();
+            }
+
+            public void RefreshMaterialVariant(string variantName)
             {
                 throw new NotSupportedException();
             }

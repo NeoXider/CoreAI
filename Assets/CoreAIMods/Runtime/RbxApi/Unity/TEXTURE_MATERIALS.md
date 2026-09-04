@@ -7,11 +7,15 @@
 `Enum.Material` value. Any of the 45 canonical materials can be textured; materials without a valid
 entry remain on `RbxProceduralMaterialProvider`.
 
-The package still includes six 1K CC0 sets: Wood, WoodPlanks, Brick, Cobblestone, Metal, and Grass.
-Because the catalog asset must be produced by Unity and is not present in source-only installations,
-the provider has a compatibility catalog for those six sets. This keeps existing players working until
-the packaged asset is materialized. New local catalogs and all override behavior use the serialized
-catalog path.
+The package ships 36 1K CC0 sets covering every textured `Enum.Material` the catalog describes, so a
+consumer who imports nothing still gets the full material set. Because the catalog asset must be
+produced by Unity and is not present in source-only installations, the provider keeps a compatibility
+catalog for the original six (Wood, WoodPlanks, Brick, Cobblestone, Metal, Grass) so such an install
+still renders something; every other path uses the serialized catalog.
+
+`CoreAI > Materials > Rebuild packaged catalog from packaged textures` regenerates the shipped asset
+from whatever maps are in `Resources/CoreAIRbxTextures/`, so adding a set is: drop the maps in, run the
+command. Bundling all 36 costs about 113 MB on disk and roughly 99 MB resident once loaded.
 
 ## Catalog entry contract
 

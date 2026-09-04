@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Datatypes;
@@ -6,6 +7,7 @@ using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Mods.Rbx.Instances;
 using UnityEngine;
 using UnityEngine.Rendering;
+using Object = UnityEngine.Object;
 
 namespace CoreAI.Mods.Rbx.Binding
 {
@@ -290,6 +292,10 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
+            // WHY: a MaterialVariant owns no GameObject, so the binding guard below returns before
+            // the repaint would ever run.
+            RepaintIfMaterialVariant(record);
+
             // WHY: the DataModel host GameObject never leaves its own tree; guard so nothing
             // deactivates or re-parents the host.
             if (!_bindings.TryGetValue(record.Id, out BindingEntry entry) || !entry.OwnsGameObject)
@@ -305,6 +311,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
         public void OnDestroyed(InstanceRecord record)
         {
+            RepaintIfMaterialVariant(record);
             if (!_bindings.TryGetValue(record.Id, out BindingEntry entry))
             {
                 _partProperties.Remove(record.Id);
@@ -328,6 +335,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
+            RepaintIfMaterialVariant(record);
             if (_bindings.TryGetValue(record.Id, out BindingEntry entry) && entry.OwnsGameObject)
             {
                 // WHY: worldPositionStays — CFrames are world-space, so a hierarchy move
@@ -338,9 +346,31 @@ namespace CoreAI.Mods.Rbx.Binding
 
         public void OnNameChanged(InstanceRecord record)
         {
+            RepaintIfMaterialVariant(record);
             if (_bindings.TryGetValue(record.Id, out BindingEntry entry) && entry.OwnsGameObject)
             {
                 entry.GameObject.name = record.Instance.Name;
+            }
+        }
+
+        /// <summary>
+        /// Repaints every variant-wearing part when the instance that moved, was renamed, was
+        /// destroyed or entered the world is a MaterialVariant.
+        /// WHY: parts hold a variant by NAME and the provider only re-reads a variant when something
+        /// asks it to. Renaming, destroying or reparenting a variant therefore left every part
+        /// wearing it on a material that no longer corresponds to anything, with nothing in the log.
+        /// Both names are affected by a rename, so this repaints all of them rather than one.
+        /// </summary>
+        private void RepaintIfMaterialVariant(InstanceRecord record)
+        {
+            if (_hostTeardownStarted || record?.Instance == null)
+            {
+                return;
+            }
+
+            if (record.Instance.IsA("MaterialVariant"))
+            {
+                RepaintVariantParts();
             }
         }
 
@@ -409,6 +439,82 @@ namespace CoreAI.Mods.Rbx.Binding
             properties.Material = material;
             Store(id, properties, PartAspect.Appearance);
         }
+
+        public void SetMaterialVariant(InstanceId id, string variantName)
+        {
+            PartProperties properties = GetPartPropertiesOrDefault(id);
+            properties.MaterialVariant = string.IsNullOrEmpty(variantName) ? null : variantName;
+            Store(id, properties, PartAspect.Appearance);
+        }
+
+        /// <summary>
+        /// Re-resolves the surface of every part wearing this variant.
+        /// WHY: the provider only re-reads a variant when something asks it to, and editing the
+        /// variant's own properties touches no part. Without this a script that changed a live
+        /// variant's ColorMap left every part wearing it on the old texture forever.
+        /// </summary>
+        public void RefreshMaterialVariant(string variantName)
+        {
+            if (_hostTeardownStarted || string.IsNullOrEmpty(variantName))
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<InstanceId, BindingEntry> pair in _bindings)
+            {
+                if (!pair.Value.IsPart ||
+                    !_partProperties.TryGetValue(pair.Key, out PartProperties properties) ||
+                    !string.Equals(properties.MaterialVariant, variantName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                ApplyAppearance(pair.Value, properties);
+            }
+        }
+
+        /// <summary>Variant lookup port the material provider consumes to resolve
+        /// PartProperties.MaterialVariant without importing the Rbx instance tree. The host
+        /// points it at the world's MaterialService; null renders every part plain.</summary>
+        public IRbxMaterialVariantSource MaterialVariantSource
+        {
+            get => _materialVariantSource;
+            set
+            {
+                _materialVariantSource = value;
+                if (_materialProvider is IRbxMaterialVariantConsumer consumer)
+                {
+                    consumer.VariantSource = value;
+                }
+
+                RepaintVariantParts();
+            }
+        }
+
+        /// <summary>
+        /// Re-resolves the shared material of every bound part that names a MaterialVariant.
+        /// WHY: a restored world is staged binder-first — every part materializes through
+        /// RestoreFresh BEFORE the host can point the binder at the new MaterialService, so each
+        /// one resolved to its plain material and nothing ever asked again. Every variant in a
+        /// loaded world rendered plain, silently. Repainting here makes the wiring order stop
+        /// mattering.
+        /// </summary>
+        private void RepaintVariantParts()
+        {
+            foreach (KeyValuePair<InstanceId, BindingEntry> pair in _bindings)
+            {
+                if (!pair.Value.IsPart ||
+                    !_partProperties.TryGetValue(pair.Key, out PartProperties properties) ||
+                    properties.MaterialVariant == null)
+                {
+                    continue;
+                }
+
+                ApplyAppearance(pair.Value, properties);
+            }
+        }
+
+        private IRbxMaterialVariantSource _materialVariantSource;
 
         public void SetPartProperties(InstanceId id, in PartProperties properties)
         {
@@ -846,7 +952,14 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
-            _materialProvider.TryGetMaterial(in properties.Material, out Material sharedMaterial);
+            RbxMaterialId materialId = properties.Material;
+            if (properties.MaterialVariant != null)
+            {
+                materialId = new RbxMaterialId(properties.Material.Name,
+                    properties.Material.Value, properties.MaterialVariant);
+            }
+
+            _materialProvider.TryGetMaterial(in materialId, out Material sharedMaterial);
             renderer.sharedMaterial = sharedMaterial;
 
             // WHY: MaterialPropertyBlock avoids per-part material instantiation (edit-mode

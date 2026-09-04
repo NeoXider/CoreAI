@@ -30,6 +30,7 @@ namespace CoreAI.Mods.Rbx.Instances
             CreateService(registry, game, "UserInputService");
             CreateService(registry, game, "RunService");
             CreateService(registry, game, "HttpService");
+            CreateService(registry, game, "MaterialService");
             return game;
         }
 
@@ -69,6 +70,13 @@ namespace CoreAI.Mods.Rbx.Instances
             if (game.FindFirstChildOfClass("HttpService") == null)
             {
                 CreateService(registry, game, "HttpService");
+            }
+
+            // WHY: snapshots taken before the material-variant slice have no MaterialService;
+            // restoring them must still yield a resolvable game:GetService("MaterialService").
+            if (game.FindFirstChildOfClass("MaterialService") == null)
+            {
+                CreateService(registry, game, "MaterialService");
             }
         }
 

@@ -126,6 +126,21 @@ namespace CoreAI.Mods.Rbx.Instances
                 };
             }
 
+            if (instance is RbxMaterialVariant materialVariant)
+            {
+                node.MaterialVariant = new MaterialVariantSnapshot
+                {
+                    BaseMaterial = materialVariant.BaseMaterial.Name,
+                    BaseMaterialValue = materialVariant.BaseMaterial.Value,
+                    ColorMap = materialVariant.ColorMap ?? string.Empty,
+                    NormalMap = materialVariant.NormalMap ?? string.Empty,
+                    RoughnessMap = materialVariant.RoughnessMap ?? string.Empty,
+                    MetalnessMap = materialVariant.MetalnessMap ?? string.Empty,
+                    StudsPerTile = materialVariant.StudsPerTile.ToString(
+                        "R", CultureInfo.InvariantCulture)
+                };
+            }
+
             foreach (string tag in instance.GetTags())
             {
                 node.Tags.Add(tag);
@@ -248,6 +263,22 @@ namespace CoreAI.Mods.Rbx.Instances
                     RbxClickDetector clickDetector = (RbxClickDetector)instance;
                     clickDetector.MaxActivationDistance = double.Parse(
                         node.ClickDetector.MaxActivationDistance, CultureInfo.InvariantCulture);
+                }
+
+                if (node.MaterialVariant != null)
+                {
+                    RbxMaterialVariant materialVariant = (RbxMaterialVariant)instance;
+                    materialVariant.BaseMaterial = new RbxMaterialId(
+                        node.MaterialVariant.BaseMaterial,
+                        node.MaterialVariant.BaseMaterialValue);
+                    materialVariant.ColorMap = node.MaterialVariant.ColorMap ?? string.Empty;
+                    materialVariant.NormalMap = node.MaterialVariant.NormalMap ?? string.Empty;
+                    materialVariant.RoughnessMap =
+                        node.MaterialVariant.RoughnessMap ?? string.Empty;
+                    materialVariant.MetalnessMap =
+                        node.MaterialVariant.MetalnessMap ?? string.Empty;
+                    materialVariant.StudsPerTile = float.Parse(
+                        node.MaterialVariant.StudsPerTile, CultureInfo.InvariantCulture);
                 }
             }
 
@@ -501,6 +532,37 @@ namespace CoreAI.Mods.Rbx.Instances
                         "snapshot ClickDetector has invalid MaxActivationDistance '"
                         + node.ClickDetector.MaxActivationDistance + "'",
                         "use a finite non-negative distance");
+                }
+            }
+
+            bool isMaterialVariant = string.Equals(
+                node.ClassName, "MaterialVariant", StringComparison.Ordinal);
+            if ((node.MaterialVariant != null) != isMaterialVariant)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot class '" + node.ClassName + "' has mismatched MaterialVariant state",
+                    isMaterialVariant
+                        ? "include MaterialVariant state"
+                        : "remove MaterialVariant state from this class");
+            }
+
+            if (node.MaterialVariant != null)
+            {
+                if (string.IsNullOrWhiteSpace(node.MaterialVariant.BaseMaterial))
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot MaterialVariant " + node.Id + " has an empty BaseMaterial name",
+                        "use a canonical Enum.Material item name");
+                }
+
+                float studs = float.Parse(
+                    node.MaterialVariant.StudsPerTile, CultureInfo.InvariantCulture);
+                if (float.IsNaN(studs) || float.IsInfinity(studs) || studs <= 0f)
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot MaterialVariant " + node.Id + " has invalid StudsPerTile '"
+                        + node.MaterialVariant.StudsPerTile + "'",
+                        "use a positive finite tile density");
                 }
             }
         }

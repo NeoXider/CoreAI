@@ -398,6 +398,10 @@ namespace CoreAI.Mods.Rbx.Instances
             // carries the MouseClick signal the host pick pump fires when that part is clicked.
             catalog.Register(new ClassDescriptor("ClickDetector", "Instance", false, true, false,
                 descriptor => new RbxClickDetector(descriptor)));
+            catalog.Register(new ClassDescriptor("MaterialService", "Instance", false, false, true,
+                descriptor => new RbxMaterialService(descriptor)));
+            catalog.Register(new ClassDescriptor("MaterialVariant", "Instance", false, true, false,
+                descriptor => new RbxMaterialVariant(descriptor)));
 
             catalog.RegisterKnownUnimplementedMembers("WorldRoot",
                 RbxKnownUnimplementedMemberDescriptor.PlannedMethod(

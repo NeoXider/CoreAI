@@ -10,7 +10,8 @@ namespace CoreAI.Mods.Rbx.Rendering
 {
     /// <summary>Runtime catalog provider that overlays textured Rbx materials on the complete
     /// procedural catalog.</summary>
-    public sealed class RbxTextureMaterialProvider : IRbxMaterialProvider<Material>
+    public sealed class RbxTextureMaterialProvider : IRbxMaterialProvider<Material>,
+        IRbxMaterialVariantConsumer
     {
         internal const string DefaultCatalogResource =
             "CoreAIRbxTextures/RbxMaterialTextureCatalog";
@@ -64,6 +65,8 @@ namespace CoreAI.Mods.Rbx.Rendering
 
         private static Dictionary<int, Material> _sharedMaterials;
         private static Dictionary<int, RbxMaterialTextureCatalog.Entry> _effectiveEntries;
+        private static Dictionary<RbxMaterialId, VariantMaterialRecord> _variantMaterials;
+        private static Shader _sharedShader;
         private static int _sharedMaterialAllocationCount;
         private static float _cachedMetersPerStud;
 
@@ -117,6 +120,10 @@ namespace CoreAI.Mods.Rbx.Rendering
         /// <summary>The same conspicuous diagnostic material used by the procedural catalog.</summary>
         public Material FallbackMaterial => _proceduralProvider.FallbackMaterial;
 
+        /// <summary>Variant lookup port the binder points at the world's MaterialService;
+        /// null renders every part plain.</summary>
+        public IRbxMaterialVariantSource VariantSource { get; set; }
+
         /// <summary>Canonical ids of the 36 texture sets packaged with CoreAI.</summary>
         internal static IReadOnlyList<RbxMaterialId> TexturedMaterials =>
             PackagedTexturedMaterialIds;
@@ -133,6 +140,16 @@ namespace CoreAI.Mods.Rbx.Rendering
         public bool TryGetMaterial(in RbxMaterialId material, out Material visualMaterial)
         {
             EnsureSharedCache();
+            if (material.Variant != null)
+            {
+                return TryGetVariantMaterial(in material, out visualMaterial);
+            }
+
+            return TryGetPlainMaterial(in material, out visualMaterial);
+        }
+
+        private bool TryGetPlainMaterial(in RbxMaterialId material, out Material visualMaterial)
+        {
             if (!_effectiveEntries.TryGetValue(material.Value,
                     out RbxMaterialTextureCatalog.Entry entry))
             {
@@ -151,6 +168,198 @@ namespace CoreAI.Mods.Rbx.Rendering
             }
 
             return _proceduralProvider.TryGetMaterial(in material, out visualMaterial);
+        }
+
+        private bool TryGetVariantMaterial(in RbxMaterialId material, out Material visualMaterial)
+        {
+            IRbxMaterialVariantSource source = VariantSource;
+            if (source == null ||
+                !source.TryGetVariant(material.Variant, out RbxMaterialVariantData data))
+            {
+                RbxMaterialId plain = new(material.Name, material.Value);
+                return TryGetPlainMaterial(in plain, out visualMaterial);
+            }
+
+            if (_variantMaterials.TryGetValue(material, out VariantMaterialRecord record))
+            {
+                if (!VariantDataEquals(record.Snapshot, in data))
+                {
+                    // WHY: the entry the record was built from supplies every slot the variant does
+                    // not override, so a variant that repoints its BaseMaterial must re-resolve it.
+                    // Reusing the cached entry left the unoverridden maps on the OLD base material,
+                    // which is exactly what happens when one world reuses a variant name from
+                    // another with a different base.
+                    if (TryResolveVariantBaseEntry(in material, in data,
+                            out RbxMaterialTextureCatalog.Entry refreshedEntry))
+                    {
+                        record.BaseEntry = refreshedEntry;
+                    }
+
+                    ApplyVariantOverrides(record.Material, record.BaseEntry, in data,
+                        material.Variant);
+                    record.Snapshot = data;
+                }
+
+                SyncTextureScaleToSessionScale();
+                visualMaterial = record.Material;
+                return true;
+            }
+
+            if (!TryResolveVariantBaseEntry(in material, in data,
+                    out RbxMaterialTextureCatalog.Entry baseEntry) || _sharedShader == null)
+            {
+                RbxMaterialId plain = new(material.Name, material.Value);
+                return TryGetPlainMaterial(in plain, out visualMaterial);
+            }
+
+            Material variantMaterial =
+                CreateSharedMaterial(_sharedShader, baseEntry, RbxSpace.MetersPerStud);
+            variantMaterial.name =
+                "CoreAiRbxTextureMaterial_" + material.Name + "_" + material.Variant;
+            ApplyVariantOverrides(variantMaterial, baseEntry, in data, material.Variant);
+            _variantMaterials[material] =
+                new VariantMaterialRecord(variantMaterial, baseEntry, data);
+            SyncTextureScaleToSessionScale();
+            visualMaterial = variantMaterial;
+            return true;
+        }
+
+        private bool TryResolveVariantBaseEntry(in RbxMaterialId material,
+            in RbxMaterialVariantData data, out RbxMaterialTextureCatalog.Entry baseEntry)
+        {
+            baseEntry = null;
+            if (_effectiveEntries == null || _sharedMaterials == null)
+            {
+                return false;
+            }
+
+            if (TryGetValidatedEntry(data.BaseMaterial, out baseEntry))
+            {
+                return true;
+            }
+
+            return TryGetValidatedEntry(in material, out baseEntry);
+        }
+
+        private bool TryGetValidatedEntry(in RbxMaterialId id,
+            out RbxMaterialTextureCatalog.Entry entry)
+        {
+            entry = null;
+            if (!_effectiveEntries.TryGetValue(id.Value, out entry))
+            {
+                return false;
+            }
+
+            if (!string.Equals(entry.MaterialName, id.Name, StringComparison.Ordinal))
+            {
+                entry = null;
+                return false;
+            }
+
+            if (!_sharedMaterials.ContainsKey(id.Value))
+            {
+                entry = null;
+                return false;
+            }
+
+            return true;
+        }
+
+        private void ApplyVariantOverrides(Material material,
+            RbxMaterialTextureCatalog.Entry baseEntry, in RbxMaterialVariantData data,
+            string variantName)
+        {
+            Texture2D albedo = ResolveVariantMap(variantName, "ColorMap", data.ColorMap) ??
+                baseEntry.Albedo;
+            Texture2D normal = ResolveVariantMap(variantName, "NormalMap", data.NormalMap) ??
+                baseEntry.Normal;
+            Texture2D roughness =
+                ResolveVariantMap(variantName, "RoughnessMap", data.RoughnessMap) ??
+                baseEntry.RoughnessOrSmoothness;
+            Texture2D metalness = baseEntry.Metalness;
+            if (!string.IsNullOrEmpty(data.MetalnessMap))
+            {
+                metalness = ResolveVariantMap(variantName, "MetalnessMap", data.MetalnessMap) ??
+                    baseEntry.Metalness;
+            }
+
+            material.SetTexture(PropertyIds.BaseMap, albedo);
+            material.SetTexture(PropertyIds.BumpMap, normal);
+            material.SetTexture(PropertyIds.RoughnessMap, roughness);
+            float textureAspect = material.GetFloat(PropertyIds.TextureAspect);
+            if (albedo != null && albedo.height > 0)
+            {
+                textureAspect = (float)albedo.width / albedo.height;
+                material.SetFloat(PropertyIds.TextureAspect, textureAspect);
+            }
+
+            float tileWidthStuds =
+                data.StudsPerTile > 0f ? data.StudsPerTile : baseEntry.TileWidthStuds;
+            material.SetFloat(PropertyIds.TextureScale,
+                ComputeTextureScale(textureAspect, tileWidthStuds, RbxSpace.MetersPerStud));
+            if (metalness != null)
+            {
+                material.SetTexture(PropertyIds.MetallicMap, metalness);
+                material.EnableKeyword(MetallicMapKeyword);
+            }
+            else
+            {
+                material.SetTexture(PropertyIds.MetallicMap, null);
+                material.DisableKeyword(MetallicMapKeyword);
+            }
+        }
+
+        private Texture2D ResolveVariantMap(string variantName, string slotName,
+            string mapReference)
+        {
+            if (string.IsNullOrEmpty(mapReference))
+            {
+                return null;
+            }
+
+            Texture2D texture = _textureLoader(mapReference);
+            if (texture == null)
+            {
+                Debug.LogError("[CoreAI.RbxApi] MaterialVariant '" + variantName + "' map '" +
+                    mapReference + "' (" + slotName + ") failed to load; keeping the base " +
+                    "texture for that slot.");
+            }
+
+            return texture;
+        }
+
+        private static bool VariantDataEquals(in RbxMaterialVariantData left,
+            in RbxMaterialVariantData right)
+        {
+            return left.BaseMaterial == right.BaseMaterial &&
+                string.Equals(left.ColorMap, right.ColorMap, StringComparison.Ordinal) &&
+                string.Equals(left.NormalMap, right.NormalMap, StringComparison.Ordinal) &&
+                string.Equals(left.RoughnessMap, right.RoughnessMap, StringComparison.Ordinal) &&
+                string.Equals(left.MetalnessMap, right.MetalnessMap, StringComparison.Ordinal) &&
+                left.StudsPerTile == right.StudsPerTile;
+        }
+
+        /// <summary>One cached variant shared material with the base entry and data snapshot
+        /// it was built from.</summary>
+        private sealed class VariantMaterialRecord
+        {
+            public VariantMaterialRecord(Material material,
+                RbxMaterialTextureCatalog.Entry baseEntry, RbxMaterialVariantData snapshot)
+            {
+                Material = material;
+                BaseEntry = baseEntry;
+                Snapshot = snapshot;
+            }
+
+            public Material Material { get; }
+
+            public RbxMaterialTextureCatalog.Entry BaseEntry { get; set; }
+
+            public RbxMaterialVariantData Snapshot { get; set; }
+
+            public float EffectiveTileWidthStuds => Snapshot.StudsPerTile > 0f
+                ? Snapshot.StudsPerTile
+                : BaseEntry.TileWidthStuds;
         }
 
         internal static int SharedMaterialAllocationCount => _sharedMaterialAllocationCount;
@@ -172,8 +381,18 @@ namespace CoreAI.Mods.Rbx.Rendering
                 }
             }
 
+            if (_variantMaterials != null)
+            {
+                foreach (VariantMaterialRecord record in _variantMaterials.Values)
+                {
+                    DestroyMaterial(record.Material);
+                }
+            }
+
             _sharedMaterials = null;
             _effectiveEntries = null;
+            _variantMaterials = null;
+            _sharedShader = null;
             _sharedMaterialAllocationCount = 0;
             _cachedMetersPerStud = 0f;
         }
@@ -195,6 +414,17 @@ namespace CoreAI.Mods.Rbx.Rendering
                     ComputeTextureScale(textureAspect, entry.TileWidthStuds, metersPerStud));
             }
 
+            if (_variantMaterials != null)
+            {
+                foreach (VariantMaterialRecord record in _variantMaterials.Values)
+                {
+                    float textureAspect = record.Material.GetFloat(PropertyIds.TextureAspect);
+                    record.Material.SetFloat(PropertyIds.TextureScale,
+                        ComputeTextureScale(textureAspect, record.EffectiveTileWidthStuds,
+                            metersPerStud));
+                }
+            }
+
             _cachedMetersPerStud = metersPerStud;
         }
 
@@ -211,6 +441,7 @@ namespace CoreAI.Mods.Rbx.Rendering
             Dictionary<int, Material> materials = new(entries.Count);
             _effectiveEntries = entries;
             _sharedMaterials = materials;
+            _variantMaterials = new Dictionary<RbxMaterialId, VariantMaterialRecord>();
 
             if (compatibilityEntries && !AnyTextureAssigned(entries.Values))
             {
@@ -233,6 +464,7 @@ namespace CoreAI.Mods.Rbx.Rendering
                 shader = shader != null ? shader : Shader.Find(ShaderName);
             }
 
+            _sharedShader = shader;
             if (shader == null)
             {
                 Debug.LogError(

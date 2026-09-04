@@ -81,6 +81,18 @@ namespace CoreAI.Mods.Rbx.Binding
             _properties[id] = properties;
         }
 
+        public void SetMaterialVariant(InstanceId id, string variantName)
+        {
+            PartProperties properties = GetPartPropertiesOrDefault(id);
+            properties.MaterialVariant = string.IsNullOrEmpty(variantName) ? null : variantName;
+            _properties[id] = properties;
+        }
+
+        /// <summary>No-op: this sink stores properties and renders nothing.</summary>
+        public void RefreshMaterialVariant(string variantName)
+        {
+        }
+
         public void SetPartProperties(InstanceId id, in PartProperties properties)
         {
             _properties[id] = properties;

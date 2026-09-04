@@ -500,6 +500,11 @@ namespace CoreAI.Ai.LuaCs
                     return clickValue;
                 }
 
+                if (TryReadMaterialVariant(context, self, key, out LuaValue variantValue))
+                {
+                    return variantValue;
+                }
+
                 if (TryReadModelPivot(context, self, key, out LuaValue modelPivotValue))
                 {
                     return modelPivotValue;
@@ -586,6 +591,11 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 if (TryWriteClickDetector(context, self, key, value))
+                {
+                    return LuaValue.Nil;
+                }
+
+                if (TryWriteMaterialVariant(context, self, key, value))
                 {
                     return LuaValue.Nil;
                 }
@@ -1433,6 +1443,9 @@ namespace CoreAI.Ai.LuaCs
                 case "Material":
                     value = WrapMaterial(context, properties.Material);
                     return true;
+                case "MaterialVariant":
+                    value = properties.MaterialVariant ?? string.Empty;
+                    return true;
                 case "Position":
                     value = LuaCsRbxDatatypeBindings.Wrap(properties.Position);
                     return true;
@@ -1497,6 +1510,12 @@ namespace CoreAI.Ai.LuaCs
                     context.RequireWorldEditForWrite(self, "Material");
                     RbxMaterialId material = ReadMaterialValue(value);
                     sink.SetMaterial(id, in material);
+                    context.RecordMutation(self);
+                    return true;
+                case "MaterialVariant":
+                    context.RequireWorldEditForWrite(self, "MaterialVariant");
+                    sink.SetMaterialVariant(id,
+                        ReadOptionalString(value, "Part.MaterialVariant assignment"));
                     context.RecordMutation(self);
                     return true;
                 case "Position":
@@ -1815,6 +1834,100 @@ namespace CoreAI.Ai.LuaCs
             return true;
         }
 
+        // ---- MaterialVariant (script-authored overrides under MaterialService) -------------
+
+        /// <summary>MaterialVariant members: BaseMaterial as its Enum.Material item, the four
+        /// map references as strings, and StudsPerTile. Reads are ungated; writes take WorldEdit.</summary>
+        private static bool TryReadMaterialVariant(LuaCsRbxModContext context, RbxInstance self,
+            string key, out LuaValue value)
+        {
+            if (!(self is RbxMaterialVariant variant))
+            {
+                value = LuaValue.Nil;
+                return false;
+            }
+
+            switch (key)
+            {
+                case "BaseMaterial":
+                    value = WrapMaterial(context, variant.BaseMaterial);
+                    return true;
+                case "ColorMap":
+                    value = variant.ColorMap ?? string.Empty;
+                    return true;
+                case "NormalMap":
+                    value = variant.NormalMap ?? string.Empty;
+                    return true;
+                case "RoughnessMap":
+                    value = variant.RoughnessMap ?? string.Empty;
+                    return true;
+                case "MetalnessMap":
+                    value = variant.MetalnessMap ?? string.Empty;
+                    return true;
+                case "StudsPerTile":
+                    value = variant.StudsPerTile;
+                    return true;
+                default:
+                    value = LuaValue.Nil;
+                    return false;
+            }
+        }
+
+        /// <summary>MaterialVariant member assignment (BaseMaterial, map strings, StudsPerTile).</summary>
+        private static bool TryWriteMaterialVariant(LuaCsRbxModContext context, RbxInstance self,
+            string key, LuaValue value)
+        {
+            if (!(self is RbxMaterialVariant variant))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "BaseMaterial":
+                    context.RequireWorldEditForWrite(self, "BaseMaterial");
+                    variant.BaseMaterial = ReadMaterialValue(value);
+                    context.RecordMutation(self);
+                    context.PartSink.RefreshMaterialVariant(variant.Name);
+                    return true;
+                case "ColorMap":
+                    context.RequireWorldEditForWrite(self, "ColorMap");
+                    variant.ColorMap = ReadStringValue(value, "MaterialVariant.ColorMap assignment");
+                    context.RecordMutation(self);
+                    context.PartSink.RefreshMaterialVariant(variant.Name);
+                    return true;
+                case "NormalMap":
+                    context.RequireWorldEditForWrite(self, "NormalMap");
+                    variant.NormalMap = ReadStringValue(value, "MaterialVariant.NormalMap assignment");
+                    context.RecordMutation(self);
+                    context.PartSink.RefreshMaterialVariant(variant.Name);
+                    return true;
+                case "RoughnessMap":
+                    context.RequireWorldEditForWrite(self, "RoughnessMap");
+                    variant.RoughnessMap =
+                        ReadStringValue(value, "MaterialVariant.RoughnessMap assignment");
+                    context.RecordMutation(self);
+                    context.PartSink.RefreshMaterialVariant(variant.Name);
+                    return true;
+                case "MetalnessMap":
+                    context.RequireWorldEditForWrite(self, "MetalnessMap");
+                    variant.MetalnessMap =
+                        ReadStringValue(value, "MaterialVariant.MetalnessMap assignment");
+                    context.RecordMutation(self);
+                    context.PartSink.RefreshMaterialVariant(variant.Name);
+                    return true;
+                case "StudsPerTile":
+                    context.RequireWorldEditForWrite(self, "StudsPerTile");
+                    variant.StudsPerTile =
+                        ReadNumberValue(value, "MaterialVariant.StudsPerTile assignment");
+                    context.RecordMutation(self);
+                    context.PartSink.RefreshMaterialVariant(variant.Name);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         // ---- Camera (workspace.CurrentCamera over the camera rig) ---------------------------
 
         /// <summary>workspace.CurrentCamera plus the Camera instance's CFrame (over the rig),
@@ -1942,6 +2055,37 @@ namespace CoreAI.Ai.LuaCs
             throw RbxError.BadArgument(
                 what + " expects a number",
                 "pass a number, got " + Describe(value));
+        }
+
+        private static string ReadStringValue(LuaValue value, string what)
+        {
+            if (value.Type == LuaValueType.String)
+            {
+                return value.Read<string>();
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects a string",
+                "pass a string, got " + Describe(value));
+        }
+
+        /// <summary>Nil or empty clears to no override (null); otherwise the variant name.</summary>
+        private static string ReadOptionalString(LuaValue value, string what)
+        {
+            if (value.Type == LuaValueType.Nil)
+            {
+                return null;
+            }
+
+            if (value.Type == LuaValueType.String)
+            {
+                string text = value.Read<string>();
+                return string.IsNullOrEmpty(text) ? null : text;
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects a string or nil",
+                "pass a variant name, \"\" or nil for plain material, got " + Describe(value));
         }
 
     }

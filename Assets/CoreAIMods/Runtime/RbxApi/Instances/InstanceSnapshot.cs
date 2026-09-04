@@ -54,6 +54,7 @@ namespace CoreAI.Mods.Rbx.Instances
         public long Revision;
         public ModelSnapshot Model;
         public ClickDetectorSnapshot ClickDetector;
+        public MaterialVariantSnapshot MaterialVariant;
         public List<string> Tags = new();
         public List<AttributeSnapshot> Attributes = new();
     }
@@ -73,6 +74,19 @@ namespace CoreAI.Mods.Rbx.Instances
     public sealed class ClickDetectorSnapshot
     {
         public string MaxActivationDistance;
+    }
+
+    /// <summary>Durable MaterialVariant state; StudsPerTile uses invariant round-trip formatting.</summary>
+    [Serializable]
+    public sealed class MaterialVariantSnapshot
+    {
+        public string BaseMaterial;
+        public int BaseMaterialValue;
+        public string ColorMap;
+        public string NormalMap;
+        public string RoughnessMap;
+        public string MetalnessMap;
+        public string StudsPerTile;
     }
 
     /// <summary>A captured subtree in preorder (parents always precede children).</summary>

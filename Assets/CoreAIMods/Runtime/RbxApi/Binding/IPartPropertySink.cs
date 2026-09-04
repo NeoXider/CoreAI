@@ -34,6 +34,13 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <summary>Sets Part.Material (Enum.Material) through the render-side provider.</summary>
         void SetMaterial(InstanceId id, in RbxMaterialId material);
 
+        /// <summary>Sets Part.MaterialVariant by name (null or empty restores plain Material).</summary>
+        void SetMaterialVariant(InstanceId id, string variantName);
+
+        /// <summary>Re-resolves the surface of every part wearing this MaterialVariant, after the
+        /// variant's own properties changed.</summary>
+        void RefreshMaterialVariant(string variantName);
+
         /// <summary>Full-state push (bulk restore / Instance.new initialization).</summary>
         void SetPartProperties(InstanceId id, in PartProperties properties);
 

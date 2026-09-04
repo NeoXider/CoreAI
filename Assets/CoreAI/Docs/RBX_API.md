@@ -61,9 +61,9 @@ soon as its `Parent` is set into the world.
 ### `BasePart.Material` and `Part.Color`
 
 `Material` takes an `Enum.Material` item and **every one of the 45 enum items renders**.
-`RbxTextureMaterialProvider` is catalog-driven: the packaged `RbxMaterialTextureCatalog` ships six CC0
-texture-backed surfaces (`Brick`, `Wood`, `WoodPlanks`, `Grass`, `Cobblestone`, `Metal`, 1K), and a
-project-local override catalog (`Assets/CoreAIRbxTexturesLocal/Resources/CoreAIRbxTextureCatalogOverride`,
+`RbxTextureMaterialProvider` is catalog-driven: the packaged `RbxMaterialTextureCatalog` ships 36 CC0
+texture-backed surfaces at 1K, so every material the catalog describes renders from the package alone
+with nothing imported. A project-local override catalog (`Assets/CoreAIRbxTexturesLocal/Resources/CoreAIRbxTextureCatalogOverride`,
 written by the Editor menus `CoreAI/Materials/Download CC0 texture sets (ambientCG)...` and
 `CoreAI/Materials/Import Bridge-Megascans folder...`) can give **any** of the 45 items a 2K–4K PBR set
 with normal, roughness, optional AO and metalness maps; the override wins per material. Items without
@@ -92,6 +92,44 @@ grey and a red one glows red — the same as Roblox.
 Catalog detail lives in
 [`PROCEDURAL_MATERIALS.md`](../../CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md) and
 [`TEXTURE_MATERIALS.md`](../../CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md).
+
+### `MaterialVariant` — your own materials, swapped at runtime
+
+The 45 `Enum.Material` items are CoreAI's defaults, not your limit. A game built on this framework
+brings its own surfaces through Roblox's own answer to that problem: a `MaterialVariant` instance
+parented to `MaterialService`, selected per part by the string property `BasePart.MaterialVariant`.
+No CoreAI-specific API, no additions to `Enum.Material` — the same script runs in Roblox.
+
+```lua
+local variant = Instance.new("MaterialVariant")
+variant.Name = "MossyBrick"
+variant.BaseMaterial = Enum.Material.Brick      -- inherits everything you do not override
+variant.ColorMap = "MyGame/Textures/mossy_brick_color"
+variant.NormalMap = "MyGame/Textures/mossy_brick_normal"
+variant.RoughnessMap = "MyGame/Textures/mossy_brick_rough"
+variant.StudsPerTile = 8
+variant.Parent = game:GetService("MaterialService")
+
+wall.MaterialVariant = "MossyBrick"   -- swap it on
+wall.MaterialVariant = ""             -- and back to plain Enum.Material.Brick
+```
+
+The map strings are `Resources` paths inside your own project, so shipping a texture pack is
+dropping files under any `Resources/` folder and naming them from Lua. A map you leave empty keeps
+the base material's own texture, so a variant that only recolours a surface is three lines.
+`StudsPerTile` is the variant's own tile width in studs — it always applies, exactly as in Roblox, so
+a variant inherits its base material's *textures* but not its tiling.
+
+Assignments take effect on the frame they are made. So does editing a variant that parts are already
+wearing: changing its maps, its `BaseMaterial` or its `StudsPerTile` repaints every part using it, and
+so does renaming, destroying or reparenting the variant itself — the shared material is mutated in
+place rather than reallocated, so no part has to be touched. Naming a variant that does not exist
+renders the plain `Material` instead; it is not an error, and nothing goes magenta. Variants and the
+parts referencing them both survive a world save and load.
+
+Supported today: `BaseMaterial`, `ColorMap`, `NormalMap`, `RoughnessMap`, `MetalnessMap`,
+`StudsPerTile`. Roblox's `AlphaMode`, `MaterialPattern`, `CustomPhysicalProperties`, the emissive
+properties and the `*Content` accessors are not implemented yet.
 
 ## A working mod
 
