@@ -171,7 +171,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [TestCase("Brick", 848, "Bricks104", 10f)]
         [TestCase("Wood", 512, "Wood095", 10f)]
         [TestCase("WoodPlanks", 528, "Wood095", 8f)]
-        [TestCase("Grass", 1280, "Grass005", 7f)]
+        [TestCase("Grass", 1280, "Grass004", 4.5f)]
         [TestCase("Cobblestone", 880, "PavingStones151", 14f)]
         [TestCase("Metal", 1088, "Metal063", 3.5f)]
         public void LuaPartMaterial_ResolvesExpectedTexturedSharedHandle(
@@ -222,7 +222,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [TestCase("Brick", 10f, 0.5f)]
         [TestCase("Wood", 10f, 0.28f)]
         [TestCase("WoodPlanks", 8f, 0.28f)]
-        [TestCase("Grass", 7f, 0.28f)]
+        [TestCase("Grass", 4.5f, 0.28f)]
         [TestCase("Cobblestone", 14f, 0.28f)]
         [TestCase("Metal", 3.5f, 0.28f)]
         public void LuaTexturedPart_ThreeStudFaceProjectsConfiguredFullTextureCount(
@@ -464,7 +464,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         [TestCase("Bricks104_1K-JPG_Color.jpg")]
         [TestCase("Wood095_1K-JPG_Color.jpg")]
-        [TestCase("Grass005_1K-JPG_Color.jpg")]
+        [TestCase("Grass004_1K-JPG_Color.jpg")]
         [TestCase("PavingStones151_1K-JPG_Color.jpg")]
         [TestCase("Metal063_1K-JPG_Color.jpg")]
         public void ColorTextureImport_IsSrgb(string fileName)
@@ -477,7 +477,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         [TestCase("Bricks104_1K-JPG_NormalGL.jpg")]
         [TestCase("Wood095_1K-JPG_NormalGL.jpg")]
-        [TestCase("Grass005_1K-JPG_NormalGL.jpg")]
+        [TestCase("Grass004_1K-JPG_NormalGL.jpg")]
         [TestCase("PavingStones151_1K-JPG_NormalGL.jpg")]
         [TestCase("Metal063_1K-JPG_NormalGL.jpg")]
         public void NormalGlTextureImport_IsNormalMapWithoutGreenFlip(string fileName)
@@ -491,7 +491,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         [TestCase("Bricks104_1K-JPG_Roughness.jpg")]
         [TestCase("Wood095_1K-JPG_Roughness.jpg")]
-        [TestCase("Grass005_1K-JPG_Roughness.jpg")]
+        [TestCase("Grass004_1K-JPG_Roughness.jpg")]
         [TestCase("PavingStones151_1K-JPG_Roughness.jpg")]
         [TestCase("Metal063_1K-JPG_Roughness.jpg")]
         [TestCase("Metal063_1K-JPG_Metalness.jpg")]

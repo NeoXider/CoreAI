@@ -39,6 +39,10 @@ Shader "CoreAI/Rbx/Procedural Surface"
             #pragma multi_compile_instancing
             #pragma multi_compile_fog
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            // WHY: URP 17 renders Forward+ (PC_Renderer m_RenderingMode: 2) and delivers the main
+            // light through the clustered light loop. Without this keyword the pass compiles the
+            // non-clustered variant and every Rbx part is lit by ambient alone — no sun, no shadows.
+            #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
             #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
             #pragma multi_compile_fragment _ _ADDITIONAL_LIGHT_SHADOWS
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH

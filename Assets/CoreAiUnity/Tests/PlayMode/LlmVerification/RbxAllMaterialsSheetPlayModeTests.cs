@@ -30,10 +30,14 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class RbxAllMaterialsSheetPlayModeTests
     {
-        // Materials per frame. Three is what keeps a 2K tile readable at three shapes each: at four
-        // the slab shrank to about sixty pixels tall, which is useless for judging a texture.
-        private const int Columns = 3;
-        private const float Spacing = 20f;
+        // WHY: one material per frame, and the file named after it. Three per frame framed the middle
+        // group correctly but still let half of each neighbour into the edges of the picture, and a
+        // reviewer then cannot tell which of the five things on screen is the one being judged.
+        private const int Columns = 1;
+
+        // A material's pieces span about twenty studs; at forty apart the neighbours fall outside the
+        // frame instead of leaking into its edges.
+        private const float Spacing = 40f;
 
         private static readonly string[] Materials =
         {
@@ -109,7 +113,6 @@ namespace CoreAI.Tests.PlayMode
                 for (int first = 0; first < Materials.Length; first += Columns)
                 {
                     int count = Mathf.Min(Columns, Materials.Length - first);
-                    float centreX = (first + (count - 1) * 0.5f) * Spacing;
                     // WHY: two traps here. camera.aspect still reports the screen's ratio, because
                     // PlayModeCameraShot only binds its RenderTexture inside Capture. And Lua places
                     // parts in STUDS while the camera lives in metres, so deriving the distance from
@@ -128,10 +131,10 @@ namespace CoreAI.Tests.PlayMode
                     camera.transform.LookAt(group.center);
                     yield return null;
                     sheet++;
+                    // WHY: the material's own name is the filename. An unlabelled contact sheet shows
+                    // that something is wrong but not which material it is, which is most of its value.
                     PlayModeCameraShot.Capture(camera,
-                        PlayModeCameraShot.ArtifactPath("materials-sheet-" + sheet + ".png"));
-                    // WHY: an unlabelled contact sheet shows that something is wrong but not which
-                    // material it is, which is most of its value.
+                        PlayModeCameraShot.ArtifactPath("material-" + Materials[first] + ".png"));
                     TestContext.WriteLine("[MaterialSheet] sheet " + sheet + ": " +
                                           string.Join(", ", Materials, first, count));
                 }
@@ -188,15 +191,23 @@ namespace CoreAI.Tests.PlayMode
             return started ? bounds : new Bounds(Vector3.zero, Vector3.one * 10f);
         }
 
+        /// <summary>The suffix each shape's part name carries, so a name match can be exact.</summary>
+        private static readonly string[] PieceSuffixes = { "Flat", "Round", "Ball" };
+
         /// <summary>Whether a renderer is one of the pieces built for <paramref name="material"/>.</summary>
         private static bool BelongsTo(MeshRenderer renderer, string material)
         {
-            // The binder can park the mesh on a child, so the owning part is found by walking up.
+            // WHY: matching on the "Mat_<material>" PREFIX made Sand swallow Sandstone and Wood swallow
+            // WoodPlanks, so a group's bounds stretched across the whole row and the sheet photographed
+            // all 36 materials at once. The name must match a piece exactly.
             for (Transform node = renderer.transform; node != null; node = node.parent)
             {
-                if (node.name.StartsWith("Mat_" + material, System.StringComparison.Ordinal))
+                for (int i = 0; i < PieceSuffixes.Length; i++)
                 {
-                    return true;
+                    if (node.name == "Mat_" + material + PieceSuffixes[i])
+                    {
+                        return true;
+                    }
                 }
             }
 
@@ -248,9 +259,9 @@ namespace CoreAI.Tests.PlayMode
         private static GameObject BuildRig()
         {
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.58f, 0.66f, 0.78f);
-            RenderSettings.ambientEquatorColor = new Color(0.42f, 0.44f, 0.46f);
-            RenderSettings.ambientGroundColor = new Color(0.24f, 0.22f, 0.2f);
+            RenderSettings.ambientSkyColor = new Color(0.34f, 0.39f, 0.47f);
+            RenderSettings.ambientEquatorColor = new Color(0.25f, 0.26f, 0.28f);
+            RenderSettings.ambientGroundColor = new Color(0.15f, 0.14f, 0.13f);
             RenderSettings.ambientIntensity = 1f;
 
             GameObject rig = new("MaterialSheetRig");
@@ -268,10 +279,19 @@ namespace CoreAI.Tests.PlayMode
             lightObject.transform.SetParent(rig.transform);
             Light sun = lightObject.AddComponent<Light>();
             sun.type = LightType.Directional;
-            sun.intensity = 1.9f;
+            sun.intensity = 1.15f;
             sun.color = new Color(1f, 0.96f, 0.9f);
             sun.shadows = LightShadows.Soft;
-            lightObject.transform.rotation = Quaternion.Euler(38f, -34f, 0f);
+            // WHY: under SRP the pipeline picks the main light from RenderSettings.sun when it is set,
+            // and a light built at runtime is not registered there. Without this the sheet was lit by
+            // ambient alone — every material photographed at about 42% of its own albedo, which made
+            // several perfectly good sets look "too dark" and nearly got them replaced.
+            RenderSettings.sun = sun;
+            // WHY: the slabs face +z and the camera sits at +z, so a sun aimed along +z lights their
+            // BACK and every material is photographed on ambient alone — which read as "everything is
+            // too dark" and nearly cost several sets a replacement they did not need. Aim it back
+            // along -z, high and slightly to the right, so the face being judged is the face that is lit.
+            lightObject.transform.rotation = Quaternion.Euler(40f, 205f, 0f);
             return rig;
         }
 

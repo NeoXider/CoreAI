@@ -1,5 +1,10 @@
 # Material texture links (free, CC0, downloadable PBR sets)
 
+> **Superseded on 2026-09-04.** Seventeen of these sets were replaced after every material was
+> photographed on its own and inspected. The current mapping is
+> [MATERIAL_TEXTURE_SOURCES_2026-09-04.md](MATERIAL_TEXTURE_SOURCES_2026-09-04.md); this file is
+> kept as the record of what was originally chosen and why.
+
 All ambientCG rows were taken from the official ambientCG API (`api/v3/assets`) and spot-checked with HTTP 200. Poly Haven rows were fetched and confirmed on-page (4K, CC0, no account).
 
 | Enum.Material | Asset name | URL | Source | Maps available | Notes |

@@ -58,18 +58,18 @@ namespace CoreAI.Editor.RbxMaterials
 
             // Wood.
             ["Wood"] = new Profile(10f, 1.2f, 0.75f, 0.65f),
-            ["WoodPlanks"] = new Profile(8f, 1.25f, 0.78f, 0.65f),
+            ["WoodPlanks"] = new Profile(9f, 1.4f, 0.78f, 0.65f),
 
             // Masonry and cut stone: walls and towers, medium repeats.
             ["Brick"] = new Profile(10f, 1.3f, 0.82f, 0.6f),
             ["Slate"] = new Profile(10f, 1.25f, 0.8f, 0.65f),
             ["Limestone"] = new Profile(12f, 1.15f, 0.82f, 0.7f),
             ["Granite"] = new Profile(12f, 1.15f, 0.78f, 0.65f),
-            ["Sandstone"] = new Profile(12f, 1.2f, 0.85f, 0.7f),
+            ["Sandstone"] = new Profile(10f, 1.35f, 0.85f, 0.7f),
             ["Marble"] = new Profile(12f, 0.55f, 0.55f, 0.7f),
             ["Basalt"] = new Profile(13f, 1.3f, 0.8f, 0.55f),
             ["Concrete"] = new Profile(14f, 1f, 0.85f, 0.75f),
-            ["Plaster"] = new Profile(14f, 0.8f, 0.9f, 0.85f),
+            ["Plaster"] = new Profile(8f, 1.1f, 0.9f, 0.85f),
             ["Salt"] = new Profile(12f, 1f, 0.85f, 0.8f),
 
             // Loose ground and paving: coarse features, the widest repeats.
@@ -77,13 +77,13 @@ namespace CoreAI.Editor.RbxMaterials
             ["Pavement"] = new Profile(12f, 1.25f, 0.8f, 0.7f),
             ["Pebble"] = new Profile(9f, 1.45f, 0.8f, 0.7f),
             ["Rock"] = new Profile(18f, 1.4f, 0.85f, 0.65f),
-            ["Sand"] = new Profile(13f, 1.05f, 0.9f, 0.75f),
+            ["Sand"] = new Profile(7f, 1.2f, 0.9f, 0.75f),
             ["Mud"] = new Profile(15f, 1.3f, 0.85f, 0.7f),
             ["Ground"] = new Profile(16f, 1.35f, 0.88f, 0.7f),
-            ["Asphalt"] = new Profile(16f, 1.1f, 0.85f, 0.6f),
-            ["Grass"] = new Profile(7f, 1.25f, 0.78f, 0.7f),
-            ["LeafyGrass"] = new Profile(8f, 1.4f, 0.8f, 0.7f),
-            ["Snow"] = new Profile(14f, 0.9f, 0.8f, 0.8f),
+            ["Asphalt"] = new Profile(8f, 1.3f, 0.85f, 0.6f),
+            ["Grass"] = new Profile(4.5f, 1.4f, 0.78f, 0.7f),
+            ["LeafyGrass"] = new Profile(5f, 1.4f, 0.8f, 0.7f),
+            ["Snow"] = new Profile(9f, 1.2f, 0.8f, 0.8f),
             ["CrackedLava"] = new Profile(13f, 1.5f, 0.85f, 0.6f),
 
             // Transparent and frozen surfaces are glossy, so their roughness is pulled well down.
@@ -95,20 +95,20 @@ namespace CoreAI.Editor.RbxMaterials
             // Metals: manufactured panels, so a small tile, and the colour must not wash out the metal.
             ["Metal"] = new Profile(3.5f, 0.85f, 0.68f, 0.45f),
             ["CorrodedMetal"] = new Profile(6f, 1.3f, 0.85f, 0.5f),
-            ["DiamondPlate"] = new Profile(4f, 1.5f, 0.72f, 0.5f),
+            ["DiamondPlate"] = new Profile(6f, 1.5f, 0.72f, 0.5f),
             ["Foil"] = new Profile(3f, 1.15f, 0.55f, 0.5f),
 
             // Roofs and interior tiling.
-            ["ClayRoofTiles"] = new Profile(8f, 1.35f, 0.8f, 0.7f),
-            ["RoofShingles"] = new Profile(8f, 1.4f, 0.85f, 0.7f),
+            ["ClayRoofTiles"] = new Profile(7f, 1.45f, 0.8f, 0.7f),
+            ["RoofShingles"] = new Profile(7f, 1.5f, 0.85f, 0.7f),
             ["CeramicTiles"] = new Profile(6f, 0.95f, 0.7f, 0.8f),
 
             // Soft goods and props: the smallest weave, and they take a colour readily.
-            ["Fabric"] = new Profile(4f, 1.1f, 0.9f, 0.9f),
-            ["Carpet"] = new Profile(6f, 1.2f, 0.95f, 0.9f),
-            ["Leather"] = new Profile(3.5f, 1.05f, 0.8f, 0.85f),
-            ["Cardboard"] = new Profile(5f, 1f, 0.9f, 0.8f),
-            ["Rubber"] = new Profile(4f, 0.9f, 0.9f, 0.85f)
+            ["Fabric"] = new Profile(2.5f, 1.3f, 0.9f, 0.9f),
+            ["Carpet"] = new Profile(3f, 1.35f, 0.95f, 0.9f),
+            ["Leather"] = new Profile(2.5f, 1.25f, 0.8f, 0.85f),
+            ["Cardboard"] = new Profile(3f, 1.2f, 0.9f, 0.8f),
+            ["Rubber"] = new Profile(3f, 1.2f, 0.9f, 0.85f)
         };
 
         /// <summary>The tuning for a material, or the generic default when the name is unknown.</summary>

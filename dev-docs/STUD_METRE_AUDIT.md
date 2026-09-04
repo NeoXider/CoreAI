@@ -41,3 +41,10 @@ each boundary converts exactly once, at the binder/rig.
 3. `unity_get/set_position/scale` ↔ Rbx `Position`/`Size`/`CFrame` on the same object: metres vs studs cross-surface.
 4. `AdoptWorldObject` of a part nested under a Size-scaled ancestor → `Size` read-back is wrong (localScale without parent compensation).
 5. Unanchored part: set `CFrame`/`Position`, host physics moves the body, read back → stale last-set value (reverse sync is a documented MVP8 TODO, not a leak).
+
+## Resolved
+
+- Round trips 1–2 (`coreai_world_pos`, `coreai_world_raycast`) — fixed: converted via `RbxSpace`, studs end to end.
+- Round trip 4 (`AdoptWorldObject` Size under a scaled ancestor) — fixed: Size derives from world scale (`lossyScale`).
+- Round trip 3 (`unity_get/set_position`, `unity_get_transform`, `unity_set_scale`) — by design: the Full-Unity escape hatch speaks raw metres; now documented on each binding, do not mix with Rbx studs.
+- Round trip 5 (unanchored-body reverse sync) — remains a documented MVP8 TODO, not a leak.

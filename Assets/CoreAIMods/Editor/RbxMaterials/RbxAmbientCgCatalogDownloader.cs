@@ -30,46 +30,33 @@ namespace CoreAI.Editor.RbxMaterials
         private const string LocalRoot = "Assets/CoreAIRbxTexturesLocal/ambientCG";
         private const string LicensePath = LocalRoot + "/LICENSE.md";
 
+        // WHY: this table used to be a second hand-maintained copy of the CC0 mapping and silently
+        // drifted when defective sets were replaced in the local-catalog importer only. It is now
+        // derived from RbxCc0TextureSets, so both readers share one source of truth.
         private static readonly ReadOnlyCollection<RbxAmbientCgMapping> MappingList =
-            Array.AsReadOnly(new[]
+            BuildMappingList();
+
+        /// <summary>
+        /// Derives the fetchable ambientCG mappings from the shared CC0 table, skipping Poly Haven
+        /// sets, which are not on ambientCG and can never be fetched from it.
+        /// </summary>
+        private static ReadOnlyCollection<RbxAmbientCgMapping> BuildMappingList()
+        {
+            List<RbxAmbientCgMapping> mappings = new();
+            for (int index = 0; index < RbxCc0TextureSets.Sets.Count; index++)
             {
-                new RbxAmbientCgMapping("Brick", "Bricks104"),
-                new RbxAmbientCgMapping("Wood", "Wood049"),
-                new RbxAmbientCgMapping("WoodPlanks", "WoodFloor051"),
-                new RbxAmbientCgMapping("Cobblestone", "PavingStones150"),
-                new RbxAmbientCgMapping("Metal", "Metal049A"),
-                new RbxAmbientCgMapping("Grass", "Grass005"),
-                new RbxAmbientCgMapping("Pavement", "PavingStones128"),
-                new RbxAmbientCgMapping("Pebble", "Gravel023"),
-                new RbxAmbientCgMapping("CeramicTiles", "Tiles133A"),
-                new RbxAmbientCgMapping("LeafyGrass", "Moss002"),
-                new RbxAmbientCgMapping("Mud", "Ground106"),
-                new RbxAmbientCgMapping("Ground", "Ground103"),
-                new RbxAmbientCgMapping("ClayRoofTiles", "RoofingTiles006"),
-                new RbxAmbientCgMapping("RoofShingles", "RoofingTiles003"),
-                new RbxAmbientCgMapping("Fabric", "Fabric036"),
-                new RbxAmbientCgMapping("Carpet", "Carpet016"),
-                new RbxAmbientCgMapping("Leather", "Leather037"),
-                new RbxAmbientCgMapping("Slate", "Rock022"),
-                new RbxAmbientCgMapping("Sandstone", "Bricks084"),
-                new RbxAmbientCgMapping("Rock", "Rock028"),
-                new RbxAmbientCgMapping("Limestone", "Travertine009"),
-                new RbxAmbientCgMapping("Granite", "Granite001A"),
-                new RbxAmbientCgMapping("Basalt", "Rock035"),
-                new RbxAmbientCgMapping("Concrete", "Concrete048"),
-                new RbxAmbientCgMapping("Asphalt", "Asphalt033"),
-                new RbxAmbientCgMapping("Snow", "Snow010A"),
-                new RbxAmbientCgMapping("Sand", "Ground093C"),
-                new RbxAmbientCgMapping("Marble", "Marble012"),
-                new RbxAmbientCgMapping("Cardboard", "Cardboard004"),
-                new RbxAmbientCgMapping("Plaster", "Plaster001"),
-                new RbxAmbientCgMapping("Rubber", "Rubber004"),
-                new RbxAmbientCgMapping("CorrodedMetal", "Rust004"),
-                new RbxAmbientCgMapping("DiamondPlate", "DiamondPlate008C"),
-                new RbxAmbientCgMapping("CrackedLava", "Lava004"),
-                new RbxAmbientCgMapping("Ice", "Ice002"),
-                new RbxAmbientCgMapping("Foil", "Foil003")
-            });
+                RbxCc0TextureSet set = RbxCc0TextureSets.Sets[index];
+                if (!RbxCc0TextureSets.IsAmbientCg(set))
+                {
+                    continue;
+                }
+
+                mappings.Add(new RbxAmbientCgMapping(set.MaterialName,
+                    RbxCc0TextureSets.AssetId(set)));
+            }
+
+            return mappings.AsReadOnly();
+        }
 
         private readonly HashSet<string> _selectedAssetIds = new(StringComparer.Ordinal);
         private readonly Queue<RbxAmbientCgMapping> _pending = new();
@@ -86,7 +73,7 @@ namespace CoreAI.Editor.RbxMaterials
         private Button _downloadButton;
         private Button _cancelButton;
 
-        /// <summary>API-confirmed default mapping table.</summary>
+        /// <summary>API-confirmed default mapping table, derived from the shared CC0 table.</summary>
         public static IReadOnlyList<RbxAmbientCgMapping> Mappings => MappingList;
 
         /// <summary>Builds the ambientCG JPG zip URL.</summary>

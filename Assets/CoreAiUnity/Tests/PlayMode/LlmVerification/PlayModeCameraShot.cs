@@ -42,7 +42,7 @@ namespace CoreAI.Tests.PlayMode
             try
             {
                 camera.targetTexture = target;
-                camera.Render();
+                Render(camera, target);
                 RenderTexture.active = target;
                 image.ReadPixels(new Rect(0, 0, Width, Height), 0, 0);
                 image.Apply();
@@ -58,6 +58,23 @@ namespace CoreAI.Tests.PlayMode
             }
 
             TestContext.WriteLine($"[Screenshot] {path} exists={File.Exists(path)}");
+        }
+
+        /// <summary>Renders one frame into <paramref name="target"/> through the active pipeline.</summary>
+        private static void Render(Camera camera, RenderTexture target)
+        {
+            // WHY: under a scriptable pipeline Camera.Render() bypasses the URP light loop — every shot
+            // came out lit by ambient alone, with no sun and no cast shadows, in this sheet AND in the
+            // castle showcase. SubmitRenderRequest is the supported SRP path and restores real lighting.
+            // The legacy call stays as the fallback for a project running the built-in pipeline.
+            UnityEngine.Rendering.RenderPipeline.StandardRequest request = new() { destination = target };
+            if (UnityEngine.Rendering.RenderPipeline.SupportsRenderRequest(camera, request))
+            {
+                UnityEngine.Rendering.RenderPipeline.SubmitRenderRequest(camera, request);
+                return;
+            }
+
+            camera.Render();
         }
     }
 }

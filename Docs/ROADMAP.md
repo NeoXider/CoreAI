@@ -55,7 +55,7 @@ world state, mods, memories, (soon) UI — is versioned, persisted, revertible, 
 
 ## 2. Package map
 
-Six UPM packages, released in lockstep (all currently 7.6.0):
+Six UPM packages, released in lockstep (all currently 7.8.0):
 
 | Package | What it is |
 |---|---|

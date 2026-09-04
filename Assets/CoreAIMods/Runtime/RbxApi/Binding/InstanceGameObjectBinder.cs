@@ -183,7 +183,9 @@ namespace CoreAI.Mods.Rbx.Binding
             Rigidbody rigidbody = gameObject.GetComponent<Rigidbody>();
             PartProperties properties = PartProperties.CreateDefault();
             properties.CFrame = RbxSpace.FromUnity(transform.position, transform.rotation);
-            properties.Size = RbxSpace.SizeFromUnity(transform.localScale);
+            // WHY: world scale, not local — under a Size-scaled ancestor localScale omits the
+            // parent factor, so the adopted Size must reflect the part the user actually sees.
+            properties.Size = RbxSpace.SizeFromUnity(transform.lossyScale);
             properties.Anchored = rigidbody == null;
             properties.CanCollide = collider == null || collider.enabled;
 

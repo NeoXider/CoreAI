@@ -63,8 +63,11 @@ namespace CoreAI.Mods.Rbx.Rendering
                     0.7f, 0.72f, false),
                 CreatePackagedEntry(textureLoader, "Metal", 1088, "Metal063", 3.5f, 0.45f,
                     0.68f, true),
-                CreatePackagedEntry(textureLoader, "Grass", 1280, "Grass005", 7f, 0.7f,
-                    0.78f, false)
+                // WHY: Grass005 was a featureless mat — albedo variation 8.5 with a normal too weak
+                // to carve blades, so it read as flat green felt. Grass004 shows real blades; the
+                // tile drops to 4.5 studs because at 7 the blades fell below one screen pixel.
+                CreatePackagedEntry(textureLoader, "Grass", 1280, "Grass004", 4.5f, 1.4f,
+                    0.7f, false)
             };
         }
 

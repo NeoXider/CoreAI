@@ -16,11 +16,11 @@ namespace CoreAI.Tests.EditMode.RbxApi
             PackagedAnchors = new()
             {
                 ["Wood"] = (10f, 0.75f, 0.65f),
-                ["WoodPlanks"] = (8f, 0.78f, 0.65f),
+                ["WoodPlanks"] = (9f, 0.78f, 0.65f),
                 ["Brick"] = (10f, 0.82f, 0.6f),
                 ["Cobblestone"] = (14f, 0.72f, 0.7f),
                 ["Metal"] = (3.5f, 0.68f, 0.45f),
-                ["Grass"] = (7f, 0.78f, 0.7f)
+                ["Grass"] = (4.5f, 0.78f, 0.7f)
             };
 
         [Test]

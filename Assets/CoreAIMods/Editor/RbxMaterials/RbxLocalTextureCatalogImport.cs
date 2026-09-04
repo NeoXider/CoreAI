@@ -19,60 +19,39 @@ namespace CoreAI.Editor.RbxMaterials
     {
         private const string TextureRoot = "Assets/CoreAIRbxTexturesLocal";
 
-        /// <summary>One <see cref="UnityEngine.Material"/> slot and the folder that surfaces it.</summary>
-        private readonly struct LocalSet
+        /// <summary>All CC0 sets, read from the single source of truth.</summary>
+        internal static IReadOnlyList<RbxCc0TextureSet> Sets => RbxCc0TextureSets.Sets;
+
+        /// <summary>
+        /// Stamps the shared texture import policy onto the packaged 1K sets.
+        /// <para>
+        /// WHY: the packaged folder ships inside the package, so its .meta files are committed and were
+        /// only ever correct because someone set them by hand once. A newly added map arrives with
+        /// Unity's defaults instead — an sRGB roughness map and a normal imported as a colour texture,
+        /// which the acceptance tests catch but nothing repairs. This applies the same policy the
+        /// override importer uses, so adding a packaged map is a one-command operation.
+        /// </para>
+        /// </summary>
+        [MenuItem("CoreAI/Materials/Apply import policy to packaged textures")]
+        public static void ApplyPackagedImportPolicy()
         {
-            public LocalSet(string materialName, string folder)
+            const string packagedRoot =
+                "Assets/CoreAIMods/Runtime/RbxApi/Unity/Resources/CoreAIRbxTextures";
+            AssetDatabase.Refresh();
+            string[] files = Directory.GetFiles(packagedRoot, "*.jpg", SearchOption.TopDirectoryOnly);
+            int stamped = 0;
+            foreach (string file in files)
             {
-                MaterialName = materialName;
-                Folder = folder;
+                string assetPath = file.Replace(Path.DirectorySeparatorChar, '/');
+                bool isAlbedo = assetPath.EndsWith("_Color.jpg", StringComparison.Ordinal);
+                bool isNormal = assetPath.Contains("_Normal", StringComparison.Ordinal);
+                RbxMaterialCatalogEditorUtility.ApplyTextureImportSettings(assetPath, isAlbedo, isNormal);
+                stamped++;
             }
 
-            public string MaterialName { get; }
-            public string Folder { get; }
+            AssetDatabase.SaveAssets();
+            Debug.Log("[CoreAI] Import policy applied to " + stamped + " packaged textures.");
         }
-
-        // Every entry was confirmed against the source catalog's own API before being written here:
-        // ambientCG ids through api/v3/assets, Poly Haven slugs through api.polyhaven.com/info.
-        private static readonly LocalSet[] Sets =
-        {
-            new("Cobblestone", "ambientCG/PavingStones151"),
-            new("Brick", "ambientCG/Bricks104"),
-            new("Slate", "polyhaven/patterned_slate_tiles"),
-            new("Limestone", "ambientCG/Tiles139"),
-            new("Sandstone", "ambientCG/Tiles144"),
-            new("Granite", "ambientCG/Granite002A"),
-            new("Basalt", "polyhaven/volcanic_rock_tiles"),
-            new("Rock", "ambientCG/Rock064"),
-            new("Concrete", "ambientCG/Concrete034"),
-            new("Marble", "ambientCG/Marble016"),
-            new("Plaster", "ambientCG/Plaster001"),
-            new("Pavement", "ambientCG/PavingStones150"),
-            new("Pebble", "ambientCG/Gravel041"),
-            new("CeramicTiles", "ambientCG/Tiles141"),
-            new("ClayRoofTiles", "ambientCG/RoofingTiles012A"),
-            new("RoofShingles", "ambientCG/RoofingTiles013A"),
-            new("Wood", "ambientCG/Wood095"),
-            new("WoodPlanks", "ambientCG/WoodFloor064"),
-            new("Metal", "ambientCG/Metal063"),
-            new("CorrodedMetal", "ambientCG/Metal021"),
-            new("DiamondPlate", "ambientCG/DiamondPlate009"),
-            new("Foil", "ambientCG/Foil002"),
-            new("Grass", "ambientCG/Grass005"),
-            new("LeafyGrass", "ambientCG/Ground106"),
-            new("Ground", "ambientCG/Ground110"),
-            new("Mud", "ambientCG/Ground109"),
-            new("Sand", "ambientCG/Ground054"),
-            new("Snow", "ambientCG/Snow015"),
-            new("Ice", "ambientCG/Ice003"),
-            new("CrackedLava", "ambientCG/Lava004"),
-            new("Asphalt", "ambientCG/Asphalt033"),
-            new("Fabric", "ambientCG/Fabric081C"),
-            new("Carpet", "ambientCG/Carpet016"),
-            new("Leather", "ambientCG/Leather037"),
-            new("Cardboard", "ambientCG/Cardboard002"),
-            new("Rubber", "ambientCG/Rubber004")
-        };
 
         [MenuItem("CoreAI/Materials/Rebuild override catalog from local sets")]
         public static void Rebuild()
@@ -86,7 +65,7 @@ namespace CoreAI.Editor.RbxMaterials
             List<RbxTextureCatalogEntryData> entries = new();
             string projectRoot = Directory.GetParent(Application.dataPath).FullName;
 
-            foreach (LocalSet set in Sets)
+            foreach (RbxCc0TextureSet set in Sets)
             {
                 string assetFolder = TextureRoot + "/" + set.Folder;
                 string absolute = Path.Combine(projectRoot,
@@ -135,7 +114,7 @@ namespace CoreAI.Editor.RbxMaterials
                 imported++;
             }
 
-            string report = $"imported {imported}/{Sets.Length} sets" +
+            string report = $"imported {imported}/{Sets.Count} sets" +
                             (skipped.Count == 0 ? "" : "; skipped: " + string.Join(" | ", skipped));
             if (entries.Count == 0)
             {

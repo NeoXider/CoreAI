@@ -1,8 +1,8 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using CoreAI.Editor.RbxMaterials;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Unity
@@ -11,80 +11,64 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
     [TestFixture]
     public sealed class RbxMaterialTextureCatalogQaEditModeTests
     {
-        private const string DownloaderTypeName =
-            "CoreAI.Editor.RbxMaterials.RbxAmbientCgCatalogDownloader";
         private const string ImporterTypeName =
             "CoreAI.Editor.RbxMaterials.RbxMegascansCatalogImporter";
 
-        private static readonly KeyValuePair<string, string>[] VerifiedMappings =
-        {
-            new("Brick", "Bricks104"),
-            new("Wood", "Wood049"),
-            new("WoodPlanks", "WoodFloor051"),
-            new("Cobblestone", "PavingStones150"),
-            new("Metal", "Metal049A"),
-            new("Grass", "Grass005"),
-            new("Pavement", "PavingStones128"),
-            new("Pebble", "Gravel023"),
-            new("CeramicTiles", "Tiles133A"),
-            new("Mud", "Ground106"),
-            new("Ground", "Ground103"),
-            new("ClayRoofTiles", "RoofingTiles006"),
-            new("RoofShingles", "RoofingTiles003"),
-            new("Fabric", "Fabric036"),
-            new("Carpet", "Carpet016"),
-            new("Slate", "Rock022"),
-            new("Sandstone", "Bricks084"),
-            new("Limestone", "Travertine009"),
-            new("Granite", "Granite001A"),
-            new("Basalt", "Rock035"),
-            new("Concrete", "Concrete048"),
-            new("Asphalt", "Asphalt033"),
-            new("Sand", "Ground093C"),
-            new("Plaster", "Plaster001"),
-            new("DiamondPlate", "DiamondPlate008C"),
-            new("CrackedLava", "Lava004"),
-            new("CorrodedMetal", "Rust004"),
-            new("Foil", "Foil003")
-        };
-
         [Test]
-        public void AmbientCgMapping_ContainsVerifiedCorrectedIds()
+        public void AmbientCgMapping_MatchesSharedCc0Table()
         {
-            Type downloaderType = RequiredEditorType(DownloaderTypeName);
-            PropertyInfo mappingsProperty = downloaderType.GetProperty("Mappings",
-                BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
-            Assert.NotNull(mappingsProperty);
-            IEnumerable mappings = (IEnumerable)mappingsProperty.GetValue(null);
-            Dictionary<string, string> actual = new(StringComparer.Ordinal);
-            foreach (object mapping in mappings)
+            // WHY: this test used to freeze its own copy of the Enum.Material -> asset-id mapping
+            // and went red when defective sets were replaced in RbxCc0TextureSets only. The
+            // expectation is reconstructed from the shared table, so a replacement can never break
+            // it again; Poly Haven sets are skipped because they are not on ambientCG.
+            Dictionary<string, string> expected = new(StringComparer.Ordinal);
+            foreach (RbxCc0TextureSet set in RbxCc0TextureSets.Sets)
             {
-                actual[(string)GetProperty(mapping, "MaterialName")] =
-                    (string)GetProperty(mapping, "AssetId");
+                if (!RbxCc0TextureSets.IsAmbientCg(set))
+                {
+                    continue;
+                }
+
+                expected[set.MaterialName] = RbxCc0TextureSets.AssetId(set);
             }
 
-            foreach (KeyValuePair<string, string> expected in VerifiedMappings)
+            IReadOnlyList<RbxAmbientCgMapping> mappings = RbxAmbientCgCatalogDownloader.Mappings;
+            Assert.AreEqual(expected.Count, mappings.Count,
+                "downloader mappings must cover exactly the shared ambientCG sets");
+            foreach (RbxAmbientCgMapping mapping in mappings)
             {
-                Assert.IsTrue(actual.ContainsKey(expected.Key), expected.Key + " must be mapped");
-                Assert.AreEqual(expected.Value, actual[expected.Key],
-                    expected.Key + " asset id must match verified SHADER_SOURCES_RESEARCH §2.4");
+                Assert.IsTrue(expected.TryGetValue(mapping.MaterialName, out string assetId),
+                    mapping.MaterialName + " is not an ambientCG set in the shared table");
+                Assert.AreEqual(assetId, mapping.AssetId,
+                    mapping.MaterialName + " asset id must match the shared table");
+                Assert.IsFalse(string.IsNullOrEmpty(mapping.AssetId),
+                    mapping.MaterialName + " asset id must not be empty");
+                StringAssert.StartsWith("https://ambientcg.com/get?file=",
+                    RbxAmbientCgCatalogDownloader.BuildDownloadUrl(mapping.AssetId, "2K"),
+                    mapping.MaterialName + " asset id must build a fetchable ambientCG URL");
             }
 
-            Assert.IsTrue(actual.ContainsKey("Foil"), "Foil must be mapped (was missing)");
-            Assert.AreEqual("Foil003", actual["Foil"]);
+            foreach (RbxCc0TextureSet set in RbxCc0TextureSets.Sets)
+            {
+                if (RbxCc0TextureSets.IsAmbientCg(set))
+                {
+                    continue;
+                }
+
+                Assert.IsFalse(expected.ContainsKey(set.MaterialName),
+                    set.MaterialName + " is a Poly Haven set and must not be fetched from ambientCG");
+            }
         }
 
         [Test]
         public void BuildDownloadUrl_UsesAmbientCgJpgZipFormat()
         {
-            Type downloaderType = RequiredEditorType(DownloaderTypeName);
-            MethodInfo build = downloaderType.GetMethod("BuildDownloadUrl",
-                BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
-            Assert.NotNull(build);
-            string url = (string)build.Invoke(null, new object[] { "DiamondPlate008C", "2K" });
+            // WHY: these literals are URL-format fixtures, not catalog claims — the id-to-material
+            // mapping itself is guarded against the shared table by AmbientCgMapping_MatchesSharedCc0Table.
+            string url = RbxAmbientCgCatalogDownloader.BuildDownloadUrl("DiamondPlate008C", "2K");
             Assert.AreEqual("https://ambientcg.com/get?file=DiamondPlate008C_2K-JPG.zip", url);
-            string url4k = (string)build.Invoke(null, new object[] { "Wood049", "4K" });
-            Assert.AreEqual("https://ambientcg.com/get?file=Wood049_4K-JPG.zip", url4k);
+            string url4k = RbxAmbientCgCatalogDownloader.BuildDownloadUrl("Wood095", "4K");
+            Assert.AreEqual("https://ambientcg.com/get?file=Wood095_4K-JPG.zip", url4k);
         }
 
         [Test]

@@ -328,6 +328,10 @@ namespace CoreAI.Ai.LuaCs
             return true;
         }
 
+        /// <summary>
+        /// Full-Unity escape hatch: raw Unity METRES, not studs. Do not mix with Rbx
+        /// Part.Position/Size/CFrame, which are studs (mixing mis-scales by 1/0.28).
+        /// </summary>
         private static Dictionary<string, object> GetPosition(int instanceId)
         {
             GameObject go = Resolve(instanceId);
@@ -339,6 +343,10 @@ namespace CoreAI.Ai.LuaCs
             return Vector(go.transform.position);
         }
 
+        /// <summary>
+        /// Full-Unity escape hatch: raw Unity METRES, not studs. Do not mix with Rbx
+        /// Part.Position/Size/CFrame, which are studs (mixing mis-scales by 1/0.28).
+        /// </summary>
         private static bool SetPosition(int instanceId, double x, double y, double z)
         {
             GameObject go = Resolve(instanceId);
@@ -351,6 +359,10 @@ namespace CoreAI.Ai.LuaCs
             return true;
         }
 
+        /// <summary>
+        /// Full-Unity escape hatch: raw Unity METRES, not studs. Do not mix with Rbx
+        /// Part.Position/Size/CFrame, which are studs (mixing mis-scales by 1/0.28).
+        /// </summary>
         private static object GetTransform(int instanceId)
         {
             GameObject go = Resolve(instanceId);
@@ -369,6 +381,10 @@ namespace CoreAI.Ai.LuaCs
             return true;
         }
 
+        /// <summary>
+        /// Full-Unity escape hatch: raw Unity METRES, not studs. Do not mix with Rbx
+        /// Part.Position/Size/CFrame, which are studs (mixing mis-scales by 1/0.28).
+        /// </summary>
         private static bool SetScale(int instanceId, double x, double y, double z)
         {
             GameObject go = Resolve(instanceId);

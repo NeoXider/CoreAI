@@ -27,7 +27,7 @@ preview, displacement, ambient-occlusion and DirectX-normal files in each archiv
 |---|---|---|
 | `Bricks104` | https://ambientcg.com/a/Bricks104 | `Enum.Material.Brick` |
 | `Wood095` | https://ambientcg.com/a/Wood095 | `Enum.Material.Wood`, `WoodPlanks` |
-| `Grass005` | https://ambientcg.com/a/Grass005 | `Enum.Material.Grass` |
+| `Grass004` | https://ambientcg.com/a/Grass004 | `Enum.Material.Grass` |
 | `PavingStones151` | https://ambientcg.com/a/PavingStones151 | `Enum.Material.Cobblestone` |
 | `Metal063` | https://ambientcg.com/a/Metal063 | `Enum.Material.Metal` |
 
