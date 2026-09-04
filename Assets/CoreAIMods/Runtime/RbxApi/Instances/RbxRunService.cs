@@ -31,6 +31,10 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxScriptSignal RenderStepped { get; } =
             new("RunService.RenderStepped");
 
+        /// <summary>Topology source behind IsServer/IsClient/IsStudio/IsRunning. Defaults to the
+        /// solo/loopback answer; the host/client slice replaces it without touching the Lua binding.</summary>
+        public IRbxRuntimeTopology Topology { get; set; } = RbxSoloRuntimeTopology.Shared;
+
         /// <summary>
         /// Per-frame pump: fires Stepped, then Heartbeat, then RenderStepped with the frame delta.
         /// The host calls this once per frame (before mod dispatch, like the input pump) so handlers

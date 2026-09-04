@@ -2276,9 +2276,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         [TestCase(
             "local value = workspace.Raycast",
             "WorldRoot:Raycast", "MVP8")]
-        [TestCase(
-            "workspace:GetServerTimeNow()",
-            "Workspace:GetServerTimeNow", "MVP2")]
         public void Lua_PlannedUnimplementedMember_RaisesExactPhaseNamingStub(
             string code, string feature, string phase)
         {

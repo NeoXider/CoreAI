@@ -491,17 +491,33 @@ Ordering changes vs. the seed roadmap, with justification:
 
 ### MVP2 — Scheduler, signals, clocks, services framework (detail: §5.2)
 
-- **Current state (partial)**: `ModScheduler`, `task.*` plus the legacy aliases, general deferred
+- **Current state**: `ModScheduler`, `task.*` plus the legacy aliases, general deferred
   signal dispatch, yieldable signal handlers, and `ServiceCatalog` with member-access loud stubs
   have landed, together with the shared JSON contract / `HttpService` JSON members, loopback
   `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction`, absent-child `WaitForChild` yield (with
   the 5 s infinite-yield warning and the timeout overload), the `Model`/`PVInstance` pivot slice,
   and the **complete materials catalog** — all 45 `Enum.Material` items render (catalog-driven
-  `RbxTextureMaterialProvider`: six packaged CC0 sets, any item overridable from a project-local 2K–4K
-  catalog via the Editor menus; the rest procedural via `RbxProceduralMaterialProvider`) with an opaque
-  magenta diagnostic material for an unmapped id.
-  Clocks, the RunService topology queries, `Workspace:GetServerTimeNow`, and the Tier-A corpus
-  gate remain.
+  `RbxTextureMaterialProvider`: thirty-six packaged CC0 sets, any item overridable from a project-local
+  2K–4K catalog via the Editor menus; the rest procedural via `RbxProceduralMaterialProvider`) with an
+  opaque magenta diagnostic material for an unmapped id, plus `MaterialVariant`/`MaterialService` for
+  a game's own textures.
+
+  The functional surface is complete. **Clocks** (`time`, `os.time`, `os.clock`, `tick`,
+  `workspace:GetServerTimeNow`) landed on the injectable `IRbxClockSource` port, so a game can redefine
+  time — accelerated days, a deterministic replay, a server-synchronised session — and monotonicity is
+  testable without touching the machine clock. `os` is still not the stock library: the sandbox table
+  holds exactly `time` and `clock`, asserted by pair count. The **RunService topology queries**
+  (`IsServer`/`IsClient`/`IsStudio`/`IsRunning`) answer through the swappable `IRbxRuntimeTopology`
+  seam MVP11 will replace; `BindToRenderStep`/`UnbindFromRenderStep` stay loud stubs, being render-step
+  binding rather than topology. The **Tier-A corpus gate was already green** — the 30% floor is
+  enforced by `TierACorpusEditModeTests` and the frozen catalog clears it roughly threefold.
+
+  What remains is **not code**: the G10 capacity gate fails on the AI backend, not on CoreAI. At the
+  measured 17.4–38.5 s provider p95 with one lane, forty requests cannot be served inside a 60 s
+  window by any implementation — the arithmetic in the acceptance manifest calls for 12–25 backend
+  lanes, and even then the 5 s p95 is unreachable because a single provider response already exceeds
+  it. That is a model and hardware decision. The observability seam the frame gate needs before it can
+  be measured honestly (`ILuaCsGuardObserver`) has landed.
 - **Goal**: time and events — `task.*`, `RunService`, the clock surface,
   `RBXScriptSignal`/connections, `game:GetService` with the loud-stub catalog, the materials
   catalog, the shared JSON contract, and loopback remotes. Conformance targets:

@@ -411,9 +411,6 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
                     "Gravity", "MVP8",
                     "keep parts Anchored or use host physics settings until per-body gravity lands"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "GetServerTimeNow", "MVP2",
-                    "use os.time() for wall-clock timestamps until the synchronized clock lands"),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedWriteProperty(
                     "SignalBehavior",
                     "signal mode is Deferred-only; use task.defer when explicit ordering is needed"),
@@ -469,18 +466,6 @@ namespace CoreAI.Mods.Rbx.Instances
                     "GeographicLatitude",
                     "configure the host scene lighting outside Lua until the lighting slice is scheduled"));
             catalog.RegisterKnownUnimplementedMembers("RunService",
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "IsServer", "MVP2",
-                    "target Solo behavior until runtime topology queries land"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "IsClient", "MVP2",
-                    "target Solo behavior until runtime topology queries land"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "IsRunning", "MVP2",
-                    "use the existing Heartbeat signal as the running-state boundary"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "IsStudio", "MVP2",
-                    "do not branch on Studio; CoreAI mods must run in built players"),
                 RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
                     "BindToRenderStep", "MVP2",
                     "connect RunService.RenderStepped until named render-step binding lands"),

@@ -4,6 +4,19 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.13.0] - 2026-09-04
+
+### Added
+
+- **Часы Rbx через сменный источник** (`IRbxClockSource`): `time`, `os.time`, `os.clock`, `tick`,
+  `workspace:GetServerTimeNow`. Игра подставляет свой источник и переопределяет время.
+- **Топологические запросы `RunService`** (`IsServer`/`IsClient`/`IsStudio`/`IsRunning`) через
+  сменный `IRbxRuntimeTopology`.
+
+### Changed
+
+- Дорожная карта MVP2 приведена к правде: корпусный гейт Tier-A был зелёным всё это время.
+
 ## [7.12.0] - 2026-09-04
 
 ### Added

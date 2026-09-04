@@ -112,11 +112,10 @@ namespace CoreAI.Ai.LuaCs
 
         private void InstallIntoState(LuaState state)
         {
-            LuaTable os = new();
-            // WHY: Roblox's monotonic wall clock wins this semantic conflict. Stock Lua's CPU-time
-            // clock was stripped with the unsafe os library and is deliberately not preserved.
-            os["clock"] = Fn("os.clock", _ => new LuaValue(_clock()), null);
-            state.Environment["os"] = new LuaValue(os);
+            // WHY: the sanctioned os surface (ONLY time + clock) has one definition on the
+            // bindings; this decorator runs after the value factories and must reuse it rather
+            // than hand-rolling a narrower table that would clobber os.time.
+            state.Environment["os"] = _bindings.BuildOsTable();
 
             LuaValue gameValue = state.Environment["game"];
             if (gameValue.Type == LuaValueType.Nil)

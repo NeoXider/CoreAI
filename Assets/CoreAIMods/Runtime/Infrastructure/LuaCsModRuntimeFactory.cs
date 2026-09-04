@@ -83,7 +83,7 @@ namespace CoreAI.Ai.LuaCs
         public double RbxHttpRateWindowSeconds =
             LuaCsRbxHttpServiceAdapter.DefaultRateWindowSeconds;
 
-        /// <summary>Optional monotonic clock shared by os.clock and HTTP rate accounting.</summary>
+        /// <summary>Optional monotonic clock for HTTP rate accounting (os.clock owns its clock).</summary>
         public Func<double> RbxMonotonicClock;
 
         /// <summary>

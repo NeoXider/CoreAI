@@ -98,6 +98,9 @@ namespace CoreAI.Ai.LuaCs
         private readonly ModConnectionRegistry _connections;
         private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
         private readonly ModScheduler _scheduler;
+        private readonly IRbxClockSource _clockSource;
+        private readonly object _serverTimeGate = new();
+        private double _lastServerTimeNow = double.NegativeInfinity;
         private readonly INetworkBridge _networkBridge;
         private readonly RbxPlayers _players;
         private readonly LuaCsRbxNetworkCodec _networkCodec;
@@ -141,13 +144,17 @@ namespace CoreAI.Ai.LuaCs
         /// <paramref name="inputSource"/> backs game:GetService("UserInputService"); pass the
         /// host's <see cref="UnityNewInputSource"/> to read real devices, or omit it for the
         /// headless in-memory default (tests drive it directly).
+        /// <paramref name="clockSource"/> backs every Lua-visible clock; pass a game-owned
+        /// source to redefine time, or omit it for the production system-clock default whose
+        /// scaled game time delegates to the scheduler's clock.
         /// </summary>
         public LuaCsRbxApiBindings(InstanceRegistry registry = null, RbxDataModel game = null,
             RbxEnumRegistry enums = null, Action<string> log = null, IPartPropertySink partSink = null,
             IRbxCameraRig cameraRig = null, IInputSource inputSource = null,
             ModConnectionRegistry connections = null, IClickPickSource pickSource = null,
             IRbxRuntimeObservabilitySink observability = null,
-            INetworkBridge networkBridge = null)
+            INetworkBridge networkBridge = null, Func<DateTimeOffset> utcNowProvider = null,
+            IRbxClockSource clockSource = null)
         {
             _registry = registry ?? new InstanceRegistry();
             _connections = connections ?? new ModConnectionRegistry();
@@ -160,6 +167,14 @@ namespace CoreAI.Ai.LuaCs
                 resumeEnvelope: ResumeSchedulerThread);
             _scheduler = new ModScheduler(
                 _schedulerThreadFactory, new RbxAccumulatingTimeSource());
+            // WHY: every Lua-visible clock reads through one injectable source, so a game with
+            // accelerated days, a deterministic replay, or a server-synced session redefines time
+            // by supplying its own source; the default's scaled game time delegates to the
+            // scheduler's clock and tests force the source backwards to prove monotonicity.
+            _clockSource = clockSource
+                ?? new RbxSystemClockSource(
+                    gameTimeSecondsReader: () => _scheduler.CurrentTime,
+                    utcNowProvider: utcNowProvider);
             // WHY: no camera/physics behind the headless default, so clicks resolve to nothing until
             // a live UnityClickPickSource is wired at composition (mirrors the camera-rig default).
             _pickSource = pickSource ?? new InMemoryClickPickSource();
@@ -294,6 +309,44 @@ namespace CoreAI.Ai.LuaCs
         /// Shared logical task scheduler advanced once per scaled host frame by the runtime driver.
         /// </summary>
         public ModScheduler Scheduler => _scheduler;
+
+        /// <summary>Injectable source behind every Lua-visible clock. Null at composition
+        /// means the production system-clock default; a game passes its own source to redefine
+        /// time.</summary>
+        public IRbxClockSource ClockSource => _clockSource;
+
+        /// <summary>Server-synced epoch seconds behind <c>workspace:GetServerTimeNow()</c>,
+        /// monotonic-smoothed on top of <see cref="ClockSource"/> so it never steps back.</summary>
+        internal double GetServerTimeNow()
+        {
+            double now = _clockSource.UnixTimeSecondsFractional;
+            lock (_serverTimeGate)
+            {
+                // WHY: clamp, don't throw — callers expect a clock that keeps ticking through
+                // NTP/system-clock corrections, never one that errors or rewinds.
+                if (now < _lastServerTimeNow)
+                {
+                    return _lastServerTimeNow;
+                }
+
+                _lastServerTimeNow = now;
+                return now;
+            }
+        }
+
+        /// <summary>
+        /// Builds the sanctioned sandbox <c>os</c> table: ONLY <c>time</c> and <c>clock</c>. The
+        /// stock library stays removed (it carries execute/remove/rename/exit/getenv/tmpname);
+        /// this is the single definition shared by the value factory and the HttpService
+        /// decorator, so decorator ordering can never widen or narrow the surface.
+        /// </summary>
+        internal LuaValue BuildOsTable()
+        {
+            LuaTable os = new();
+            os["time"] = Fn("os.time", _ => (double)_clockSource.UnixTimeSeconds);
+            os["clock"] = Fn("os.clock", _ => _clockSource.ProcessTimeSeconds);
+            return new LuaValue(os);
+        }
 
         /// <summary>Transport-neutral bridge used by the production Lua remote surface.</summary>
         public INetworkBridge NetworkBridge => _networkBridge;
@@ -1295,6 +1348,28 @@ namespace CoreAI.Ai.LuaCs
                 "spawn", ctx => LegacySpawn(context, ctx))));
             luaRegistry.RegisterValue("delay", () => new LuaValue(Fn(
                 "delay", ctx => LegacyDelay(context, ctx))));
+            // WHY: time() reads the injectable source's scaled game time, which defaults to the
+            // scheduler's clock (fed the already-scaled host delta by the frame driver), never
+            // Unity Time.time directly — so it freezes at time scale 0 like task.wait does.
+            luaRegistry.RegisterValue("time", () => new LuaValue(Fn(
+                "time", _ => _clockSource.GameTimeSeconds, context)));
+            luaRegistry.RegisterValue("tick", () => new LuaValue(Fn(
+                "tick", _ =>
+                {
+                    if (!context.HasLoggedTickDeprecation)
+                    {
+                        context.HasLoggedTickDeprecation = true;
+                        _log?.Invoke(
+                            "[RbxApi] tick() is deprecated by Roblox; use os.time() for " +
+                            "timestamps or workspace:GetServerTimeNow() for synchronized time " +
+                            "instead. (Logged once per mod.)");
+                    }
+
+                    return _clockSource.UnixTimeSecondsFractional;
+                }, context)));
+            // WHY: the stock os library stays removed by the sandbox (execute/remove/rename/exit
+            // and friends are a sandbox escape); mods get this two-member table and nothing else.
+            luaRegistry.RegisterValue("os", () => BuildOsTable());
             // WHY: registered on every tier so a WorldEdit-less call fails with the actionable
             // capability message instead of "attempt to call a nil value".
             luaRegistry.RegisterValue("camera_set_cframe",

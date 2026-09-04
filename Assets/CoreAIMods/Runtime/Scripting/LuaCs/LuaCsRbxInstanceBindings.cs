@@ -137,6 +137,9 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>DEV-5 task.synchronize/desynchronize no-op note fires once per mod.</summary>
         public bool HasLoggedParallelNoOp { get; set; }
 
+        /// <summary>tick() legacy deprecation note fires once per mod.</summary>
+        public bool HasLoggedTickDeprecation { get; set; }
+
         public bool CanWorldEdit => (Capabilities & LuaCapabilities.WorldEdit) != 0;
 
         public bool IsNetworkServer => Bindings.NetworkBridge.Topology != RbxNetworkTopology.Client
@@ -989,6 +992,18 @@ namespace CoreAI.Ai.LuaCs
 
             Method("GetPlayers", (_, self) => WrapList(
                 context, ((RbxPlayers)self).GetPlayers()), "Players");
+
+            // WHY: the server clock is unscaled and monotonic-smoothed (it never steps back over
+            // NTP/system-clock corrections); gameplay timing still belongs on task.wait and time().
+            Method("GetServerTimeNow", (_, self) =>
+                context.Bindings.GetServerTimeNow(), "Workspace");
+
+            // WHY: topology answers come from the instance's IRbxRuntimeTopology (solo by default),
+            // never from literals here, so the host/client slice swaps the source, not the binding.
+            Method("IsServer", (_, self) => ((RbxRunService)self).Topology.IsServer, "RunService");
+            Method("IsClient", (_, self) => ((RbxRunService)self).Topology.IsClient, "RunService");
+            Method("IsStudio", (_, self) => ((RbxRunService)self).Topology.IsStudio, "RunService");
+            Method("IsRunning", (_, self) => ((RbxRunService)self).Topology.IsRunning, "RunService");
 
             Method("FireServer", (ctx, self) =>
             {
