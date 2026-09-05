@@ -156,6 +156,18 @@ namespace CoreAI.Mods.Rbx.Datatypes
                 ("Default", 0), ("LockCenter", 1), ("LockCurrentPosition", 2)));
             registry.Register(new RbxEnum("PlayerExitReason",
                 ("Unknown", 0), ("PlatformKick", 1), ("CreatorKick", 2)));
+            // WHY: MVP8 slice 8.4 — tween enums arrive with TweenService (mirror-valued 1:1;
+            // EasingStyle Linear 0..Cubic 10, EasingDirection In 0..InOut 2, PlaybackState
+            // Begin 0..Cancelled 5).
+            registry.Register(new RbxEnum("EasingStyle",
+                ("Linear", 0), ("Sine", 1), ("Back", 2), ("Quad", 3), ("Quart", 4),
+                ("Quint", 5), ("Bounce", 6), ("Elastic", 7), ("Exponential", 8),
+                ("Circular", 9), ("Cubic", 10)));
+            registry.Register(new RbxEnum("EasingDirection",
+                ("In", 0), ("Out", 1), ("InOut", 2)));
+            registry.Register(new RbxEnum("PlaybackState",
+                ("Begin", 0), ("Delayed", 1), ("Playing", 2), ("Paused", 3),
+                ("Completed", 4), ("Cancelled", 5)));
             return registry;
         }
 

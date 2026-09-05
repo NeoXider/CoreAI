@@ -356,6 +356,12 @@ namespace CoreAI.Mods.Rbx.Instances
                 descriptor => new RbxRemoteFunction(descriptor)));
             catalog.Register(new ClassDescriptor("Player", "Instance", false, false, false,
                 descriptor => new RbxPlayer(descriptor)));
+            // WHY: MVP8 slice 8.3 — the empty per-player containers Roblox creates on join. The
+            // mirror tags Backpack with no NotCreatable (script-creatable) while PlayerGui and
+            // PlayerScripts are NotCreatable engine children, so only Backpack is creatable here.
+            catalog.Register(new ClassDescriptor("Backpack", "Instance", false, true, false));
+            catalog.Register(new ClassDescriptor("PlayerGui", "Instance", false, false, false));
+            catalog.Register(new ClassDescriptor("PlayerScripts", "Instance", false, false, false));
             catalog.Register(new ClassDescriptor("PVInstance", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("Folder", "Instance", false, true, false));
             catalog.Register(new ClassDescriptor("Model", "PVInstance", false, true, false,
@@ -408,6 +414,15 @@ namespace CoreAI.Mods.Rbx.Instances
             // over the registry tag store); the behavior class is constructed here.
             catalog.Register(new ClassDescriptor("CollectionService", "Instance", false, false, true,
                 descriptor => new RbxCollectionService(descriptor)));
+            // WHY: MVP8 slice 8.4 — TweenService and its tweens are engine-free (Heartbeat
+            // driver on the scheduler scaled clock); TweenBase is the mirror's abstract
+            // ancestor (NotCreatable), Tween instances are service-created and never pass
+            // through Instance.new (creatable false), and TweenService is a service behavior.
+            catalog.Register(new ClassDescriptor("TweenBase", "Instance", true, false, false));
+            catalog.Register(new ClassDescriptor("Tween", "TweenBase", false, false, false,
+                descriptor => new RbxTween(descriptor)));
+            catalog.Register(new ClassDescriptor("TweenService", "Instance", false, false, true,
+                descriptor => new RbxTweenService(descriptor)));
             // WHY: MVP8 slice 8.1 — ValueBase is the mirror's abstract ancestor of all value
             // instances (NotCreatable); the eight concrete values are creatable and carry
             // Value + Changed (lowercase `changed` stays an unknown member: deprecated).
@@ -500,6 +515,136 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
                     "UnbindFromRenderStep", "MVP2",
                     "disconnect the RunService.RenderStepped connection explicitly"));
+            // WHY: MVP8 slice 8.3 — everything outside the slice (lookups, profile names, Kick,
+            // Character read, empty Backpack/PlayerGui/PlayerScripts) stays a loud stub so an
+            // accidental delivery or un-stubbing is caught by the gate tests. "Unsupported" marks
+            // the plan's "not planned" backend/security members; "Planned/MVP8" marks members a
+            // later MVP8 slice ships (character pipeline, respawn fields).
+            catalog.RegisterKnownUnimplementedMembers("Players",
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "BanAsync",
+                    "bans are a platform backend concern, not planned; track identity via Player.UserId"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "UnbanAsync",
+                    "bans are a platform backend concern, not planned; track identity via Player.UserId"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetBanHistoryAsync",
+                    "bans are a platform backend concern, not planned; track identity via Player.UserId"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "CreateHumanoidModelFromDescription",
+                    "avatar appearance fetch is a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "CreateHumanoidModelFromDescriptionAsync",
+                    "avatar appearance fetch is a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "CreateHumanoidModelFromUserId",
+                    "avatar appearance fetch is a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "CreateHumanoidModelFromUserIdAsync",
+                    "avatar appearance fetch is a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetCharacterAppearanceAsync",
+                    "avatar appearance fetch is a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetCharacterAppearanceInfoAsync",
+                    "avatar appearance fetch is a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetFriendsAsync",
+                    "social graph fetch is a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetHumanoidDescriptionFromOutfitId",
+                    "avatar appearance fetch is a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetHumanoidDescriptionFromOutfitIdAsync",
+                    "avatar appearance fetch is a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetHumanoidDescriptionFromUserId",
+                    "avatar appearance fetch is a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetHumanoidDescriptionFromUserIdAsync",
+                    "avatar appearance fetch is a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetNameFromUserIdAsync",
+                    "username lookup is a platform backend concern, not planned; use the profile port"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetUserIdFromNameAsync",
+                    "username lookup is a platform backend concern, not planned; use the profile port"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetUserThumbnailAsync",
+                    "avatar thumbnails are a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "Chat",
+                    "PluginSecurity chat entry point; chat ships as TextChatService, a non-goal"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "TeamChat",
+                    "PluginSecurity chat entry point; chat ships as TextChatService, a non-goal"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "SetChatStyle",
+                    "PluginSecurity chat entry point; chat ships as TextChatService, a non-goal"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
+                    "PlayerMembershipChanged",
+                    "premium membership callbacks are a platform backend concern, not planned"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
+                    "UserSubscriptionStatusChanged",
+                    "subscription callbacks are a platform backend concern, not planned"));
+            catalog.RegisterKnownUnimplementedMembers("Player",
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
+                    "Team",
+                    "no Teams service in this rung; team play arrives with it"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
+                    "TeamColor",
+                    "no Teams service in this rung; team play arrives with it"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
+                    "Neutral",
+                    "no Teams service in this rung; team play arrives with it"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
+                    "ReplicationFocus",
+                    "deferred by owner decision 5; replication focus is not scriptable in this rung"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "AddReplicationFocus",
+                    "deferred by owner decision 5; replication focus is not scriptable in this rung"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "RemoveReplicationFocus",
+                    "deferred by owner decision 5; replication focus is not scriptable in this rung"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetMouse",
+                    "input ships in MVP10; no mouse surface in this rung"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "Chatted",
+                    "chat is TextChatService, a non-goal of this rung"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
+                    "GetNetworkPing",
+                    "network telemetry ships with the MVP11 transport"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
+                    "RespawnLocation",
+                    "respawn plumbing ships with the character pipeline in MVP8"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
+                    "CameraMode",
+                    "camera modes are host-scene configuration in this rung"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
+                    "CanLoadCharacterAppearance",
+                    "character appearance loading ships with the character pipeline in MVP8"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
+                    "CharacterAppearanceId",
+                    "character appearance loading ships with the character pipeline in MVP8"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "StarterGear",
+                    "per-player StarterGear lands with character contents (MVP10/MVP14); use Backpack meanwhile"),
+                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
+                    "LoadCharacterAsync", "MVP8",
+                    "the character pipeline assigns Character; read player.Character meanwhile"),
+                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
+                    "LoadCharacter", "MVP8",
+                    "deprecated alias of LoadCharacterAsync; the character pipeline lands it"),
+                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
+                    "DistanceFromCharacter", "MVP8",
+                    "distance needs the spawned character Head; the character pipeline lands it"),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
+                    "CharacterAdded", "MVP8",
+                    "character spawn signals fire from the character pipeline, not this slice"),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
+                    "CharacterRemoving", "MVP8",
+                    "character spawn signals fire from the character pipeline, not this slice"));
             catalog.EnsureKnownUnimplementedMembersFlattened();
             return catalog;
         }

@@ -33,6 +33,7 @@ namespace CoreAI.Mods.Rbx.Instances
             CreateService(registry, game, "MaterialService");
             CreateService(registry, game, "Debris");
             CreateService(registry, game, "CollectionService");
+            CreateService(registry, game, "TweenService");
             return game;
         }
 
@@ -94,6 +95,14 @@ namespace CoreAI.Mods.Rbx.Instances
             if (game.FindFirstChildOfClass("CollectionService") == null)
             {
                 CreateService(registry, game, "CollectionService");
+            }
+
+            // WHY: snapshots taken before the TweenService slice have no
+            // TweenService; restoring them must still yield a resolvable
+            // game:GetService("TweenService").
+            if (game.FindFirstChildOfClass("TweenService") == null)
+            {
+                CreateService(registry, game, "TweenService");
             }
         }
 

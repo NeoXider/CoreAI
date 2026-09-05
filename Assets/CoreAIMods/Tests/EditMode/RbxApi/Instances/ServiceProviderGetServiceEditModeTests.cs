@@ -78,21 +78,25 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void GetService_PlannedService_ReturnsCachedStubWithoutThrowing()
         {
+            // WHY: TweenService landed as a live tree-backed service (MVP8 slice 8.4), so
+            // DataStoreService (MVP9) stands in as the planned-service probe now.
             RbxInstance service = null;
-            Assert.DoesNotThrow(() => service = _game.GetService("TweenService"));
+            Assert.DoesNotThrow(() => service = _game.GetService("DataStoreService"));
             RbxStubService stub = service as RbxStubService;
             Assert.IsNotNull(stub);
-            Assert.AreEqual("MVP8", stub.PlannedMvp);
-            Assert.AreSame(stub, _game.GetService("TweenService"));
+            Assert.AreEqual("MVP9", stub.PlannedMvp);
+            Assert.AreSame(stub, _game.GetService("DataStoreService"));
         }
 
         [Test]
         public void FindService_ReturnsNullForValidAbsentServicesAndThrowsForUnknown()
         {
             Assert.AreSame(_registry.WorldRoot, _game.FindService("Workspace"));
-            // WHY: Debris landed as a live tree-backed service (MVP8 slice 8.0), so the
-            // still-unimplemented TweenService stands in as the valid-but-absent example.
-            Assert.IsNull(_game.FindService("TweenService"));
+            // WHY: Debris landed as a live tree-backed service (MVP8 slice 8.0), and
+            // TweenService followed in slice 8.4, so the still-unimplemented
+            // DataStoreService stands in as the valid-but-absent example.
+            Assert.IsNull(_game.FindService("DataStoreService"));
+            Assert.IsNotNull(_game.FindService("TweenService"));
 
             // WHY: Players is no longer absent — the loopback networking rung pulled its minimum
             // surface forward so RemoteEvent.OnServerEvent can hand Lua a real Player, as Roblox does.

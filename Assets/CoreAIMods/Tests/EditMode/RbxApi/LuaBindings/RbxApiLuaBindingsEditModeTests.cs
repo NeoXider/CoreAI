@@ -1397,11 +1397,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         public void Lua_Enum_UnknownEnum_RaisesLoudStub()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
-            // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle stays unimplemented
-            // until TweenService (MVP8), so it is the loud-stub probe now.
-            Exception ex = LoadFails(stack, "m", "local k = Enum.EasingStyle");
+            // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle landed with
+            // TweenService (MVP8 slice 8.4), so RaycastFilterType (slice 8.5) is the
+            // loud-stub probe now.
+            Exception ex = LoadFails(stack, "m", "local k = Enum.RaycastFilterType");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("Enum.EasingStyle", FullText(ex));
+            StringAssert.Contains("Enum.RaycastFilterType", FullText(ex));
         }
 
         [Test]
@@ -1611,17 +1612,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             // WHY: top-of-file GetService calls must not block unrelated script initialization;
             // the loud failure belongs to the line that first uses the missing service surface.
+            // TweenService landed in MVP8 slice 8.4, so DataStoreService (MVP9) is the
+            // deferred-stub probe now.
             stack.Runtime.LoadMod("resolve-only", @"
-                local TweenService = game:GetService('TweenService')
-                assert(TweenService ~= nil)");
+                local DataStoreService = game:GetService('DataStoreService')
+                assert(DataStoreService ~= nil)");
             Assert.IsTrue(stack.Runtime.IsLoaded("resolve-only"));
 
             Exception ex = LoadFails(stack, "member-access", @"
-                local TweenService = game:GetService('TweenService')
-                TweenService:Create()");
+                local DataStoreService = game:GetService('DataStoreService')
+                DataStoreService:GetDataStore()");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("TweenService:Create", FullText(ex));
-            StringAssert.Contains("MVP8", FullText(ex));
+            StringAssert.Contains("DataStoreService:GetDataStore", FullText(ex));
+            StringAssert.Contains("MVP9", FullText(ex));
         }
 
         [Test]

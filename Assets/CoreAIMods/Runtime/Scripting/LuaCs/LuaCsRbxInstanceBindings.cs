@@ -443,7 +443,7 @@ namespace CoreAI.Ai.LuaCs
             {
                 RbxInstance self = Self(ctx, context);
                 string key = ReadString(ctx, 1, "Instance member access");
-                ThrowIfDestroyedForLua(self, key);
+                ThrowIfDestroyedForLua(self, key, memberRead: true);
                 ThrowIfStubServiceForLua(self, key);
 
                 switch (key)
@@ -534,6 +534,11 @@ namespace CoreAI.Ai.LuaCs
                 if (TryReadSpatial(context, self, key, out LuaValue spatial))
                 {
                     return spatial;
+                }
+
+                if (TryReadTween(context, self, key, out LuaValue tweenValue))
+                {
+                    return tweenValue;
                 }
 
                 RbxError knownMemberError = GetKnownUnimplementedMemberError(
@@ -702,10 +707,20 @@ namespace CoreAI.Ai.LuaCs
                 }
             }
 
-            if (instance is RbxPlayer player && member == "UserId")
+            if (instance is RbxPlayer player)
             {
-                value = (double)player.UserId;
-                return true;
+                switch (member)
+                {
+                    case "UserId":
+                        value = (double)player.UserId;
+                        return true;
+                    case "DisplayName":
+                        value = player.DisplayName ?? "";
+                        return true;
+                    case "Character":
+                        value = context.WrapInstance(player.Character);
+                        return true;
+                }
             }
 
             if (instance is RbxRemoteEvent remoteEvent)
@@ -763,6 +778,25 @@ namespace CoreAI.Ai.LuaCs
         private static bool TryWriteNetworkMember(LuaCsRbxModContext context,
             RbxInstance instance, string member, LuaState state, LuaValue value)
         {
+            if (instance is RbxPlayer player)
+            {
+                switch (member)
+                {
+                    case "DisplayName":
+                        context.RequireWorldEditForWrite(player, "DisplayName");
+                        player.DisplayName = ReadStringValue(value, "Player.DisplayName assignment");
+                        context.RecordMutation(player);
+                        return true;
+                    case "Character":
+                        context.RequireWorldEditForWrite(player, "Character");
+                        player.Character = ReadOptionalInstance(value, "Player.Character assignment");
+                        context.RecordMutation(player);
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+
             if (!(instance is RbxRemoteFunction remoteFunction))
             {
                 return false;
@@ -980,6 +1014,65 @@ namespace CoreAI.Ai.LuaCs
                 return LuaValue.Nil;
             }, "Debris");
 
+            // WHY: Create/Play/Pause/Cancel stay out of IsMutatingMethod like AddItem —
+            // Create authorizes at call time inside RbxTweenService, Play re-checks there, and
+            // per-frame writes take no envelope (they converge to the authorized goals), so
+            // none of them run inside the per-call server-generated mutation envelope.
+            Method("Create", (ctx, self) =>
+            {
+                RbxTweenService tweenService = (RbxTweenService)self;
+                tweenService.EnsureHost(context.Bindings.Scheduler,
+                    context.Bindings.TweenPropertyHost,
+                    context.Bindings.ResolvePlaybackStateItem);
+                RbxInstance target =
+                    ReadTargetInstance(Arg(ctx, 1), "TweenService:Create", 1);
+                RbxTweenInfo info = LuaCsRbxDatatypeBindings.ReadTweenInfo(
+                    Arg(ctx, 2), "TweenService:Create", 2);
+                List<KeyValuePair<string, object>> goals =
+                    ReadPropertyTable(Arg(ctx, 3));
+                RbxTween tween = tweenService.Create(target, info, goals, new TweenCaller(
+                    context.ActorContext.ActorId,
+                    context.ActorContext.Grants.IsUnrestricted,
+                    context.ActorContext.WorldId));
+                return context.WrapInstance(tween);
+            }, "TweenService");
+            Method("GetValue", (ctx, self) =>
+            {
+                double alpha = ReadDouble(ctx, 1, "TweenService:GetValue");
+                if (double.IsNaN(alpha) || double.IsInfinity(alpha))
+                {
+                    throw RbxError.BadArgument(
+                        "TweenService:GetValue expects a finite alpha at argument 1",
+                        "pass an interpolation value between 0 and 1 at argument 1");
+                }
+
+                RbxEasingStyle style = ReadEasingStyle(Arg(ctx, 2));
+                RbxEasingDirection direction = ReadEasingDirection(Arg(ctx, 3));
+                return RbxTweenService.GetValue(alpha, style, direction);
+            }, "TweenService");
+            Method("SmoothDamp", (_, _) =>
+            {
+                throw RbxError.NotImplemented(
+                    "TweenService:SmoothDamp",
+                    "a later MVP",
+                    "interpolate manually with TweenService:GetValue over RunService.Heartbeat");
+            }, "TweenService");
+            Method("Play", (_, self) =>
+            {
+                ((RbxTween)self).Play();
+                return LuaValue.Nil;
+            }, "Tween");
+            Method("Pause", (_, self) =>
+            {
+                ((RbxTween)self).Pause();
+                return LuaValue.Nil;
+            }, "Tween");
+            Method("Cancel", (_, self) =>
+            {
+                ((RbxTween)self).Cancel();
+                return LuaValue.Nil;
+            }, "Tween");
+
             // ---- Attributes / tags ----
             Method("GetAttribute", (ctx, self) => AttributeToLua(
                 self.GetAttribute(ReadString(ctx, 1, "GetAttribute"))));
@@ -1149,6 +1242,45 @@ namespace CoreAI.Ai.LuaCs
 
             Method("GetPlayers", (_, self) => WrapList(
                 context, ((RbxPlayers)self).GetPlayers()), "Players");
+            Method("GetPlayerByUserId", (ctx, self) => context.WrapInstance(
+                    ((RbxPlayers)self).GetPlayerByUserId(ReadUserId(ctx, 1))), "Players");
+            Method("GetPlayerFromCharacter", (ctx, self) =>
+            {
+                LuaValue characterArg = Arg(ctx, 1);
+                if (characterArg.Type == LuaValueType.Nil)
+                {
+                    return LuaValue.Nil;
+                }
+
+                if (!TryGetInstance(characterArg, out LuaCsRbxInstanceProxy characterProxy))
+                {
+                    throw RbxError.BadArgument(
+                        "Players:GetPlayerFromCharacter expects a Model at argument 1, got "
+                        + Describe(characterArg),
+                        "pass a character Model or nil");
+                }
+
+                return context.WrapInstance(
+                    ((RbxPlayers)self).GetPlayerFromCharacter(characterProxy.Instance));
+            }, "Players");
+            Method("Kick", (ctx, self) =>
+            {
+                RbxPlayer player = (RbxPlayer)self;
+                LuaValue messageArg = Arg(ctx, 1);
+                if (messageArg.Type != LuaValueType.Nil)
+                {
+                    ReadString(ctx, 1, "Player:Kick");
+                }
+
+                // WHY: kicking destroys the player's whole subtree (Player + empty containers),
+                // so it authorizes exactly like Destroy: the host kicks anyone, an actor kicks
+                // its own player, and a cross-actor kick by a plain actor is refused. The
+                // message is validated above and dropped — headless runtime has no surface that
+                // could present it to the kicked user.
+                context.RequireDestroyTree(player, "kick");
+                context.Bindings.KickPlayerWithCreatorKick(player);
+                return LuaValue.Nil;
+            }, "Player");
 
             // WHY: the server clock is unscaled and monotonic-smoothed (it never steps back over
             // NTP/system-clock corrections); gameplay timing still belongs on task.wait and time().
@@ -1195,7 +1327,23 @@ namespace CoreAI.Ai.LuaCs
                    || name == "SetAttribute"
                    || name == "AddTag"
                    || name == "RemoveTag"
-                   || name == "PivotTo";
+                   || name == "PivotTo"
+                   || name == "Kick";
+        }
+
+        private static long ReadUserId(LuaFunctionExecutionContext ctx, int index)
+        {
+            double rawUserId = ReadDoubleValue(
+                Arg(ctx, index), "Players:GetPlayerByUserId argument " + index);
+            if (double.IsNaN(rawUserId) || double.IsInfinity(rawUserId))
+            {
+                throw RbxError.BadArgument(
+                    "Players:GetPlayerByUserId expects a finite UserId at argument " + index
+                    + ", got " + Describe(Arg(ctx, index)),
+                    "pass the numeric UserId, e.g. Players:GetPlayerByUserId(player.UserId)");
+            }
+
+            return (long)rawUserId;
         }
 
         private static RbxPlayer ReadPlayer(LuaFunctionExecutionContext ctx,
@@ -1233,9 +1381,25 @@ namespace CoreAI.Ai.LuaCs
             return instance.IsService || instance.ClassName == "Camera";
         }
 
-        private static void ThrowIfDestroyedForLua(RbxInstance instance, string memberName)
+        /// <param name="memberRead">
+        /// True on the <c>__index</c> path, where the member is being READ. Reads of the instance a
+        /// destruction handler was handed are permitted; writes and method calls never are.
+        /// </param>
+        /// <remarks>
+        /// WHY reads are wider than the three navigation members: the mirror documents
+        /// <c>Players.PlayerRemoving</c> as firing "right before a Player leaves… useful for
+        /// storing player data using a GlobalDataStore", and a DataStore write needs
+        /// <c>player.UserId</c> — the key. With only Name/ClassName/Parent readable, the canonical
+        /// save-on-leave handler raised INSTANCE_DESTROYED on its first line, and because signal
+        /// callbacks report faults through the mod logger instead of throwing, the handler simply
+        /// did nothing. The narrowness stays where it matters: the exception covers reads only,
+        /// only inside a destruction handler, and only for the instance that handler was given.
+        /// </remarks>
+        private static void ThrowIfDestroyedForLua(RbxInstance instance, string memberName,
+            bool memberRead = false)
         {
-            bool tombstoneMember = memberName == "Name"
+            bool tombstoneMember = memberRead
+                                   || memberName == "Name"
                                    || memberName == "ClassName"
                                    || memberName == "Parent";
             if (instance.IsDestroyed
@@ -2230,6 +2394,174 @@ namespace CoreAI.Ai.LuaCs
             // set, so a phantom bump means a replicated update carrying nothing and a stale-revision
             // refusal for a write that was never in conflict.
             return true;
+        }
+
+        // ---- Tween / TweenService (MVP8 slice 8.4) ----------------------------------------
+
+        /// <summary>Tween reads: Instance/TweenInfo/PlaybackState/Completed. Reads are ungated;
+        /// PlaybackState resolves through the enum registry like PartType does.</summary>
+        private static bool TryReadTween(LuaCsRbxModContext context, RbxInstance self,
+            string key, out LuaValue value)
+        {
+            if (!(self is RbxTween tween))
+            {
+                value = LuaValue.Nil;
+                return false;
+            }
+
+            switch (key)
+            {
+                case "Instance":
+                    value = context.WrapInstance(tween.Target);
+                    return true;
+                case "TweenInfo":
+                    value = tween.Info == null
+                        ? LuaValue.Nil
+                        : LuaCsRbxDatatypeBindings.Wrap(
+                            tween.Info, context.Bindings.Enums);
+                    return true;
+                case "PlaybackState":
+                    value = WrapPlaybackState(context, tween.PlaybackState);
+                    return true;
+                case "Completed":
+                    value = LuaCsRbxDatatypeBindings.Wrap(tween.Completed, context);
+                    return true;
+                default:
+                    value = LuaValue.Nil;
+                    return false;
+            }
+        }
+
+        private static LuaValue WrapPlaybackState(LuaCsRbxModContext context,
+            RbxTweenPlaybackState state)
+        {
+            if (context.Bindings.Enums.TryGet("PlaybackState", out RbxEnum playbackState)
+                && playbackState.TryGetItem(state.ToString(), out RbxEnumItem item))
+            {
+                return LuaCsRbxDatatypeBindings.Wrap(item);
+            }
+
+            return (double)(int)state;
+        }
+
+        /// <summary>Reads the Create property table into goal boxes (double, Vector3, CFrame,
+        /// Color3, UDim2); anything else is refused before the service sees it.</summary>
+        private static List<KeyValuePair<string, object>> ReadPropertyTable(LuaValue value)
+        {
+            if (value.Type != LuaValueType.Table)
+            {
+                throw RbxError.BadArgument(
+                    "TweenService:Create expects a table at argument 3",
+                    "pass a dictionary like {Transparency = 1} at argument 3, got "
+                    + Describe(value));
+            }
+
+            LuaTable table = value.Read<LuaTable>();
+            List<KeyValuePair<string, object>> goals = new();
+            foreach (KeyValuePair<LuaValue, LuaValue> pair in table)
+            {
+                if (pair.Key.Type != LuaValueType.String)
+                {
+                    throw RbxError.BadArgument(
+                        "TweenService:Create expects string property names in the property table",
+                        "pass a dictionary like {Transparency = 1}, got a "
+                        + Describe(pair.Key) + " key");
+                }
+
+                string propertyName = pair.Key.Read<string>();
+                goals.Add(new KeyValuePair<string, object>(
+                    propertyName, ReadTweenGoal(pair.Value, propertyName)));
+            }
+
+            return goals;
+        }
+
+        private static object ReadTweenGoal(LuaValue value, string propertyName)
+        {
+            if (value.Type == LuaValueType.Number)
+            {
+                return value.Read<double>();
+            }
+
+            if (TryUnbox(value, out RbxVector3 vector))
+            {
+                return vector;
+            }
+
+            if (TryUnbox(value, out RbxCFrame cframe))
+            {
+                return cframe;
+            }
+
+            if (TryUnbox(value, out RbxColor3 color))
+            {
+                return color;
+            }
+
+            if (TryUnbox(value, out RbxUDim2 udim2))
+            {
+                return udim2;
+            }
+
+            if (value.Type == LuaValueType.Boolean || TryUnbox(value, out RbxEnumItem _)
+                || TryUnbox(value, out RbxUDim _) || TryUnbox(value, out RbxVector2 _))
+            {
+                throw RbxError.BadArgument(
+                    "TweenService:Create does not tween " + Describe(value)
+                    + " goals (MVP-later tweenable backlog: boolean, EnumItem, Rect,"
+                    + " UDim, Vector2, Vector2int16)",
+                    "pass a number, Vector3, CFrame, Color3, or UDim2 goal for '"
+                    + propertyName + "'");
+            }
+
+            throw RbxError.BadArgument(
+                "TweenService:Create goal for '" + propertyName
+                + "' expects a number, Vector3, CFrame, Color3, or UDim2, got "
+                + Describe(value),
+                "pass a tweenable goal value for '" + propertyName + "'");
+        }
+
+        private static RbxEasingStyle ReadEasingStyle(LuaValue value)
+        {
+            RbxEnumItem item = ReadEasingItem(value, "EasingStyle", 2);
+            if (Enum.TryParse(item.Name, out RbxEasingStyle style)
+                && Enum.IsDefined(typeof(RbxEasingStyle), style))
+            {
+                return style;
+            }
+
+            throw RbxError.BadArgument(
+                "got an unknown Enum.EasingStyle item '" + item.Name + "' at argument 2",
+                "use one of Enum.EasingStyle:GetEnumItems()");
+        }
+
+        private static RbxEasingDirection ReadEasingDirection(LuaValue value)
+        {
+            RbxEnumItem item = ReadEasingItem(value, "EasingDirection", 3);
+            if (Enum.TryParse(item.Name, out RbxEasingDirection direction)
+                && Enum.IsDefined(typeof(RbxEasingDirection), direction))
+            {
+                return direction;
+            }
+
+            throw RbxError.BadArgument(
+                "got an unknown Enum.EasingDirection item '" + item.Name + "' at argument 3",
+                "use one of Enum.EasingDirection:GetEnumItems()");
+        }
+
+        private static RbxEnumItem ReadEasingItem(LuaValue value, string enumName,
+            int argumentNumber)
+        {
+            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType != null
+                && item.EnumType.Name == enumName)
+            {
+                return item;
+            }
+
+            throw RbxError.BadArgument(
+                "expects Enum." + enumName + " at argument " + argumentNumber,
+                "pass Enum." + enumName + ".Quad, got " + Describe(value)
+                + " at argument " + argumentNumber);
         }
 
         // ---- Camera (workspace.CurrentCamera over the camera rig) ---------------------------

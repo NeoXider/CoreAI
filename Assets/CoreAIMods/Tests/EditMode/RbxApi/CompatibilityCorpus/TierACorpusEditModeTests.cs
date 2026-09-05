@@ -242,6 +242,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                 case TierAFixtureDriver.AdvanceQuarterSecond:
                     harness.RbxApi.Scheduler.Advance(0.25d);
                     return;
+                case TierAFixtureDriver.AdvanceHalfSecond:
+                    harness.RbxApi.Scheduler.Advance(0.5d);
+                    return;
                 case TierAFixtureDriver.PumpThreeFrames:
                     for (int frame = 0; frame < 3; frame++)
                     {

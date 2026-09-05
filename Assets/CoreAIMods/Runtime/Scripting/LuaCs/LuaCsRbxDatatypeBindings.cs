@@ -275,6 +275,263 @@ namespace CoreAI.Ai.LuaCs
             return new LuaValue(t);
         }
 
+        // ---- TweenInfo ----------------------------------------------------------------------
+
+        /// <summary>
+        /// Carries a TweenInfo plus its resolved enum items: the shared meta reads the items
+        /// back out, so `info.EasingStyle` is the interned Enum.EasingStyle item like Roblox.
+        /// </summary>
+        private sealed class TweenInfoBox
+        {
+            public TweenInfoBox(RbxTweenInfo info, RbxEnumItem style, RbxEnumItem direction)
+            {
+                Info = info;
+                Style = style;
+                Direction = direction;
+            }
+
+            public RbxTweenInfo Info { get; }
+
+            public RbxEnumItem Style { get; }
+
+            public RbxEnumItem Direction { get; }
+        }
+
+        private static readonly LuaTable TweenInfoMeta = BuildTweenInfoMeta();
+
+        /// <summary>Wraps a TweenInfo with its enum items resolved from the registry.</summary>
+        public static LuaValue Wrap(RbxTweenInfo value, RbxEnumRegistry registry)
+        {
+            return Box(ResolveTweenInfoBox(value, registry), TweenInfoMeta);
+        }
+
+        /// <summary>Reads a TweenInfo userdata (argument after self is 1-based here).</summary>
+        public static RbxTweenInfo ReadTweenInfo(LuaValue value, string what, int argumentNumber)
+        {
+            if (TryUnbox(value, out TweenInfoBox box) && box.Info != null)
+            {
+                return box.Info;
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects a TweenInfo at argument " + argumentNumber,
+                "pass TweenInfo.new(...) at argument " + argumentNumber
+                + ", got " + Describe(value));
+        }
+
+        public static LuaValue BuildTweenInfoGlobal(RbxEnumRegistry registry)
+        {
+            LuaTable t = new();
+            t["new"] = Fn("TweenInfo.new", ctx => Wrap(new RbxTweenInfo(
+                ReadTweenTime(Arg(ctx, 0)),
+                ReadTweenStyle(Arg(ctx, 1), registry),
+                ReadTweenDirection(Arg(ctx, 2), registry),
+                ReadTweenRepeatCount(Arg(ctx, 3)),
+                ReadTweenReverses(Arg(ctx, 4)),
+                ReadTweenDelay(Arg(ctx, 5))), registry));
+            return new LuaValue(t);
+        }
+
+        private static TweenInfoBox ResolveTweenInfoBox(RbxTweenInfo info,
+            RbxEnumRegistry registry)
+        {
+            return new TweenInfoBox(info, ResolveTweenEnumItem(registry, "EasingStyle",
+                info.EasingStyle.ToString()), ResolveTweenEnumItem(registry,
+                "EasingDirection", info.EasingDirection.ToString()));
+        }
+
+        private static RbxEnumItem ResolveTweenEnumItem(RbxEnumRegistry registry,
+            string enumName, string itemName)
+        {
+            if (registry.TryGet(enumName, out RbxEnum enumType)
+                && enumType.TryGetItem(itemName, out RbxEnumItem item))
+            {
+                return item;
+            }
+
+            throw RbxError.BadArgument(
+                "TweenInfo cannot resolve Enum." + enumName + "." + itemName,
+                "use the default enum registry, which ships " + enumName + " with TweenService");
+        }
+
+        private static LuaTable BuildTweenInfoMeta()
+        {
+            LuaTable meta = new();
+            meta[Metamethods.Index] = Fn("TweenInfo.__index", ctx =>
+            {
+                TweenInfoBox self = SelfTweenInfo(ctx);
+                string key = ReadString(ctx, 1, "TweenInfo member access");
+                switch (key)
+                {
+                    case "Time": return self.Info.Time;
+                    case "EasingStyle": return Wrap(self.Style);
+                    case "EasingDirection": return Wrap(self.Direction);
+                    case "RepeatCount": return (double)self.Info.RepeatCount;
+                    case "Reverses": return self.Info.Reverses;
+                    case "DelayTime": return self.Info.DelayTime;
+                    default: throw NotAMember(key, "TweenInfo");
+                }
+            });
+            meta[Metamethods.NewIndex] = Fn("TweenInfo.__newindex",
+                _ => throw ReadOnlyMember("TweenInfo"));
+            meta[Metamethods.Eq] = Fn("TweenInfo.__eq", ctx =>
+                TryUnbox(Arg(ctx, 0), out TweenInfoBox a)
+                && TryUnbox(Arg(ctx, 1), out TweenInfoBox b)
+                && a.Info.Equals(b.Info));
+            meta[Metamethods.ToString] = Fn("TweenInfo.__tostring", _ => "TweenInfo");
+            return Lock(meta);
+        }
+
+        private static TweenInfoBox SelfTweenInfo(LuaFunctionExecutionContext ctx)
+        {
+            LuaValue value = Arg(ctx, 0);
+            if (TryUnbox(value, out TweenInfoBox box) && box.Info != null)
+            {
+                return box;
+            }
+
+            throw RbxError.BadArgument(
+                "TweenInfo member access expects a TweenInfo as self",
+                "call TweenInfo members with a colon, got " + Describe(value));
+        }
+
+        private static double ReadTweenTime(LuaValue value)
+        {
+            if (value.Type == LuaValueType.Nil)
+            {
+                return RbxTweenInfo.DefaultTime;
+            }
+
+            if (value.Type != LuaValueType.Number)
+            {
+                throw RbxError.BadArgument(
+                    "TweenInfo.new expects a number for time at argument 1",
+                    "pass a duration in seconds, got " + Describe(value) + " at argument 1");
+            }
+
+            double time = value.Read<double>();
+            if (double.IsNaN(time) || double.IsInfinity(time))
+            {
+                throw RbxError.BadArgument(
+                    "TweenInfo.new expects a finite time at argument 1",
+                    "pass a duration in seconds, e.g. TweenInfo.new(1)");
+            }
+
+            return time;
+        }
+
+        private static double ReadTweenDelay(LuaValue value)
+        {
+            if (value.Type == LuaValueType.Nil)
+            {
+                return RbxTweenInfo.DefaultDelayTime;
+            }
+
+            if (value.Type != LuaValueType.Number)
+            {
+                throw RbxError.BadArgument(
+                    "TweenInfo.new expects a number for delayTime at argument 6",
+                    "pass a delay in seconds, got " + Describe(value) + " at argument 6");
+            }
+
+            double delay = value.Read<double>();
+            if (double.IsNaN(delay) || double.IsInfinity(delay))
+            {
+                throw RbxError.BadArgument(
+                    "TweenInfo.new expects a finite delayTime at argument 6",
+                    "pass a delay in seconds, e.g. TweenInfo.new(1, nil, nil, 0, false, 0.5)");
+            }
+
+            return delay;
+        }
+
+        private static RbxEasingStyle ReadTweenStyle(LuaValue value, RbxEnumRegistry registry)
+        {
+            if (value.Type == LuaValueType.Nil)
+            {
+                return RbxTweenInfo.DefaultEasingStyle;
+            }
+
+            return (RbxEasingStyle)ReadTweenEnumValue(value, registry, "EasingStyle", 2);
+        }
+
+        private static RbxEasingDirection ReadTweenDirection(LuaValue value,
+            RbxEnumRegistry registry)
+        {
+            if (value.Type == LuaValueType.Nil)
+            {
+                return RbxTweenInfo.DefaultEasingDirection;
+            }
+
+            return (RbxEasingDirection)ReadTweenEnumValue(value, registry, "EasingDirection", 3);
+        }
+
+        private static int ReadTweenEnumValue(LuaValue value, RbxEnumRegistry registry,
+            string enumName, int argumentNumber)
+        {
+            if (!TryUnbox(value, out RbxEnumItem item) || item.EnumType == null
+                || item.EnumType.Name != enumName)
+            {
+                throw RbxError.BadArgument(
+                    "TweenInfo.new expects Enum." + enumName + " at argument " + argumentNumber,
+                    "pass Enum." + enumName + ".Quad, got " + Describe(value)
+                    + " at argument " + argumentNumber);
+            }
+
+            if (!registry.TryGet(enumName, out RbxEnum enumType)
+                || !enumType.TryGetItem(item.Name, out RbxEnumItem _))
+            {
+                throw RbxError.BadArgument(
+                    "TweenInfo.new got an unknown Enum." + enumName + " item '" + item.Name + "'",
+                    "use one of Enum." + enumName + ":GetEnumItems()");
+            }
+
+            return item.Value;
+        }
+
+        private static int ReadTweenRepeatCount(LuaValue value)
+        {
+            if (value.Type == LuaValueType.Nil)
+            {
+                return RbxTweenInfo.DefaultRepeatCount;
+            }
+
+            if (value.Type != LuaValueType.Number)
+            {
+                throw RbxError.BadArgument(
+                    "TweenInfo.new expects a number for repeatCount at argument 4",
+                    "pass an integer repeat count, got " + Describe(value) + " at argument 4");
+            }
+
+            double count = value.Read<double>();
+            if (double.IsNaN(count) || double.IsInfinity(count)
+                || count != Math.Floor(count) || count > int.MaxValue || count < int.MinValue)
+            {
+                throw RbxError.BadArgument(
+                    "TweenInfo.new expects a finite integer repeatCount at argument 4",
+                    "pass an integer like 0, or -1 to repeat indefinitely");
+            }
+
+            return (int)count;
+        }
+
+        private static bool ReadTweenReverses(LuaValue value)
+        {
+            if (value.Type == LuaValueType.Nil)
+            {
+                return RbxTweenInfo.DefaultReverses;
+            }
+
+            if (value.Type != LuaValueType.Boolean)
+            {
+                throw RbxError.BadArgument(
+                    "TweenInfo.new expects a boolean for reverses at argument 5",
+                    "pass true or false, got " + Describe(value) + " at argument 5");
+            }
+
+            return value.Read<bool>();
+        }
+
         // ---- Vector3 ------------------------------------------------------------------------
 
         private static LuaTable BuildVector3Meta()

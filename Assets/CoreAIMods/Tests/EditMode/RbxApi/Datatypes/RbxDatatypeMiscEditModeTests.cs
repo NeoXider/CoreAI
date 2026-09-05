@@ -162,11 +162,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         public void EnumRegistry_UnknownEnum_RaisesLoudStub()
         {
             RbxEnumRegistry registry = RbxEnumRegistry.CreateWithBuiltins();
-            // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle stays unimplemented
-            // until TweenService (MVP8), so it is the loud-stub probe now.
-            RbxApiStubException ex = Assert.Throws<RbxApiStubException>(() => registry.Get("EasingStyle"));
+            // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle landed with
+            // TweenService (MVP8 slice 8.4), so RaycastFilterType (slice 8.5) is the
+            // loud-stub probe now.
+            RbxApiStubException ex = Assert.Throws<RbxApiStubException>(() => registry.Get("RaycastFilterType"));
             Assert.AreEqual("NOT_IMPLEMENTED", ex.Code);
-            StringAssert.Contains("Enum.EasingStyle", ex.Message);
+            StringAssert.Contains("Enum.RaycastFilterType", ex.Message);
             StringAssert.Contains("| fix:", ex.Message, "stub errors carry the machine-parsable fix section");
         }
 

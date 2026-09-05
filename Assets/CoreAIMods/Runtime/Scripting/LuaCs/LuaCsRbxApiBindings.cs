@@ -96,6 +96,8 @@ namespace CoreAI.Ai.LuaCs
         private readonly RbxRunService _runService;
         private readonly RbxDebris _debris;
         private readonly RbxCollectionService _collectionService;
+        private readonly RbxTweenService _tweenService;
+        private readonly LuaCsTweenPropertyHost _tweenPropertyHost;
         private readonly IClickPickSource _pickSource;
         private readonly ModConnectionRegistry _connections;
         private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
@@ -274,6 +276,26 @@ namespace CoreAI.Ai.LuaCs
                 _collectionService.AttachHost(_scheduler);
             }
 
+            // WHY: same rationale as Debris — worlds bootstrapped before the TweenService
+            // slice may lack the service; create it here so game:GetService("TweenService")
+            // resolves, then attach the Heartbeat driver, the property host, and the
+            // PlaybackState item resolver so Create/Play/Completed all work.
+            _tweenPropertyHost = new LuaCsTweenPropertyHost(_partSink, _registry);
+            _tweenService =
+                _game.FindFirstChildOfClass("TweenService") as RbxTweenService;
+            if (_tweenService == null
+                && _registry.Catalog.TryGet("TweenService", out _))
+            {
+                _tweenService = (RbxTweenService)_registry.Create("TweenService");
+                _tweenService.Parent = _game;
+            }
+
+            if (_tweenService != null)
+            {
+                _tweenService.AttachHost(
+                    _scheduler, _tweenPropertyHost, ResolvePlaybackStateItem);
+            }
+
             if (_userInputService != null)
             {
                 _userInputService.InputBegan.BindScheduler(_scheduler);
@@ -334,6 +356,29 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>The shared CollectionService instance (tag collections and signals).</summary>
         public RbxCollectionService CollectionService => _collectionService;
+
+        /// <summary>The shared TweenService instance (scaled-time property tweens).</summary>
+        public RbxTweenService TweenService => _tweenService;
+
+        /// <summary>Property IO behind the tween driver (same assembly as the bindings).</summary>
+        internal LuaCsTweenPropertyHost TweenPropertyHost => _tweenPropertyHost;
+
+        /// <summary>
+        /// Resolves an engine-free tween state to its interned Enum.PlaybackState item for the
+        /// Completed signal payload (mirror: Completed passes the PlaybackState).
+        /// </summary>
+        internal RbxEnumItem ResolvePlaybackStateItem(RbxTweenPlaybackState state)
+        {
+            if (_enums.TryGet("PlaybackState", out RbxEnum playbackState)
+                && playbackState.TryGetItem(state.ToString(), out RbxEnumItem item))
+            {
+                return item;
+            }
+
+            throw RbxError.BadArgument(
+                "Tween.Completed cannot resolve Enum.PlaybackState." + state,
+                "use the default enum registry, which ships PlaybackState with TweenService");
+        }
 
         /// <summary>Mod log sink behind Debris drop reports and headless-mode notes.</summary>
         internal Action<string> LogSink => _log;
@@ -400,6 +445,18 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Players service populated from trusted network actor contexts.</summary>
         public RbxPlayers Players => _players;
+
+        /// <summary>
+        /// Mirror <c>Player:Kick</c> entry: removes the player with the <c>CreatorKick</c> exit
+        /// reason (the enum item comes from the shared registry so Lua identity comparison
+        /// against <c>Enum.PlayerExitReason.CreatorKick</c> holds). Already-removed players are a
+        /// silent no-op here; the Lua boundary refuses destroyed instances before reaching this.
+        /// </summary>
+        internal void KickPlayerWithCreatorKick(RbxPlayer player)
+        {
+            RbxEnumItem reason = _enums.Get("PlayerExitReason")["CreatorKick"];
+            _players.KickPlayer(player, reason);
+        }
 
         internal int CountRemoteFunctionWaitsOwnedBy(string ownerModId)
         {
@@ -1394,6 +1451,8 @@ namespace CoreAI.Ai.LuaCs
             luaRegistry.RegisterValue("UDim2", LuaCsRbxDatatypeBindings.BuildUDim2Global);
             luaRegistry.RegisterValue("Random", LuaCsRbxDatatypeBindings.BuildRandomGlobal);
             luaRegistry.RegisterValue("Enum", () => LuaCsRbxDatatypeBindings.BuildEnumGlobal(_enums));
+            luaRegistry.RegisterValue("TweenInfo",
+                () => LuaCsRbxDatatypeBindings.BuildTweenInfoGlobal(_enums));
             if (!string.IsNullOrWhiteSpace(ownerModId))
             {
                 luaRegistry.RegisterValue("script", () =>

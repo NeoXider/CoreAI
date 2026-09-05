@@ -85,7 +85,8 @@ order is not part of the CoreAI or Roblox authoring contract.
 
 In the standard runtime, `game:GetService()` resolves these tree-backed services: `Workspace`,
 `Lighting`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `Players`,
-`HttpService`, `UserInputService`, `MaterialService`, `Debris`, and `RunService`. A tree-backed service can still have
+`HttpService`, `UserInputService`, `MaterialService`, `Debris`, `CollectionService`, `TweenService`,
+and `RunService`. A tree-backed service can still have
 service-specific members that have not landed; resolution alone does not promise that every Roblox
 member exists.
 
@@ -95,8 +96,6 @@ delivery rung recorded by `ServiceCatalog`:
 
 | Service | Catalog delivery rung |
 |---|---|
-| `TweenService` | MVP8 |
-| `CollectionService` | MVP8 |
 | `DataStoreService` | MVP9 |
 | `ContextActionService` | MVP10 |
 | `SoundService` | MVP15 |
@@ -113,12 +112,12 @@ but use them only in a later code path. Failing during `GetService()` would prev
 loading and stop unrelated supported code from running. For example:
 
 ```lua
-local TweenService = game:GetService("TweenService") -- resolves
+local DataStoreService = game:GetService("DataStoreService") -- resolves
 
 print("unrelated setup still runs")
 
--- The first member lookup fails loudly and names MVP8.
-TweenService:Create(...)
+-- The first member lookup fails loudly and names MVP9.
+DataStoreService:GetDataStore("Saves")
 ```
 
 An unknown, unregistered name still fails immediately at `GetService()` with `UNKNOWN_SERVICE`.

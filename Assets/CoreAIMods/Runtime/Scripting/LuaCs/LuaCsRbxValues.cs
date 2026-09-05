@@ -268,6 +268,7 @@ namespace CoreAI.Ai.LuaCs
                 case RbxColor3 _: return "Color3";
                 case RbxUDim _: return "UDim";
                 case RbxUDim2 _: return "UDim2";
+                case RbxTweenInfo _: return "TweenInfo";
                 case RbxEnumItem _: return "EnumItem";
                 case RbxEnum _: return "Enum";
                 case RbxRandom _: return "Random";

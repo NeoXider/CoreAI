@@ -12,6 +12,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         None,
         AdvanceImmediate,
         AdvanceQuarterSecond,
+        AdvanceHalfSecond,
         PumpThreeFrames,
         PumpSixSeconds,
         PressE
@@ -264,12 +265,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
             new TierAFixtureSpec(
                 "TAC-019-tween-create",
                 "TAC-019-tween-create.lua",
-                TierAFixtureClassification.Failing,
-                TierAFixtureDriver.None,
-                "None; the canonical TweenService:Create idiom is intentionally retained.",
-                "TweenService is a loud planned-service stub and TweenInfo is not exposed.",
-                "TweenService:Create, TweenInfo, and tween lifecycle",
-                "TweenService",
+                TierAFixtureClassification.Unmodified,
+                TierAFixtureDriver.AdvanceHalfSecond,
+                "None.",
+                "The canonical TweenService:Create idiom runs unchanged: TweenInfo.new, multi-property goals, Completed(Completed), attribute marker.",
+                "",
+                "",
                 "D:/Git/RobloxDocs/creator-docs/content/en-us/reference/engine/classes/TweenService.yaml; Docs/CoreAIMods/RobloxReference/03_SERVICES_AND_DATA.md S4.1-S4.6"),
             new TierAFixtureSpec(
                 "TAC-020-players-localplayer",
