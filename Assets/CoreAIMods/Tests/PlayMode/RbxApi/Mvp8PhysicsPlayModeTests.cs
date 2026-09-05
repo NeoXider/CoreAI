@@ -164,6 +164,36 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             StringAssert.Contains("15000", error.Message);
         }
 
+        [UnityTest]
+        public IEnumerator Humanoid_WalksAtWalkSpeedInStudsPerSecond()
+        {
+            // The one number the whole metric contract rests on: WalkSpeed is studs per second, and
+            // a stud is 0.28 m. A motor that walked in metres would be 3.5x too fast and nothing
+            // else in the API would notice.
+            GameObject character = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            character.transform.position = new Vector3(0f, 0.5f, 0f);
+            Rigidbody body = character.AddComponent<Rigidbody>();
+            body.useGravity = false;
+            UnityRbxCharacterMotor motor = new(body);
+            yield return null;
+
+            motor.SetWalkSpeed(RbxHumanoid.DefaultWalkSpeed);
+            motor.MoveTo(new RbxVector3(0f, 0f, 1000f));
+            Vector3 start = body.position;
+            for (int step = 0; step < 50; step++)
+            {
+                motor.Step();
+                UnityEngine.Physics.Simulate(FixedStep);
+            }
+
+            float travelled = Vector3.Distance(start, body.position);
+            float expected = RbxSpace.LengthToUnity((float)RbxHumanoid.DefaultWalkSpeed) * 1f;
+            UnityEngine.Object.DestroyImmediate(character);
+
+            Assert.AreEqual(expected, travelled, expected * 0.02f,
+                "16 studs/s must measure 16 x 0.28 m/s on the controller, within 2%");
+        }
+
         /// <summary>
         /// How far a body falls in <paramref name="seconds"/> under <paramref name="gravityStuds"/>,
         /// in metres, as a fixed-step simulation actually integrates it.

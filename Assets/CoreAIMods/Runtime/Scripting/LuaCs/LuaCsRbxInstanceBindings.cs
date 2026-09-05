@@ -716,6 +716,42 @@ namespace CoreAI.Ai.LuaCs
                 return true;
             }
 
+            if (instance is RbxHumanoid humanoid)
+            {
+                switch (member)
+                {
+                    case "Health": return Ok(humanoid.Health, out value);
+                    case "MaxHealth": return Ok(humanoid.MaxHealth, out value);
+                    case "WalkSpeed": return Ok(humanoid.WalkSpeed, out value);
+                    case "JumpPower": return Ok(humanoid.JumpPower, out value);
+                    case "JumpHeight": return Ok(humanoid.JumpHeight, out value);
+                    case "UseJumpPower": return Ok(humanoid.UseJumpPower, out value);
+                    case "DisplayName": return Ok(humanoid.DisplayName ?? "", out value);
+                    case "MoveDirection":
+                        return Ok(LuaCsRbxDatatypeBindings.Wrap(humanoid.MoveDirection), out value);
+                    case "RootPart":
+                        return Ok(context.WrapInstance(humanoid.RootPart), out value);
+                    // WHY Jump reads false rather than raising: the mirror's Jump is a write-only
+                    // request in practice, and a script that reads it back is asking "am I jumping",
+                    // which GetState answers honestly.
+                    case "Jump": return Ok(false, out value);
+                    case "Died":
+                        return Ok(LuaCsRbxDatatypeBindings.Wrap(humanoid.Died, context), out value);
+                    case "HealthChanged":
+                        return Ok(LuaCsRbxDatatypeBindings.Wrap(humanoid.HealthChanged, context), out value);
+                    case "MoveToFinished":
+                        return Ok(LuaCsRbxDatatypeBindings.Wrap(humanoid.MoveToFinished, context), out value);
+                    case "Running":
+                        return Ok(LuaCsRbxDatatypeBindings.Wrap(humanoid.Running, context), out value);
+                    case "Jumping":
+                        return Ok(LuaCsRbxDatatypeBindings.Wrap(humanoid.Jumping, context), out value);
+                    case "FreeFalling":
+                        return Ok(LuaCsRbxDatatypeBindings.Wrap(humanoid.FreeFalling, context), out value);
+                    case "StateChanged":
+                        return Ok(LuaCsRbxDatatypeBindings.Wrap(humanoid.StateChanged, context), out value);
+                }
+            }
+
             // WHY here and not in the part-property reader: Touched/TouchEnded are signals on the
             // instance, not state in the part sink, and a part with no listener must not have its
             // signal created just because something read a different member.
@@ -809,6 +845,63 @@ namespace CoreAI.Ai.LuaCs
                 context.Bindings.WorldPhysics.Gravity =
                     ReadDoubleValue(value, "Workspace.Gravity assignment");
                 return true;
+            }
+
+            if (instance is RbxHumanoid humanoidTarget)
+            {
+                switch (member)
+                {
+                    case "Health":
+                        context.RequireWorldEditForWrite(instance, "Health");
+                        humanoidTarget.Health = ReadDoubleValue(value, "Humanoid.Health assignment");
+                        context.RecordMutation(instance);
+                        return true;
+                    case "MaxHealth":
+                        context.RequireWorldEditForWrite(instance, "MaxHealth");
+                        humanoidTarget.MaxHealth =
+                            ReadDoubleValue(value, "Humanoid.MaxHealth assignment");
+                        context.RecordMutation(instance);
+                        return true;
+                    case "WalkSpeed":
+                        context.RequireWorldEditForWrite(instance, "WalkSpeed");
+                        humanoidTarget.WalkSpeed =
+                            ReadDoubleValue(value, "Humanoid.WalkSpeed assignment");
+                        context.RecordMutation(instance);
+                        return true;
+                    case "JumpPower":
+                        context.RequireWorldEditForWrite(instance, "JumpPower");
+                        humanoidTarget.JumpPower =
+                            ReadDoubleValue(value, "Humanoid.JumpPower assignment");
+                        context.RecordMutation(instance);
+                        return true;
+                    case "JumpHeight":
+                        context.RequireWorldEditForWrite(instance, "JumpHeight");
+                        humanoidTarget.JumpHeight =
+                            ReadDoubleValue(value, "Humanoid.JumpHeight assignment");
+                        context.RecordMutation(instance);
+                        return true;
+                    case "UseJumpPower":
+                        context.RequireWorldEditForWrite(instance, "UseJumpPower");
+                        humanoidTarget.UseJumpPower = value.ToBoolean();
+                        context.RecordMutation(instance);
+                        return true;
+                    case "DisplayName":
+                        context.RequireWorldEditForWrite(instance, "DisplayName");
+                        humanoidTarget.DisplayName =
+                            ReadStringValue(value, "Humanoid.DisplayName assignment");
+                        context.RecordMutation(instance);
+                        return true;
+                    // WHY a write and not a method: the mirror's jump request IS an assignment
+                    // (humanoid.Jump = true), and scripts written for Roblox spell it that way.
+                    case "Jump":
+                        context.RequireWorldEditForWrite(instance, "Jump");
+                        if (value.ToBoolean())
+                        {
+                            humanoidTarget.RequestJump();
+                        }
+
+                        return true;
+                }
             }
 
             if (instance is RbxPlayer player)
@@ -1314,6 +1407,48 @@ namespace CoreAI.Ai.LuaCs
                 context.Bindings.KickPlayerWithCreatorKick(player);
                 return LuaValue.Nil;
             }, "Player");
+
+            Method("TakeDamage", (ctx, self) =>
+            {
+                ((RbxHumanoid)self).TakeDamage(
+                    ReadDoubleValue(Arg(ctx, 1), "Humanoid:TakeDamage amount"));
+                return LuaValue.Nil;
+            }, "Humanoid");
+            Method("MoveTo", (ctx, self) =>
+            {
+                // The mirror's second argument is a part to follow; following a moving target needs
+                // the character rig, so it is refused rather than silently ignored.
+                if (Arg(ctx, 2).Type != LuaValueType.Nil)
+                {
+                    throw RbxError.BadArgument(
+                        "Humanoid:MoveTo part following is not implemented",
+                        "pass only the destination Vector3; re-issue MoveTo as the target moves");
+                }
+
+                ((RbxHumanoid)self).MoveTo(
+                    ReadVector3Value(Arg(ctx, 1), "Humanoid:MoveTo location"));
+                return LuaValue.Nil;
+            }, "Humanoid");
+            Method("GetState", (_, self) =>
+                LuaCsRbxDatatypeBindings.Wrap(ResolveHumanoidStateItem(
+                    context, ((RbxHumanoid)self).GetState())), "Humanoid");
+            Method("ChangeState", (ctx, self) =>
+            {
+                // WHY only Jumping: it is the one state a script can legitimately force without a
+                // rig. Anything else would be a state the machine never leaves, so it says so.
+                RbxEnumItem requested = ReadHumanoidStateItem(Arg(ctx, 1));
+                if (requested.Value != (int)RbxHumanoidState.Jumping)
+                {
+                    throw new RbxApiStubException(
+                        "NOT_IMPLEMENTED",
+                        "Humanoid:ChangeState(Enum.HumanoidStateType." + requested.Name
+                        + ") is not implemented; CoreAI's character is a motor, not a full R15 rig",
+                        "force only Enum.HumanoidStateType.Jumping, or read Humanoid:GetState()");
+                }
+
+                ((RbxHumanoid)self).RequestJump();
+                return LuaValue.Nil;
+            }, "Humanoid");
 
             // WHY declared on WorldRoot and not Workspace: the mirror puts Raycast on WorldRoot, so
             // any future WorldModel gets it from the same declaration rather than a copy.
@@ -2793,6 +2928,39 @@ namespace CoreAI.Ai.LuaCs
 
 
         // ---- Raycast userdata ---------------------------------------------------------------
+
+        private static bool Ok(LuaValue produced, out LuaValue value)
+        {
+            value = produced;
+            return true;
+        }
+
+        private static RbxEnumItem ResolveHumanoidStateItem(LuaCsRbxModContext context,
+            RbxHumanoidState state)
+        {
+            if (context.Bindings.Enums.TryGet("HumanoidStateType", out RbxEnum enumType)
+                && enumType.TryGetItemByValue((int)state, out RbxEnumItem item))
+            {
+                return item;
+            }
+
+            throw RbxError.BadArgument(
+                "Humanoid:GetState cannot resolve Enum.HumanoidStateType." + state,
+                "use the default enum registry, which ships HumanoidStateType with Humanoid");
+        }
+
+        private static RbxEnumItem ReadHumanoidStateItem(LuaValue value)
+        {
+            if (TryUnbox(value, out RbxEnumItem item)
+                && string.Equals(item.EnumType.Name, "HumanoidStateType", StringComparison.Ordinal))
+            {
+                return item;
+            }
+
+            throw RbxError.BadArgument(
+                "Humanoid:ChangeState expects an Enum.HumanoidStateType",
+                "pass Enum.HumanoidStateType.Jumping, got " + Describe(value));
+        }
 
         private static RbxError NotAValidMember(string key, string typeName)
         {

@@ -99,6 +99,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly RbxTweenService _tweenService;
         private readonly LuaCsTweenPropertyHost _tweenPropertyHost;
         private readonly RbxWorldPhysics _worldPhysics;
+        private Func<RbxHumanoid, IRbxCharacterMotor> _characterMotorFactory;
         private readonly IClickPickSource _pickSource;
         private readonly ModConnectionRegistry _connections;
         private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
@@ -302,6 +303,10 @@ namespace CoreAI.Ai.LuaCs
             // workspace:Raycast (with a miss) and remember a scripted Workspace.Gravity until a host
             // attaches one. The null port is that answer.
             _worldPhysics = new RbxWorldPhysics(_registry);
+            // WHY every Humanoid is wired on registration rather than on first use: a Humanoid that
+            // has no scheduler silently never times out a MoveTo and never changes state, and the
+            // script that created it has no way to notice.
+            _registry.Registered += OnInstanceRegisteredForCharacter;
 
             if (_userInputService != null)
             {
@@ -369,6 +374,42 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>World queries, gravity and contact relay; the host attaches the engine port.</summary>
         public RbxWorldPhysics WorldPhysics => _worldPhysics;
+
+        /// <summary>
+        /// Supplies the character controller behind every <c>Humanoid</c>. Without one, humanoids
+        /// keep their health and state but never move.
+        /// </summary>
+        /// <remarks>
+        /// WHY a factory and not one motor: each Humanoid drives its own character, and the host
+        /// decides what that is — the bundled motor, its own controller, or nothing at all in a
+        /// headless world.
+        /// </remarks>
+        public void AttachCharacterMotorFactory(Func<RbxHumanoid, IRbxCharacterMotor> factory)
+        {
+            _characterMotorFactory = factory;
+            IReadOnlyList<RbxInstance> live = _registry.GetLiveInstances();
+            for (int index = 0; index < live.Count; index++)
+            {
+                if (live[index] is RbxHumanoid humanoid)
+                {
+                    AttachCharacterMotor(humanoid);
+                }
+            }
+        }
+
+        private void OnInstanceRegisteredForCharacter(InstanceRecord record)
+        {
+            if (record.Instance is RbxHumanoid humanoid)
+            {
+                AttachCharacterMotor(humanoid);
+            }
+        }
+
+        private void AttachCharacterMotor(RbxHumanoid humanoid)
+        {
+            IRbxCharacterMotor motor = _characterMotorFactory?.Invoke(humanoid);
+            humanoid.AttachHost(_scheduler, motor, humanoid.Parent);
+        }
 
         /// <summary>Property IO behind the tween driver (same assembly as the bindings).</summary>
         internal LuaCsTweenPropertyHost TweenPropertyHost => _tweenPropertyHost;

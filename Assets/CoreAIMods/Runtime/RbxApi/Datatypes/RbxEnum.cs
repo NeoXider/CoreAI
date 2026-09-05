@@ -174,6 +174,16 @@ namespace CoreAI.Mods.Rbx.Datatypes
             // round-trip cannot carry back.
             registry.Register(new RbxEnum("RaycastFilterType",
                 ("Exclude", 0), ("Include", 1)));
+            // WHY the FULL mirror item set and not only the five states CoreAI enters: an enum is a
+            // vocabulary, and a script that writes Enum.HumanoidStateType.Seated must fail on the
+            // ChangeState call it makes, with a message naming what is missing — not on the enum
+            // lookup, which would read as "Roblox has no such state".
+            registry.Register(new RbxEnum("HumanoidStateType",
+                ("FallingDown", 0), ("Ragdoll", 1), ("GettingUp", 2), ("Jumping", 3),
+                ("Swimming", 4), ("Freefall", 5), ("Flying", 6), ("Landed", 7), ("Running", 8),
+                ("RunningNoPhysics", 10), ("StrafingNoPhysics", 11), ("Climbing", 12),
+                ("Seated", 13), ("PlatformStanding", 14), ("Dead", 15), ("Physics", 16),
+                ("None", 18)));
             return registry;
         }
 

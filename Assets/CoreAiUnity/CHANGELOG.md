@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.21.0] - 2026-09-05
+
+### Added
+
+- **MVP8 срез 8.6** — `Humanoid` (здоровье, параметры движения, автомат состояний, `MoveTo` с
+  таймаутом на масштабированном времени) и собственный `UnityRbxCharacterMotor` за интерфейсом
+  `IRbxCharacterMotor`; PlayMode-гейт меряет 16 стадов/с как 16 × 0,28 м/с ±2 %.
+
 ## [7.20.0] - 2026-09-05
 
 ### Added

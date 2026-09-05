@@ -1398,11 +1398,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle landed with
-            // TweenService (MVP8 slice 8.4) and RaycastFilterType with Raycast (slice 8.5), so
-            // HumanoidStateType (slice 8.6) is the loud-stub probe now.
-            Exception ex = LoadFails(stack, "m", "local k = Enum.HumanoidStateType");
+            // TweenService (MVP8 slice 8.4), RaycastFilterType with Raycast (8.5) and
+            // HumanoidStateType with Humanoid (8.6), so SurfaceType — the vocabulary of the legacy
+            // surface members, which are explicitly not scheduled — is the loud-stub probe now.
+            Exception ex = LoadFails(stack, "m", "local k = Enum.SurfaceType");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("Enum.HumanoidStateType", FullText(ex));
+            StringAssert.Contains("Enum.SurfaceType", FullText(ex));
         }
 
         [Test]

@@ -58,6 +58,27 @@ soon as its `Parent` is set into the world.
 `Position` keeps the part's rotation; `CFrame` sets position and rotation together; `Orientation`
 (YXZ degrees) and `Rotation` (XYZ degrees) set the rotation and keep the position.
 
+### `Humanoid`
+
+`Instance.new("Humanoid")` gives a character `Health` (clamped to `[0, MaxHealth]`, default 100),
+`MaxHealth`, `WalkSpeed` (16 studs/s), `JumpPower` (50), `JumpHeight` (7.2 studs), `UseJumpPower`
+(true), read-only `MoveDirection` and `RootPart`, plus `TakeDamage(amount)` (negative heals),
+`MoveTo(location)`, `GetState()` and `Humanoid.Jump = true`. Signals: `Died` (once — a dead humanoid
+stays dead), `HealthChanged`, `MoveToFinished(reached)`, `Running`, `Jumping`, `FreeFalling`,
+`StateChanged(old, new)`. `MoveTo` reports `MoveToFinished(false)` after **eight seconds of scaled
+time**, so a paused world never times a walk out.
+
+Movement is done by a motor behind `IRbxCharacterMotor`: CoreAI ships `UnityRbxCharacterMotor`, and
+a host that prefers its own controller implements the interface without changing anything a script
+sees. `Enum.HumanoidStateType` ships its full Roblox item set, but the state machine only enters
+`Running`, `Jumping`, `Freefall`, `Landed` and `Dead`; `ChangeState` accepts only `Jumping` and says
+so loudly otherwise. Seats, ragdoll, swimming, climbing, accessories and animation raise the loud
+stub — they need a character rig CoreAI does not model.
+
+**Passive regeneration is not built in**, exactly as in Roblox: the mirror inserts a regeneration
+*script* into humanoids and documents disabling it with an empty `Script` named `Health`, so
+regeneration belongs to the character template rather than the class.
+
 ### Physics: gravity, raycasts, contacts
 
 `workspace.Gravity` is studs per second squared and defaults to Roblox's 196.2. It is applied per

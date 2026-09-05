@@ -370,6 +370,10 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("Workspace", "WorldRoot", false, false, true,
                 descriptor => new RbxModel(descriptor)));
             catalog.Register(new ClassDescriptor("BasePart", "PVInstance", true, false, false));
+            // WHY MVP8 slice 8.6: Humanoid carries health, the movement parameters and the state
+            // machine; the character controller behind it is a swappable motor, not a class here.
+            catalog.Register(new ClassDescriptor("Humanoid", "Instance", false, true, false,
+                descriptor => new RbxHumanoid(descriptor)));
             // WHY Part has a behaviour class from MVP8 slice 8.5: Touched/TouchEnded belong to the
             // part the mirror fires them on, not to a side table keyed by id that every reader of
             // the tree would have to know about.
@@ -460,6 +464,9 @@ namespace CoreAI.Mods.Rbx.Instances
                     "Terrain",
                     "build terrain from Parts; voxel Terrain is a roadmap non-goal"));
 
+            string humanoidRigWorkaround =
+                "CoreAI's character is a motor, not a full R15 rig; these members land with the "
+                + "character-rig slice";
             string physicsWorkaround =
                 "keep the part Anchored and animate CFrame, or use host physics until this bridge lands";
             string collisionWorkaround =
@@ -644,6 +651,51 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
                     "CharacterRemoving", "MVP8",
                     "character spawn signals fire from the character pipeline, not this slice"));
+            // WHY these stay loud: each needs a character rig CoreAI does not model (seats,
+            // ragdoll, swimming, climbing, accessories, animation). A silent no-op would let a
+            // script believe it sat a player down; the loud stub names the rung instead.
+            catalog.RegisterKnownUnimplementedMembers("Humanoid",
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "Sit", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "SeatPart", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "PlatformStand", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "AutoRotate", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "HipHeight", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "MaxSlopeAngle", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "CameraOffset", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "RigType", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "Seated", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "Climbing", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "Swimming", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
+                    "Touched", "connect BasePart.Touched on the character's parts instead"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "SetStateEnabled", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "GetStateEnabled", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "ApplyDescription", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "GetAppliedDescription", humanoidRigWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "LoadAnimation", "animation playback lands with the animation slice"),
+                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
+                    "Move", "MVP10",
+                    "drive movement with Humanoid:MoveTo until input-driven Move lands"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "EquipTool", "tools land with the Backpack contents slice"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "UnequipTools", "tools land with the Backpack contents slice"));
             catalog.EnsureKnownUnimplementedMembersFlattened();
             return catalog;
         }
