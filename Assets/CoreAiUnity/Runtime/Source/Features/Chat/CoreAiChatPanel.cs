@@ -2916,6 +2916,16 @@ namespace CoreAI.Chat
 
                         if (!string.IsNullOrEmpty(visible))
                         {
+                            // Явная граница из клиента: началась СЛЕДУЮЩАЯ реплика того же потока.
+                            // Раньше границу ловила только эвристика по tool-progress подсказке
+                            // (см. BufferedStreamingUseToolProgressHint выше), а её нет на нативном
+                            // tool-calling — вторая реплика дописывалась в конец первой, и ученик
+                            // читал слипшееся «Проверь себя:**Ход завершён…**» одним пузырём.
+                            if (chunk.StartsNewMessage)
+                            {
+                                SealStreamingBubbleIfAny();
+                            }
+
                             if (!_streamingStartedVisible || _streamingBubbleSealed)
                             {
                                 _streamingStartedVisible = true;
@@ -2929,7 +2939,10 @@ namespace CoreAI.Chat
                             // WHY: fullResponse keeps the complete text for history/handlers; only the
                             // rendered streaming label is capped (see AppendToStreaming).
                             string formatted = FormatResponseText(visible);
-                            fullResponse += formatted;
+                            // Пузыри разъехались, но fullResponse уходит в историю и обработчикам
+                            // одной строкой — там граница обязана остаться пустой строкой, иначе
+                            // склейка вернётся при следующем показе той же истории.
+                            fullResponse = AppendStreamedMessage(fullResponse, formatted, chunk.StartsNewMessage);
                             AppendToStreaming(formatted, turnGeneration);
                         }
                     }
@@ -4087,6 +4100,18 @@ namespace CoreAI.Chat
                 ScheduleStreamingScrollToBottom();
             }
         }
+
+        /// <summary>
+        /// Дописывает очередной кусок речи в полный ответ хода. Само правило разделения реплик общее
+        /// для всех накопителей и живёт в <see cref="StreamedMessageJoiner"/> — здесь только вызов.
+        /// <para>
+        /// Пузыри на экране уже разъехались, но <c>fullResponse</c> уходит ОДНОЙ строкой в историю
+        /// роли и обработчикам ответа, поэтому разделитель нужен и тут: иначе склейка «Проверь
+        /// себя:**Ход завершён…**» всплывёт снова при следующем показе той же истории.
+        /// </para>
+        /// </summary>
+        internal static string AppendStreamedMessage(string fullResponse, string formatted, bool startsNewMessage) =>
+            StreamedMessageJoiner.Append(fullResponse, formatted, startsNewMessage);
 
         /// <summary>
         /// Closes the in-flight streaming bubble at a tool-round boundary so subsequent prose opens a

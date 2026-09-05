@@ -713,7 +713,7 @@ namespace CoreAI.Ai
 
                         if (current != null && !string.IsNullOrEmpty(current.Text))
                         {
-                            accumulated.Append(current.Text);
+                            StreamedMessageJoiner.Append(accumulated, current);
                             chunkCount++;
                         }
 
@@ -1103,7 +1103,7 @@ namespace CoreAI.Ai
 
                     if (!string.IsNullOrEmpty(current.Text))
                     {
-                        accumulated.Append(current.Text);
+                        StreamedMessageJoiner.Append(accumulated, current);
                     }
 
                     if (!string.IsNullOrEmpty(current.Error))

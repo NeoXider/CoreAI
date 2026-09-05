@@ -134,6 +134,62 @@ namespace CoreAI.Tests.EditMode
                 "Plain streaming with no tool round must stay in a single bubble.");
         }
 
+        /// <summary>
+        /// Явная граница сообщения из клиента открывает НОВЫЙ пузырь и ставит пустую строку в полном
+        /// ответе хода. Прежде границу ловила только эвристика по tool-progress подсказке, которой нет
+        /// на нативном tool-calling: на проде две реплики слипались в одну строку и ученик читал
+        /// «Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**».
+        /// </summary>
+        [Test]
+        public async Task Streaming_ChunkStartsNewMessage_OpensSecondBubbleAndSeparatesFullResponse()
+        {
+            using PanelCtx ctx = NewPanel();
+            ctx.Panel.SetRuntimeOptions(new CoreAiChatOptions { RoleId = "SmartChat" });
+
+            ScrollView scroll = new();
+            SetField(ctx.Panel, "MessageScroll", scroll);
+            SetField(ctx.Panel, "ChatContainer", scroll);
+
+            ctx.Panel.ChatService = new CoreAiChatService(
+                new FakeStreamingOrchestrator(new[]
+                {
+                    new LlmStreamChunk { Text = "Проверь себя:" },
+                    new LlmStreamChunk { Text = "**Ход завершён.**", StartsNewMessage = true },
+                    new LlmStreamChunk { IsDone = true }
+                }),
+                settings: new StubSettings { EnableStreaming = true });
+
+            string? response = await ctx.Panel.SubmitMessageFromExternalAsync(
+                "hi",
+                new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+
+            Assert.AreEqual("Проверь себя:\n\n**Ход завершён.**", response,
+                "Полный ответ хода уходит в историю одной строкой — граница обязана остаться в нём.");
+
+            List<Label> aiLabels = scroll.contentContainer
+                .Query<Label>().Class("coreai-ai-message").ToList();
+
+            Assert.AreEqual(2, aiLabels.Count,
+                "Признак новой реплики обязан открыть отдельный пузырь.");
+            Assert.AreEqual("Проверь себя:", aiLabels[0].text);
+            Assert.AreEqual("**Ход завершён.**", aiLabels[1].text,
+                "Разделитель живёт в полном ответе, а не в тексте нового пузыря.");
+        }
+
+        /// <summary>
+        /// Реплика, уже закончившаяся абзацем, не получает третьей пустой строки, а признак на самом
+        /// первом чанке не выносит разделитель в начало ответа.
+        /// </summary>
+        [Test]
+        public void AppendStreamedMessage_AddsOnlyTheMissingBlankLine()
+        {
+            Assert.AreEqual("a\n\nb", CoreAiChatPanel.AppendStreamedMessage("a", "b", true));
+            Assert.AreEqual("a\n\nb", CoreAiChatPanel.AppendStreamedMessage("a\n", "b", true));
+            Assert.AreEqual("a\n\nb", CoreAiChatPanel.AppendStreamedMessage("a\n\n", "b", true));
+            Assert.AreEqual("ab", CoreAiChatPanel.AppendStreamedMessage("a", "b", false));
+            Assert.AreEqual("b", CoreAiChatPanel.AppendStreamedMessage("", "b", true));
+        }
+
         // ---------- helpers ----------
 
         /// <summary>

@@ -123,6 +123,15 @@ Covered by **24 EditMode tests** (`ThinkBlockStreamFilterEditModeTests`) includi
 ### Response and persistence boundary (7.0.7+)
 
 - Build visible incremental and final text only from `LlmStreamChunk.Text`.
+- **One stream carries several assistant messages.** After every tool round the model speaks again, and
+  those replies arrive as one continuous chunk sequence. `LlmStreamChunk.StartsNewMessage` marks the
+  first visible chunk of each reply after the first. Concatenating chunks blindly glues the end of one
+  reply to the start of the next — in production a student read
+  `…Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**`, two messages fused into one.
+  Use `StreamedMessageJoiner.Append(...)`: it is the single owner of the separation rule (blank line
+  between replies, nothing before the first, no third blank line when the reply already ended with a
+  paragraph). Never infer the boundary from punctuation — a reply may legitimately end with a colon
+  and begin with a lowercase letter, so any heuristic is wrong in both directions.
 - Treat `LlmStreamChunk.ReasoningText` as optional, ephemeral diagnostics. It may feed an explicitly
   diagnostic “thinking” view, but it must never be concatenated into the assistant answer.
 - A reasoning-only stream is not an answer. It ends with no visible text and an `EmptyResponse` terminal
@@ -181,7 +190,8 @@ Programmatic consumers can bypass the panel entirely:
 ```csharp
 await foreach (LlmStreamChunk chunk in service.SendMessageStreamingAsync("Hello", "SmartChat", ct))
 {
-    if (!string.IsNullOrEmpty(chunk.Text)) label.text += chunk.Text;
+    // NOT `label.text += chunk.Text` — that fuses the reply after a tool round onto the previous one.
+    label.text = StreamedMessageJoiner.Append(label.text, chunk.Text, chunk.StartsNewMessage);
     if (!string.IsNullOrEmpty(chunk.ReasoningText)) diagnostics.Append(chunk.ReasoningText);
     if (chunk.IsDone) break;
 }

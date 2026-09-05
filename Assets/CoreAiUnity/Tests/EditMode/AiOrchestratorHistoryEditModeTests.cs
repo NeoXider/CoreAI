@@ -986,6 +986,91 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("stream success", memory.Appended[0].Content);
         }
 
+        /// <summary>
+        /// Один поток несёт НЕСКОЛЬКО реплик — после каждого раунда инструментов модель говорит
+        /// заново. Накопитель обязан разделять их пустой строкой: на проде он склеивал их встык, и
+        /// ученик читал «Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**» — эта же
+        /// склейка уезжала в историю роли и в <c>ApplyAiGameCommand</c>.
+        /// </summary>
+        [Test]
+        public async Task RunStreamingAsync_ChunkStartsNewMessage_SeparatesMessagesInAccumulatedTurn()
+        {
+            SegmentedStreamLlmClient llm = new(
+                new LlmStreamChunk { Text = "Проверь себя:" },
+                new LlmStreamChunk { Text = "**Ход завершён.**", StartsNewMessage = true });
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await foreach (LlmStreamChunk _ in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "Teacher", Hint = "две реплики" }))
+            {
+            }
+
+            string assistant = memory.Appended.Single(m => m.MessageRole == "assistant").Content;
+            Assert.That(assistant, Does.Not.Contain("себя:**Ход"),
+                "Две реплики учителя не имеют права слипнуться встык.");
+            Assert.That(assistant, Does.Contain("Проверь себя:\n\n**Ход завершён.**"));
+        }
+
+        /// <summary>
+        /// Без признака границы накопитель ведёт себя ровно как раньше: обычные дельты одной реплики
+        /// склеиваются вплотную, разделитель не появляется сам собой.
+        /// </summary>
+        [Test]
+        public async Task RunStreamingAsync_WithoutNewMessageFlag_KeepsPlainConcatenation()
+        {
+            SegmentedStreamLlmClient llm = new(
+                new LlmStreamChunk { Text = "Проверь " },
+                new LlmStreamChunk { Text = "себя." });
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await foreach (LlmStreamChunk _ in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "Teacher", Hint = "одна реплика" }))
+            {
+            }
+
+            Assert.AreEqual("Проверь себя.",
+                memory.Appended.Single(m => m.MessageRole == "assistant").Content);
+        }
+
+        /// <summary>
+        /// Клиент, отдающий заранее заданные чанки: даёт тесту прямой контроль над признаком границы
+        /// сообщения, который в бою ставит <c>MeaiLlmClient</c> на первом видимом чанке новой итерации.
+        /// </summary>
+        private sealed class SegmentedStreamLlmClient : ILlmClient
+        {
+            private readonly LlmStreamChunk[] _chunks;
+
+            public SegmentedStreamLlmClient(params LlmStreamChunk[] chunks)
+            {
+                _chunks = chunks;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "buffered" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                await Task.Yield();
+                foreach (LlmStreamChunk chunk in _chunks)
+                {
+                    yield return chunk;
+                }
+
+                yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
+            }
+        }
+
         [Test]
         public async Task RunStreamingAsync_ConsumerAbandonsTurn_RecordsUserMessageOnceAndNothingElse()
         {

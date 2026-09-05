@@ -75,6 +75,70 @@ namespace CoreAI.Tests.EditMode
             Assert.That(chunks.Last().ExecutedToolCalls.Any(t => t.Source == "parse-error"), Is.True);
         }
 
+        /// <summary>
+        /// Вторая итерация tool-цикла — это ВТОРАЯ реплика модели, и признак границы обязан стоять
+        /// ровно на её первом видимом чанке. Без признака потребитель склеивал реплики встык, и на
+        /// проде ученик читал «Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**».
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_SecondIteration_FlagsFirstVisibleChunkOnly()
+        {
+            StreamingScripted inner = new(
+                new[] { "Before {\"name\":\"memory\",\"arguments\":{\"action\":\"write\"" },
+                new[] { "Retry complete." });
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), null);
+
+            List<LlmStreamChunk> visible = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { new TestTool("memory") }
+                           }, CancellationToken.None))
+            {
+                if (!string.IsNullOrEmpty(chunk.Text))
+                {
+                    visible.Add(chunk);
+                }
+            }
+
+            Assert.That(visible.Count, Is.GreaterThanOrEqualTo(2));
+            Assert.IsFalse(visible[0].StartsNewMessage,
+                "Первая реплика хода не является «новой» — разделять нечего.");
+            Assert.AreEqual(1, visible.Count(c => c.StartsNewMessage),
+                "Признак ставится РОВНО на одном чанке итерации, иначе потребитель размножит разделители.");
+
+            LlmStreamChunk boundary = visible.First(c => c.StartsNewMessage);
+            Assert.That(boundary.Text, Does.StartWith("Retry"),
+                "Граница обязана попасть на первый видимый чанк ВТОРОЙ итерации.");
+        }
+
+        /// <summary>
+        /// Один ход без инструментов — одна реплика: границ в потоке нет, и потребитель ведёт себя
+        /// ровно как до появления признака.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_SingleIteration_NeverFlagsNewMessage()
+        {
+            StreamingScripted inner = new(new[] { "Привет, ", "как дела?" });
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go"
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual("Привет, как дела?", string.Concat(chunks.Select(c => c.Text)));
+            Assert.IsFalse(chunks.Any(c => c.StartsNewMessage));
+        }
+
         [Test]
         public async Task CompleteStreamingAsync_ToolJsonInsideThink_LogsDiagnosticButKeepsThinkHidden()
         {
