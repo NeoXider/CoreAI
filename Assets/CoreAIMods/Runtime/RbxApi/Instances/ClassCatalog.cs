@@ -370,7 +370,11 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("Workspace", "WorldRoot", false, false, true,
                 descriptor => new RbxModel(descriptor)));
             catalog.Register(new ClassDescriptor("BasePart", "PVInstance", true, false, false));
-            catalog.Register(new ClassDescriptor("Part", "BasePart", false, true, false));
+            // WHY Part has a behaviour class from MVP8 slice 8.5: Touched/TouchEnded belong to the
+            // part the mirror fires them on, not to a side table keyed by id that every reader of
+            // the tree would have to know about.
+            catalog.Register(new ClassDescriptor("Part", "BasePart", false, true, false,
+                descriptor => new RbxBasePart(descriptor)));
             // WHY: one canonical Camera per world (bootstrap creates it under Workspace and the
             // Lua layer routes its CFrame to the camera rig), so scripted creation stays off.
             // TODO: MVP-later — creatable Cameras with per-instance state once multiple
@@ -446,14 +450,9 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("MaterialVariant", "Instance", false, true, false,
                 descriptor => new RbxMaterialVariant(descriptor)));
 
-            catalog.RegisterKnownUnimplementedMembers("WorldRoot",
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "Raycast", "MVP8",
-                    "use CoreAI world-query tools outside Lua until workspace:Raycast lands"));
+            // WHY no WorldRoot entry any more: Raycast landed in MVP8 slice 8.5 and a planned-member
+            // stub for a shipped member is worse than none — it fails a call that works.
             catalog.RegisterKnownUnimplementedMembers("Workspace",
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
-                    "Gravity", "MVP8",
-                    "keep parts Anchored or use host physics settings until per-body gravity lands"),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedWriteProperty(
                     "SignalBehavior",
                     "signal mode is Deferred-only; use task.defer when explicit ordering is needed"),

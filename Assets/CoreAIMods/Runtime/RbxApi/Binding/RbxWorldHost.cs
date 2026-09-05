@@ -43,6 +43,9 @@ namespace CoreAI.Mods.Rbx.Binding
         /// Initialize like the camera rig.</summary>
         public IInputSource InputSource { get; private set; }
 
+        /// <summary>Real raycasts, per-body gravity and contact events for the bound world.</summary>
+        public UnityRbxPhysicsPort PhysicsPort { get; private set; }
+
         /// <summary>Rendering camera resolved once for this host, or null in headless scenes.</summary>
         public Camera SceneCamera { get; private set; }
 
@@ -118,6 +121,7 @@ namespace CoreAI.Mods.Rbx.Binding
             // TODO: com.unity.inputsystem may be removed — the source stays behind IInputSource so
             // only this composition line changes when the backend is swapped.
             InputSource = new UnityNewInputSource();
+            PhysicsPort = new UnityRbxPhysicsPort(Binder);
         }
 
         /// <summary>Publishes an already restored replacement and retires the outgoing host state.</summary>
@@ -146,6 +150,10 @@ namespace CoreAI.Mods.Rbx.Binding
             Binder = binder;
             Binder.MaterialVariantSource =
                 game.GetService("MaterialService") as IRbxMaterialVariantSource;
+            // WHY the old port is disposed here: it still listens to the outgoing binder, and a
+            // stale listener would relay contacts from a world that no longer exists.
+            PhysicsPort?.Dispose();
+            PhysicsPort = new UnityRbxPhysicsPort(binder);
             CameraRig = cameraRig;
             InputSource = inputSource;
             PickSource = pickSource;

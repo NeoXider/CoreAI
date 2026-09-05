@@ -19,9 +19,9 @@ player on device?"**
 - **Comments**: only `/// <summary>` XML docs, `// WHY:`, `// TODO:`, `// HACK:`. No narrative or
   change-description comments.
 - **No audit reports live in the repo** — findings become `TODO.md` items; report files get deleted.
-- **Releases**: run `python tools/bump_version.py <version>` — it moves ALL SIX `package.json` in
+- **Releases**: run `python tools/bump_version.py <version>` — it moves ALL SEVEN `package.json` in
   lockstep (`com.neoxider.coreai`, `coreaiunity`, `coreaimods`, `coreaihub`, `coreaibenchmark`,
-  `coreaimcp`) plus `McpServerInfo.Version`, which is the one a hand-edit forgets. Changelog entries go
+  `coreaimcp`, `coreaimirror`) plus `McpServerInfo.Version`, which is the one a hand-edit forgets. Changelog entries go
   in the only two changelogs: `Assets/CoreAI/CHANGELOG.md` (core + mods) and
   `Assets/CoreAiUnity/CHANGELOG.md` (host).
 - **Commits**: NEVER add `Co-Authored-By` or any AI-attribution trailers.

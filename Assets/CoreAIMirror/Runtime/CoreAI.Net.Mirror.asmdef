@@ -1,0 +1,23 @@
+{
+  "name": "CoreAI.Net.Mirror",
+  "rootNamespace": "CoreAI.Net.Mirror",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.RbxApi.Datatypes",
+    "CoreAI.RbxApi.Instances",
+    "CoreAI.Mods",
+    "VContainer",
+    "Mirror"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "MIRROR"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

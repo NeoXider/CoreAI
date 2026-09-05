@@ -1398,11 +1398,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle landed with
-            // TweenService (MVP8 slice 8.4), so RaycastFilterType (slice 8.5) is the
-            // loud-stub probe now.
-            Exception ex = LoadFails(stack, "m", "local k = Enum.RaycastFilterType");
+            // TweenService (MVP8 slice 8.4) and RaycastFilterType with Raycast (slice 8.5), so
+            // HumanoidStateType (slice 8.6) is the loud-stub probe now.
+            Exception ex = LoadFails(stack, "m", "local k = Enum.HumanoidStateType");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("Enum.RaycastFilterType", FullText(ex));
+            StringAssert.Contains("Enum.HumanoidStateType", FullText(ex));
         }
 
         [Test]
@@ -2273,12 +2273,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.IsTrue(stack.Runtime.IsLoaded("m"));
         }
 
+        // WHY these two and not workspace.Gravity/Raycast any more: both shipped in MVP8 slice 8.5,
+        // and a probe that asserts a shipped member still fails is a test that fails on success.
+        // Named render-step binding is the nearest surface that is still only planned and needs no
+        // world setup to reach.
         [TestCase(
-            "local value = workspace.Gravity",
-            "Workspace.Gravity", "MVP8")]
+            "local value = game:GetService('RunService').BindToRenderStep",
+            "RunService:BindToRenderStep", "MVP2")]
         [TestCase(
-            "local value = workspace.Raycast",
-            "WorldRoot:Raycast", "MVP8")]
+            "local value = game:GetService('RunService').UnbindFromRenderStep",
+            "RunService:UnbindFromRenderStep", "MVP2")]
         public void Lua_PlannedUnimplementedMember_RaisesExactPhaseNamingStub(
             string code, string feature, string phase)
         {

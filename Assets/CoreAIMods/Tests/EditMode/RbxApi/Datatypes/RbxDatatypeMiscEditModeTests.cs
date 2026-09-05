@@ -163,11 +163,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         {
             RbxEnumRegistry registry = RbxEnumRegistry.CreateWithBuiltins();
             // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle landed with
-            // TweenService (MVP8 slice 8.4), so RaycastFilterType (slice 8.5) is the
-            // loud-stub probe now.
-            RbxApiStubException ex = Assert.Throws<RbxApiStubException>(() => registry.Get("RaycastFilterType"));
+            // TweenService (MVP8 slice 8.4) and RaycastFilterType with Raycast (slice 8.5), so
+            // HumanoidStateType (slice 8.6) is the loud-stub probe now.
+            RbxApiStubException ex =
+                Assert.Throws<RbxApiStubException>(() => registry.Get("HumanoidStateType"));
             Assert.AreEqual("NOT_IMPLEMENTED", ex.Code);
-            StringAssert.Contains("Enum.RaycastFilterType", ex.Message);
+            StringAssert.Contains("Enum.HumanoidStateType", ex.Message);
             StringAssert.Contains("| fix:", ex.Message, "stub errors carry the machine-parsable fix section");
         }
 

@@ -142,6 +142,68 @@ namespace CoreAI.Mods.Rbx.Binding
         public int BoundCount => _bindings.Count;
 
         /// <summary>The backing GameObject, when one exists (world adapter / test seam).</summary>
+        /// <summary>
+        /// A bound part started or stopped touching another bound part, reported as instance ids.
+        /// </summary>
+        /// <remarks>
+        /// WHY the binder is the one to raise it: it owns the GameObjects and is the only place that
+        /// can turn a Unity collider back into an instance id. Everything about which Roblox signal
+        /// this becomes is decided on the engine-free side.
+        /// </remarks>
+        public event System.Action<InstanceId, InstanceId, bool> ContactObserved;
+
+        /// <summary>
+        /// Fills <paramref name="bodies"/> with every bound part's Rigidbody, for the caller that
+        /// applies world gravity each fixed step.
+        /// </summary>
+        public void CollectSimulatedBodies(System.Collections.Generic.List<Rigidbody> bodies)
+        {
+            if (bodies == null)
+            {
+                return;
+            }
+
+            foreach (System.Collections.Generic.KeyValuePair<InstanceId, BindingEntry> pair in _bindings)
+            {
+                if (pair.Value.IsPart && pair.Value.Rigidbody != null)
+                {
+                    bodies.Add(pair.Value.Rigidbody);
+                }
+            }
+        }
+
+        private void OnRelayContact(GameObject self, GameObject other, bool began)
+        {
+            if (ContactObserved == null
+                || !TryGetInstanceId(self, out InstanceId selfId)
+                || !TryGetInstanceId(other, out InstanceId otherId)
+                || selfId.Value == otherId.Value)
+            {
+                return;
+            }
+
+            // WHY only one direction: both parts carry a relay, so Unity reports the same contact
+            // twice. Raising it once per relay and letting the engine-free side fan out to both
+            // parts keeps "Touched fires on both" written in exactly one place.
+            ContactObserved(selfId, otherId, began);
+        }
+
+        private void AttachContactRelay(GameObject gameObject)
+        {
+            if (gameObject == null)
+            {
+                return;
+            }
+
+            RbxContactRelay relay = gameObject.GetComponent<RbxContactRelay>();
+            if (relay == null)
+            {
+                relay = gameObject.AddComponent<RbxContactRelay>();
+            }
+
+            relay.Attach(OnRelayContact);
+        }
+
         public bool TryGetBoundObject(InstanceId id, out GameObject gameObject)
         {
             if (_bindings.TryGetValue(id, out BindingEntry entry))
@@ -202,6 +264,7 @@ namespace CoreAI.Mods.Rbx.Binding
             CacheVisualComponents(entry);
             _partProperties.Add(id, properties);
             _bindings.Add(id, entry);
+            AttachContactRelay(gameObject);
         }
 
         /// <summary>
@@ -261,6 +324,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 if (entry.IsPart)
                 {
                     Apply(entry, GetPartPropertiesOrDefault(record.Id));
+                    AttachContactRelay(entry.GameObject);
                     // WHY: log only the FIRST part — a materialized-but-invisible part looks
                     // identical to one never created, and a player has no inspector to tell them
                     // apart; logging every part would flood mods that spawn in bulk.

@@ -168,6 +168,12 @@ namespace CoreAI.Mods.Rbx.Datatypes
             registry.Register(new RbxEnum("PlaybackState",
                 ("Begin", 0), ("Delayed", 1), ("Playing", 2), ("Paused", 3),
                 ("Completed", 4), ("Cancelled", 5)));
+            // WHY exactly two items: the mirror's RaycastFilterType.yaml lists Exclude 0 and
+            // Include 1 and nothing else. The pre-2022 Blacklist/Whitelist spellings were retired
+            // rather than kept as aliases, so shipping them would teach scripts a name a Roblox
+            // round-trip cannot carry back.
+            registry.Register(new RbxEnum("RaycastFilterType",
+                ("Exclude", 0), ("Include", 1)));
             return registry;
         }
 

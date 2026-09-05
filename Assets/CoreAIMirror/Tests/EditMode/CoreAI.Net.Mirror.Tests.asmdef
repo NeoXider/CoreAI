@@ -1,0 +1,29 @@
+{
+  "name": "CoreAI.Net.Mirror.Tests",
+  "rootNamespace": "CoreAI.Net.Mirror.Tests",
+  "references": [
+    "CoreAI.Net.Mirror",
+    "CoreAI.Core",
+    "CoreAI.RbxApi.Datatypes",
+    "CoreAI.RbxApi.Instances",
+    "CoreAI.Mods",
+    "VContainer",
+    "Mirror",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "MIRROR",
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

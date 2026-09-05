@@ -58,6 +58,23 @@ soon as its `Parent` is set into the world.
 `Position` keeps the part's rotation; `CFrame` sets position and rotation together; `Orientation`
 (YXZ degrees) and `Rotation` (XYZ degrees) set the rotation and keep the position.
 
+### Physics: gravity, raycasts, contacts
+
+`workspace.Gravity` is studs per second squared and defaults to Roblox's 196.2. It is applied per
+body, so a world that changes it never touches the host scene's own `Physics.gravity`.
+
+`workspace:Raycast(origin, direction, raycastParams?)` returns a `RaycastResult` (`Instance`,
+`Position`, `Normal`, `Material`, `Distance`) or `nil`. The direction's **length is the range** and
+may not exceed 15,000 studs — a longer one is refused rather than clamped. `RaycastParams.new()`
+carries `FilterDescendantsInstances`, `FilterType` (`Enum.RaycastFilterType.Exclude`/`Include`),
+`RespectCanCollide`, and `AddToFilter`. `IgnoreWater` and `BruteForceAllSlow` are accepted and inert
+(CoreAI has no Terrain and one broadphase); `CollisionGroup` accepts only `"Default"` and raises
+otherwise, because a group that filtered parts differently would return a confidently wrong hit.
+
+`BasePart.Touched(otherPart)` and `BasePart.TouchEnded(otherPart)` fire on **both** parts, and only
+from physical movement: at least one part must be unanchored, and a part moved by assigning
+`Position` or `CFrame` fires nothing that step — the same rule Roblox documents.
+
 ### `BasePart.Material` and `Part.Color`
 
 `Material` takes an `Enum.Material` item and **every one of the 45 enum items renders**.

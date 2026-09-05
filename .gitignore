@@ -165,3 +165,10 @@ Assets/Resources/PerformanceTestRunInfo.json*
 Assets/Resources/PerformanceTestRunSettings.json*
 
 __pycache__/
+
+# Mirror is a third-party transport installed per host, never vendored into the package repo.
+# The MIRROR-constrained assemblies simply do not compile without it, which is the point (N11.7).
+/Assets/Mirror/
+/Assets/Mirror.meta
+/Assets/ScriptTemplates/
+/Assets/ScriptTemplates.meta

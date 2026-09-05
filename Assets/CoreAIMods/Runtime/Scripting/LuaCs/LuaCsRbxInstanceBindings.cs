@@ -707,6 +707,31 @@ namespace CoreAI.Ai.LuaCs
                 }
             }
 
+            // WHY read through the physics facade rather than a stored property: gravity is world
+            // state the engine adapter must see, and a copy on the Workspace instance would be the
+            // version that drifts when a host attaches physics after a script already set it.
+            if (member == "Gravity" && instance.IsA("Workspace"))
+            {
+                value = context.Bindings.WorldPhysics.Gravity;
+                return true;
+            }
+
+            // WHY here and not in the part-property reader: Touched/TouchEnded are signals on the
+            // instance, not state in the part sink, and a part with no listener must not have its
+            // signal created just because something read a different member.
+            if (instance is RbxBasePart basePart)
+            {
+                switch (member)
+                {
+                    case "Touched":
+                        value = LuaCsRbxDatatypeBindings.Wrap(basePart.Touched, context);
+                        return true;
+                    case "TouchEnded":
+                        value = LuaCsRbxDatatypeBindings.Wrap(basePart.TouchEnded, context);
+                        return true;
+                }
+            }
+
             if (instance is RbxPlayer player)
             {
                 switch (member)
@@ -778,6 +803,14 @@ namespace CoreAI.Ai.LuaCs
         private static bool TryWriteNetworkMember(LuaCsRbxModContext context,
             RbxInstance instance, string member, LuaState state, LuaValue value)
         {
+            if (member == "Gravity" && instance.IsA("Workspace"))
+            {
+                context.RequireWorldEditForWrite(instance, "Gravity");
+                context.Bindings.WorldPhysics.Gravity =
+                    ReadDoubleValue(value, "Workspace.Gravity assignment");
+                return true;
+            }
+
             if (instance is RbxPlayer player)
             {
                 switch (member)
@@ -1281,6 +1314,22 @@ namespace CoreAI.Ai.LuaCs
                 context.Bindings.KickPlayerWithCreatorKick(player);
                 return LuaValue.Nil;
             }, "Player");
+
+            // WHY declared on WorldRoot and not Workspace: the mirror puts Raycast on WorldRoot, so
+            // any future WorldModel gets it from the same declaration rather than a copy.
+            Method("Raycast", (ctx, self) =>
+            {
+                RbxVector3 origin = ReadVector3Value(Arg(ctx, 1), "WorldRoot:Raycast origin");
+                RbxVector3 direction = ReadVector3Value(Arg(ctx, 2), "WorldRoot:Raycast direction");
+                LuaValue paramsArgument = Arg(ctx, 3);
+                RbxRaycastParams raycastParams = paramsArgument.Type == LuaValueType.Nil
+                    ? null
+                    : ReadRaycastParams(paramsArgument);
+
+                RbxRaycastResult result =
+                    context.Bindings.WorldPhysics.Raycast(origin, direction, raycastParams);
+                return result == null ? LuaValue.Nil : WrapRaycastResult(context, result);
+            }, "WorldRoot");
 
             // WHY: the server clock is unscaled and monotonic-smoothed (it never steps back over
             // NTP/system-clock corrections); gameplay timing still belongs on task.wait and time().
@@ -1875,6 +1924,10 @@ namespace CoreAI.Ai.LuaCs
                 case "Position":
                     context.RequireWorldEditForWrite(self, "Position");
                     sink.SetPosition(id, ReadVector3Value(value, "Part.Position assignment"));
+                    // WHY every positional assignment is noted: the mirror's Touched fires only for
+                    // physical movement, so a part MOVED by a script must not report the overlap it
+                    // lands in as a collision. The physics relay drops contacts for parts noted here.
+                    context.Bindings.WorldPhysics.NoteTeleport(id);
                     context.RecordMutation(self);
                     return true;
                 case "Size":
@@ -1885,6 +1938,7 @@ namespace CoreAI.Ai.LuaCs
                 case "CFrame":
                     context.RequireWorldEditForWrite(self, "CFrame");
                     sink.SetCFrame(id, ReadCFrameValue(value, "Part.CFrame assignment"));
+                    context.Bindings.WorldPhysics.NoteTeleport(id);
                     context.RecordMutation(self);
                     return true;
                 case "Orientation":
@@ -2737,5 +2791,256 @@ namespace CoreAI.Ai.LuaCs
                 "pass a variant name, \"\" or nil for plain material, got " + Describe(value));
         }
 
+
+        // ---- Raycast userdata ---------------------------------------------------------------
+
+        private static RbxError NotAValidMember(string key, string typeName)
+        {
+            return RbxError.BadArgument(
+                key + " is not a valid member of " + typeName,
+                "check the " + typeName + " member list in the Roblox API reference");
+        }
+
+        private static readonly LuaTable RaycastParamsMeta = BuildRaycastParamsMeta();
+
+        private static readonly LuaTable RaycastResultMeta = BuildRaycastResultMeta();
+
+        /// <summary>Builds the <c>RaycastParams</c> global: only <c>new</c>, as the mirror has it.</summary>
+        internal static LuaValue BuildRaycastParamsGlobal(LuaCsRbxModContext context)
+        {
+            LuaTable global = new();
+            global["new"] = Fn("RaycastParams.new",
+                _ => Box(new RaycastParamsBox(context, new RbxRaycastParams()), RaycastParamsMeta));
+            return new LuaValue(global);
+        }
+
+        private static RbxRaycastParams ReadRaycastParams(LuaValue value)
+        {
+            if (TryUnbox(value, out RaycastParamsBox box))
+            {
+                return box.Params;
+            }
+
+            throw RbxError.BadArgument(
+                "WorldRoot:Raycast expects a RaycastParams at argument 3",
+                "pass RaycastParams.new() or nil, got " + Describe(value));
+        }
+
+        private static LuaTable BuildRaycastParamsMeta()
+        {
+            LuaTable meta = new();
+            meta[Metamethods.Index] = Fn("RaycastParams.__index", ctx =>
+            {
+                RaycastParamsBox box = SelfRaycastParams(ctx);
+                RbxRaycastParams self = box.Params;
+                string key = ReadString(ctx, 1, "RaycastParams member access");
+                switch (key)
+                {
+                    case "FilterType":
+                        return LuaCsRbxDatatypeBindings.Wrap(ResolveFilterTypeItem(box.Context, self.FilterType));
+                    case "IgnoreWater": return self.IgnoreWater;
+                    case "BruteForceAllSlow": return self.BruteForceAllSlow;
+                    case "RespectCanCollide": return self.RespectCanCollide;
+                    case "CollisionGroup": return self.CollisionGroup;
+                    case "FilterDescendantsInstances":
+                        return new LuaValue(BuildFilterTable(box));
+                    case "AddToFilter":
+                        return new LuaValue(Fn("RaycastParams:AddToFilter", inner =>
+                        {
+                            SelfRaycastParams(inner).Params.AddToFilter(
+                                ReadInstanceList(Arg(inner, 1), "RaycastParams:AddToFilter"));
+                            return LuaValue.Nil;
+                        }));
+                    default: throw NotAValidMember(key, "RaycastParams");
+                }
+            });
+            meta[Metamethods.NewIndex] = Fn("RaycastParams.__newindex", ctx =>
+            {
+                RbxRaycastParams self = SelfRaycastParams(ctx).Params;
+                string key = ReadString(ctx, 1, "RaycastParams member assignment");
+                LuaValue value = Arg(ctx, 2);
+                switch (key)
+                {
+                    case "FilterType":
+                        self.FilterType = ReadFilterType(value);
+                        return LuaValue.Nil;
+                    case "IgnoreWater":
+                        self.IgnoreWater = value.ToBoolean();
+                        return LuaValue.Nil;
+                    case "BruteForceAllSlow":
+                        self.BruteForceAllSlow = value.ToBoolean();
+                        return LuaValue.Nil;
+                    case "RespectCanCollide":
+                        self.RespectCanCollide = value.ToBoolean();
+                        return LuaValue.Nil;
+                    case "CollisionGroup":
+                        self.CollisionGroup = ReadStringValue(
+                            value, "RaycastParams.CollisionGroup assignment");
+                        return LuaValue.Nil;
+                    case "FilterDescendantsInstances":
+                        self.SetFilterDescendantsInstances(ReadInstanceList(
+                            value, "RaycastParams.FilterDescendantsInstances assignment"));
+                        return LuaValue.Nil;
+                    default: throw NotAValidMember(key, "RaycastParams");
+                }
+            });
+            meta[Metamethods.ToString] = Fn("RaycastParams.__tostring", _ => "RaycastParams");
+            return Lock(meta);
+        }
+
+        private static RbxEnumItem ResolveFilterTypeItem(LuaCsRbxModContext context,
+            RbxRaycastFilterType filterType)
+        {
+            if (context.Bindings.Enums.TryGet("RaycastFilterType", out RbxEnum enumType)
+                && enumType.TryGetItemByValue((int)filterType, out RbxEnumItem item))
+            {
+                return item;
+            }
+
+            throw RbxError.BadArgument(
+                "RaycastParams.FilterType cannot resolve Enum.RaycastFilterType." + filterType,
+                "use the default enum registry, which ships RaycastFilterType with Raycast");
+        }
+
+        private static RbxRaycastFilterType ReadFilterType(LuaValue value)
+        {
+            if (TryUnbox(value, out RbxEnumItem item)
+                && string.Equals(item.EnumType.Name, "RaycastFilterType", StringComparison.Ordinal))
+            {
+                return (RbxRaycastFilterType)item.Value;
+            }
+
+            throw RbxError.BadArgument(
+                "RaycastParams.FilterType expects an Enum.RaycastFilterType",
+                "assign Enum.RaycastFilterType.Exclude or .Include, got " + Describe(value));
+        }
+
+        private static LuaTable BuildFilterTable(RaycastParamsBox box)
+        {
+            // WHY a fresh table: Roblox hands back an array the script may keep and mutate, and that
+            // mutation must not silently re-filter a query the params are still used for.
+            LuaTable table = new();
+            IReadOnlyList<RbxInstance> filter = box.Params.FilterDescendantsInstances;
+            for (int index = 0; index < filter.Count; index++)
+            {
+                table[index + 1] = box.Context.WrapInstance(filter[index]);
+            }
+
+            return table;
+        }
+
+        private static IEnumerable<RbxInstance> ReadInstanceList(LuaValue value, string what)
+        {
+            if (value.Type != LuaValueType.Table)
+            {
+                throw RbxError.BadArgument(
+                    what + " expects an array of Instances",
+                    "pass a table such as {part, model}, got " + Describe(value));
+            }
+
+            List<RbxInstance> instances = new();
+            LuaTable table = value.Read<LuaTable>();
+            for (int index = 1; index <= table.ArrayLength; index++)
+            {
+                LuaValue entry = table[index];
+                if (entry.Type == LuaValueType.Nil)
+                {
+                    continue;
+                }
+
+                if (!TryGetInstance(entry, out LuaCsRbxInstanceProxy proxy))
+                {
+                    throw RbxError.BadArgument(
+                        what + " expects Instances; entry " + index + " is " + Describe(entry),
+                        "remove the entry or pass the Instance it should have been");
+                }
+
+                instances.Add(proxy.Instance);
+            }
+
+            return instances;
+        }
+
+        private static RaycastParamsBox SelfRaycastParams(LuaFunctionExecutionContext ctx)
+        {
+            if (TryUnbox(Arg(ctx, 0), out RaycastParamsBox self))
+            {
+                return self;
+            }
+
+            throw RbxError.BadArgument(
+                "RaycastParams member access expects a RaycastParams as self",
+                "read members off a RaycastParams.new() value");
+        }
+
+        private static LuaValue WrapRaycastResult(LuaCsRbxModContext context, RbxRaycastResult result)
+        {
+            return Box(new RaycastResultBox(context, result), RaycastResultMeta);
+        }
+
+        private static LuaTable BuildRaycastResultMeta()
+        {
+            LuaTable meta = new();
+            meta[Metamethods.Index] = Fn("RaycastResult.__index", ctx =>
+            {
+                RaycastResultBox self = SelfRaycastResult(ctx);
+                string key = ReadString(ctx, 1, "RaycastResult member access");
+                switch (key)
+                {
+                    case "Instance": return self.Context.WrapInstance(self.Result.Instance);
+                    case "Position": return LuaCsRbxDatatypeBindings.Wrap(self.Result.Position);
+                    case "Normal": return LuaCsRbxDatatypeBindings.Wrap(self.Result.Normal);
+                    case "Distance": return self.Result.Distance;
+                    case "Material": return WrapMaterial(self.Context, self.Result.Material);
+                    default: throw NotAValidMember(key, "RaycastResult");
+                }
+            });
+            meta[Metamethods.NewIndex] = Fn("RaycastResult.__newindex",
+                _ => throw RbxError.BadArgument(
+                    "RaycastResult values are immutable",
+                    "read the members workspace:Raycast filled in; they describe one past query"));
+            meta[Metamethods.ToString] = Fn("RaycastResult.__tostring", _ => "RaycastResult");
+            return Lock(meta);
+        }
+
+        private static RaycastResultBox SelfRaycastResult(LuaFunctionExecutionContext ctx)
+        {
+            if (TryUnbox(Arg(ctx, 0), out RaycastResultBox self))
+            {
+                return self;
+            }
+
+            throw RbxError.BadArgument(
+                "RaycastResult member access expects a RaycastResult as self",
+                "read members off the value workspace:Raycast returned");
+        }
+
+        /// <summary>Pairs params with the mod context that wraps instances read back out of them.</summary>
+        private sealed class RaycastParamsBox
+        {
+            public RaycastParamsBox(LuaCsRbxModContext context, RbxRaycastParams raycastParams)
+            {
+                Context = context;
+                Params = raycastParams;
+            }
+
+            public LuaCsRbxModContext Context { get; }
+
+            public RbxRaycastParams Params { get; }
+        }
+
+        /// <summary>Pairs a result with the mod context that has to wrap its instance.</summary>
+        private sealed class RaycastResultBox
+        {
+            public RaycastResultBox(LuaCsRbxModContext context, RbxRaycastResult result)
+            {
+                Context = context;
+                Result = result;
+            }
+
+            public LuaCsRbxModContext Context { get; }
+
+            public RbxRaycastResult Result { get; }
+        }
     }
 }

@@ -479,9 +479,23 @@ namespace CoreAI.Composition
 
                             // WHY: phase-specific pumps preserve Stepped -> delayed work -> input ->
                             // Heartbeat -> RenderStepped before the runtime tick each scaled frame.
-                            tickerGo.AddComponent<LuaModRuntimeTickDriver>().Initialize(
-                                sessionController,
-                                hostActor);
+                            LuaModRuntimeTickDriver tickDriver =
+                                tickerGo.AddComponent<LuaModRuntimeTickDriver>();
+                            tickDriver.Initialize(sessionController, hostActor);
+
+                            // WHY wired here and not in RbxWorldHost: the host owns the scene objects,
+                            // the mod stack owns the world-physics facade, and this is the one place
+                            // that sees both. A scene with no RbxWorldHost keeps the null port, so a
+                            // headless world still answers Raycast with a miss instead of throwing.
+                            Mods.Rbx.Binding.RbxWorldHost physicsHost =
+                                container.ResolveOrDefault<Mods.Rbx.Binding.RbxWorldHost>();
+                            if (physicsHost?.PhysicsPort != null && stackRbxApi?.WorldPhysics != null)
+                            {
+                                stackRbxApi.WorldPhysics.AttachPort(physicsHost.PhysicsPort);
+                                tickDriver.AttachPhysicsPumps(
+                                    stackRbxApi.WorldPhysics.BeginPhysicsStep,
+                                    physicsHost.PhysicsPort.ApplyGravity);
+                            }
                         }
 
                         // Ordering contract (audit finding W4, see WORLD_COMMANDS.md §7): mod rehydrate

@@ -4,6 +4,16 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.20.0] - 2026-09-05
+
+### Added
+
+- **MVP8 срез 8.5** — `workspace:Raycast`, `Workspace.Gravity` (по телам, хозяйская `Physics.gravity`
+  не трогается), `Touched`/`TouchEnded` от настоящих столкновений; первая PlayMode-папка пакета
+  модов и помпа на `FixedUpdate`.
+- **MVP11** — порт допуска `IActorAdmissionProvider` и седьмой пакет `com.neoxider.coreaimirror`
+  (скелет за `defineConstraints: ["MIRROR"]`) с тестом границы пакетов.
+
 ## [7.19.0] - 2026-09-05
 
 ### Added

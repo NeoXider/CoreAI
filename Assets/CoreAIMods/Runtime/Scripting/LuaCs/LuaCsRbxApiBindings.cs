@@ -98,6 +98,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly RbxCollectionService _collectionService;
         private readonly RbxTweenService _tweenService;
         private readonly LuaCsTweenPropertyHost _tweenPropertyHost;
+        private readonly RbxWorldPhysics _worldPhysics;
         private readonly IClickPickSource _pickSource;
         private readonly ModConnectionRegistry _connections;
         private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
@@ -296,6 +297,12 @@ namespace CoreAI.Ai.LuaCs
                     _scheduler, _tweenPropertyHost, ResolvePlaybackStateItem);
             }
 
+            // WHY constructed unconditionally, unlike the services above: world physics is not an
+            // instance in the tree, and a world with no engine adapter still has to answer
+            // workspace:Raycast (with a miss) and remember a scripted Workspace.Gravity until a host
+            // attaches one. The null port is that answer.
+            _worldPhysics = new RbxWorldPhysics(_registry);
+
             if (_userInputService != null)
             {
                 _userInputService.InputBegan.BindScheduler(_scheduler);
@@ -359,6 +366,9 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>The shared TweenService instance (scaled-time property tweens).</summary>
         public RbxTweenService TweenService => _tweenService;
+
+        /// <summary>World queries, gravity and contact relay; the host attaches the engine port.</summary>
+        public RbxWorldPhysics WorldPhysics => _worldPhysics;
 
         /// <summary>Property IO behind the tween driver (same assembly as the bindings).</summary>
         internal LuaCsTweenPropertyHost TweenPropertyHost => _tweenPropertyHost;
@@ -1453,6 +1463,10 @@ namespace CoreAI.Ai.LuaCs
             luaRegistry.RegisterValue("Enum", () => LuaCsRbxDatatypeBindings.BuildEnumGlobal(_enums));
             luaRegistry.RegisterValue("TweenInfo",
                 () => LuaCsRbxDatatypeBindings.BuildTweenInfoGlobal(_enums));
+            // WHY per-context and not a shared table like TweenInfo: a RaycastParams filter holds
+            // Instances, and reading the list back has to wrap them for the mod that asked.
+            luaRegistry.RegisterValue("RaycastParams",
+                () => LuaCsRbxInstanceBindings.BuildRaycastParamsGlobal(context));
             if (!string.IsNullOrWhiteSpace(ownerModId))
             {
                 luaRegistry.RegisterValue("script", () =>

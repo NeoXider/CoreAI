@@ -23,6 +23,8 @@ namespace CoreAI.Infrastructure.Lua
         private System.Action<float> _preRender;
         private ModScheduler _scheduler;
         private RbxWorldRuntimeSessionController _sessionController;
+        private System.Action _beginPhysicsStep;
+        private System.Action _applyGravity;
 
         /// <summary>Attaches the runtime and phase-specific host pumps to the scheduler.</summary>
         public void Initialize(ILuaModRuntime runtime, ActorContext actorContext, ModScheduler scheduler = null,
@@ -48,6 +50,16 @@ namespace CoreAI.Infrastructure.Lua
             }
         }
 
+        /// <summary>
+        /// Attaches the two fixed-step pumps: opening a physics step and applying world gravity.
+        /// Either may be null; a world with no physics adapter simply has nothing to pump.
+        /// </summary>
+        public void AttachPhysicsPumps(System.Action beginPhysicsStep, System.Action applyGravity)
+        {
+            _beginPhysicsStep = beginPhysicsStep;
+            _applyGravity = applyGravity;
+        }
+
         /// <summary>Attaches the production session controller so every frame targets the active world.</summary>
         public void Initialize(
             RbxWorldRuntimeSessionController sessionController,
@@ -71,6 +83,22 @@ namespace CoreAI.Infrastructure.Lua
         private void Update()
         {
             PumpFrame(Time.deltaTime);
+        }
+
+        /// <summary>
+        /// Opens the physics step and applies world gravity, once per fixed step.
+        /// </summary>
+        /// <remarks>
+        /// WHY a second pump and not more work in Update: gravity is a force, and a force applied on
+        /// the render frame is applied a variable number of times per simulated step — parts would
+        /// fall at a rate that depends on the frame rate. Unity's contract is that forces belong in
+        /// FixedUpdate, and CoreAI's teleport rule needs the same boundary: this runs before the
+        /// simulation, so a script's assignment during the step is known when its contacts arrive.
+        /// </remarks>
+        private void FixedUpdate()
+        {
+            _beginPhysicsStep?.Invoke();
+            _applyGravity?.Invoke();
         }
 
         private void OnDestroy()

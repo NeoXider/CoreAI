@@ -624,6 +624,19 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
+        /// <summary>True when a script is listening to the named signal.</summary>
+        /// <remarks>
+        /// WHY: the highest-frequency events a world produces (contacts) must cost nothing when
+        /// nobody subscribed, and asking the signal for its connections is the only honest way to
+        /// know — GetOrCreateSignal would itself create the signal and answer "yes".
+        /// </remarks>
+        internal bool HasSignalConnections(string signalName)
+        {
+            return _signals != null
+                   && _signals.TryGetValue(signalName, out RbxScriptSignal signal)
+                   && signal.HasConnections;
+        }
+
         private void DisconnectSignals()
         {
             if (_signals == null)
