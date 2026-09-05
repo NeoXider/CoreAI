@@ -242,6 +242,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         private sealed class ForgingNetworkBridge : INetworkBridge
         {
+            public int MaxPayloadBytes => 65536;
+
+            public double ServerClockOffsetSeconds => 0d;
+
+            public event System.Action<RbxNetworkPeerDisconnected> PeerDisconnected
+            {
+                add { }
+                remove { }
+            }
+
             private readonly List<string> _actorIds = new();
 
             public RbxNetworkTopology Topology => RbxNetworkTopology.Host;

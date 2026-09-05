@@ -2140,6 +2140,23 @@ namespace CoreAI.Mods.WorldPackages
 
             public IReadOnlyList<string> ActorIds => _inner.ActorIds;
 
+            /// <summary>Delegated: the payload ceiling belongs to the real transport underneath.</summary>
+            public int MaxPayloadBytes => _inner.MaxPayloadBytes;
+
+            /// <summary>Delegated: only the real transport can measure the server clock.</summary>
+            public double ServerClockOffsetSeconds => _inner.ServerClockOffsetSeconds;
+
+            /// <inheritdoc />
+            /// <remarks>
+            /// Forwarded rather than queued: a peer that dropped during staging has already gone, and
+            /// replaying that after the swap would tear down a session that the new world never had.
+            /// </remarks>
+            public event Action<RbxNetworkPeerDisconnected> PeerDisconnected
+            {
+                add => _inner.PeerDisconnected += value;
+                remove => _inner.PeerDisconnected -= value;
+            }
+
             public event Action<RbxNetworkEventMessage> EventReceived;
 
             public event Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> RequestReceived;

@@ -4,6 +4,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.23.0] - 2026-09-05
+
+### Added
+
+- **MVP11** — шов `INetworkBridge` v2 (`MaxPayloadBytes`, `ServerClockOffsetSeconds`,
+  `PeerDisconnected`) и общий `RbxNetworkRateLimiter`, который транспорт не может потерять молча.
+
 ## [7.22.0] - 2026-09-05
 
 ### Added

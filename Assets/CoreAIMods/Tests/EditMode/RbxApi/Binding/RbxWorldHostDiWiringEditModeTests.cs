@@ -1784,6 +1784,16 @@ camera_follow(p)"),
 
         private sealed class RecordingNetworkBridge : INetworkBridge
         {
+            public int MaxPayloadBytes => 65536;
+
+            public double ServerClockOffsetSeconds => 0d;
+
+            public event System.Action<RbxNetworkPeerDisconnected> PeerDisconnected
+            {
+                add { }
+                remove { }
+            }
+
             private System.Action<RbxNetworkEventMessage> _eventReceived;
             private System.Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> _requestReceived;
 

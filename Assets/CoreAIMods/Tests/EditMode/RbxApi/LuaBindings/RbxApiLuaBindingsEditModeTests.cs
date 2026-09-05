@@ -139,6 +139,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
         private sealed class TrackingNetworkBridge : INetworkBridge
         {
+            public int MaxPayloadBytes => 65536;
+
+            public double ServerClockOffsetSeconds => 0d;
+
+            public event Action<RbxNetworkPeerDisconnected> PeerDisconnected
+            {
+                add { }
+                remove { }
+            }
+
             private readonly List<string> _actors = new();
             private Action<RbxNetworkEventMessage> _eventReceived;
             private Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> _requestReceived;
