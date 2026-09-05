@@ -4,6 +4,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.33.0] - 2026-09-06
+
+### Added
+
+- **Демо-сцена MVP11/12** (`OnlineAuthorityDemo`): отказ → грант → отказ, с PlayMode-гейтом на всю
+  последовательность. Кнопка хоста показывает, что его запись не идёт путём намерений вовсе.
+
 ## [7.32.0] - 2026-09-06
 
 ### Added

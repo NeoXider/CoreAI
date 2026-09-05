@@ -33,6 +33,7 @@ namespace CoreAI.Tests.PlayMode
             "Assets/CoreAI.Demos/MiniRpg/MiniRpgModsDemo.unity",
             "Assets/CoreAI.Demos/ModdableUnits/ModdableUnitsDemo.unity",
             "Assets/CoreAI.Demos/MultiplayerFoundation/MultiplayerFoundationDemo.unity",
+            "Assets/CoreAI.Demos/OnlineAuthority/OnlineAuthorityDemo.unity",
             "Assets/CoreAI.Demos/ProceduralMaterials/ProceduralMaterialsShowcase.unity",
             "Assets/CoreAI.Demos/QwenDemo/QwenGenieDemo.unity",
             "Assets/CoreAI.Demos/QwenDemo/QwenSpellcraftDemo.unity",
