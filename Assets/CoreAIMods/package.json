@@ -1,6 +1,6 @@
 {
   "name": "com.neoxider.coreaimods",
-  "version": "7.16.0",
+  "version": "7.17.0",
   "displayName": "CoreAI Mods (Lua)",
   "unity": "6000.0",
   "description": "Lua modding layer for CoreAI: the Lua-CSharp sandbox (managed, AOT-safe, WebGL/IL2CPP-ready — bundled, no external package), execute_lua and manage_mods tools, the Lua Modding skill, the mod runtime, persistent mod stores, gameplay bindings, and mod UI. Depends on com.neoxider.coreai / com.neoxider.coreaiunity. Install this package only when you want AI/player-authored Lua mods; without it CoreAI compiles Lua-free.",

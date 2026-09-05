@@ -185,6 +185,37 @@ namespace CoreAI.Tests.PlayMode
             return setup;
         }
 
+        /// <summary>
+        /// Fails with the REASON when the model never actually called a tool, instead of letting the
+        /// scenario's own assertion report an empty world.
+        /// </summary>
+        /// <remarks>
+        /// WHY: a live scenario that ends with "expected 40 parts, was 0" says nothing about why. The
+        /// two causes look identical from the outside and need opposite responses — the tools never
+        /// reached the request (a CoreAI defect), or the model answered in prose like
+        /// <c>execute_lua('...')</c> instead of emitting a tool call (a model too weak for the
+        /// scenario). Observed on 2026-09-05 with a 3B local model: it wrote the call as prose, nothing
+        /// was extracted, and an hour went into reading the wrong half of the log. CoreAI deliberately
+        /// does NOT parse prose into calls — a misparse would EXECUTE something the model never asked
+        /// for, which is worse than a lost turn — so this states the situation plainly instead.
+        /// </remarks>
+        internal static void AssertModelActuallyCalledTools(string label)
+        {
+            IReadOnlyList<LlmToolCallRecord> history = CoreAi.GetToolCallHistorySnapshot();
+            if (history != null && history.Count > 0)
+            {
+                return;
+            }
+
+            Assert.Fail(
+                $"[{label}] The model produced no tool calls at all, so nothing could have been built. " +
+                "This is a MODEL capability result, not a CoreAI defect: the scenario needs a backend " +
+                "that emits real function calls. Check the log for an assistant message that writes the " +
+                "call as prose (for example execute_lua('...')) — CoreAI does not parse prose into " +
+                "calls on purpose. If instead the log shows '0 AIFunction(s) were bound', that IS a " +
+                "CoreAI wiring defect and a different investigation.");
+        }
+
         internal static void LogToolCallTranscript(string label)
         {
             IReadOnlyList<LlmToolCallRecord> history = CoreAi.GetToolCallHistorySnapshot();

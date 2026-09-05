@@ -19,60 +19,49 @@ using UnityEditor;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// Helper   ILlmClient   IAgentMemoryStore.
-    ///  :      InMemoryStore,
-    ///     store  .
+    /// Attaches an <see cref="IAgentMemoryStore"/> to a factory-built live client so the built-in
+    /// <c>memory</c> tool binds instead of being advertised in the system prompt and then stripped.
     /// </summary>
     public static class LlmClientTestHelpers
     {
         /// <summary>
-        ///    PlayModeProductionLikeLlmHandle   IAgentMemoryStore.
-        ///  LLMUnity   MeaiLlmClient   store.
-        ///  HTTP     (HTTP      null store).
+        /// Rebuilds the handle's client with <paramref name="memoryStore"/> through the same construction the
+        /// factory used (same HTTP/behavior settings, same native-tools decorator). The Offline stub binds no
+        /// tools and is returned unchanged. A live backend without a rebuild path throws instead of silently
+        /// handing back the store-less client.
         /// </summary>
         public static ILlmClient WrapWithMemoryStore(this PlayModeProductionLikeLlmHandle handle,
             IAgentMemoryStore memoryStore)
         {
-#if !COREAI_LLM || UNITY_WEBGL
-            // In this build target, we do not use LLMUnity and may not have HTTP client types compiled.
-            // Just return the resolved client as-is.
-            return handle.Client;
-#else
             if (handle == null)
             {
                 throw new ArgumentNullException(nameof(handle));
             }
 
-#if COREAI_HAS_LLMUNITY
-            // LLMUnity      MemoryStore
-            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity && handle._coreAiSettings != null)
+            if (memoryStore == null)
             {
-                CoreAISettingsAsset settings = handle._coreAiSettings;
-                return new OpenAiChatLlmClient(
-                    new LlmUnityServerHttpSettings(settings, settings.LlmUnityServerPort, settings.ModelName, ""),
-                    settings,
-                    GameLoggerUnscopedFallback.Instance,
-                    memoryStore);
-            }
-#endif
-
-            // HTTP      OpenAiChatLlmClient   
-            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp)
-            {
-                if (handle._openAiSettings != null)
-                {
-                    return new OpenAiChatLlmClient(handle._openAiSettings, memoryStore);
-                }
-
-                if (handle._coreAiSettings != null)
-                {
-                    return new OpenAiChatLlmClient(handle._coreAiSettings, memoryStore);
-                }
+                throw new ArgumentNullException(nameof(memoryStore));
             }
 
-            // Offline      
-            return handle.Client;
-#endif
+            // WHY: the previous body re-created the client under `#if COREAI_LLM && !UNITY_WEBGL` with
+            // CoreAISettingsAsset.Instance. On an Editor whose active build target is WebGL it collapsed to
+            // `return handle.Client`, so every live suite ran with an unbound `memory` tool ("'memory' tool
+            // requested ... but IAgentMemoryStore is null") while the prompt still listed it; on other
+            // targets it dropped the resolved streaming/roundtrip settings and the non-native-tools decorator.
+            if (handle.RebuildWithMemoryStore != null)
+            {
+                return handle.RebuildWithMemoryStore(memoryStore);
+            }
+
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.Offline)
+            {
+                return handle.Client;
+            }
+
+            throw new InvalidOperationException(
+                $"PlayModeProductionLikeLlmHandle for backend '{handle.ResolvedBackend}' has no memory-store " +
+                "rebuild path; the factory must supply one, otherwise the role's 'memory' tool is advertised " +
+                "but never bound.");
         }
     }
 
@@ -169,6 +158,12 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         public PlayModeOpenAiTestConfig.ResolvedConfig ResolvedConfig { get; }
 
+        /// <summary>
+        /// Re-creates <see cref="Client"/> with a memory store using the exact settings and decorators the
+        /// factory applied; <c>null</c> only for the Offline stub, which binds no tools.
+        /// </summary>
+        internal Func<IAgentMemoryStore, ILlmClient> RebuildWithMemoryStore { get; }
+
         internal readonly OpenAiHttpLlmSettings _openAiSettings;
         internal readonly CoreAISettingsAsset _coreAiSettings;
         private readonly GameObject _llmUnityHarnessRoot;
@@ -184,7 +179,8 @@ namespace CoreAI.Tests.PlayMode
             CoreAISettingsAsset coreAiSettings = null,
             GameObject llmUnityHarnessRoot = null,
             bool ownsCoreAiSettings = false,
-            PlayModeOpenAiTestConfig.ResolvedConfig resolvedConfig = null)
+            PlayModeOpenAiTestConfig.ResolvedConfig resolvedConfig = null,
+            Func<IAgentMemoryStore, ILlmClient> rebuildWithMemoryStore = null)
         {
             Client = client;
             ResolvedBackend = resolvedBackend;
@@ -193,6 +189,7 @@ namespace CoreAI.Tests.PlayMode
             _llmUnityHarnessRoot = llmUnityHarnessRoot;
             _ownsCoreAiSettings = ownsCoreAiSettings;
             ResolvedConfig = resolvedConfig;
+            RebuildWithMemoryStore = rebuildWithMemoryStore;
         }
 
         public void Dispose()
@@ -458,43 +455,7 @@ namespace CoreAI.Tests.PlayMode
             // 1) Explicit env/file configuration wins (and is the only place streaming/native-tools toggles live).
             if (config.IsComplete)
             {
-                // Wire config (base URL / key / model / temperature / timeout).
-                OpenAiHttpLlmSettings httpSettings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
-                httpSettings.SetRuntimeConfiguration(
-                    true,
-                    config.BaseUrl,
-                    config.ApiKey,
-                    config.Model,
-                    temperature,
-                    timeoutSeconds);
-                if (!string.IsNullOrWhiteSpace(config.ExtraBodyJson))
-                {
-                    JObject extraBody = JObject.Parse(config.ExtraBodyJson);
-                    foreach (JProperty property in extraBody.Properties())
-                    {
-                        httpSettings.SetProviderBodyParameter(property.Name, property.Value);
-                    }
-                }
-
-                // Behavioral config (streaming etc.) carried by an ICoreAISettings snapshot.
-                CoreAISettingsAsset behavior = BuildBehaviorSettings(config.Streaming, timeoutSeconds);
-
-                ILlmClient httpClient = MeaiLlmClient.CreateHttp(
-                    httpSettings, behavior, GameLoggerUnscopedFallback.Instance);
-
-                // CreateHttp wires native tool calling ON; honor an explicit native-tools=false toggle.
-                if (!config.NativeTools)
-                {
-                    httpClient = new NonNativeToolsLlmClientDecorator(httpClient);
-                }
-
-                handle = new PlayModeProductionLikeLlmHandle(
-                    httpClient,
-                    PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
-                    httpSettings,
-                    behavior,
-                    ownsCoreAiSettings: true,
-                    resolvedConfig: config);
+                handle = CreateOpenAiHandle(config, temperature, timeoutSeconds);
                 ignoreReason = null;
                 return true;
             }
@@ -516,7 +477,8 @@ namespace CoreAI.Tests.PlayMode
                 handle = new PlayModeProductionLikeLlmHandle(
                     client,
                     PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
-                    coreAiSettings: settings);
+                    coreAiSettings: settings,
+                    rebuildWithMemoryStore: store => new OpenAiChatLlmClient(settings, store));
                 ignoreReason = null;
                 return true;
             }
@@ -528,6 +490,64 @@ namespace CoreAI.Tests.PlayMode
         }
 
 #if COREAI_LLM
+        /// <summary>
+        /// Builds the HTTP handle for a complete env/file configuration. The client comes from a local
+        /// factory the handle keeps, so <see cref="LlmClientTestHelpers.WrapWithMemoryStore"/> can rebuild it
+        /// with a memory store and the identical settings and decorators.
+        /// </summary>
+        internal static PlayModeProductionLikeLlmHandle CreateOpenAiHandle(
+            PlayModeOpenAiTestConfig.ResolvedConfig config,
+            float temperature,
+            int timeoutSeconds)
+        {
+            if (config == null)
+            {
+                throw new ArgumentNullException(nameof(config));
+            }
+
+            if (!config.IsComplete)
+            {
+                throw new ArgumentException("Base URL and model are required.", nameof(config));
+            }
+
+            OpenAiHttpLlmSettings httpSettings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            httpSettings.SetRuntimeConfiguration(
+                true,
+                config.BaseUrl,
+                config.ApiKey,
+                config.Model,
+                temperature,
+                timeoutSeconds);
+            if (!string.IsNullOrWhiteSpace(config.ExtraBodyJson))
+            {
+                JObject extraBody = JObject.Parse(config.ExtraBodyJson);
+                foreach (JProperty property in extraBody.Properties())
+                {
+                    httpSettings.SetProviderBodyParameter(property.Name, property.Value);
+                }
+            }
+
+            CoreAISettingsAsset behavior = BuildBehaviorSettings(config.Streaming, timeoutSeconds);
+
+            ILlmClient BuildClient(IAgentMemoryStore memoryStore)
+            {
+                ILlmClient client = MeaiLlmClient.CreateHttp(
+                    httpSettings, behavior, GameLoggerUnscopedFallback.Instance, memoryStore);
+                // WHY: CreateHttp wires native tool calling ON; an explicit native-tools=false toggle has to
+                // survive the memory-store rebuild as well, or the live suite silently changes contract.
+                return config.NativeTools ? client : new NonNativeToolsLlmClientDecorator(client);
+            }
+
+            return new PlayModeProductionLikeLlmHandle(
+                BuildClient(null),
+                PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
+                httpSettings,
+                behavior,
+                ownsCoreAiSettings: true,
+                resolvedConfig: config,
+                rebuildWithMemoryStore: BuildClient);
+        }
+
         /// <summary>
         /// Builds a throwaway <see cref="CoreAISettingsAsset"/> carrying the resolved behavioral flags
         /// (streaming, orchestration timeout). The asset has no public streaming setter, so the serialized
@@ -613,7 +633,12 @@ namespace CoreAI.Tests.PlayMode
                 client,
                 PlayModeProductionLikeLlmBackend.LlmUnity,
                 coreAiSettings: settings,
-                llmUnityHarnessRoot: go);
+                llmUnityHarnessRoot: go,
+                rebuildWithMemoryStore: store => new OpenAiChatLlmClient(
+                    new LlmUnityServerHttpSettings(settings, port, model, ""),
+                    settings,
+                    GameLoggerUnscopedFallback.Instance,
+                    store));
             ignoreReason = null;
             return true;
 #endif

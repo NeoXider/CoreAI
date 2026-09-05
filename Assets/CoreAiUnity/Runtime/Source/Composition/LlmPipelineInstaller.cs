@@ -214,7 +214,7 @@ namespace CoreAI.Composition
 
             if (settings != null && settings.HasValidFallbackBackend)
             {
-                ILlmClient secondaryClient = BuildSecondaryHttpClient(settings);
+                ILlmClient secondaryClient = BuildSecondaryHttpClient(settings, memoryStore);
                 primaryClient = new FallbackLlmClientDecorator(primaryClient, secondaryClient, log);
             }
 
@@ -403,16 +403,18 @@ namespace CoreAI.Composition
         /// <summary>
         /// Builds an <see cref="ILlmClient"/> for the secondary (fallback) backend from <see cref="CoreAISettingsAsset"/>.
         /// </summary>
-        private static ILlmClient BuildSecondaryHttpClient(CoreAISettingsAsset settings)
+        internal static ILlmClient BuildSecondaryHttpClient(CoreAISettingsAsset settings, IAgentMemoryStore memoryStore)
         {
 #if !COREAI_LLM
             return new StubLlmClient();
 #else
+            // WHY: the role's system prompt keeps listing `memory` after a failover; a store-less secondary
+            // client would advertise the tool and then strip every call to it without execution.
             return new OpenAiChatLlmClient(
                 new SecondarySettingsAdapter(settings),
                 settings,
                 GameLoggerUnscopedFallback.Instance,
-                null);
+                memoryStore);
 #endif
         }
 

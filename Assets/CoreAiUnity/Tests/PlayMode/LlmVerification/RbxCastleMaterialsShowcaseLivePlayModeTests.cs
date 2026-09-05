@@ -114,6 +114,7 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeTestAwait.WaitTask(task, 3000f, "Programmer castle showcase", cts);
 
                 ProgrammerLiveHarness.LogToolCallTranscript("CastleShowcase");
+                ProgrammerLiveHarness.AssertModelActuallyCalledTools("CastleShowcase");
                 Assert.IsTrue(setup.Capturing.LastResult == null || setup.Capturing.LastResult.Ok,
                     $"Programmer run failed: {setup.Capturing.LastResult?.Error}");
 

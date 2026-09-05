@@ -93,6 +93,40 @@ namespace CoreAI.Tests.EditMode
                 "otherwise memory tool calls are silently stripped in HTTP modes");
         }
 
+        /// <summary>
+        /// The secondary (fallback) HTTP client must carry the same memory store as the primary: the role's
+        /// system prompt still lists <c>memory</c> after a failover, and an unbound tool is advertised but
+        /// stripped without execution. Before the fix BuildSecondaryHttpClient passed <c>null</c>.
+        /// </summary>
+        [Test]
+        public void BuildSecondaryHttpClient_PassesMemoryStore_ToTheFallbackClient()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                settings.ConfigureFallbackBackend(true, "http://localhost:1235/v1", "fallback-model");
+                StubMemoryStore memoryStore = new();
+
+                ILlmClient client = LlmPipelineInstaller.BuildSecondaryHttpClient(settings, memoryStore);
+
+                Assert.IsInstanceOf<OpenAiChatLlmClient>(client,
+                    "the fallback backend is an OpenAI-compatible HTTP client");
+                FieldInfo meaiField = typeof(OpenAiChatLlmClient)
+                    .GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance);
+                object meaiClient = meaiField.GetValue(client);
+                FieldInfo storeField = meaiClient.GetType()
+                    .GetField("_memoryStore", BindingFlags.NonPublic | BindingFlags.Instance);
+
+                Assert.AreSame(memoryStore, storeField.GetValue(meaiClient),
+                    "BuildSecondaryHttpClient must propagate memoryStore to the fallback MeaiLlmClient - " +
+                    "otherwise memory is advertised in the prompt and stripped after a failover");
+            }
+            finally
+            {
+                Object.DestroyImmediate(settings);
+            }
+        }
+
         [Test]
         public void BuildHttpClient_WithoutMemoryStore_StillCreatesClient()
         {
