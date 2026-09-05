@@ -84,10 +84,10 @@ buttons live at 1000+).
   `cd.MaxActivationDistance` studs (default 32). Only the part under the cursor fires.
 - `game:GetService("Name")` — the standard runtime has live tree-backed `Workspace`, `Lighting`,
   `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `Players`,
-  `HttpService`, `UserInputService`, `RunService`, and `MaterialService` services.
-- The catalog's 13 registrations are: `HttpService` and `Players` (tree-backed), `RunService`
-  (MVP2; fallback), `UserInputService` (MVP10; fallback), `TweenService` (MVP8),
-  `CollectionService` (MVP8), `Debris` (MVP8), `DataStoreService` (MVP9),
+  `HttpService`, `UserInputService`, `RunService`, `MaterialService`, and `Debris` services.
+- The catalog's 13 registrations are: `HttpService`, `Players`, and `Debris` (tree-backed),
+  `RunService` (MVP2; fallback), `UserInputService` (MVP10; fallback), `TweenService` (MVP8),
+  `CollectionService` (MVP8), `DataStoreService` (MVP9),
   `ContextActionService` (MVP10), `SoundService` (MVP15), `AIService`
   (`a future MVP (reserved)`), `PathfindingService` (`no planned MVP (not planned)`), and
   `MarketplaceService` (`no planned MVP (not planned)`). The standard runtime replaces the
@@ -110,6 +110,11 @@ buttons live at 1000+).
   non-Archivable subtrees are skipped and the copy gets fresh ids. After Destroy, any member
   access errors with INSTANCE_DESTROYED; re-parenting a destroyed instance raises PARENT_LOCKED
   — drop the reference and make a new one.
+- `Debris:AddItem(inst[, seconds])` (default 10 s) schedules guaranteed destruction without
+  yielding and survives the scheduling script's death — the idiom for temporary
+  projectiles/effects. WRONG: `task.delay(10, function() part:Destroy() end)` (dies with the
+  script); RIGHT: `game:GetService("Debris"):AddItem(part, 10)`. Past 1,000 queued items the
+  oldest is destroyed instantly, so treat the lifetime as a maximum, not an exact delay.
 
 ### Model pivots
 

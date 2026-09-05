@@ -400,6 +400,10 @@ namespace CoreAI.Mods.Rbx.Instances
                 descriptor => new RbxClickDetector(descriptor)));
             catalog.Register(new ClassDescriptor("MaterialService", "Instance", false, false, true,
                 descriptor => new RbxMaterialService(descriptor)));
+            // WHY: MVP8 slice 8.0 — Debris is engine-free (deadline queue over the scheduler host
+            // timer); the behavior class is constructed here like every other service behavior.
+            catalog.Register(new ClassDescriptor("Debris", "Instance", false, false, true,
+                descriptor => new RbxDebris(descriptor)));
             catalog.Register(new ClassDescriptor("MaterialVariant", "Instance", false, true, false,
                 descriptor => new RbxMaterialVariant(descriptor)));
 

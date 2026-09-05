@@ -198,7 +198,25 @@ namespace CoreAI.Tools.Scale
 
         public double HeapEndBytes { get; set; }
 
+        /// <summary>
+        /// Reported, never gated: its noise on identical repeats reaches 47 MB/min against a budget
+        /// of 1, so it cannot decide pass or fail. See <see cref="RetainedHeapDeltaMegabytes"/>.
+        /// </summary>
         public double HeapSlopeMegabytesPerMinute { get; set; }
+
+        /// <summary>Live retained bytes at the start of the window, after a stabilising collection.</summary>
+        public double RetainedHeapStartBytes { get; set; }
+
+        /// <summary>Live retained bytes at the end of the window, after a stabilising collection.</summary>
+        public double RetainedHeapEndBytes { get; set; }
+
+        /// <summary>
+        /// Growth in LIVE retained memory across the measured window. This is the honest leak signal:
+        /// both endpoints are taken after a full collect + finalizer drain, so collector timing cannot
+        /// move it the way it moves the slope.
+        /// </summary>
+        public double RetainedHeapDeltaMegabytes =>
+            (RetainedHeapEndBytes - RetainedHeapStartBytes) / (1024d * 1024d);
 
         public double WorkingSetStartBytes { get; set; }
 
@@ -341,6 +359,12 @@ namespace CoreAI.Tools.Scale
         public bool ChatGatePass { get; set; }
 
         public bool HeapGatePass { get; set; }
+
+        /// <summary>Worst growth in live retained megabytes across repeats — one half of the memory gate.</summary>
+        public double WorstRetainedHeapDeltaMegabytes { get; set; }
+
+        /// <summary>Worst bytes allocated per actor per frame across repeats — the other half.</summary>
+        public double WorstAllocBytesPerActorPerFrame { get; set; }
 
         public bool WorkCountersPass { get; set; }
 
@@ -520,6 +544,9 @@ namespace CoreAI.Tools.Scale
                     PacketsSentTotal = repeats.Sum(r => r.PacketsSentTotal),
                     PayloadBytesTotal = repeats.Sum(r => r.PayloadBytesTotal),
                     WorstHeapSlopeMegabytesPerMinute = repeats.Max(r => r.HeapSlopeMegabytesPerMinute),
+                    WorstRetainedHeapDeltaMegabytes = repeats.Max(r => r.RetainedHeapDeltaMegabytes),
+                    WorstAllocBytesPerActorPerFrame = repeats.Max(
+                        r => r.AllocBytesPerFrame.Median / Math.Max(1, group.Key)),
                     WorstWorkingSetSlopeMegabytesPerMinute = repeats.Max(r => r.WorkingSetSlopeMegabytesPerMinute),
                     RateRefusals = repeats.Sum(r => r.RateRefusals),
                     HandlerErrors = repeats.Sum(r => r.HandlerErrors),
@@ -542,7 +569,13 @@ namespace CoreAI.Tools.Scale
                                     && step.ChatOffered > 0
                                     && step.WorstChatBurstP95EndToEndMs <= workload.Chat.P95EndToEndBudgetMilliseconds
                                     && step.WorstChatStaggeredP95EndToEndMs <= workload.Chat.P95EndToEndBudgetMilliseconds;
-                step.HeapGatePass = step.WorstHeapSlopeMegabytesPerMinute <= workload.Budgets.HeapSlopeMegabytesPerMinuteMax;
+                // WHY the slope stopped deciding this: three identical repeats at N=100 produced
+                // -45.6, -70.4 and -93.3 MB/min against a 1 MB/min budget. It measures when the
+                // collector ran. Retained delta (stabilised endpoints) and allocation rate per actor
+                // decide it now; both are reproducible, the second to the byte.
+                step.HeapGatePass =
+                    step.WorstRetainedHeapDeltaMegabytes <= workload.Budgets.RetainedHeapDeltaMegabytesMax
+                    && step.WorstAllocBytesPerActorPerFrame <= workload.Budgets.AllocBytesPerActorPerFrameMax;
                 foreach (double budget in workload.Budgets.FrameMilliseconds)
                 {
                     string key = FormatBudget(budget);

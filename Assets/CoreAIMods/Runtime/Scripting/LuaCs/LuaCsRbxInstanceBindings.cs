@@ -910,6 +910,53 @@ namespace CoreAI.Ai.LuaCs
                 return LuaValue.Nil;
             });
 
+            // WHY: AddItem stays out of IsMutatingMethod on purpose — scheduling runs unenveloped
+            // (authorization is the call-time ACL Demand inside RbxDebris) and the destroy takes
+            // its own server-generated envelope when the timer fires, so the retained-operation
+            // count proves the destroy went through an envelope.
+            Method("AddItem", (ctx, self) =>
+            {
+                RbxDebris debris = (RbxDebris)self;
+                debris.EnsureHost(context.Bindings.Scheduler, context.Bindings.LogSink);
+                RbxInstance item;
+                if (TryGetInstance(Arg(ctx, 1), out LuaCsRbxInstanceProxy itemProxy))
+                {
+                    item = itemProxy.Instance;
+                }
+                else
+                {
+                    throw RbxError.BadArgument(
+                        "Debris:AddItem expects an Instance at argument 1",
+                        "pass an Instance, got " + Describe(Arg(ctx, 1)) + " at argument 1");
+                }
+
+                LuaValue lifetimeValue = Arg(ctx, 2);
+                double lifetime;
+                if (lifetimeValue.Type == LuaValueType.Nil)
+                {
+                    lifetime = RbxDebris.DefaultLifetimeSeconds;
+                }
+                else if (lifetimeValue.Type == LuaValueType.Number)
+                {
+                    lifetime = lifetimeValue.Read<double>();
+                }
+                else
+                {
+                    throw RbxError.BadArgument(
+                        "Debris:AddItem expects a number at argument 2",
+                        "pass a number, got " + Describe(lifetimeValue) + " at argument 2");
+                }
+
+                // WHY: the caller identity is copied from the trusted ActorContext issued at mod
+                // load — never from a Lua argument — so a script cannot schedule destruction as
+                // another actor.
+                debris.AddItem(item, lifetime, new DebrisCaller(
+                    context.ActorContext.ActorId,
+                    context.ActorContext.Grants.IsUnrestricted,
+                    context.ActorContext.WorldId));
+                return LuaValue.Nil;
+            }, "Debris");
+
             // ---- Attributes / tags ----
             Method("GetAttribute", (ctx, self) => AttributeToLua(
                 self.GetAttribute(ReadString(ctx, 1, "GetAttribute"))));

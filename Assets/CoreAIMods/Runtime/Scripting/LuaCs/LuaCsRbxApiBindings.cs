@@ -94,6 +94,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly IRbxCameraRig _cameraRig;
         private readonly RbxUserInputService _userInputService;
         private readonly RbxRunService _runService;
+        private readonly RbxDebris _debris;
         private readonly IClickPickSource _pickSource;
         private readonly ModConnectionRegistry _connections;
         private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
@@ -240,6 +241,21 @@ namespace CoreAI.Ai.LuaCs
                 _runService.Parent = _game;
             }
 
+            // WHY: same rationale as RunService — worlds bootstrapped before the Debris slice may
+            // lack the service; create it here so game:GetService("Debris") resolves, then attach
+            // the scheduler host timer and the mod log sink so AddItem can schedule and report.
+            _debris = _game.FindFirstChildOfClass("Debris") as RbxDebris;
+            if (_debris == null && _registry.Catalog.TryGet("Debris", out _))
+            {
+                _debris = (RbxDebris)_registry.Create("Debris");
+                _debris.Parent = _game;
+            }
+
+            if (_debris != null)
+            {
+                _debris.AttachHost(_scheduler, _log);
+            }
+
             if (_userInputService != null)
             {
                 _userInputService.InputBegan.BindScheduler(_scheduler);
@@ -294,6 +310,12 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>The shared RunService instance (Heartbeat/Stepped/RenderStepped signals).</summary>
         public RbxRunService RunService => _runService;
+
+        /// <summary>The shared Debris instance (scheduled guaranteed destruction).</summary>
+        public RbxDebris Debris => _debris;
+
+        /// <summary>Mod log sink behind Debris drop reports and headless-mode notes.</summary>
+        internal Action<string> LogSink => _log;
 
         /// <summary>Camera-ray seam behind ClickDetector.MouseClick (headless in-memory by default,
         /// the composition attaches the engine-backed source once).</summary>
@@ -509,6 +531,10 @@ namespace CoreAI.Ai.LuaCs
             _networkBridge.EventReceived -= DeliverNetworkEvent;
             _networkBridge.RequestReceived -= QueueNetworkRequest;
             _registry.Unregistered -= OnInstanceUnregistered;
+            if (_debris != null)
+            {
+                _debris.DetachHost();
+            }
             _scheduler.PhaseReached -= PumpSchedulerPhase;
             _networkRequestConnection.Disconnect();
 

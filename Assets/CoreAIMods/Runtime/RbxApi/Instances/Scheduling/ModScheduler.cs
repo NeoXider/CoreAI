@@ -203,6 +203,18 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             public Func<object[]> ResumeArguments { get; }
         }
 
+        private sealed class HostCallbackEntry : TimedEntry
+        {
+            public HostCallbackEntry(Action callback, double deadline,
+                long earliestFrame, long sequence)
+                : base(null, deadline, earliestFrame, sequence)
+            {
+                Callback = callback;
+            }
+
+            public Action Callback { get; }
+        }
+
         private sealed class CompletionWaitEntry
         {
             public CompletionWaitEntry(ThreadRecord record, RbxSchedulerCompletion completion,
@@ -382,6 +394,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private readonly MinHeap<WaitEntry> _waitHeap;
         private readonly MinHeap<DelayEntry> _delayHeap;
         private readonly MinHeap<SignalWaitTimeoutEntry> _signalWaitTimeoutHeap;
+        private readonly MinHeap<HostCallbackEntry> _hostHeap;
         private Func<string, string> _actorIdResolver;
 
         private long _frameIndex;
@@ -424,6 +437,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 (DelayEntry left, DelayEntry right) => CompareTimedEntries(left, right));
             _signalWaitTimeoutHeap = new MinHeap<SignalWaitTimeoutEntry>(
                 (SignalWaitTimeoutEntry left, SignalWaitTimeoutEntry right) =>
+                    CompareTimedEntries(left, right));
+            _hostHeap = new MinHeap<HostCallbackEntry>(
+                (HostCallbackEntry left, HostCallbackEntry right) =>
                     CompareTimedEntries(left, right));
         }
 
@@ -544,6 +560,30 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 GetEarliestTimerFrame(), NextSequence());
             _delayHeap.Add(entry);
             return record.Thread;
+        }
+
+        /// <summary>
+        /// Schedules an ownerless host callback for the next eligible delayed slot, serviced in the
+        /// delayed-threads slot before Heartbeat (R4.2) alongside task.wait/task.delay resumptions.
+        /// Ownerless by design: the entry carries no mod id, is never counted against
+        /// <see cref="MaxThreadsPerActor"/>, and <see cref="KillOwnedBy"/> never touches it, so a
+        /// scheduled host timer (Debris destruction) survives the scheduling mod's unload (S5.1).
+        /// A callback that throws is dropped after its single attempt and the error propagates out
+        /// of <see cref="Advance"/>; later entries are re-queued untouched.
+        /// </summary>
+        public void ScheduleHostCallback(double seconds, Action callback)
+        {
+            if (callback == null)
+            {
+                throw RbxError.BadArgument(
+                    "ScheduleHostCallback requires a callback",
+                    "pass the host action to run when the scaled delay elapses");
+            }
+
+            double duration = ValidateAndNormalizeDuration(seconds, "ScheduleHostCallback");
+            HostCallbackEntry entry = new(callback, CurrentTime + duration,
+                GetEarliestTimerFrame(), NextSequence());
+            _hostHeap.Add(entry);
         }
 
         /// <summary>
@@ -1092,7 +1132,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 WaitEntry wait = PeekEligibleWait();
                 DelayEntry delay = PeekEligibleDelay();
                 SignalWaitTimeoutEntry signalTimeout = PeekEligibleSignalWaitTimeout();
-                if (wait == null && delay == null && signalTimeout == null)
+                HostCallbackEntry hostCallback = PeekEligibleHostCallback();
+                if (wait == null && delay == null && signalTimeout == null && hostCallback == null)
                 {
                     break;
                 }
@@ -1111,6 +1152,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     earliest = signalTimeout;
                 }
 
+                if (earliest == null
+                    || hostCallback != null
+                    && CompareTimedEntries(hostCallback, earliest) < 0)
+                {
+                    earliest = hostCallback;
+                }
+
                 if (ReferenceEquals(earliest, wait))
                 {
                     _delayedBatchBuffer.Add(_waitHeap.Pop());
@@ -1119,9 +1167,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 {
                     _delayedBatchBuffer.Add(_delayHeap.Pop());
                 }
-                else
+                else if (ReferenceEquals(earliest, signalTimeout))
                 {
                     _delayedBatchBuffer.Add(_signalWaitTimeoutHeap.Pop());
+                }
+                else
+                {
+                    _delayedBatchBuffer.Add(_hostHeap.Pop());
                 }
             }
 
@@ -1131,6 +1183,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 for (; nextIndex < _delayedBatchBuffer.Count; nextIndex++)
                 {
                     TimedEntry entry = _delayedBatchBuffer[nextIndex];
+                    HostCallbackEntry hostCallback = entry as HostCallbackEntry;
+                    if (hostCallback != null)
+                    {
+                        hostCallback.Callback();
+                        continue;
+                    }
+
                     WaitEntry wait = entry as WaitEntry;
                     if (wait != null)
                     {
@@ -1183,6 +1242,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             for (int index = startIndex; index < _delayedBatchBuffer.Count; index++)
             {
                 TimedEntry entry = _delayedBatchBuffer[index];
+                HostCallbackEntry hostCallback = entry as HostCallbackEntry;
+                if (hostCallback != null)
+                {
+                    _hostHeap.Add(hostCallback);
+                    continue;
+                }
+
                 WaitEntry wait = entry as WaitEntry;
                 if (wait != null)
                 {
@@ -1258,6 +1324,17 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             SignalWaitTimeoutEntry entry = _signalWaitTimeoutHeap.Peek();
+            return IsEligible(entry) ? entry : null;
+        }
+
+        private HostCallbackEntry PeekEligibleHostCallback()
+        {
+            if (_hostHeap.Count == 0)
+            {
+                return null;
+            }
+
+            HostCallbackEntry entry = _hostHeap.Peek();
             return IsEligible(entry) ? entry : null;
         }
 

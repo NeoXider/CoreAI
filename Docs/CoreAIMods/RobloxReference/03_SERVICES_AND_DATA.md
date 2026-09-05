@@ -262,6 +262,7 @@ tween:Play()
 ### 5.1 Debris
 
 - **S5.1:** `Debris:AddItem(item: Instance, lifetime: number = 10)` schedules `item:Destroy()` after `lifetime` seconds. Non-yielding, fire-and-forget, survives the calling script's death — the idiomatic "temporary projectile/effect" cleanup. `MaxItems` is deprecated. CoreAI: a timer queue calling the engine Destroy path (must fire Destroying/AncestryChanged exactly like a manual Destroy).
+  - Implemented (MVP8 slice 8.0): engine-free `RbxDebris` over the scheduler host timer; mirror cap of 1,000 items with oldest-instant eviction. Wrong→right: `task.delay(10, function() part:Destroy() end)` → `game:GetService("Debris"):AddItem(part, 10)`.
 
 ### 5.2 CollectionService
 

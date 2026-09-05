@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "scale-staircase-v1",
+  "frozenUtc": "2026-09-02T00:00:00Z",
+  "rationale": "DIAGNOSTIC ONLY, never evidence: frozen workload with orchestratorMaxPending 64->512 and orchestratorMaxConcurrent 4->16. Isolates whether the residual p95 overshoot at N=200 is orchestrator concurrency.",
+  "staircase": [
+    20,
+    50,
+    100,
+    200
+  ],
+  "repeats": 3,
+  "frameRate": 60,
+  "warmupFrames": 120,
+  "measurementFrames": 600,
+  "drainFramesMax": 900,
+  "snapshotEventName": "scale.snapshot",
+  "perActor": {
+    "modsPerActor": 1,
+    "heartbeatLoopIterations": 32,
+    "persistentWaitLoops": 1,
+    "persistentWaitSeconds": 0.25,
+    "remoteFireEveryFrames": 6,
+    "partSpawnEveryFrames": 30,
+    "phaseOffsetByActorIndex": true
+  },
+  "chat": {
+    "orchestratorMaxConcurrent": 16,
+    "orchestratorMaxPending": 512,
+    "stubLatencyMilliseconds": 100,
+    "synchronizedBurstAtFrame": 0,
+    "staggeredWindowStartFrame": 300,
+    "staggeredWindowEndFrame": 600,
+    "p95EndToEndBudgetMilliseconds": 5000
+  },
+  "network": {
+    "loopbackMaxClientRequestsPerSecond": 500
+  },
+  "budgets": {
+    "frameMilliseconds": [
+      4,
+      16
+    ],
+    "passRule": "A step passes a frame budget only when EVERY repeat's median main-thread frame time is within the budget, every frozen work counter is non-zero, the chat gate holds (0 admission refusals, all offered requests served, p95 end-to-end <= p95EndToEndBudgetMilliseconds for both patterns) and the managed heap slope is within heapSlopeMegabytesPerMinuteMax. Worst frames and p99 are reported, never hidden.",
+    "heapSlopeMegabytesPerMinuteMax": 1,
+    "fairnessMaxMinRatioMax": 2
+  },
+  "nonZeroCounters": [
+    "guardedSteps",
+    "threadResumes",
+    "heartbeats",
+    "remoteSent",
+    "serverReceived",
+    "acks",
+    "packetsSent",
+    "packetsDelivered",
+    "payloadBytes",
+    "partsSpawned",
+    "waitLoopResumes",
+    "snapshotEventsDelivered",
+    "chatServed",
+    "syncContextContinuations"
+  ]
+}

@@ -236,7 +236,25 @@ namespace CoreAI.Tools.Scale
 
         public string PassRule { get; set; } = "";
 
+        /// <summary>
+        /// Kept for older reports only; the slope is no longer gated because its noise on identical
+        /// repeats reaches 47 MB/min against this 1 MB/min figure.
+        /// </summary>
         public double HeapSlopeMegabytesPerMinuteMax { get; set; } = 1d;
+
+        /// <summary>
+        /// Gate: growth in LIVE retained megabytes across the measured window, per repeat. Both
+        /// endpoints are taken after a full collect and finalizer drain, so this measures retention
+        /// rather than when the collector happened to run.
+        /// </summary>
+        public double RetainedHeapDeltaMegabytesMax { get; set; } = 8d;
+
+        /// <summary>
+        /// Gate: bytes allocated per actor per frame. This is the reproducible number — measured
+        /// spread across three identical repeats is exactly 0 bytes at every staircase step, while
+        /// the heap slope over the same runs spread by up to 47 MB/min.
+        /// </summary>
+        public double AllocBytesPerActorPerFrameMax { get; set; } = 4096d;
 
         public double FairnessMaxMinRatioMax { get; set; } = 2d;
     }

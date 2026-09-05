@@ -85,7 +85,7 @@ order is not part of the CoreAI or Roblox authoring contract.
 
 In the standard runtime, `game:GetService()` resolves these tree-backed services: `Workspace`,
 `Lighting`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `Players`,
-`HttpService`, `UserInputService`, `MaterialService`, and `RunService`. A tree-backed service can still have
+`HttpService`, `UserInputService`, `MaterialService`, `Debris`, and `RunService`. A tree-backed service can still have
 service-specific members that have not landed; resolution alone does not promise that every Roblox
 member exists.
 
@@ -97,7 +97,6 @@ delivery rung recorded by `ServiceCatalog`:
 |---|---|
 | `TweenService` | MVP8 |
 | `CollectionService` | MVP8 |
-| `Debris` | MVP8 |
 | `DataStoreService` | MVP9 |
 | `ContextActionService` | MVP10 |
 | `SoundService` | MVP15 |

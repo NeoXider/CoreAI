@@ -57,6 +57,14 @@ texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
       envelopes on every production Lua entry (execute_lua plain/MCP, mod chunks, scheduler resumes,
       signal/remote dispatch, cross-mod calls), disconnect seam firing `PlayerRemoving` once,
       inbound `SenderActorId` cannot create identity, `PAYLOAD_TOO_LARGE` at a frozen 65,536-byte cap.
+- [x] **MVP2.5 slice 8.0 `Debris:AddItem` — landed (`PROGRESS.mvp8-debris.md`, 12 gate tests):**
+      engine-free `RbxDebris` (default 10 s, 1,000-item cap evicting the oldest instantly, negative
+      clamps to 0, re-add replaces the deadline), call-time ACL `Demand` + enveloped destroy at fire
+      with drop-and-log-one-line on ownership change, ownerless `ModScheduler.ScheduleHostCallback`
+      surviving unload/`KillOwnedBy`, `Debris` tree-backed in catalog/bootstrap/binding (stub row
+      removed). File-only gates green (`CoreAI.RbxApi.Instances` / `Mods` / `Mods.Tests`, 0 errors;
+      temp `<Compile Include>` entries reverted — Unity regenerates them on next refresh). OPEN:
+      full EditMode verification gate on next editor start (Unity held by another process).
 - [ ] **Rung zero residue — host restore envelope.** World-package restore writes
       (`RbxWorldPackageSerializer.cs:274`, `RbxWorldPackageContracts.cs:568`, `RbxWorldHost.cs`) do not
       yet run under a host envelope; they were out of the rung-zero task's file scope. Add the host

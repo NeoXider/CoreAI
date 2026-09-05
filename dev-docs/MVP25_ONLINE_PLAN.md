@@ -225,6 +225,15 @@ budget. A result with zero relevant work is a failure, not a fast pass.
 >    Direct client-authoritative forwarding is never to be called Roblox parity.
 > 4. **Release promise** — hold the **20-client bar** before the scale manifest is frozen. No
 >    concurrency number is claimed publicly until the staircase measurement proves it.
+>    **Update 2026-09-05: the bar is no longer blocked.** The plan recorded the 20-client promise as
+>    blocked by a solo heap-budget failure. That failure was a broken metric — it fitted a line through
+>    `GC.GetTotalMemory(false)` samples and so measured collector timing, returning −93 MB/min against a
+>    budget of +1. With a reproducible gate the memory budget passes at every staircase step, and with
+>    the queue sized for the actor count (`AiOrchestrationQueueOptions.ForActorCount`) **200 actors pass
+>    the 16 ms frame, memory and chat gates**. See
+>    [CAPACITY_UNBLOCKED_2026-09-05.md](CAPACITY_UNBLOCKED_2026-09-05.md). The promise itself does not
+>    change: this measures CoreAI against a scripted 100 ms provider, not a deployment, so no public
+>    concurrency claim follows from it until the manifest is re-run against a real backend.
 > 5. **Physics and streaming scope** — server-owned physics in MVP12; hostile physics authority and
 >    streaming / interest management deferred to measured later work.
 

@@ -225,6 +225,14 @@ namespace CoreAI.Tools.Scale
             int gen1Start = GC.CollectionCount(1);
             int gen2Start = GC.CollectionCount(2);
             double heapStart = GC.GetTotalMemory(false);
+            // WHY: the RETAINED figure is what a leak gate must judge. GetTotalMemory(false) reports
+            // live objects PLUS whatever garbage has not been collected yet, so a Gen2 landing inside
+            // the window drops it by tens of megabytes and the linear fit over those samples comes out
+            // NEGATIVE. Measured on this harness: three identical repeats at N=100 gave slopes of
+            // -45.6, -70.4 and -93.3 MB/min against a budget of 1. That is not a leak signal, it is
+            // collector timing. Stabilising first — collect, drain finalizers, collect again, because
+            // the first pass only queues finalizable objects — makes the endpoints comparable.
+            double retainedStart = StabilisedHeapBytes();
             double workingSetStart = Environment.WorkingSet;
             long measurementStart = Stopwatch.GetTimestamp();
 
@@ -243,6 +251,7 @@ namespace CoreAI.Tools.Scale
 
             double measurementWallSeconds = ScaleMath.TicksToMs(Stopwatch.GetTimestamp() - measurementStart) / 1000d;
             double heapEnd = GC.GetTotalMemory(false);
+            double retainedEnd = StabilisedHeapBytes();
             double workingSetEnd = Environment.WorkingSet;
             Dictionary<string, ScaleActorCounters> endCounters = Snapshot(session, host, actors, frameSeconds);
             long serverReceivedEnd = session.ModStore.ReadLong(ServerModId, "received");
@@ -303,6 +312,8 @@ namespace CoreAI.Tools.Scale
                 LiveInstancesAtEnd = rbxApi.Registry.Count,
                 HeapStartBytes = heapStart,
                 HeapEndBytes = heapEnd,
+                RetainedHeapStartBytes = retainedStart,
+                RetainedHeapEndBytes = retainedEnd,
                 WorkingSetStartBytes = workingSetStart,
                 WorkingSetEndBytes = workingSetEnd,
                 Gen0Collections = GC.CollectionCount(0) - gen0Start,
@@ -564,6 +575,23 @@ namespace CoreAI.Tools.Scale
             }
 
             return counters;
+        }
+
+        /// <summary>
+        /// Live retained bytes, with pending garbage collected first so two readings are comparable.
+        /// </summary>
+        /// <remarks>
+        /// WHY the double collect: the first pass only QUEUES objects that have finalizers; their
+        /// memory is released by the pass after the finalizer thread has run. A single collect would
+        /// leave a finalizable population counted as live, and the endpoint delta would drift with how
+        /// many happened to be pending at each end rather than with what the run actually retained.
+        /// </remarks>
+        private static double StabilisedHeapBytes()
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            return GC.GetTotalMemory(true);
         }
 
         private static void Pace(long frameStart, long periodTicks)

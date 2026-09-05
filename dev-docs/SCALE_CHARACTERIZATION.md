@@ -89,6 +89,29 @@ Relaxed to frame-only (`median ≤ B` + non-zero, ignoring chat/heap):
 
 Do not claim 200-player support: the frozen chat gate fails at ≥100 and the heap budget fails at 20 even on the host.
 
+> **Superseded 2026-09-05 — both failures were ours, not the program's.** See
+> [CAPACITY_UNBLOCKED_2026-09-05.md](CAPACITY_UNBLOCKED_2026-09-05.md).
+>
+> The **heap budget** was gating on `heapSlopeMegabytesPerMinute`, a fit over `GC.GetTotalMemory(false)`
+> samples — live objects plus uncollected garbage. Three identical repeats at N=100 gave −45.6, −70.4
+> and −93.3 MB/min against a budget of 1: the metric measured when the collector ran. It is now
+> reported but not gated; the gate uses retained heap delta (stabilised endpoints, measured spread
+> 0.13 MB) and allocation bytes per actor per frame (measured spread **0.00 bytes**). With that, the
+> memory gate passes at every step.
+>
+> The **chat gate** was hitting `MaxPending = 64`, a default sized for a small session, which refuses an
+> actor outright before any work is attempted. At 100 actors on a synchronized burst it turned away 96
+> of 600 requests. Sized for the actor count the same run served 200 of 200 with none refused, and at
+> 200 actors with sixteen lanes the burst p95 fell from 5,234 ms to 1,346 ms.
+>
+> **Measured result: 200 actors pass the 16 ms frame budget, the memory gate and the chat gate.** The
+> 4 ms budget still fails at 200 (median 7.37 ms) — that is a 240 Hz-equivalent target.
+> Use `AiOrchestrationQueueOptions.ForActorCount(n)` rather than the bare defaults.
+>
+> This still bounds **CoreAI**, not a deployment: the harness drives a scripted 100 ms provider. The
+> real-provider G10 run measured a 17.4–38.5 s p95 on one lane, where the backend is the constraint
+> long before any of this.
+
 ## 8. Bottlenecks (file:line)
 
 1. **Admission ceiling** `QueuedAiOrchestrator.cs:282` (`_pending.RemoveAt`), `AiOrchestrationQueueOptions.cs:8` `MaxPending=64`. At N=100 the burst offers 100 against 64 slots → 96 refusals; at 200 offers 400 against 64+concurrency → 396 refusals. Fix is sizing, not code. Chat **fairness** (burst end-to-end max/min 5→17) is high because Fifo admission plus 100 ms sequential service stretches tail.

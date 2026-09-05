@@ -90,7 +90,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         public void FindService_ReturnsNullForValidAbsentServicesAndThrowsForUnknown()
         {
             Assert.AreSame(_registry.WorldRoot, _game.FindService("Workspace"));
-            Assert.IsNull(_game.FindService("Debris"));
+            // WHY: Debris landed as a live tree-backed service (MVP8 slice 8.0), so the
+            // still-unimplemented TweenService stands in as the valid-but-absent example.
+            Assert.IsNull(_game.FindService("TweenService"));
 
             // WHY: Players is no longer absent — the loopback networking rung pulled its minimum
             // surface forward so RemoteEvent.OnServerEvent can hand Lua a real Player, as Roblox does.
