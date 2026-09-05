@@ -1,6 +1,6 @@
 {
   "name": "com.neoxider.coreaihub",
-  "version": "7.27.0",
+  "version": "7.28.0",
   "displayName": "CoreAI Hub (UI Toolkit)",
   "unity": "6000.0",
   "description": "Optional UI Toolkit window for CoreAI: a tabbed Hub that renders pages registered into CoreAI's HubPageRegistry (Chat, Settings, Statistics, Mods, and C#/Lua-authored pages). Lazy per-tab content, live tab rebuild on register/unregister, semi-transparent runtime panel, and a future path to Unity 6.5 world-space PanelRenderer. Install this package only when you want the built-in Hub window; without it CoreAI still exposes the registry so you can render pages on your own uGUI/UITK canvas via the API. Depends on com.neoxider.coreai.",
@@ -11,7 +11,7 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "licensesUrl": "https://github.com/NeoXider/CoreAI/blob/main/LICENSE",
   "dependencies": {
-    "com.neoxider.coreai": "7.27.0",
-    "com.neoxider.coreaiunity": "7.27.0"
+    "com.neoxider.coreai": "7.28.0",
+    "com.neoxider.coreaiunity": "7.28.0"
   }
 }
