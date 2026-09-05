@@ -4,6 +4,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.29.0] - 2026-09-05
+
+### Added
+
+- **MVP12** — `ClientWritePolicy` (`RobloxParity`/`Strict`, значения `Open` нет) и `MutationIntent`
+  без единого поля идентичности; запись по гранту уходит намерением, ничего не предсказывая.
+
 ## [7.28.0] - 2026-09-05
 
 ### Added
