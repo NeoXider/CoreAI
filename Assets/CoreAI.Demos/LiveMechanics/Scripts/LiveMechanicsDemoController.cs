@@ -52,6 +52,7 @@ namespace CoreAI.Demos
         private int _bossesDefeated;
         private float _attackTimer;
         private string _status = "";
+        private CoreAI.Demos.Shared.CoreAiDemoPanel _panel;
 
         private void Start()
         {
@@ -62,6 +63,9 @@ namespace CoreAI.Demos
 
             if (coreAiScope == null || coreAiScope.Container == null)
             {
+                _panel = CoreAI.Demos.Shared.CoreAiDemoPanel.Create(
+                    "CoreAI — Live Mechanics",
+                    "The LLM rewrites the rules while the fight runs.");
                 _status = "CoreAILifetimeScope not found in scene.";
                 Debug.LogError($"[LiveMechanicsDemo] {_status}");
                 enabled = false;
@@ -82,6 +86,9 @@ namespace CoreAI.Demos
             _slots.DeclareSlot(BossRewardSlot);
             LoadPersistedRules();
             LuaCsGameToolExecutor.LuaExecutedSuccessfully += OnLuaExecutedSuccessfully;
+            _panel ??= CoreAI.Demos.Shared.CoreAiDemoPanel.Create(
+                "CoreAI — Live Mechanics",
+                "The LLM rewrites the rules while the fight runs.");
             _status = "Press C to open the chat and ask the AI to change the rules.";
             Log("Battle started. Default rules: damage = atk - def, attack every 2s, loot = 10 gold.");
         }
@@ -93,6 +100,7 @@ namespace CoreAI.Demos
 
         private void Update()
         {
+            RefreshPanel();
             if (_slots == null)
             {
                 return;
@@ -200,71 +208,75 @@ namespace CoreAI.Demos
                    code.IndexOf(BossRewardSlot, System.StringComparison.Ordinal) >= 0;
         }
 
-        private void OnGUI()
+        /// <summary>
+        /// Repaints the whole readout each frame.
+        /// </summary>
+        /// <remarks>
+        /// WHY a per-frame rebuild rather than an append: this panel is a live view of state that
+        /// changes on its own — boss health, gold, which rules Lua has taken over — so the honest
+        /// shape is "replace what is shown", not "add another line". SetLog replaces, so nothing
+        /// accumulates.
+        /// </remarks>
+        private void RefreshPanel()
         {
-            GUILayout.BeginArea(new Rect(12, 12, 470, Screen.height - 24), GUI.skin.box);
-            GUILayout.Label("<b>CoreAI - Live Mechanics Demo (LLM edits the rules)</b>", RichLabel());
-            GUILayout.Label(_status, RichLabel());
-
-            if (_slots == null)
+            if (_panel == null)
             {
-                GUILayout.EndArea();
                 return;
             }
 
-            GUILayout.Space(6);
-            GUILayout.Label(
-                $"Boss HP: <b>{System.Math.Max(0d, _bossHp):0.#}</b> / {BossMaxHp:0}   " +
-                $"Gold: <b>{_gold:0.#}</b>   Defeated: <b>{_bossesDefeated}</b>",
-                RichLabel());
-
-            GUILayout.Space(4);
-            GUILayout.Label("<b>Rules (Lua logic slots)</b>", RichLabel());
-            DrawSlotRow(DamageSlot, "atk=25, def=10");
-            DrawSlotRow(AttackIntervalSlot, "()");
-            DrawSlotRow(LootSlot, "bossMaxHp=200");
-            DrawSlotRow(BossRewardSlot, "bossMaxHp=200");
-            if (!string.IsNullOrEmpty(_slots.LastError))
+            if (_slots == null)
             {
-                GUILayout.Label($"Last Lua error: {_slots.LastError}", RichLabel());
+                _panel.SetLog(_status);
+                return;
             }
 
-            GUILayout.Space(4);
-            GUILayout.Label("<b>Mods</b>", RichLabel());
+            System.Text.StringBuilder view = new();
+            view.AppendLine(_status);
+            view.AppendLine();
+            view.AppendLine($"Boss HP: <b>{System.Math.Max(0d, _bossHp):0.#}</b> / {BossMaxHp:0}" +
+                            $"   Gold: <b>{_gold:0.#}</b>   Defeated: <b>{_bossesDefeated}</b>");
+            view.AppendLine();
+            view.AppendLine("<b>Rules (Lua logic slots)</b>");
+            view.AppendLine(SlotRow(DamageSlot, "atk=25, def=10"));
+            view.AppendLine(SlotRow(AttackIntervalSlot, "()"));
+            view.AppendLine(SlotRow(LootSlot, "bossMaxHp=200"));
+            view.AppendLine(SlotRow(BossRewardSlot, "bossMaxHp=200"));
+            if (!string.IsNullOrEmpty(_slots.LastError))
+            {
+                view.AppendLine($"Last Lua error: {_slots.LastError}");
+            }
+
+            view.AppendLine();
+            view.AppendLine("<b>Mods</b>");
             IReadOnlyList<LuaModInfo> mods = _mods.ListMods(_actorContext);
             if (mods.Count == 0)
             {
-                GUILayout.Label("No mods loaded.");
+                view.AppendLine("No mods loaded.");
             }
             else
             {
                 foreach (LuaModInfo mod in mods)
                 {
-                    GUILayout.Label($"* {mod.Id} caps={mod.Capabilities} errors={mod.ErrorCount}");
+                    view.AppendLine($"* {mod.Id} caps={mod.Capabilities} errors={mod.ErrorCount}");
                 }
             }
 
-            GUILayout.Space(4);
-            GUILayout.Label("<b>Battle log</b>", RichLabel());
+            view.AppendLine();
+            view.AppendLine("<b>Battle log</b>");
             foreach (string line in _battleLog)
             {
-                GUILayout.Label(line);
+                view.AppendLine(line);
             }
 
-            GUILayout.EndArea();
+            _panel.SetLog(view.ToString());
         }
 
-        private void DrawSlotRow(string slot, string args)
+        private string SlotRow(string slot, string args)
         {
             string state = _slots.IsOverridden(slot) ? "<b>Lua override</b>" : "C# default";
-            GUILayout.Label($"* {slot}({args}) - {state}", RichLabel());
+            return $"* {slot}({args}) - {state}";
         }
 
-        private static GUIStyle RichLabel()
-        {
-            GUIStyle style = new(GUI.skin.label) { richText = true, wordWrap = true };
-            return style;
-        }
 #else
         private void Start()
         {

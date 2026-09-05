@@ -6,6 +6,7 @@ using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Composition;
+using CoreAI.Demos.Shared;
 using VContainer;
 #endif
 
@@ -39,12 +40,17 @@ namespace CoreAI.Demos
         private ILuaModRuntime _mods;
         private ActorContext _actorContext;
         private LuaCsLogicSlots _slots;
+        private CoreAiDemoPanel _panel;
         private string _status = "";
         private string _lastModEvent = "-";
         private int _waveButtonPresses;
 
         private void Start()
         {
+            _panel = CoreAiDemoPanel.Create(
+                "CoreAI — Lua Mods Demo",
+                "Loads persistent Lua mods into the DI LuaModRuntime and drives them from the UI.");
+
             if (coreAiScope == null)
             {
                 coreAiScope = FindFirstObjectByType<CoreAILifetimeScope>();
@@ -53,6 +59,7 @@ namespace CoreAI.Demos
             if (coreAiScope == null || coreAiScope.Container == null)
             {
                 _status = "CoreAILifetimeScope not found in scene.";
+                _panel.Log(_status);
                 Debug.LogError($"[LuaModsDemo] {_status}");
                 enabled = false;
                 return;
@@ -69,6 +76,13 @@ namespace CoreAI.Demos
             _status = LuaCsModRuntime.IsSupported
                 ? "Ready. Load a mod to start."
                 : "Lua sandbox is not supported on this platform.";
+
+            _panel.AddButton("Load mod", LoadWaveDirector);
+            _panel.AddButton("Emit 'wave_started'", EmitWaveStarted);
+            _panel.AddButton("Unload", UnloadWaveDirector);
+            _panel.AddButton("Load override mod", LoadDamageTuner);
+            _panel.AddButton("Unload + reset slot", UnloadDamageTuner);
+            RefreshStatus();
         }
 
         private void OnDestroy()
@@ -93,116 +107,45 @@ namespace CoreAI.Demos
         private void OnModEvent(string modId, string eventName, string payload)
         {
             _lastModEvent = $"{modId} -> {eventName}({payload})";
+            RefreshStatus();
         }
 
-        private void OnGUI()
+        private void LoadWaveDirector()
         {
-            GUILayout.BeginArea(new Rect(12, 12, 460, Screen.height - 24), GUI.skin.box);
-            GUILayout.Label("<b>CoreAI - Lua Mods Demo</b>", RichLabel());
-            GUILayout.Label(_status, RichLabel());
-            GUILayout.Space(6);
-
-            // OnGUI can fire before Start on the first frame.
-            if (_mods == null || _slots == null)
-            {
-                GUILayout.EndArea();
-                return;
-            }
-
-            DrawWaveDirectorSection();
-            GUILayout.Space(6);
-            DrawDamageTunerSection();
-            GUILayout.Space(6);
-            DrawRuntimeSection();
-
-            GUILayout.EndArea();
+            Try(() => _mods.LoadMod(
+                _actorContext,
+                WaveDirectorModId,
+                waveDirectorMod.text,
+                LuaCapabilities.Read | LuaCapabilities.WorldEdit));
         }
 
-        private void DrawWaveDirectorSection()
+        private void EmitWaveStarted()
         {
-            GUILayout.Label("<b>1. Wave director mod (Read | WorldEdit)</b>", RichLabel());
-            GUILayout.BeginHorizontal();
-            bool loaded = _mods.IsLoaded(_actorContext, WaveDirectorModId);
-            if (!loaded && GUILayout.Button("Load mod"))
-            {
-                Try(() => _mods.LoadMod(
-                    _actorContext,
-                    WaveDirectorModId,
-                    waveDirectorMod.text,
-                    LuaCapabilities.Read | LuaCapabilities.WorldEdit));
-            }
-
-            if (loaded && GUILayout.Button("Emit 'wave_started'"))
-            {
-                _waveButtonPresses++;
-                Try(() => _mods.EmitEvent(_actorContext, "wave_started", _waveButtonPresses.ToString()));
-            }
-
-            if (loaded && GUILayout.Button("Unload"))
-            {
-                Try(() => _mods.UnloadMod(_actorContext, WaveDirectorModId));
-            }
-
-            GUILayout.EndHorizontal();
+            _waveButtonPresses++;
+            Try(() => _mods.EmitEvent(_actorContext, "wave_started", _waveButtonPresses.ToString()));
         }
 
-        private void DrawDamageTunerSection()
+        private void UnloadWaveDirector()
         {
-            GUILayout.Label("<b>2. Damage formula via LuaCsLogicSlots (Read | LogicOverride)</b>", RichLabel());
-
-            const double atk = 25d;
-            const double def = 10d;
-            string source = _slots.TryInvokeNumber(DamageSlot, out double dmg, atk, def)
-                ? "Lua override"
-                : "C# default";
-            if (source == "C# default")
-            {
-                dmg = atk - def; // The game's vanilla formula.
-            }
-
-            GUILayout.Label($"damage(atk={atk}, def={def}) = <b>{dmg:0.#}</b>  ({source})", RichLabel());
-
-            GUILayout.BeginHorizontal();
-            bool loaded = _mods.IsLoaded(_actorContext, DamageTunerModId);
-            if (!loaded && GUILayout.Button("Load override mod"))
-            {
-                Try(() => _mods.LoadMod(
-                    _actorContext,
-                    DamageTunerModId,
-                    damageTunerMod.text,
-                    LuaCapabilities.Read | LuaCapabilities.LogicOverride));
-            }
-
-            if (loaded && GUILayout.Button("Unload + reset slot"))
-            {
-                Try(() =>
-                {
-                    _mods.UnloadMod(_actorContext, DamageTunerModId);
-                    _slots.Reset(DamageSlot);
-                });
-            }
-
-            GUILayout.EndHorizontal();
+            Try(() => _mods.UnloadMod(_actorContext, WaveDirectorModId));
         }
 
-        private void DrawRuntimeSection()
+        private void LoadDamageTuner()
         {
-            GUILayout.Label("<b>3. Runtime state</b>", RichLabel());
-            GUILayout.Label($"Last mod event: {_lastModEvent}");
+            Try(() => _mods.LoadMod(
+                _actorContext,
+                DamageTunerModId,
+                damageTunerMod.text,
+                LuaCapabilities.Read | LuaCapabilities.LogicOverride));
+        }
 
-            IReadOnlyList<LuaModInfo> mods = _mods.ListMods(_actorContext);
-            if (mods.Count == 0)
+        private void UnloadDamageTuner()
+        {
+            Try(() =>
             {
-                GUILayout.Label("No mods loaded.");
-                return;
-            }
-
-            foreach (LuaModInfo mod in mods)
-            {
-                GUILayout.Label(
-                    $"* {mod.Id}  caps={mod.Capabilities}  handlers={mod.HandlerCount}  " +
-                    $"timers={mod.TimerCount}  errors={mod.ErrorCount}");
-            }
+                _mods.UnloadMod(_actorContext, DamageTunerModId);
+                _slots.Reset(DamageSlot);
+            });
         }
 
         private void Try(Action action)
@@ -217,12 +160,47 @@ namespace CoreAI.Demos
                 _status = $"Error: {ex.Message}";
                 Debug.LogError($"[LuaModsDemo] {ex}");
             }
+
+            RefreshStatus();
         }
 
-        private static GUIStyle RichLabel()
+        /// <summary>Recomputes the status block and button availability shown in the panel.</summary>
+        private void RefreshStatus()
         {
-            GUIStyle style = new(GUI.skin.label) { richText = true, wordWrap = true };
-            return style;
+            bool waveLoaded = _mods.IsLoaded(_actorContext, WaveDirectorModId);
+            bool damageLoaded = _mods.IsLoaded(_actorContext, DamageTunerModId);
+            // WHY: the original OnGUI showed only the applicable button (Load xor Unload); the shared
+            // panel keeps captions stable, so the same gating is expressed as interactable instead.
+            _panel.SetButtonInteractable("Load mod", !waveLoaded);
+            _panel.SetButtonInteractable("Emit 'wave_started'", waveLoaded);
+            _panel.SetButtonInteractable("Unload", waveLoaded);
+            _panel.SetButtonInteractable("Load override mod", !damageLoaded);
+            _panel.SetButtonInteractable("Unload + reset slot", damageLoaded);
+
+            const double atk = 25d;
+            const double def = 10d;
+            string source = _slots.TryInvokeNumber(DamageSlot, out double dmg, atk, def)
+                ? "Lua override"
+                : "C# default";
+            if (source == "C# default")
+            {
+                dmg = atk - def; // The game's vanilla formula.
+            }
+
+            List<string> modLines = new();
+            foreach (LuaModInfo mod in _mods.ListMods(_actorContext))
+            {
+                modLines.Add(
+                    $"* {mod.Id}  caps={mod.Capabilities}  handlers={mod.HandlerCount}  " +
+                    $"timers={mod.TimerCount}  errors={mod.ErrorCount}");
+            }
+
+            string mods = modLines.Count == 0 ? "No mods loaded." : string.Join("\n", modLines);
+            _panel.SetLog(
+                $"{_status}\n\n" +
+                $"damage(atk={atk}, def={def}) = {dmg:0.#}  ({source})\n\n" +
+                $"Last mod event: {_lastModEvent}\n\n" +
+                $"Loaded mods:\n{mods}");
         }
 #else
         private void Start()

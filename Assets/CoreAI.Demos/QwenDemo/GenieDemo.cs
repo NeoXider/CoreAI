@@ -45,8 +45,8 @@ namespace CoreAI.Demos.QwenDemo
         private LlmRunResult _last;
         private bool _busy;
         private readonly List<string> _log = new();
-        private Vector2 _scroll;
-        private Vector2 _controlsScroll;
+        private CoreAI.Demos.Shared.CoreAiDemoPanel _panel;
+        private TMPro.TMP_InputField _wishField;
         private string _disabledReason;
         private bool _ready;
         private readonly QwenToolTurnGuard _toolTurnGuard = new();
@@ -54,6 +54,7 @@ namespace CoreAI.Demos.QwenDemo
 
         private async void Start()
         {
+            BuildPanel();
             QwenFx.BuildStage(new Color(0.14f, 0.12f, 0.18f));
             _root = new GameObject("GenieRoot").transform;
             _pump = gameObject.AddComponent<MainThreadPump>();
@@ -317,92 +318,94 @@ namespace CoreAI.Demos.QwenDemo
             }
         }
 
-        private void OnGUI()
+        private void Update()
         {
-            GUIStyle rich = new(GUI.skin.label) { richText = true, wordWrap = true };
+            RefreshPanel();
+        }
 
-            QwenDemoLayout.Calculate(Screen.width, Screen.height, out Rect topPanel, out Rect logPanel);
-            GUILayout.BeginArea(topPanel, GUI.skin.box);
-            _controlsScroll = GUILayout.BeginScrollView(_controlsScroll);
-            GUILayout.Label("<b>WISH GENIE — Qwen3.5-0.8B (native tool calls)</b>",
-                new GUIStyle(GUI.skin.label) { richText = true, fontSize = 14 });
-            GUILayout.Label(
-                _last == null ? "<b>⏱ waiting for the first wish…</b>" : "<b>" + _last.HudLine() + "</b>",
-                new GUIStyle(GUI.skin.label)
-                    { richText = true, fontSize = 12, normal = { textColor = new Color(0.6f, 0.9f, 1f) } });
-            GUILayout.Label($"🪔 wishes left (code-enforced limit): <b>{_charges}</b>", rich);
-
-            if (QwenDemoState.HasBlockingError(_disabledReason))
+        /// <summary>
+        /// Builds the panel once: a wish field, the actions, and the preset wishes as buttons.
+        /// </summary>
+        private void BuildPanel()
+        {
+            _panel = CoreAI.Demos.Shared.CoreAiDemoPanel.Create(
+                "WISH GENIE — Qwen3.5-0.8B (native tool calls)",
+                "Type a wish, or press one of the examples. The model decides which tool to call.");
+            _wishField = _panel.AddInput("your wish, in Russian or English");
+            _panel.AddButton("Make a wish", Submit);
+            _panel.AddButton("Reset lamp (+3)", ResetLamp);
+            foreach (string preset in Presets)
             {
-                GUILayout.Label("<color=#ff8080>" + _disabledReason + "</color>", rich);
-                GUILayout.EndScrollView();
-                GUILayout.EndArea();
+                string captured = preset;
+                _panel.AddButton(captured, () =>
+                {
+                    _input = captured;
+                    Submit();
+                });
+            }
+        }
+
+        private void ResetLamp()
+        {
+            lock (_gate)
+            {
+                _charges = 3;
+            }
+        }
+
+        /// <summary>
+        /// Repaints the readout and keeps the buttons honest about what can be pressed.
+        /// </summary>
+        /// <remarks>
+        /// WHY per frame: charges, readiness and the busy flag all change from a background turn, and
+        /// the old immediate-mode panel read them every frame for the same reason. SetLog replaces the
+        /// text, so nothing accumulates.
+        /// </remarks>
+        private void RefreshPanel()
+        {
+            if (_panel == null)
+            {
                 return;
             }
 
-            if (!_ready)
+            if (_wishField != null)
             {
-                GUILayout.Label("<color=#ffd166>⏳ Qwen/llama.cpp is loading; actions unlock after readiness.</color>",
-                    rich);
+                _input = _wishField.text;
             }
 
-            GUILayout.Space(4);
-            _input = GUILayout.TextField(_input, GUILayout.Height(24));
-            bool stackedButtons = QwenDemoLayout.StackActionButtons(topPanel.width);
-            if (!stackedButtons)
+            System.Text.StringBuilder view = new();
+            view.AppendLine(_last == null
+                ? "<b>waiting for the first wish…</b>"
+                : "<b>" + _last.HudLine() + "</b>");
+            view.AppendLine($"wishes left (code-enforced limit): <b>{_charges}</b>");
+
+            if (QwenDemoState.HasBlockingError(_disabledReason))
             {
-                GUILayout.BeginHorizontal();
+                view.AppendLine("<color=#ff8080>" + _disabledReason + "</color>");
+            }
+            else if (!_ready)
+            {
+                view.AppendLine(
+                    "<color=#ffd166>Qwen/llama.cpp is loading; actions unlock after readiness.</color>");
             }
 
-            GUI.enabled = !_busy && _ready;
-            if (GUILayout.Button(_busy ? "⏳ the genie is thinking…" : "🙏 MAKE A WISH", GUILayout.Height(28)))
+            view.AppendLine();
+            view.AppendLine("<b>Log (model decision + speed/tokens)</b>");
+            for (int index = _log.Count - 1; index >= 0; index--)
             {
-                Submit();
+                view.AppendLine(_log[index]);
             }
 
-            GUILayoutOption[] resetOptions = stackedButtons
-                ? new[] { GUILayout.Height(28) }
-                : new[] { GUILayout.Width(130), GUILayout.Height(28) };
-            if (GUILayout.Button("reset lamp (+3)", resetOptions))
+            _panel.SetLog(view.ToString());
+
+            bool actionable = !_busy && _ready && !QwenDemoState.HasBlockingError(_disabledReason);
+            _panel.SetButtonInteractable("Make a wish", actionable);
+            _panel.SetButtonInteractable("Reset lamp (+3)", actionable);
+            foreach (string preset in Presets)
             {
-                lock (_gate)
-                {
-                    _charges = 3;
-                }
+                _panel.SetButtonInteractable(preset, actionable);
             }
-
-            GUI.enabled = true;
-            if (!stackedButtons)
-            {
-                GUILayout.EndHorizontal();
-            }
-
-            GUILayout.Label("Examples (RU/EN):", rich);
-            GUI.enabled = !_busy && _ready;
-            foreach (string p in Presets)
-            {
-                if (GUILayout.Button(p, GUILayout.Height(20)))
-                {
-                    _input = p;
-                    Submit();
-                }
-            }
-
-            GUI.enabled = true;
-
-            GUILayout.EndScrollView();
-            GUILayout.EndArea();
-
-            GUILayout.BeginArea(logPanel, GUI.skin.box);
-            GUILayout.Label("Log (model decision + speed/tokens):");
-            _scroll = GUILayout.BeginScrollView(_scroll);
-            for (int i = _log.Count - 1; i >= 0; i--)
-            {
-                GUILayout.Label(_log[i], rich);
-            }
-
-            GUILayout.EndScrollView();
-            GUILayout.EndArea();
         }
+
     }
 }

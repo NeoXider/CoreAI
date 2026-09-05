@@ -1,5 +1,6 @@
 using System;
 using CoreAI.Composition;
+using CoreAI.Demos.Shared;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
 using UnityEngine;
@@ -20,7 +21,7 @@ namespace CoreAI.Demos
         private CoreAILifetimeScope coreAiScope;
 
         private IAiGameCommandSink _sink;
-        private string _status = "";
+        private CoreAiDemoPanel _panel;
         private int _spawned;
 
         private void Start()
@@ -30,16 +31,61 @@ namespace CoreAI.Demos
                 coreAiScope = FindFirstObjectByType<CoreAILifetimeScope>();
             }
 
+            _panel = CoreAiDemoPanel.Create(
+                "CoreAI — World Commands",
+                "Publishes JSON world-command envelopes exactly as an AI agent does.\n"
+                + "No LLM and no Lua: this is the raw command transport.");
+
             if (coreAiScope == null || coreAiScope.Container == null)
             {
-                _status = "CoreAILifetimeScope not found in scene.";
-                Debug.LogError($"[WorldCommandsDemo] {_status}");
+                _panel.Log("CoreAILifetimeScope not found in scene.");
+                Debug.LogError("[WorldCommandsDemo] CoreAILifetimeScope not found in scene.");
                 enabled = false;
                 return;
             }
 
             _sink = coreAiScope.Container.Resolve<IAiGameCommandSink>();
-            _status = "Ready.";
+            _panel.AddButton("Spawn enemy", SpawnEnemy);
+            _panel.AddButton("Move Boss", MoveBoss);
+            _panel.AddButton("Recolor Boss", RecolorBoss);
+            _panel.AddButton("Destroy last", DestroyLast);
+            _panel.Log("Ready.");
+        }
+
+        private void SpawnEnemy()
+        {
+            _spawned++;
+            Publish(CoreAiWorldCommandEnvelope.Spawn(
+                "enemy.basic",
+                $"cmd_enemy_{_spawned}",
+                new Vector3(UnityEngine.Random.Range(-4f, 4f), 1.5f, 6f)));
+        }
+
+        private void MoveBoss()
+        {
+            Publish(CoreAiWorldCommandEnvelope.Move(
+                "Boss",
+                new Vector3(UnityEngine.Random.Range(-4f, 4f), 0.5f, 8f)));
+        }
+
+        private void RecolorBoss()
+        {
+            string[] colors = { "#ff3300", "#33ccff", "#aaff33", "#ff66cc" };
+            Publish(CoreAiWorldCommandEnvelope.SetColor(
+                "Boss",
+                colors[UnityEngine.Random.Range(0, colors.Length)]));
+        }
+
+        private void DestroyLast()
+        {
+            if (_spawned <= 0)
+            {
+                _panel.Log("Nothing spawned yet.");
+                return;
+            }
+
+            Publish(CoreAiWorldCommandEnvelope.Destroy($"cmd_enemy_{_spawned}"));
+            _spawned--;
         }
 
         private void Publish(CoreAiWorldCommandEnvelope envelope)
@@ -54,53 +100,14 @@ namespace CoreAI.Demos
                     SourceTaskHint = "world_command",
                     SourceTag = "demo:world_command"
                 });
-                _status = $"Published: {envelope.action}";
+                _panel.Log($"Published: {envelope.action}");
             }
             catch (Exception ex)
             {
-                _status = $"Error: {ex.Message}";
+                _panel.Log($"Error: {ex.Message}");
                 Debug.LogError($"[WorldCommandsDemo] {ex}");
             }
         }
 
-        private void OnGUI()
-        {
-            GUILayout.BeginArea(new Rect(12, 12, 420, Screen.height - 24), GUI.skin.box);
-            GUILayout.Label("CoreAI - World Commands Demo (AI command pipeline)");
-            GUILayout.Label(_status);
-            GUILayout.Space(6);
-
-            if (GUILayout.Button("Spawn enemy"))
-            {
-                _spawned++;
-                Publish(CoreAiWorldCommandEnvelope.Spawn(
-                    "enemy.basic",
-                    $"cmd_enemy_{_spawned}",
-                    new Vector3(UnityEngine.Random.Range(-4f, 4f), 1.5f, 6f)));
-            }
-
-            if (GUILayout.Button("Move Boss to a random point"))
-            {
-                Publish(CoreAiWorldCommandEnvelope.Move(
-                    "Boss",
-                    new Vector3(UnityEngine.Random.Range(-4f, 4f), 0.5f, 8f)));
-            }
-
-            if (GUILayout.Button("Recolor Boss"))
-            {
-                string[] colors = { "#ff3300", "#33ccff", "#aaff33", "#ff66cc" };
-                Publish(CoreAiWorldCommandEnvelope.SetColor(
-                    "Boss",
-                    colors[UnityEngine.Random.Range(0, colors.Length)]));
-            }
-
-            if (GUILayout.Button("Destroy last spawned enemy") && _spawned > 0)
-            {
-                Publish(CoreAiWorldCommandEnvelope.Destroy($"cmd_enemy_{_spawned}"));
-                _spawned--;
-            }
-
-            GUILayout.EndArea();
-        }
     }
 }

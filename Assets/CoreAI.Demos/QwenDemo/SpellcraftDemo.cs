@@ -71,8 +71,8 @@ namespace CoreAI.Demos.QwenDemo
         private LlmRunResult _last;
         private bool _busy;
         private readonly List<string> _log = new();
-        private Vector2 _scroll;
-        private Vector2 _controlsScroll;
+        private CoreAI.Demos.Shared.CoreAiDemoPanel _panel;
+        private TMPro.TMP_InputField _spellField;
         private string _disabledReason;
         private bool _ready;
         private readonly QwenToolTurnGuard _toolTurnGuard = new();
@@ -80,6 +80,7 @@ namespace CoreAI.Demos.QwenDemo
 
         private async void Start()
         {
+            BuildPanel();
             QwenFx.BuildStage(new Color(0.12f, 0.13f, 0.18f));
             _root = new GameObject("MageRoot").transform;
             _pump = gameObject.AddComponent<MainThreadPump>();
@@ -151,6 +152,8 @@ namespace CoreAI.Demos.QwenDemo
 
         private void Update()
         {
+            RefreshPanel();
+
             // WHY: Mana regenerates on the main thread while worker-thread tools spend it under the same lock.
             lock (_gate)
             {
@@ -614,105 +617,96 @@ namespace CoreAI.Demos.QwenDemo
             }
         }
 
-        private void OnGUI()
+        /// <summary>Builds the panel once: the description field, the actions, and the presets.</summary>
+        private void BuildPanel()
         {
-            GUIStyle rich = new(GUI.skin.label) { richText = true, wordWrap = true };
+            _panel = CoreAI.Demos.Shared.CoreAiDemoPanel.Create(
+                "SPELLCRAFT FROM DESCRIPTION — Qwen3.5-0.8B (native tool calls)",
+                "Describe a spell. The model picks element and power; mana is enforced in code.");
+            _spellField = _panel.AddInput("describe a spell, in Russian or English");
+            _panel.AddButton("Cast", Submit);
+            _panel.AddButton("Determinism x5", () => RunDeterminism(_input, 5));
+            _panel.AddButton("Refill mana", RefillMana);
+            foreach (string preset in Presets)
+            {
+                string captured = preset;
+                _panel.AddButton(captured, () =>
+                {
+                    _input = captured;
+                    Submit();
+                });
+            }
+        }
+
+        private void RefillMana()
+        {
+            lock (_gate)
+            {
+                _mana = MaxMana;
+            }
+        }
+
+        /// <summary>
+        /// Repaints the readout and keeps the buttons honest about what can be pressed.
+        /// </summary>
+        /// <remarks>
+        /// WHY per frame: mana, readiness and the busy flag change from a background turn, which is
+        /// why the immediate-mode panel read them every frame too. SetLog replaces the text, so
+        /// nothing accumulates.
+        /// </remarks>
+        private void RefreshPanel()
+        {
+            if (_panel == null)
+            {
+                return;
+            }
+
+            if (_spellField != null)
+            {
+                _input = _spellField.text;
+            }
+
             int mana;
             lock (_gate)
             {
                 mana = (int)_mana;
             }
 
-            QwenDemoLayout.Calculate(Screen.width, Screen.height, out Rect topPanel, out Rect logPanel);
-            GUILayout.BeginArea(topPanel, GUI.skin.box);
-            _controlsScroll = GUILayout.BeginScrollView(_controlsScroll);
-            GUILayout.Label("<b>SPELLCRAFT FROM DESCRIPTION — Qwen3.5-0.8B (native tool calls)</b>",
-                new GUIStyle(GUI.skin.label) { richText = true, fontSize = 14 });
-            GUILayout.Label(
-                _last == null ? "<b>⏱ waiting for the first spell…</b>" : "<b>" + _last.HudLine() + "</b>",
-                new GUIStyle(GUI.skin.label)
-                    { richText = true, fontSize = 12, normal = { textColor = new Color(0.7f, 0.85f, 1f) } });
-            GUILayout.Label($"🔷 mana (code-enforced guard): <b>{mana}/100</b> — spell 1/2/3 costs 20/40/60", rich);
+            System.Text.StringBuilder view = new();
+            view.AppendLine(_last == null
+                ? "<b>waiting for the first spell…</b>"
+                : "<b>" + _last.HudLine() + "</b>");
+            view.AppendLine($"mana (code-enforced guard): <b>{mana}/100</b>" +
+                            " — spell 1/2/3 costs 20/40/60");
 
             if (QwenDemoState.HasBlockingError(_disabledReason))
             {
-                GUILayout.Label("<color=#ff8080>" + _disabledReason + "</color>", rich);
-                GUILayout.EndScrollView();
-                GUILayout.EndArea();
-                return;
+                view.AppendLine("<color=#ff8080>" + _disabledReason + "</color>");
             }
-
-            if (!_ready)
+            else if (!_ready)
             {
-                GUILayout.Label("<color=#ffd166>⏳ Qwen/llama.cpp is loading; actions unlock after readiness.</color>",
-                    rich);
+                view.AppendLine(
+                    "<color=#ffd166>Qwen/llama.cpp is loading; actions unlock after readiness.</color>");
             }
 
-            GUILayout.Space(4);
-            _input = GUILayout.TextField(_input, GUILayout.Height(24));
-            bool stackedButtons = QwenDemoLayout.StackActionButtons(topPanel.width);
-            if (!stackedButtons)
+            view.AppendLine();
+            view.AppendLine("<b>Log (element/power + speed/tokens)</b>");
+            for (int index = _log.Count - 1; index >= 0; index--)
             {
-                GUILayout.BeginHorizontal();
+                view.AppendLine(_log[index]);
             }
 
-            GUI.enabled = !_busy && _ready;
-            if (GUILayout.Button(_busy ? "⏳ the mage is casting…" : "🪄 CAST", GUILayout.Height(28)))
+            _panel.SetLog(view.ToString());
+
+            bool actionable = !_busy && _ready && !QwenDemoState.HasBlockingError(_disabledReason);
+            _panel.SetButtonInteractable("Cast", actionable);
+            _panel.SetButtonInteractable("Determinism x5", actionable);
+            _panel.SetButtonInteractable("Refill mana", actionable);
+            foreach (string preset in Presets)
             {
-                Submit();
+                _panel.SetButtonInteractable(preset, actionable);
             }
-
-            GUILayoutOption[] determinismOptions = stackedButtons
-                ? new[] { GUILayout.Height(28) }
-                : new[] { GUILayout.Width(120), GUILayout.Height(28) };
-            if (GUILayout.Button("🔁 determinism ×5", determinismOptions))
-            {
-                RunDeterminism(_input, 5);
-            }
-
-            GUILayoutOption[] manaOptions = stackedButtons
-                ? new[] { GUILayout.Height(28) }
-                : new[] { GUILayout.Width(60), GUILayout.Height(28) };
-            if (GUILayout.Button("mana", manaOptions))
-            {
-                lock (_gate)
-                {
-                    _mana = MaxMana;
-                }
-            }
-
-            GUI.enabled = true;
-            if (!stackedButtons)
-            {
-                GUILayout.EndHorizontal();
-            }
-
-            GUILayout.Label("Examples (RU/EN):", rich);
-            GUI.enabled = !_busy && _ready;
-            foreach (string p in Presets)
-            {
-                if (GUILayout.Button(p, GUILayout.Height(20)))
-                {
-                    _input = p;
-                    Submit();
-                }
-            }
-
-            GUI.enabled = true;
-
-            GUILayout.EndScrollView();
-            GUILayout.EndArea();
-
-            GUILayout.BeginArea(logPanel, GUI.skin.box);
-            GUILayout.Label("Log (element/power + speed/tokens):");
-            _scroll = GUILayout.BeginScrollView(_scroll);
-            for (int i = _log.Count - 1; i >= 0; i--)
-            {
-                GUILayout.Label(_log[i], rich);
-            }
-
-            GUILayout.EndScrollView();
-            GUILayout.EndArea();
         }
+
     }
 }

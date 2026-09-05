@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using CoreAI.Ai;
+using CoreAI.Demos.Shared;
+using TMPro;
 using UnityEngine;
 
 namespace CoreAI.Demos
@@ -26,14 +28,21 @@ namespace CoreAI.Demos
         private readonly List<string> _crafted = new();
         private int _enemyHp = 100;
 
+        private const string AskCaption = "Ask the Game Master";
+
         private AgentConfig _agent;
+        private CoreAiDemoPanel _panel;
+        private TMP_InputField _inputField;
         private string _input = "Craft me an iron sword, then attack the training dummy";
         private string _response = "";
         private bool _busy;
-        private Vector2 _scroll;
 
         private void Start()
         {
+            _panel = CoreAiDemoPanel.Create(
+                "CoreAI — Skills Demo",
+                "read_skill / call_skill_tool: a Game Master agent with two on-demand skills.");
+
             SkillSet crafting = new(
                 "Crafting",
                 "Forge weapons and armor from raw materials",
@@ -66,12 +75,28 @@ namespace CoreAI.Demos
             if (CoreAIAgent.Policy == null)
             {
                 _response = "LLM module is not initialized (CoreAIAgent facade is empty); demo is inactive.";
+                _panel.Log(_response);
                 Debug.LogWarning("[SkillsDemo] " + _response);
                 enabled = false;
                 return;
             }
 
             _agent.ApplyToPolicy(CoreAIAgent.Policy);
+
+            _inputField = _panel.AddInput("Ask the Game Master...");
+            _inputField.text = _input;
+            _panel.AddButton(AskCaption, Ask);
+            RefreshStatus();
+        }
+
+        /// <summary>Recomputes the status block shown in the panel log.</summary>
+        private void RefreshStatus()
+        {
+            string inventory = string.Join(", ", _inventory.Select(p => $"{p.Key} x{p.Value}"));
+            string crafted = _crafted.Count == 0 ? "-" : string.Join(", ", _crafted);
+            string busy = _busy ? "\n(waiting for the model...)" : "";
+            _panel.SetLog(
+                $"Inventory: {inventory}\nCrafted: {crafted}\nTraining dummy HP: {_enemyHp}{busy}\n\n{_response}");
         }
 
         private string CraftItem(string itemName)
@@ -85,6 +110,7 @@ namespace CoreAI.Demos
             _inventory["iron_ingot"]--;
             _inventory["wood"]--;
             _crafted.Add(item);
+            RefreshStatus();
             return
                 $"Crafted '{item}'. Materials left: iron_ingot x{_inventory["iron_ingot"]}, wood x{_inventory["wood"]}.";
         }
@@ -93,18 +119,22 @@ namespace CoreAI.Demos
         {
             int dmg = Mathf.Clamp(damage, 1, 50);
             _enemyHp = Mathf.Max(0, _enemyHp - dmg);
+            RefreshStatus();
             return $"Hit for {dmg}. Training dummy HP: {_enemyHp}.";
         }
 
         private void Ask()
         {
-            if (_busy || string.IsNullOrWhiteSpace(_input))
+            if (_busy || _inputField == null || string.IsNullOrWhiteSpace(_inputField.text))
             {
                 return;
             }
 
+            _input = _inputField.text;
             _busy = true;
             _response = "...";
+            _panel.SetButtonInteractable(AskCaption, false);
+            RefreshStatus();
             try
             {
                 // Callback arrives on the Unity main thread (captured SynchronizationContext).
@@ -112,41 +142,18 @@ namespace CoreAI.Demos
                 {
                     _response = string.IsNullOrEmpty(text) ? "(empty response - check LLM backend)" : text;
                     _busy = false;
+                    _panel.SetButtonInteractable(AskCaption, true);
+                    RefreshStatus();
                 });
             }
             catch (Exception ex)
             {
                 _response = $"Error: {ex.Message}";
                 _busy = false;
+                _panel.SetButtonInteractable(AskCaption, true);
+                RefreshStatus();
                 Debug.LogError($"[SkillsDemo] {ex}");
             }
-        }
-
-        private void OnGUI()
-        {
-            GUILayout.BeginArea(new Rect(12, 12, 520, Screen.height - 24), GUI.skin.box);
-            GUILayout.Label("CoreAI - Skills Demo (read_skill / call_skill_tool)");
-            GUILayout.Space(4);
-
-            GUILayout.Label($"Inventory: {string.Join(", ", _inventory.Select(p => $"{p.Key} x{p.Value}"))}");
-            GUILayout.Label($"Crafted: {(_crafted.Count == 0 ? "-" : string.Join(", ", _crafted))}");
-            GUILayout.Label($"Training dummy HP: {_enemyHp}");
-            GUILayout.Space(8);
-
-            _input = GUILayout.TextField(_input);
-            GUI.enabled = !_busy;
-            if (GUILayout.Button(_busy ? "Waiting for the model..." : "Ask the Game Master"))
-            {
-                Ask();
-            }
-
-            GUI.enabled = true;
-            GUILayout.Space(8);
-
-            _scroll = GUILayout.BeginScrollView(_scroll);
-            GUILayout.Label(_response);
-            GUILayout.EndScrollView();
-            GUILayout.EndArea();
         }
     }
 }

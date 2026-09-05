@@ -10,6 +10,26 @@
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
+### Demo scene smoke hangs the editor — 2026-09-06
+
+`CoreAiDemoScenesSmokePlayModeTests.AllPublishedDemoScenes_LoadWithScopeCameraAndSupportedShaders`
+starts, switches the shared settings to Offline, and then never returns; the editor is killed by the
+crash handler. **It is not caused by the demo UI migration or by the two new demo scenes** — that was
+checked rather than assumed:
+
+- with the two new scenes removed from the frozen list: same hang;
+- with the whole IMGUI conversion stashed (the ten controllers back on `OnGUI`): same hang, same
+  crash handler.
+
+The last recorded green run of this test is `artifacts/testresults/playmode.xml`, 2026-08-30 — before
+the MVP8, MVP11 and MVP12 rungs landed. The window is therefore a week of work, and finding the cause
+means bisecting that window rather than reading it off a log.
+
+- [ ] Bisect the window between 2026-08-30 and 2026-09-06 for the scene-load hang, then fix it. Until
+      it is fixed, no run may be reported as covering the demo scenes; the two new demos have their
+      own PlayMode gates (`GameplayServicesDemoPlayModeTests`, `OnlineAuthorityDemoPlayModeTests`)
+      which do pass, and those are the only demo-scene claims currently supported by evidence.
+
 ## MVP2.5 rungs — status 2026-09-05
 
 Verified on the settled tree (Unity 6000.3.14f1 batchmode, XML in `artifacts/testresults/`):

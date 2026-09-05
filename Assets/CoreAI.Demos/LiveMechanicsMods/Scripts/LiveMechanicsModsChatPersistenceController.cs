@@ -38,17 +38,12 @@ namespace CoreAI.Demos
         private KeyCode toggleKey = KeyCode.F9;
 
         [SerializeField]
-        private Rect panelRect = new(24, 92, 430, 460);
-
-        [SerializeField]
         private bool showPanel = true;
 
         [Tooltip("Saved ids that are validation artifacts and must not autoload in the playable demo.")]
         [SerializeField]
         private string[] transientModIds = { "auto_repair_smoke" };
 
-        private const int WindowId = 0x10D_0001;
-        private const int EditWindowId = 0x10D_0003;
 
         private ILuaModRuntime _mods;
         private ActorContext _actorContext;
@@ -57,11 +52,9 @@ namespace CoreAI.Demos
         private string _status = "Waiting for CoreAI scope.";
         private int _autoloadedCount;
         private bool _isAutoloading;
-        private Vector2 _scroll;
-        private GUIStyle _richLabel;
 
         // Cached mod lists. Rebuilt only on ModSourceLoaded/ModSourceUnloaded and after user actions
-        // in this panel (Activate/Deactivate/Forget/Save) — never from OnGUI or a Draw method. See
+        // in this panel (Activate/Deactivate/Forget/Save) — never while the panel is being built. See
         // Docs/coreai-mod-system.md §6.
         private List<LuaModInfo> _cachedActiveMods = new();
         private List<ModDescriptor> _cachedActiveDescriptors = new();
@@ -71,13 +64,13 @@ namespace CoreAI.Demos
 
         // Mod source editor state. Non-null _editModId means the editor window is open; the buffer
         // is a private copy, so closing without saving changes nothing anywhere.
+        private CoreAI.Demos.Shared.CoreAiDemoPanel _panel;
+        private TMPro.TMP_InputField _editor;
+        private bool _editorLoaded;
         private string _editModId;
         private string _editBuffer = "";
         private string _editError = "";
-        private Vector2 _editScroll;
         private Rect _editRect = new(120, 60, 620, 480);
-        private GUIStyle _activeBadge;
-        private GUIStyle _inactiveBadge;
 
         private readonly struct ModDescriptor
         {
@@ -99,7 +92,11 @@ namespace CoreAI.Demos
         public bool PanelVisible
         {
             get => showPanel;
-            set => showPanel = value;
+            set
+            {
+                showPanel = value;
+                ApplyPanelVisibility();
+            }
         }
 
         /// <summary>Toggle hotkey; <see cref="KeyCode.None"/> disables keyboard toggling.</summary>
@@ -117,8 +114,11 @@ namespace CoreAI.Demos
             }
 
             panelTitle = string.IsNullOrWhiteSpace(title) ? panelTitle : title;
-            panelRect = rect;
+            // WHY the rect is ignored now: the shared panel anchors itself to the screen, so a
+            // caller-supplied rectangle would be a setting that changes nothing. The parameter stays
+            // so existing scenes and callers still compile.
             showPanel = visible;
+            ApplyPanelVisibility();
         }
 
         private void Update()
@@ -126,11 +126,25 @@ namespace CoreAI.Demos
             if (toggleKey != KeyCode.None && Input.GetKeyDown(toggleKey))
             {
                 showPanel = !showPanel;
+                ApplyPanelVisibility();
+            }
+        }
+
+        private void ApplyPanelVisibility()
+        {
+            if (_panel != null)
+            {
+                _panel.gameObject.SetActive(showPanel);
             }
         }
 
         private IEnumerator Start()
         {
+            _panel = CoreAI.Demos.Shared.CoreAiDemoPanel.Create(
+                panelTitle,
+                "Mods the chat loaded, and the ones saved on disk. Edit, activate, forget.");
+            ApplyPanelVisibility();
+
             // LiveMechanicsDemoController declares its logic slots in Start. Wait one frame so
             // saved mods that call logic_define can bind to those slots reliably.
             yield return null;
@@ -326,29 +340,117 @@ namespace CoreAI.Demos
             return true;
         }
 
-        private void OnGUI()
+        /// <summary>
+        /// Rebuilds the panel: a header, one row per mod with its own actions, and the editor when
+        /// a mod is open.
+        /// </summary>
+        /// <remarks>
+        /// WHY the rows are rebuilt rather than updated in place: the mod list changes from
+        /// activation, deactivation and chat-driven loads, and an in-place update would need a
+        /// diffing pass whose only purpose is to save a few allocations on a click. The rebuild
+        /// happens when the list changes, not per frame.
+        /// </remarks>
+        private void RefreshPanel()
         {
-            if (!showPanel)
+            if (_panel == null)
             {
                 return;
             }
 
-            EnsureStyles();
+            _panel.ClearRows();
+            _panel.ClearButtons();
 
-            // Keep the window reachable, then let the user drag it anywhere.
-            panelRect.x = Mathf.Clamp(panelRect.x, 0f, Mathf.Max(0f, Screen.width - 120f));
-            panelRect.y = Mathf.Clamp(panelRect.y, 0f, Mathf.Max(0f, Screen.height - 40f));
-
-            string title =
-                $"{panelTitle}  ({toggleKey})   active {_cachedActiveCount} / inactive {_cachedInactiveCount}";
-            panelRect = GUILayout.Window(WindowId, panelRect, DrawWindow, title);
-
-            if (_editModId != null)
+            System.Text.StringBuilder header = new();
+            header.AppendLine(_status);
+            if (_autoRepair != null)
             {
-                _editRect.x = Mathf.Clamp(_editRect.x, 0f, Mathf.Max(0f, Screen.width - 160f));
-                _editRect.y = Mathf.Clamp(_editRect.y, 0f, Mathf.Max(0f, Screen.height - 60f));
-                _editRect = GUILayout.Window(EditWindowId, _editRect, DrawEditWindow, $"Edit mod: {_editModId}");
+                header.AppendLine($"<b>Auto-repair:</b> {_autoRepair.StatusLine}");
             }
+
+            if (_mods == null || _versions == null)
+            {
+                header.AppendLine("Waiting for runtime...");
+                _panel.SetLog(header.ToString());
+                return;
+            }
+
+            header.AppendLine($"active {_cachedActiveCount} / inactive {_cachedInactiveCount}");
+            if (!string.IsNullOrEmpty(_editError))
+            {
+                header.AppendLine($"<color=#FF7070>{_editError}</color>");
+            }
+
+            _panel.SetLog(header.ToString());
+            BuildActiveRows();
+            BuildInactiveRows();
+            BuildEditorControls();
+        }
+
+        private void BuildActiveRows()
+        {
+            // Local copies: the deactivate action below replaces the cached fields with new list
+            // instances, so this loop keeps iterating its own stable snapshot.
+            List<LuaModInfo> active = _cachedActiveMods;
+            List<ModDescriptor> descriptors = _cachedActiveDescriptors;
+            for (int index = 0; index < active.Count; index++)
+            {
+                LuaModInfo info = active[index];
+                ModDescriptor descriptor = descriptors[index];
+                bool logReports = _mods.GetModReportLoggingEnabled(_actorContext, info.Id);
+                string label = $"[ACTIVE] <b>{descriptor.Name}</b>  id: {info.Id}  " +
+                               $"caps={info.Capabilities}  errors={info.ErrorCount}  " +
+                               $"logs={(logReports ? "on" : "off")}";
+                _panel.AddRow(label,
+                    ("Logs", () => ToggleLogs(info.Id)),
+                    ("Edit", () => OpenEditor(info.Id, descriptor.Source)),
+                    ("Deactivate", () => Deactivate(info.Id)));
+            }
+        }
+
+        private void BuildInactiveRows()
+        {
+            List<ModDescriptor> inactive = _cachedInactiveMods;
+            for (int index = 0; index < inactive.Count; index++)
+            {
+                ModDescriptor descriptor = inactive[index];
+                _panel.AddRow($"[ inactive ] <b>{descriptor.Name}</b>  id: {descriptor.Id}",
+                    ("Activate", () => ActivateSavedMod(descriptor)),
+                    ("Edit", () => OpenEditor(descriptor.Id, descriptor.Source)),
+                    ("Forget", () => ForgetSavedMod(descriptor.Id, true)));
+            }
+        }
+
+        private void BuildEditorControls()
+        {
+            if (_editModId == null)
+            {
+                return;
+            }
+
+            _editor ??= _panel.AddEditor("mod source");
+            _editor.gameObject.SetActive(true);
+            if (!_editorLoaded)
+            {
+                _editor.text = _editBuffer ?? "";
+                _editorLoaded = true;
+            }
+
+            _panel.AddButton("Save " + _editModId, SaveEditor);
+            _panel.AddButton("Close editor", CloseEditor);
+        }
+
+        private void ToggleLogs(string modId)
+        {
+            bool next = !_mods.GetModReportLoggingEnabled(_actorContext, modId);
+            _mods.SetModReportLoggingEnabled(_actorContext, modId, next);
+            _status = $"Mod '{modId}' logs {(next ? "enabled" : "disabled")}.";
+            RefreshPanel();
+        }
+
+        private void Deactivate(string modId)
+        {
+            _mods.UnloadMod(_actorContext, modId);
+            RecomputeModLists();
         }
 
         private void OpenEditor(string modId, string source)
@@ -356,38 +458,21 @@ namespace CoreAI.Demos
             _editModId = modId;
             _editBuffer = source ?? "";
             _editError = "";
-            _editScroll = Vector2.zero;
+            _editorLoaded = false;
+            RefreshPanel();
         }
 
-        private void DrawEditWindow(int id)
+        private void CloseEditor()
         {
-            _editScroll = GUILayout.BeginScrollView(_editScroll, GUILayout.ExpandHeight(true));
-            _editBuffer = GUILayout.TextArea(_editBuffer, GUILayout.ExpandHeight(true));
-            GUILayout.EndScrollView();
-
-            if (!string.IsNullOrEmpty(_editError))
+            // Discard: the buffer was a copy, nothing was touched.
+            _editModId = null;
+            _editorLoaded = false;
+            if (_editor != null)
             {
-                GUILayout.Label($"<color=#FF7070>{_editError}</color>", _richLabel);
+                _editor.gameObject.SetActive(false);
             }
 
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Save", GUILayout.Width(90)))
-            {
-                SaveEditor();
-            }
-
-            if (GUILayout.Button("Close", GUILayout.Width(90)))
-            {
-                // Discard: the buffer was a copy, nothing was touched.
-                _editModId = null;
-            }
-
-            GUILayout.FlexibleSpace();
-            GUILayout.Label(_mods != null && _mods.IsLoaded(_actorContext, _editModId ?? "")
-                ? "Save reloads the running mod and persists the new source."
-                : "Save updates the saved source (mod stays inactive).", _richLabel);
-            GUILayout.EndHorizontal();
-            GUI.DragWindow(new Rect(0, 0, _editRect.width, 22f));
+            RefreshPanel();
         }
 
         private void SaveEditor()
@@ -397,9 +482,15 @@ namespace CoreAI.Demos
                 return;
             }
 
+            if (_editor != null)
+            {
+                _editBuffer = _editor.text;
+            }
+
             if (string.IsNullOrWhiteSpace(_editBuffer))
             {
                 _editError = "Source is empty; nothing saved.";
+                RefreshPanel();
                 return;
             }
 
@@ -419,156 +510,13 @@ namespace CoreAI.Demos
                 }
 
                 _status = $"Saved mod '{_editModId}'.";
-                _editModId = null;
+                CloseEditor();
                 RecomputeModLists();
             }
             catch (System.Exception ex)
             {
                 _editError = ex.Message;
-            }
-        }
-
-        private void DrawWindow(int id)
-        {
-            if (GUI.Button(new Rect(panelRect.width - 58f, 2f, 52f, 18f), "Hide"))
-            {
-                showPanel = false;
-            }
-
-            GUILayout.Label(_status, _richLabel);
-            if (_autoRepair != null)
-            {
-                GUILayout.Label($"<b>Auto-repair:</b> {_autoRepair.StatusLine}", _richLabel);
-            }
-
-            GUILayout.Space(4);
-
-            if (_mods == null || _versions == null)
-            {
-                GUILayout.Label("Waiting for runtime...", _richLabel);
-                GUI.DragWindow(new Rect(0, 0, panelRect.width, 22f));
-                return;
-            }
-
-            _scroll = GUILayout.BeginScrollView(_scroll);
-            DrawActiveMods();
-            GUILayout.Space(8);
-            DrawSavedInactiveMods();
-            GUILayout.EndScrollView();
-
-            GUI.DragWindow(new Rect(0, 0, panelRect.width, 22f));
-        }
-
-        private void EnsureStyles()
-        {
-            if (_richLabel != null)
-            {
-                return;
-            }
-
-            _richLabel = new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true };
-            _activeBadge = new GUIStyle(GUI.skin.label)
-            {
-                richText = true,
-                fontStyle = FontStyle.Bold,
-                normal = { textColor = new Color(0.40f, 0.85f, 0.45f) }
-            };
-            _inactiveBadge = new GUIStyle(GUI.skin.label)
-            {
-                richText = true,
-                fontStyle = FontStyle.Bold,
-                normal = { textColor = new Color(0.65f, 0.65f, 0.68f) }
-            };
-        }
-
-        private void DrawActiveMods()
-        {
-            // Local copies: RecomputeModLists() (triggered by Deactivate below) replaces the cached
-            // fields with new list instances, so this loop keeps iterating its own stable snapshot.
-            List<LuaModInfo> active = _cachedActiveMods;
-            List<ModDescriptor> descriptors = _cachedActiveDescriptors;
-            GUILayout.Label($"<b>Active mods</b>  ({active.Count})", _richLabel);
-            if (active.Count == 0)
-            {
-                GUILayout.Label("No active mods. Load one with manage_mods from chat.", _richLabel);
-                return;
-            }
-
-            for (int i = 0; i < active.Count; i++)
-            {
-                LuaModInfo info = active[i];
-                ModDescriptor descriptor = descriptors[i];
-                GUILayout.BeginVertical(GUI.skin.box);
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("[ACTIVE]", _activeBadge, GUILayout.Width(64));
-                GUILayout.Label($"<b>{descriptor.Name}</b>", _richLabel);
-                GUILayout.FlexibleSpace();
-                bool logReports = _mods.GetModReportLoggingEnabled(_actorContext, info.Id);
-                bool nextLogReports = GUILayout.Toggle(logReports, "Logs", GUILayout.Width(58));
-                if (nextLogReports != logReports)
-                {
-                    _mods.SetModReportLoggingEnabled(_actorContext, info.Id, nextLogReports);
-                    _status = $"Mod '{info.Id}' logs {(nextLogReports ? "enabled" : "disabled")}.";
-                }
-
-                if (GUILayout.Button("Edit", GUILayout.Width(44)))
-                {
-                    OpenEditor(info.Id, descriptor.Source);
-                }
-
-                if (GUILayout.Button("Deactivate", GUILayout.Width(86)))
-                {
-                    _mods.UnloadMod(_actorContext, info.Id);
-                    RecomputeModLists();
-                }
-
-                GUILayout.EndHorizontal();
-                GUILayout.Label(
-                    $"id: {info.Id}  caps={info.Capabilities}  handlers={info.HandlerCount}  timers={info.TimerCount}  errors={info.ErrorCount}  logs={(info.LogReports ? "on" : "off")}",
-                    _richLabel);
-                GUILayout.Label(descriptor.Description, _richLabel);
-                GUILayout.EndVertical();
-            }
-        }
-
-        private void DrawSavedInactiveMods()
-        {
-            // Local copy: see the comment in DrawActiveMods.
-            List<ModDescriptor> inactive = _cachedInactiveMods;
-            GUILayout.Label($"<b>Saved / inactive mods</b>  ({inactive.Count})", _richLabel);
-            if (inactive.Count == 0)
-            {
-                GUILayout.Label("No saved inactive mods.", _richLabel);
-                return;
-            }
-
-            foreach (ModDescriptor descriptor in inactive)
-            {
-                GUILayout.BeginVertical(GUI.skin.box);
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("[ inactive ]", _inactiveBadge, GUILayout.Width(78));
-                GUILayout.Label($"<b>{descriptor.Name}</b>", _richLabel);
-                GUILayout.EndHorizontal();
-                GUILayout.Label($"id: {descriptor.Id}", _richLabel);
-                GUILayout.Label(descriptor.Description, _richLabel);
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("Activate"))
-                {
-                    ActivateSavedMod(descriptor);
-                }
-
-                if (GUILayout.Button("Edit", GUILayout.Width(44)))
-                {
-                    OpenEditor(descriptor.Id, descriptor.Source);
-                }
-
-                if (GUILayout.Button("Forget", GUILayout.Width(72)))
-                {
-                    ForgetSavedMod(descriptor.Id, true);
-                }
-
-                GUILayout.EndHorizontal();
-                GUILayout.EndVertical();
+                RefreshPanel();
             }
         }
 
@@ -576,7 +524,7 @@ namespace CoreAI.Demos
         /// Rebuilds the cached active/inactive lists and counts from the runtime and the version
         /// store. This is the only place allowed to call the disk-backed store enumeration
         /// (GetKnownKeys/TryGetSnapshot via GetInactiveSavedMods) and ListMods/TryGetModSource/
-        /// ReadMetadata; OnGUI and the Draw* methods must only read the cached fields.
+        /// ReadMetadata; the panel builders must only read the cached fields.
         /// </summary>
         private void RecomputeModLists()
         {

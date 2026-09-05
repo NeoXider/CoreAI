@@ -5,6 +5,7 @@ using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Composition;
+using CoreAI.Demos.Shared;
 using VContainer;
 #endif
 
@@ -64,11 +65,15 @@ namespace CoreAI.Demos
         private ILuaModRuntime _mods;
         private ActorContext _actorContext;
         private UnitForgeLuaBindings _bindings;
+        private CoreAiDemoPanel _panel;
         private string _status = "Starting...";
-        private Vector2 _scroll;
 
         private void Start()
         {
+            _panel = CoreAiDemoPanel.Create(
+                "CoreAI — Unit Forge",
+                "Empty arena. No units and no behaviour ship with it: Lua mods forge and spawn units.");
+
             if (coreAiScope == null)
             {
                 coreAiScope = FindFirstObjectByType<CoreAILifetimeScope>();
@@ -77,6 +82,7 @@ namespace CoreAI.Demos
             if (coreAiScope == null || coreAiScope.Container == null)
             {
                 _status = "CoreAILifetimeScope not found in scene.";
+                _panel.Log(_status);
                 Debug.LogError($"[ModdableUnitsDemo] {_status}");
                 enabled = false;
                 return;
@@ -194,6 +200,7 @@ namespace CoreAI.Demos
             });
 
             _mods?.EmitEvent(_actorContext, "unit_spawned", $"{archetype.Name}:{archetype.Team}");
+            RefreshStatus();
             return visual.GetInstanceID();
         }
 
@@ -321,7 +328,11 @@ namespace CoreAI.Demos
             if (Count(team) == 0)
             {
                 _mods?.EmitEvent(_actorContext, "team_wiped", team);
-                Log($"Team '{team}' was wiped out.");
+                Log($"Team '{team}' was wiped out."); // Log() already refreshes the panel.
+            }
+            else
+            {
+                RefreshStatus();
             }
         }
 
@@ -344,64 +355,58 @@ namespace CoreAI.Demos
             {
                 _log.RemoveAt(0);
             }
+
+            RefreshStatus();
         }
 
-        private void OnGUI()
+        /// <summary>Recomputes the status block (counts, unit types, loaded mods, event log) shown in the panel.</summary>
+        private void RefreshStatus()
         {
-            GUILayout.BeginArea(new Rect(12, 12, 560, 540), GUI.skin.box);
-            GUILayout.Label("<b>CoreAI - Unit Forge (mod-driven game)</b>", RichLabel());
-            GUILayout.Label(_status, RichLabel());
+            _panel.SetLog(
+                $"{_status}\n\n" +
+                $"Allies: {Count("ally")}   Enemies: {Count("enemy")}   Defined types: {_archetypes.Count}\n\n" +
+                $"Unit types (forged by mods):\n{BuildArchetypeList()}\n\n" +
+                $"Loaded mods:\n{BuildModList()}\n\n" +
+                $"Event log:\n{string.Join("\n", _log)}");
+        }
 
-            GUILayout.Space(4);
-            GUILayout.Label(
-                $"Allies: <b>{Count("ally")}</b>   Enemies: <b>{Count("enemy")}</b>   Defined types: <b>{_archetypes.Count}</b>",
-                RichLabel());
-
-            GUILayout.Space(4);
-            GUILayout.Label("<b>Unit types (forged by mods)</b>", RichLabel());
+        private string BuildArchetypeList()
+        {
             if (_archetypes.Count == 0)
             {
-                GUILayout.Label("None yet - ask chat to write a mod that calls forge_define.");
-            }
-            else
-            {
-                foreach (KeyValuePair<string, Archetype> entry in _archetypes)
-                {
-                    Archetype a = entry.Value;
-                    GUILayout.Label(
-                        $"* {a.Name} [{a.Team}] hp={a.Hp:0.#} dmg={a.Damage:0.#} spd={a.Speed:0.#} rng={a.Range:0.#}");
-                }
+                return "None yet - ask chat to write a mod that calls forge_define.";
             }
 
-            GUILayout.Space(4);
-            GUILayout.Label("<b>Loaded mods</b>", RichLabel());
-            if (_mods != null)
+            List<string> lines = new();
+            foreach (KeyValuePair<string, Archetype> entry in _archetypes)
             {
-                IReadOnlyList<LuaModInfo> mods = _mods.ListMods(_actorContext);
-                if (mods.Count == 0)
-                {
-                    GUILayout.Label("No mods loaded.");
-                }
-                else
-                {
-                    foreach (LuaModInfo mod in mods)
-                    {
-                        GUILayout.Label(
-                            $"* {mod.Id} handlers={mod.HandlerCount} timers={mod.TimerCount} errors={mod.ErrorCount}");
-                    }
-                }
+                Archetype a = entry.Value;
+                lines.Add($"* {a.Name} [{a.Team}] hp={a.Hp:0.#} dmg={a.Damage:0.#} spd={a.Speed:0.#} rng={a.Range:0.#}");
             }
 
-            GUILayout.Space(4);
-            GUILayout.Label("<b>Event log</b>", RichLabel());
-            _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.Height(150));
-            foreach (string line in _log)
+            return string.Join("\n", lines);
+        }
+
+        private string BuildModList()
+        {
+            if (_mods == null)
             {
-                GUILayout.Label(line);
+                return "No mods loaded.";
             }
 
-            GUILayout.EndScrollView();
-            GUILayout.EndArea();
+            IReadOnlyList<LuaModInfo> mods = _mods.ListMods(_actorContext);
+            if (mods.Count == 0)
+            {
+                return "No mods loaded.";
+            }
+
+            List<string> lines = new();
+            foreach (LuaModInfo mod in mods)
+            {
+                lines.Add($"* {mod.Id} handlers={mod.HandlerCount} timers={mod.TimerCount} errors={mod.ErrorCount}");
+            }
+
+            return string.Join("\n", lines);
         }
 
         private static string NormalizeTeam(string team)
@@ -441,11 +446,6 @@ namespace CoreAI.Demos
                 material.color = color;
                 renderer.sharedMaterial = material;
             }
-        }
-
-        private static GUIStyle RichLabel()
-        {
-            return new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true };
         }
 #else
         private void Start()

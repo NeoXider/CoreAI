@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Demos.Shared;
 using CoreAI.Sandbox.LuaCs;
 using UnityEngine;
 
@@ -34,6 +35,8 @@ namespace CoreAI.Demos
             {
                 Debug.LogError("[CoreAI][WebGlLuaSelfTest] FAIL\n" + _report);
             }
+
+            ShowReport();
         }
 
         /// <summary>Registers the host callbacks the self-test chunks call (CLR-only surface).</summary>
@@ -121,12 +124,20 @@ namespace CoreAI.Demos
             return allPassed;
         }
 
-        private void OnGUI()
+        /// <summary>
+        /// Publishes the finished report once, rather than redrawing it every frame.
+        /// </summary>
+        /// <remarks>
+        /// WHY once: the report is computed in Start and never changes afterwards, so an immediate-mode
+        /// redraw was repainting a constant — and, being IMGUI, was repainting nothing at all in the
+        /// WebGL player this self-test exists to check.
+        /// </remarks>
+        private void ShowReport()
         {
-            GUILayout.BeginArea(new Rect(10, 10, 520, 240), GUI.skin.box);
-            GUILayout.Label("CoreAI Lua sandbox self-test: " + (_passed ? "PASS" : "FAIL"));
-            GUILayout.Label(_report);
-            GUILayout.EndArea();
+            CoreAiDemoPanel panel = CoreAiDemoPanel.Create(
+                "CoreAI — Lua sandbox self-test",
+                "Runs in a built player, where the EditMode and PlayMode runners cannot.");
+            panel.SetLog((_passed ? "PASS" : "FAIL") + "\n\n" + _report);
         }
     }
 }
@@ -138,11 +149,11 @@ namespace CoreAI.Demos
     /// <summary>No-op fallback when the positive Lua opt-in is absent.</summary>
     public sealed class WebGlLuaSelfTest : MonoBehaviour
     {
-        private void OnGUI()
+        private void Start()
         {
-            GUILayout.BeginArea(new Rect(10, 10, 520, 60), GUI.skin.box);
-            GUILayout.Label("CoreAI Lua sandbox self-test unavailable: COREAI_LUA is not set.");
-            GUILayout.EndArea();
+            CoreAI.Demos.Shared.CoreAiDemoPanel.Create(
+                "CoreAI — Lua sandbox self-test",
+                "Unavailable: COREAI_LUA is not set for this build.");
         }
     }
 }

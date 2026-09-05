@@ -1,6 +1,6 @@
 {
   "name": "com.neoxider.coreaimirror",
-  "version": "7.33.0",
+  "version": "7.34.0",
   "displayName": "CoreAI Mirror transport",
   "unity": "6000.0",
   "description": "Optional Mirror transport for CoreAI's online worlds: authenticated admission, real RemoteEvent/RemoteFunction traffic over the wire, and the server clock offset. Install it only when you run a host; without it CoreAI stays solo on the loopback bridge and nothing in this package compiles. Requires Mirror (Asset Store or UPM), which defines MIRROR — the assemblies here carry that as a define constraint, so a project without Mirror never builds them.",
@@ -11,7 +11,7 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "licensesUrl": "https://github.com/NeoXider/CoreAI/blob/main/LICENSE",
   "dependencies": {
-    "com.neoxider.coreai": "7.33.0",
-    "com.neoxider.coreaimods": "7.33.0"
+    "com.neoxider.coreai": "7.34.0",
+    "com.neoxider.coreaimods": "7.34.0"
   }
 }

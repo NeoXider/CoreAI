@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.34.0] - 2026-09-06
+
+### Changed
+
+- **IMGUI выведен из всех десяти демо-контроллеров** на общую `CoreAiDemoPanel`; список исключений в
+  рэтчете пуст. Smoke по 16 сценам висит по причине, которая старше этой работы (A/B в примечаниях
+  основного changelog).
+
 ## [7.33.0] - 2026-09-06
 
 ### Added

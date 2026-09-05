@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Composition;
+using CoreAI.Demos.Shared;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
@@ -60,10 +61,10 @@ namespace CoreAI.Demos
         private string[] trackedTags = Array.Empty<string>();
 
         private AgentConfig _director;
+        private CoreAiDemoPanel _panel;
         private readonly Queue<float> _recentRequestTimes = new();
         private readonly StringBuilder _promptBuilder = new(256);
         private Transform _player;
-        private GUIStyle _richLabelStyle;
         private string _guiLine = "";
         private string _lastDirective = "(none yet)";
         private int _observationCount;
@@ -92,6 +93,10 @@ namespace CoreAI.Demos
 
         private void Start()
         {
+            _panel = CoreAiDemoPanel.Create(
+                "CoreAI — Director AI",
+                "Ambient agent with no chat box: observes on a timer and acts through world_command.");
+
             if (coreAiScope == null)
             {
                 coreAiScope = FindFirstObjectByType<CoreAILifetimeScope>();
@@ -99,6 +104,7 @@ namespace CoreAI.Demos
 
             if (coreAiScope == null || coreAiScope.Container == null)
             {
+                _panel.Log("CoreAILifetimeScope not found in scene; demo is inactive.");
                 Debug.LogError("[DirectorAiDemo] CoreAILifetimeScope not found in scene; demo is inactive.");
                 enabled = false;
                 return;
@@ -106,6 +112,7 @@ namespace CoreAI.Demos
 
             if (CoreAIAgent.Policy == null || CoreAIAgent.Orchestrator == null)
             {
+                _panel.Log("LLM module is not initialized; demo is inactive.");
                 Debug.LogWarning(
                     "[DirectorAiDemo] LLM module is not initialized (CoreAIAgent facade is empty); demo is inactive.");
                 enabled = false;
@@ -139,6 +146,7 @@ namespace CoreAI.Demos
             }
             catch (Exception ex)
             {
+                _panel.Log($"Failed to build the director agent: {ex.Message}");
                 Debug.LogError($"[DirectorAiDemo] Failed to build the director agent: {ex.Message}");
                 enabled = false;
                 return;
@@ -321,22 +329,13 @@ namespace CoreAI.Demos
             }
         }
 
-        /// <summary>Rebuilds the single cached OnGUI line only when state actually changes.</summary>
+        /// <summary>Rebuilds the panel's status line, only called when state actually changes.</summary>
         private void RefreshGuiLine()
         {
             string state = _busy ? "observing..." : directorEnabled ? "idle" : "disabled";
             _guiLine =
-                $"<b>Director AI</b> [{directorRoleId}] obs #{_observationCount} ({state})\nLast directive: {_lastDirective}";
-        }
-
-        private void OnGUI()
-        {
-            GUI.Label(new Rect(12, 12, Screen.width - 24, 64), _guiLine, RichLabel());
-        }
-
-        private GUIStyle RichLabel()
-        {
-            return _richLabelStyle ??= new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true };
+                $"Director AI [{directorRoleId}] obs #{_observationCount} ({state})\nLast directive: {_lastDirective}";
+            _panel.SetLog(_guiLine);
         }
 #else
         private void Start()
