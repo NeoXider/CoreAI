@@ -4,6 +4,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.22.0] - 2026-09-05
+
+### Added
+
+- **MVP8 срез 8.7** — корпус Tier-B (10 игровых идиом) и гейт «не меньше 60 % Tier-A + Tier-B без
+  правок исходника», с отрицательными близнецами на испорченных копиях. **MVP8 закрыт целиком.**
+
 ## [7.21.0] - 2026-09-05
 
 ### Added

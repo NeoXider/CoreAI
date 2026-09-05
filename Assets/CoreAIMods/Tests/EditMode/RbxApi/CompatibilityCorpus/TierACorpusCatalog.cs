@@ -15,6 +15,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         AdvanceHalfSecond,
         PumpThreeFrames,
         PumpSixSeconds,
+        TouchFirstTwoParts,
         PressE
     }
 

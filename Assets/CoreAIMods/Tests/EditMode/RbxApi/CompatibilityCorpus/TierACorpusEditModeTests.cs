@@ -5,6 +5,8 @@ using System.IO;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Logging;
@@ -26,6 +28,32 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         private const string ResultAttribute = "TierACorpusResult";
         private const int FrozenFixtureCount = 20;
         private const int MinimumUnmodifiedPercent = 30;
+        private const int FrozenTierBFixtureCount = 10;
+
+        /// <summary>
+        /// The MVP8 acceptance threshold over Tier-A and Tier-B together.
+        /// </summary>
+        /// <remarks>
+        /// WHY the combined figure is higher than Tier-A's own 30%: Tier-A deliberately includes
+        /// probes for surfaces CoreAI has not built yet, so its own bar is a floor, not a target.
+        /// Tier-B measures whole gameplay idioms, which is what "can you build a game on this"
+        /// actually means, and MVP8's gate is 60% of the two tiers together.
+        /// </remarks>
+        private const int MinimumCombinedUnmodifiedPercent = 60;
+
+        private static readonly string[] TierBFixtureIds =
+        {
+            "TBC-001-kill-brick",
+            "TBC-002-touch-pickup-with-leaderstats",
+            "TBC-003-door-tween",
+            "TBC-004-raycast-ground-check",
+            "TBC-005-humanoid-damage-loop",
+            "TBC-006-collection-service-respawner",
+            "TBC-007-player-leave-save",
+            "TBC-008-tween-cancel-restart",
+            "TBC-009-attribute-driven-config",
+            "TBC-010-gravity-low-jump"
+        };
         private static readonly string[] FrozenFixtureIds =
         {
             "TAC-001-instance-parent-last",
@@ -180,13 +208,91 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                 });
                 RbxApi.Scheduler.ThreadFaulted += (string modId, RbxError error) =>
                     ThreadFaults.Add(modId + ": " + error);
+                Physics = new ScriptedContactPort();
+                RbxApi.WorldPhysics.AttachPort(Physics);
+
+                // WHY the corpus has one connected player: a Roblox SERVER always does, and the
+                // idioms this corpus measures (save on leave, leaderstats under a Player) are server
+                // code. Running them against an empty Players service would measure the harness, not
+                // the API. Players.LocalPlayer stays nil, which is what the mirror says a server
+                // sees — TAC-020 still fails for its own, correct reason.
+                RbxApi.ConnectActor(new LocalActorIdentityProvider(
+                        "corpus-player",
+                        "corpus-session",
+                        registry.WorldId,
+                        ActorGrantSet.None,
+                        AgentMemoryScope.Empty)
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer));
             }
 
             public InMemoryInputSource Input { get; }
             public LuaCsRbxApiBindings RbxApi { get; }
             public CapturingGameLogger Logger { get; }
             public LuaCsModStack Stack { get; }
+            public ScriptedContactPort Physics { get; }
             public List<string> ThreadFaults { get; } = new();
+
+            /// <summary>Reports a contact between the first two parts the fixture put in the world.</summary>
+            /// <remarks>
+            /// WHY the harness supplies the collision: a headless corpus has no physics engine, so a
+            /// kill brick could never be exercised — and dropping it would leave the most common
+            /// gameplay idiom in Roblox untested. The fixture source stays exactly what a developer
+            /// writes; only the physical event a real engine would produce is injected here.
+            /// </remarks>
+            public void TouchFirstTwoParts()
+            {
+                RbxInstance world = RbxApi.Game.FindFirstChildOfClass("Workspace");
+                if (world == null)
+                {
+                    return;
+                }
+
+                List<RbxInstance> parts = new();
+                foreach (RbxInstance child in world.GetChildren())
+                {
+                    if (child.IsA("BasePart"))
+                    {
+                        parts.Add(child);
+                    }
+                }
+
+                if (parts.Count < 2)
+                {
+                    return;
+                }
+
+                Physics.RaiseBegan(parts[0].Id, parts[1].Id);
+            }
+        }
+
+        /// <summary>A physics engine the corpus drives by hand: no rays hit, contacts are injected.</summary>
+        private sealed class ScriptedContactPort : IRbxPhysicsPort
+        {
+            public event Action<InstanceId, InstanceId> ContactBegan;
+
+            public event Action<InstanceId, InstanceId> ContactEnded;
+
+            public bool TryRaycast(RbxVector3 originStuds, RbxVector3 directionStuds,
+                bool respectCanCollide, Func<InstanceId, bool> isEligible,
+                out RbxPhysicsRaycastHit hit)
+            {
+                hit = default;
+                return false;
+            }
+
+            public void SetGravity(double studsPerSecondSquared)
+            {
+            }
+
+            public void RaiseBegan(InstanceId first, InstanceId second)
+            {
+                ContactBegan?.Invoke(first, second);
+            }
+
+            public void RaiseEnded(InstanceId first, InstanceId second)
+            {
+                ContactEnded?.Invoke(first, second);
+            }
         }
 
         private sealed class ExecutionOutcome
@@ -223,9 +329,21 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
             Application.dataPath, "CoreAIMods", "Tests", "EditMode", "RbxApi",
             "CompatibilityCorpus", "Fixtures");
 
+        private static string TierBFixtureDirectory => Path.Combine(
+            Application.dataPath, "CoreAIMods", "Tests", "EditMode", "RbxApi",
+            "CompatibilityCorpus", "FixturesB");
+
+        /// <summary>The directory a fixture lives in, chosen by its id prefix.</summary>
+        private static string DirectoryFor(TierAFixtureSpec fixture)
+        {
+            return fixture.Id.StartsWith("TBC-", StringComparison.Ordinal)
+                ? TierBFixtureDirectory
+                : FixtureDirectory;
+        }
+
         private static string LoadFixtureSource(TierAFixtureSpec fixture)
         {
-            string path = Path.Combine(FixtureDirectory, fixture.FileName);
+            string path = Path.Combine(DirectoryFor(fixture), fixture.FileName);
             Assert.IsTrue(File.Exists(path), fixture.Id + " fixture is missing: " + path);
             return File.ReadAllText(path);
         }
@@ -260,6 +378,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                         harness.RbxApi.Scheduler.Advance(0d);
                     }
 
+                    return;
+                case TierAFixtureDriver.TouchFirstTwoParts:
+                    harness.RbxApi.Scheduler.Advance(0d);
+                    harness.TouchFirstTwoParts();
+                    harness.RbxApi.Scheduler.Advance(0d);
                     return;
                 case TierAFixtureDriver.PressE:
                     harness.Input.PressKey(KeyE);
@@ -317,7 +440,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                 Assert.IsTrue(ids.Add(fixture.Id), "Duplicate fixture id: " + fixture.Id);
                 Assert.IsTrue(fileNames.Add(fixture.FileName), "Duplicate fixture file: " + fixture.FileName);
                 Assert.IsNotEmpty(fixture.Why, fixture.Id + " must record its classification reason.");
-                Assert.IsTrue(File.Exists(Path.Combine(FixtureDirectory, fixture.FileName)),
+                Assert.IsTrue(File.Exists(Path.Combine(DirectoryFor(fixture), fixture.FileName)),
                     fixture.Id + " fixture file is missing.");
 
                 if (fixture.Classification == TierAFixtureClassification.Unmodified)
@@ -367,6 +490,141 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
             string[] fixtureFiles = Directory.GetFiles(FixtureDirectory, "*.lua", SearchOption.TopDirectoryOnly);
             Assert.AreEqual(FrozenFixtureCount, fixtureFiles.Length,
                 "The fixture directory and frozen catalog must contain the same 20 entries.");
+        }
+
+        private static IEnumerable TierBFixtureCases()
+        {
+            foreach (TierAFixtureSpec fixture in TierBCorpusCatalog.Fixtures)
+            {
+                yield return new TestCaseData(fixture).SetName("TierB_" + fixture.Id);
+            }
+        }
+
+        [Test]
+        public void FrozenTierBCatalog_MatchesItsFilesAndIds()
+        {
+            // The negative twin of the gate below: it would pass on a shrinking corpus, so the
+            // membership is asserted against the frozen list AND the directory on disk.
+            Assert.AreEqual(FrozenTierBFixtureCount, TierBCorpusCatalog.Fixtures.Length);
+
+            HashSet<string> ids = new(StringComparer.Ordinal);
+            foreach (TierAFixtureSpec fixture in TierBCorpusCatalog.Fixtures)
+            {
+                Assert.IsTrue(ids.Add(fixture.Id), "Duplicate Tier-B fixture id: " + fixture.Id);
+                Assert.IsNotEmpty(fixture.Why, fixture.Id + " must record why it is in the corpus.");
+                Assert.IsTrue(
+                    File.Exists(Path.Combine(TierBFixtureDirectory, fixture.FileName)),
+                    fixture.Id + " fixture file is missing.");
+            }
+
+            CollectionAssert.AreEquivalent(TierBFixtureIds, ids,
+                "The Tier-B catalog ids must match the frozen acceptance set exactly.");
+            Assert.AreEqual(FrozenTierBFixtureCount,
+                Directory.GetFiles(TierBFixtureDirectory, "*.lua", SearchOption.TopDirectoryOnly).Length,
+                "The Tier-B fixture directory and the frozen catalog must agree.");
+        }
+
+        [Test]
+        public void CombinedCorpus_MeetsTheMvp8UnmodifiedThreshold()
+        {
+            int total = TierACorpusCatalog.Fixtures.Length + TierBCorpusCatalog.Fixtures.Length;
+            int unmodified = 0;
+            List<string> modifiedOrFailing = new();
+
+            foreach (TierAFixtureSpec fixture in TierACorpusCatalog.Fixtures)
+            {
+                Count(fixture, ref unmodified, modifiedOrFailing);
+            }
+
+            foreach (TierAFixtureSpec fixture in TierBCorpusCatalog.Fixtures)
+            {
+                Count(fixture, ref unmodified, modifiedOrFailing);
+            }
+
+            Assert.GreaterOrEqual(unmodified * 100, total * MinimumCombinedUnmodifiedPercent,
+                $"MVP8 requires {MinimumCombinedUnmodifiedPercent}% of Tier-A + Tier-B to run "
+                + $"unmodified; {unmodified} of {total} do. Still short: "
+                + string.Join(", ", modifiedOrFailing));
+        }
+
+        [TestCaseSource(nameof(TierBFixtureCases))]
+        public void TierBFixture_RunsUnmodifiedWithNoStubHits(object fixtureValue)
+        {
+            // WHY the stub check and not only the completion attribute: a fixture wrapped in pcall
+            // can "complete" while every interesting call inside it raised NOT_IMPLEMENTED. The
+            // harness records those as failures, so a fixture only counts when nothing was stubbed.
+            TierAFixtureSpec fixture = (TierAFixtureSpec)fixtureValue;
+            ExecutionOutcome outcome = Execute(fixture);
+
+            Assert.IsNull(outcome.Exception,
+                fixture.Id + " raised: " + outcome.Exception);
+            Assert.IsEmpty(outcome.Failures,
+                fixture.Id + " hit a stub or logged an error: "
+                + string.Join(" | ", outcome.Failures));
+            Assert.AreEqual(fixture.Id, outcome.Completion,
+                fixture.Id + " did not reach its completion marker.");
+        }
+
+        [Test]
+        public void Negative_CorruptedTierBFixtures_Fail()
+        {
+            // The zero-work counter for the gate above: if the runner reported success for anything,
+            // these three deliberately broken twins of the named MVP8 fixtures would pass too.
+            (string Id, string Source, string Expected)[] corrupted =
+            {
+                ("TBC-001-kill-brick",
+                    "local h = Instance.new('Humanoid')\nh.Parent = workspace\nh:Vaporize()",
+                    "Vaporize"),
+                ("TBC-002-touch-pickup-with-leaderstats",
+                    "local v = Instance.new('IntValue')\nv.Parent = workspace\nv.Value = 'gold'",
+                    "IntValue"),
+                ("TBC-003-door-tween",
+                    "local t = game:GetService('TweenService')\n"
+                    + "local p = Instance.new('Part')\np.Parent = workspace\n"
+                    + "t:Create(p, TweenInfo.new(1), { CanCollide = false }):Play()",
+                    "CanCollide")
+            };
+
+            foreach ((string id, string source, string expected) in corrupted)
+            {
+                RuntimeHarness harness = new(_capturingLog);
+                bool failed = false;
+                string detail = "";
+                try
+                {
+                    harness.Stack.Runtime.LoadMod(
+                        id + "-corrupt", source, LuaCapabilities.All, persistToStore: false);
+                    harness.RbxApi.Scheduler.Advance(0d);
+                }
+                catch (Exception exception)
+                {
+                    failed = true;
+                    detail = exception.ToString();
+                }
+
+                if (!failed)
+                {
+                    detail = string.Join(" | ", harness.Logger.Messages);
+                    failed = detail.IndexOf("NOT_IMPLEMENTED", StringComparison.Ordinal) >= 0
+                             || detail.IndexOf("BAD_ARGUMENT", StringComparison.Ordinal) >= 0;
+                }
+
+                Assert.IsTrue(failed, "corrupted " + id + " was accepted: " + detail);
+                StringAssert.Contains(expected, detail,
+                    "corrupted " + id + " must fail for its own reason, not an unrelated one");
+            }
+        }
+
+        private static void Count(TierAFixtureSpec fixture, ref int unmodified,
+            List<string> shortfall)
+        {
+            if (fixture.Classification == TierAFixtureClassification.Unmodified)
+            {
+                unmodified++;
+                return;
+            }
+
+            shortfall.Add(fixture.Id);
         }
 
         [TestCaseSource(nameof(FixtureCases))]
