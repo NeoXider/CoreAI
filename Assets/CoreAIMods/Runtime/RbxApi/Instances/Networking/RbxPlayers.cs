@@ -67,6 +67,15 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// synthetic profile; a host assigns a real provider (ideally before any actor joins —
         /// the profile is read once per join in <see cref="EnsureActor"/>).
         /// </summary>
+        /// <summary>
+        /// Where an admitted actor's durable identity comes from; null keeps the session counter.
+        /// </summary>
+        /// <remarks>
+        /// WHY it is consulted first: a UserId decided at admission is the same on every join, and
+        /// the counter's is not. A script that saves by UserId depends on that difference.
+        /// </remarks>
+        public IRbxActorIdentitySource IdentitySource { get; set; }
+
         public IRbxPlayerProfileProvider ProfileProvider { get; set; } =
             SyntheticPlayerProfileProvider.Instance;
 
@@ -93,14 +102,26 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 isRuntimeInfrastructure: true);
             try
             {
-                long userId = _nextUserId++;
-                IRbxPlayerProfileProvider provider =
-                    ProfileProvider ?? SyntheticPlayerProfileProvider.Instance;
                 string username;
                 string displayName;
-                if (!provider.TryGetProfile(userId, out username, out displayName))
+                long userId;
+                if (IdentitySource == null
+                    || !IdentitySource.TryGetIdentity(actor, out userId, out username,
+                        out displayName)
+                    || userId <= 0L
+                    || string.IsNullOrWhiteSpace(username))
                 {
-                    username = "Player" + userId;
+                    userId = _nextUserId++;
+                    IRbxPlayerProfileProvider provider =
+                        ProfileProvider ?? SyntheticPlayerProfileProvider.Instance;
+                    if (!provider.TryGetProfile(userId, out username, out displayName))
+                    {
+                        username = "Player" + userId;
+                        displayName = username;
+                    }
+                }
+                else if (string.IsNullOrWhiteSpace(displayName))
+                {
                     displayName = username;
                 }
 

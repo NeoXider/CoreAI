@@ -4,6 +4,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.26.0] - 2026-09-05
+
+### Added
+
+- **MVP11** — `CoreAiMirrorSessionHost` (допуск → актор → снос при разрыве) и
+  `IRbxActorIdentitySource`: `Player.UserId` берётся из допуска, а не из счётчика сессии.
+
 ## [7.25.0] - 2026-09-05
 
 ### Added

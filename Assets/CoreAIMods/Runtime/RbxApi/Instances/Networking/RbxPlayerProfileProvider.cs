@@ -39,4 +39,28 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             return true;
         }
     }
+
+    /// <summary>
+    /// Engine-free port that maps an admitted ACTOR to the durable identity its <c>Player</c> gets.
+    /// </summary>
+    /// <remarks>
+    /// WHY this exists next to <see cref="IRbxPlayerProfileProvider"/>: the profile port answers
+    /// "who is user 7", which presumes the UserId is already known. In an online session it is not —
+    /// it is decided at admission, and it must be the SAME number every time that account joins.
+    /// Without this port a Player's UserId is a per-session counter, so every script that saves by
+    /// UserId writes to a different key on each join and quietly loses the player's data.
+    /// <para>
+    /// A host with no source (solo, loopback, tests) keeps the counter, which is what makes the
+    /// single-player path work with no wiring at all.
+    /// </para>
+    /// </remarks>
+    public interface IRbxActorIdentitySource
+    {
+        /// <summary>
+        /// Resolves the durable identity admitted for <paramref name="actorId"/>. Returns false when
+        /// this actor was not admitted through an identity-bearing path.
+        /// </summary>
+        bool TryGetIdentity(string actorId, out long userId, out string username,
+            out string displayName);
+    }
 }
