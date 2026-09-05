@@ -4,6 +4,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.31.0] - 2026-09-05
+
+### Added
+
+- **MVP12** — `IntentGateway`: единственное место, где судится клиентская запись (отправитель от
+  моста, отказ неограниченному актору, бюджет, размер, грант, ACL, конверт мутации).
+
 ## [7.30.0] - 2026-09-05
 
 ### Added
