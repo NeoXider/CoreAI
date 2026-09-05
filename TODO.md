@@ -10,6 +10,52 @@
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
+## MVP2.5 rungs — status 2026-09-05
+
+Verified on the settled tree (Unity 6000.3.14f1 batchmode, XML in `artifacts/testresults/`):
+full EditMode **3666 total / 3657 passed / 0 failed / 9 skipped**; PlayMode physics and character
+**8/8**. Released 7.19.0 → 7.31.0, all seven packages in lockstep.
+
+**Modularity proved by removal, not by argument**: with `Assets/Mirror` taken out of the project the
+tree compiles with **0 errors**, `CoreAI.Net.Mirror.dll` is not built at all, and EditMode runs
+**3588 / 0 failed** — exactly the Mirror-present total minus that package's own 19 gates. The Lua
+layer, mods and host need nothing from the transport.
+
+- [x] **MVP8 — complete (7 slices).** Value objects + `leaderstats`; `CollectionService`;
+      `Players`/`Player` completion; `TweenService` on scaled time; `Raycast`/`Gravity`/
+      `Touched`+`TouchEnded` with the first Mods PlayMode folder and a `FixedUpdate` pump;
+      `Humanoid` + CoreAI's own `UnityRbxCharacterMotor`; Tier-B corpus (10 gameplay idioms) with the
+      ≥60 % unmodified gate over Tier-A + Tier-B.
+- [x] Two plan decisions that blocked slice 8.6 are made and recorded in
+      `dev-docs/MVP25_BUILD_PLAN_2026-09-04.md` §F.4: CoreAI ships its own minimal character motor
+      (a framework package cannot depend on NeoxiderTools, and only an own motor's numbers can be
+      asserted); passive regeneration is a script, not a class feature, exactly as the mirror
+      describes it.
+- [x] **MVP11 core.** `IActorAdmissionProvider` (no anonymous fallback, and CoreAI ships no
+      implementation — a test enforces that); `CoreAiMirrorAuthenticator` deciding before the
+      connection is authenticated; `MirrorNetworkBridge` whose envelope carries no actor id at all;
+      `CoreAiMirrorSessionHost` (admit → bind → create actor, and the reverse on a drop);
+      `IRbxActorIdentitySource` so `Player.UserId` is the admitted one rather than a session counter;
+      `RbxBridgeRuntimeTopology` and the server clock offset; the shared `RbxNetworkRateLimiter`;
+      `INetworkBridge` v2; the packaging-boundary fitness test.
+- [x] **MVP12 core.** `WriteGrantLedger` (the host grants a client write access by scope, action set
+      and expiry; the host itself is deliberately not in the ledger); `ClientWritePolicy` with
+      exactly two values and a test that `Open` does not exist; `MutationIntent` carrying no identity
+      field of any kind; `IReplicationFilter` + `ReplicationDirtySet`; `IntentGateway` running the
+      ordered checks with a negative twin for each.
+
+### Left on MVP2.5 (named, not hidden)
+
+- [ ] **The join snapshot** (MVP11): an admitted client still receives no filtered `ExportSnapshot`,
+      so client Lua cannot yet resolve `ReplicatedStorage.RemoteX` by reference.
+- [ ] **Wiring the gateway to the wire** (MVP12): `SendIntent`/`IntentReceived` on the bridge, the
+      dirty set published as deltas each step, and the client applying them. Every RULE is built and
+      gated; this is the plumbing between them.
+- [ ] **A two-process over-the-wire run** (N11.3–N11.6). Mirror's host mode did not deliver
+      client→server inside the batch-mode test runner, so the bridge's rules are gated against its
+      receive paths directly and **no claim is made that bytes cross a real socket**. That claim
+      needs a real host and client.
+
 ## MVP2.5 persistence release — status 2026-09-02
 
 Verified on the merged tree (commit `5c62c43d`, Unity 6000.3.14f1 batchmode, XML in
