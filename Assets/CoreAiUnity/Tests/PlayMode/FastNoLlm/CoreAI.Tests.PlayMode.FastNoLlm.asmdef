@@ -10,7 +10,12 @@
     "VContainer",
     "UniTask",
     "UnityEngine.TestRunner",
-    "UnityEditor.TestRunner"
+    "UnityEditor.TestRunner",
+    "CoreAI.RbxApi.Instances",
+    "CoreAI.RbxApi.Binding",
+    "CoreAI.RbxApi.Datatypes",
+    "UnityEngine.UI",
+    "Unity.TextMeshPro"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

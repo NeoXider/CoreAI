@@ -1,0 +1,100 @@
+-- CoreAI MVP8 gameplay services, in one script a Roblox developer would recognise.
+-- Every idiom below is one the compatibility corpus runs unmodified.
+
+local CollectionService = game:GetService("CollectionService")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+
+local function report(line)
+    workspace:SetAttribute("DemoStatus", line)
+end
+
+-- 1. A door that slides open on a tween, over two properties at once.
+local door = Instance.new("Part")
+door.Name = "Door"
+door.Size = Vector3.new(1, 7, 5)
+door.Position = Vector3.new(-9, 3.5, 0)
+door.Color = Color3.fromRGB(150, 110, 70)
+door.Anchored = true
+door.Parent = workspace
+
+local opening = TweenService:Create(door, TweenInfo.new(1.2, Enum.EasingStyle.Quad), {
+    Position = door.Position + Vector3.new(0, 7, 0),
+    Transparency = 0.35,
+})
+opening.Completed:Connect(function(state)
+    if state == Enum.PlaybackState.Completed then
+        report("Door opened on a tween; Completed fired with " .. state.Name)
+    end
+end)
+opening:Play()
+
+-- 2. A kill brick: tagged, found by tag, and lethal on contact.
+local brick = Instance.new("Part")
+brick.Name = "KillBrick"
+brick.Size = Vector3.new(6, 1, 6)
+brick.Position = Vector3.new(0, 0.5, 0)
+brick.Color = Color3.fromRGB(200, 60, 60)
+brick.Material = Enum.Material.Neon
+brick.Anchored = true
+brick.Parent = workspace
+CollectionService:AddTag(brick, "Kill")
+
+local humanoid = Instance.new("Humanoid")
+humanoid.Name = "Humanoid"
+humanoid.Parent = workspace
+
+humanoid.HealthChanged:Connect(function(health)
+    report("Humanoid health is now " .. tostring(health))
+end)
+humanoid.Died:Connect(function()
+    report("The kill brick did its job: Died fired once")
+end)
+
+for _, tagged in ipairs(CollectionService:GetTagged("Kill")) do
+    tagged.Touched:Connect(function(other)
+        if other.Name ~= "Door" then
+            humanoid.Health = 0
+        end
+    end)
+end
+
+-- 3. A coin that scores into leaderstats, the way every tutorial teaches it.
+local player = Players:GetPlayers()[1]
+if player then
+    local leaderstats = Instance.new("Folder")
+    leaderstats.Name = "leaderstats"
+    leaderstats.Parent = player
+
+    local coins = Instance.new("IntValue")
+    coins.Name = "Coins"
+    coins.Value = 0
+    coins.Parent = leaderstats
+    coins.Changed:Connect(function(value)
+        report("Coins: " .. tostring(value))
+    end)
+
+    local coin = Instance.new("Part")
+    coin.Name = "Coin"
+    coin.Shape = Enum.PartType.Cylinder
+    coin.Size = Vector3.new(0.3, 2, 2)
+    coin.Position = Vector3.new(6, 1.5, 0)
+    coin.Color = Color3.fromRGB(240, 200, 60)
+    coin.Material = Enum.Material.Metal
+    coin.Anchored = true
+    coin.Parent = workspace
+
+    coin.Touched:Connect(function()
+        coins.Value = coins.Value + 1
+        coin:Destroy()
+    end)
+end
+
+-- 4. A ground probe, and gravity a designer can retune live.
+local hit = workspace:Raycast(Vector3.new(0, 30, 0), Vector3.new(0, -60, 0))
+if hit then
+    report("Raycast hit " .. hit.Instance.Name .. " at " ..
+        string.format("%.1f", hit.Distance) .. " studs")
+end
+
+workspace:SetAttribute("DemoGravity", workspace.Gravity)

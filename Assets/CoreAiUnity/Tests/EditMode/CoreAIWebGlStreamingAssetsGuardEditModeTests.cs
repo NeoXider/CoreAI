@@ -467,6 +467,7 @@ namespace CoreAI.Tests.EditMode
             string[] expected =
             {
                 "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity",
+                "Assets/CoreAI.Demos/GameplayServices/GameplayServicesDemo.unity",
                 "Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity",
                 "Assets/CoreAI.Demos/LiveMechanics/LiveMechanicsDemo.unity",
                 "Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity",

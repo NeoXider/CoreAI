@@ -562,6 +562,7 @@ namespace CoreAI.Editor
         private static readonly string[] FrozenScenePaths =
         {
             "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity",
+            "Assets/CoreAI.Demos/GameplayServices/GameplayServicesDemo.unity",
             "Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity",
             "Assets/CoreAI.Demos/LiveMechanics/LiveMechanicsDemo.unity",
             "Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity",

@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.Composition;
-using Neo.Tools;
+using CoreAI.Demos.Shared;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -629,11 +629,8 @@ namespace CoreAI.Demos.ProceduralMaterials
             Renderer rotating = CreateMeshSample(station.transform, "Rotating Projection Sample",
                 assets.BevelledCube, new Vector3(7f, 1.15f, 4f),
                 Quaternion.Euler(18f, 0f, 12f), new Vector3(2f, 2f, 2f), null);
-            ConstantRotator rotator = rotating.gameObject.AddComponent<ConstantRotator>();
-            rotator.axisSource = ConstantRotator.AxisSource.Custom;
-            rotator.customAxis = Vector3.up;
-            rotator.spaceLocal = false;
-            rotator.SetDegreesPerSecond(18f);
+            rotating.gameObject.AddComponent<CoreAiConstantRotator>()
+                .Configure(Vector3.up, 18f, localSpace: false);
             renderers.Add(rotating);
             CreateText(station.transform, "ROTATING: CHECK SWIMMING",
                 new Vector3(7f, 3.1f, 3.8f), faceOnCamera, font, 0.034f,

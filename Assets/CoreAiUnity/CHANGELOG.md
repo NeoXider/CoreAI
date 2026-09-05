@@ -4,6 +4,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.32.0] - 2026-09-06
+
+### Added
+
+- **Демо-сцена MVP8** (`GameplayServicesDemo`) на настоящем Canvas, без IMGUI, с PlayMode-гейтом,
+  который её реально запускает.
+
+### Fixed
+
+- NeoxiderTools больше не используется в CoreAI: ссылка сборки, импорт и компонент в сцене убраны,
+  дальше это стережёт тест независимости пакетов.
+
 ## [7.31.0] - 2026-09-05
 
 ### Added
