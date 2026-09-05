@@ -4,6 +4,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.30.0] - 2026-09-05
+
+### Added
+
+- **MVP12** — `IReplicationFilter` (ServerStorage и ServerScriptService не реплицируются никогда) и
+  `ReplicationDirtySet` (одна дельта на экземпляр за шаг, удаление побеждает изменение).
+
 ## [7.29.0] - 2026-09-05
 
 ### Added
