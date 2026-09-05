@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.24.0] - 2026-09-05
+
+### Added
+
+- **MVP11** — `CoreAiMirrorAuthenticator` (допуск до аутентификации соединения, отказ по умолчанию)
+  и `MirrorNetworkBridge` (отправитель из карты соединений, а не из пакета; корреляция по паре
+  соединение+номер; общий бюджет; потолок пакета от транспорта).
+
 ## [7.23.0] - 2026-09-05
 
 ### Added
