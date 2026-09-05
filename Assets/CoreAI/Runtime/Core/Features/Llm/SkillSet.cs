@@ -28,6 +28,24 @@ namespace CoreAI.Ai
     /// });
     /// </code>
     /// </example>
+    /// <summary>
+    /// One addressable part of a skill's instructions: the name a reader asks for, and its body.
+    /// </summary>
+    public readonly struct SkillSection
+    {
+        public SkillSection(string name, string content)
+        {
+            Name = name ?? "";
+            Content = content ?? "";
+        }
+
+        /// <summary>The name a reader passes to <c>read_skill</c> to fetch this part.</summary>
+        public string Name { get; }
+
+        /// <summary>The part's own text, without the joining heading.</summary>
+        public string Content { get; }
+    }
+
     public sealed class SkillSet
     {
         /// <summary>Human-readable name of this skill (e.g. "Quiz", "Crafting", "Combat").</summary>
@@ -44,6 +62,21 @@ namespace CoreAI.Ai
         /// Full procedural instructions returned by <c>read_skill</c> when this skill is selected.
         /// </summary>
         public string Instructions { get; }
+
+        /// <summary>
+        /// The named parts this skill's instructions were assembled from, in order. The FIRST is the
+        /// entry document; the rest are references a reader fetches only when it needs them.
+        /// A single-source skill has exactly one section and behaves as it always did.
+        /// </summary>
+        /// <remarks>
+        /// WHY: this is the third disclosure level, and it exists because the reader has no file
+        /// system. Claude Code gets away with plain `[foo](references/foo.md)` links because its agent
+        /// can open the file itself; a CoreAI agent reaches a skill only through <c>read_skill</c>, so
+        /// an unfetchable link would just be dead text. Keeping the parts addressable lets
+        /// <c>read_skill</c> hand back the entry document plus an index, and fetch one section on a
+        /// second call — the same staged cost, through the door this reader actually has.
+        /// </remarks>
+        public IReadOnlyList<SkillSection> Sections { get; }
 
         /// <summary>Tools that belong to this skill.</summary>
         public IReadOnlyList<ILlmTool> Tools { get; }
@@ -67,10 +100,21 @@ namespace CoreAI.Ai
         /// </param>
         /// <param name="tools">Tools that belong to this skill.</param>
         public SkillSet(string name, string description, string instructions, params ILlmTool[] tools)
+            : this(null, name, description, instructions, tools)
+        {
+        }
+
+        /// <summary>
+        /// Creates a skill whose instructions were assembled from named parts, keeping those parts
+        /// addressable so <c>read_skill</c> can hand back one at a time.
+        /// </summary>
+        private SkillSet(IReadOnlyList<SkillSection> sections, string name, string description,
+            string instructions, params ILlmTool[] tools)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Description = string.IsNullOrWhiteSpace(description) ? name : description;
             Instructions = instructions ?? "";
+            Sections = sections ?? new[] { new SkillSection(name, Instructions) };
             tools ??= Array.Empty<ILlmTool>();
 
             List<ILlmTool> toolList = new(tools.Length);
@@ -249,7 +293,42 @@ namespace CoreAI.Ai
                 }
             }
 
-            return new SkillSet(name, description, JoinInstructionParts(parts), tools);
+            List<SkillSection> sections = new(parts.Count);
+            foreach (KeyValuePair<string, string> part in parts)
+            {
+                // WHY: an empty part is skipped by the joiner, so keeping it here would advertise a
+                // section index entry that fetches nothing.
+                if (!string.IsNullOrWhiteSpace(part.Value))
+                {
+                    sections.Add(new SkillSection(part.Key, part.Value));
+                }
+            }
+
+            return new SkillSet(sections.Count > 0 ? sections : null, name, description,
+                JoinInstructionParts(parts), tools);
+        }
+
+        /// <summary>
+        /// Finds one instruction section by name, case-insensitively. False when this skill has no
+        /// such part.
+        /// </summary>
+        public bool TryGetSection(string sectionName, out SkillSection section)
+        {
+            if (!string.IsNullOrWhiteSpace(sectionName) && Sections != null)
+            {
+                string wanted = sectionName.Trim();
+                foreach (SkillSection candidate in Sections)
+                {
+                    if (string.Equals(candidate.Name, wanted, StringComparison.OrdinalIgnoreCase))
+                    {
+                        section = candidate;
+                        return true;
+                    }
+                }
+            }
+
+            section = default;
+            return false;
         }
 
         /// <summary>

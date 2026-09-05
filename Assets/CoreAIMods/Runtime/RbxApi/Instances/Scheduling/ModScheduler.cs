@@ -70,17 +70,21 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
         }
 
+        /// <summary>
+        /// Scheduler bookkeeping for one live thread. Records are pooled only when their thread died
+        /// inside the resume that started it (see <see cref="TryReleaseRecord"/>); <see cref="Reset"/>
+        /// and <see cref="Clear"/> are the complete per-field policy for a reused record.
+        /// </summary>
         private sealed class ThreadRecord
         {
             public ThreadRecord(IRbxScriptThread thread, string ownerModId)
             {
-                Thread = thread;
-                OwnerModId = ownerModId;
+                Reset(thread, ownerModId);
             }
 
-            public IRbxScriptThread Thread { get; }
+            public IRbxScriptThread Thread { get; private set; }
 
-            public string OwnerModId { get; }
+            public string OwnerModId { get; private set; }
 
             public ThreadScheduleState State { get; set; }
 
@@ -91,6 +95,31 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             public RbxInstance ReadableTombstone { get; set; }
 
             public long SignalWaitGeneration { get; set; }
+
+            /// <summary>Re-arms a record for a new thread and owner; every per-thread field restarts.</summary>
+            public void Reset(IRbxScriptThread thread, string ownerModId)
+            {
+                Thread = thread;
+                OwnerModId = ownerModId;
+                State = ThreadScheduleState.Idle;
+                DeferredArguments = null;
+                CompletionWait = null;
+                ReadableTombstone = null;
+                // WHY: SignalWaitGeneration keeps counting across tenants on purpose. A timeout entry is
+                // matched by (record, generation); a monotonic counter can never re-produce a value an
+                // earlier tenant used, so a stale entry can never resume a later tenant.
+            }
+
+            /// <summary>Drops every reference before the record waits in the pool.</summary>
+            public void Clear()
+            {
+                Thread = null;
+                OwnerModId = null;
+                State = ThreadScheduleState.Idle;
+                DeferredArguments = null;
+                CompletionWait = null;
+                ReadableTombstone = null;
+            }
         }
 
         private sealed class SignalInvocation
@@ -332,10 +361,14 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             PipelineStage.DrainSignals
         };
 
+        /// <summary>Idle records kept for reuse; anything beyond this is left to the GC as before.</summary>
+        internal const int MaxPooledRecords = 64;
+
         private readonly IRbxScriptThreadFactory _threadFactory;
         private readonly IRbxTimeSource _timeSource;
         private readonly Dictionary<IRbxScriptThread, ThreadRecord> _records =
             new(ThreadReferenceComparer.Instance);
+        private readonly Stack<ThreadRecord> _recordPool = new();
         private readonly Queue<ThreadRecord> _deferredQueue = new();
         private readonly List<ThreadRecord> _drainBuffer = new();
         private readonly Queue<SignalInvocation> _signalQueue = new();
@@ -425,6 +458,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         /// <summary>Current live thread count for lifecycle and bounded-churn verification.</summary>
         public int LiveThreadCount => _records.Count;
 
+        /// <summary>Idle records waiting for reuse; never counted as live threads.</summary>
+        internal int PooledRecordCount => _recordPool.Count;
+
         /// <summary>Raised at each observable phase boundary in canonical pipeline order.</summary>
         public event Action<SchedulerPhase, double> PhaseReached;
 
@@ -438,8 +474,10 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         public IRbxScriptThread Spawn(string ownerModId, object callable, object[] args)
         {
             ThreadRecord record = CreateRecord(ownerModId, callable);
+            IRbxScriptThread thread = record.Thread;
             ResumeThread(record, CopyArguments(args));
-            return record.Thread;
+            TryReleaseRecord(record);
+            return thread;
         }
 
         /// <summary>Creates a scheduler-owned signal callback with its destruction tombstone scope.</summary>
@@ -456,9 +494,34 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 return null;
             }
 
+            IRbxScriptThread thread = record.Thread;
             record.ReadableTombstone = _currentSignalTombstone;
             ResumeThread(record, CopyArguments(args));
-            return record.Thread;
+            TryReleaseRecord(record);
+            return thread;
+        }
+
+        /// <summary>
+        /// Pools a record whose thread died inside the resume that started it. That thread never left
+        /// the Running state, so no wait/delay/timeout heap, deferred queue, or completion entry can
+        /// reference the record; any other ending (yielded, faulted, killed) keeps today's GC lifetime.
+        /// </summary>
+        private void TryReleaseRecord(ThreadRecord record)
+        {
+            if (record.State != ThreadScheduleState.Running
+                || record.CompletionWait != null
+                || record.DeferredArguments != null
+                || record.Thread == null
+                || _records.ContainsKey(record.Thread))
+            {
+                return;
+            }
+
+            record.Clear();
+            if (_recordPool.Count < MaxPooledRecords)
+            {
+                _recordPool.Push(record);
+            }
         }
 
         /// <summary>Creates a thread for the next deferred resumption point.</summary>
@@ -1404,7 +1467,17 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     "create a distinct thread for each scheduling call");
             }
 
-            ThreadRecord record = new(thread, ownerModId);
+            ThreadRecord record;
+            if (_recordPool.Count > 0)
+            {
+                record = _recordPool.Pop();
+                record.Reset(thread, ownerModId);
+            }
+            else
+            {
+                record = new ThreadRecord(thread, ownerModId);
+            }
+
             _records.Add(thread, record);
             return record;
         }

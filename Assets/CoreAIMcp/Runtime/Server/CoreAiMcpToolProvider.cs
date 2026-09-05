@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using CoreAI;
 using CoreAI.Ai;
@@ -28,6 +29,9 @@ namespace CoreAI.Mcp.Server
         /// <param name="worldTool">Constructed world tool (world_command). Optional - absent when no executor resolved.</param>
         /// <param name="skills">Programmer-role skills (read_skill). Optional - absent when empty/null.</param>
         /// <param name="screenshotSource">Screenshot source (screenshot). Optional - absent when null.</param>
+        /// <param name="residencyPolicy">Host residency override (delegate channel). Null means all Native.</param>
+        /// <param name="readEnvironmentVariable">Variable reader (variable channel). Null reads the process environment.</param>
+        /// <param name="warningSink">Unknown variable names warn here. Null sinks to the CoreAI log.</param>
         public static McpToolRegistry Build(
             LuaTool.ILuaExecutor luaExecutor,
             ILuaModRuntime modRuntime,
@@ -38,7 +42,10 @@ namespace CoreAI.Mcp.Server
             ILuaLogService logService,
             WorldLlmTool worldTool,
             IReadOnlyList<SkillSet> skills,
-            IScreenshotSource screenshotSource)
+            IScreenshotSource screenshotSource,
+            IMcpToolResidencyPolicy residencyPolicy = null,
+            Func<string, string> readEnvironmentVariable = null,
+            Action<string> warningSink = null)
         {
             List<IMcpTool> tools = new();
 
@@ -82,7 +89,18 @@ namespace CoreAI.Mcp.Server
                 tools.Add(new ScreenshotMcpTool(screenshotSource));
             }
 
-            return new McpToolRegistry(tools);
+            List<string> knownNames = new(tools.Count);
+            foreach (IMcpTool tool in tools)
+            {
+                knownNames.Add(tool.Name);
+            }
+
+            IMcpToolResidencyPolicy effectivePolicy = McpToolResidencyPolicies.FromEnvironment(
+                knownNames,
+                residencyPolicy,
+                readEnvironmentVariable,
+                warningSink ?? (static message => Log.Instance.Warn(message)));
+            return new McpToolRegistry(tools, effectivePolicy, true);
         }
     }
 }

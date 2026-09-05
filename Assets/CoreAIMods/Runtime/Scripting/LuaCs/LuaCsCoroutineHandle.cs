@@ -48,6 +48,7 @@ namespace CoreAI.Sandbox.LuaCs
         private readonly LuaState _coroutine;
         private readonly LuaStack _callStack;
         private readonly CancellationTokenSource _cts;
+        private readonly ResumeGuardHook _hook;
         private readonly int _budgetPerResume;
         private readonly int _resumeTimeoutMs;
         private readonly long _totalLifetimeSteps;
@@ -93,6 +94,7 @@ namespace CoreAI.Sandbox.LuaCs
             _coroutine = ownerState.CreateCoroutine(function, isProtectedMode);
             _callStack = new LuaStack(8);
             _cts = new CancellationTokenSource();
+            _hook = new ResumeGuardHook();
         }
 
         /// <summary>Convenience factory mirroring the constructor.</summary>
@@ -125,6 +127,16 @@ namespace CoreAI.Sandbox.LuaCs
 
         /// <summary>Cap on instruction steps across the whole coroutine lifetime.</summary>
         public long TotalLifetimeSteps => _totalLifetimeSteps;
+
+        /// <summary>
+        /// Restarts the lifetime step budget. Only a pooled signal runner calls this, at the moment it is
+        /// re-armed for a fresh handler: each handler is a new logical thread, so it starts its lifetime
+        /// budget from zero exactly as a freshly created coroutine would.
+        /// </summary>
+        internal void ResetLifetime()
+        {
+            _consumedSteps = 0;
+        }
 
         /// <summary>
         /// Result flag of the most recent resume. Lua-CSharp follows <c>coroutine.resume</c> semantics:
@@ -163,32 +175,12 @@ namespace CoreAI.Sandbox.LuaCs
 
             // WHY: Re-arm a fresh per-resume budget (instruction steps + wall clock) via SetHook, mirroring
             // LuaCsExecutionGuard. In protected mode a breach throws a LuaRuntimeException inside the VM,
-            // which Lua-CSharp turns into an [ok=false, error] result and marks the thread Dead.
-            long steps = 0;
-            Stopwatch sw = Stopwatch.StartNew();
-            int budget = _budgetPerResume;
-            int timeout = _resumeTimeoutMs;
-
-            LuaFunction hook = new("coreai_luacs_coroutine_guard", (ctx, ct) =>
-            {
-                steps++;
-                if (steps > budget)
-                {
-                    throw new LuaRuntimeException(ctx.State,
-                        new InvalidOperationException(
-                            $"LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET ({budget})"));
-                }
-
-                if (sw.ElapsedMilliseconds > timeout)
-                {
-                    throw new LuaRuntimeException(ctx.State,
-                        new TimeoutException($"Lua coroutine resume exceeded {timeout} ms."));
-                }
-
-                return new ValueTask<int>(ctx.Return());
-            });
-
-            _coroutine.SetHook(hook, string.Empty, 1);
+            // which Lua-CSharp turns into an [ok=false, error] result and marks the thread Dead. The hook
+            // object is built once per handle and re-armed here (like the guard's pooled GuardHook): a
+            // fresh LuaFunction + closure + Stopwatch per resume was measured heap churn on every signal
+            // handler and every task.wait loop resume.
+            _hook.Arm(_budgetPerResume, _resumeTimeoutMs);
+            _coroutine.SetHook(_hook.Function, string.Empty, 1);
 
             int count;
             try
@@ -209,7 +201,7 @@ namespace CoreAI.Sandbox.LuaCs
                 }
             }
 
-            _consumedSteps += steps;
+            _consumedSteps += _hook.Steps;
             CaptureResults(count);
 
             if (_consumedSteps >= _totalLifetimeSteps)
@@ -318,6 +310,58 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             _lastValues = values;
+        }
+
+        /// <summary>
+        /// Reusable per-resume budget hook. A handle resumes one coroutine at a time (a nested resume of
+        /// a non-suspended coroutine is rejected by the VM before any instruction runs), so one hook per
+        /// handle is enough; its counters live in fields and are reset by <see cref="Arm"/>.
+        /// </summary>
+        private sealed class ResumeGuardHook
+        {
+            public readonly LuaFunction Function;
+
+            private long _steps;
+            private int _budget;
+            private int _timeoutMs;
+            private long _startTimestamp;
+            private long _timeoutTicks;
+
+            public ResumeGuardHook()
+            {
+                Function = new LuaFunction("coreai_luacs_coroutine_guard", Hook);
+            }
+
+            /// <summary>Instruction steps charged during the current resume.</summary>
+            public long Steps => _steps;
+
+            public void Arm(int budget, int timeoutMs)
+            {
+                _steps = 0;
+                _budget = budget;
+                _timeoutMs = timeoutMs;
+                _startTimestamp = Stopwatch.GetTimestamp();
+                _timeoutTicks = (long)timeoutMs * Stopwatch.Frequency / 1000;
+            }
+
+            private ValueTask<int> Hook(LuaFunctionExecutionContext ctx, CancellationToken ct)
+            {
+                _steps++;
+                if (_steps > _budget)
+                {
+                    throw new LuaRuntimeException(ctx.State,
+                        new InvalidOperationException(
+                            $"LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET ({_budget})"));
+                }
+
+                if (Stopwatch.GetTimestamp() - _startTimestamp > _timeoutTicks)
+                {
+                    throw new LuaRuntimeException(ctx.State,
+                        new TimeoutException($"Lua coroutine resume exceeded {_timeoutMs} ms."));
+                }
+
+                return new ValueTask<int>(ctx.Return());
+            }
         }
     }
 }

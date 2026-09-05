@@ -202,6 +202,16 @@ budget. A result with zero relevant work is a failure, not a fast pass.
 >    online fallback.** CoreAI owns the admission seam only; it never owns accounts.
 > 2. **Mirror packaging** — a **separate optional package**. The solo build keeps no hard Mirror
 >    dependency, and NeoxiderTools reflection sync / context relay is not the bridge.
+>    **Mirror over NGO, reconfirmed 2026-09-04** after the build plan found Unity Netcode for
+>    GameObjects 2.11 already installed and used by the example game. The reason is decision 3, not
+>    taste: NGO's route to scale is distributed authority — handing authority to clients — while this
+>    project just committed to a server-authoritative model, so NGO's scaling story works against the
+>    design at every step. Mirror is also transport-agnostic (Telepathy / KCP / a relay can be swapped
+>    under load) and pulls in no paid Unity service, which is what "universal" has to mean here. NGO
+>    stays where it is, in the example game; it is not removed and not used by the framework.
+>    **The transport is not the binding constraint today** and should not be treated as one: the heap
+>    budget already fails at 20 actors in solo, with no network at all, so CoreAI runs out before any
+>    stack does.
 > 3. **`Open` write policy** — **removed as it stands**, replaced by an explicit host-granted,
 >    server-mediated write authority. The owner's intent is that a host can grant a *named* client the
 >    right to change the world — co-building, an authoring client, a client driving mods through its

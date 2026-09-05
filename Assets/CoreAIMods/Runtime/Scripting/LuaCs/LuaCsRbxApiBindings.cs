@@ -98,6 +98,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly ModConnectionRegistry _connections;
         private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
         private readonly ModScheduler _scheduler;
+        private readonly Dictionary<string, string> _resumeOperationByMod = new();
         private readonly IRbxClockSource _clockSource;
         private readonly object _serverTimeGate = new();
         private double _lastServerTimeNow = double.NegativeInfinity;
@@ -309,6 +310,9 @@ namespace CoreAI.Ai.LuaCs
         /// Shared logical task scheduler advanced once per scaled host frame by the runtime driver.
         /// </summary>
         public ModScheduler Scheduler => _scheduler;
+
+        /// <summary>The scheduler thread factory (tests read its runner-reuse counters).</summary>
+        internal LuaCsRbxScriptThreadFactory SchedulerThreadFactory => _schedulerThreadFactory;
 
         /// <summary>Injectable source behind every Lua-visible clock. Null at composition
         /// means the production system-clock default; a game passes its own source to redefine
@@ -627,8 +631,21 @@ namespace CoreAI.Ai.LuaCs
                 actorContext.ActorId,
                 actorContext.Grants.IsUnrestricted,
                 actorContext.WorldId,
-                "resume Lua scheduler thread owned by mod '" + ownerModId + "'",
+                ResumeOperationName(ownerModId),
                 resume);
+        }
+
+        private string ResumeOperationName(string ownerModId)
+        {
+            // WHY: this label is built for every scheduler resume (every signal handler, every
+            // task.wait loop tick); interning it per mod keeps the hot path free of string churn.
+            if (!_resumeOperationByMod.TryGetValue(ownerModId, out string operation))
+            {
+                operation = "resume Lua scheduler thread owned by mod '" + ownerModId + "'";
+                _resumeOperationByMod[ownerModId] = operation;
+            }
+
+            return operation;
         }
 
         internal ActorContext ResolveOwnerActorContext(string ownerModId)
@@ -644,7 +661,9 @@ namespace CoreAI.Ai.LuaCs
 
         internal object CaptureSignalCallable(LuaState ownerState, LuaValue callable)
         {
-            return _schedulerThreadFactory.CaptureCallable(ownerState, callable);
+            // WHY: a signal handler's thread is never exposed to Lua as a task thread, so it may run on
+            // a pooled runner (Roblox recycles handler threads the same way).
+            return _schedulerThreadFactory.CaptureCallable(ownerState, callable, recyclable: true);
         }
 
         internal void SpawnSignalHandler(LuaCsRbxModContext context,

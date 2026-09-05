@@ -110,6 +110,33 @@ var quiz = SkillSet.FromTextParts("Quiz", "Quizzes and tests",
 A skill built from exactly **one** source keeps its text unchanged and gets no heading, so `FromFile`
 and `FromTextContent` behave exactly as they always did.
 
+### Reading a long skill one document at a time
+
+A skill assembled from several documents is **not** delivered as one blob. `read_skill(skill_name)`
+returns the **entry document** plus a `sections` index naming the rest; `read_skill(skill_name, section)`
+fetches one of them. So a five-document reference costs the entry page to start with, and the reader
+pays for a section only when it decides it needs one.
+
+```text
+read_skill("Quiz")
+  → instructions: <overview.md body>      section: "overview.md"
+    sections:     ["scoring.md", "edge-cases.md"]
+
+read_skill("Quiz", "scoring.md")
+  → instructions: <scoring.md body>       section: "scoring.md"
+```
+
+A skill built from a **single** source is returned exactly as it always was — full text, no `section`,
+no index. Nothing about existing one-document skills changes.
+
+This is the same staged disclosure other agent harnesses get from a `SKILL.md` that links to
+`references/*.md`, with one deliberate difference: those agents follow the link with their own file
+reader, and a CoreAI agent has no file system — it reaches a skill only through `read_skill`. A
+markdown link would be dead text here, so the second level is an argument instead of a link.
+
+Tool schemas are listed at **every** stage, entry and section alike: a reader that fetched one section
+still needs to know what it may call, and hiding that would only cost it another round trip.
+
 ### Tools do not depend on reading the skill
 
 `read_skill` defers the **instructions**, never the ability to invoke. A skill's tools are callable at

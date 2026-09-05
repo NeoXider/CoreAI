@@ -305,5 +305,94 @@ namespace CoreAI.Tests.PlayMode
             Assert.That(llm.LastRequest.SystemPrompt, Does.Not.Contain("spawn_quiz"),
                 "Individual tool names should NOT be in catalog.");
         }
+
+        /// <summary>
+        /// Progressive disclosure through the LIVE pipeline: a skill written across several documents
+        /// must reach the model as its entry document plus an index, never as the whole blob.
+        /// </summary>
+        /// <remarks>
+        /// WHY a Play Mode test on top of the EditMode ones: EditMode calls the tool directly, so it
+        /// proves the tool's own logic. This proves the staged answer survives the real orchestrator
+        /// path — policy, tool registration, invocation — which is where a wrapper could quietly
+        /// re-assemble the document before the model sees it.
+        /// </remarks>
+        [UnityTest]
+        public IEnumerator SelfService_MultiDocumentSkill_ReachesTheModelStaged()
+        {
+            SkillSet manual = SkillSet.FromTextParts("Manual", "A skill written across documents",
+                new[]
+                {
+                    new KeyValuePair<string, string>("overview.md", "PM_ENTRY: read this first."),
+                    new KeyValuePair<string, string>("deep.md", "PM_DEEP: the long reference."),
+                },
+                MakeTool("do_thing"));
+
+            const string roleId = "pm_skill_sections";
+            AgentConfig config = new AgentBuilder(roleId)
+                {
+                    SuppressBuildWarnings = true
+                }
+                .WithSystemPrompt("You are a helper.")
+                .WithSkill(manual)
+                .WithMode(AgentMode.ToolsAndChat)
+                .Build();
+
+            StubSettings settings = new();
+            CaptureLlmClient llm = new();
+            StubMem mem = new();
+            AgentMemoryPolicy policy = new();
+            config.ApplyToPolicy(policy);
+            AiOrchestrator orch = BuildOrch(roleId, llm, policy, settings, mem);
+
+            Task t = orch.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = roleId,
+                Hint = "help me"
+            });
+            yield return PlayModeTestAwait.WaitTask(t, 10f, "multi-document skill");
+
+            Assert.IsNotNull(llm.LastRequest);
+            Assert.That(llm.LastRequest.SystemPrompt, Does.Not.Contain("PM_ENTRY"),
+                "no document body belongs in the always-resident catalog");
+            Assert.That(llm.LastRequest.SystemPrompt, Does.Not.Contain("PM_DEEP"));
+
+            ILlmTool readSkill = null;
+            foreach (ILlmTool tool in policy.GetToolsForRole(roleId))
+            {
+                if (tool != null && tool.Name == "read_skill")
+                {
+                    readSkill = tool;
+                }
+            }
+
+            Assert.IsNotNull(readSkill, "read_skill must be registered for a role that has skills");
+
+            Task<object> entryCall = ((IAIFunctionLlmTool)readSkill).CreateAIFunction().InvokeAsync(
+                new Microsoft.Extensions.AI.AIFunctionArguments(
+                    new Dictionary<string, object> { ["skill_name"] = "Manual" }),
+                System.Threading.CancellationToken.None).AsTask();
+            yield return PlayModeTestAwait.WaitTask(entryCall, 10f, "read_skill entry");
+
+            string entry = entryCall.Result?.ToString() ?? "";
+            StringAssert.Contains("PM_ENTRY", entry, "the entry document must arrive");
+            Assert.That(entry, Does.Not.Contain("PM_DEEP"),
+                "the reference document must NOT arrive with it — that is the saving");
+            StringAssert.Contains("deep.md", entry, "but its name must be in the index");
+
+            Task<object> sectionCall = ((IAIFunctionLlmTool)readSkill).CreateAIFunction().InvokeAsync(
+                new Microsoft.Extensions.AI.AIFunctionArguments(
+                    new Dictionary<string, object>
+                    {
+                        ["skill_name"] = "Manual",
+                        ["section"] = "deep.md"
+                    }),
+                System.Threading.CancellationToken.None).AsTask();
+            yield return PlayModeTestAwait.WaitTask(sectionCall, 10f, "read_skill section");
+
+            string section = sectionCall.Result?.ToString() ?? "";
+            StringAssert.Contains("PM_DEEP", section, "asking for the section must deliver it");
+            Assert.That(section, Does.Not.Contain("PM_ENTRY"),
+                "and must not re-send the entry document");
+        }
     }
 }

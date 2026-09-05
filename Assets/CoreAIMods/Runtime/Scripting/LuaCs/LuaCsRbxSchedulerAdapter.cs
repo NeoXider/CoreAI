@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Mods.Rbx.Instances;
@@ -16,13 +18,14 @@ namespace CoreAI.Ai.LuaCs
     {
         public LuaCsRbxSchedulerCallable(IScriptState ownerState, object callable,
             bool bindInitialArguments = true, IExecutionBudget resumeBudget = null,
-            bool propagateOriginalException = false)
+            bool propagateOriginalException = false, bool recyclable = false)
         {
             OwnerState = ownerState ?? throw new ArgumentNullException(nameof(ownerState));
             Callable = callable ?? throw new ArgumentNullException(nameof(callable));
             BindInitialArguments = bindInitialArguments;
             ResumeBudget = resumeBudget;
             PropagateOriginalException = propagateOriginalException;
+            Recyclable = recyclable;
         }
 
         public IScriptState OwnerState { get; }
@@ -34,6 +37,12 @@ namespace CoreAI.Ai.LuaCs
         public IExecutionBudget ResumeBudget { get; }
 
         public bool PropagateOriginalException { get; }
+
+        /// <summary>
+        /// True for signal-handler callables: their thread is never handed to Lua as a task thread, so
+        /// a handler that returns without yielding may run on a pooled <see cref="LuaCsRbxSignalRunner"/>.
+        /// </summary>
+        public bool Recyclable { get; }
     }
 
     /// <summary>
@@ -152,11 +161,45 @@ namespace CoreAI.Ai.LuaCs
                 end
             end";
 
+        /// <summary>
+        /// Idle runners kept per mod state. Handlers in one drain run one after another, so one parked
+        /// runner serves a mod's whole Heartbeat; the rest absorb handlers that were parked in a yield
+        /// while later fires arrived. Anything beyond that is released to the GC exactly as every
+        /// handler thread was before pooling.
+        /// </summary>
+        internal const int MaxIdleRunnersPerState = 8;
+
+        private sealed class RunnerPool
+        {
+            public RunnerPool(LuaState ownerState)
+            {
+                BodyFactory = LuaCsRbxSignalRunner.LoadBodyFactory(ownerState);
+            }
+
+            /// <summary>Runner body factory compiled once per state.</summary>
+            public LuaValue BodyFactory { get; }
+
+            /// <summary>The single mod this state's runners may serve; fixed by the first rent.</summary>
+            public string OwnerModId { get; set; }
+
+            public Stack<LuaCsRbxSignalRunner> Idle { get; } = new();
+        }
+
+        // WHY: keyed by the mod's LuaState (an ephemeron table), so a runner can only ever be rented for
+        // handlers captured on the state it was built on, and a torn-down mod's runners die with its
+        // state instead of needing explicit teardown plumbing.
+        private readonly ConditionalWeakTable<LuaState, RunnerPool> _runnerPools = new();
         private readonly IScriptEngine _scriptEngine;
         private readonly IRbxRuntimeObservabilitySink _observability;
         private readonly Func<string, Func<ScriptResumeResult>, ScriptResumeResult>
             _resumeEnvelope;
         private LuaCsRbxScriptThread _currentThread;
+
+        /// <summary>Signal runners built so far (diagnostic; tests prove reuse through it).</summary>
+        internal long SignalRunnersCreated { get; private set; }
+
+        /// <summary>Signal-handler spawns served by an idle runner instead of a new thread.</summary>
+        internal long SignalRunnersReused { get; private set; }
 
         public LuaCsRbxScriptThreadFactory(IScriptEngine scriptEngine = null,
             IRbxRuntimeObservabilitySink observability = null,
@@ -213,11 +256,79 @@ namespace CoreAI.Ai.LuaCs
                     "pass a Lua function to task.spawn, task.defer, or task.delay");
             }
 
+            if (launch.Recyclable && launch.BindInitialArguments
+                && launch.ResumeBudget == null && !launch.PropagateOriginalException)
+            {
+                return RentSignalRunner(ownerModId, launch);
+            }
+
             return new LuaCsRbxScriptThread(
                 this, _scriptEngine, launch, ownerModId);
         }
 
-        internal object CaptureCallable(LuaState ownerState, LuaValue callable)
+        private IRbxScriptThread RentSignalRunner(string ownerModId,
+            LuaCsRbxSchedulerCallable launch)
+        {
+            LuaState ownerState = LuaCsScriptState.Unwrap(launch.OwnerState);
+            RunnerPool pool = _runnerPools.GetValue(ownerState, CreateRunnerPool);
+            if (pool.OwnerModId == null)
+            {
+                pool.OwnerModId = ownerModId;
+            }
+            else if (!string.Equals(pool.OwnerModId, ownerModId, StringComparison.Ordinal))
+            {
+                // WHY: a state serves one mod. Should composition ever run a second mod id on the
+                // same state, that mod gets dedicated threads rather than another mod's runners.
+                return new LuaCsRbxScriptThread(this, _scriptEngine, launch, ownerModId);
+            }
+
+            // WHY: a fresh wrapper per fire, only the runner is reused. Every C#-side identity (the
+            // scheduler's record key, the mod's tracked-thread sets, RemoteFunction waits) belongs to
+            // the wrapper, so nothing outside the pool can ever alias a runner's next tenant.
+            while (pool.Idle.Count > 0)
+            {
+                LuaCsRbxSignalRunner idle = pool.Idle.Pop();
+                if (idle.CanRun && ReferenceEquals(idle.OwnerState, ownerState))
+                {
+                    idle.ResetLifetime();
+                    SignalRunnersReused++;
+                    return new LuaCsRbxScriptThread(this, _scriptEngine, launch, ownerModId, idle);
+                }
+            }
+
+            LuaCsRbxSignalRunner runner = new(ownerState, pool.BodyFactory);
+            SignalRunnersCreated++;
+            return new LuaCsRbxScriptThread(this, _scriptEngine, launch, ownerModId, runner);
+        }
+
+        private static RunnerPool CreateRunnerPool(LuaState ownerState)
+        {
+            return new RunnerPool(ownerState);
+        }
+
+        /// <summary>
+        /// Returns a runner whose handler has returned (yielded along the way or not) to the idle pool
+        /// of its own state and mod. A runner whose coroutine died or was killed is never offered here.
+        /// </summary>
+        internal void Recycle(LuaCsRbxSignalRunner runner, string ownerModId)
+        {
+            if (runner == null || !runner.CanRun)
+            {
+                return;
+            }
+
+            if (!_runnerPools.TryGetValue(runner.OwnerState, out RunnerPool pool)
+                || !string.Equals(pool.OwnerModId, ownerModId, StringComparison.Ordinal)
+                || pool.Idle.Count >= MaxIdleRunnersPerState)
+            {
+                return;
+            }
+
+            pool.Idle.Push(runner);
+        }
+
+        internal object CaptureCallable(LuaState ownerState, LuaValue callable,
+            bool recyclable = false)
         {
             if (callable.Type != LuaValueType.Function)
             {
@@ -234,7 +345,8 @@ namespace CoreAI.Ai.LuaCs
 
             IScriptState capturedOwnerState = _currentThread?.OwnerState
                                               ?? new LuaCsScriptState(ownerState);
-            return new LuaCsRbxSchedulerCallable(capturedOwnerState, callable);
+            return new LuaCsRbxSchedulerCallable(capturedOwnerState, callable,
+                recyclable: recyclable);
         }
 
         internal object CaptureChunk(IScriptState ownerState, string source,
@@ -308,19 +420,35 @@ namespace CoreAI.Ai.LuaCs
         }
     }
 
-    /// <summary>Lua-CSharp scheduler thread adapter over one <see cref="IScriptCoroutine"/>.</summary>
+    /// <summary>
+    /// Lua-CSharp scheduler thread adapter over one <see cref="IScriptCoroutine"/>. In runner mode the
+    /// coroutine is a pooled <see cref="LuaCsRbxSignalRunner"/>: once the armed handler has returned
+    /// the thread detaches from the runner, reports itself dead to the scheduler, and hands the runner
+    /// back to the factory pool for the next fire. The wrapper itself is never reused.
+    /// </summary>
     public sealed class LuaCsRbxScriptThread : IRbxScriptThread
     {
         private readonly LuaCsRbxScriptThreadFactory _factory;
         private readonly IScriptEngine _scriptEngine;
         private readonly LuaCsRbxSchedulerCallable _launch;
+        private Func<ScriptResumeResult> _resumeCore;
+        private LuaCsRbxSignalRunner _runner;
         private IScriptCoroutine _coroutine;
         private object[] _resumeArguments = Array.Empty<object>();
         private long _remoteFunctionWaitGeneration;
         private bool _killed;
+        private bool _runnerArmed;
+        private bool _runnerIterationDone;
 
         internal LuaCsRbxScriptThread(LuaCsRbxScriptThreadFactory factory,
             IScriptEngine scriptEngine, LuaCsRbxSchedulerCallable launch, string ownerModId)
+            : this(factory, scriptEngine, launch, ownerModId, null)
+        {
+        }
+
+        internal LuaCsRbxScriptThread(LuaCsRbxScriptThreadFactory factory,
+            IScriptEngine scriptEngine, LuaCsRbxSchedulerCallable launch, string ownerModId,
+            LuaCsRbxSignalRunner runner)
         {
             _factory = factory ?? throw new ArgumentNullException(nameof(factory));
             _scriptEngine = scriptEngine ?? throw new ArgumentNullException(nameof(scriptEngine));
@@ -328,6 +456,11 @@ namespace CoreAI.Ai.LuaCs
             OwnerModId = string.IsNullOrWhiteSpace(ownerModId)
                 ? throw new ArgumentException("Owner mod id is required.", nameof(ownerModId))
                 : ownerModId;
+            _runner = runner;
+            _coroutine = runner?.Coroutine;
+            // WHY: the envelope call sits on the hottest path in the scheduler: a runner thread borrows
+            // the runner's stable delegate, an ordinary thread builds its own once, never per resume.
+            _resumeCore = runner?.ResumeDelegate;
         }
 
         /// <summary>The persistent mod that owns this scheduled thread.</summary>
@@ -351,7 +484,7 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <inheritdoc />
-        public bool IsDead => _killed || _coroutine != null
+        public bool IsDead => _killed || _runnerIterationDone || _coroutine != null
             && (_coroutine.IsFinished || _coroutine.Status == ScriptCoroutineStatus.Dead);
 
         internal RbxError LastFailure { get; private set; }
@@ -359,6 +492,9 @@ namespace CoreAI.Ai.LuaCs
         internal Exception LastException { get; private set; }
 
         internal IScriptState OwnerState => _launch.OwnerState;
+
+        /// <summary>True while this thread's handler runs on a pooled signal runner.</summary>
+        internal bool IsSignalRunner => _runner != null;
 
         /// <inheritdoc />
         public RbxScriptThreadResumeResult Resume(params object[] args)
@@ -370,33 +506,55 @@ namespace CoreAI.Ai.LuaCs
                     "retain and resume only a live suspended task thread"));
             }
 
-            bool isInitialResume = _coroutine == null;
+            bool isInitialResume = _runner != null ? !_runnerArmed : _coroutine == null;
             bool observe = _factory.IsObservabilityEnabled;
             long consumedStepsBefore = observe ? ReadConsumedSteps() : 0;
             LuaCsRbxScriptThread previous = _factory.Enter(this);
+            LuaCsRbxSignalRunner finishedRunner = null;
             _resumeArguments = args == null || args.Length == 0
                 ? Array.Empty<object>()
                 : (object[])args.Clone();
             try
             {
-                if (_coroutine == null)
+                if (_runner != null)
+                {
+                    if (!_runnerArmed)
+                    {
+                        _runner.Arm(LuaCsValueMarshaller.Unbox(_launch.Callable), _resumeArguments);
+                        _runnerArmed = true;
+                    }
+                }
+                else if (_coroutine == null)
                 {
                     _coroutine = CreateCoroutine(_resumeArguments);
                 }
 
                 ScriptResumeResult result = _factory.Resume(
-                    OwnerModId, () => _coroutine.Resume());
+                    OwnerModId, _resumeCore ??= ResumeCore);
                 if (result.Ok)
                 {
+                    if (_runner != null && _runner.IterationCompleted)
+                    {
+                        // WHY: the handler returned, so to the scheduler this thread is dead from here
+                        // on. Detach first: a dead wrapper must never reach the runner again (Kill or
+                        // status queries), because the runner's next tenant is another wrapper.
+                        finishedRunner = _runner;
+                        _runner = null;
+                        _coroutine = null;
+                        _runnerIterationDone = true;
+                    }
+
                     return RbxScriptThreadResumeResult.Success();
                 }
 
                 _killed = true;
+                _runner?.Disarm();
                 LastFailure = ToRbxError(result.Error);
                 return RbxScriptThreadResumeResult.Failure(LastFailure);
             }
             catch (Exception ex)
             {
+                _runner?.Disarm();
                 _coroutine?.Kill();
                 _killed = true;
                 if (_launch.PropagateOriginalException && isInitialResume)
@@ -414,14 +572,25 @@ namespace CoreAI.Ai.LuaCs
                 _factory.Exit(this, previous);
                 if (observe)
                 {
-                    _factory.RecordThreadResume(ReadConsumedSteps() - consumedStepsBefore);
+                    _factory.RecordThreadResume(ReadConsumedSteps(finishedRunner) - consumedStepsBefore);
+                }
+
+                if (finishedRunner != null)
+                {
+                    _factory.Recycle(finishedRunner, OwnerModId);
                 }
             }
         }
 
-        private long ReadConsumedSteps()
+        private ScriptResumeResult ResumeCore()
         {
-            return _coroutine is LuaCsScriptCoroutine luaCoroutine
+            return _coroutine.Resume();
+        }
+
+        private long ReadConsumedSteps(LuaCsRbxSignalRunner finishedRunner = null)
+        {
+            IScriptCoroutine coroutine = _coroutine ?? finishedRunner?.Coroutine;
+            return coroutine is LuaCsScriptCoroutine luaCoroutine
                 ? luaCoroutine.ConsumedSteps
                 : 0;
         }
@@ -448,6 +617,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _killed = true;
+            _runner?.Disarm();
             _coroutine?.Kill();
         }
 

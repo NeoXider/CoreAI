@@ -1,0 +1,27 @@
+{
+  "name": "CoreAI.Mcp.PlayModeTests",
+  "rootNamespace": "CoreAI.Mcp.Tests",
+  "references": [
+    "CoreAI.Mcp",
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "CoreAI.Mods",
+    "VContainer",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll",
+    "Newtonsoft.Json.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

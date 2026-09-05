@@ -46,13 +46,12 @@ Items here are intentionally not active TODO checkboxes.
 
 ## Skill System (before MVP2)
 
-- **Structural browsing of a multi-file skill.** The assembly half shipped in 7.11.0: a `SkillSet` can
-  take its `Instructions` from several sources via `FromFiles`/`FromTextParts`, joined under
-  `## name` headings. What is still missing is the third disclosure level, as in Claude Code (a main
-  doc plus `references/*` read lazily): the model SEES the structure — an index or table of contents —
-  up front, and READS only the section it needs, e.g. `read_skill_section(name, section)`. Today
-  `read_skill(name)` still returns the whole assembled document, so a large reference (the Rbx API
-  skill is already large) arrives as one dump.
+- ~~**Structural browsing of a multi-file skill.**~~ **DONE.** The assembly half shipped in 7.11.0
+  (`FromFiles`/`FromTextParts`), and the third disclosure level followed: `read_skill(name)` returns
+  the entry document plus a `sections` index, and `read_skill(name, section)` fetches one document.
+  A single-source skill is unchanged. The one deliberate departure from the Claude Code shape it was
+  modelled on: those agents follow a `references/*.md` link with their own file reader, and a CoreAI
+  agent has no file system, so the second level is an argument rather than a link.
 - **Skill self-improvement.** A mechanism for a skill to update/augment its own instructions from
   experience (learned corrections, new patterns the agent discovered at runtime). Design after the
   structural-browsing work; both land before MVP2.

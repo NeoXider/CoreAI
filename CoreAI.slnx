@@ -6,8 +6,8 @@
   <Project Path="CoreAI.RbxApi.Instances.csproj" />
   <Project Path="CoreAI.Mods.Tests.csproj" />
   <Project Path="CoreAI.Tests.csproj" />
-  <Project Path="CoreAI.Tests.PlayMode.LlmInfra.csproj" />
   <Project Path="CoreAI.Mcp.csproj" />
+  <Project Path="CoreAI.Tests.PlayMode.LlmInfra.csproj" />
   <Project Path="CoreAI.Demos.csproj" />
   <Project Path="CoreAI.Mods.csproj" />
   <Project Path="CoreAI.Mods.Hub.csproj" />
@@ -31,6 +31,7 @@
   <Project Path="CoreAI.Tests.PlayMode.Scenarios.csproj" />
   <Project Path="IngameDebugConsole.Runtime.csproj" />
   <Project Path="CoreAI.Tests.PlayMode.Shared.csproj" />
+  <Project Path="CoreAI.Mcp.PlayModeTests.csproj" />
   <Project Path="CoreAI.ExampleGame.Editor.csproj" />
   <Project Path="CoreAI.Hub.UI.Editor.csproj" />
   <Project Path="IngameDebugConsole.Editor.csproj" />

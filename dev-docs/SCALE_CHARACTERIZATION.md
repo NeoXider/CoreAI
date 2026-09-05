@@ -129,3 +129,22 @@ The frame/chat/heap gates still report failures exactly as in §7; the envelope 
 correctness, not capacity. The actor-count-scaled admission ceiling attempted for bottleneck 1 was
 reverted because it broke the `MaxPending_*` refusal tests; the admission fix remains open together
 with the allocation storm (bottleneck 3).
+
+## 12. Re-run after the signal runner pool (2026-09-05)
+
+`ALLOC_SIGNALS_FINDING_2026-09-05.md` traced 99.6% of per-frame allocation to one fresh Lua thread
+per signal handler fire; handlers now run on a parked runner coroutine per mod state (details and the
+per-field reset policy in that document). Host CoreCLR, `--only N --repeats 3`, same frozen workload:
+
+```text
+N=20: alloc/frame 105.6 KB -> 52.5 KB (median, every repeat); median frame 0.538 -> 0.453 ms;
+      heap slope per repeat -3.08 / 5.33 / 5.27 MB/min (worst 5.33; a single-repeat run read -3.96 and PASSED both frame budgets)
+N=50: alloc/frame 269.9 KB -> 135.1 KB; median frame 1.144 -> 1.037 ms;
+      heap slope per repeat 13.69 / 10.08 / 10.25 MB/min (heap 24.4 -> 28.4 MB inside a window across 12 gen0 + 1 gen1 collections, back down between repeats)
+```
+
+The allocation rate halved at both N; the heap-slope gate still fails because the 10-second fit
+reads gen1/gen2 accumulation between gen2 collections (chat bursts and their records are the likely
+survivors), which no longer has anything to do with thread churn — the next allocation items are the
+per-resume mutation envelope and actor-context resolution (measured sizes in the finding). Note for
+§10: `dotnet build CoreAI.Mods.csproj` now builds clean (0 errors) on this host.

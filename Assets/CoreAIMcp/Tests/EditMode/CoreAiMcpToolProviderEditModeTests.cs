@@ -95,7 +95,10 @@ namespace CoreAI.Mcp.Tests
             McpToolRegistry registry = BuildMinimal(null);
 
             Assert.IsFalse(registry.Contains("execute_lua"));
-            Assert.AreEqual(0, registry.Count);
+            // WHY: the provider composition always includes the broker, so an empty composition
+            // lists exactly the broker — no domain tool appears without its backing service.
+            Assert.AreEqual(1, registry.Count);
+            Assert.IsTrue(registry.Contains(CoreAI.Mcp.Tools.CoreAiToolsBrokerMcpTool.ToolName));
         }
     }
 }

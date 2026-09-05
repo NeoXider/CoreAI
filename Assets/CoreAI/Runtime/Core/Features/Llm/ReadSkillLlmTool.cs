@@ -93,7 +93,7 @@ namespace CoreAI.Ai
                 "Pass the skill name exactly as listed in the catalog.";
 
             public override string ParametersSchema =>
-                "{\"type\":\"object\",\"properties\":{\"skill_name\":{\"type\":\"string\",\"description\":\"Skill name exactly as listed in the catalog.\"}},\"required\":[\"skill_name\"]}";
+                "{\"type\":\"object\",\"properties\":{\"skill_name\":{\"type\":\"string\",\"description\":\"Skill name exactly as listed in the catalog.\"},\"section\":{\"type\":\"string\",\"description\":\"Optional. One section name from the sections index of a previous read_skill call. Omit it to get the entry document plus that index.\"}},\"required\":[\"skill_name\"]}";
 
             public override bool AllowDuplicates => true;
 
@@ -129,7 +129,7 @@ namespace CoreAI.Ai
             public AIFunction CreateAIFunction()
             {
                 return AIFunctionFactory.Create(
-                    (Func<string, string>)Execute,
+                    (Func<string, string, string>)Execute,
                     new AIFunctionFactoryOptions
                     {
                         Name = Name,
@@ -139,19 +139,25 @@ namespace CoreAI.Ai
 
             private string Execute(
                 [Description("Skill name exactly as listed in the catalog.")]
-                string skill_name)
+                string skill_name,
+                [Description("Optional section name from a previous read_skill call's sections index.")]
+                string section = null)
             {
-                return ReadSkillLlmTool.Execute(skill_name, ResolveSkillsByName(), _allowedToolNames);
+                return ReadSkillLlmTool.Execute(skill_name, section, ResolveSkillsByName(),
+                    _allowedToolNames);
             }
         }
 
-        private static string Execute(string skillName, Dictionary<string, SkillSet> skillsByName,
+        private static string Execute(string skillName, string sectionName,
+            Dictionary<string, SkillSet> skillsByName,
             IReadOnlyCollection<string> allowedToolNames)
         {
-            return JsonConvert.SerializeObject(ExecuteObject(skillName, skillsByName, allowedToolNames));
+            return JsonConvert.SerializeObject(
+                ExecuteObject(skillName, sectionName, skillsByName, allowedToolNames));
         }
 
-        private static object ExecuteObject(string skillName, Dictionary<string, SkillSet> skillsByName,
+        private static object ExecuteObject(string skillName, string sectionName,
+            Dictionary<string, SkillSet> skillsByName,
             IReadOnlyCollection<string> allowedToolNames)
         {
             if (string.IsNullOrWhiteSpace(skillName))
@@ -199,15 +205,7 @@ namespace CoreAI.Ai
                     };
                 }
 
-                return new
-                {
-                    success = true,
-                    skill = skill.Name,
-                    instructions = skill.Instructions,
-                    tools = toolSchemas,
-                    usage = "Call call_skill_tool(tool_name, arguments_json) to use any tool listed above. " +
-                            "arguments_json is a JSON object string with the parameter names and values."
-                };
+                return BuildSkillResult(skill, sectionName, toolSchemas);
             }
 
             foreach (KeyValuePair<string, SkillSet> kvp in skillsByName)
@@ -238,6 +236,12 @@ namespace CoreAI.Ai
         /// having to call the tool. Unlike the interactive path this is not gated on the skill having
         /// callable tools — an instructions-only skill still yields a payload. Returns null for a null or
         /// unnamed skill.
+        /// <para>
+        /// WHY this path is deliberately NOT staged like the interactive one: preloading is the host
+        /// putting a skill into history on purpose, so it wants the whole document. Handing back an
+        /// entry page plus an index nobody asked the agent to follow would leave a preloaded skill
+        /// permanently half-loaded.
+        /// </para>
         /// </summary>
         internal static string BuildSkillPayloadJson(SkillSet skill)
         {
@@ -272,6 +276,94 @@ namespace CoreAI.Ai
                 usage = "Call call_skill_tool(tool_name, arguments_json) to use any tool listed above. " +
                         "arguments_json is a JSON object string with the parameter names and values."
             });
+        }
+
+
+        /// <summary>
+        /// Builds the read_skill payload, staged: the entry document plus a section index when the
+        /// skill has several parts, or one named section when the caller asks for it.
+        /// </summary>
+        /// <remarks>
+        /// WHY: a skill assembled from five documents used to arrive as one blob, so a reader paid for
+        /// all of it to use any of it. A single-part skill is returned exactly as it always was — the
+        /// staging must not change what an existing skill looks like.
+        /// </remarks>
+        private static object BuildSkillResult(SkillSet skill, string sectionName,
+            List<object> toolSchemas)
+        {
+            const string ToolUsage =
+                "Call call_skill_tool(tool_name, arguments_json) to use any tool listed above. " +
+                "arguments_json is a JSON object string with the parameter names and values.";
+
+            IReadOnlyList<SkillSection> sections = skill.Sections;
+            bool staged = sections != null && sections.Count > 1;
+
+            if (!string.IsNullOrWhiteSpace(sectionName))
+            {
+                if (skill.TryGetSection(sectionName, out SkillSection wanted))
+                {
+                    return new
+                    {
+                        success = true,
+                        skill = skill.Name,
+                        section = wanted.Name,
+                        instructions = wanted.Content,
+                        tools = toolSchemas,
+                        usage = ToolUsage
+                    };
+                }
+
+                return new
+                {
+                    success = false,
+                    skill = skill.Name,
+                    error = $"Skill '{skill.Name}' has no section '{sectionName.Trim()}'.",
+                    sections = SectionNames(sections, 0)
+                };
+            }
+
+            if (!staged)
+            {
+                return new
+                {
+                    success = true,
+                    skill = skill.Name,
+                    instructions = skill.Instructions,
+                    tools = toolSchemas,
+                    usage = ToolUsage
+                };
+            }
+
+            return new
+            {
+                success = true,
+                skill = skill.Name,
+                section = sections[0].Name,
+                instructions = sections[0].Content,
+                sections = SectionNames(sections, 1),
+                tools = toolSchemas,
+                usage = ToolUsage +
+                        " This skill is written across several documents: the text above is its entry " +
+                        "document, and `sections` lists the rest. Call read_skill(skill_name, section) " +
+                        "for one of them only when you need it."
+            };
+        }
+
+        /// <summary>Section names from <paramref name="startIndex"/> onward, for the index a reader picks from.</summary>
+        private static string[] SectionNames(IReadOnlyList<SkillSection> sections, int startIndex)
+        {
+            if (sections == null || sections.Count <= startIndex)
+            {
+                return Array.Empty<string>();
+            }
+
+            string[] names = new string[sections.Count - startIndex];
+            for (int i = startIndex; i < sections.Count; i++)
+            {
+                names[i - startIndex] = sections[i].Name;
+            }
+
+            return names;
         }
 
         private static bool IsAllowed(string toolName, IReadOnlyCollection<string> allowedToolNames)
