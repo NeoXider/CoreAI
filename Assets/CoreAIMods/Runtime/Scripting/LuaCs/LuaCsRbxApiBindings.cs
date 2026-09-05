@@ -462,7 +462,12 @@ namespace CoreAI.Ai.LuaCs
         /// monotonic-smoothed on top of <see cref="ClockSource"/> so it never steps back.</summary>
         internal double GetServerTimeNow()
         {
-            double now = _clockSource.UnixTimeSecondsFractional;
+            // WHY the bridge's offset is added: on a client the local clock is its own machine's,
+            // and a player whose system time is an hour off would otherwise disagree with the server
+            // about when everything happened. The offset is zero on a server and on the loopback,
+            // so solo behaviour is byte-identical to before.
+            double now = _clockSource.UnixTimeSecondsFractional
+                         + (_networkBridge?.ServerClockOffsetSeconds ?? 0d);
             lock (_serverTimeGate)
             {
                 // WHY: clamp, don't throw — callers expect a clock that keeps ticking through

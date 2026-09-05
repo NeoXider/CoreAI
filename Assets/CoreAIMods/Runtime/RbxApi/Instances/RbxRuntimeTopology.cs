@@ -39,4 +39,43 @@ namespace CoreAI.Mods.Rbx.Instances
 
         public bool IsRunning => true;
     }
+
+    /// <summary>
+    /// Topology derived from a live network bridge: the transport decides which side this process is.
+    /// </summary>
+    /// <remarks>
+    /// WHY derived rather than configured: CoreAI already had a second "am I the host" answer in the
+    /// AI authority layer, and two independently configured answers eventually disagree — at which
+    /// point a script gets one story and the command pipeline another. The bridge knows the truth
+    /// because it is the thing connected to the other side, so it is the single source.
+    /// </remarks>
+    public sealed class RbxBridgeRuntimeTopology : IRbxRuntimeTopology
+    {
+        private readonly Networking.INetworkBridge _bridge;
+
+        /// <summary>Reads the topology from the bridge on every query.</summary>
+        public RbxBridgeRuntimeTopology(Networking.INetworkBridge bridge)
+        {
+            _bridge = bridge ?? throw new System.ArgumentNullException(nameof(bridge));
+        }
+
+        /// <inheritdoc />
+        public bool IsServer =>
+            _bridge.Topology != Networking.RbxNetworkTopology.Client;
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// WHY only a pure client answers true, even on a host: in Roblox IsClient is true inside a
+        /// CLIENT execution context, and CoreAI does not yet let a mod declare which context it runs
+        /// in. Answering true on a host would tell server-side Lua it is a client, which is worse
+        /// than the conservative answer — it is a wrong one that a script would branch on.
+        /// </remarks>
+        public bool IsClient => _bridge.Topology == Networking.RbxNetworkTopology.Client;
+
+        /// <inheritdoc />
+        public bool IsStudio => false;
+
+        /// <inheritdoc />
+        public bool IsRunning => true;
+    }
 }

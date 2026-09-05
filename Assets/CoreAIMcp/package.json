@@ -1,6 +1,6 @@
 {
   "name": "com.neoxider.coreaimcp",
-  "version": "7.26.0",
+  "version": "7.27.0",
   "displayName": "CoreAI MCP Server",
   "unity": "6000.0",
   "description": "Optional Model Context Protocol (MCP) server that runs INSIDE a live CoreAI game session (play mode or a build) so an external agent - Claude Code and any other MCP client - can drive the running game over a standard protocol. Exposes the in-game Command Bar surface (execute_lua, manage_mods, get_mod_logs, screenshot, and world_command when present) as MCP tools over localhost streamable HTTP. Off by default: drop a CoreAiMcpServer component into a scene (or call CoreAiMcpServer.StartServer). Loopback-only and opt-in, with Origin/Host validation and bearer-token auth (the token is printed to the console at start) - never expose beyond loopback. Depends on com.neoxider.coreaimods; the world tool registers only when that service exists in the current composition.",
@@ -11,7 +11,7 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "licensesUrl": "https://github.com/NeoXider/CoreAI/blob/main/LICENSE",
   "dependencies": {
-    "com.neoxider.coreaimods": "7.26.0",
-    "com.neoxider.coreaiunity": "7.26.0"
+    "com.neoxider.coreaimods": "7.27.0",
+    "com.neoxider.coreaiunity": "7.27.0"
   }
 }

@@ -4,6 +4,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.27.0] - 2026-09-05
+
+### Added
+
+- **MVP11 N11.6** — топология `RunService` выводится из моста; серверные часы на клиенте учитывают
+  смещение транспорта (на сервере и петле — ноль, соло не меняется).
+
 ## [7.26.0] - 2026-09-05
 
 ### Added
