@@ -528,6 +528,15 @@ namespace CoreAI.Mods.WorldPackages
                     };
                 }
 
+                if (node.Value != null)
+                {
+                    dto.Value = new WorldValueDto
+                    {
+                        StringValue = node.Value.StringValue,
+                        ObjectTargetId = U(node.Value.ObjectTargetId)
+                    };
+                }
+
                 world.Instances.Add(dto);
             }
 
@@ -710,6 +719,15 @@ namespace CoreAI.Mods.WorldPackages
                     MetalnessMap = dto.MaterialVariant.MetalnessMap ?? string.Empty,
                     StudsPerTile = dto.MaterialVariant.StudsPerTile.ToString(
                         "R", CultureInfo.InvariantCulture)
+                };
+            }
+
+            if (dto.Value != null)
+            {
+                node.Value = new ValueSnapshot
+                {
+                    StringValue = dto.Value.StringValue,
+                    ObjectTargetId = ParseUlong(dto.Value.ObjectTargetId, "ObjectValue target id")
                 };
             }
 
@@ -1585,6 +1603,9 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("material_variant")]
             public WorldMaterialVariantDto MaterialVariant;
+
+            [JsonProperty("value")]
+            public WorldValueDto Value;
         }
 
         [Serializable]
@@ -1657,6 +1678,16 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("can_collide", Required = Required.Always)]
             public bool CanCollide;
+        }
+
+        [Serializable]
+        private sealed class WorldValueDto
+        {
+            [JsonProperty("string_value")]
+            public string StringValue;
+
+            [JsonProperty("object_target_id", Required = Required.Always)]
+            public string ObjectTargetId;
         }
 
         [Serializable]

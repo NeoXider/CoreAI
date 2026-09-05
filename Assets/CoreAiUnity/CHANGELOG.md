@@ -4,6 +4,19 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.18.0] - 2026-09-05
+
+### Added
+
+- **MVP8 срез 8.1** — восемь Value-объектов с `Changed` и поддержкой в пакете мира; `leaderstats`
+  задокументирован как соглашение Roblox, а не API.
+- **MVP8 срез 8.2** — `CollectionService` поверх существующего хранилища тегов.
+
+### Fixed
+
+- Запись значения двигала ревизию дважды, пустая — один раз.
+- Маршалинг аргументов сигнала отдавал `nil` для long/CFrame/Color3.
+
 ## [7.17.0] - 2026-09-05
 
 ### Fixed

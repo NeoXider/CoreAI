@@ -15,7 +15,8 @@ decimal strings so WebGL does not lose 64-bit precision. Only server-authority I
 
 The durable v1 surface is class/name/Archivable, world-owned origin/ACL/revision metadata, attributes,
 tags, BasePart properties, Model PrimaryPart/stored WorldPivot, ClickDetector distance, camera CFrame,
-and exact Lua mod manifests/source. `MaterialVariant` instances and part `MaterialVariant` references
+ValueBase `Value` payloads (Int/Number/String/Bool/Object/Vector3/CFrame/Color3; ObjectValue targets
+must name a serialized instance in the same package, nil is 0), and exact Lua mod manifests/source. `MaterialVariant` instances and part `MaterialVariant` references
 are durable package state. `OwnerModId` is teardown bookkeeping used to form the projection,
 not durable tree state. Runtime key/value scratch data, callbacks, signal connections, in-flight
 requests, scheduler state, input state, and camera-follow attachment are ephemeral.

@@ -233,6 +233,39 @@ namespace CoreAI.Mods.Rbx.Instances
         public event Action<InstanceRecord> Unregistered;
 
         /// <summary>
+        /// Tag transition on one instance: the instance, the tag, and whether this add made the
+        /// tag used anywhere for the first time. CollectionService layers TagAdded and the
+        /// per-tag added signals here; raised only when the tag was newly applied.
+        /// </summary>
+        public event Action<RbxInstance, string, bool> TagAdded;
+
+        /// <summary>
+        /// Tag transition on one instance: the instance, the tag, and whether this removal left
+        /// the tag used nowhere. CollectionService layers TagRemoved and the per-tag removed
+        /// signals here; raised only when the tag was actually held.
+        /// </summary>
+        public event Action<RbxInstance, string, bool> TagRemoved;
+
+        /// <summary>
+        /// A reparented subtree root crossed the scene boundary: the moved root and whether it
+        /// is in the scene now. CollectionService fires per-tag added/removed signals for the
+        /// tagged nodes of the moved subtree here.
+        /// </summary>
+        internal event Action<RbxInstance, bool> SceneMembershipChanged;
+
+        /// <summary>Raises <see cref="TagAdded"/> for a newly applied tag.</summary>
+        internal void OnTagAdded(RbxInstance instance, string tag, bool isFirstPlaceUse)
+        {
+            TagAdded?.Invoke(instance, tag, isFirstPlaceUse);
+        }
+
+        /// <summary>Raises <see cref="TagRemoved"/> for a tag that was actually held.</summary>
+        internal void OnTagRemoved(RbxInstance instance, string tag, bool isLastPlaceUse)
+        {
+            TagRemoved?.Invoke(instance, tag, isLastPlaceUse);
+        }
+
+        /// <summary>
         /// Serializes one enveloped mutation, rejects stale observations, and returns the first
         /// completed result when the durable actor retries the same operation id while it remains
         /// in that actor's FIFO retention window. Once evicted, the result is unavailable and the
@@ -1000,6 +1033,7 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             ApplySceneMembership(instance, isInScene);
+            SceneMembershipChanged?.Invoke(instance, isInScene);
         }
 
         internal void OnNameChanged(RbxInstance instance)
@@ -1060,6 +1094,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
+            IReadOnlyList<string> clearedTags = Tags.GetTags(instance.Id);
             Tags.ClearInstance(instance.Id);
             _byId.Remove(instance.Id);
             if (record.NetId != 0)
@@ -1075,6 +1110,15 @@ namespace CoreAI.Mods.Rbx.Instances
             record.IsMaterialized = false;
             _binder.OnDestroyed(record);
             Unregistered?.Invoke(record);
+
+            // WHY: the destroy sweep drops tags silently at the store, but the per-tag removed
+            // signals already fired on the detach (SceneMembershipChanged) and the TagRemoved
+            // global still needs its last-use transition, so each cleared tag notifies here.
+            for (int index = 0; index < clearedTags.Count; index++)
+            {
+                OnTagRemoved(instance, clearedTags[index],
+                    !Tags.IsTagInUse(clearedTags[index]));
+            }
         }
     }
 }

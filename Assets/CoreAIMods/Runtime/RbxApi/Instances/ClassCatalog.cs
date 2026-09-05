@@ -404,6 +404,30 @@ namespace CoreAI.Mods.Rbx.Instances
             // timer); the behavior class is constructed here like every other service behavior.
             catalog.Register(new ClassDescriptor("Debris", "Instance", false, false, true,
                 descriptor => new RbxDebris(descriptor)));
+            // WHY: MVP8 slice 8.2 — CollectionService is engine-free (tag queries and signals
+            // over the registry tag store); the behavior class is constructed here.
+            catalog.Register(new ClassDescriptor("CollectionService", "Instance", false, false, true,
+                descriptor => new RbxCollectionService(descriptor)));
+            // WHY: MVP8 slice 8.1 — ValueBase is the mirror's abstract ancestor of all value
+            // instances (NotCreatable); the eight concrete values are creatable and carry
+            // Value + Changed (lowercase `changed` stays an unknown member: deprecated).
+            catalog.Register(new ClassDescriptor("ValueBase", "Instance", true, false, false));
+            catalog.Register(new ClassDescriptor("IntValue", "ValueBase", false, true, false,
+                descriptor => new RbxIntValue(descriptor)));
+            catalog.Register(new ClassDescriptor("NumberValue", "ValueBase", false, true, false,
+                descriptor => new RbxNumberValue(descriptor)));
+            catalog.Register(new ClassDescriptor("StringValue", "ValueBase", false, true, false,
+                descriptor => new RbxStringValue(descriptor)));
+            catalog.Register(new ClassDescriptor("BoolValue", "ValueBase", false, true, false,
+                descriptor => new RbxBoolValue(descriptor)));
+            catalog.Register(new ClassDescriptor("ObjectValue", "ValueBase", false, true, false,
+                descriptor => new RbxObjectValue(descriptor)));
+            catalog.Register(new ClassDescriptor("Vector3Value", "ValueBase", false, true, false,
+                descriptor => new RbxVector3Value(descriptor)));
+            catalog.Register(new ClassDescriptor("CFrameValue", "ValueBase", false, true, false,
+                descriptor => new RbxCFrameValue(descriptor)));
+            catalog.Register(new ClassDescriptor("Color3Value", "ValueBase", false, true, false,
+                descriptor => new RbxColor3Value(descriptor)));
             catalog.Register(new ClassDescriptor("MaterialVariant", "Instance", false, true, false,
                 descriptor => new RbxMaterialVariant(descriptor)));
 

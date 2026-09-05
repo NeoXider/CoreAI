@@ -55,6 +55,7 @@ namespace CoreAI.Mods.Rbx.Instances
         public ModelSnapshot Model;
         public ClickDetectorSnapshot ClickDetector;
         public MaterialVariantSnapshot MaterialVariant;
+        public ValueSnapshot Value;
         public List<string> Tags = new();
         public List<AttributeSnapshot> Attributes = new();
     }
@@ -87,6 +88,17 @@ namespace CoreAI.Mods.Rbx.Instances
         public string RoughnessMap;
         public string MetalnessMap;
         public string StudsPerTile;
+    }
+
+    /// <summary>Durable ValueBase payload. Scalars and datatypes encode into
+    /// <see cref="StringValue"/> with invariant round-trip formatting (longs plain, doubles
+    /// "R", Vector3/Color3 comma-joined floats, CFrame 12 comma-joined floats);
+    /// <see cref="ObjectTargetId"/> carries an ObjectValue reference (0 means nil).</summary>
+    [Serializable]
+    public sealed class ValueSnapshot
+    {
+        public string StringValue;
+        public ulong ObjectTargetId;
     }
 
     /// <summary>A captured subtree in preorder (parents always precede children).</summary>

@@ -463,6 +463,19 @@ namespace CoreAI.Ai.LuaCs
                         return LuaCsRbxDatatypeBindings.Wrap(self.AncestryChanged, context);
                     case "AttributeChanged":
                         return LuaCsRbxDatatypeBindings.Wrap(self.AttributeChanged, context);
+                    case "TagAdded":
+                    case "TagRemoved":
+                        if (self is RbxCollectionService tagSignalService)
+                        {
+                            tagSignalService.EnsureHost(context.Bindings.Scheduler);
+                            return LuaCsRbxDatatypeBindings.Wrap(
+                                key == "TagAdded"
+                                    ? tagSignalService.TagAdded
+                                    : tagSignalService.TagRemoved,
+                                context);
+                        }
+
+                        break;
                     case "WaitForChild": return ReadWaitForChildBridge(ctx);
                 }
 
@@ -506,6 +519,11 @@ namespace CoreAI.Ai.LuaCs
                 if (TryReadMaterialVariant(context, self, key, out LuaValue variantValue))
                 {
                     return variantValue;
+                }
+
+                if (TryReadValue(context, self, key, out LuaValue valueResult))
+                {
+                    return valueResult;
                 }
 
                 if (TryReadModelPivot(context, self, key, out LuaValue modelPivotValue))
@@ -599,6 +617,11 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 if (TryWriteMaterialVariant(context, self, key, value))
+                {
+                    return LuaValue.Nil;
+                }
+
+                if (TryWriteValue(context, self, key, value))
                 {
                     return LuaValue.Nil;
                 }
@@ -979,19 +1002,68 @@ namespace CoreAI.Ai.LuaCs
             });
             Method("AddTag", (ctx, self) =>
             {
+                if (self is RbxCollectionService addTagService)
+                {
+                    addTagService.EnsureHost(context.Bindings.Scheduler);
+                    RbxInstance addTagTarget =
+                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:AddTag", 2);
+                    string addTagName = ReadString(ctx, 2, "CollectionService:AddTag");
+                    context.RequireMetadataMutation(addTagTarget, "add tag");
+                    addTagService.AddTag(addTagTarget, addTagName);
+                    return LuaValue.Nil;
+                }
+
                 context.RequireMetadataMutation(self, "add tag");
                 self.AddTag(ReadString(ctx, 1, "AddTag"));
                 return LuaValue.Nil;
             });
             Method("RemoveTag", (ctx, self) =>
             {
+                if (self is RbxCollectionService removeTagService)
+                {
+                    removeTagService.EnsureHost(context.Bindings.Scheduler);
+                    RbxInstance removeTagTarget =
+                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:RemoveTag", 2);
+                    string removeTagName = ReadString(ctx, 2, "CollectionService:RemoveTag");
+                    context.RequireMetadataMutation(removeTagTarget, "remove tag");
+                    removeTagService.RemoveTag(removeTagTarget, removeTagName);
+                    return LuaValue.Nil;
+                }
+
                 context.RequireMetadataMutation(self, "remove tag");
                 self.RemoveTag(ReadString(ctx, 1, "RemoveTag"));
                 return LuaValue.Nil;
             });
-            Method("HasTag", (ctx, self) => self.HasTag(ReadString(ctx, 1, "HasTag")));
-            Method("GetTags", (_, self) =>
+            Method("HasTag", (ctx, self) =>
             {
+                if (self is RbxCollectionService hasTagService)
+                {
+                    hasTagService.EnsureHost(context.Bindings.Scheduler);
+                    RbxInstance hasTagTarget =
+                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:HasTag", 2);
+                    return hasTagService.HasTag(
+                        hasTagTarget, ReadString(ctx, 2, "CollectionService:HasTag"));
+                }
+
+                return self.HasTag(ReadString(ctx, 1, "HasTag"));
+            });
+            Method("GetTags", (ctx, self) =>
+            {
+                if (self is RbxCollectionService getTagsService)
+                {
+                    getTagsService.EnsureHost(context.Bindings.Scheduler);
+                    RbxInstance getTagsTarget =
+                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:GetTags", 2);
+                    LuaTable serviceTags = new();
+                    int serviceTagsIndex = 1;
+                    foreach (string serviceTag in getTagsService.GetTags(getTagsTarget))
+                    {
+                        serviceTags[serviceTagsIndex++] = serviceTag;
+                    }
+
+                    return new LuaValue(serviceTags);
+                }
+
                 LuaTable table = new();
                 int index = 1;
                 foreach (string tag in self.GetTags())
@@ -1001,6 +1073,44 @@ namespace CoreAI.Ai.LuaCs
 
                 return new LuaValue(table);
             });
+            Method("GetTagged", (ctx, self) =>
+            {
+                RbxCollectionService taggedService = (RbxCollectionService)self;
+                taggedService.EnsureHost(context.Bindings.Scheduler);
+                return WrapList(context, taggedService.GetTagged(
+                    ReadString(ctx, 1, "CollectionService:GetTagged")));
+            }, "CollectionService");
+            Method("GetAllTags", (_, self) =>
+            {
+                RbxCollectionService allTagsService = (RbxCollectionService)self;
+                allTagsService.EnsureHost(context.Bindings.Scheduler);
+                LuaTable allTags = new();
+                int allTagsIndex = 1;
+                foreach (string tag in allTagsService.GetAllTags())
+                {
+                    allTags[allTagsIndex++] = tag;
+                }
+
+                return new LuaValue(allTags);
+            }, "CollectionService");
+            Method("GetInstanceAddedSignal", (ctx, self) =>
+            {
+                RbxCollectionService addedSignalService = (RbxCollectionService)self;
+                addedSignalService.EnsureHost(context.Bindings.Scheduler);
+                return LuaCsRbxDatatypeBindings.Wrap(
+                    addedSignalService.GetInstanceAddedSignal(
+                        ReadString(ctx, 1, "CollectionService:GetInstanceAddedSignal")),
+                    context);
+            }, "CollectionService");
+            Method("GetInstanceRemovedSignal", (ctx, self) =>
+            {
+                RbxCollectionService removedSignalService = (RbxCollectionService)self;
+                removedSignalService.EnsureHost(context.Bindings.Scheduler);
+                return LuaCsRbxDatatypeBindings.Wrap(
+                    removedSignalService.GetInstanceRemovedSignal(
+                        ReadString(ctx, 1, "CollectionService:GetInstanceRemovedSignal")),
+                    context);
+            }, "CollectionService");
             Method("GetAttributeChangedSignal", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
                 self.GetAttributeChangedSignal(ReadString(ctx, 1, "GetAttributeChangedSignal")), context));
             Method("GetPropertyChangedSignal", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
@@ -1254,6 +1364,24 @@ namespace CoreAI.Ai.LuaCs
             throw RbxError.BadArgument(
                 what + " expects an Instance or nil",
                 "pass an Instance, got " + Describe(value));
+        }
+
+        /// <summary>
+        /// Reads the target instance of a CollectionService method (argument 1 after self);
+        /// destroyed proxies are rejected by the service call itself, so only shape is checked here.
+        /// </summary>
+        private static RbxInstance ReadTargetInstance(LuaValue value, string what,
+            int argumentNumber)
+        {
+            if (TryGetInstance(value, out LuaCsRbxInstanceProxy proxy)
+                && proxy.Instance != null)
+            {
+                return proxy.Instance;
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects an Instance at argument " + argumentNumber,
+                "pass an Instance, got " + Describe(value) + " at argument " + argumentNumber);
         }
 
         private static LuaValue WrapList(LuaCsRbxModContext context,
@@ -1990,8 +2118,121 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        // ---- Camera (workspace.CurrentCamera over the camera rig) ---------------------------
+        // ---- ValueBase (Value + Changed over the engine-free value classes) -----------------
 
+        /// <summary>Value/Changed reads. Reads are ungated; writes take the WorldEdit+ACL gate
+        /// in <see cref="TryWriteValue"/> like every other part property.</summary>
+        private static bool TryReadValue(LuaCsRbxModContext context, RbxInstance self,
+            string key, out LuaValue value)
+        {
+            if (!(self is RbxValueBase valueBase))
+            {
+                value = LuaValue.Nil;
+                return false;
+            }
+
+            switch (key)
+            {
+                case "Value":
+                    value = ValueToLua(context, valueBase);
+                    return true;
+                case "Changed":
+                    value = LuaCsRbxDatatypeBindings.Wrap(valueBase.Changed, context);
+                    return true;
+                default:
+                    value = LuaValue.Nil;
+                    return false;
+            }
+        }
+
+        /// <summary>Boxes a live value payload for Lua (IntValue crosses as a number; the
+        /// mirror documents precision loss past 2^53, so double is the faithful shape).</summary>
+        private static LuaValue ValueToLua(LuaCsRbxModContext context, RbxValueBase valueBase)
+        {
+            switch (valueBase)
+            {
+                case RbxIntValue intValue: return (double)intValue.Value;
+                case RbxNumberValue numberValue: return numberValue.Value;
+                case RbxStringValue stringValue: return stringValue.Value;
+                case RbxBoolValue boolValue: return boolValue.Value;
+                case RbxObjectValue objectValue: return context.WrapInstance(objectValue.Value);
+                case RbxVector3Value vector3Value:
+                    return LuaCsRbxDatatypeBindings.Wrap(vector3Value.Value);
+                case RbxCFrameValue cframeValue:
+                    return LuaCsRbxDatatypeBindings.Wrap(cframeValue.Value);
+                case RbxColor3Value color3Value:
+                    return LuaCsRbxDatatypeBindings.Wrap(color3Value.Value);
+                default: return LuaValue.Nil;
+            }
+        }
+
+        /// <summary>Value assignment through the same WorldEdit+ACL sink path other part
+        /// properties use; the per-type reader raises BAD_ARGUMENT on a mistyped assignment
+        /// and nothing is written. ObjectValue accepts an Instance or nil.</summary>
+        private static bool TryWriteValue(LuaCsRbxModContext context, RbxInstance self,
+            string key, LuaValue value)
+        {
+            if (!(self is RbxValueBase valueBase) || key != "Value")
+            {
+                return false;
+            }
+
+            context.RequireWorldEditForWrite(self, "Value");
+            switch (valueBase)
+            {
+                case RbxIntValue intValue:
+                    intValue.SetFromDouble(
+                        ReadDoubleValue(value, "IntValue.Value assignment"));
+                    break;
+                case RbxNumberValue numberValue:
+                    numberValue.Value =
+                        ReadDoubleValue(value, "NumberValue.Value assignment");
+                    break;
+                case RbxStringValue stringValue:
+                    stringValue.Value =
+                        ReadStringValue(value, "StringValue.Value assignment");
+                    break;
+                case RbxBoolValue boolValue:
+                    if (value.Type != LuaValueType.Boolean)
+                    {
+                        throw RbxError.BadArgument(
+                            "BoolValue.Value assignment expects a boolean",
+                            "pass true or false, got " + Describe(value));
+                    }
+
+                    boolValue.Value = value.Read<bool>();
+                    break;
+                case RbxObjectValue objectValue:
+                    objectValue.Value =
+                        ReadOptionalInstance(value, "ObjectValue.Value assignment");
+                    break;
+                case RbxVector3Value vector3Value:
+                    vector3Value.Value =
+                        ReadVector3Value(value, "Vector3Value.Value assignment");
+                    break;
+                case RbxCFrameValue cframeValue:
+                    cframeValue.Value =
+                        ReadCFrameValue(value, "CFrameValue.Value assignment");
+                    break;
+                case RbxColor3Value color3Value:
+                    color3Value.Value =
+                        ReadColor3Value(value, "Color3Value.Value assignment");
+                    break;
+                default:
+                    return false;
+            }
+
+            // WHY no RecordMutation here: the setter itself advances the revision, and only when the
+            // value ACTUALLY changed (`FireValueChanged`, guarded by an equality check in every
+            // typed setter). Advancing again from the binding double-counted a real write and — worse
+            // — counted a no-op write, because the guard that suppresses `Changed` cannot suppress a
+            // bump that happens outside it. Revision drives stale-write rejection and the MVP12 dirty
+            // set, so a phantom bump means a replicated update carrying nothing and a stale-revision
+            // refusal for a write that was never in conflict.
+            return true;
+        }
+
+        // ---- Camera (workspace.CurrentCamera over the camera rig) ---------------------------
         /// <summary>workspace.CurrentCamera plus the Camera instance's CFrame (over the rig),
         /// CameraType, and CameraSubject. Reads are ungated; writes require WorldEdit.</summary>
         private static bool TryReadCamera(LuaCsRbxModContext context, RbxInstance self,
@@ -2112,6 +2353,20 @@ namespace CoreAI.Ai.LuaCs
             if (value.Type == LuaValueType.Number)
             {
                 return (float)value.Read<double>();
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects a number",
+                "pass a number, got " + Describe(value));
+        }
+
+        /// <summary>Double-precision number reader for NumberValue/IntValue (float would
+        /// lose the mirror's documented integer range).</summary>
+        private static double ReadDoubleValue(LuaValue value, string what)
+        {
+            if (value.Type == LuaValueType.Number)
+            {
+                return value.Read<double>();
             }
 
             throw RbxError.BadArgument(

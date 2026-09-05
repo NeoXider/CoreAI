@@ -1037,6 +1037,12 @@ namespace CoreAI.Ai.LuaCs
                 case double d: return d;
                 case float f: return f;
                 case int i: return i;
+                // WHY: slice 8.1 — IntValue holds int64 but Luau numbers are doubles (the
+                // mirror documents precision loss past 2^53); CFrame/Color3 values cross as
+                // their datatype userdata like Vector3 already does.
+                case long l: return (double)l;
+                case RbxCFrame cf: return Wrap(cf);
+                case RbxColor3 c3: return Wrap(c3);
                 case string s: return s;
                 case RbxInstance instance: return context.WrapInstance(instance);
                 case RbxInputObject input: return Wrap(input);

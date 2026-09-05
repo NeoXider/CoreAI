@@ -173,7 +173,7 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.RegisterTreeBacked("Players");
             catalog.RegisterTreeBacked("Debris");
             catalog.RegisterStub("TweenService", "MVP8", implementedServiceHint);
-            catalog.RegisterStub("CollectionService", "MVP8", implementedServiceHint);
+            catalog.RegisterTreeBacked("CollectionService");
             catalog.RegisterStub("DataStoreService", "MVP9", implementedServiceHint);
             catalog.RegisterStub("UserInputService", "MVP10", implementedServiceHint);
             catalog.RegisterStub("ContextActionService", "MVP10", implementedServiceHint);

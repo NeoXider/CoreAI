@@ -95,6 +95,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly RbxUserInputService _userInputService;
         private readonly RbxRunService _runService;
         private readonly RbxDebris _debris;
+        private readonly RbxCollectionService _collectionService;
         private readonly IClickPickSource _pickSource;
         private readonly ModConnectionRegistry _connections;
         private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
@@ -256,6 +257,23 @@ namespace CoreAI.Ai.LuaCs
                 _debris.AttachHost(_scheduler, _log);
             }
 
+            // WHY: same rationale as Debris — worlds bootstrapped before the CollectionService
+            // slice may lack the service; create it here so game:GetService("CollectionService")
+            // resolves, then attach the registry tag-transition subscriptions so the signals fire.
+            _collectionService =
+                _game.FindFirstChildOfClass("CollectionService") as RbxCollectionService;
+            if (_collectionService == null
+                && _registry.Catalog.TryGet("CollectionService", out _))
+            {
+                _collectionService = (RbxCollectionService)_registry.Create("CollectionService");
+                _collectionService.Parent = _game;
+            }
+
+            if (_collectionService != null)
+            {
+                _collectionService.AttachHost(_scheduler);
+            }
+
             if (_userInputService != null)
             {
                 _userInputService.InputBegan.BindScheduler(_scheduler);
@@ -313,6 +331,9 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>The shared Debris instance (scheduled guaranteed destruction).</summary>
         public RbxDebris Debris => _debris;
+
+        /// <summary>The shared CollectionService instance (tag collections and signals).</summary>
+        public RbxCollectionService CollectionService => _collectionService;
 
         /// <summary>Mod log sink behind Debris drop reports and headless-mode notes.</summary>
         internal Action<string> LogSink => _log;
@@ -534,6 +555,10 @@ namespace CoreAI.Ai.LuaCs
             if (_debris != null)
             {
                 _debris.DetachHost();
+            }
+            if (_collectionService != null)
+            {
+                _collectionService.DetachHost();
             }
             _scheduler.PhaseReached -= PumpSchedulerPhase;
             _networkRequestConnection.Disconnect();

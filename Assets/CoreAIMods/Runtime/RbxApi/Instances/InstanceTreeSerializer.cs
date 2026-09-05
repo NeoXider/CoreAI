@@ -141,6 +141,11 @@ namespace CoreAI.Mods.Rbx.Instances
                 };
             }
 
+            if (instance is RbxValueBase valueBase)
+            {
+                node.Value = CaptureValue(valueBase);
+            }
+
             foreach (string tag in instance.GetTags())
             {
                 node.Tags.Add(tag);
@@ -153,6 +158,61 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             output.Add(node);
+        }
+
+        /// <summary>Encodes a live value payload; ObjectValue stores the target id (0 = nil).</summary>
+        private static ValueSnapshot CaptureValue(RbxValueBase valueBase)
+        {
+            switch (valueBase)
+            {
+                case RbxIntValue intValue:
+                    return new ValueSnapshot
+                    {
+                        StringValue = intValue.Value.ToString(CultureInfo.InvariantCulture)
+                    };
+                case RbxNumberValue numberValue:
+                    return new ValueSnapshot
+                    {
+                        StringValue = numberValue.Value.ToString("R", CultureInfo.InvariantCulture)
+                    };
+                case RbxStringValue stringValue:
+                    return new ValueSnapshot { StringValue = stringValue.Value };
+                case RbxBoolValue boolValue:
+                    return new ValueSnapshot
+                    {
+                        StringValue = boolValue.Value ? "true" : "false"
+                    };
+                case RbxObjectValue objectValue:
+                    return new ValueSnapshot
+                    {
+                        ObjectTargetId = objectValue.Value?.Id.Value ?? 0UL
+                    };
+                case RbxVector3Value vector3Value:
+                {
+                    RbxVector3 vector = vector3Value.Value;
+                    return new ValueSnapshot
+                    {
+                        StringValue = Join(vector.X, vector.Y, vector.Z)
+                    };
+                }
+                case RbxCFrameValue cframeValue:
+                    return new ValueSnapshot
+                    {
+                        StringValue = Join(cframeValue.Value.GetComponents())
+                    };
+                case RbxColor3Value color3Value:
+                {
+                    RbxColor3 color = color3Value.Value;
+                    return new ValueSnapshot
+                    {
+                        StringValue = Join(color.R, color.G, color.B)
+                    };
+                }
+                default:
+                    throw RbxError.BadArgument(
+                        "cannot capture unsupported value class '" + valueBase.ClassName + "'",
+                        "capture only the eight MVP8 value classes");
+            }
         }
 
         private static AttributeSnapshot ToAttributeSnapshot(string name, object value)
@@ -280,6 +340,11 @@ namespace CoreAI.Mods.Rbx.Instances
                     materialVariant.StudsPerTile = float.Parse(
                         node.MaterialVariant.StudsPerTile, CultureInfo.InvariantCulture);
                 }
+
+                if (node.Value != null)
+                {
+                    RestoreValue((RbxValueBase)instance, node, restored);
+                }
             }
 
             foreach (InstanceSnapshot node in snapshot.Instances)
@@ -288,6 +353,53 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             return root;
+        }
+
+        /// <summary>Applies an already-validated value payload without firing Changed.</summary>
+        private static void RestoreValue(RbxValueBase valueBase, InstanceSnapshot node,
+            IReadOnlyDictionary<ulong, RbxInstance> restored)
+        {
+            ValueSnapshot value = node.Value;
+            switch (valueBase)
+            {
+                case RbxIntValue intValue:
+                    intValue.SetValueSilent(long.Parse(value.StringValue, CultureInfo.InvariantCulture));
+                    break;
+                case RbxNumberValue numberValue:
+                    numberValue.SetValueSilent(double.Parse(value.StringValue, CultureInfo.InvariantCulture));
+                    break;
+                case RbxStringValue stringValue:
+                    stringValue.SetValueSilent(value.StringValue ?? string.Empty);
+                    break;
+                case RbxBoolValue boolValue:
+                    boolValue.SetValueSilent(string.Equals(
+                        value.StringValue, "true", StringComparison.Ordinal));
+                    break;
+                case RbxObjectValue objectValue:
+                    objectValue.SetValueSilent(value.ObjectTargetId == 0UL
+                        ? null
+                        : restored[value.ObjectTargetId]);
+                    break;
+                case RbxVector3Value vector3Value:
+                {
+                    float[] parts = Parse(value.StringValue, 3);
+                    vector3Value.SetValueSilent(new RbxVector3(parts[0], parts[1], parts[2]));
+                    break;
+                }
+                case RbxCFrameValue cframeValue:
+                    cframeValue.SetValueSilent(ParseCFrame(value.StringValue));
+                    break;
+                case RbxColor3Value color3Value:
+                {
+                    float[] parts = Parse(value.StringValue, 3);
+                    color3Value.SetValueSilent(new RbxColor3(parts[0], parts[1], parts[2]));
+                    break;
+                }
+                default:
+                    throw RbxError.BadArgument(
+                        "cannot restore unsupported value class '" + valueBase.ClassName + "'",
+                        "restore only the eight MVP8 value classes");
+            }
         }
 
         /// <summary>Validates the entire tree before the destination registry is mutated.</summary>
@@ -411,6 +523,7 @@ namespace CoreAI.Mods.Rbx.Instances
             foreach (InstanceSnapshot node in snapshot.Instances)
             {
                 ValidateModelReferences(node, byId, registry.Catalog);
+                ValidateValueReferences(node, byId);
             }
         }
 
@@ -565,6 +678,19 @@ namespace CoreAI.Mods.Rbx.Instances
                         "use a positive finite tile density");
                 }
             }
+
+            bool isValue = catalog.IsA(node.ClassName, "ValueBase");
+            if ((node.Value != null) != isValue)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot class '" + node.ClassName + "' has mismatched Value state",
+                    isValue ? "include Value state" : "remove Value state from this class");
+            }
+
+            if (node.Value != null)
+            {
+                ValidateValuePayload(node);
+            }
         }
 
         private static void ValidateHierarchy(
@@ -654,6 +780,115 @@ namespace CoreAI.Mods.Rbx.Instances
                     "snapshot Model " + node.Id + " names non-descendant PrimaryPart "
                     + node.Model.PrimaryPartId,
                     "PrimaryPart must name a serialized BasePart descendant");
+            }
+        }
+
+        /// <summary>Strict per-type check of an already shape-matched value payload.</summary>
+        private static void ValidateValuePayload(InstanceSnapshot node)
+        {
+            string raw = node.Value.StringValue;
+            switch (node.ClassName)
+            {
+                case "IntValue":
+                    try
+                    {
+                        long.Parse(raw, CultureInfo.InvariantCulture);
+                    }
+                    catch (Exception ex) when (ex is FormatException || ex is OverflowException
+                        || ex is ArgumentNullException)
+                    {
+                        throw RbxError.BadArgument(
+                            "snapshot IntValue " + node.Id + " has non-integer Value '"
+                            + raw + "'",
+                            "serialize an exact 64-bit integer");
+                    }
+
+                    break;
+                case "NumberValue":
+                    try
+                    {
+                        double parsed = double.Parse(raw, CultureInfo.InvariantCulture);
+                        if (double.IsNaN(parsed) || double.IsInfinity(parsed))
+                        {
+                            throw RbxError.BadArgument(
+                                "snapshot NumberValue " + node.Id
+                                + " has non-finite Value '" + raw + "'",
+                                "serialize a finite JSON number");
+                        }
+                    }
+                    catch (Exception ex) when (ex is FormatException || ex is OverflowException
+                        || ex is ArgumentNullException)
+                    {
+                        throw RbxError.BadArgument(
+                            "snapshot NumberValue " + node.Id + " has malformed Value '"
+                            + raw + "'",
+                            "serialize a finite JSON number");
+                    }
+
+                    break;
+                case "StringValue":
+                    if (raw == null)
+                    {
+                        throw RbxError.BadArgument(
+                            "snapshot StringValue " + node.Id + " has a nil value",
+                            "serialize an empty string when the value is intentionally empty");
+                    }
+
+                    if (raw.Length > RbxStringValue.MaxLength)
+                    {
+                        throw RbxError.BadArgument(
+                            "snapshot StringValue " + node.Id + " exceeds "
+                            + RbxStringValue.MaxLength + " characters",
+                            "split the text across several values");
+                    }
+
+                    break;
+                case "BoolValue":
+                    if (!string.Equals(raw, "true", StringComparison.Ordinal)
+                        && !string.Equals(raw, "false", StringComparison.Ordinal))
+                    {
+                        throw RbxError.BadArgument(
+                            "snapshot BoolValue " + node.Id + " has malformed Value '"
+                            + raw + "'",
+                            "serialize 'true' or 'false'");
+                    }
+
+                    break;
+                case "ObjectValue":
+                    break;
+                case "Vector3Value":
+                    Parse(raw, 3);
+                    break;
+                case "CFrameValue":
+                    ParseCFrame(raw);
+                    break;
+                case "Color3Value":
+                    Parse(raw, 3);
+                    break;
+                default:
+                    throw RbxError.BadArgument(
+                        "snapshot class '" + node.ClassName + "' has mismatched Value state",
+                        "remove Value state from this class");
+            }
+        }
+
+        /// <summary>ObjectValue targets must name a serialized instance (nil is 0).</summary>
+        private static void ValidateValueReferences(InstanceSnapshot node,
+            IReadOnlyDictionary<ulong, InstanceSnapshot> byId)
+        {
+            if (node.Value == null
+                || !string.Equals(node.ClassName, "ObjectValue", StringComparison.Ordinal)
+                || node.Value.ObjectTargetId == 0UL)
+            {
+                return;
+            }
+
+            if (!byId.ContainsKey(node.Value.ObjectTargetId))
+            {
+                throw RbxError.BadArgument(
+                    "snapshot ObjectValue " + node.Id + " names missing target "
+                    + node.Value.ObjectTargetId,
+                    "ObjectValue targets must name a serialized instance in the same package");
             }
         }
 

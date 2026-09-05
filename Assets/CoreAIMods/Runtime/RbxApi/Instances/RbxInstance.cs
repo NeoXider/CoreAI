@@ -405,6 +405,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 ClassName, resolvedOwnerModId, resolvedOriginTag, authority);
             copy._name = _name;
             copy._archivable = _archivable;
+            CopyCustomStateTo(copy);
             foreach (KeyValuePair<string, object> attribute in _attributes)
             {
                 copy._attributes[attribute.Key] = attribute.Value;
@@ -522,10 +523,12 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             ThrowIfDestroyed("AddTag");
             bool alreadyTagged = Registry.Tags.HasTag(Id, tag);
+            bool tagInUse = Registry.Tags.IsTagInUse(tag);
             Registry.Tags.AddTag(Id, tag);
             if (!alreadyTagged)
             {
                 Registry.AdvanceRevision(Id);
+                Registry.OnTagAdded(this, tag, !tagInUse);
             }
         }
 
@@ -537,6 +540,7 @@ namespace CoreAI.Mods.Rbx.Instances
             if (wasTagged)
             {
                 Registry.AdvanceRevision(Id);
+                Registry.OnTagRemoved(this, tag, !Registry.Tags.IsTagInUse(tag));
             }
         }
 
@@ -635,6 +639,12 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private RbxScriptSignal GetSignal(string signalName)
         {
+            return GetOrCreateSignal(signalName);
+        }
+
+        /// <summary>Lazily resolves a named signal; subclasses expose theirs over this.</summary>
+        protected RbxScriptSignal GetOrCreateSignal(string signalName)
+        {
             _signals ??= new Dictionary<string, RbxScriptSignal>(System.StringComparer.Ordinal);
             if (!_signals.TryGetValue(signalName, out RbxScriptSignal signal))
             {
@@ -646,6 +656,12 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         // ---- Guards -------------------------------------------------------------------------
+
+        /// <summary>Copies subclass state into a <see cref="Clone"/> copy; the base shape
+        /// (name/archivable/attributes/tags/children) is copied by the caller. No-op here.</summary>
+        protected internal virtual void CopyCustomStateTo(RbxInstance copy)
+        {
+        }
 
         protected void ThrowIfDestroyed(string memberName)
         {

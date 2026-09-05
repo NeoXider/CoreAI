@@ -90,6 +90,27 @@ namespace CoreAI.Mods.Rbx.Instances
             return result;
         }
 
+        /// <summary>
+        /// CollectionService:GetAllTags substrate: every tag currently held by any instance,
+        /// sorted for deterministic enumeration.
+        /// </summary>
+        public IReadOnlyList<string> GetAllTags()
+        {
+            List<string> result = new(_byTag.Keys);
+            result.Sort(StringComparer.Ordinal);
+            return result;
+        }
+
+        /// <summary>
+        /// Whether any instance currently holds the tag; backs the TagAdded/TagRemoved globals,
+        /// which fire only on the first-use/last-use transitions.
+        /// </summary>
+        public bool IsTagInUse(string tag)
+        {
+            ValidateTag(tag);
+            return _byTag.ContainsKey(tag);
+        }
+
         /// <summary>Destroy sweep: drops every tag held by the instance (R6.2 cleanup).</summary>
         public void ClearInstance(InstanceId id)
         {
