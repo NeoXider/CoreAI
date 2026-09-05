@@ -359,7 +359,22 @@ namespace CoreAI.Net.Mirror
 
         private void OnServerEvent(NetworkConnectionToClient conn, CoreAiRemoteEventMessage wire)
         {
-            if (!TryResolveSender(conn, out RbxNetworkPeer peer))
+            ReceiveServerEvent(conn?.connectionId ?? -1, wire);
+        }
+
+        /// <summary>
+        /// The server's receive path for one event, keyed by connection rather than by a Mirror
+        /// object.
+        /// </summary>
+        /// <remarks>
+        /// WHY it takes an id: the sender is resolved from this bridge's own map, so the connection
+        /// object itself is never needed — and taking only the id makes the rule ("an unadmitted
+        /// connection reaches nothing") provable without standing up a transport, which is the
+        /// difference between a rule that is tested and one that is asserted in a comment.
+        /// </remarks>
+        internal void ReceiveServerEvent(int connectionId, CoreAiRemoteEventMessage wire)
+        {
+            if (!TryResolveSender(connectionId, out RbxNetworkPeer peer))
             {
                 return;
             }
@@ -388,14 +403,19 @@ namespace CoreAI.Net.Mirror
 
         private void OnServerRequest(NetworkConnectionToClient conn, CoreAiRemoteRequestMessage wire)
         {
-            if (!TryResolveSender(conn, out RbxNetworkPeer peer))
+            ReceiveServerRequest(conn?.connectionId ?? -1, wire);
+        }
+
+        /// <summary>The server's receive path for one request, keyed by connection.</summary>
+        internal void ReceiveServerRequest(int connectionId, CoreAiRemoteRequestMessage wire)
+        {
+            if (!TryResolveSender(connectionId, out RbxNetworkPeer peer))
             {
                 return;
             }
 
             PacketsDelivered++;
             uint correlationId = wire.CorrelationId;
-            int connectionId = conn.connectionId;
             RequestReceived?.Invoke(
                 new RbxNetworkRequestMessage(
                     new InstanceId(wire.RemoteId),
@@ -425,7 +445,13 @@ namespace CoreAI.Net.Mirror
         private void OnServerResponse(NetworkConnectionToClient conn,
             CoreAiRemoteResponseMessage wire)
         {
-            CompleteResponse(conn.connectionId, wire);
+            ReceiveServerResponse(conn?.connectionId ?? -1, wire);
+        }
+
+        /// <summary>The server's receive path for one response, keyed by connection.</summary>
+        internal void ReceiveServerResponse(int connectionId, CoreAiRemoteResponseMessage wire)
+        {
+            CompleteResponse(connectionId, wire);
         }
 
         private void OnClientResponse(CoreAiRemoteResponseMessage wire)
@@ -480,9 +506,9 @@ namespace CoreAI.Net.Mirror
             };
         }
 
-        private bool TryResolveSender(NetworkConnectionToClient conn, out RbxNetworkPeer peer)
+        private bool TryResolveSender(int connectionId, out RbxNetworkPeer peer)
         {
-            if (conn != null && _peersByConnection.TryGetValue(conn.connectionId, out peer))
+            if (connectionId >= 0 && _peersByConnection.TryGetValue(connectionId, out peer))
             {
                 return true;
             }

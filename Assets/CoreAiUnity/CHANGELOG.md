@@ -4,6 +4,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.25.0] - 2026-09-05
+
+### Added
+
+- **MVP11** — гейты правил Mirror-моста (12 проверок приёмного пути). Модульность подтверждена
+  прогоном без `Assets/Mirror`: 0 ошибок, пакет транспорта не компилируется, EditMode 3588/0 failed.
+
 ## [7.24.0] - 2026-09-05
 
 ### Added
