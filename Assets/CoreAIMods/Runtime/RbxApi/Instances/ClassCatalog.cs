@@ -473,7 +473,23 @@ namespace CoreAI.Mods.Rbx.Instances
                 "use CanCollide and host-side layers until the extended collision controls land";
             string surfaceWorkaround =
                 "use Material, Color, and geometry; legacy surface joints are not currently scheduled";
+            // WHY network ownership is a loud stub rather than absent: the MVP2.5 plan defers it
+            // (owner decision 5) and MVP12's replication gate asserts it raises the deferred stub,
+            // so a script that calls it has to be told the rung, not told it made a typo.
+            const string networkOwnershipWorkaround =
+                "the server simulates every part; network ownership is deferred until the "
+                + "replication rung assigns it";
             catalog.RegisterKnownUnimplementedMembers("BasePart",
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "SetNetworkOwner", networkOwnershipWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "GetNetworkOwner", networkOwnershipWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "SetNetworkOwnershipAuto", networkOwnershipWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "GetNetworkOwnershipAuto", networkOwnershipWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
+                    "CanSetNetworkOwnership", networkOwnershipWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "Velocity", physicsWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(

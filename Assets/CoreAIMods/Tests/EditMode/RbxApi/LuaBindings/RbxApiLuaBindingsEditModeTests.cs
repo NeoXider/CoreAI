@@ -554,6 +554,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                         store_set('client', table.concat(clientValues, ','))
                     end)
                     remote:FireServer('server-payload')
+                    -- WHY: proves R5.4 deferred dispatch — if OnServerEvent ran synchronously
+                    -- inside FireServer, the shared workspace attribute it sets would already be
+                    -- true the instant FireServer returns, before any scheduler drain runs.
+                    store_set('fired_synchronously',
+                        tostring(workspace:GetAttribute('ServerReceivedFire') == true))
                 end)", persistToStore: false);
 
             harness.Runtime.LoadMod(serverActor, "network-delivery-server", @"
@@ -564,6 +569,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 remote.Parent = workspace
                 remote.OnServerEvent:Connect(function(player, payload)
                     store_set('server', tostring(player.UserId) .. ':' .. payload)
+                    workspace:SetAttribute('ServerReceivedFire', true)
                 end)
                 task.defer(function()
                     task.wait()
@@ -575,6 +581,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     remote:FireAllClients('all')
                 end)", persistToStore: false);
 
+            // WHY: both LoadMod calls only queue task.defer bodies — nothing has drained yet, so
+            // the server handler cannot have run regardless of dispatch correctness. This baseline
+            // makes the post-pump assertions below meaningful rather than vacuous.
+            Assert.AreEqual("", harness.Store.Get("network-delivery-server", "server"));
+
             harness.PumpFrames(4);
 
             Assert.IsInstanceOf<NullNetworkBridge>(harness.Bindings.NetworkBridge);
@@ -584,6 +595,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 harness.Store.Get("network-delivery-server", "server_player_count"));
             Assert.AreEqual("one,all",
                 harness.Store.Get("network-delivery-client", "client"));
+            Assert.AreEqual("false",
+                harness.Store.Get("network-delivery-client", "fired_synchronously"),
+                "OnServerEvent must not run synchronously inside FireServer (R5.4 deferred dispatch).");
         }
 
         [Test]

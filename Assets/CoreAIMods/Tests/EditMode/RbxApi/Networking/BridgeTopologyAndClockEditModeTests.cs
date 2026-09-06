@@ -1,7 +1,13 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
+using CoreAI.Infrastructure.Logging;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using CoreAI.Sandbox.LuaCs;
+using CoreAI.Scripting;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Networking
@@ -69,6 +75,165 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
             Assert.IsTrue(RbxSoloRuntimeTopology.Shared.IsRunning);
         }
 
+        [Test]
+        public void ServerTimeNow_ReadsTheClientClockThroughTheBridgeOffset()
+        {
+            // A client's own clock says 1700000000; the bridge says the server is 42.5 s ahead.
+            LuaCsModStack stack = StackWith(
+                localClockSeconds: 1700000000d,
+                topology: RbxNetworkTopology.Client,
+                offsetSeconds: 42.5d);
+            stack.Runtime.LoadMod("m",
+                "assert(workspace:GetServerTimeNow() == 1700000042.5, " +
+                "'server time must carry the bridge offset, got ' .. " +
+                "tostring(workspace:GetServerTimeNow()))");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Negative_AClientWhoseWallClockIsAnHourFast_StillReportsServerTime()
+        {
+            // The whole point of the offset: two clients disagreeing about the wall clock by an
+            // hour must still stamp the same moment. Without the offset the second one would read
+            // 1700003600 and every timestamp it sent would be an hour into the future.
+            LuaCsModStack onTime = StackWith(1700000000d, RbxNetworkTopology.Client, 0d);
+            onTime.Runtime.LoadMod("m", "assert(workspace:GetServerTimeNow() == 1700000000)");
+            Assert.IsTrue(onTime.Runtime.IsLoaded("m"));
+
+            LuaCsModStack anHourFast = StackWith(1700003600d, RbxNetworkTopology.Client, -3600d);
+            anHourFast.Runtime.LoadMod("m",
+                "assert(workspace:GetServerTimeNow() == 1700000000, " +
+                "'a skewed client must still read server time, got ' .. " +
+                "tostring(workspace:GetServerTimeNow()))");
+            Assert.IsTrue(anHourFast.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Negative_AServerAddsNoOffsetToItsOwnClock()
+        {
+            // The server IS the clock. Solo and host must read exactly the injected source, so the
+            // offline behaviour stays byte-identical to the pre-transport one.
+            foreach (RbxNetworkTopology topology in
+                     new[] { RbxNetworkTopology.Solo, RbxNetworkTopology.Host })
+            {
+                LuaCsModStack stack = StackWith(1700000000d, topology, 0d);
+                stack.Runtime.LoadMod("m",
+                    "assert(workspace:GetServerTimeNow() == 1700000000, '" + topology + "')");
+                Assert.IsTrue(stack.Runtime.IsLoaded("m"), topology.ToString());
+            }
+        }
+
+        [Test]
+        public void Negative_AnOffsetThatJumpsBackwards_DoesNotRewindServerTime()
+        {
+            // A resynchronising transport can revise its offset downwards mid-session. Lua must
+            // never see time run backwards, or every duration a mod measured turns negative.
+            FakeClockSource clock = new() { UnixTimeSecondsFractional = 1700000000d };
+            FakeBridge bridge = new(RbxNetworkTopology.Client) { ServerClockOffsetSeconds = 10d };
+            LuaCsModStack stack = StackWith(clock, bridge);
+            stack.Runtime.LoadMod("m", "assert(workspace:GetServerTimeNow() == 1700000010)");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+
+            bridge.ServerClockOffsetSeconds = -50d;
+            stack.Runtime.LoadMod("m2",
+                "assert(workspace:GetServerTimeNow() == 1700000010, " +
+                "'a revised offset must clamp, never rewind, got ' .. " +
+                "tostring(workspace:GetServerTimeNow()))");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m2"));
+        }
+
+        private static LuaCsModStack StackWith(double localClockSeconds,
+            RbxNetworkTopology topology, double offsetSeconds)
+        {
+            return StackWith(
+                new FakeClockSource { UnixTimeSecondsFractional = localClockSeconds },
+                new FakeBridge(topology) { ServerClockOffsetSeconds = offsetSeconds });
+        }
+
+        private static LuaCsModStack StackWith(FakeClockSource clock, FakeBridge bridge)
+        {
+            return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new SilentGameLogger(),
+                ModStore = new MemoryModStore(),
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = new LuaCsRbxApiBindings(networkBridge: bridge, clockSource: clock)
+            });
+        }
+
+        private sealed class FakeClockSource : IRbxClockSource
+        {
+            public double GameTimeSeconds { get; set; }
+
+            public long UnixTimeSeconds { get; set; }
+
+            public double ProcessTimeSeconds { get; set; }
+
+            public double UnixTimeSecondsFractional { get; set; }
+        }
+
+        private sealed class MemoryModStore : ILuaModStore
+        {
+            private readonly Dictionary<(string ModId, string Key), string> _values = new();
+
+            public string Get(string modId, string key)
+            {
+                return _values.TryGetValue((modId, key), out string value) ? value : "";
+            }
+
+            public void Set(string modId, string key, string value)
+            {
+                if (value == null)
+                {
+                    _values.Remove((modId, key));
+                    return;
+                }
+
+                _values[(modId, key)] = value;
+            }
+
+            public void Clear(string modId)
+            {
+                List<(string ModId, string Key)> keys = new();
+                foreach ((string storedModId, string key) in _values.Keys)
+                {
+                    if (storedModId == modId)
+                    {
+                        keys.Add((storedModId, key));
+                    }
+                }
+
+                foreach ((string ModId, string Key) key in keys)
+                {
+                    _values.Remove(key);
+                }
+            }
+        }
+
+        private sealed class SilentGameLogger : IGameLogger
+        {
+            public void LogDebug(GameLogFeature feature, string message,
+                UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogInfo(GameLogFeature feature, string message,
+                UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogWarning(GameLogFeature feature, string message,
+                UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogError(GameLogFeature feature, string message,
+                UnityEngine.Object context = null)
+            {
+            }
+        }
+
         private static IRbxRuntimeTopology TopologyFor(RbxNetworkTopology topology)
         {
             return new RbxBridgeRuntimeTopology(new FakeBridge(topology));
@@ -87,7 +252,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
 
             public int MaxPayloadBytes => 65536;
 
-            public double ServerClockOffsetSeconds => 0d;
+            public double ServerClockOffsetSeconds { get; set; }
 
             public event Action<RbxNetworkEventMessage> EventReceived
             {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
@@ -316,11 +317,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         {
             // The mirror: Touched "will not fire if the CFrame property was changed such that the
             // part overlaps another part". A teleporting pad must not read as a hit.
+            //
+            // WHY this order and not BeginPhysicsStep -> NoteTeleport -> contact: production never
+            // produces that order. A CFrame/Position write reaches NoteTeleport from Lua, which
+            // ticks in Update(); BeginPhysicsStep runs in the FixedUpdate that follows, right before
+            // the engine simulates and reports this step's contacts. So the real order is note
+            // (previous Update), then BeginPhysicsStep (this FixedUpdate), then the contact (this
+            // step's simulate) — exactly what is driven here.
             using ProductionHarness harness = new ProductionHarness();
             harness.LoadTouchCounter("teleport");
 
-            harness.Physics.BeginPhysicsStep();
             harness.Physics.NoteTeleport(harness.Pad.Id);
+            harness.Physics.BeginPhysicsStep();
             harness.RaiseContact(began: true);
             harness.RaiseContact(began: false);
 
@@ -334,18 +342,59 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         public void Contact_AfterTheTeleportStepEnds_FiresAgain()
         {
             // The twin of the suppression: it lasts one step, not forever, or a part that ever
-            // teleported would go permanently deaf to real collisions.
+            // teleported would go permanently deaf to real collisions. Same real ordering as above:
+            // note during the "previous Update", then the two physics steps that follow it.
             using ProductionHarness harness = new ProductionHarness();
             harness.LoadTouchCounter("nextstep");
 
-            harness.Physics.BeginPhysicsStep();
             harness.Physics.NoteTeleport(harness.Pad.Id);
+            harness.Physics.BeginPhysicsStep();
             harness.RaiseContact(began: true);
             harness.Physics.BeginPhysicsStep();
             harness.RaiseContact(began: true);
 
             Assert.AreEqual("1", harness.Store.Get("nextstep", "pad_touched"));
             Assert.AreEqual("1", harness.Store.Get("nextstep", "ball_touched"));
+        }
+
+        [Test]
+        public void Contact_DestroyedMidContact_LeavesNoResidueAndTheSameIdsFireAgain()
+        {
+            // WHY reflection: the leaked pair lives in a private dictionary with no other
+            // observable surface, and production InstanceIds are never reused by design (see
+            // InstanceRecord.Id), so the exact reuse scenario the defect describes cannot be
+            // constructed through the public registry API. Replaying the identical (pad, ball) ids
+            // straight at the port is the closest honest reproduction: it proves the stale pair no
+            // longer blocks a fresh contact report carrying those same values, which is exactly the
+            // mechanism a reused id would trigger.
+            using ProductionHarness harness = new ProductionHarness();
+            harness.LoadTouchCounter("residue");
+            InstanceId padId = harness.Pad.Id;
+            InstanceId ballId = harness.Ball.Id;
+
+            harness.RaiseContact(began: true);
+            Assert.AreEqual("1", harness.Store.Get("residue", "pad_touched"));
+            Assert.AreEqual(1, OpenContactCount(harness.Physics));
+
+            harness.Ball.Destroy();
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual(0, OpenContactCount(harness.Physics),
+                "a part destroyed mid-contact must not leave its pair resident forever");
+
+            harness.Port.RaiseBegan(padId, ballId);
+
+            Assert.AreEqual(1, OpenContactCount(harness.Physics),
+                "the pair must be recorded as freshly open, not silently dropped by a dedupe check "
+                + "against the stale entry — that stale check is exactly what would deduplicate "
+                + "away the next genuine Touched on a reused id");
+        }
+
+        private static int OpenContactCount(RbxWorldPhysics physics)
+        {
+            FieldInfo field = typeof(RbxWorldPhysics).GetField(
+                "_openContacts", BindingFlags.NonPublic | BindingFlags.Instance);
+            return ((System.Collections.IDictionary)field.GetValue(physics)).Count;
         }
 
         [Test]

@@ -58,6 +58,19 @@ Notation: **ships** = 1:1 member bound to production behaviour; **stub** = regis
 
 ### A.1 MVP8 — full Players and gameplay services
 
+> **Delivery status, 2026-09-06.** This table is the PLAN. The closure audit
+> (`dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md`) checked it against the code and found rows that
+> diverge; read the audit for what actually shipped. Known divergences, since a stale plan read as
+> truth is worse than no plan: `Players.RespawnTime`/`CharacterAutoLoads`/`MaxPlayers` were absent
+> and now ship; the whole `Player` character pipeline (`LoadCharacterAsync`, `LoadCharacter`,
+> `CharacterAdded`, `CharacterRemoving`, `DistanceFromCharacter`) is still a loud stub and is the
+> named open slice; `Humanoid.MoveTo` refuses the optional `part` argument; `Vector3Value`,
+> `CFrameValue` and `Color3Value` ship rather than stub, while `BrickColorValue` and `RayValue`
+> are absent entirely; the `SetNetworkOwner` family was absent and is now a loud backlog stub;
+> `RaycastFilterType` deliberately does not carry the deprecated `Blacklist`/`Whitelist` aliases;
+> the tween backlog raises `BAD_ARGUMENT` naming the backlog rather than `NOT_IMPLEMENTED`; and
+> `Humanoid` state is now carried by the one serializer (it was silently dropped).
+
 Lua-facing surface, member by member (mirror-checked):
 
 | Class | Ships | Stub / not |

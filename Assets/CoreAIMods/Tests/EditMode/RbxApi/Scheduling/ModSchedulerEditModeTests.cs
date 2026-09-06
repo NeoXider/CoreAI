@@ -351,7 +351,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             RbxError error = Assert.Throws<RbxError>(() => scheduler.Cancel(thread));
 
             Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
-            StringAssert.Contains("dead thread", error.RawMessage);
+            // WHY: pinned to CoreAI's exact text, not Luau's. The Roblox docs mirror
+            // (reference/engine/libraries/task.yaml, task.cancel) only promises "an error will be
+            // generated" for an uncancellable thread and gives no wording; Lua's own analogous
+            // error for coroutine.resume on a finished coroutine is "cannot resume dead coroutine"
+            // (ldo.c). CoreAI's message matches neither verbatim — that divergence is a reportable
+            // finding, not something to paper over here.
+            Assert.AreEqual("task.cancel cannot cancel a dead thread", error.RawMessage);
             Assert.AreEqual(1, factory.Created.Count);
             Assert.AreEqual(0d, timeSource.CurrentTime);
         }

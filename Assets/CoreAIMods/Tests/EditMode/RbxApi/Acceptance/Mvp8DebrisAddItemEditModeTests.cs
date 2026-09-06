@@ -130,6 +130,44 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void AddItem_ZeroScaledDelta_FreezesEverything()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("freeze-a");
+            harness.Stack.Runtime.LoadMod(actor, "freeze-setup", @"
+                local part = Instance.new('Part')
+                part.Name = 'FrozenDebrisPart'
+                part.Parent = workspace
+                game:GetService('Debris'):AddItem(part, 0.5)", persistToStore: false);
+
+            RbxInstance part = harness.Registry.WorldRoot.FindFirstChild("FrozenDebrisPart");
+            Assert.IsNotNull(part);
+            InstanceId id = part.Id;
+            int destroyingCount = 0;
+            harness.ConnectDestroying(part, () => destroyingCount++);
+
+            // WHY: mirror Mvp8TweenServiceEditModeTests.Tween_ZeroScaledDelta_FreezesEverything —
+            // a timeScale-0 frame driver feeds delta 0 into Advance; Debris must not consume
+            // scheduler time or destroy the item, proving its lifetime is scaled, not wall-clock.
+            for (int frame = 0; frame < 5; frame++)
+            {
+                harness.Bindings.Scheduler.Advance(0d);
+                Assert.AreSame(harness.Registry.WorldRoot, part.Parent,
+                    "frame " + frame + " at scaled delta 0 must not destroy the item");
+            }
+
+            Assert.AreEqual(0d, harness.Bindings.Scheduler.CurrentTime);
+            Assert.AreEqual(0, destroyingCount);
+            Assert.IsTrue(harness.Registry.TryGet(id, out _));
+
+            harness.Bindings.Scheduler.Advance(0.5d);
+
+            Assert.IsNull(part.Parent);
+            Assert.AreEqual(1, destroyingCount);
+            Assert.IsFalse(harness.Registry.TryGet(id, out _));
+        }
+
+        [Test]
         public void AddItem_Cap1k_EvictsOldestInstantly_OthersUntouched()
         {
             using ProductionHarness harness = new ProductionHarness();

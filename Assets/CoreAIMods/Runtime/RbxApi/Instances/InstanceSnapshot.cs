@@ -56,6 +56,7 @@ namespace CoreAI.Mods.Rbx.Instances
         public ClickDetectorSnapshot ClickDetector;
         public MaterialVariantSnapshot MaterialVariant;
         public ValueSnapshot Value;
+        public HumanoidSnapshot Humanoid;
         public List<string> Tags = new();
         public List<AttributeSnapshot> Attributes = new();
     }
@@ -88,6 +89,28 @@ namespace CoreAI.Mods.Rbx.Instances
         public string RoughnessMap;
         public string MetalnessMap;
         public string StudsPerTile;
+    }
+
+    /// <summary>
+    /// Durable Humanoid state, all numbers using invariant round-trip formatting.
+    /// </summary>
+    /// <remarks>
+    /// WHY only these seven fields: Health, MaxHealth, WalkSpeed, JumpPower, JumpHeight,
+    /// UseJumpPower and DisplayName are the durable Humanoid state. The MoveTo target, the
+    /// state machine and signal subscriptions are transient runtime state that a host recreates
+    /// through AttachHost/Advance once it reattaches a character motor, so they are deliberately
+    /// NOT persisted.
+    /// </remarks>
+    [Serializable]
+    public sealed class HumanoidSnapshot
+    {
+        public string Health;
+        public string MaxHealth;
+        public string WalkSpeed;
+        public string JumpPower;
+        public string JumpHeight;
+        public bool UseJumpPower;
+        public string DisplayName;
     }
 
     /// <summary>Durable ValueBase payload. Scalars and datatypes encode into

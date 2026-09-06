@@ -91,7 +91,7 @@ namespace CoreAI.Tests.PlayMode
             Application.logMessageReceived += capture;
 
             Assert.AreEqual(
-                15,
+                17,
                 FrozenDemoScenePaths.Length,
                 "Published first-party demo inventory changed; update the G11 build matrix and QA evidence.");
             foreach (string scenePath in FrozenDemoScenePaths)

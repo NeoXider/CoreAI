@@ -497,6 +497,185 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void LeaderstatsAndHumanoid_RoundTripThroughTree_AllValuesAndIdsIdentical()
+        {
+            // Gate P8.6: a Player-less leaderstats folder (IntValue, NumberValue, StringValue,
+            // BoolValue, ObjectValue) plus a non-default Humanoid must round-trip to an identical
+            // tree — every value and every instance id.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxInstance root = harness.Registry.Create("Folder");
+            root.Name = "NpcRoot";
+            root.Parent = harness.Registry.WorldRoot;
+
+            RbxInstance folder = harness.Registry.Create("Folder");
+            folder.Name = "leaderstats";
+            folder.Parent = root;
+
+            RbxIntValue coins = (RbxIntValue)harness.Registry.Create("IntValue");
+            coins.Name = "Coins";
+            coins.Value = 7;
+            coins.Parent = folder;
+            RbxNumberValue score = (RbxNumberValue)harness.Registry.Create("NumberValue");
+            score.Name = "Score";
+            score.Value = 12.5d;
+            score.Parent = folder;
+            RbxStringValue rank = (RbxStringValue)harness.Registry.Create("StringValue");
+            rank.Name = "Rank";
+            rank.Value = "Pro";
+            rank.Parent = folder;
+            RbxBoolValue vip = (RbxBoolValue)harness.Registry.Create("BoolValue");
+            vip.Name = "Vip";
+            vip.Value = true;
+            vip.Parent = folder;
+
+            RbxHumanoid humanoid = (RbxHumanoid)harness.Registry.Create("Humanoid");
+            humanoid.Name = "Humanoid";
+            humanoid.MaxHealth = 250d;
+            humanoid.Health = 30d;
+            humanoid.WalkSpeed = 24d;
+            humanoid.JumpPower = 75d;
+            humanoid.JumpHeight = 9.5d;
+            humanoid.UseJumpPower = false;
+            humanoid.DisplayName = "Rex";
+            humanoid.Parent = root;
+
+            RbxObjectValue marker = (RbxObjectValue)harness.Registry.Create("ObjectValue");
+            marker.Name = "Marker";
+            marker.Value = humanoid;
+            marker.Parent = folder;
+
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(root);
+
+            InstanceRegistry fresh = new(
+                binder: new InMemoryInstanceBackingBinder(),
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion,
+                worldId: "values-world");
+            RbxInstance restoredRoot = InstanceTreeSerializer.Restore(snapshot, fresh);
+
+            Assert.AreEqual(root.Id, restoredRoot.Id, "stable ids, no remap");
+            RbxInstance restoredFolder = restoredRoot.FindFirstChild("leaderstats");
+            Assert.IsNotNull(restoredFolder);
+            Assert.AreEqual(folder.Id, restoredFolder.Id);
+
+            RbxInstance restoredCoins = restoredFolder.FindFirstChild("Coins");
+            Assert.AreEqual(coins.Id, restoredCoins.Id);
+            Assert.AreEqual(7L, ((RbxIntValue)restoredCoins).Value);
+            RbxInstance restoredScore = restoredFolder.FindFirstChild("Score");
+            Assert.AreEqual(score.Id, restoredScore.Id);
+            Assert.AreEqual(12.5d, ((RbxNumberValue)restoredScore).Value);
+            RbxInstance restoredRank = restoredFolder.FindFirstChild("Rank");
+            Assert.AreEqual(rank.Id, restoredRank.Id);
+            Assert.AreEqual("Pro", ((RbxStringValue)restoredRank).Value);
+            RbxInstance restoredVip = restoredFolder.FindFirstChild("Vip");
+            Assert.AreEqual(vip.Id, restoredVip.Id);
+            Assert.IsTrue(((RbxBoolValue)restoredVip).Value);
+
+            RbxHumanoid restoredHumanoid = (RbxHumanoid)restoredRoot.FindFirstChild("Humanoid");
+            Assert.IsNotNull(restoredHumanoid);
+            Assert.AreEqual(humanoid.Id, restoredHumanoid.Id);
+            Assert.AreEqual(250d, restoredHumanoid.MaxHealth);
+            Assert.AreEqual(30d, restoredHumanoid.Health);
+            Assert.AreEqual(24d, restoredHumanoid.WalkSpeed);
+            Assert.AreEqual(75d, restoredHumanoid.JumpPower);
+            Assert.AreEqual(9.5d, restoredHumanoid.JumpHeight);
+            Assert.IsFalse(restoredHumanoid.UseJumpPower);
+            Assert.AreEqual("Rex", restoredHumanoid.DisplayName);
+
+            RbxObjectValue restoredMarker =
+                (RbxObjectValue)restoredFolder.FindFirstChild("Marker");
+            Assert.AreEqual(marker.Id, restoredMarker.Id);
+            Assert.AreSame(restoredHumanoid, restoredMarker.Value);
+        }
+
+        [Test]
+        public void MalformedHumanoidPackage_HealthAboveMaxHealth_Rejected_RegistryUnchanged()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid humanoid = (RbxHumanoid)harness.Registry.Create("Humanoid");
+            humanoid.Name = "Npc";
+            humanoid.Parent = harness.Registry.WorldRoot;
+
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(harness.Bindings.Game);
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                if (node.Id == humanoid.Id.Value)
+                {
+                    node.Humanoid.MaxHealth = "100";
+                    node.Humanoid.Health = "150";
+                }
+            }
+
+            InstanceRegistry fresh = new(
+                binder: new InMemoryInstanceBackingBinder(),
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion,
+                worldId: "values-world");
+            RbxError error = Assert.Throws<RbxError>(
+                () => InstanceTreeSerializer.Restore(snapshot, fresh));
+            StringAssert.Contains("Humanoid", error.RawMessage);
+            Assert.IsFalse(
+                fresh.TryGet(humanoid.Id, out _),
+                "validate-before-mutate: nothing was restored");
+        }
+
+        [Test]
+        public void MalformedHumanoidPackage_NegativeMaxHealth_Rejected_RegistryUnchanged()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid humanoid = (RbxHumanoid)harness.Registry.Create("Humanoid");
+            humanoid.Name = "Npc";
+            humanoid.Parent = harness.Registry.WorldRoot;
+
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(harness.Bindings.Game);
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                if (node.Id == humanoid.Id.Value)
+                {
+                    node.Humanoid.MaxHealth = "-1";
+                }
+            }
+
+            InstanceRegistry fresh = new(
+                binder: new InMemoryInstanceBackingBinder(),
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion,
+                worldId: "values-world");
+            RbxError error = Assert.Throws<RbxError>(
+                () => InstanceTreeSerializer.Restore(snapshot, fresh));
+            StringAssert.Contains("Humanoid", error.RawMessage);
+            Assert.IsFalse(
+                fresh.TryGet(humanoid.Id, out _),
+                "validate-before-mutate: nothing was restored");
+        }
+
+        [Test]
+        public void MalformedHumanoidPackage_NonFiniteNumber_Rejected_RegistryUnchanged()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid humanoid = (RbxHumanoid)harness.Registry.Create("Humanoid");
+            humanoid.Name = "Npc";
+            humanoid.Parent = harness.Registry.WorldRoot;
+
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(harness.Bindings.Game);
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                if (node.Id == humanoid.Id.Value)
+                {
+                    node.Humanoid.WalkSpeed = "NaN";
+                }
+            }
+
+            InstanceRegistry fresh = new(
+                binder: new InMemoryInstanceBackingBinder(),
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion,
+                worldId: "values-world");
+            RbxError error = Assert.Throws<RbxError>(
+                () => InstanceTreeSerializer.Restore(snapshot, fresh));
+            StringAssert.Contains("Humanoid", error.RawMessage);
+            Assert.IsFalse(
+                fresh.TryGet(humanoid.Id, out _),
+                "validate-before-mutate: nothing was restored");
+        }
+
+        [Test]
         public void Acl_ActorWithoutRights_CannotWriteOthersValue()
         {
             using ProductionHarness harness = new ProductionHarness();

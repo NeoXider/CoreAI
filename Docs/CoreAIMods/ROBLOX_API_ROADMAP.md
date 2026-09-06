@@ -1143,7 +1143,7 @@ Globals installed: `game`, `workspace` (== `game.Workspace`), `Instance`, `Vecto
 | containers | `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer` tree nodes | — | — | — |
 | `Lighting` | structural service/tree node | — | `ClockTime`, `Ambient`, `GeographicLatitude` | — |
 | `UserInputService` | `InputBegan`, `InputEnded`, `InputChanged`; `MouseBehavior`; `IsKeyDown`, `GetKeysPressed`, `GetMouseLocation`; signal `Wait` | — | — | — |
-| `RunService` | `Heartbeat`, `Stepped`, `RenderStepped`; signal `Wait` | `IsServer`, `IsClient`, `IsRunning`, `IsStudio`, `BindToRenderStep`, `UnbindFromRenderStep` → MVP2 | — | — |
+| `RunService` | `PreAnimation`, `PreSimulation`, `PostSimulation`, `PreRender`; legacy `Heartbeat`, `Stepped`, `RenderStepped`; `IsServer`, `IsClient`, `IsRunning`, `IsStudio`; signal `Wait` | `BindToRenderStep`, `UnbindFromRenderStep` → MVP2 | — | — |
 | `ClickDetector` | `MouseClick`, `MouseHoverEnter`, `MouseHoverLeave`, `MaxActivationDistance`; signal `Wait` | — | — | — |
 | `InputObject` | read-only `KeyCode`, `UserInputType`, `UserInputState`, `Position`, `Delta` | — | — | — |
 | `RBXScriptSignal` | deferred `Connect`/`Once`/`Wait` on every shipped signal; handlers may yield with `task.wait` | — | — | — |
@@ -1262,11 +1262,11 @@ records its C# marker; scheduled stubs normally use `// TODO: MVP<n> — ...`.
 | Status | Surface | Phase / meaning | Source |
 |---|---|---|---|
 | shipped | `PVInstance:PivotTo/GetPivot`; `Model.PrimaryPart/WorldPivot` | landed in the MVP2 Model-pivot slice; no longer a stub | `ClassCatalog` |
-| planned | `WorldRoot:Raycast`; `Workspace.Gravity` | MVP8 | `ClassCatalog` |
-| planned | `Workspace:GetServerTimeNow` | MVP2 | `ClassCatalog` |
+| shipped | `WorldRoot:Raycast`; `Workspace.Gravity` | landed in MVP8 slice 8.5: `Raycast(origin, direction, raycastParams?)` with the mirror's 15,000-stud cap, `Gravity` 196.2 studs/s² per-body | `ClassCatalog` |
+| shipped | `Workspace:GetServerTimeNow` | landed in MVP2: epoch seconds over `IRbxClockSource`, monotonic, plus the bridge's server offset on a client | Lua binding |
 | shipped | `BasePart.Material` | landed: all 45 `Enum.Material` items render, unmapped ids resolve to a magenta diagnostic material ([research](../../dev-docs/MATERIALS_RESEARCH.md)) | `ClassCatalog` |
 | shipped | `MaterialVariant` / `MaterialService` | landed in 7.10.0: `Instance.new("MaterialVariant")` parented to `MaterialService`; parts wear one via the string property `BasePart.MaterialVariant` (`""` for none); an unknown name renders the plain `Material`, not an error | `ClassCatalog` |
-| planned | six RunService query/render-step methods | MVP2 | `ClassCatalog` |
+| planned | `RunService:BindToRenderStep`/`UnbindFromRenderStep` | MVP2; the four topology queries (`IsServer`/`IsClient`/`IsStudio`/`IsRunning`) and the modern frame events (`PreAnimation`/`PreSimulation`/`PostSimulation`/`PreRender`) have shipped | `ClassCatalog` |
 | backlog | BasePart velocity, mass, collision-query, physical-properties, and legacy-surface members listed in §5.1.3 | known member; no rung assigned | `ClassCatalog` |
 | backlog | `Lighting.ClockTime/Ambient/GeographicLatitude` | known member; no rung assigned | `ClassCatalog` |
 | unsupported | `Workspace.Terrain` | deliberate non-goal; use Parts | `ClassCatalog` |
@@ -1444,10 +1444,21 @@ points. Order within one Unity frame:
 
 Notes:
 
+- **What is actually implemented, 2026-09-06.** The three-callback split below is the design; the
+  shipped driver (`LuaModRuntimeTickDriver`) pumps every RunService phase from a single `Update()`
+  through `LuaCsRbxApiBindings.PumpFrame`, in the order PreAnimation → PreSimulation (+ legacy
+  `Stepped`) → PostSimulation → Heartbeat → input → PreRender (+ legacy `RenderStepped`), and uses
+  `FixedUpdate()` only to open the physics step and apply gravity. The observable ORDER matches the
+  table; the callback each phase is fired from does not. That matters for one thing only — a phase
+  fired from `Update` runs once per rendered frame, not once per simulated step — and it is
+  recorded here rather than left for the next reader to discover.
 - Roblox fires `PostSimulation`/`Heartbeat` after physics; Unity's physics step happens inside
   the FixedUpdate loop, so firing them from `Update` preserves the "after simulation" contract.
-  `PreRender`/`RenderStepped` fire only in a topology that renders (`IsClient` true) — a
-  dedicated server never runs them (Roblox parity: RenderStepped is client-only).
+  `PreRender`/`RenderStepped` fire only in a topology that renders — a dedicated server never runs
+  them (Roblox parity: `PreRender` is client-only). The gate is `IRbxRuntimeTopology.RendersFrames`,
+  **not** `IsClient`: CoreAI's solo process both renders and is the server, and `IsClient` stays
+  false there on purpose, so gating on it would silently kill every solo game's per-frame render
+  handler.
 - All `dt` arguments are **scaled** game-time deltas (D9): `Time.deltaTime` /
   `Time.fixedDeltaTime`. At `Time.timeScale = 0` the FixedUpdate row stops entirely and wait
   heaps freeze; the deferred queue still drains (so UI-ish mods stay responsive during pause).
@@ -1641,7 +1652,9 @@ even raw VM tracebacks resolve to the owning mod. Until then errors surface with
 6. Clocks (D9): at `timeScale = 0.5`, `task.wait(1)` takes ~2 real seconds and returns ~1;
    `os.time()` is unaffected by timeScale; `time()` advances with scaled time;
    `GetServerTimeNow()` is monotonic, unscaled, and **epoch-comparable with `os.time()`**
-   (|difference| ≤ 1 s); `os.clock()` measures CPU time.
+   (|difference| ≤ 1 s); `os.clock()` measures monotonic elapsed wall time since the clock source
+   was created — **a recorded deviation**: stock Lua's `os.clock` is process CPU time, but the
+   offline mirror defines Luau's as monotonic elapsed wall time, and CoreAI follows the mirror.
 7. Deferred dispatch per R5.4–R5.7: `ChildAdded` handler runs deferred, mutations inside the
    handler do not re-enter; re-entrancy cap of 10 generations raises `SIGNAL_CASCADE` (R5.6).
 8. `Once` fires exactly once; `Wait` resumes with fire args; Disconnect-vs-Destroy
@@ -1653,8 +1666,10 @@ even raw VM tracebacks resolve to the owning mod. Until then errors surface with
 10. `WaitForChild`: the pre-existing-child immediate path remains green from MVP1; MVP2 adds
     created 3 frames later → resumes, the 5 s warning text matching `Infinite yield possible…`,
     and the timeout overload returning nil.
-11. `GetService("RunService")` works; `GetService("TweenService"):Create(...)` errors at the
-    Create line with phase MVP8; `GetService("Bogus")` → `Bogus is not a valid Service name`.
+11. `GetService("RunService")` works; a service that is still planned errors **at the member**,
+    not at `GetService`, naming its rung — the frozen example moved from `TweenService`/MVP8 to
+    `DataStoreService`/MVP9 when TweenService shipped in 7.19.0, and the tests moved with it;
+    `GetService("Bogus")` → `Bogus is not a valid Service name`.
 12. `HttpService:JSONEncode/JSONDecode` round-trips the contract fixtures (arrays, dicts,
     nested, empty table, null, unicode); DataStore/remote marshallers are asserted to be the
     same component (reference equality of the serializer instance in tests).

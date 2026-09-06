@@ -537,6 +537,24 @@ namespace CoreAI.Mods.WorldPackages
                     };
                 }
 
+                if (node.Humanoid != null)
+                {
+                    dto.Humanoid = new WorldHumanoidDto
+                    {
+                        Health = double.Parse(node.Humanoid.Health, CultureInfo.InvariantCulture),
+                        MaxHealth = double.Parse(
+                            node.Humanoid.MaxHealth, CultureInfo.InvariantCulture),
+                        WalkSpeed = double.Parse(
+                            node.Humanoid.WalkSpeed, CultureInfo.InvariantCulture),
+                        JumpPower = double.Parse(
+                            node.Humanoid.JumpPower, CultureInfo.InvariantCulture),
+                        JumpHeight = double.Parse(
+                            node.Humanoid.JumpHeight, CultureInfo.InvariantCulture),
+                        UseJumpPower = node.Humanoid.UseJumpPower,
+                        DisplayName = node.Humanoid.DisplayName ?? string.Empty
+                    };
+                }
+
                 world.Instances.Add(dto);
             }
 
@@ -728,6 +746,21 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     StringValue = dto.Value.StringValue,
                     ObjectTargetId = ParseUlong(dto.Value.ObjectTargetId, "ObjectValue target id")
+                };
+            }
+
+            if (dto.Humanoid != null)
+            {
+                node.Humanoid = new HumanoidSnapshot
+                {
+                    Health = dto.Humanoid.Health.ToString("R", CultureInfo.InvariantCulture),
+                    MaxHealth = dto.Humanoid.MaxHealth.ToString("R", CultureInfo.InvariantCulture),
+                    WalkSpeed = dto.Humanoid.WalkSpeed.ToString("R", CultureInfo.InvariantCulture),
+                    JumpPower = dto.Humanoid.JumpPower.ToString("R", CultureInfo.InvariantCulture),
+                    JumpHeight = dto.Humanoid.JumpHeight.ToString(
+                        "R", CultureInfo.InvariantCulture),
+                    UseJumpPower = dto.Humanoid.UseJumpPower,
+                    DisplayName = dto.Humanoid.DisplayName ?? string.Empty
                 };
             }
 
@@ -1606,6 +1639,9 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("value")]
             public WorldValueDto Value;
+
+            [JsonProperty("humanoid")]
+            public WorldHumanoidDto Humanoid;
         }
 
         [Serializable]
@@ -1688,6 +1724,31 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("object_target_id", Required = Required.Always)]
             public string ObjectTargetId;
+        }
+
+        [Serializable]
+        private sealed class WorldHumanoidDto
+        {
+            [JsonProperty("health", Required = Required.Always)]
+            public double Health;
+
+            [JsonProperty("max_health", Required = Required.Always)]
+            public double MaxHealth;
+
+            [JsonProperty("walk_speed", Required = Required.Always)]
+            public double WalkSpeed;
+
+            [JsonProperty("jump_power", Required = Required.Always)]
+            public double JumpPower;
+
+            [JsonProperty("jump_height", Required = Required.Always)]
+            public double JumpHeight;
+
+            [JsonProperty("use_jump_power", Required = Required.Always)]
+            public bool UseJumpPower;
+
+            [JsonProperty("display_name", Required = Required.Always)]
+            public string DisplayName;
         }
 
         [Serializable]

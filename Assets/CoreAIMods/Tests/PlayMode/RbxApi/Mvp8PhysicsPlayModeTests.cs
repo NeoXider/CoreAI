@@ -47,9 +47,18 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         [TearDown]
         public void DestroyWorld()
         {
-            _world.Dispose();
-            Physics.simulationMode = _savedSimulationMode;
-            Physics.gravity = _savedHostGravity;
+            // WHY try/finally: simulationMode and gravity are process-global. If Dispose() ever threw
+            // before the two lines below ran, every other PlayMode test sharing this process would
+            // silently inherit a scripted simulation for the rest of the run.
+            try
+            {
+                _world.Dispose();
+            }
+            finally
+            {
+                Physics.simulationMode = _savedSimulationMode;
+                Physics.gravity = _savedHostGravity;
+            }
         }
 
         [UnityTest]
@@ -162,6 +171,32 @@ namespace CoreAI.Tests.PlayMode.RbxApi
 
             Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
             StringAssert.Contains("15000", error.Message);
+        }
+
+        [UnityTest]
+        public IEnumerator Raycast_PastMoreCollidersThanTheOldFixedScratchBuffer_StillFindsTheAcceptedTarget()
+        {
+            // 40 anchored, filtered-out parts stacked along the ray, then one accepted part past all
+            // of them. A 32-slot RaycastNonAlloc buffer fills up on the near blockers alone and never
+            // sees the target at all, so a fixed-size buffer reports a miss here every time.
+            for (int index = 0; index < 40; index++)
+            {
+                _world.CreatePart("blocker" + index, new RbxVector3(0f, 40f - index, 0f), anchored: true);
+            }
+
+            RbxInstance target = _world.CreatePart("target", new RbxVector3(0f, -5f, 0f), anchored: true);
+            yield return null;
+
+            RbxRaycastParams filter = new() { FilterType = RbxRaycastFilterType.Include };
+            filter.SetFilterDescendantsInstances(new[] { target });
+
+            RbxRaycastResult result = _world.Physics.Raycast(
+                new RbxVector3(0f, 50f, 0f), new RbxVector3(0f, -100f, 0f), filter);
+
+            Assert.IsNotNull(result,
+                "the accepted target sits past 40 other colliders on the ray, more than a 32-slot "
+                + "scratch buffer can hold without growing");
+            Assert.AreSame(target, result.Instance);
         }
 
         [UnityTest]
@@ -302,6 +337,39 @@ namespace CoreAI.Tests.PlayMode.RbxApi
                 ulong high = Math.Max(first.Value, second.Value);
                 return low + "-" + high + ":" + (began ? "began" : "ended");
             }
+        }
+    }
+
+    /// <summary>
+    /// Pins <see cref="Mvp8PhysicsPlayModeTests"/>'s save/restore of the host's own
+    /// <c>Physics.simulationMode</c> and <c>Physics.gravity</c>.
+    /// </summary>
+    /// <remarks>
+    /// WHY a separate fixture: calling <c>CreateWorld</c>/<c>DestroyWorld</c> as plain methods from
+    /// inside a test of the fixture they belong to would also be wrapped by NUnit's own automatic
+    /// [SetUp]/[TearDown] invocation for that same fixture, doubling the save/restore and hiding
+    /// exactly the regression this guards: that DestroyWorld puts the host's globals back to what
+    /// they were before CreateWorld touched them, even for a fixture instance NUnit never manages.
+    /// </remarks>
+    [TestFixture]
+    public sealed class Mvp8PhysicsPlayModeTearDownRegressionTests
+    {
+        [UnityTest]
+        public IEnumerator CreateWorldThenDestroyWorld_RestoresTheHostsSimulationModeAndGravity()
+        {
+            SimulationMode modeBefore = Physics.simulationMode;
+            Vector3 gravityBefore = Physics.gravity;
+
+            Mvp8PhysicsPlayModeTests harness = new();
+            harness.CreateWorld();
+            yield return null;
+            harness.DestroyWorld();
+
+            Assert.AreEqual(modeBefore, Physics.simulationMode,
+                "DestroyWorld must restore the host's own simulation mode, or every other PlayMode "
+                + "test sharing this process would inherit a scripted simulation");
+            Assert.AreEqual(gravityBefore, Physics.gravity,
+                "DestroyWorld must restore the host's own gravity too");
         }
     }
 }

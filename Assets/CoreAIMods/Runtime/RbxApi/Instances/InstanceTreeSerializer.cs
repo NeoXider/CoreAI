@@ -146,6 +146,20 @@ namespace CoreAI.Mods.Rbx.Instances
                 node.Value = CaptureValue(valueBase);
             }
 
+            if (instance is RbxHumanoid humanoid)
+            {
+                node.Humanoid = new HumanoidSnapshot
+                {
+                    Health = humanoid.Health.ToString("R", CultureInfo.InvariantCulture),
+                    MaxHealth = humanoid.MaxHealth.ToString("R", CultureInfo.InvariantCulture),
+                    WalkSpeed = humanoid.WalkSpeed.ToString("R", CultureInfo.InvariantCulture),
+                    JumpPower = humanoid.JumpPower.ToString("R", CultureInfo.InvariantCulture),
+                    JumpHeight = humanoid.JumpHeight.ToString("R", CultureInfo.InvariantCulture),
+                    UseJumpPower = humanoid.UseJumpPower,
+                    DisplayName = humanoid.DisplayName ?? string.Empty
+                };
+            }
+
             foreach (string tag in instance.GetTags())
             {
                 node.Tags.Add(tag);
@@ -345,6 +359,11 @@ namespace CoreAI.Mods.Rbx.Instances
                 {
                     RestoreValue((RbxValueBase)instance, node, restored);
                 }
+
+                if (node.Humanoid != null)
+                {
+                    RestoreHumanoid((RbxHumanoid)instance, node.Humanoid);
+                }
             }
 
             foreach (InstanceSnapshot node in snapshot.Instances)
@@ -400,6 +419,22 @@ namespace CoreAI.Mods.Rbx.Instances
                         "cannot restore unsupported value class '" + valueBase.ClassName + "'",
                         "restore only the eight MVP8 value classes");
             }
+        }
+
+        /// <summary>
+        /// Applies an already-validated Humanoid payload through the public setters. MaxHealth is
+        /// restored before Health so the live clamp-to-MaxHealth path never engages on a valid
+        /// snapshot; Health reaching zero re-derives IsDead exactly as a live death would.
+        /// </summary>
+        private static void RestoreHumanoid(RbxHumanoid humanoid, HumanoidSnapshot snapshot)
+        {
+            humanoid.MaxHealth = double.Parse(snapshot.MaxHealth, CultureInfo.InvariantCulture);
+            humanoid.Health = double.Parse(snapshot.Health, CultureInfo.InvariantCulture);
+            humanoid.WalkSpeed = double.Parse(snapshot.WalkSpeed, CultureInfo.InvariantCulture);
+            humanoid.JumpPower = double.Parse(snapshot.JumpPower, CultureInfo.InvariantCulture);
+            humanoid.JumpHeight = double.Parse(snapshot.JumpHeight, CultureInfo.InvariantCulture);
+            humanoid.UseJumpPower = snapshot.UseJumpPower;
+            humanoid.DisplayName = snapshot.DisplayName ?? string.Empty;
         }
 
         /// <summary>Validates the entire tree before the destination registry is mutated.</summary>
@@ -691,6 +726,19 @@ namespace CoreAI.Mods.Rbx.Instances
             {
                 ValidateValuePayload(node);
             }
+
+            bool isHumanoid = string.Equals(node.ClassName, "Humanoid", StringComparison.Ordinal);
+            if ((node.Humanoid != null) != isHumanoid)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot class '" + node.ClassName + "' has mismatched Humanoid state",
+                    isHumanoid ? "include Humanoid state" : "remove Humanoid state from this class");
+            }
+
+            if (node.Humanoid != null)
+            {
+                ValidateHumanoidPayload(node);
+            }
         }
 
         private static void ValidateHierarchy(
@@ -870,6 +918,73 @@ namespace CoreAI.Mods.Rbx.Instances
                         "snapshot class '" + node.ClassName + "' has mismatched Value state",
                         "remove Value state from this class");
             }
+        }
+
+        /// <summary>Strict per-field check of an already shape-matched Humanoid payload.</summary>
+        private static void ValidateHumanoidPayload(InstanceSnapshot node)
+        {
+            HumanoidSnapshot humanoid = node.Humanoid;
+            double maxHealth = ParseHumanoidNumber(node.Id, "MaxHealth", humanoid.MaxHealth);
+            double health = ParseHumanoidNumber(node.Id, "Health", humanoid.Health);
+            double walkSpeed = ParseHumanoidNumber(node.Id, "WalkSpeed", humanoid.WalkSpeed);
+            double jumpPower = ParseHumanoidNumber(node.Id, "JumpPower", humanoid.JumpPower);
+            double jumpHeight = ParseHumanoidNumber(node.Id, "JumpHeight", humanoid.JumpHeight);
+
+            if (maxHealth < 0d)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Humanoid " + node.Id + " has negative MaxHealth '"
+                    + humanoid.MaxHealth + "'",
+                    "use a non-negative MaxHealth");
+            }
+
+            if (health < 0d || health > maxHealth)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Humanoid " + node.Id + " has Health '" + humanoid.Health
+                    + "' outside [0, MaxHealth] " + humanoid.MaxHealth,
+                    "clamp Health to [0, MaxHealth] before capture");
+            }
+
+            if (walkSpeed < 0d || jumpPower < 0d || jumpHeight < 0d)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Humanoid " + node.Id
+                    + " has a negative WalkSpeed, JumpPower or JumpHeight",
+                    "use non-negative movement parameters");
+            }
+
+            if (humanoid.DisplayName == null)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Humanoid " + node.Id + " has a nil DisplayName",
+                    "serialize an empty string when DisplayName is intentionally empty");
+            }
+        }
+
+        private static double ParseHumanoidNumber(ulong nodeId, string field, string raw)
+        {
+            double value;
+            try
+            {
+                value = double.Parse(raw, CultureInfo.InvariantCulture);
+            }
+            catch (Exception ex) when (ex is FormatException || ex is OverflowException
+                || ex is ArgumentNullException)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Humanoid " + nodeId + " has malformed " + field + " '" + raw + "'",
+                    "serialize a finite JSON number");
+            }
+
+            if (double.IsNaN(value) || double.IsInfinity(value))
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Humanoid " + nodeId + " has non-finite " + field + " '" + raw + "'",
+                    "serialize a finite JSON number");
+            }
+
+            return value;
         }
 
         /// <summary>ObjectValue targets must name a serialized instance (nil is 0).</summary>

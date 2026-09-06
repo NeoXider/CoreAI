@@ -16,6 +16,19 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>Whether the experience simulation is currently running.</summary>
         bool IsRunning { get; }
+
+        /// <summary>
+        /// Whether this process draws frames, and therefore whether the render-phase signals
+        /// (<c>PreRender</c> and its legacy alias <c>RenderStepped</c>) fire at all.
+        /// </summary>
+        /// <remarks>
+        /// WHY this is not <see cref="IsClient"/>: the mirror says PreRender is client-side, but
+        /// CoreAI's solo process both renders and is the server, and IsClient stays false there so
+        /// server-side Lua is never told it is a client. Gating the render phase on IsClient would
+        /// silently stop every solo game's per-frame render handler. The question the phase actually
+        /// asks is "does anything get drawn here", and only a dedicated server answers no.
+        /// </remarks>
+        bool RendersFrames { get; }
     }
 
     /// <summary>Solo/loopback topology: the mod runtime is the server authority with no client
@@ -38,6 +51,8 @@ namespace CoreAI.Mods.Rbx.Instances
         public bool IsStudio => false;
 
         public bool IsRunning => true;
+
+        public bool RendersFrames => true;
     }
 
     /// <summary>
@@ -77,5 +92,9 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <inheritdoc />
         public bool IsRunning => true;
+
+        /// <inheritdoc />
+        public bool RendersFrames =>
+            _bridge.Topology != Networking.RbxNetworkTopology.DedicatedServer;
     }
 }

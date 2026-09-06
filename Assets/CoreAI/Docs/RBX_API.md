@@ -58,6 +58,46 @@ soon as its `Parent` is set into the world.
 `Position` keeps the part's rotation; `CFrame` sets position and rotation together; `Orientation`
 (YXZ degrees) and `Rotation` (XYZ degrees) set the rotation and keep the position.
 
+### `RunService`: the frame loop
+
+The modern Roblox frame events all fire, in the mirror's order, each carrying the frame delta:
+
+| Event | When | Legacy alias |
+|---|---|---|
+| `PreAnimation(deltaTimeSim)` | before the physics simulation, after rendering | — |
+| `PreSimulation(deltaTimeSim)` | before the physics simulation | `Stepped(runTime, step)` |
+| `PostSimulation(deltaTimeSim)` | after the physics simulation | — |
+| `Heartbeat(deltaTime)` | after `PostSimulation` | — |
+| `PreRender(deltaTimeRender)` | before the frame is drawn | `RenderStepped(delta)` |
+
+The legacy aliases keep their legacy signatures — `Stepped` still takes `(runTime, step)` while its
+replacement `PreSimulation` takes the delta alone — so a script migrating between them reads
+different argument positions, exactly as in Roblox.
+
+`PreRender` and `RenderStepped` are withheld on a process that draws nothing (a dedicated server).
+Solo and host both render, so both keep firing: the gate is "does anything get drawn here", not
+`IsClient` — CoreAI's solo process is the server *and* the renderer.
+
+`RunService:BindToRenderStep`/`UnbindFromRenderStep` are still loud stubs; connect `PreRender`
+instead until named render-step binding lands.
+
+### `Players`
+
+`Players.LocalPlayer` (nil in a server context), `PlayerAdded(player)`,
+`PlayerRemoving(player, exitReason)`, `GetPlayers()`, `GetPlayerByUserId(userId)` and
+`GetPlayerFromCharacter(character)`, plus `CharacterAutoLoads` (default true), `RespawnTime`
+(default 5.0 seconds; a negative or non-finite value is refused at the assignment) and a read-only
+`MaxPlayers` — assigning `MaxPlayers` from a mod is refused rather than silently ignored, because
+the host owns the capacity.
+
+The character pipeline itself — `LoadCharacterAsync`, `LoadCharacter`, `CharacterAdded`,
+`CharacterRemoving`, `DistanceFromCharacter` — is **not delivered yet** and raises the loud stub
+naming its rung. `Player.Character` therefore stays nil unless a host assigns one.
+
+`BasePart`'s network-ownership family (`SetNetworkOwner`, `GetNetworkOwner`,
+`SetNetworkOwnershipAuto`, `GetNetworkOwnershipAuto`, `CanSetNetworkOwnership`) is a loud stub too:
+the server simulates every part, and ownership is deferred to the replication rung.
+
 ### `Humanoid`
 
 `Instance.new("Humanoid")` gives a character `Health` (clamped to `[0, MaxHealth]`, default 100),
@@ -70,7 +110,10 @@ time**, so a paused world never times a walk out.
 
 Movement is done by a motor behind `IRbxCharacterMotor`: CoreAI ships `UnityRbxCharacterMotor`, and
 a host that prefers its own controller implements the interface without changing anything a script
-sees. `Enum.HumanoidStateType` ships its full Roblox item set, but the state machine only enters
+sees. **The motor is not yet wired into the default composition**, so a Humanoid in a scene CoreAI
+built for you gets the null motor and does not move — `MoveTo` then reports arrival immediately,
+because the null motor's position never changes. Attach one through
+`LuaCsRbxApiBindings.AttachCharacterMotorFactory` until the character slice lands. `Enum.HumanoidStateType` ships its full Roblox item set, but the state machine only enters
 `Running`, `Jumping`, `Freefall`, `Landed` and `Dead`; `ChangeState` accepts only `Jumping` and says
 so loudly otherwise. Seats, ragdoll, swimming, climbing, accessories and animation raise the loud
 stub — they need a character rig CoreAI does not model.

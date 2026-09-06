@@ -22,6 +22,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         {
             Code = code;
             Fix = fix;
+            RbxStubRaiseObserver.Note(code);
         }
 
         /// <summary>Creates the standard NOT_IMPLEMENTED stub error naming the roadmap phase.</summary>

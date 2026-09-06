@@ -1253,8 +1253,16 @@ namespace CoreAI.Ai.LuaCs
             _userInputService?.Step();
         }
 
+        /// <summary>Fires PreAnimation at the scheduler's PreAnimation boundary.</summary>
+        public void PumpPreAnimation(float dt)
+        {
+            FireRunServiceSignal(_runService?.PreAnimation, dt);
+        }
+
         /// <summary>
-        /// Fires legacy Stepped at the scheduler's PreSimulation boundary.
+        /// Fires PreSimulation and its legacy alias Stepped at the scheduler's PreSimulation
+        /// boundary. Stepped keeps Roblox's legacy (runTime, dt) signature; PreSimulation takes the
+        /// delta alone.
         /// </summary>
         public void PumpPreSimulation(float dt)
         {
@@ -1265,30 +1273,38 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _runServiceElapsed += dt;
+            if (_runService.PreSimulation.HasConnections)
+            {
+                _runService.PreSimulation.Fire(dt);
+            }
+
             if (_runService.Stepped.HasConnections)
             {
                 _runService.Stepped.Fire(_runServiceElapsed, dt);
             }
         }
 
+        /// <summary>Fires PostSimulation at the scheduler's PostSimulation boundary.</summary>
+        public void PumpPostSimulation(float dt)
+        {
+            FireRunServiceSignal(_runService?.PostSimulation, dt);
+        }
+
         /// <summary>Fires legacy Heartbeat at the scheduler Heartbeat boundary.</summary>
         public void PumpHeartbeat(float dt)
         {
-            if (_runService != null && !_runService.IsDestroyed
-                && _runService.Heartbeat.HasConnections)
-            {
-                _runService.Heartbeat.Fire(dt);
-            }
-
+            FireRunServiceSignal(_runService?.Heartbeat, dt);
         }
 
-        /// <summary>Fires legacy RenderStepped and completes click picking at PreRender.</summary>
+        /// <summary>
+        /// Fires PreRender and its legacy alias RenderStepped, then completes click picking, at the
+        /// PreRender boundary. Both signals are withheld on a process that draws no frames.
+        /// </summary>
         public void PumpPreRender(float dt)
         {
-            if (_runService != null && !_runService.IsDestroyed
-                && _runService.RenderStepped.HasConnections)
+            if (_runService != null && !_runService.IsDestroyed)
             {
-                _runService.RenderStepped.Fire(dt);
+                _runService.FireRenderPhase(dt);
             }
 
             PumpClicks();
@@ -1297,10 +1313,23 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Runs the split frame pumps in their observable scheduler order.</summary>
         public void PumpFrame(float dt)
         {
+            PumpPreAnimation(dt);
             PumpPreSimulation(dt);
+            PumpPostSimulation(dt);
             PumpHeartbeat(dt);
             PumpInput();
             PumpPreRender(dt);
+        }
+
+        private void FireRunServiceSignal(RbxScriptSignal signal, float dt)
+        {
+            if (_runService == null || _runService.IsDestroyed || signal == null
+                || !signal.HasConnections)
+            {
+                return;
+            }
+
+            signal.Fire(dt);
         }
 
         private void PumpSchedulerPhase(SchedulerPhase phase, double deltaSeconds)

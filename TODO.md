@@ -10,71 +10,79 @@
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
-### Demo scene smoke hangs the editor — 2026-09-06
+### Demo scene smoke — cause found and fixed, 2026-09-06
 
-`CoreAiDemoScenesSmokePlayModeTests.AllPublishedDemoScenes_LoadWithScopeCameraAndSupportedShaders`
-starts, switches the shared settings to Offline, and then never returns; the editor is killed by the
-crash handler. **It is not caused by the demo UI migration or by the two new demo scenes** — that was
-checked rather than assumed:
+`CoreAiDemoScenesSmokePlayModeTests` did not "hang since 2026-08-30". Three separate causes, two of
+them introduced by the demo work in `ebe8c365`/`374bafbb`:
 
-- with the two new scenes removed from the frozen list: same hang;
-- with the whole IMGUI conversion stashed (the ten controllers back on `OnGUI`): same hang, same
-  crash handler.
+1. the frozen list grew to 17 scenes while `Assert.AreEqual(15, FrozenDemoScenePaths.Length, ...)`
+   was left behind, so the test failed on its first statement;
+2. failing *before* the first `LoadSceneMode.Single` left the Test Framework's bootstrap scene
+   loaded, and `PlayModeSceneSandbox.UnloadToEmptyScene` then unloaded the scene holding the test
+   runner itself — the run never finished and no results file was written. A failing assertion
+   turned into a dead batchmode editor. The sandbox now skips the runner's scene.
+3. Independently: with the local, gitignored `Assets/Mirror` present, Mirror's
+   `NetworkScenePostProcess` calls `EditorApplication.isPlaying = false` on a scene `NetworkIdentity`
+   without a sceneId, which aborts the whole PlayMode run ("Playmode tests were aborted because the
+   player was stopped"). PlayMode demo-scene evidence must therefore be taken **without** Mirror
+   installed — which is also the shipped configuration, since Mirror is optional.
 
-The last recorded green run of this test is `artifacts/testresults/playmode.xml`, 2026-08-30 — before
-the MVP8, MVP11 and MVP12 rungs landed. The window is therefore a week of work, and finding the cause
-means bisecting that window rather than reading it off a log.
+The earlier A/B that concluded "pre-existing, unrelated to the demo work" was wrong; it is recorded
+here so the wrong conclusion is not inherited.
 
-- [ ] Bisect the window between 2026-08-30 and 2026-09-06 for the scene-load hang, then fix it. Until
-      it is fixed, no run may be reported as covering the demo scenes; the two new demos have their
-      own PlayMode gates (`GameplayServicesDemoPlayModeTests`, `OnlineAuthorityDemoPlayModeTests`)
-      which do pass, and those are the only demo-scene claims currently supported by evidence.
+Once it ran to the end it immediately earned its keep: it caught that `OnlineAuthorityDemo` — a
+scene built in the same session — carried no `CoreAILifetimeScope` at all. The builder now creates
+the standard composition like every other demo, and the scene was regenerated.
 
-## MVP2.5 rungs — status 2026-09-05
+## MVP2.5 rungs — status 2026-09-06
 
-Verified on the settled tree (Unity 6000.3.14f1 batchmode, XML in `artifacts/testresults/`):
-full EditMode **3666 total / 3657 passed / 0 failed / 9 skipped**; PlayMode physics and character
-**8/8**. Released 7.19.0 → 7.31.0, all seven packages in lockstep.
+Verified on the settled tree (Unity 6000.3.14f1 batchmode): full EditMode
+**3694 total / 3685 passed / 0 failed / 9 skipped** (`artifacts/testresults/verify4.xml`).
+
+**MVP2.5 is NOT closed.** A three-rung closure audit (`dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md`)
+found that MVP8 — previously recorded here as "complete" — has gates whose positive column the code
+does not implement. MVP1 is closed; MVP2 is not (its own manifest still records G10 FAILED).
+
+Fixed on 2026-09-06 in response to the audit:
+
+- [x] The modern RunService events (`PreAnimation`/`PreSimulation`/`PostSimulation`/`PreRender`) —
+      a direct Roblox-1:1 break; they did not exist at all. Render phase now withheld where nothing
+      renders (`IRbxRuntimeTopology.RendersFrames`).
+- [x] The `CFrame`-teleport contact suppression, which was dead code in production: the note was
+      taken in `Update` and cleared by the next frame's `FixedUpdate` before the step it was meant
+      for. `Orientation`/`Rotation` writes now note a teleport too.
+- [x] Humanoid state through the one serializer (it was silently dropped on every save).
+- [x] `Players.RespawnTime` / `CharacterAutoLoads` / `MaxPlayers`, and the `SetNetworkOwner` family
+      as loud backlog stubs — six members that were previously silently absent.
+- [x] The corpus harness's "zero stub hits" guard, which did not exist.
+- [x] The agent-facing skill text, which still told the LLM that TweenService and CollectionService
+      raise `NOT_IMPLEMENTED`, plus a ratchet so it cannot go stale silently again.
+- [x] Destroy ORDER and connection teardown; the demo-scene smoke; the raycast buffer cap; the
+      open-contact leak; `Humanoid.Jump` reading a constant `false`.
+
+### Left on MVP2.5 (named, not hidden)
+
+- [ ] **The character pipeline and the character motor** (MVP8 gates P8.2/P8.6). `LoadCharacterAsync`,
+      `CharacterAdded`/`CharacterRemoving` and `DistanceFromCharacter` are stubs the suite pins as
+      stubs, and `UnityRbxCharacterMotor` has no production caller — every Humanoid in a real scene
+      gets `NullRbxCharacterMotor`, so it moves nothing and `MoveTo` succeeds instantly.
+- [ ] **The MVP8 acceptance manifest.** Gate P8.5 cites frozen ids "listed in the MVP8 manifest";
+      no such file exists.
+- [ ] **The join snapshot** (MVP11): an admitted client still receives no filtered `ExportSnapshot`,
+      so client Lua cannot resolve `ReplicatedStorage.RemoteX` by reference.
+- [ ] **Wiring the gateway to the wire** (MVP12): `SendIntent`/`IntentReceived` on the bridge, the
+      dirty set published as deltas each step, and the client applying them. Every rule is built and
+      gated; this is the plumbing between them.
+- [ ] **A two-process over-the-wire run** (N11.3–N11.6). Mirror's host mode did not deliver
+      client→server inside the batch-mode test runner, so the bridge's rules are gated against its
+      receive paths directly and **no claim is made that bytes cross a real socket**.
+- [ ] **MVP2 criterion 14** (budget kill within a frame slice) and **criterion 12** (one JSON
+      encoder) — see the audit; both need a decision, not just a test.
 
 **Modularity proved by removal, not by argument**: with `Assets/Mirror` taken out of the project the
 tree compiles with **0 errors**, `CoreAI.Net.Mirror.dll` is not built at all, and EditMode runs
 **3588 / 0 failed** — exactly the Mirror-present total minus that package's own 19 gates. The Lua
 layer, mods and host need nothing from the transport.
-
-- [x] **MVP8 — complete (7 slices).** Value objects + `leaderstats`; `CollectionService`;
-      `Players`/`Player` completion; `TweenService` on scaled time; `Raycast`/`Gravity`/
-      `Touched`+`TouchEnded` with the first Mods PlayMode folder and a `FixedUpdate` pump;
-      `Humanoid` + CoreAI's own `UnityRbxCharacterMotor`; Tier-B corpus (10 gameplay idioms) with the
-      ≥60 % unmodified gate over Tier-A + Tier-B.
-- [x] Two plan decisions that blocked slice 8.6 are made and recorded in
-      `dev-docs/MVP25_BUILD_PLAN_2026-09-04.md` §F.4: CoreAI ships its own minimal character motor
-      (a framework package cannot depend on NeoxiderTools, and only an own motor's numbers can be
-      asserted); passive regeneration is a script, not a class feature, exactly as the mirror
-      describes it.
-- [x] **MVP11 core.** `IActorAdmissionProvider` (no anonymous fallback, and CoreAI ships no
-      implementation — a test enforces that); `CoreAiMirrorAuthenticator` deciding before the
-      connection is authenticated; `MirrorNetworkBridge` whose envelope carries no actor id at all;
-      `CoreAiMirrorSessionHost` (admit → bind → create actor, and the reverse on a drop);
-      `IRbxActorIdentitySource` so `Player.UserId` is the admitted one rather than a session counter;
-      `RbxBridgeRuntimeTopology` and the server clock offset; the shared `RbxNetworkRateLimiter`;
-      `INetworkBridge` v2; the packaging-boundary fitness test.
-- [x] **MVP12 core.** `WriteGrantLedger` (the host grants a client write access by scope, action set
-      and expiry; the host itself is deliberately not in the ledger); `ClientWritePolicy` with
-      exactly two values and a test that `Open` does not exist; `MutationIntent` carrying no identity
-      field of any kind; `IReplicationFilter` + `ReplicationDirtySet`; `IntentGateway` running the
-      ordered checks with a negative twin for each.
-
-### Left on MVP2.5 (named, not hidden)
-
-- [ ] **The join snapshot** (MVP11): an admitted client still receives no filtered `ExportSnapshot`,
-      so client Lua cannot yet resolve `ReplicatedStorage.RemoteX` by reference.
-- [ ] **Wiring the gateway to the wire** (MVP12): `SendIntent`/`IntentReceived` on the bridge, the
-      dirty set published as deltas each step, and the client applying them. Every RULE is built and
-      gated; this is the plumbing between them.
-- [ ] **A two-process over-the-wire run** (N11.3–N11.6). Mirror's host mode did not deliver
-      client→server inside the batch-mode test runner, so the bridge's rules are gated against its
-      receive paths directly and **no claim is made that bytes cross a real socket**. That claim
-      needs a real host and client.
 
 ## MVP2.5 persistence release — status 2026-09-02
 

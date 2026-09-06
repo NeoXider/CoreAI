@@ -102,6 +102,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             public bool IsStudio => false;
 
             public bool IsRunning => true;
+
+            public bool RendersFrames => true;
         }
 
         private static LuaCsModStack BuildStack(LuaCsRbxApiBindings roblox, MemoryStore store)

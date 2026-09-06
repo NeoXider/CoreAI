@@ -704,6 +704,15 @@ namespace CoreAI.Ai.LuaCs
                     case "PlayerRemoving":
                         value = LuaCsRbxDatatypeBindings.Wrap(players.PlayerRemoving, context);
                         return true;
+                    case "CharacterAutoLoads":
+                        value = new LuaValue(players.CharacterAutoLoads);
+                        return true;
+                    case "RespawnTime":
+                        value = new LuaValue(players.RespawnTime);
+                        return true;
+                    case "MaxPlayers":
+                        value = new LuaValue((double)players.MaxPlayers);
+                        return true;
                 }
             }
 
@@ -731,10 +740,12 @@ namespace CoreAI.Ai.LuaCs
                         return Ok(LuaCsRbxDatatypeBindings.Wrap(humanoid.MoveDirection), out value);
                     case "RootPart":
                         return Ok(context.WrapInstance(humanoid.RootPart), out value);
-                    // WHY Jump reads false rather than raising: the mirror's Jump is a write-only
-                    // request in practice, and a script that reads it back is asking "am I jumping",
-                    // which GetState answers honestly.
-                    case "Jump": return Ok(false, out value);
+                    // WHY Jump reads the state rather than a stored flag: the mirror's Jump is a
+                    // request on write, and on read it answers "am I jumping" — which is exactly
+                    // the state machine's answer. A constant false would make a legitimate
+                    // `if humanoid.Jump then` branch dead code.
+                    case "Jump":
+                        return Ok(humanoid.GetState() == RbxHumanoidState.Jumping, out value);
                     case "Died":
                         return Ok(LuaCsRbxDatatypeBindings.Wrap(humanoid.Died, context), out value);
                     case "HealthChanged":
@@ -839,6 +850,29 @@ namespace CoreAI.Ai.LuaCs
         private static bool TryWriteNetworkMember(LuaCsRbxModContext context,
             RbxInstance instance, string member, LuaState state, LuaValue value)
         {
+            if (instance is RbxPlayers playersTarget)
+            {
+                switch (member)
+                {
+                    case "CharacterAutoLoads":
+                        context.RequireWorldEditForWrite(instance, "CharacterAutoLoads");
+                        // Lua truthiness, matching how Anchored/CanCollide are written.
+                        playersTarget.CharacterAutoLoads = value.ToBoolean();
+                        return true;
+                    case "RespawnTime":
+                        context.RequireWorldEditForWrite(instance, "RespawnTime");
+                        playersTarget.RespawnTime = ReadRespawnTime(value);
+                        return true;
+                    case "MaxPlayers":
+                        // WHY refused rather than silently ignored: the mirror tags MaxPlayers
+                        // ReadOnly, and a script that "sets" a capacity the host owns would carry
+                        // on believing it changed something.
+                        throw RbxError.BadArgument(
+                            "Players.MaxPlayers is read-only",
+                            "the host owns the capacity; MaxPlayers cannot be set from a mod");
+                }
+            }
+
             if (member == "Gravity" && instance.IsA("Workspace"))
             {
                 context.RequireWorldEditForWrite(instance, "Gravity");
@@ -2086,6 +2120,9 @@ namespace CoreAI.Ai.LuaCs
                         orientation.Z * MathF.PI / 180f);
                     sink.SetCFrame(id,
                         RbxCFrame.FromPosition(orientationProperties.Position) * orientationCFrame);
+                    // A rotation is a scripted move like any other: it can spin a part into an
+                    // overlap, and that overlap is not a collision.
+                    context.Bindings.WorldPhysics.NoteTeleport(id);
                     context.RecordMutation(self);
                     return true;
                 case "Rotation":
@@ -2098,6 +2135,7 @@ namespace CoreAI.Ai.LuaCs
                         rotation.Z * MathF.PI / 180f);
                     sink.SetCFrame(id,
                         RbxCFrame.FromPosition(rotationProperties.Position) * rotationCFrame);
+                    context.Bindings.WorldPhysics.NoteTeleport(id);
                     context.RecordMutation(self);
                     return true;
                 case "Color":
@@ -2298,8 +2336,9 @@ namespace CoreAI.Ai.LuaCs
 
         // ---- RunService (per-frame game-loop signals over the host Step pump) ----------------
 
-        /// <summary>RunService members: the Heartbeat/Stepped/RenderStepped signals. Reads are open
-        /// at the Read tier — connecting a per-frame handler observes the loop, it mutates nothing.</summary>
+        /// <summary>RunService members: the modern PreAnimation/PreSimulation/PostSimulation/PreRender
+        /// signals and their legacy aliases Stepped/Heartbeat/RenderStepped. Reads are open at the
+        /// Read tier — connecting a per-frame handler observes the loop, it mutates nothing.</summary>
         private static bool TryReadRunService(LuaCsRbxModContext context, RbxInstance self, string key,
             out LuaValue value)
         {
@@ -2319,6 +2358,18 @@ namespace CoreAI.Ai.LuaCs
                     return true;
                 case "RenderStepped":
                     value = LuaCsRbxDatatypeBindings.Wrap(runService.RenderStepped, context);
+                    return true;
+                case "PreAnimation":
+                    value = LuaCsRbxDatatypeBindings.Wrap(runService.PreAnimation, context);
+                    return true;
+                case "PreSimulation":
+                    value = LuaCsRbxDatatypeBindings.Wrap(runService.PreSimulation, context);
+                    return true;
+                case "PostSimulation":
+                    value = LuaCsRbxDatatypeBindings.Wrap(runService.PostSimulation, context);
+                    return true;
+                case "PreRender":
+                    value = LuaCsRbxDatatypeBindings.Wrap(runService.PreRender, context);
                     return true;
                 default:
                     value = LuaValue.Nil;
@@ -2893,6 +2944,28 @@ namespace CoreAI.Ai.LuaCs
             throw RbxError.BadArgument(
                 what + " expects a number",
                 "pass a number, got " + Describe(value));
+        }
+
+        /// <summary>
+        /// Reads Players.RespawnTime, refusing anything a respawn timer could not honour.
+        /// </summary>
+        /// <remarks>
+        /// WHY negative and non-finite are refused rather than clamped: a respawn delay is a
+        /// duration, and a script that computed one wrongly gets told so at the assignment instead
+        /// of discovering it when nothing ever respawns.
+        /// </remarks>
+        private static double ReadRespawnTime(LuaValue value)
+        {
+            double seconds = ReadDoubleValue(value, "Players.RespawnTime assignment");
+            if (seconds < 0d || double.IsNaN(seconds) || double.IsInfinity(seconds))
+            {
+                throw RbxError.BadArgument(
+                    "Players.RespawnTime expects a finite number of seconds >= 0",
+                    "pass a duration in seconds, got " + seconds.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            return seconds;
         }
 
         private static string ReadStringValue(LuaValue value, string what)

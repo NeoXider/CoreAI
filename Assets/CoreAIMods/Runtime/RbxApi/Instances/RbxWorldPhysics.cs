@@ -64,7 +64,8 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private readonly InstanceRegistry _registry;
         private readonly Dictionary<(InstanceId, InstanceId), bool> _openContacts = new();
-        private readonly HashSet<InstanceId> _teleportedThisStep = new();
+        private readonly HashSet<InstanceId> _pendingTeleports = new();
+        private readonly HashSet<InstanceId> _activeTeleports = new();
         private IRbxPhysicsPort _port = NullRbxPhysicsPort.Instance;
         private double _gravity = DefaultGravity;
 
@@ -72,6 +73,7 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxWorldPhysics(InstanceRegistry registry)
         {
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+            _registry.Unregistered += OnInstanceUnregistered;
         }
 
         /// <summary>Mirror <c>Workspace.Gravity</c>, in studs per second squared.</summary>
@@ -114,7 +116,8 @@ namespace CoreAI.Mods.Rbx.Instances
             _port.ContactBegan -= OnContactBegan;
             _port.ContactEnded -= OnContactEnded;
             _openContacts.Clear();
-            _teleportedThisStep.Clear();
+            _pendingTeleports.Clear();
+            _activeTeleports.Clear();
             _port = replacement;
             _port.ContactBegan += OnContactBegan;
             _port.ContactEnded += OnContactEnded;
@@ -123,7 +126,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>
         /// Records that an instance was moved by assignment rather than by simulation, so contacts
-        /// it produces in this physics step are not reported.
+        /// it produces in the next physics step are not reported.
         /// </summary>
         /// <remarks>
         /// WHY: the mirror says Touched "will not fire if the CFrame property was changed such that
@@ -132,23 +135,41 @@ namespace CoreAI.Mods.Rbx.Instances
         /// cannot tell the two apart on its own: teleporting a body into a wall generates exactly
         /// the same contact as falling into it, so the distinction has to be recorded where the move
         /// is made.
+        /// <para>
+        /// WHY a pending set rather than writing straight into the active one: Lua ticks (and so
+        /// every <c>CFrame</c>/<c>Position</c> assignment) run from <c>Update()</c>, which happens
+        /// AFTER the fixed step whose contacts it should still see, but BEFORE the fixed step that
+        /// follows. A note taken here therefore has to survive until <see cref="BeginPhysicsStep"/>
+        /// promotes it, not be visible to contacts already in flight this frame.
+        /// </para>
         /// </remarks>
         public void NoteTeleport(InstanceId id)
         {
-            _teleportedThisStep.Add(id);
+            _pendingTeleports.Add(id);
         }
 
         /// <summary>
-        /// Opens a physics step: forgets the previous step's teleports.
+        /// Opens a physics step: promotes teleports noted since the last step into the set that
+        /// suppresses this step's contacts, and forgets the ones from before that.
         /// </summary>
         /// <remarks>
-        /// WHY at the start: Unity runs FixedUpdate callbacks, then the simulation, then the contact
-        /// callbacks, so a teleport recorded during this step's script phase is still known when the
-        /// contacts it caused arrive, and is forgotten before the next step's honest collisions.
+        /// WHY promote here and not just clear: Unity's order for one fixed step is
+        /// FixedUpdate (this call) -&gt; simulate -&gt; contact callbacks -&gt; Update. A teleport noted
+        /// during the PREVIOUS Update is exactly the one that must suppress the contacts THIS
+        /// simulate is about to produce, and must stop suppressing anything once this step's
+        /// contacts have been delivered. Clearing <c>_pendingTeleports</c> unconditionally at the
+        /// start of every step (the previous, dead-code version of this method) discarded that note
+        /// before the simulate step it was meant for ever ran.
         /// </remarks>
         public void BeginPhysicsStep()
         {
-            _teleportedThisStep.Clear();
+            _activeTeleports.Clear();
+            foreach (InstanceId id in _pendingTeleports)
+            {
+                _activeTeleports.Add(id);
+            }
+
+            _pendingTeleports.Clear();
         }
 
         /// <summary>Detaches the adapter and stops relaying contacts.</summary>
@@ -223,7 +244,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
-            if (_teleportedThisStep.Contains(first) || _teleportedThisStep.Contains(second))
+            if (_activeTeleports.Contains(first) || _activeTeleports.Contains(second))
             {
                 // WHY the pair is not tracked either: a withheld Touched followed later by a
                 // TouchEnded would be a contact that ended without ever having begun, which is
@@ -280,6 +301,45 @@ namespace CoreAI.Mods.Rbx.Instances
         private static (InstanceId, InstanceId) ContactKey(InstanceId first, InstanceId second)
         {
             return first.Value <= second.Value ? (first, second) : (second, first);
+        }
+
+        /// <summary>
+        /// Drops any open contact pair that named a just-destroyed instance.
+        /// </summary>
+        /// <remarks>
+        /// WHY: <see cref="_openContacts"/> was previously pruned only on <see cref="OnContactEnded"/>
+        /// or <see cref="AttachPort"/>. A part destroyed while still touching another leaves its pair
+        /// key resident forever — harmless by itself, but <see cref="InstanceId"/> values are reused
+        /// once the id space wraps, and a resident stale key would then dedupe away the next genuine
+        /// Touched for the reused id instead of firing it.
+        /// </remarks>
+        private void OnInstanceUnregistered(InstanceRecord record)
+        {
+            if (_openContacts.Count == 0)
+            {
+                return;
+            }
+
+            InstanceId destroyedId = record.Id;
+            List<(InstanceId, InstanceId)> stale = null;
+            foreach ((InstanceId, InstanceId) key in _openContacts.Keys)
+            {
+                if (key.Item1.Value == destroyedId.Value || key.Item2.Value == destroyedId.Value)
+                {
+                    stale ??= new List<(InstanceId, InstanceId)>();
+                    stale.Add(key);
+                }
+            }
+
+            if (stale == null)
+            {
+                return;
+            }
+
+            for (int index = 0; index < stale.Count; index++)
+            {
+                _openContacts.Remove(stale[index]);
+            }
         }
 
         private static void RequireFinite(RbxVector3 vector, string argumentName)

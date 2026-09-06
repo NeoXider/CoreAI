@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Mods.Rbx.Instances;
 using Microsoft.Extensions.AI;
 using NUnit.Framework;
 
@@ -126,7 +127,12 @@ namespace CoreAI.Tests.EditMode
                 "Position", "Size", "CFrame", "Transparency", "Anchored", "CanCollide",
                 "SetAttribute", "GetAttribute", "AddTag", "HasTag",
                 "BAD_ARGUMENT", "INSTANCE_DESTROYED", "PARENT_LOCKED", "NOT_IMPLEMENTED",
-                "1 stud = 0.28 m", "LookVector is -Z"
+                "1 stud = 0.28 m", "LookVector is -Z",
+                "TweenService:Create", "TweenInfo.new", "CollectionService:AddTag", "GetTagged",
+                "Humanoid", "TakeDamage", "MoveToFinished", "workspace:Raycast", "RaycastParams",
+                "15,000 studs", "workspace.Gravity", "196.2", "BasePart.Touched", "TouchEnded",
+                "IntValue", "NumberValue", "StringValue", "BoolValue", "ObjectValue",
+                "Vector3Value", "CFrameValue", "Color3Value", "leaderstats"
             };
             foreach (string api in required)
             {
@@ -136,6 +142,60 @@ namespace CoreAI.Tests.EditMode
             // Worked examples and the not-implemented catalog are the reason this skill exists.
             StringAssert.Contains("```lua", text);
             StringAssert.Contains("Not implemented", text);
+        }
+
+        /// <summary>
+        /// Ratchet: the skill must never describe a service the ServiceCatalog actually ships as
+        /// unimplemented. This reads the shipped/stubbed truth LIVE off a fresh
+        /// <see cref="ServiceCatalog.CreateMvp2"/> rather than pinning a second hard-coded list of
+        /// which services are stubs, so a future rung that ships a service (switching its
+        /// registration from <c>RegisterStub</c> to <c>RegisterTreeBacked</c>/<c>Register</c>)
+        /// without updating the prose fails HERE: the service name would still appear in the skill
+        /// text tagged with an (MVPnn) rung marker even though it no longer resolves to a stub.
+        /// A tree-backed registration with nothing attached yet raises BAD_ARGUMENT from
+        /// <see cref="ServiceCatalog.GetService"/> instead of returning an
+        /// <see cref="RbxStubService"/> — that failure IS the "this is real, not a stub" signal at
+        /// the bare-catalog level the skill's "catalog's 13 registrations" line describes.
+        /// </summary>
+        [Test]
+        public void RbxApiInstructions_NeverDescribeAShippedServiceAsUnimplemented()
+        {
+            string text = BuiltInRbxApiSkillText.Instructions;
+
+            string[] knownServiceNames =
+            {
+                "RunService", "HttpService", "Players", "Debris", "TweenService",
+                "CollectionService", "DataStoreService", "UserInputService",
+                "ContextActionService", "SoundService", "AIService", "PathfindingService",
+                "MarketplaceService"
+            };
+
+            foreach (string serviceName in knownServiceNames)
+            {
+                ServiceCatalog catalog = ServiceCatalog.CreateMvp2();
+                bool isStub;
+                try
+                {
+                    isStub = catalog.GetService(serviceName) is RbxStubService;
+                }
+                catch (RbxError)
+                {
+                    // Tree-backed and not yet attached to a DataModel: a real (non-stub)
+                    // registration, per ServiceCatalog.GetService's own contract.
+                    isStub = false;
+                }
+
+                if (isStub)
+                {
+                    continue;
+                }
+
+                // A shipped (non-stub) service must not be tagged with a roadmap rung marker,
+                // which is how this skill spells "still unimplemented" (e.g. `TweenService` (MVP8)).
+                StringAssert.DoesNotContain($"`{serviceName}` (MVP", text,
+                    $"'{serviceName}' now ships (a real ServiceCatalog registration, not a stub) " +
+                    "but the skill still marks it with an (MVPnn) unimplemented rung");
+            }
         }
 
         [Test]

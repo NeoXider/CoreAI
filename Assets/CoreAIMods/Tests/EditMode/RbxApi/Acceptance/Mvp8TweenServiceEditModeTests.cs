@@ -156,6 +156,51 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void Tween_DestroyedTarget_NeverFiresCompleted_SurvivingTwinDoes()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("doomed-a");
+            harness.Stack.Runtime.LoadMod(actor, "doomed-setup", @"
+                local doomed = Instance.new('Part')
+                doomed.Name = 'DoomedPart'
+                doomed.Transparency = 0
+                doomed.Parent = workspace
+                local surviving = Instance.new('Part')
+                surviving.Name = 'SurvivingPart'
+                surviving.Transparency = 0
+                surviving.Parent = workspace
+                local ts = game:GetService('TweenService')
+                local twDoomed = ts:Create(doomed, TweenInfo.new(1), {Transparency = 1})
+                local countDoomed = 0
+                twDoomed.Completed:Connect(function() countDoomed = countDoomed + 1 end)
+                twDoomed:Play()
+                local twSurviving = ts:Create(surviving, TweenInfo.new(1), {Transparency = 1})
+                local countSurviving = 0
+                twSurviving.Completed:Connect(function() countSurviving = countSurviving + 1 end)
+                twSurviving:Play()
+                task.wait(0.5)
+                doomed:Destroy()
+                task.wait(0.5)
+                task.wait(0.1)
+                store_set('count_doomed', tostring(countDoomed))
+                store_set('count_surviving', tostring(countSurviving))",
+                persistToStore: false);
+
+            // WHY: this is P8.4's negative twin — a destroyed tween target must never report
+            // completion and must never throw, but the surviving twin proves the harness would
+            // still catch a build where Completed never fires at all.
+            harness.Bindings.Scheduler.Advance(0.5);
+            harness.Bindings.Scheduler.Advance(0.5);
+            harness.Bindings.Scheduler.Advance(0.1);
+
+            Assert.AreEqual("0", harness.Store.Get("doomed-setup", "count_doomed"),
+                "Completed never fires for a destroyed tween target");
+            Assert.AreEqual("1", harness.Store.Get("doomed-setup", "count_surviving"),
+                "the surviving twin still fires Completed exactly once");
+            Assert.AreEqual(0, harness.Bindings.TweenService.ActiveTweenCount);
+        }
+
+        [Test]
         public void Tween_Cancel_FiresCompletedWithCancelled_AndFreezesValue()
         {
             using ProductionHarness harness = new ProductionHarness();

@@ -31,8 +31,9 @@ hooks_every, store_set, coreai_world_*, etc. (read_skill('Lua Modding') covers t
 covers only the Rbx surface.
 
 Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part properties
-6. Input (UserInputService)  7. Camera  8. Attributes & tags  9. Errors  10. Not implemented
-11. Examples
+6. Physics (Raycast, Gravity, Touched)  7. Humanoid  8. Value objects
+9. Input (UserInputService)  10. Camera  11. Attributes & tags  12. Errors  13. Not implemented
+14. Examples
 
 ## 1. Space & rules
 
@@ -84,9 +85,12 @@ Globals: `Vector3`, `Vector2`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Random`, `E
 ## 3. Enum
 
 `Enum.<Type>.<Item>` e.g. `Enum.Material.Wood`, `Enum.PartType.Ball`, `Enum.KeyCode.Space`,
-`Enum.UserInputType.Keyboard`, `Enum.NormalId.Top`, `Enum.Axis.X`, `Enum.RotationOrder.XYZ`.
+`Enum.UserInputType.Keyboard`, `Enum.NormalId.Top`, `Enum.Axis.X`, `Enum.RotationOrder.XYZ`,
+`Enum.RaycastFilterType.Exclude`, `Enum.HumanoidStateType.Running`, `Enum.EasingStyle.Quad`,
+`Enum.EasingDirection.Out`, `Enum.PlaybackState.Playing`.
 Registered enum types: Material, PartType, CameraType, NormalId, Axis, RotationOrder, KeyCode,
-UserInputType, UserInputState, MouseBehavior. Any other `Enum.X` raises NOT_IMPLEMENTED. Item
+UserInputType, UserInputState, MouseBehavior, RaycastFilterType, HumanoidStateType, EasingStyle,
+EasingDirection, PlaybackState. Any other `Enum.X` raises NOT_IMPLEMENTED. Item
 fields: Name, Value, EnumType. `Enum.GetEnums()`; `Enum.Material:GetEnumItems()`. Items compare
 by identity (`==`). Names AND numeric values are the real Roblox ones (e.g. KeyCode gamepad
 buttons live at 1000+).
@@ -108,14 +112,40 @@ buttons live at 1000+).
   `cd.MaxActivationDistance` studs (default 32). Only the part under the cursor fires.
 - `game:GetService(""Name"")` — the standard runtime has live tree-backed `Workspace`, `Lighting`,
   `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `Players`,
-  `HttpService`, `UserInputService`, `RunService`, `MaterialService`, and `Debris` services.
-- The catalog's 13 registrations are: `HttpService`, `Players`, and `Debris` (tree-backed),
-  `RunService` (MVP2; fallback), `UserInputService` (MVP10; fallback), `TweenService` (MVP8),
-  `CollectionService` (MVP8), `DataStoreService` (MVP9),
-  `ContextActionService` (MVP10), `SoundService` (MVP15), `AIService`
+  `HttpService`, `UserInputService`, `RunService`, `MaterialService`, `Debris`, `TweenService`, and
+  `CollectionService` services.
+- The catalog's 13 registrations are: `HttpService`, `Players`, `Debris`, `TweenService`, and
+  `CollectionService` (tree-backed — real implementations, the same tier as `HttpService`, NOT
+  placeholders), `RunService` (MVP2; fallback), `UserInputService` (MVP10; fallback),
+  `DataStoreService` (MVP9), `ContextActionService` (MVP10), `SoundService` (MVP15), `AIService`
   (`a future MVP (reserved)`), `PathfindingService` (`no planned MVP (not planned)`), and
   `MarketplaceService` (`no planned MVP (not planned)`). The standard runtime replaces the
   two fallbacks with its live implementations.
+- `TweenService:Create(instance, TweenInfo.new(time[, easingStyle, easingDirection, repeatCount,
+  reverses, delayTime]), {Property = goal, ...})` returns a Tween. `:Play()`, `:Pause()`,
+  `:Cancel()`; `.PlaybackState` (Enum.PlaybackState); `.Completed` fires once with the ending
+  state (`Completed` or `Cancelled` — Pause fires nothing, and a second `:Play()` on the same
+  part cancels whatever tween was already running there first). Tweens advance on
+  `RunService.Heartbeat` SCALED time, so a paused world (delta 0) freezes them exactly.
+  `TweenService:GetValue(alpha, easingStyle, easingDirection)` -> eased number clamped to [0,1].
+  `TweenInfo.new()` defaults: time 1, `Enum.EasingStyle.Quad`, `Enum.EasingDirection.Out`,
+  repeatCount 0, reverses false, delayTime 0. `SmoothDamp` is a loud stub (NOT_IMPLEMENTED) —
+  interpolate manually with `GetValue` over `Heartbeat` instead.
+    local tw = game:GetService(""TweenService""):Create(part,
+        TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Transparency = 1})
+    tw.Completed:Connect(function(state) print(state) end)  -- Enum.PlaybackState.Completed
+    tw:Play()
+- `CollectionService:AddTag(inst, tag)`, `:RemoveTag`, `:HasTag`, `:GetTags(inst)`,
+  `:GetTagged(tag)`, `:GetAllTags()`, plus per-tag `:GetInstanceAddedSignal(tag)` /
+  `:GetInstanceRemovedSignal(tag)` and the placewide `.TagAdded` / `.TagRemoved` (fire once per
+  FIRST instance ever to carry a tag, not once per instance — use the per-tag signals for that).
+  Entering/leaving the tree fires Added/Removed exactly like Add/RemoveTag would. Duplicate
+  `AddTag` is a no-op; `RemoveTag` of a tag never held is a no-op. `GetCollection`, `ItemAdded`,
+  `ItemRemoved` are Deprecated in the mirror and are simply absent here (unknown-member, not a
+  NOT_IMPLEMENTED stub).
+    local cs = game:GetService(""CollectionService"")
+    cs:AddTag(part, ""kill"")
+    cs:GetInstanceAddedSignal(""kill""):Connect(function(inst) inst:Destroy() end)
 - `GetService` for a registered but unimplemented service resolves a placeholder. The first
   member read, write, or method lookup raises NOT_IMPLEMENTED and names that service's rung.
   Top-of-file acquisition therefore does not abort setup; do not add defensive workarounds
@@ -177,7 +207,77 @@ quietly, so a wrong value is visible at once.
 material's own albedo; assigning `Color` modulates that albedo from then on. `Neon` is the one
 material with no palette of its own — its emission IS `Part.Color`, so set `Color` to pick the glow.
 
-## 6. Input (UserInputService)
+## 6. Physics (Raycast, Gravity, Touched)
+
+- `workspace:Raycast(origin, direction[, raycastParams])` -> RaycastResult or nil. `direction`'s
+  length is capped at 15,000 studs inclusive; longer, zero-length, or non-finite origin/direction
+  raise BAD_ARGUMENT before the engine is ever queried. RaycastResult fields: `Instance` (the hit
+  BasePart), `Position`, `Normal` (both Vector3), `Material` (Enum.Material), `Distance` (number);
+  the result is immutable userdata, read-only.
+- `RaycastParams.new()` — fields `FilterType` (Enum.RaycastFilterType: only `Exclude` (default)
+  and `Include` exist), `FilterDescendantsInstances` (an array of instances), `IgnoreWater` (bool,
+  accepted but a no-op), `CollisionGroup` (string; only `""Default""` is accepted — anything else
+  raises BAD_ARGUMENT), `BruteForceAllSlow` (bool, accepted but a no-op). Method
+  `:AddToFilter(list)` appends to `FilterDescendantsInstances`. `Exclude` skips the listed
+  instances and their descendants; `Include` makes ONLY the listed subtree eligible; an empty list
+  means everything is eligible.
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {player.Character}
+    local hit = workspace:Raycast(origin, direction * 100, params)
+    if hit then print(hit.Instance.Name, hit.Distance) end
+- `workspace.Gravity` (number, read+write, studs/s^2) — default `196.2`. Must be finite; NaN or
+  infinity raise BAD_ARGUMENT and leave the old value in place. Writing needs WorldEdit.
+- `BasePart.Touched` / `.TouchEnded` (RbxScriptSignal, fire `(otherPart)`) — created on first read.
+  A contact fires Touched on BOTH parts of the pair (`partA.Touched` reports `partB` and vice
+  versa); several engine contact points for one collision collapse to a single fire. Setting a
+  part's `CFrame` (a teleport) so it ends up overlapping another part does NOT fire Touched for
+  that physics step — the suppression lasts exactly one step, then contacts fire normally again.
+
+## 7. Humanoid
+
+- `Instance.new(""Humanoid"")` — health, movement parameters and a small state machine; NOT a full
+  character rig (no body parts, no auto-created Model/Script). Defaults: `MaxHealth` 100, `Health`
+  100, `WalkSpeed` 16, `JumpPower` 50, `JumpHeight` 7.2, `UseJumpPower` true.
+- `Health` is clamped to `[0, MaxHealth]`; lowering `MaxHealth` clamps `Health` down with it.
+  `:TakeDamage(amount)` lowers Health (a negative amount heals). Reaching 0 fires `Died` exactly
+  once; a dead Humanoid does not resurrect from further Health writes and stays `IsDead == true`.
+  There is NO passive health regeneration in the class itself (the mirror puts that in a Script
+  inserted into the character; nothing heals a CoreAI Humanoid on its own).
+- `:MoveTo(position)` walks toward `position` and fires `MoveToFinished(reached: bool)` — `true`
+  on arrival, `false` after an 8-SCALED-second timeout (a paused world never times it out).
+  `:MoveTo(position, part)` (follow a moving part) is refused with BAD_ARGUMENT, not silently
+  downgraded. Setting `Jump = true` requests one jump (fires `Jumping(true)`) using
+  `JumpPower`/`JumpHeight`/`UseJumpPower`; jumping and moving both do nothing while dead.
+- `:GetState()` -> an `Enum.HumanoidStateType` item; `StateChanged(old, new)` fires on transitions
+  the character motor reports (e.g. Freefall/Landed/Running from ground contact). `:ChangeState`
+  may only force `Enum.HumanoidStateType.Jumping` — any other state raises NOT_IMPLEMENTED. `Sit`
+  is a loud stub (`h.Sit = true` raises NOT_IMPLEMENTED).
+- `MoveDirection` (read-only Vector3) mirrors the character controller's current motion.
+
+## 8. Value objects
+
+- `IntValue`, `NumberValue`, `StringValue`, `BoolValue`, `ObjectValue`, `Vector3Value`,
+  `CFrameValue`, `Color3Value` — all `Instance.new`-creatable; every one `IsA(""ValueBase"")`, the
+  common abstract ancestor (`ValueBase` itself is NOT creatable).
+- One member, `.Value` (read+write, type-checked): a wrong-type write raises BAD_ARGUMENT and
+  leaves the old value AND revision untouched. Defaults: Int/Number 0, String """", Bool false,
+  Object nil, Vector3/CFrame their datatype's zero/identity, Color3 black (CoreAI's own default;
+  the mirror does not specify one). `.Changed` fires once with the new value on every real change
+  (assigning the SAME value again does not fire).
+- `IntValue.Value` rounds to the nearest integer, halfway away from zero (`2.5`->3, `-2.5`->-3).
+  `StringValue.Value` is capped at 200,000 characters; longer raises ""String too long"".
+  `ObjectValue.Value` accepts an Instance or nil.
+- `leaderstats` is CONVENTION, not an API: a `Folder` named exactly `""leaderstats""` parented
+  under a `Player`, holding named Value children — the standard way to show per-player stats.
+    local coins = Instance.new(""IntValue"")
+    coins.Name = ""Coins""; coins.Value = 0
+    local stats = Instance.new(""Folder"")
+    stats.Name = ""leaderstats""
+    coins.Parent = stats
+    stats.Parent = player
+
+## 9. Input (UserInputService)
 
 Roblox-1:1 keyboard/mouse. Get it with `game:GetService(""UserInputService"")`, or use the global
 `UserInputService` (same instance). Reading input is Read-tier — no WorldEdit needed.
@@ -192,7 +292,7 @@ Roblox-1:1 keyboard/mouse. Get it with `game:GetService(""UserInputService"")`, 
 - `MouseBehavior` (read+write, Enum.MouseBehavior: Default/LockCenter/LockCurrentPosition) is
   stored today; hardware cursor lock lands later.
 
-## 7. Camera
+## 10. Camera
 
 `workspace.CurrentCamera` is the Camera instance. Members: `CFrame` (read+write — the camera
 pose in studs, over the engine camera rig), `CameraType` (Enum.CameraType, read+write),
@@ -224,14 +324,14 @@ Anchor gameplay parts (`part.Anchored = true`) unless you WANT physics: an unanc
 under gravity and a dense stack shoves itself apart. Drive the whole game from one
 `RunService.Heartbeat:Connect(function(dt) ... end)` and scale motion by `dt`.
 
-## 8. Attributes & tags
+## 11. Attributes & tags
 
 - `inst:SetAttribute(name, value)` / `inst:GetAttribute(name)` / `inst:GetAttributes()`.
   Value must be string, boolean, number, Vector3, Vector2, Color3, or UDim — anything else is
   rejected with BAD_ARGUMENT. SetAttribute needs WorldEdit.
 - `inst:AddTag(t)` / `RemoveTag(t)` / `HasTag(t)` / `GetTags()`. Add/Remove need WorldEdit.
 
-## 9. Errors
+## 12. Errors
 
 Every failure is a Lua error whose message is `CODE: message | fix: suggestion` (no
 `[mod:...]` prefix). Catch with `pcall`. Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE,
@@ -242,7 +342,7 @@ destroyed — a scene load, a domain reload during play, or leaving play mode �
 part in that world with it. Nothing you spawn can materialize until the mods are reloaded against
 the current world, so report it instead of retrying the spawn.
 
-## 10. Not implemented (raise NOT_IMPLEMENTED — do not use)
+## 13. Not implemented (raise NOT_IMPLEMENTED — do not use)
 
 - `Instance.fromExisting` (use `Clone`).
 - Part `Shape`, `Material`, `Orientation` and `Rotation` ALL work now — see section 5. So does
@@ -251,7 +351,7 @@ the current world, so report it instead of retrying the spawn.
   `-=/*=//=/%=/^=/..=`), `continue`, `` `str{}` `` interpolation, if-then-else expressions, and
   type annotations/casts all work. Plain Lua 5.2 is unaffected.
 
-## 11. Examples
+## 14. Examples
 
 Build a colored tower of parts:
 ```lua

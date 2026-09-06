@@ -79,6 +79,31 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         public IRbxPlayerProfileProvider ProfileProvider { get; set; } =
             SyntheticPlayerProfileProvider.Instance;
 
+        /// <summary>Mirror default for <c>Players.RespawnTime</c>: 5 seconds.</summary>
+        public const double DefaultRespawnTime = 5d;
+
+        /// <summary>
+        /// Whether characters respawn on their own, per the mirror's default of true. Nothing
+        /// respawns yet — the character pipeline is a later slice — but the flag is real state a
+        /// script can set and read back, which is what a respawn-timer script does first.
+        /// </summary>
+        public bool CharacterAutoLoads { get; set; } = true;
+
+        /// <summary>Seconds before a character respawns when <see cref="CharacterAutoLoads"/> is
+        /// true. Mirror default 5.0; negative values are refused by the write path.</summary>
+        public double RespawnTime { get; set; } = DefaultRespawnTime;
+
+        /// <summary>
+        /// How many players this host admits. Read-only to Lua, as in the mirror.
+        /// </summary>
+        /// <remarks>
+        /// WHY it defaults to 1 rather than to a Roblox place default: the mirror documents no
+        /// default at all, and a CoreAI world with no transport installed genuinely admits exactly
+        /// one actor. Inventing a Roblox-looking number would be a value a script could branch on
+        /// that nothing in CoreAI honours; 1 is the true capacity until a host sets its own.
+        /// </remarks>
+        public int MaxPlayers { get; set; } = 1;
+
         /// <summary>Returns the real Player registered for an actor, creating it once if needed.</summary>
         public RbxPlayer EnsureActor(InstanceRegistry registry, string actorId)
         {

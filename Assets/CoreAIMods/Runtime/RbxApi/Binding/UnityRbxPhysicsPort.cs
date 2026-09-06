@@ -20,9 +20,18 @@ namespace CoreAI.Mods.Rbx.Binding
     /// </remarks>
     public sealed class UnityRbxPhysicsPort : IRbxPhysicsPort, IDisposable
     {
+        /// <summary>Upper bound on how far <see cref="TryRaycast"/> grows its scratch buffer.</summary>
+        /// <remarks>
+        /// WHY a cap at all: without one, a pathological scene (or a script deliberately spamming
+        /// colliders along a ray) could grow the buffer without limit every raycast. 4096 colliders
+        /// on one ray is already an unreasonable scene; beyond the cap the sweep uses whatever the
+        /// buffer holds rather than growing forever.
+        /// </remarks>
+        private const int MaxHitScratchLength = 4096;
+
         private readonly InstanceGameObjectBinder _binder;
         private readonly List<Rigidbody> _bodyScratch = new();
-        private readonly RaycastHit[] _hitScratch = new RaycastHit[32];
+        private RaycastHit[] _hitScratch = new RaycastHit[32];
         private Vector3 _gravityMetres =
             new(0f, -RbxSpace.AccelerationToUnity((float)RbxWorldPhysics.DefaultGravity), 0f);
 
@@ -88,10 +97,25 @@ namespace CoreAI.Mods.Rbx.Binding
 
             // WHY every hit and not Physics.Raycast: the nearest collider may belong to a part the
             // filter excludes, and stopping at it would report a miss through a wall the script
-            // deliberately ignored. The scratch buffer keeps the sweep allocation-free.
+            // deliberately ignored. The scratch buffer keeps the common case allocation-free.
+            //
+            // WHY grow-and-retry rather than Physics.RaycastAll: RaycastNonAlloc returning a count
+            // equal to the buffer's length means the buffer was full and Unity may have dropped hits
+            // arbitrarily, including ones nearer than what made it in — the leftover 32-slot buffer
+            // silently mis-reported misses in any host scene with more than 32 colliders along a
+            // ray. RaycastAll allocates a new array on every call regardless of hit count; growing
+            // _hitScratch instead pays that allocation once per session, the first time a ray meets
+            // an unusually crowded line, and every raycast after that stays allocation-free again.
             int count = Physics.RaycastNonAlloc(
                 origin, direction / distance, _hitScratch, distance,
                 ~0, QueryTriggerInteraction.Ignore);
+            while (count == _hitScratch.Length && _hitScratch.Length < MaxHitScratchLength)
+            {
+                _hitScratch = new RaycastHit[Math.Min(_hitScratch.Length * 2, MaxHitScratchLength)];
+                count = Physics.RaycastNonAlloc(
+                    origin, direction / distance, _hitScratch, distance,
+                    ~0, QueryTriggerInteraction.Ignore);
+            }
 
             bool found = false;
             float bestDistance = float.MaxValue;

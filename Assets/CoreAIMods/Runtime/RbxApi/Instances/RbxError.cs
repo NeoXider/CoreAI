@@ -60,6 +60,7 @@ namespace CoreAI.Mods.Rbx.Instances
             ModId = modId;
             Script = script;
             Line = line;
+            Datatypes.RbxStubRaiseObserver.Note(ToWireName(code));
         }
 
         /// <summary>Returns a copy of this error with mod/script/line context attached.</summary>

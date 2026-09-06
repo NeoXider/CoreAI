@@ -1,5 +1,6 @@
 #if UNITY_EDITOR
 using System.IO;
+using CoreAI.Composition;
 using CoreAI.Mods.Rbx.Binding;
 using TMPro;
 using UnityEditor;
@@ -7,6 +8,8 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using VContainer.Unity;
+using Object = UnityEngine.Object;
 
 namespace CoreAI.Demos.OnlineAuthority.Editor
 {
@@ -15,15 +18,24 @@ namespace CoreAI.Demos.OnlineAuthority.Editor
     /// change that and change it back.
     /// </summary>
     /// <remarks>
-    /// WHY this scene carries no LLM composition, unlike the other demos: the thing on show is who
-    /// may write to a world, and adding a chat backend would make the demo depend on a model being
-    /// installed to answer a question about permissions. It needs a world and the ledger, nothing
-    /// more.
+    /// WHY the scene still carries the standard composition even though the demo asks nothing of a
+    /// language model: every other published demo does, the shared settings default to the Offline
+    /// backend so nothing here needs a model installed, and a scene without the container is a
+    /// scene where backend-state discovery and every container-provided service behave differently
+    /// from the other sixteen. It was built without one at first, and the demo-scene smoke caught
+    /// exactly that.
     /// </remarks>
     public static class OnlineAuthorityDemoSceneBuilder
     {
         private const string ScenePath =
             "Assets/CoreAI.Demos/OnlineAuthority/OnlineAuthorityDemo.unity";
+
+        private const string SettingsPath = "Assets/Resources/CoreAISettings.asset";
+        private const string LogSettingsPath = "Assets/CoreAiUnity/Settings/GameLogSettings.asset";
+        private const string PromptsPath = "Assets/CoreAiUnity/Settings/AgentPromptsManifest.asset";
+        private const string RoutingPath = "Assets/CoreAiUnity/Settings/LlmRoutingManifest.asset";
+        private const string PrefabRegistryPath =
+            "Assets/CoreAiUnity/Settings/CoreAiPrefabRegistry.asset";
 
         /// <summary>Creates or replaces the ready-to-play demo scene in one editor action.</summary>
         [MenuItem("CoreAI/Demos/Build Online Authority Demo", priority = 31)]
@@ -38,6 +50,7 @@ namespace CoreAI.Demos.OnlineAuthority.Editor
             CreateStage();
             RbxWorldHost worldHost = new GameObject("CoreAI_RbxWorld")
                 .AddComponent<RbxWorldHost>();
+            CreateComposition(worldHost);
             CreateUi(worldHost);
 
             EditorSceneManager.MarkSceneDirty(scene);
@@ -50,6 +63,60 @@ namespace CoreAI.Demos.OnlineAuthority.Editor
 
             AssetDatabase.Refresh();
             Debug.Log("[OnlineAuthorityDemo] Built " + ScenePath + ".");
+        }
+
+        /// <summary>
+        /// Builds the standard CoreAI container: the core scope, the Lua/world module and the
+        /// actor-scoped mods scope bound to this scene's world host.
+        /// </summary>
+        private static void CreateComposition(RbxWorldHost worldHost)
+        {
+            // WHY the scope object starts inactive: VContainer builds the container in Awake, and a
+            // scope that wakes before its serialized references are assigned resolves a half-wired
+            // graph — which surfaces later as a null service rather than as a build error.
+            GameObject coreObject = new("CoreAI Production Services");
+            coreObject.SetActive(false);
+            CoreAILifetimeScope coreScope = coreObject.AddComponent<CoreAILifetimeScope>();
+
+            SerializedObject coreSerialized = new(coreScope);
+            SetAssetReference(coreSerialized, "coreAiSettings", SettingsPath);
+            SetAssetReference(coreSerialized, "gameLogSettings", LogSettingsPath);
+            SetAssetReference(coreSerialized, "agentPromptsManifest", PromptsPath);
+            SetAssetReference(coreSerialized, "llmRoutingManifest", RoutingPath);
+
+            GameObject luaModuleObject = new("Lua and World Commands");
+            luaModuleObject.transform.SetParent(coreObject.transform, false);
+            CoreAiLuaWorldModule luaModule = luaModuleObject.AddComponent<CoreAiLuaWorldModule>();
+            SerializedObject moduleSerialized = new(luaModule);
+            SetAssetReference(moduleSerialized, "worldPrefabRegistry", PrefabRegistryPath);
+            moduleSerialized.ApplyModifiedPropertiesWithoutUndo();
+            Assign(coreSerialized, "luaWorldModule", luaModule);
+            coreSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+            GameObject modsObject = new("Actor-Scoped Mods Production Scope");
+            modsObject.transform.SetParent(coreObject.transform, false);
+            CoreAiModsLifetimeScope modsScope = modsObject.AddComponent<CoreAiModsLifetimeScope>();
+            modsScope.parentReference = ParentReference.Create<CoreAILifetimeScope>();
+            SerializedObject modsSerialized = new(modsScope);
+            Assign(modsSerialized, "robloxWorldHost", worldHost);
+            SerializedProperty storeId = modsSerialized.FindProperty("storeId");
+            if (storeId != null)
+            {
+                storeId.stringValue = "online-authority-demo";
+            }
+
+            modsSerialized.ApplyModifiedPropertiesWithoutUndo();
+
+            coreObject.SetActive(true);
+            EditorUtility.SetDirty(coreScope);
+            EditorUtility.SetDirty(luaModule);
+            EditorUtility.SetDirty(modsScope);
+        }
+
+        private static void SetAssetReference(SerializedObject serialized, string field,
+            string assetPath)
+        {
+            Assign(serialized, field, AssetDatabase.LoadMainAssetAtPath(assetPath));
         }
 
         private static void CreateStage()

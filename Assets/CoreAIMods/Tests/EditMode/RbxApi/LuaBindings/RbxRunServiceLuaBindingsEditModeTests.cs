@@ -120,7 +120,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     store_set('dt', tostring(dt))
                 end)");
 
-            // WHY: drive the same path the host uses each frame (PumpFrame → RunService.Step(dt)).
+            // WHY: drive the same path the host uses each frame — PumpFrame runs the split
+            // scheduler-phase pumps; RunService.Step is the standalone equivalent nothing calls.
             roblox.PumpFrame(0.25f);
             roblox.Scheduler.Advance(0d);
             Assert.AreEqual("1", store.Get("m", "n"));

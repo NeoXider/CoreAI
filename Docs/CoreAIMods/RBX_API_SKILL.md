@@ -66,6 +66,19 @@ Keep these in step with the runtime when the skill text is edited:
   overload.
 - `RemoteFunction` invocation is bounded to 30 scheduler seconds — a documented deviation from
   Roblox, detailed in [`RBX_API.md`](../../Assets/CoreAI/Docs/RBX_API.md).
+- `RunService` carries the modern frame events `PreAnimation`, `PreSimulation`, `PostSimulation`
+  and `PreRender` alongside the legacy `Stepped`, `Heartbeat` and `RenderStepped` aliases. The
+  legacy pair keeps its legacy signature — `Stepped(runTime, step)`, `RenderStepped(delta)` — while
+  the modern events each take the delta alone. The render pair is withheld on a process that draws
+  nothing (a dedicated server); solo and host both render.
+- `Players` exposes `CharacterAutoLoads` (default true), `RespawnTime` (default 5.0) and a
+  read-only `MaxPlayers`; assigning `MaxPlayers` from a mod is refused rather than ignored.
+- `BasePart`'s network-ownership family (`SetNetworkOwner`, `GetNetworkOwner`,
+  `SetNetworkOwnershipAuto`, `GetNetworkOwnershipAuto`, `CanSetNetworkOwnership`) is a loud stub:
+  the server simulates every part, and ownership is deferred to the replication rung.
+
+A ratchet test reads the shipped-versus-stubbed truth out of `ServiceCatalog` at test time, so a
+future rung cannot ship a service while the skill text still calls it unimplemented.
 
 The user-facing companion to this skill is
 [`Assets/CoreAI/Docs/RBX_API.md`](../../Assets/CoreAI/Docs/RBX_API.md); world saving/loading is

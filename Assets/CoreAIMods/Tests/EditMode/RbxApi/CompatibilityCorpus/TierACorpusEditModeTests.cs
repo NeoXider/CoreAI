@@ -81,6 +81,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         private SynchronizationContext _savedContext;
         private ILog _savedLog;
         private CapturingLog _capturingLog;
+        private StubHitCounter _stubHitCounter;
 
         [SetUp]
         public void SetUpHarnessEnvironment()
@@ -90,13 +91,54 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
             _capturingLog = new CapturingLog();
             Log.Instance = _capturingLog;
             SynchronizationContext.SetSynchronizationContext(null);
+            _stubHitCounter = new StubHitCounter();
         }
 
         [TearDown]
         public void RestoreHarnessEnvironment()
         {
+            _stubHitCounter.Dispose();
             Log.Instance = _savedLog;
             SynchronizationContext.SetSynchronizationContext(_savedContext);
+        }
+
+        /// <summary>
+        /// Counts every NOT_IMPLEMENTED stub raise at the point the error is BUILT, through
+        /// <see cref="RbxStubRaiseObserver"/>.
+        /// </summary>
+        /// <remarks>
+        /// WHY the raise site and not the log: nothing in the runtime logs when a loud stub is
+        /// raised — a stub is a plain <c>throw</c> — so a fixture that wraps the call in
+        /// <c>pcall</c> swallows the error, emits nothing, and reads as a clean pass. The corpus's
+        /// central claim ("this fixture ran unmodified against real API, not around a stub") was
+        /// therefore unproven.
+        /// <para>
+        /// WHY not <c>AppDomain.FirstChanceException</c>: that is the framework answer, and it was
+        /// tried first. Unity's Mono exposes the event but never raises it, so the counter reported
+        /// zero for a raise that definitely happened — measured on a full EditMode run, not assumed.
+        /// </para>
+        /// </remarks>
+        private sealed class StubHitCounter : IDisposable
+        {
+            public int Count { get; private set; }
+
+            public StubHitCounter()
+            {
+                RbxStubRaiseObserver.Raised += OnRaised;
+            }
+
+            private void OnRaised(string code)
+            {
+                if (code == "NOT_IMPLEMENTED")
+                {
+                    Count++;
+                }
+            }
+
+            public void Dispose()
+            {
+                RbxStubRaiseObserver.Raised -= OnRaised;
+            }
         }
 
         private sealed class MemoryStore : ILuaModStore
@@ -299,6 +341,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         {
             public Exception Exception;
             public object Completion;
+            public int StubHitCount;
             public readonly List<string> Failures = new();
 
             public bool Failed => Exception != null || Failures.Count > 0;
@@ -399,6 +442,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         {
             RuntimeHarness harness = new(_capturingLog);
             ExecutionOutcome outcome = new();
+            int stubHitsBefore = _stubHitCounter.Count;
             try
             {
                 string source = LoadFixtureSource(fixture);
@@ -413,6 +457,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                 outcome.Exception = exception;
             }
 
+            outcome.StubHitCount = _stubHitCounter.Count - stubHitsBefore;
             outcome.Failures.AddRange(harness.ThreadFaults);
             outcome.Failures.AddRange(_capturingLog.Errors);
             outcome.Failures.AddRange(harness.Logger.Errors);
@@ -422,6 +467,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                 {
                     outcome.Failures.Add(message);
                 }
+            }
+
+            if (outcome.StubHitCount > 0)
+            {
+                outcome.Failures.Add(fixture.Id + " raised " + outcome.StubHitCount
+                    + " NOT_IMPLEMENTED stub hit(s), observed via FirstChanceException "
+                    + "(a pcall may have swallowed it from Lua's perspective)");
             }
 
             return outcome;
@@ -613,6 +665,33 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                 StringAssert.Contains(expected, detail,
                     "corrupted " + id + " must fail for its own reason, not an unrelated one");
             }
+        }
+
+        [Test]
+        public void Negative_PcallWrappedStubHit_CountsAsFailing()
+        {
+            // The proof for the gate above (P8.5's negative twin): a fixture that wraps a stubbed
+            // call in pcall produces no logger line and completes cleanly from Lua's perspective,
+            // so the old text-scrape check would have reported a clean pass. The raise-site
+            // counter must still classify this as failing.
+            RuntimeHarness harness = new(_capturingLog);
+            int stubHitsBefore = _stubHitCounter.Count;
+
+            harness.Stack.Runtime.LoadMod("hostile-pcall-stub", @"
+                local ok, err = pcall(function() game:BindToClose(function() end) end)
+                workspace:SetAttribute('" + ResultAttribute + @"', 'hostile-pcall-stub')",
+                LuaCapabilities.All, persistToStore: false);
+            harness.RbxApi.Scheduler.Advance(0d);
+
+            int stubHits = _stubHitCounter.Count - stubHitsBefore;
+            Assert.Greater(stubHits, 0,
+                "a pcall-wrapped NOT_IMPLEMENTED raise must still be counted at the throw site");
+
+            RbxInstance workspace = harness.RbxApi.Game.FindFirstChildOfClass("Workspace");
+            object completion = workspace?.GetAttribute(ResultAttribute);
+            Assert.AreEqual("hostile-pcall-stub", completion,
+                "the fixture reaches its completion marker cleanly, which is exactly why a "
+                + "log-scrape or completion-only check would have wrongly passed it");
         }
 
         private static void Count(TierAFixtureSpec fixture, ref int unmodified,
