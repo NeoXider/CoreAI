@@ -27,6 +27,12 @@ player on device?"**
 - **Commits**: NEVER add `Co-Authored-By` or any AI-attribution trailers.
 - **TODO.md** is the living priority tracker; every fix wave updates it.
 - Every bug fix ships with a regression test; every feature ships with tests and docs.
+- **Language: English for all prose.** READMEs, `Docs/`, package docs, `TODO.md`/`PLAN.md` additions,
+  code comments (`///` XML docs, `// WHY:`), test names/messages/assert texts, and log strings are
+  written in English. Keep other languages only inside quoted upstream text. Legacy non-English prose
+  is migrated gradually when a file is touched for a real change — never as a standalone rewrite wave.
+  Mirror rule: RedoSchool is a Russian-language project; when copying text or patterns between the
+  repos, translate the language layer.
 
 ## Verification while the Unity editor holds the project lock
 

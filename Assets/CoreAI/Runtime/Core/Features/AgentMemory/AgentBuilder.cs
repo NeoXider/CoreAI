@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Logging;
 
@@ -309,11 +310,12 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Adds the built-in <c>wait</c> tool so the model can pause briefly before continuing
-        /// the same tool-calling turn.
+        /// the same tool-calling turn. Pass the host async marshaler on Unity WebGL, where
+        /// <see cref="Task.Delay(int, CancellationToken)"/> never fires; portable hosts use the default.
         /// </summary>
-        public AgentBuilder WithWaitTool(double maxSeconds = WaitLlmTool.DefaultMaxSeconds)
+        public AgentBuilder WithWaitTool(double maxSeconds = WaitLlmTool.DefaultMaxSeconds, ILlmAsyncMarshaler asyncMarshaler = null)
         {
-            _tools.Add(new WaitLlmTool(maxSeconds));
+            _tools.Add(new WaitLlmTool(maxSeconds, asyncMarshaler));
             return this;
         }
 

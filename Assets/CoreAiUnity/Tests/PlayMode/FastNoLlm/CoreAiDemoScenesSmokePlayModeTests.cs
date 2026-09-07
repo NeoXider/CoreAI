@@ -67,6 +67,7 @@ namespace CoreAI.Tests.PlayMode
             EditorUtility.ClearDirty(_sharedSettings);
 
             List<string> unexpectedErrors = new();
+            List<string> skippedModelScenes = new();
             string currentScene = "(startup)";
             Application.LogCallback capture = (condition, stackTrace, type) =>
             {
@@ -80,6 +81,19 @@ namespace CoreAI.Tests.PlayMode
                 // must not make this deterministic scene-wiring smoke depend on local saved content.
                 if (condition.Contains("Rehydrate of mod"))
                 {
+                    return;
+                }
+
+                // Model-backed demos boot a local LLM service from the committed settings asset.
+                // Without a model file on disk that boot logs errors that prove nothing about the
+                // scene wiring this smoke owns; those scenes are reported as skipped, not failed.
+                if (IsMissingModelNoise(condition) && IsModelBackedScene(currentScene))
+                {
+                    if (!skippedModelScenes.Contains(currentScene))
+                    {
+                        skippedModelScenes.Add(currentScene);
+                    }
+
                     return;
                 }
 
@@ -140,6 +154,34 @@ namespace CoreAI.Tests.PlayMode
             CleanupLogCapture();
             Assert.IsEmpty(unexpectedErrors,
                 "Published demos emitted unexpected errors:\n" + string.Join("\n\n", unexpectedErrors));
+            if (skippedModelScenes.Count > 0)
+            {
+                Debug.LogWarning(
+                    "[CoreAI] Demo smoke skipped model-backed scenes with no local model file: " +
+                    string.Join(", ", skippedModelScenes));
+            }
+        }
+
+        /// <summary>
+        /// Model-boot noise that proves nothing about scene wiring: emitted when the committed
+        /// settings asset points at a local GGUF file that is absent on this machine.
+        /// </summary>
+        private static bool IsMissingModelNoise(string condition)
+        {
+            return condition.Contains("No model file provided!")
+                || condition.Contains("LLM failed to start");
+        }
+
+        /// <summary>
+        /// Scenes whose composition boots a local model service. Kept next to the frozen list on
+        /// purpose: a new model-backed demo added to the matrix must opt into the skip here too,
+        /// otherwise its missing-model noise fails the smoke instead of skipping it.
+        /// </summary>
+        private static bool IsModelBackedScene(string scenePath)
+        {
+            return !string.IsNullOrEmpty(scenePath) &&
+                (scenePath.Contains("/QwenDemo/QwenGenieDemo.unity") ||
+                 scenePath.Contains("/QwenDemo/QwenSpellcraftDemo.unity"));
         }
 
         private static void AssertMaterialSupported(

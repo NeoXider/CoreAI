@@ -233,6 +233,32 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
+#if COREAI_LLM
+        /// <summary>
+        /// Двойник пробы канала инструментов: решение фабрики выполняется без сети, а готовность
+        /// по-прежнему идёт настоящим запросом на фейковый сервер.
+        /// </summary>
+        private sealed class ScriptedToolChannelProbe : ILlmToolChannelProbe
+        {
+            public int Calls { get; private set; }
+            public LlmToolChannelProbeRequest LastRequest { get; private set; }
+
+            public Task<LlmToolChannelProbeResult> ProbeAsync(
+                LlmToolChannelProbeRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                Calls++;
+                LastRequest = request;
+                return Task.FromResult(new LlmToolChannelProbeResult
+                {
+                    Outcome = LlmToolChannelProbeOutcome.Accepted,
+                    StatusCode = 200,
+                    Detail = "HTTP 200"
+                });
+            }
+        }
+#endif
+
         private sealed class NamedFactory : ILlmEndpointClientFactory
         {
             public Task<LlmEndpointClientActivation> ActivateAsync(
@@ -423,8 +449,17 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator HttpFactory_ModelsProbeRequiresSuccessAndForwardsCredential()
         {
             CoreAISettingsAsset settings = CreateSettings();
+#if COREAI_LLM
+            // WHY: готовность идёт настоящим запросом на фейк, а решение о канале — двойником:
+            // настоящий UnityWebRequestToolChannelProbe слал бы POST /chat/completions, который
+            // одноразовый LocalHttpServer не обслуживает, и активация висела бы до таймаута пробы (15с).
+            ScriptedToolChannelProbe toolProbe = new();
+            LlmEndpointClientFactory factory = new(
+                settings, GameLoggerUnscopedFallback.Instance, null, null, toolProbe);
+#else
             LlmEndpointClientFactory factory = new(
                 settings, GameLoggerUnscopedFallback.Instance);
+#endif
             using (LocalHttpServer server = new(200, "Bearer session-key"))
             {
                 Task<LlmEndpointClientActivation> success = factory.ActivateAsync(
@@ -434,6 +469,12 @@ namespace CoreAI.Tests.PlayMode
 
                 Assert.IsFalse(success.IsFaulted, success.Exception?.ToString());
                 Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, success.Result.Mode);
+#if COREAI_LLM
+                Assert.AreEqual(1, toolProbe.Calls);
+                Assert.AreEqual($"http://127.0.0.1:{server.Port}/v1", toolProbe.LastRequest.BaseUrl);
+                Assert.AreEqual("test", toolProbe.LastRequest.Model);
+                Assert.AreEqual("session-key", toolProbe.LastRequest.ApiKey);
+#endif
             }
 
             foreach (int status in new[] { 401, 403, 500 })
@@ -448,14 +489,28 @@ namespace CoreAI.Tests.PlayMode
 
                 Assert.IsTrue(failed.IsFaulted, $"HTTP {status} must fail readiness.");
             }
+#if COREAI_LLM
+            Assert.AreEqual(1, toolProbe.Calls, "Failed readiness must not consume the capability probe.");
+#endif
         }
 
         [UnityTest]
         public IEnumerator HttpFactory_FallsBackToCompletionsWhenModelsRouteIsUnavailable()
         {
             CoreAISettingsAsset settings = CreateSettings();
+#if COREAI_LLM
+            // WHY: тот же двойник, что и выше: FallbackHttpServer обслуживает только readiness-маршруты
+            // (GET /models, POST /completions), а проба канала шла бы третьим запросом в никуда.
+            ScriptedToolChannelProbe toolProbe = new();
+            LlmEndpointClientFactory factory = new(
+                settings, GameLoggerUnscopedFallback.Instance, null, null, toolProbe);
+#else
             LlmEndpointClientFactory factory = new(
                 settings, GameLoggerUnscopedFallback.Instance);
+#endif
+#if COREAI_LLM
+            int expectedProbeCalls = 0;
+#endif
 
             foreach (int modelsStatus in new[] { 404, 405 })
             {
@@ -470,6 +525,13 @@ namespace CoreAI.Tests.PlayMode
 
                 Assert.IsFalse(success.IsFaulted, success.Exception?.ToString());
                 Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, success.Result.Mode);
+#if COREAI_LLM
+                expectedProbeCalls++;
+                Assert.AreEqual(expectedProbeCalls, toolProbe.Calls);
+                Assert.AreEqual($"http://127.0.0.1:{server.Port}/v1", toolProbe.LastRequest.BaseUrl);
+                Assert.AreEqual("test", toolProbe.LastRequest.Model);
+                Assert.AreEqual("session-key", toolProbe.LastRequest.ApiKey);
+#endif
             }
         }
 

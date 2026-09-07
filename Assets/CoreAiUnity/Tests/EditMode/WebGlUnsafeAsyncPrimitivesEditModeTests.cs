@@ -106,8 +106,6 @@ namespace CoreAI.Tests.EditMode
                 "ILlmAsyncMarshaler.DelayAsync (DefaultAsyncMarshaler ставит Unity-инсталлер); оставшиеся " +
                 "Task.Delay — переносимый fallback внутри HostDelayAsync и ветка #else (не WebGL); " +
                 "MeaiOpenAiChatClientWebGlDelayEditModeTests закрепляет это",
-            [("Assets/CoreAI/Runtime/Core/Features/Llm/WaitLlmTool.cs", Primitive.TaskDelay)] =
-                "унаследовано: инструмент «подожди», смысл которого и есть задержка",
             [("Assets/CoreAI/Runtime/Core/Features/Orchestration/QueuedAiOrchestrator.cs", Primitive.PoolContinuations)] =
                 "ПРОВЕРЕНО и безвредно (2026-08-20): это сигнал AsyncChunkQueue, введённый как раз " +
                 "ПОЧИНКА WebGL взамен SemaphoreSlim.WaitAsync. Флаг здесь ничего не ломает, потому что " +
@@ -154,10 +152,6 @@ namespace CoreAI.Tests.EditMode
             [("Assets/CoreAI/Runtime/Core/Features/AgentMemory/MemoryTool.cs", Primitive.ConfigureAwaitFalse)] =
                 "унаследовано (найдено при добавлении примитива в 7.3.1): тело инструмента того же класса, что execute_lua до 7.3.1 — в G11-сценах инструмент не подключён; исправляется по образцу LuaTool (снять ConfigureAwait(false) + MeaiToolTaskBridge.Publish на MEAI-границе) отдельной задачей",
             [("Assets/CoreAI/Runtime/Core/Features/Config/GameConfigTool.cs", Primitive.ConfigureAwaitFalse)] =
-                "унаследовано (найдено при добавлении примитива в 7.3.1): тело инструмента того же класса, что execute_lua до 7.3.1 — в G11-сценах инструмент не подключён; исправляется по образцу LuaTool (снять ConfigureAwait(false) + MeaiToolTaskBridge.Publish на MEAI-границе) отдельной задачей",
-            [("Assets/CoreAI/Runtime/Core/Features/Llm/CallSkillToolLlmTool.cs", Primitive.ConfigureAwaitFalse)] =
-                "унаследовано (найдено при добавлении примитива в 7.3.1): тело инструмента того же класса, что execute_lua до 7.3.1 — в G11-сценах инструмент не подключён; исправляется по образцу LuaTool (снять ConfigureAwait(false) + MeaiToolTaskBridge.Publish на MEAI-границе) отдельной задачей",
-            [("Assets/CoreAI/Runtime/Core/Features/Llm/WaitLlmTool.cs", Primitive.ConfigureAwaitFalse)] =
                 "унаследовано (найдено при добавлении примитива в 7.3.1): тело инструмента того же класса, что execute_lua до 7.3.1 — в G11-сценах инструмент не подключён; исправляется по образцу LuaTool (снять ConfigureAwait(false) + MeaiToolTaskBridge.Publish на MEAI-границе) отдельной задачей",
             [("Assets/CoreAI/Runtime/Core/Features/Llm/CircuitBreakerLlmClientDecorator.cs", Primitive.ConfigureAwaitFalse)] =
                 "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
