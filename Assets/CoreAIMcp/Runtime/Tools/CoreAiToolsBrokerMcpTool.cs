@@ -55,6 +55,7 @@ namespace CoreAI.Mcp.Tools
         /// <inheritdoc />
         public async Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string action = McpArguments.String(arguments, "action", null)?.Trim().ToLowerInvariant();
             switch (action)
             {
@@ -136,11 +137,15 @@ namespace CoreAI.Mcp.Tools
         private async Task<McpToolResult> CallAsync(
             string toolName, string argumentsJson, CancellationToken cancellationToken)
         {
-            IMcpTool tool = string.IsNullOrWhiteSpace(toolName) ? null : _find?.Invoke(toolName.Trim());
-            if (tool == null)
-            {
-                return UnknownTool(toolName);
-            }
+            CallBinding binding = PrepareCall(toolName, argumentsJson, _find, _listDynamic?.Invoke());
+            return await binding.InvokeAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        internal static CallBinding PrepareCall(string toolName, string argumentsJson,
+            Func<string, IMcpTool> find, IReadOnlyList<IMcpTool> dynamicTools)
+        {
+            if (string.Equals(toolName?.Trim(), ToolName, StringComparison.Ordinal))
+                return new CallBinding(null, null, null, McpToolResult.Failure("The discovery broker cannot call itself."));
 
             // WHY: a Native tool called through the broker still runs. The model generalises by
             // analogy and wraps known tools in the broker; refusing is pedantry that costs a turn.
@@ -154,21 +159,41 @@ namespace CoreAI.Mcp.Tools
             }
             catch (JsonException ex)
             {
-                return McpToolResult.Failure(JsonConvert.SerializeObject(new
+                return new CallBinding(null, null, null, McpToolResult.Failure(JsonConvert.SerializeObject(new
                 {
                     success = false,
                     error = $"arguments_json is not a JSON object: {ex.Message}.",
-                }));
+                })));
             }
 
-            McpToolResult result = await tool.InvokeAsync(parsed, cancellationToken).ConfigureAwait(false);
-            return result ?? McpToolResult.Failure($"Tool '{tool.Name}' returned no result.");
+            string name = toolName?.Trim();
+            IMcpTool tool = string.IsNullOrWhiteSpace(name) ? null : find?.Invoke(name);
+            return new CallBinding(name, tool, parsed, tool == null ? UnknownTool(name, dynamicTools) : null);
         }
 
-        private McpToolResult UnknownTool(string toolName)
+        internal sealed class CallBinding
+        {
+            private readonly JObject _arguments;
+            private readonly McpToolResult _failure;
+            internal CallBinding(string name, IMcpTool tool, JObject arguments, McpToolResult failure)
+            { TargetName = name; Tool = tool; _arguments = arguments; _failure = failure; }
+            internal string TargetName { get; }
+            internal IMcpTool Tool { get; }
+            internal async Task<McpToolResult> InvokeAsync(CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (_failure != null) return _failure;
+                McpToolResult result = await Tool.InvokeAsync(_arguments, cancellationToken).ConfigureAwait(false);
+                return result ?? McpToolResult.Failure($"Tool '{Tool.Name}' returned no result.");
+            }
+        }
+
+        private McpToolResult UnknownTool(string toolName) => UnknownTool(toolName, _listDynamic?.Invoke());
+
+        private static McpToolResult UnknownTool(string toolName, IReadOnlyList<IMcpTool> dynamicTools)
         {
             List<string> available = new();
-            foreach (IMcpTool tool in _listDynamic?.Invoke() ?? Array.Empty<IMcpTool>())
+            foreach (IMcpTool tool in dynamicTools ?? Array.Empty<IMcpTool>())
             {
                 if (tool != null && !string.IsNullOrEmpty(tool.Name))
                 {

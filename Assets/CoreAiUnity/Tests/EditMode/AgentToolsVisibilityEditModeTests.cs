@@ -97,10 +97,10 @@ namespace CoreAI.Tests.EditMode
             try
             {
                 settings.ConfigureHttpApi("http://offline.invalid/v1", "", "test");
-                MeaiLlmClient client = MeaiLlmClient.CreateHttp(
-                    settings,
+                MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings,
                     GameLoggerUnscopedFallback.Instance,
-                    new TestMemoryStore());
+                    supportsNativeToolCalling: true,
+                    memoryStore: new TestMemoryStore());
                 List<ILlmTool> tools = new()
                 {
                     new MemoryLlmTool(),

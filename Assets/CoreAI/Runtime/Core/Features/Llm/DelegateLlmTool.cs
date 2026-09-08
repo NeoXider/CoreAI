@@ -1,7 +1,4 @@
 using System;
-using System.Diagnostics;
-using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -34,12 +31,22 @@ namespace CoreAI.Ai
 
         public bool AllowDuplicates { get; set; }
 
+        /// <summary>Completes the agent turn after a successful invocation.</summary>
+        public bool EndsTurn { get; set; }
+
         /// <summary>
         /// Settable counterpart of <see cref="ILlmTool.ToolTimeoutMsOverride"/>, so a delegate-registered
         /// tool that waits for a human (a confirmation prompt, an inline card) can get its own budget
         /// without first being rewritten as a class. <c>null</c> keeps the global setting.
         /// </summary>
         public int? ToolTimeoutMsOverride { get; set; }
+
+        /// <summary>
+        /// Настраиваемый аналог <see cref="ILlmTool.IsMutating"/>: инструмент-делегат с побочным эффектом
+        /// (спавн, запись в сохранение, вызов сервера) объявляет его здесь и попадает в цепочку
+        /// сериализации мутаций, не превращаясь ради этого в класс. По умолчанию <c>false</c> — read-only.
+        /// </summary>
+        public bool IsMutating { get; set; }
 
         public Delegate ActionDelegate { get; }
 
@@ -49,7 +56,7 @@ namespace CoreAI.Ai
             Description = description ?? throw new ArgumentNullException(nameof(description));
             ActionDelegate = action ?? throw new ArgumentNullException(nameof(action));
             _function = CreateAIFunction(ActionDelegate, Name, Description);
-            _parametersSchema = HasModelVisibleParameters(ActionDelegate) ? _function.JsonSchema.ToString() : "{}";
+            _parametersSchema = HasModelVisibleParameters(_function) ? _function.JsonSchema.ToString() : "{}";
         }
 
         /// <summary>
@@ -78,134 +85,56 @@ namespace CoreAI.Ai
                 Description = description
             };
             AIFunction function = AIFunctionFactory.Create(action, options);
-            return new DelegateExceptionBoundaryAIFunction(function, action.Method);
+            return new DelegateExceptionBoundaryAIFunction(function);
         }
 
+        /// <summary>
+        /// Граница исключений тела делегата: всё, что вылетает из вызова (кроме отмены), становится
+        /// результатом <c>"Error: …"</c>, который модель может прочитать и исправить, а не сбоем запроса.
+        /// <para>
+        /// ПОЧЕМУ здесь нет классификации «привязка аргументов vs тело»: раньше она искала метод
+        /// делегата в стеке исключения, а под IL2CPP/WebGL фреймы срываются — тогда исключение ИЗ ТЕЛА
+        /// выглядело как сбой привязки, политика записывала «инструмент не вызывался», и декораторы
+        /// ретрая/фолбэка повторяли ход, который уже изменил мир. Теперь различение делает
+        /// <c>ToolExecutionPolicy</c> консервативно на границе вызова; всё, что
+        /// добралось сюда, по определению уже «вызов», и единственно безопасная трактовка — «тело
+        /// исполнялось». Поэтому граница одна для синхронных и асинхронных сбоев и не зависит от формы стека.
+        /// </para>
+        /// </summary>
         private sealed class DelegateExceptionBoundaryAIFunction : DelegatingAIFunction
         {
-            private readonly MethodInfo _delegateMethod;
-            private readonly Type _delegateStateMachineType;
-
-            public DelegateExceptionBoundaryAIFunction(AIFunction innerFunction, MethodInfo delegateMethod)
+            public DelegateExceptionBoundaryAIFunction(AIFunction innerFunction)
                 : base(innerFunction)
             {
-                _delegateMethod = delegateMethod;
-                _delegateStateMachineType =
-                    delegateMethod.GetCustomAttribute<AsyncStateMachineAttribute>()?.StateMachineType;
             }
 
             protected override async ValueTask<object> InvokeCoreAsync(
                 AIFunctionArguments arguments,
                 CancellationToken cancellationToken)
             {
-                ValueTask<object> invocation;
                 try
                 {
-                    invocation = InnerFunction.InvokeAsync(arguments, cancellationToken);
+                    return await InnerFunction.InvokeAsync(arguments, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
                     throw;
                 }
-                catch (Exception ex) when (ShouldConvertSynchronousFault(ex))
+                catch (Exception ex)
                 {
-                    return $"Error: {ex.Message}";
+                    // WHY: The model needs the underlying failure, not a binder's exception wrapper.
+                    Exception cause = ex.GetBaseException();
+                    return $"Error: {cause.Message}";
                 }
-
-                bool completedSynchronously = invocation.IsCompleted;
-                try
-                {
-                    return await invocation;
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex) when (!completedSynchronously)
-                {
-                    // WHY: MEAI argument binding is synchronous — a fault observed only after the inner
-                    // ValueTask went async can only come from the delegate body (or its returned Task),
-                    // regardless of stack shape. This covers non-async lambdas returning a Task whose
-                    // frames never include the lambda itself.
-                    return $"Error: {(TryGetDelegateException(ex, out Exception inner) ? inner : ex).Message}";
-                }
-                catch (Exception ex) when (ShouldConvertSynchronousFault(ex))
-                {
-                    return $"Error: {(TryGetDelegateException(ex, out Exception inner) ? inner : ex).Message}";
-                }
-            }
-
-            /// <summary>
-            /// Classifies a synchronously-observed fault: delegate-body exceptions become error results,
-            /// MEAI argument-coercion failures escape so the policy traces them as never-invoked.
-            /// A conversion-shaped exception with no delegate frame is treated as coercion (the residual
-            /// ambiguity: a synchronous body throw whose frames were stripped, e.g. under IL2CPP).
-            /// </summary>
-            private bool ShouldConvertSynchronousFault(Exception ex)
-            {
-                if (TryGetDelegateException(ex, out _))
-                {
-                    return true;
-                }
-
-#if !COREAI_LLM
-                // WHY: ToolExecutionPolicy is stripped with the LLM module and no policy traces
-                // coercion failures; converting every synchronous fault to an error result is the
-                // safe standalone behavior.
-                return true;
-#else
-                return !Infrastructure.Llm.ToolExecutionPolicy.LooksLikeArgumentConversionError(ex);
-#endif
-            }
-
-            private bool TryGetDelegateException(Exception exception, out Exception delegateException)
-            {
-                for (Exception current = exception; current != null; current = current.InnerException)
-                {
-                    if (OriginatedInDelegate(current))
-                    {
-                        delegateException = current;
-                        return true;
-                    }
-                }
-
-                delegateException = null;
-                return false;
-            }
-
-            private bool OriginatedInDelegate(Exception exception)
-            {
-                StackFrame[] frames = new StackTrace(exception, false).GetFrames();
-                if (frames == null)
-                {
-                    return false;
-                }
-
-                foreach (StackFrame frame in frames)
-                {
-                    MethodBase method = frame.GetMethod();
-                    if (method == _delegateMethod ||
-                        (_delegateStateMachineType != null && method?.DeclaringType == _delegateStateMachineType))
-                    {
-                        return true;
-                    }
-                }
-
-                return false;
             }
         }
 
-        private static bool HasModelVisibleParameters(Delegate action)
+        private static bool HasModelVisibleParameters(AIFunction function)
         {
-            foreach (ParameterInfo parameter in action.Method.GetParameters())
-            {
-                if (parameter.ParameterType != typeof(CancellationToken))
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return function.JsonSchema.TryGetProperty("properties", out System.Text.Json.JsonElement properties) &&
+                   properties.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                   properties.EnumerateObject().MoveNext();
         }
+
     }
 }

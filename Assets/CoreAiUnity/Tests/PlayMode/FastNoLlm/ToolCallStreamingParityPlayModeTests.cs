@@ -58,7 +58,7 @@ namespace CoreAI.Tests.PlayMode
                     },
                     new[] { "Saved." });
 
-                MeaiLlmClient client = new(inner, spy, settings, memStore);
+                MeaiLlmClient client = new(inner, spy, settings, supportsNativeToolCalling: false, memoryStore: memStore);
                 LlmCompletionRequest request = new()
                 {
                     AgentRoleId = "Teacher",
@@ -130,7 +130,7 @@ namespace CoreAI.Tests.PlayMode
                         : MakeTextResponse("Saved.");
                 });
 
-                MeaiLlmClient client = new(inner, spy, settings, memStore);
+                MeaiLlmClient client = new(inner, spy, settings, supportsNativeToolCalling: false, memoryStore: memStore);
                 LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
                 {
                     AgentRoleId = "Teacher",
@@ -180,7 +180,7 @@ namespace CoreAI.Tests.PlayMode
                     new[] { "Recovered." });
 
                 FlakyManageModsTool tool = new();
-                MeaiLlmClient client = new(inner, spy, settings, new InMemoryMemoryStore());
+                MeaiLlmClient client = new(inner, spy, settings, supportsNativeToolCalling: false, memoryStore: new InMemoryMemoryStore());
                 LlmCompletionRequest request = new()
                 {
                     AgentRoleId = BuiltInAgentRoleIds.Programmer,

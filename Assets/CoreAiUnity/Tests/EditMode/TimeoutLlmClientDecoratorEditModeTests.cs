@@ -19,6 +19,116 @@ namespace CoreAI.Tests.EditMode
     public sealed class TimeoutLlmClientDecoratorEditModeTests
     {
         [Test]
+        public async Task NonCooperativeCompletion_DeadlineReturnsBeforeInnerFinishes()
+        {
+            IgnoringCancellationClient inner = new();
+            PendingDelayMarshaler clock = new();
+            TimeoutLlmClientDecorator client = new(inner, () => 60f, clock);
+            Task<LlmCompletionResult> call = client.CompleteAsync(Req());
+            clock.ReleaseAll();
+            try
+            {
+                Assert.AreSame(call, await Task.WhenAny(call, Task.Delay(3000)),
+                    "Deadline completion must not depend on a backend observing its cancellation token.");
+                Assert.ThrowsAsync<LlmOperationTimeoutException>(async () => await call);
+                Assert.IsFalse(inner.Completion.Task.IsCompleted);
+            }
+            finally
+            {
+                inner.Completion.TrySetException(new InvalidOperationException("late backend failure"));
+            }
+        }
+
+        [Test]
+        public async Task NonCooperativeStream_DeadlineReturnsAndDefersDisposalUntilMoveCompletes()
+        {
+            IgnoringCancellationClient inner = new() { FailDisposal = true };
+            PendingDelayMarshaler clock = new();
+            TimeoutLlmClientDecorator client = new(inner, () => 60f, clock);
+            Task<List<LlmStreamChunk>> call = Drain(client.CompleteStreamingAsync(Req()));
+            clock.ReleaseAll();
+            try
+            {
+                Assert.AreSame(call, await Task.WhenAny(call, Task.Delay(3000)));
+                List<LlmStreamChunk> chunks = await call;
+                Assert.AreEqual(1, chunks.Count);
+                Assert.AreEqual(LlmErrorCode.Timeout, chunks[0].ErrorCode);
+                Assert.AreEqual(0, inner.DisposeCount, "An active MoveNext must not overlap DisposeAsync.");
+            }
+            finally
+            {
+                inner.Move.TrySetException(new InvalidOperationException("late stream failure"));
+            }
+            Assert.AreSame(inner.Disposed.Task, await Task.WhenAny(inner.Disposed.Task, Task.Delay(3000)));
+            Assert.AreEqual(1, inner.DisposeCount);
+            Assert.AreEqual(0, inner.OverlappingDisposals);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task NonCooperativeInner_CallerCancellationReturnsWithoutBecomingTimeout(bool streaming)
+        {
+            IgnoringCancellationClient inner = new();
+            PendingDelayMarshaler clock = new();
+            TimeoutLlmClientDecorator client = new(inner, () => 60f, clock);
+            using CancellationTokenSource caller = new();
+            Task call = streaming ? Drain(client.CompleteStreamingAsync(Req(), caller.Token))
+                : client.CompleteAsync(Req(), caller.Token);
+            caller.Cancel();
+            try
+            {
+                Assert.AreSame(call, await Task.WhenAny(call, Task.Delay(3000)));
+                try
+                {
+                    await call;
+                    Assert.Fail("Caller cancellation must propagate.");
+                }
+                catch (OperationCanceledException error)
+                {
+                    Assert.IsNotInstanceOf<LlmOperationTimeoutException>(error);
+                }
+            }
+            finally
+            {
+                inner.Completion.TrySetResult(new LlmCompletionResult { Ok = true });
+                inner.Move.TrySetResult(false);
+            }
+        }
+
+        private sealed class IgnoringCancellationClient : ILlmClient, IAsyncEnumerable<LlmStreamChunk>, IAsyncEnumerator<LlmStreamChunk>
+        {
+            public readonly TaskCompletionSource<LlmCompletionResult> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource<bool> Move = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource<bool> Disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            private bool _moving;
+            public int DisposeCount;
+            public int OverlappingDisposals;
+            public bool FailDisposal;
+            public LlmStreamChunk Current => new() { Text = "late" };
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default) => Completion.Task;
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default) => this;
+            public IAsyncEnumerator<LlmStreamChunk> GetAsyncEnumerator(CancellationToken cancellationToken = default) => this;
+            public ValueTask<bool> MoveNextAsync() => new(MoveAsync());
+            private async Task<bool> MoveAsync()
+            {
+                _moving = true;
+                try { return await Move.Task; }
+                finally { _moving = false; }
+            }
+            public ValueTask DisposeAsync()
+            {
+                DisposeCount++;
+                if (_moving) { OverlappingDisposals++; }
+                Disposed.TrySetResult(true);
+                return FailDisposal
+                    ? new ValueTask(Task.FromException(new InvalidOperationException("late cleanup failure")))
+                    : default;
+            }
+        }
+
+        [Test]
         public async Task CompleteAsync_LibraryTimeout_ThrowsLlmOperationTimeoutException()
         {
             SlowClient inner = new() { DelayMs = 2000 };
@@ -163,6 +273,77 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, chunks[0].ExecutedToolCalls.Count);
         }
 
+        /// <summary>
+        /// Продление дедлайна на каждый чанк раньше создавало новый источник отмены, отменяло предыдущий и
+        /// запускало новое ожидание — по исключению и по нескольким аллокациям на КАЖДЫЙ токен. Теперь у
+        /// потока одно сторожевое ожидание: хост получает ровно один запрос задержки на окно, сколько бы
+        /// чанков ни пришло.
+        /// </summary>
+        [Test]
+        public async Task Streaming_ManyChunks_DoNotRearmTheHostDelayPerChunk()
+        {
+            const int chunkCount = 500;
+            ChattyClient inner = new() { ChunkCount = chunkCount };
+            PendingDelayMarshaler marshaler = new();
+            TimeoutLlmClientDecorator sut = new(inner, () => 30f, marshaler);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(chunkCount + 1, chunks.Count);
+            Assert.AreEqual(1, marshaler.DelayCallCount,
+                "Каждый чанк — отметка прогресса, а не новый таймер: ожидание у хоста запрашивается один раз на окно.");
+            Assert.LessOrEqual(marshaler.CancelledDelays, 1,
+                "Разрешена одна отмена таймера при завершении запроса; отдельной отмены на каждый чанк быть не должно.");
+            marshaler.ReleaseAll();
+        }
+
+        /// <summary>
+        /// Сбой таймера — не истечение таймера: если задержка хоста упала, запрос НЕ отменяется и не
+        /// репортится как таймаут, а сбой отдаётся в обработчик.
+        /// </summary>
+        [Test]
+        public async Task Streaming_HostDelayFaults_RequestIsNotReportedAsTimeout()
+        {
+            SlowClient inner = new() { DelayMs = 100, StreamText = "answer" };
+            FaultingDelayMarshaler marshaler = new();
+            Exception reported = null;
+            TimeoutLlmClientDecorator sut = new(inner, () => 30f, marshaler, ex => reported = ex);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.IsFalse(chunks.Exists(c => c.ErrorCode == LlmErrorCode.Timeout),
+                "Упавший таймер раньше трактовался как истёкший, и здоровый запрос отменялся с кодом Timeout.");
+            Assert.IsTrue(chunks.Exists(c => c.Text == "answer"));
+            Assert.IsInstanceOf<InvalidOperationException>(reported, "Сбой таймера должен быть виден хосту.");
+        }
+
+        [Test]
+        public async Task CompleteAsync_HostDelayFaults_ResultIsDelivered_NotTimeout()
+        {
+            SlowClient inner = new() { DelayMs = 100, Result = new LlmCompletionResult { Ok = true, Content = "late" } };
+            FaultingDelayMarshaler marshaler = new();
+            TimeoutLlmClientDecorator sut = new(inner, () => 30f, marshaler);
+
+            LlmCompletionResult result = await sut.CompleteAsync(Req());
+
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual("late", result.Content);
+        }
+
+        [Test]
+        public async Task Streaming_ProgressWithinWindow_KeepsStreamAlive_ThenStallTimesOut()
+        {
+            // Три чанка с паузой в 60 мс при окне 150 мс: ни одна пауза не превышает окно — поток жив;
+            // затем застой на 400 мс — таймаут.
+            StallingAfterChunksClient inner = new() { ChunkGapMs = 60, StallMs = 400 };
+            TimeoutLlmClientDecorator sut = new(inner, () => 0.15f);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(3, chunks.FindAll(c => c.Text == "t").Count, "Все три чанка до застоя должны дойти.");
+            Assert.AreEqual(LlmErrorCode.Timeout, chunks[chunks.Count - 1].ErrorCode, "Застой дольше окна — таймаут.");
+        }
+
         // ---- helpers ----
 
         [Test]
@@ -184,6 +365,15 @@ namespace CoreAI.Tests.EditMode
         private static LlmCompletionRequest Req()
         {
             return new LlmCompletionRequest { AgentRoleId = "Test", UserPayload = "hi" };
+        }
+
+        private static async Task InlineCancellationAsync(CancellationToken token)
+        {
+            // Model a response produced synchronously by cancellation. This checks metadata that is
+            // available at the deadline; a later response cannot hold a hard deadline open indefinitely.
+            TaskCompletionSource<bool> stopped = new();
+            using CancellationTokenRegistration registration = token.Register(() => stopped.TrySetCanceled(token));
+            await stopped.Task.ConfigureAwait(false);
         }
 
         private static async Task<List<LlmStreamChunk>> Drain(IAsyncEnumerable<LlmStreamChunk> stream)
@@ -213,6 +403,112 @@ namespace CoreAI.Tests.EditMode
                 DelayCallCount++;
                 LastDelayMilliseconds = milliseconds;
                 return Task.CompletedTask;
+            }
+        }
+
+        /// <summary>Задержка хоста, которая никогда не истекает сама, но считает запросы и отмены.</summary>
+        private sealed class PendingDelayMarshaler : ILlmAsyncMarshaler
+        {
+            private readonly List<TaskCompletionSource<bool>> _pending = new();
+            public int DelayCallCount;
+            public int CancelledDelays;
+
+            public Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken)
+            {
+                return factory();
+            }
+
+            public Task DelayAsync(int milliseconds, CancellationToken cancellationToken)
+            {
+                DelayCallCount++;
+                TaskCompletionSource<bool> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                cancellationToken.Register(() =>
+                {
+                    CancelledDelays++;
+                    tcs.TrySetCanceled(cancellationToken);
+                });
+                lock (_pending)
+                {
+                    _pending.Add(tcs);
+                }
+
+                return tcs.Task;
+            }
+
+            public void ReleaseAll()
+            {
+                lock (_pending)
+                {
+                    foreach (TaskCompletionSource<bool> tcs in _pending)
+                    {
+                        tcs.TrySetResult(true);
+                    }
+                }
+            }
+        }
+
+        private sealed class FaultingDelayMarshaler : ILlmAsyncMarshaler
+        {
+            public Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken)
+            {
+                return factory();
+            }
+
+            public Task DelayAsync(int milliseconds, CancellationToken cancellationToken)
+            {
+                return Task.FromException(new InvalidOperationException("player loop is not running"));
+            }
+        }
+
+        private sealed class ChattyClient : ILlmClient
+        {
+            public int ChunkCount;
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "ok" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                for (int i = 0; i < ChunkCount; i++)
+                {
+                    await Task.Yield();
+                    yield return new LlmStreamChunk { Text = "t" };
+                }
+
+                yield return new LlmStreamChunk { IsDone = true };
+            }
+        }
+
+        private sealed class StallingAfterChunksClient : ILlmClient
+        {
+            public int ChunkGapMs;
+            public int StallMs;
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "ok" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    await Task.Delay(ChunkGapMs, cancellationToken).ConfigureAwait(false);
+                    yield return new LlmStreamChunk { Text = "t" };
+                }
+
+                await Task.Delay(StallMs, cancellationToken).ConfigureAwait(false);
+                yield return new LlmStreamChunk { IsDone = true, Text = "never" };
             }
         }
 
@@ -261,7 +557,7 @@ namespace CoreAI.Tests.EditMode
             {
                 try
                 {
-                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                    await InlineCancellationAsync(cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -285,7 +581,7 @@ namespace CoreAI.Tests.EditMode
             {
                 try
                 {
-                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                    await InlineCancellationAsync(cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -328,7 +624,7 @@ namespace CoreAI.Tests.EditMode
             {
                 try
                 {
-                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                    await InlineCancellationAsync(cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {

@@ -32,23 +32,68 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IAgentMemoryStore? _memoryStore;
         private readonly ICoreAISettings _settings;
         private readonly bool _supportsNativeToolCalling;
-        private string _currentRoleId = "";
-
-        /// <summary>
-        /// When the gateway sends one long <c>delta.content</c> per frame, fan out to the consumer so UI updates stay incremental.
-        /// </summary>
-        private const int LiveUiStreamMaxCharsPerChunk = 48;
 
         private const int HybridToolJsonHeldTailMaxChars = 64 * 1024;
 
+        /// <param name="supportsNativeToolCalling">
+        /// Whether this endpoint accepts the native tools channel. Callers should pass its probed
+        /// or explicitly configured capability. There is no implicit channel default.
+        /// </param>
         public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
-            IAgentMemoryStore? memoryStore = null, bool supportsNativeToolCalling = false)
+            bool supportsNativeToolCalling, IAgentMemoryStore? memoryStore = null)
         {
-            _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
+            if (innerClient == null)
+            {
+                throw new ArgumentNullException(nameof(innerClient));
+            }
+            _innerClient = supportsNativeToolCalling ? innerClient : new TextToolChannelChatClient(innerClient);
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _memoryStore = memoryStore;
             _supportsNativeToolCalling = supportsNativeToolCalling;
+        }
+
+        /// <summary>
+        /// Keeps local MEAI function bindings available to the invocation layer while a text-only
+        /// endpoint receives no native tool declarations or forced native tool choice.
+        /// </summary>
+        private sealed class TextToolChannelChatClient : MEAI.DelegatingChatClient
+        {
+            public TextToolChannelChatClient(MEAI.IChatClient innerClient) : base(innerClient) { }
+
+            public override Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> messages,
+                MEAI.ChatOptions? options = null, CancellationToken cancellationToken = default)
+            {
+                return base.GetResponseAsync(messages, ProviderOptions(options), cancellationToken);
+            }
+
+            public override IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions? options = null,
+                CancellationToken cancellationToken = default)
+            {
+                return base.GetStreamingResponseAsync(messages, ProviderOptions(options), cancellationToken);
+            }
+
+            private static MEAI.ChatOptions? ProviderOptions(MEAI.ChatOptions? options)
+            {
+                if (options == null) return null;
+                MEAI.ChatOptions provider = options.Clone();
+                provider.Tools = null;
+                provider.ToolMode = null;
+                provider.AllowMultipleToolCalls = null;
+                if (options.AdditionalProperties != null)
+                {
+                    provider.AdditionalProperties = new MEAI.AdditionalPropertiesDictionary();
+                    foreach (KeyValuePair<string, object?> property in options.AdditionalProperties)
+                    {
+                        if (property.Key != "tools" && property.Key != "tool_choice" && property.Key != "parallel_tool_calls")
+                        {
+                            provider.AdditionalProperties[property.Key] = property.Value;
+                        }
+                    }
+                }
+                return provider;
+            }
         }
 
         /// <inheritdoc />
@@ -57,10 +102,15 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Creates an OpenAI-compatible HTTP-backed MEAI client.
         /// </summary>
+        /// <param name="supportsNativeToolCalling">
+        /// Whether this endpoint accepts native tool calls. This is an endpoint capability, including
+        /// local llama.cpp/LLMUnity servers, and must follow probing or explicit configuration.
+        /// </param>
         public static MeaiLlmClient CreateHttp(
             IOpenAiHttpSettings openAiSettings,
             ICoreAISettings settings,
             IGameLogger logger,
+            bool supportsNativeToolCalling,
             IAgentMemoryStore? memoryStore = null)
         {
             if (openAiSettings == null)
@@ -98,8 +148,8 @@ namespace CoreAI.Infrastructure.Llm
 #else
             transport = new HttpClientOpenAiTransport();
 #endif
-            MeaiOpenAiChatClient innerClient = new(openAiSettings, transport);
-            return new MeaiLlmClient(innerClient, logger, settings, memoryStore, true);
+            MeaiOpenAiChatClient innerClient = new(openAiSettings, transport, supportsNativeToolCalling);
+            return new MeaiLlmClient(innerClient, logger, settings, supportsNativeToolCalling: supportsNativeToolCalling, memoryStore: memoryStore);
         }
 
         /// <summary>
@@ -108,6 +158,7 @@ namespace CoreAI.Infrastructure.Llm
         public static MeaiLlmClient CreateHttp(
             CoreAISettingsAsset settings,
             IGameLogger logger,
+            bool supportsNativeToolCalling,
             IAgentMemoryStore? memoryStore = null)
         {
             if (settings == null)
@@ -121,7 +172,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             HttpSettingsAdapter adapter = new(settings);
-            return CreateHttp(adapter, settings, logger, memoryStore);
+            return CreateHttp(adapter, settings, logger, supportsNativeToolCalling, memoryStore);
         }
 
         /// <inheritdoc />
@@ -133,13 +184,20 @@ namespace CoreAI.Infrastructure.Llm
         public async Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
             CancellationToken cancellationToken = default)
         {
-            _currentRoleId = request.AgentRoleId ?? "Unknown";
+            string roleId = request.AgentRoleId ?? "Unknown";
             using LlmRequestContext.Scope ctxScope = LlmRequestContext.Begin(
-                _currentRoleId,
+                roleId,
                 request.TraceId,
                 EnsureIdempotencyKey(request),
                 request.ActorId);
-            List<MEAI.AIFunction> aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
+            List<MEAI.AIFunction> aiTools = request.ForcedToolMode == LlmToolChoiceMode.None
+                ? new List<MEAI.AIFunction>() : BuildAIFunctions(request.Tools, roleId);
+            string bindingError = RequiredToolBindingError(request, aiTools);
+            if (bindingError != null)
+            {
+                return new LlmCompletionResult { Ok = false, ErrorCode = LlmErrorCode.InvalidRequest, Error = bindingError };
+            }
+
 
             if (_settings.LogMeaiToolCallingSteps)
             {
@@ -148,10 +206,11 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
+            bool allowTextShapedToolCalls = InterpretsProseAsToolCalls(request);
             SmartToolCallingChatClient functionClient = new(_innerClient, Log.Instance, _settings, allowDuplicates,
-                request.Tools, _currentRoleId, _settings.MaxToolCallRetries, request.TraceId,
+                request.Tools, roleId, _settings.MaxToolCallRetries, request.TraceId,
                 MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance,
-                request.MaxToolCallRoundtrips, request.ActorId);
+                request.MaxToolCallRoundtrips, request.ActorId, allowTextShapedToolCalls);
 
             List<MEAI.ChatMessage> chatMessages = BuildMeaiChatMessages(request);
 
@@ -178,8 +237,8 @@ namespace CoreAI.Infrastructure.Llm
             if (aiTools.Count > 0)
             {
                 chatOptions.Tools = aiTools.Cast<MEAI.AITool>().ToList();
-                ApplyForcedToolMode(chatOptions, request, aiTools);
             }
+            ApplyForcedToolMode(chatOptions, request, aiTools);
 
             MEAI.ChatResponse response;
             try
@@ -226,16 +285,12 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            string text = response.Text;
-            if (string.IsNullOrEmpty(text))
-            {
-                text = SmartToolCallingChatClient.ConcatenateAssistantTextContents(response);
-            }
+            string text = GetFinalAssistantText(response);
 
             text = SanitizeAssistantVisibleText(text, request);
             string reasoningText = ConcatenateAssistantReasoningText(response);
 
-            if (string.IsNullOrEmpty(text))
+            if (string.IsNullOrEmpty(text) && !functionClient.LastTurnEndedByTool)
             {
                 // Even though the FINAL assistant text is empty, earlier iterations of this same
                 // non-streaming tool loop may have already executed real tools (e.g. a model that spawns
@@ -268,7 +323,7 @@ namespace CoreAI.Infrastructure.Llm
                 result.CompletionTokens = (int)(response.Usage.OutputTokenCount ?? 0);
                 result.TotalTokens = (int)(response.Usage.TotalTokenCount ?? 0);
                 (result.CacheReadTokens, result.CacheWriteTokens) =
-                    ExtractCacheTokenCounts(response.Usage.AdditionalCounts);
+                    ExtractUsageCacheTokenCounts(response.Usage);
                 // WHY: PromptTokens stays the whole-turn CUMULATIVE sum (Prompt + Completion == Total
                 // for cost telemetry); the prompt-size calibration reads the dedicated last-roundtrip
                 // field instead. Zero counts are ignored (zero-emitting providers must not pollute it).
@@ -280,6 +335,21 @@ namespace CoreAI.Infrastructure.Llm
             // decorator can render the same `tools=[...]` line for stream and non-stream paths.
             result.ExecutedToolCalls = functionClient.LastExecutedToolCalls;
             return result;
+        }
+
+        /// <summary>Only the final assistant message is user-visible after the native tool loop.</summary>
+        private static string GetFinalAssistantText(MEAI.ChatResponse response)
+        {
+            for (int index = response.Messages.Count - 1; index >= 0; index--)
+            {
+                MEAI.ChatMessage message = response.Messages[index];
+                if (message.Role == MEAI.ChatRole.Assistant)
+                {
+                    return string.Concat(message.Contents.OfType<MEAI.TextContent>().Select(content => content.Text));
+                }
+            }
+
+            return string.Empty;
         }
 
         private LlmCompletionResult FromException(
@@ -420,16 +490,25 @@ namespace CoreAI.Infrastructure.Llm
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
-            _currentRoleId = request.AgentRoleId ?? "Unknown";
+            string roleId = request.AgentRoleId ?? "Unknown";
             using LlmRequestContext.Scope ctxScope = LlmRequestContext.Begin(
-                _currentRoleId,
+                roleId,
                 request.TraceId,
                 EnsureIdempotencyKey(request),
                 request.ActorId);
 
             List<MEAI.ChatMessage> chatMessages = BuildMeaiChatMessages(request);
 
-            List<MEAI.AIFunction> aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
+            List<MEAI.AIFunction> aiTools = request.ForcedToolMode == LlmToolChoiceMode.None
+                ? new List<MEAI.AIFunction>() : BuildAIFunctions(request.Tools, roleId);
+            string bindingError = RequiredToolBindingError(request, aiTools);
+            if (bindingError != null)
+            {
+                yield return new LlmStreamChunk { IsDone = true, ErrorCode = LlmErrorCode.InvalidRequest, Error = bindingError };
+                yield break;
+            }
+
+            string[] declaredToolNames = request.Tools?.Select(tool => tool.Name).ToArray() ?? Array.Empty<string>();
             MEAI.ChatOptions chatOptions = new()
             {
                 MaxOutputTokens = ResolveMaxOutputTokens(request.MaxOutputTokens)
@@ -442,8 +521,8 @@ namespace CoreAI.Infrastructure.Llm
             if (aiTools.Count > 0)
             {
                 chatOptions.Tools = aiTools.Cast<MEAI.AITool>().ToList();
-                ApplyForcedToolMode(chatOptions, request, aiTools);
             }
+            ApplyForcedToolMode(chatOptions, request, aiTools);
 
             _logger.LogInfo(GameLogFeature.Llm,
                 $"MeaiLlmClient: Starting streaming with {chatMessages.Count} messages");
@@ -459,6 +538,7 @@ namespace CoreAI.Infrastructure.Llm
             // первом же видимом чанке: без него потребитель склеивал конец одной реплики с началом
             // другой встык, и ученик читал «Проверь себя:**Ход завершён…**».
             bool visibleMessageBoundaryPending = false;
+            string lastVisibleMessageId = null;
 
             // Единая точка выдачи видимого текста: помечает начало новой реплики РОВНО один раз и
             // ведёт учёт «была ли вообще видимая речь». Раньше эти два факта расползались по
@@ -478,13 +558,13 @@ namespace CoreAI.Infrastructure.Llm
             if (aiTools.Count == 0 && (request.Tools?.Count ?? 0) > 0)
             {
                 _logger.LogWarning(GameLogFeature.Llm,
-                    $"MeaiLlmClient: Streaming role='{_currentRoleId}' requested {request.Tools?.Count ?? 0} tool(s) but 0 AIFunction(s) were bound. " +
+                    $"MeaiLlmClient: Streaming role='{roleId}' requested {request.Tools?.Count ?? 0} tool(s) but 0 AIFunction(s) were bound. " +
                     "Tool calls will be stripped from output without execution. Verify tool registration.");
             }
 
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
             ToolExecutionPolicy policy = new(Log.Instance, _settings, request.Tools, allowDuplicates,
-                _currentRoleId, _settings.MaxToolCallRetries, request.TraceId,
+                roleId, _settings.MaxToolCallRetries, request.TraceId,
                 MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance,
                 request.ActorId);
             string? pendingFailedToolRetryInstruction = null;
@@ -606,12 +686,18 @@ namespace CoreAI.Infrastructure.Llm
 
                 summaryVisible.Append(summaryFilter.Flush());
 
-                // Fail closed: the buffered prose is stripped of any text-shaped tool JSON the model
-                // still tried to emit (it can never execute here) before reaching the consumer.
+                // WHY: this turn runs with tools disabled, so nothing here can execute — the strip is purely
+                // cosmetic, and cosmetics must not delete a teacher's JSON example. It therefore follows
+                // the same channel rule as everything else: only where a call can be written as prose.
+                string summaryProse = summaryVisible.ToString();
+                if (InterpretsProseAsToolCalls(request))
+                {
+                    summaryProse = StripEmbeddedToolCallJsonForDisplay(summaryProse, declaredToolNames);
+                }
+
                 string summaryText = summaryFailed
                     ? string.Empty
-                    : SanitizeAssistantVisibleText(
-                        StripEmbeddedToolCallJsonForDisplay(summaryVisible.ToString()), request);
+                    : SanitizeAssistantVisibleText(summaryProse, request);
                 if (string.IsNullOrWhiteSpace(summaryText))
                 {
                     ApplyStreamingUsageFields(fallbackTerminal, summaryUsage, model);
@@ -623,11 +709,8 @@ namespace CoreAI.Infrastructure.Llm
                 // Итоговый ход без инструментов — это отдельная реплика: перед ней уже прошли и речь,
                 // и раунды инструментов.
                 visibleMessageBoundaryPending |= emittedAnyVisibleText;
-                foreach (string part in SplitForLiveUiStreaming(summaryText, LiveUiStreamMaxCharsPerChunk))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    yield return MarkVisibleChunk(new LlmStreamChunk { Text = part });
-                }
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return MarkVisibleChunk(new LlmStreamChunk { Text = summaryText });
 
                 // The model got to summarize, so the turn ends as a graceful stop: traces still
                 // carry every failure for telemetry, but the consumer sees prose, not a raw error.
@@ -683,6 +766,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         IsDone = true,
                         Error = "tool loop exceeded max iterations",
+                        ErrorCode = LlmErrorCode.ProviderError,
                         ExecutedToolCalls = executedToolCalls
                     };
                     await foreach (LlmStreamChunk summaryChunk in RunFinalNoToolsSummaryTurnAsync(
@@ -731,11 +815,12 @@ namespace CoreAI.Infrastructure.Llm
                 // may already have mutated the world.
                 int chunkCount = 0;
                 bool toolsDeclared = (request.Tools?.Count ?? 0) > 0;
-                bool fullIterationBuffer =
-                    toolsDeclared && request.BufferFullStreamingIterationWhenToolsDeclared == true;
-                bool hybridToolJsonHold = toolsDeclared && !fullIterationBuffer;
-                bool streamLiveNoTools = !toolsDeclared;
                 bool unboundToolsRequested = toolsDeclared && aiTools.Count == 0;
+                // WHY: failed local binding does not change the endpoint protocol or authorize parsing prose.
+                bool interpretProseAsToolCalls = toolsDeclared && InterpretsProseAsToolCalls(request);
+                // Удерживаем прозу ровно тогда, когда разбираем её как вызовы, — другого повода нет.
+                bool hybridToolJsonHold = interpretProseAsToolCalls;
+                bool streamLiveVisibleText = !hybridToolJsonHold;
                 int hybridRawExclusiveEndEmitted = 0;
                 bool emittedHybridHoldTypingHint = false;
                 bool emittedToolProgressTypingHint = false;
@@ -768,11 +853,8 @@ namespace CoreAI.Infrastructure.Llm
                 // emitted prose and skipped JSON, so downstream suffix reconciliation stays in sync.
                 IEnumerable<LlmStreamChunk> DrainHybridSafeSegments(string full)
                 {
-                    int scanStart = Math.Min(hybridRawExclusiveEndEmitted, full.Length);
-                    string scan = full.Substring(scanStart);
-                    List<HybridProseSegment> segments = GetHybridSafeSegments(scan, out int relativeSafeEnd);
-                    int safeEnd = scanStart + relativeSafeEnd;
-                    int heldLength = scan.Length - relativeSafeEnd;
+                    List<HybridProseSegment> segments = GetHybridSafeSegments(full, out int safeEnd, declaredToolNames);
+                    int heldLength = full.Length - safeEnd;
                     if (heldLength > HybridToolJsonHeldTailMaxChars)
                     {
                         hybridToolJsonCandidateOverflow = true;
@@ -782,7 +864,7 @@ namespace CoreAI.Infrastructure.Llm
 
                     foreach (HybridProseSegment segment in segments)
                     {
-                        int absoluteStart = scanStart + segment.Start;
+                        int absoluteStart = segment.Start;
                         if (absoluteStart + segment.Length <= hybridRawExclusiveEndEmitted)
                         {
                             continue; // already consumed in a previous update
@@ -798,11 +880,8 @@ namespace CoreAI.Infrastructure.Llm
                         if (!segment.IsToolJson)
                         {
                             string prose = full.Substring(from, len);
-                            foreach (string part in SplitForLiveUiStreaming(prose, LiveUiStreamMaxCharsPerChunk))
-                            {
-                                streamedVisibleToConsumer = true;
-                                yield return MarkVisibleChunk(new LlmStreamChunk { Text = part });
-                            }
+                            streamedVisibleToConsumer = true;
+                            yield return MarkVisibleChunk(new LlmStreamChunk { Text = prose });
                         }
                         // else: completed tool-call JSON span - hidden (never emitted), only the cursor advances.
                     }
@@ -909,6 +988,8 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             if (content is MEAI.FunctionCallContent fcc)
                             {
+                                // WHY: An unsolicited provider call cannot override the caller's execution prohibition.
+                                if (request.ForcedToolMode == LlmToolChoiceMode.None) continue;
                                 nativeToolCalls.Add(fcc);
                                 if (aiTools.Count > 0)
                                 {
@@ -970,6 +1051,17 @@ namespace CoreAI.Infrastructure.Llm
                         continue;
                     }
 
+                    if (!string.IsNullOrEmpty(update.MessageId))
+                    {
+                        if (lastVisibleMessageId != null &&
+                            !string.Equals(lastVisibleMessageId, update.MessageId, StringComparison.Ordinal))
+                        {
+                            visibleMessageBoundaryPending |= emittedAnyVisibleText;
+                        }
+
+                        lastVisibleMessageId = update.MessageId;
+                    }
+
                     rawIterationText.Append(raw);
                     string visible = thinkFilter.ProcessChunk(raw);
                     if (pendingInlineReasoning.Count > 0)
@@ -990,14 +1082,10 @@ namespace CoreAI.Infrastructure.Llm
                     chunkCount++;
                     iterationVisible.Append(visible);
                     visibleChunks.Add(visible);
-                    if (streamLiveNoTools)
+                    if (streamLiveVisibleText)
                     {
-                        foreach (string part in SplitForLiveUiStreaming(visible, LiveUiStreamMaxCharsPerChunk))
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
-                            yield return MarkVisibleChunk(new LlmStreamChunk { Text = part });
-                        }
-
+                        cancellationToken.ThrowIfCancellationRequested();
+                        yield return MarkVisibleChunk(new LlmStreamChunk { Text = visible });
                         streamedVisibleToConsumer = true;
                     }
                     else if (hybridToolJsonHold)
@@ -1044,14 +1132,10 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     iterationVisible.Append(tail);
                     visibleChunks.Add(tail);
-                    if (streamLiveNoTools)
+                    if (streamLiveVisibleText)
                     {
-                        foreach (string part in SplitForLiveUiStreaming(tail, LiveUiStreamMaxCharsPerChunk))
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
-                            yield return MarkVisibleChunk(new LlmStreamChunk { Text = part });
-                        }
-
+                        cancellationToken.ThrowIfCancellationRequested();
+                        yield return MarkVisibleChunk(new LlmStreamChunk { Text = tail });
                         streamedVisibleToConsumer = true;
                     }
                     else if (hybridToolJsonHold)
@@ -1065,7 +1149,10 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 string visibleText = iterationVisible.ToString();
-                bool hiddenThinkToolCall = toolsDeclared &&
+                // WHY: Same channel gate. This only produces a diagnostic, but on a native endpoint the
+                // diagnostic would be a lie: JSON inside <think> there is the model reasoning about an
+                // example, not a call we dropped.
+                bool hiddenThinkToolCall = interpretProseAsToolCalls &&
                                            ContainsCompleteThinkBlockToolCall(rawIterationText.ToString());
                 if (string.IsNullOrWhiteSpace(visibleText) &&
                     nativeToolCalls.Count == 0 &&
@@ -1128,7 +1215,7 @@ namespace CoreAI.Infrastructure.Llm
                     if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(visibleText))
                     {
                         string visibleProse = SanitizeAssistantVisibleText(
-                            StripEmbeddedToolCallJsonForDisplay(visibleText), request);
+                            StripEmbeddedToolCallJsonForDisplay(visibleText, declaredToolNames), request);
                         if (!string.IsNullOrWhiteSpace(visibleProse))
                         {
                             yield return MarkVisibleChunk(new LlmStreamChunk { Text = visibleProse });
@@ -1140,14 +1227,11 @@ namespace CoreAI.Infrastructure.Llm
                         // The hybrid hold streamed only the safe prefix; whatever prose it was still
                         // holding when the native tool calls arrived must be flushed now or it is
                         // silently dropped for this roundtrip (mirrors the text-extraction path).
-                        string heldSuffix = GetHybridUnemittedSuffix(visibleText, hybridRawExclusiveEndEmitted);
+                        string heldSuffix = GetHybridUnemittedSuffix(visibleText, hybridRawExclusiveEndEmitted, declaredToolNames);
                         if (!string.IsNullOrEmpty(heldSuffix))
                         {
-                            foreach (string part in SplitForLiveUiStreaming(heldSuffix, LiveUiStreamMaxCharsPerChunk))
-                            {
-                                cancellationToken.ThrowIfCancellationRequested();
-                                yield return MarkVisibleChunk(new LlmStreamChunk { Text = part });
-                            }
+                            cancellationToken.ThrowIfCancellationRequested();
+                            yield return MarkVisibleChunk(new LlmStreamChunk { Text = heldSuffix });
                         }
                     }
 
@@ -1204,6 +1288,16 @@ namespace CoreAI.Infrastructure.Llm
                         yield break;
                     }
 
+                    if (policy.TurnEndingToolSucceeded)
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            "MeaiLlmClient: Streaming turn closed by a turn-ending tool (native path); " +
+                            "the tool result is NOT sent back for another roundtrip.");
+                        yield return BuildTurnEndedByToolChunk(
+                            policy, turnUsage, streamModel, lastRoundtripUsage);
+                        yield break;
+                    }
+
                     continue;
                 }
 
@@ -1212,9 +1306,9 @@ namespace CoreAI.Infrastructure.Llm
                 // backend successfully bound AIFunctions. This way, a tool that was requested
                 // but couldn't be bound (e.g., MemoryLlmTool with a null store) still has its
                 // Resolve and cache required local values.
-                bool requestHadTools = toolsDeclared;
-                if (requestHadTools && TryExtractToolCallsFromText(visibleText,
-                        out List<MEAI.FunctionCallContent> toolCalls, out string cleanedText))
+                if (interpretProseAsToolCalls && TryExtractToolCallsFromText(visibleText,
+                        out List<MEAI.FunctionCallContent> toolCalls, out string cleanedText,
+                        declaredToolNames))
                 {
                     if (aiTools.Count == 0)
                     {
@@ -1238,15 +1332,11 @@ namespace CoreAI.Infrastructure.Llm
                             else if (hybridToolJsonHold && hybridRawExclusiveEndEmitted > 0)
                             {
                                 string suffix = GetHybridUnemittedSuffix(
-                                    visibleText, hybridRawExclusiveEndEmitted);
+                                    visibleText, hybridRawExclusiveEndEmitted, declaredToolNames);
                                 if (!string.IsNullOrEmpty(suffix))
                                 {
-                                    foreach (string part in SplitForLiveUiStreaming(suffix,
-                                                 LiveUiStreamMaxCharsPerChunk))
-                                    {
-                                        cancellationToken.ThrowIfCancellationRequested();
-                                        yield return MarkVisibleChunk(new LlmStreamChunk { Text = part });
-                                    }
+                                    cancellationToken.ThrowIfCancellationRequested();
+                                    yield return MarkVisibleChunk(new LlmStreamChunk { Text = suffix });
                                 }
                             }
                         }
@@ -1279,14 +1369,11 @@ namespace CoreAI.Infrastructure.Llm
                              !string.IsNullOrWhiteSpace(cleanedText))
                     {
                         string suffix = GetHybridUnemittedSuffix(
-                            visibleText, hybridRawExclusiveEndEmitted);
+                            visibleText, hybridRawExclusiveEndEmitted, declaredToolNames);
                         if (!string.IsNullOrEmpty(suffix))
                         {
-                            foreach (string part in SplitForLiveUiStreaming(suffix, LiveUiStreamMaxCharsPerChunk))
-                            {
-                                cancellationToken.ThrowIfCancellationRequested();
-                                yield return MarkVisibleChunk(new LlmStreamChunk { Text = part });
-                            }
+                            cancellationToken.ThrowIfCancellationRequested();
+                            yield return MarkVisibleChunk(new LlmStreamChunk { Text = suffix });
                         }
                     }
 
@@ -1351,6 +1438,16 @@ namespace CoreAI.Infrastructure.Llm
                         yield break;
                     }
 
+                    if (policy.TurnEndingToolSucceeded)
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            "MeaiLlmClient: Streaming turn closed by a turn-ending tool (text-extraction path); " +
+                            "the tool result is NOT sent back for another roundtrip.");
+                        yield return BuildTurnEndedByToolChunk(
+                            policy, turnUsage, streamModel, lastRoundtripUsage);
+                        yield break;
+                    }
+
                     continue;
                 }
 
@@ -1361,7 +1458,10 @@ namespace CoreAI.Infrastructure.Llm
                         "The hidden reasoning text was not streamed or executed; move tool-call JSON outside <think>.");
                 }
 
-                if (requestHadTools && TryBuildMalformedTextToolCall(
+                // WHY: Same gate, and this one EXECUTES: it repairs a truncated JSON object out of the prose
+                // and runs it as a tool call. On a native endpoint that is an example the tutor did not
+                // finish typing, not a call - the most expensive possible way to be wrong about prose.
+                if (interpretProseAsToolCalls && TryBuildMalformedTextToolCall(
                         visibleText,
                         request.Tools,
                         aiTools,
@@ -1442,6 +1542,16 @@ namespace CoreAI.Infrastructure.Llm
                         yield break;
                     }
 
+                    if (policy.TurnEndingToolSucceeded)
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            "MeaiLlmClient: Streaming turn closed by a turn-ending tool (malformed-tool-json path); " +
+                            "the tool result is NOT sent back for another roundtrip.");
+                        yield return BuildTurnEndedByToolChunk(
+                            policy, turnUsage, streamModel, lastRoundtripUsage);
+                        yield break;
+                    }
+
                     continue;
                 }
 
@@ -1471,11 +1581,8 @@ namespace CoreAI.Infrastructure.Llm
                         string restSan = SanitizeAssistantVisibleText(rest, request);
                         if (!string.IsNullOrEmpty(restSan))
                         {
-                            foreach (string part in SplitForLiveUiStreaming(restSan, LiveUiStreamMaxCharsPerChunk))
-                            {
-                                cancellationToken.ThrowIfCancellationRequested();
-                                yield return MarkVisibleChunk(new LlmStreamChunk { Text = part });
-                            }
+                            cancellationToken.ThrowIfCancellationRequested();
+                            yield return MarkVisibleChunk(new LlmStreamChunk { Text = restSan });
                         }
                     }
                 }
@@ -1486,7 +1593,7 @@ namespace CoreAI.Infrastructure.Llm
                 // hidden thinking and end the roundtrip with zero visible text, zero tool calls and
                 // finish_reason=length - the user would see "Could not get a response". Retry ONCE
                 // with an explicit act-now nudge before surfacing the empty turn.
-                if (!emittedAnyVisibleText &&
+                if (request.ForcedToolMode != LlmToolChoiceMode.None && !emittedAnyVisibleText &&
                     nativeToolCalls.Count == 0 &&
                     string.IsNullOrWhiteSpace(SanitizeAssistantVisibleText(visibleText, request)) &&
                     !emptyResponseNudgeSent)
@@ -1659,6 +1766,30 @@ namespace CoreAI.Infrastructure.Llm
             chunk.LastRoundtripPromptTokens = ClampTokenCount(lastRoundtripUsage.InputTokenCount.Value);
         }
 
+        /// <summary>
+        /// Terminal chunk for a turn a tool declaring <see cref="ILlmTool.EndsTurn"/> closed after a
+        /// SUCCESSFUL call. Carries the executed-call traces and the usage fields exactly like every other
+        /// clean end of the streaming loop: a terminal chunk without them makes the turn read as
+        /// zero-token and tool-less to the orchestrator's accounting, and a turn that produced no visible
+        /// prose loses the very traces the tool-only completion line is synthesized from.
+        /// </summary>
+        private static LlmStreamChunk BuildTurnEndedByToolChunk(
+            ToolExecutionPolicy policy,
+            MEAI.UsageDetails turnUsage,
+            string streamModel,
+            MEAI.UsageDetails lastRoundtripUsage)
+        {
+            LlmStreamChunk chunk = new()
+            {
+                IsDone = true,
+                Text = string.Empty,
+                ExecutedToolCalls = policy.ExecutedTraces.ToList()
+            };
+            ApplyStreamingUsageFields(chunk, turnUsage, streamModel);
+            OverrideTerminalPromptTokensWithLastRoundtrip(chunk, lastRoundtripUsage);
+            return chunk;
+        }
+
         private static void ApplyStreamingUsageFields(LlmStreamChunk chunk, MEAI.UsageDetails usage, string model)
         {
             if (chunk == null || usage == null)
@@ -1670,13 +1801,21 @@ namespace CoreAI.Infrastructure.Llm
             chunk.CompletionTokens = (int)(usage.OutputTokenCount ?? 0);
             chunk.TotalTokens = (int)(usage.TotalTokenCount ?? 0);
             (chunk.CacheReadTokens, chunk.CacheWriteTokens) =
-                ExtractCacheTokenCounts(usage.AdditionalCounts);
+                ExtractUsageCacheTokenCounts(usage);
             if (!string.IsNullOrEmpty(model))
             {
                 chunk.Model = model;
             }
         }
 
+        /// <summary>MEAI typed cache reads take precedence; vendor counters supply legacy reads and writes.</summary>
+        internal static (int CacheReadTokens, int CacheWriteTokens) ExtractUsageCacheTokenCounts(MEAI.UsageDetails usage)
+        {
+            (int reads, int writes) = ExtractCacheTokenCounts(usage?.AdditionalCounts);
+            return (usage?.CachedInputTokenCount is long cached ? ClampTokenCount(cached) : reads, writes);
+        }
+
+        /// <summary>Reads legacy provider cache metrics when no typed MEAI value exists.</summary>
         internal static (int CacheReadTokens, int CacheWriteTokens) ExtractCacheTokenCounts(
             MEAI.AdditionalPropertiesDictionary<long>? additionalCounts)
         {
@@ -1765,6 +1904,11 @@ namespace CoreAI.Infrastructure.Llm
 
         private static string GetStreamingUpdateText(MEAI.ChatResponseUpdate update)
         {
+            if (update.Role.HasValue && update.Role.Value != MEAI.ChatRole.Assistant)
+            {
+                return string.Empty;
+            }
+
             if (!string.IsNullOrEmpty(update.Text))
             {
                 return update.Text;
@@ -1787,33 +1931,15 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Splits a single provider-visible string into smaller outward chunks. Surrogate pairs are not split.
+        /// Whether this endpoint's answers may be read as tool calls at all: only where a call CAN be
+        /// written as prose — no native tool channel — or where the host explicitly opted in for an
+        /// endpoint that advertises one and then answers with JSON in the text.
         /// </summary>
-        private static IEnumerable<string> SplitForLiveUiStreaming(string visible, int maxChars)
+        private bool InterpretsProseAsToolCalls(LlmCompletionRequest request)
         {
-            if (string.IsNullOrEmpty(visible))
-            {
-                yield break;
-            }
-
-            if (maxChars <= 0 || visible.Length <= maxChars)
-            {
-                yield return visible;
-                yield break;
-            }
-
-            int i = 0;
-            while (i < visible.Length)
-            {
-                int take = Math.Min(maxChars, visible.Length - i);
-                while (take > 1 && char.IsHighSurrogate(visible[i + take - 1]) && i + take < visible.Length)
-                {
-                    take--;
-                }
-
-                yield return visible.Substring(i, take);
-                i += take;
-            }
+            return LlmToolChannelPolicy.InterpretsProse(
+                _supportsNativeToolCalling, request?.AllowTextShapedToolCallsOnNativeEndpoint,
+                request?.ForcedToolMode ?? LlmToolChoiceMode.Auto);
         }
 
         private string SanitizeAssistantVisibleText(string text, LlmCompletionRequest request)
@@ -1937,11 +2063,12 @@ namespace CoreAI.Infrastructure.Llm
         internal static bool TryExtractToolCallsFromText(
             string text,
             out List<MEAI.FunctionCallContent> toolCalls,
-            out string cleanedText)
+            out string cleanedText,
+            IReadOnlyCollection<string> knownToolNames = null)
         {
             // WHY: delegates to the hardened portable extractor instead of a local parser so
             // cited schema examples never execute and the guards aren't duplicated.
-            return TryPortableToolExtract(text, out toolCalls, out cleanedText);
+            return TryPortableToolExtract(text, out toolCalls, out cleanedText, knownToolNames);
         }
 
         /// <summary>
@@ -1951,11 +2078,12 @@ namespace CoreAI.Infrastructure.Llm
         private static bool TryPortableToolExtract(
             string text,
             out List<MEAI.FunctionCallContent> toolCalls,
-            out string cleanedText)
+            out string cleanedText,
+            IReadOnlyCollection<string> knownToolNames)
         {
             toolCalls = new List<MEAI.FunctionCallContent>();
             cleanedText = text ?? string.Empty;
-            if (!LlmToolCallTextExtractor.TryExtract(text, out List<LlmToolCallTextExtractor.Match> matches,
+            if (!LlmToolCallTextExtractor.TryExtract(text, knownToolNames, out List<LlmToolCallTextExtractor.Match> matches,
                     out cleanedText))
             {
                 return false;
@@ -1988,14 +2116,15 @@ namespace CoreAI.Infrastructure.Llm
         /// Used when the orchestrator could not separate tool JSON from prose in the streaming path
         /// (same rules as <see cref="TryExtractToolCallsFromText"/>; does not execute tools).
         /// </summary>
-        public static string StripEmbeddedToolCallJsonForDisplay(string assistantText)
+        public static string StripEmbeddedToolCallJsonForDisplay(string assistantText,
+            IReadOnlyCollection<string> knownToolNames = null)
         {
             if (string.IsNullOrWhiteSpace(assistantText))
             {
                 return assistantText ?? string.Empty;
             }
 
-            return TryExtractToolCallsFromText(assistantText, out _, out string cleaned) ? cleaned : assistantText;
+            return TryExtractToolCallsFromText(assistantText, out _, out string cleaned, knownToolNames) ? cleaned : assistantText;
         }
 
         /// <summary>Removes fenced code blocks (```...```) from text to prevent false positive tool call detection.</summary>
@@ -2271,48 +2400,6 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// For hybrid tool-json streaming (bound or unbound): after <see cref="TryExtractToolCallsFromText"/> yields
-        /// <paramref name="cleanedText"/>, emit only the suffix not already streamed as the safe raw prefix
-        /// (<paramref name="hybridRawExclusiveEndEmitted"/> bytes of <paramref name="visibleText"/>).
-        /// </summary>
-        internal static string? GetCleanedTextSuffixAfterHybridPrefix(
-            string cleanedText,
-            string visibleText,
-            int hybridRawExclusiveEndEmitted)
-        {
-            if (string.IsNullOrWhiteSpace(cleanedText) || hybridRawExclusiveEndEmitted <= 0)
-            {
-                return null;
-            }
-
-            string rawPrefix = visibleText.Substring(0,
-                Math.Min(hybridRawExclusiveEndEmitted, visibleText.Length));
-            string rawPrefixTrimEnd = rawPrefix.TrimEnd();
-            int skipLen = 0;
-            if (cleanedText.StartsWith(rawPrefix, StringComparison.Ordinal))
-            {
-                skipLen = rawPrefix.Length;
-            }
-            else if (rawPrefixTrimEnd.Length > 0 &&
-                     cleanedText.StartsWith(rawPrefixTrimEnd, StringComparison.Ordinal))
-            {
-                skipLen = rawPrefixTrimEnd.Length;
-            }
-
-            if (skipLen > 0 && cleanedText.Length > skipLen)
-            {
-                return cleanedText.Substring(skipLen);
-            }
-
-            if (skipLen == 0)
-            {
-                return cleanedText;
-            }
-
-            return null;
-        }
-
-        /// <summary>
         /// On-the-fly hybrid hold: prose in <paramref name="visibleText"/> up to
         /// <paramref name="hybridRawExclusiveEndEmitted"/> has already been streamed live (with any tool-call
         /// JSON in that region hidden). After the turn ends and tool calls are extracted, the only prose that
@@ -2320,7 +2407,8 @@ namespace CoreAI.Infrastructure.Llm
         /// (<c>visibleText[hybridRawExclusiveEndEmitted..]</c>). This returns that suffix, or <c>null</c> when
         /// the held tail was only tool-call JSON / whitespace.
         /// </summary>
-        internal static string? GetHybridUnemittedSuffix(string visibleText, int hybridRawExclusiveEndEmitted)
+        internal static string? GetHybridUnemittedSuffix(string visibleText, int hybridRawExclusiveEndEmitted,
+            IReadOnlyCollection<string> knownToolNames = null)
         {
             if (string.IsNullOrEmpty(visibleText) || hybridRawExclusiveEndEmitted >= visibleText.Length)
             {
@@ -2335,7 +2423,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // Strip any tool-call JSON that lived in the held tail so only prose remains.
-            string strippedTail = TryExtractToolCallsFromText(heldTail, out _, out string cleanedTail)
+            string strippedTail = TryExtractToolCallsFromText(heldTail, out _, out string cleanedTail, knownToolNames)
                 ? cleanedTail
                 : heldTail;
 
@@ -2378,7 +2466,8 @@ namespace CoreAI.Infrastructure.Llm
         /// </para>
         /// Indices align with <paramref name="text"/> because <see cref="StripCodeBlocks"/> preserves length.
         /// </summary>
-        internal static List<HybridProseSegment> GetHybridSafeSegments(string text, out int exclusiveSafeEnd)
+        internal static List<HybridProseSegment> GetHybridSafeSegments(string text, out int exclusiveSafeEnd,
+            IReadOnlyCollection<string> knownToolNames = null)
         {
             List<HybridProseSegment> segments = new();
             exclusiveSafeEnd = 0;
@@ -2390,16 +2479,16 @@ namespace CoreAI.Infrastructure.Llm
             string search = StripCodeBlocks(text);
 
             // Hold boundary = start of the first STILL-INCOMPLETE (unclosed) brace that could grow into a
-            // tool call. Unlike GetExclusiveEndForSafeUnboundRawStreaming, completed tool-call JSON spans do
-            // NOT lower this boundary - they are hidden in place so prose after their closing `}` keeps
-            // streaming live.
+            // tool call. Completed tool-call JSON spans do NOT lower this boundary - they are hidden in
+            // place so prose after their closing `}` keeps streaming live.
             int holdBoundary = GetFirstIncompleteBraceStart(search);
 
             // Completed text-shaped tool-call JSON spans (to hide) that fall before the hold boundary.
-            List<JsonSpan> toolSpans = FindToolCallJsonSpans(search);
+            LlmToolCallTextExtractor.TryExtract(text, knownToolNames,
+                out List<LlmToolCallTextExtractor.Match> toolSpans, out _);
 
             int cursor = 0;
-            foreach (JsonSpan span in toolSpans.OrderBy(s => s.Start))
+            foreach (LlmToolCallTextExtractor.Match span in toolSpans.OrderBy(match => match.Start))
             {
                 if (span.Start >= holdBoundary)
                 {
@@ -2504,108 +2593,24 @@ namespace CoreAI.Infrastructure.Llm
             return search.Length;
         }
 
-        /// <summary>
-        /// For hybrid tool-json streaming (bound or unbound): largest <paramref name="text"/> prefix that can be emitted as raw
-        /// without splitting a text-shaped tool JSON (complete <see cref="FindToolCallJsonSpans"/> hits) or
-        /// an incomplete JSON object that may become a tool call.
-        /// Indices align with <paramref name="text"/> because <see cref="StripCodeBlocks"/> preserves length.
-        /// </summary>
-        internal static int GetExclusiveEndForSafeUnboundRawStreaming(string text)
-        {
-            if (string.IsNullOrEmpty(text))
-            {
-                return 0;
-            }
-
-            string search = StripCodeBlocks(text);
-            int minHold = search.Length;
-
-            foreach (JsonSpan span in FindToolCallJsonSpans(search))
-            {
-                if (span.Start < minHold)
-                {
-                    minHold = span.Start;
-                }
-            }
-
-            int i = 0;
-            while (i < search.Length)
-            {
-                int braceStart = search.IndexOf('{', i);
-                if (braceStart < 0)
-                {
-                    break;
-                }
-
-                int depth = 0;
-                bool inString = false;
-                bool escaped = false;
-                int j = braceStart;
-
-                for (; j < search.Length; j++)
-                {
-                    char c = search[j];
-
-                    if (escaped)
-                    {
-                        escaped = false;
-                        continue;
-                    }
-
-                    if (c == '\\' && inString)
-                    {
-                        escaped = true;
-                        continue;
-                    }
-
-                    if (c == '"')
-                    {
-                        inString = !inString;
-                        continue;
-                    }
-
-                    if (inString)
-                    {
-                        continue;
-                    }
-
-                    if (c == '{')
-                    {
-                        depth++;
-                    }
-                    else if (c == '}')
-                    {
-                        depth--;
-                        if (depth == 0)
-                        {
-                            break;
-                        }
-                    }
-                }
-
-                if (depth == 0 && j < search.Length)
-                {
-                    i = j + 1;
-                }
-                else if (depth != 0)
-                {
-                    minHold = Math.Min(minHold, braceStart);
-                    i = braceStart + 1;
-                }
-                else
-                {
-                    i = braceStart + 1;
-                }
-            }
-
-            return minHold;
-        }
-
         /// <summary>Represents a span of JSON text within a larger string.</summary>
         internal struct JsonSpan
         {
             public int Start;
             public int Length;
+        }
+
+        private static string RequiredToolBindingError(LlmCompletionRequest request, IReadOnlyList<MEAI.AIFunction> tools)
+        {
+            if (request.ForcedToolMode == LlmToolChoiceMode.RequireAny && !tools.Any(tool => tool != null))
+                return "A tool call is required, but no callable tool is bound for this request. Check tool registration and memory-store wiring.";
+            if (request.ForcedToolMode != LlmToolChoiceMode.RequireSpecific) return null;
+            string requiredName = request.RequiredToolName?.Trim();
+            if (string.IsNullOrEmpty(requiredName))
+                return "RequireSpecific needs a non-empty RequiredToolName.";
+            return tools.Any(tool => tool != null && string.Equals(tool.Name, requiredName, StringComparison.Ordinal))
+                ? null
+                : $"Required tool '{requiredName}' has no callable binding for this request. Check tool registration and memory-store wiring.";
         }
 
         /// <summary>
@@ -2634,14 +2639,6 @@ namespace CoreAI.Infrastructure.Llm
                     return;
                 case LlmToolChoiceMode.RequireSpecific:
                     string targetName = request.RequiredToolName?.Trim();
-                    if (string.IsNullOrEmpty(targetName))
-                    {
-                        _logger.LogWarning(GameLogFeature.Llm,
-                            "MeaiLlmClient: ForcedToolMode=RequireSpecific but RequiredToolName is empty - falling back to RequireAny.");
-                        options.ToolMode = MEAI.ChatToolMode.RequireAny;
-                        return;
-                    }
-
                     MEAI.AIFunction targetTool = null;
                     for (int i = 0; i < aiTools.Count; i++)
                     {
@@ -2650,14 +2647,6 @@ namespace CoreAI.Infrastructure.Llm
                             targetTool = aiTools[i];
                             break;
                         }
-                    }
-
-                    if (targetTool == null)
-                    {
-                        _logger.LogWarning(GameLogFeature.Llm,
-                            $"MeaiLlmClient: ForcedToolMode=RequireSpecific('{targetName}') but tool is not registered for this role - falling back to RequireAny.");
-                        options.ToolMode = MEAI.ChatToolMode.RequireAny;
-                        return;
                     }
 
                     // Force the specific tool WITHOUT an OpenAI specific-function tool_choice: local
@@ -2747,14 +2736,11 @@ namespace CoreAI.Infrastructure.Llm
                             }
                             else
                             {
-                                // Memory tool was requested for this role but the orchestrator
-                                // could not bind a store. The model may still emit memory tool
-                                // JSON; the streaming/non-streaming loops will strip it from the
-                                // visible reply but cannot persist anything. Warn loudly so the
-                                // operator knows the tool is silently a no-op.
+                                // WHY: a missing store is a binding problem, not permission to interpret prose.
+                                // Required calls fail validation before the provider; optional calls stay unavailable.
                                 _logger.LogWarning(GameLogFeature.Llm,
                                     $"MeaiLlmClient: 'memory' tool requested for role '{roleId}' but IAgentMemoryStore is null. " +
-                                    "Tool calls to 'memory' will be stripped from output without execution. " +
+                                    "The memory tool is unavailable and cannot persist changes. " +
                                     "Wire IAgentMemoryStore (CoreServicesInstaller) to enable persistence.");
                             }
 
@@ -2800,7 +2786,7 @@ namespace CoreAI.Infrastructure.Llm
             public float Temperature => _s.Temperature;
             public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;
-            public string ExtraBodyJson => "";
+            public string ExtraBodyJson => _s.ExtraBodyJson;
             public LlmReasoningMode ReasoningMode => _s.ReasoningMode;
             public int ThinkingBudgetTokens => _s.ThinkingBudgetTokens;
             public bool LogLlmInput => _s.LogLlmInput;

@@ -10,6 +10,7 @@ using CoreAI.Infrastructure.World;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Authority;
 using CoreAI.Infrastructure;
+using CoreAI.Logging;
 using CoreAI.Unity;
 using System.IO;
 using UnityEngine;
@@ -136,6 +137,17 @@ namespace CoreAI.Composition
         [SerializeField]
         private AgentMemoryScopeProviderBehaviour agentMemoryScopeProvider;
 
+        [Tooltip("How many chat messages one role keeps per memory key. Beyond it the OLDEST turns are dropped " +
+                 "on every new message; the store logs the first drop and raises FileAgentMemoryStore.HistoryTrimmed.")]
+        [Min(1)]
+        [SerializeField]
+        private int chatHistoryMessageCap = FileAgentMemoryStore.DefaultMaxChatHistoryMessages;
+
+        [Tooltip("How many structured transcript rows one role keeps per memory key (chat lines plus tool rows).")]
+        [Min(1)]
+        [SerializeField]
+        private int transcriptEntryCap = FileAgentMemoryStore.DefaultMaxTranscriptEntries;
+
         [System.NonSerialized]
         private IAgentMemoryScopeProvider runtimeAgentMemoryScopeProvider;
 
@@ -189,6 +201,45 @@ namespace CoreAI.Composition
             }
 
             agentMemoryPersistenceMode = mode;
+        }
+
+        /// <summary>Потолок сообщений чата на роль, который получит backing store при сборке.</summary>
+        public int ConfiguredChatHistoryMessageCap => chatHistoryMessageCap;
+
+        /// <summary>Потолок строк транскрипта на роль, который получит backing store при сборке.</summary>
+        public int ConfiguredTranscriptEntryCap => transcriptEntryCap;
+
+        /// <summary>
+        /// Задаёт потолки переписки до сборки контейнера. Раньше 500/2000 были зашиты в регистрацию:
+        /// курс ученика — сотни ходов, и после потолка начало переписки исчезало при каждом новом
+        /// сообщении без возможности это поменять. Понижение потолков применяется к уже сохранённой
+        /// истории при следующей загрузке роли.
+        /// </summary>
+        /// <exception cref="System.InvalidOperationException">The container is already built.</exception>
+        /// <exception cref="System.ArgumentOutOfRangeException">A cap is below one.</exception>
+        public void SetConversationHistoryCaps(int maxChatHistoryMessages, int maxTranscriptEntries)
+        {
+            if (Container != null)
+            {
+                throw new System.InvalidOperationException(
+                    "SetConversationHistoryCaps must be called before CoreAILifetimeScope builds its container. " +
+                    "Configure it on an inactive GameObject, then activate the scope.");
+            }
+
+            if (maxChatHistoryMessages < 1)
+            {
+                throw new System.ArgumentOutOfRangeException(nameof(maxChatHistoryMessages), maxChatHistoryMessages,
+                    "At least one chat message must be kept.");
+            }
+
+            if (maxTranscriptEntries < 1)
+            {
+                throw new System.ArgumentOutOfRangeException(nameof(maxTranscriptEntries), maxTranscriptEntries,
+                    "At least one transcript row must be kept.");
+            }
+
+            chatHistoryMessageCap = maxChatHistoryMessages;
+            transcriptEntryCap = maxTranscriptEntries;
         }
 
         /// <summary>
@@ -329,7 +380,7 @@ namespace CoreAI.Composition
                 .As<IDataOverlayVersionStore>();
             // WHY: Persistent uses the file-backed store on all players (WebGL flushes through IDBFS).
             // SessionOnly swaps the private backing to process memory while keeping the same scoped facades.
-            RegisterAgentMemoryStore(builder, agentMemoryPersistenceMode);
+            RegisterAgentMemoryStore(builder, agentMemoryPersistenceMode, chatHistoryMessageCap, transcriptEntryCap);
 
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
@@ -387,16 +438,21 @@ namespace CoreAI.Composition
                 legacyEnableFullLuaPrivateAccess);
         }
 
-#if UNITY_WEBGL
-        internal const bool UsesPersistentFileConversationSummaryStore = false;
-#else
-        internal const bool UsesPersistentFileConversationSummaryStore = true;
-#endif
-
         /// <summary>
-        /// Registers <see cref="IConversationSummaryStore"/> for this lifetime scope. Persistent non-WebGL
-        /// builds use <c>Application.persistentDataPath/CoreAI/ConversationSummaries</c>; WebGL and
-        /// <see cref="AgentMemoryPersistenceMode.SessionOnly"/> use an in-memory backing.
+        /// Registers <see cref="IConversationSummaryStore"/> for this lifetime scope.
+        /// <see cref="AgentMemoryPersistenceMode.Persistent"/> uses
+        /// <c>Application.persistentDataPath/CoreAI/ConversationSummaries</c> on EVERY player, WebGL included;
+        /// <see cref="AgentMemoryPersistenceMode.SessionOnly"/> uses an in-memory backing.
+        /// <para>
+        /// WHY WebGL тоже файловый: сводка — это пересказ всего, что старше окна истории. Оперативное
+        /// хранилище на WebGL означало, что после перезагрузки вкладки сводка пуста, начало урока исчезает,
+        /// а следующая компакция суммирует тот же префикс заново — лишний оплаченный вызов LLM. Прежнее
+        /// обоснование («синхронный File IO на WebGL идёт в IndexedDB и стопорит цикл») не соответствует
+        /// устройству платформы: <c>persistentDataPath</c> там — MEMFS в памяти вкладки, в IndexedDB его
+        /// доводит только асинхронный <c>FS.syncfs</c>, а <see cref="FileAgentMemoryStore"/> те же
+        /// синхронные вызовы делает на WebGL каждый ход. Единственное, чего портативному стору не хватало, —
+        /// постановка флаша в очередь после записи; она передаётся хуком <c>afterWrite</c>.
+        /// </para>
         /// </summary>
         internal static void RegisterConversationSummaryForCoreAiLifetimeScope(
             IContainerBuilder builder,
@@ -409,13 +465,18 @@ namespace CoreAI.Composition
                             "TokenCalibration", "scales.json"),
                         null),
                 Lifetime.Singleton);
+            const bool suppressDefaultTokenCalibrationStore = true;
+#else
+            const bool suppressDefaultTokenCalibrationStore = false;
+#endif
             if (mode == AgentMemoryPersistenceMode.Persistent)
             {
-                builder.Register(_ =>
+                builder.Register(c =>
                         new FileConversationSummaryStore(
                             Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
                                 CoreAiPersistentPaths.ConversationSummaries),
-                            null),
+                            ResolveLogOrNull(c),
+                            CoreAiWebGlPersistence.Sync),
                         Lifetime.Singleton)
                     .AsSelf();
                 builder.Register<IConversationSummaryStore>(c =>
@@ -437,20 +498,17 @@ namespace CoreAI.Composition
             builder.RegisterCorePortable(
                 true,
                 true,
-                true);
-#else
-            if (!System.Enum.IsDefined(typeof(AgentMemoryPersistenceMode), mode))
-            {
-                throw new System.ArgumentOutOfRangeException(nameof(mode), mode,
-                    "Unknown agent memory persistence mode.");
-            }
+                suppressDefaultTokenCalibrationStore);
+        }
 
-            RegisterInMemoryConversationSummaryStore(builder);
-            builder.RegisterCorePortable(
-                true,
-                true,
-                false);
-#endif
+        /// <summary>
+        /// The host logger when the container has one. Раньше файловые сторы получали <c>null</c>, и КАЖДЫЙ
+        /// сбой записи памяти или переписки в бою исчезал бесследно: строки в логе не было даже там, где код
+        /// её «писал».
+        /// </summary>
+        private static ILog ResolveLogOrNull(IObjectResolver c)
+        {
+            return c.TryResolve(out ILog log) ? log : null;
         }
 
         private static void RegisterInMemoryConversationSummaryStore(IContainerBuilder builder)
@@ -483,20 +541,30 @@ namespace CoreAI.Composition
         /// scoped decorators; the selected store remains their shared private backing.
         /// Called from <see cref="Configure"/>; internal for EditMode DI tests.
         /// </summary>
+        /// <param name="builder">Container builder.</param>
+        /// <param name="mode">Backing selection.</param>
+        /// <param name="maxChatHistoryMessages">Потолок сообщений чата на роль (см. <see cref="SetConversationHistoryCaps"/>).</param>
+        /// <param name="maxTranscriptEntries">Потолок строк транскрипта на роль.</param>
         internal static void RegisterAgentMemoryStore(
             IContainerBuilder builder,
-            AgentMemoryPersistenceMode mode = AgentMemoryPersistenceMode.Persistent)
+            AgentMemoryPersistenceMode mode = AgentMemoryPersistenceMode.Persistent,
+            int maxChatHistoryMessages = FileAgentMemoryStore.DefaultMaxChatHistoryMessages,
+            int maxTranscriptEntries = FileAgentMemoryStore.DefaultMaxTranscriptEntries)
         {
             if (mode == AgentMemoryPersistenceMode.Persistent)
             {
                 // WHY: Lambda registration: the ctor's optional string rootDirectory must not be injected.
-                builder.Register(_ => new FileAgentMemoryStore(maxChatHistoryMessages: 500,
-                        maxTranscriptEntries: 2000), Lifetime.Singleton)
+                builder.Register(c => new FileAgentMemoryStore(
+                            ResolveLogOrNull(c),
+                            maxChatHistoryMessages: maxChatHistoryMessages,
+                            maxTranscriptEntries: maxTranscriptEntries),
+                        Lifetime.Singleton)
                     .AsSelf();
                 builder.Register<ScopedAgentMemoryStoreDecorator>(c =>
                             new ScopedAgentMemoryStoreDecorator(
                                 c.Resolve<FileAgentMemoryStore>(),
-                                c.Resolve<IAgentMemoryScopeProvider>()),
+                                c.Resolve<IAgentMemoryScopeProvider>(),
+                                ResolveConversationSummaryStoreOrNull(c)),
                         Lifetime.Singleton)
                     .As<IAgentMemoryStore>();
                 builder.Register<IConversationTranscriptStore>(c =>
@@ -511,13 +579,14 @@ namespace CoreAI.Composition
             {
                 // WHY: Lambda registration: VContainer otherwise tries to inject the optional integer caps.
                 builder.Register(_ => new InMemoryAgentMemoryStore(
-                        500,
-                        2000), Lifetime.Singleton)
+                        maxChatHistoryMessages,
+                        maxTranscriptEntries), Lifetime.Singleton)
                     .AsSelf();
                 builder.Register<ScopedAgentMemoryStoreDecorator>(c =>
                             new ScopedAgentMemoryStoreDecorator(
                                 c.Resolve<InMemoryAgentMemoryStore>(),
-                                c.Resolve<IAgentMemoryScopeProvider>()),
+                                c.Resolve<IAgentMemoryScopeProvider>(),
+                                ResolveConversationSummaryStoreOrNull(c)),
                         Lifetime.Singleton)
                     .As<IAgentMemoryStore>();
                 builder.Register<IConversationTranscriptStore>(c =>
@@ -530,6 +599,17 @@ namespace CoreAI.Composition
 
             throw new System.ArgumentOutOfRangeException(nameof(mode), mode,
                 "Unknown agent memory persistence mode.");
+        }
+
+        /// <summary>
+        /// The scoped <see cref="IConversationSummaryStore"/> of this scope, so that
+        /// <see cref="IAgentMemoryStore.ClearChatHistory"/> also drops the summary derived from the erased
+        /// turns. <c>null</c> when the container has no summary store (EditMode containers that register the
+        /// memory store alone): a missing summary is nothing to clear, not a reason to fail every resolve.
+        /// </summary>
+        private static IConversationSummaryStore ResolveConversationSummaryStoreOrNull(IObjectResolver c)
+        {
+            return c.TryResolve(out IConversationSummaryStore summaries) ? summaries : null;
         }
     }
 }

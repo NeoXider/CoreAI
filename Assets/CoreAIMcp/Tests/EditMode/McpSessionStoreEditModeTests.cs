@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using CoreAI.Mcp.Server;
 using NUnit.Framework;
 
@@ -10,6 +11,18 @@ namespace CoreAI.Mcp.Tests
     /// </summary>
     public sealed class McpSessionStoreEditModeTests
     {
+        [Test]
+        public void ConcurrentInitializeStorm_NeverExceedsSessionCapacity()
+        {
+            McpSessionStore store = new(maxSessions: 4);
+            Parallel.For(0, 1000, _ =>
+            {
+                store.Issue();
+                Assert.LessOrEqual(store.Count, 4);
+            });
+            Assert.AreEqual(4, store.Count);
+        }
+
         [Test]
         public void Issue_ReturnsDistinctIds_ThatAreKnown()
         {

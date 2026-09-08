@@ -37,16 +37,7 @@ namespace CoreAI.Tests.EditMode
 
         private void Apply(TextAsset primary, params TextAsset[] additional)
         {
-            SetField("instructionsAsset", primary);
-            SetField("additionalInstructionAssets", additional ?? Array.Empty<TextAsset>());
-        }
-
-        private void SetField(string name, object value)
-        {
-            typeof(SkillSetAsset)
-                .GetField(name, System.Reflection.BindingFlags.Instance |
-                                System.Reflection.BindingFlags.NonPublic)
-                .SetValue(_asset, value);
+            _asset.SetInstructionAssets(primary, additional);
         }
 
         [Test]
@@ -94,7 +85,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void NoInstructionFiles_FallsBackToTheInlineField()
         {
-            SetField("inlineInstructions", "Typed straight into the Inspector.");
+            _asset.ApplyDefinition(new SkillSetDefinition { Instructions = "Typed straight into the Inspector." });
             Apply(null);
 
             Assert.AreEqual("Typed straight into the Inspector.", _asset.Instructions);
@@ -118,8 +109,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BuiltSkillSet_CarriesTheJoinedInstructions()
         {
-            SetField("skillName", "MultiDoc");
-            SetField("description", "Written across two files");
+            _asset.ApplyDefinition(new SkillSetDefinition { Name = "MultiDoc", Description = "Written across two files" });
             Apply(_overview, _details);
 
             SkillSet skill = _asset.BuildSkillSet();
@@ -127,6 +117,37 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("MultiDoc", skill.Name);
             Assert.That(skill.Instructions, Does.Contain("## overview"));
             Assert.That(skill.Instructions, Does.Contain("## details"));
+        }
+
+        [Test]
+        public void DefinitionRoundtrip_PreservesCompleteEntryAndRelativeReferences()
+        {
+            _asset.SetInstructionAssets(_overview, new[] { _details }, "SKILL.md", new[] { "references/api.md" });
+            SkillSetDefinition definition = _asset.ToSkillDefinition();
+            _asset.ApplyDefinition(definition);
+            SkillSet skill = _asset.BuildSkillSet();
+            Assert.AreEqual(_overview.text, skill.Sections[0].Content);
+            Assert.AreEqual("SKILL.md", skill.Sections[0].Name);
+            Assert.IsTrue(skill.TryGetSection("references/api.md", out SkillSection reference));
+            Assert.AreEqual(_details.text, reference.Content);
+            Assert.AreEqual(skill.Instructions, definition.BuildSkillSet().Instructions);
+        }
+
+        [Test]
+        public void MissingPrimary_DoesNotPromoteReferenceToEntry()
+        {
+            _asset.SetInstructionAssets(null, new[] { _details }, "SKILL.md", new[] { "references/api.md" });
+            SkillSet skill = _asset.BuildSkillSet();
+            Assert.AreEqual("SKILL.md", skill.Sections[0].Name);
+            Assert.AreEqual("", skill.Sections[0].Content);
+            Assert.AreEqual(_details.text, skill.Sections[1].Content);
+        }
+
+        [Test]
+        public void SingleFileBuiltSkill_PreservesExactText()
+        {
+            Apply(_overview);
+            Assert.AreEqual(_overview.text, _asset.BuildSkillSet().Instructions);
         }
     }
 }

@@ -8,7 +8,54 @@ Portable **`CoreAI.Core`** exposes **`IOpenAiHttpTransport`** for OpenAI-compati
 | **`UnityWebRequestOpenAiTransport`** | CoreAI.Source | **`UNITY_WEBGL && !UNITY_EDITOR`**, default when **`WebGlNativeStreaming`** is off | No — full JSON + **simulated** stream |
 | **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** | CoreAI.Source | **`UNITY_WEBGL && !UNITY_EDITOR`** when **`WebGlNativeStreaming`** is on | Yes — browser **`fetch`** reads SSE incrementally |
 
-**Composition:** **`MeaiLlmClient.CreateHttp`** selects the transport and constructs **`MeaiOpenAiChatClient(settings, transport)`**.
+**Composition:** `MeaiLlmClient.CreateHttp(..., supportsNativeToolCalling: decision.Native, memoryStore: store)`
+selects the transport and passes the explicit endpoint capability into `MeaiOpenAiChatClient`.
+`MeaiLlmClient`, its factories, and `OpenAiChatLlmClient` no longer have a channel default: the required
+`bool supportsNativeToolCalling` sits before the optional `memoryStore`. This is an intentional
+API change; when updating a third-party host, pass its setting or probe result, not a random constant.
+Existing low-level `MeaiOpenAiChatClient(settings, transport, ...)` constructors keep the ordinary
+OpenAI API contract with native tools; the new overload takes the capability explicitly.
+
+### Single-request tool ban
+
+`ForcedToolMode=None` — a local execution ban for Native and Text, including streaming mode.
+The request performs one provider turn, builds no unused bindings, and starts no
+approval or empty-response recovery loop. JSON examples are preserved as text; unsolicited
+native calls are not executed. Native passes `tool_choice=none`; Text still strips
+unsupported tool fields from the HTTP body, keeping the ban on the CoreAI side.
+
+### Channel selection and text mode
+
+The runtime factory first checks server readiness. Then `ToolChannel=Auto` makes one probe with a
+tool declaration at activation — the same for HTTP and LLMUnity. Accepted `tools` enables Native;
+a jinja rejection enables Text; a transport/other error keeps activation at Text and writes the reason to a warning.
+`Native` and `Text` skip the capability probe. Caller cancellation interrupts activation even when
+the probe adapter returned a result after cancellation. The probe checks schema acceptance by the server,
+while the model's own tool-choice accuracy is verified separately.
+
+Text keeps local `AIFunction` entries for execution via MEAI but removes outgoing `tools`, `tool_choice`,
+and `parallel_tool_calls`. The HTTP adapter removes them **after** `ExtraBodyJson`, so extra parameters
+do not bring the unsupported channel back onto the wire. This works the same for ordinary responses, SSE, and
+follow-up requests after tool execution. Native keeps the standard MEAI `ToolMode` modes.
+
+Prose call parsing and response cleanup use one rule: a `Text` endpoint or the explicit
+`AllowTextShapedToolCallsOnNativeEndpoint = true`. An unavailable native binding alone
+**does not** enable text parsing: tutorial JSON examples are preserved. Cleanup is limited to
+declared tool names; an unknown name stays text. A required call without a usable
+executable binding returns `InvalidRequest` before any model request; an optional one is skipped
+with a diagnostic. When rounds are exhausted, the stream makes one final request without tools;
+if there is neither a successful action nor a usable result, the terminal chunk carries the error,
+`ProviderError`, and traces of failed calls. A successful tool preserves the existing valid
+completion even with an empty final response.
+
+### Waiting for HTTP in Unity
+
+Readiness, the tool probe, and the ordinary HTTP transport use a single `AsyncOperation.completed` wait.
+It does not poll `isDone` in a loop and does not occupy a frame. An already completed operation is also accepted safely;
+the event rules are described in [Unity Scripting API](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/AsyncOperation-completed.html).
+The cancellation callback only completes the wait; `Abort`, unsubscription, and request release happen in the saved
+Unity context. A pre-cancelled request creates no network operation. Unity API is not moved into `Task.Run`.
+
 
 **WebGL player:** without **`WebGlNativeStreaming`** (or when it is **`false`**), **`UnityWebRequest`** does not deliver SSE incrementally — use the fetch bridge (**default `true`** on new **`CoreAISettingsAsset`** since **v1.6.13**) or disable streaming for chat (see **`STREAMING_WEBGL_TODO.md`**).
 

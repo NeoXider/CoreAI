@@ -17,19 +17,139 @@ using VContainer.Unity;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Covers <see cref="CoreAILifetimeScope"/> store registration: persistent/platform-specific and
-    /// session-only conversation backings, always exposed through the same scoped facades.
+    /// Covers <see cref="CoreAILifetimeScope"/> store registration: persistent and session-only
+    /// conversation backings, always exposed through the same scoped facades, on every player the same way.
     /// </summary>
     public sealed class CoreAILifetimeScopeConversationStoreEditModeTests
     {
+        /// <summary>
+        /// Раньше тест фиксировал КОНСТАНТУ (<c>UsesPersistentFileConversationSummaryStore</c> = false под
+        /// <c>UNITY_WEBGL</c>), то есть узаконивал поведение, при котором на целевой платформе сводка жила
+        /// только в памяти процесса: после перезагрузки вкладки всё старше окна истории исчезало, а следующая
+        /// компакция суммировала тот же префикс заново за деньги. Теперь проверяется поведение: в режиме
+        /// Persistent сводка файловая и переживает новый контейнер — без <c>#if</c> по платформе.
+        /// </summary>
         [Test]
-        public void UsesPersistentFileConversationSummaryStore_MatchesCompileTimePlatform()
+        public void PersistentMode_ConversationSummary_IsFileBacked_AndSurvivesANewContainer()
         {
-#if UNITY_WEBGL
-            Assert.IsFalse(CoreAILifetimeScope.UsesPersistentFileConversationSummaryStore);
-#else
-            Assert.IsTrue(CoreAILifetimeScope.UsesPersistentFileConversationSummaryStore);
-#endif
+            string roleId = "persistent-summary-" + Guid.NewGuid().ToString("N");
+            const string summaryText = "lesson so far: variables, print, first loop";
+            CoreAISettingsAsset firstSettings = null;
+            CoreAISettingsAsset secondSettings = null;
+            IObjectResolver first = null;
+            IObjectResolver second = null;
+            try
+            {
+                first = BuildPersistentContainer(out firstSettings);
+                Assert.IsInstanceOf<FileConversationSummaryStore>(first.Resolve<FileConversationSummaryStore>(),
+                    "Persistent mode must back the summary with a file on every player, WebGL included.");
+                Assert.IsInstanceOf<ScopedConversationSummaryStoreDecorator>(first.Resolve<IConversationSummaryStore>());
+                first.Resolve<IConversationSummaryStore>().SaveSummary(roleId, summaryText);
+                DisposeContainer(first);
+                first = null;
+
+                second = BuildPersistentContainer(out secondSettings);
+                Assert.AreEqual(summaryText, second.Resolve<IConversationSummaryStore>().LoadSummary(roleId),
+                    "A summary written by one process must be readable by the next one: it IS the memory of " +
+                    "everything older than the history window.");
+                second.Resolve<IConversationSummaryStore>().ClearSummary(roleId);
+            }
+            finally
+            {
+                DisposeContainer(first);
+                DisposeContainer(second);
+                if (firstSettings != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(firstSettings);
+                }
+
+                if (secondSettings != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(secondSettings);
+                }
+            }
+        }
+
+        [Test]
+        public void RegisterAgentMemoryStore_PassesConfiguredCapsToTheBacking()
+        {
+            ContainerBuilder builder = new();
+            builder.RegisterInstance<ILog>(NullLog.Instance);
+            builder.Register<DefaultAgentMemoryScopeProvider>(Lifetime.Singleton)
+                .As<IAgentMemoryScopeProvider>();
+            CoreAILifetimeScope.RegisterAgentMemoryStore(builder, AgentMemoryPersistenceMode.Persistent, 7, 11);
+            using IObjectResolver container = builder.Build();
+
+            FileAgentMemoryStore backing = container.Resolve<FileAgentMemoryStore>();
+
+            Assert.AreEqual(7, backing.MaxChatHistoryMessages,
+                "Раньше 500/2000 были зашиты в регистрацию и потребитель не мог их поменять.");
+            Assert.AreEqual(11, backing.MaxTranscriptEntries);
+        }
+
+        [Test]
+        public void SetConversationHistoryCaps_BeforeBuild_RejectsInvalidValues_AndChangesAfterBuild()
+        {
+            GameObject root = new("CoreAILifetimeScope-history-caps-test");
+            root.SetActive(false);
+            IObjectResolver container = null;
+            try
+            {
+                CoreAILifetimeScope scope = root.AddComponent<CoreAILifetimeScope>();
+                Assert.AreEqual(FileAgentMemoryStore.DefaultMaxChatHistoryMessages, scope.ConfiguredChatHistoryMessageCap);
+                Assert.AreEqual(FileAgentMemoryStore.DefaultMaxTranscriptEntries, scope.ConfiguredTranscriptEntryCap);
+
+                scope.SetConversationHistoryCaps(1200, 4800);
+                Assert.AreEqual(1200, scope.ConfiguredChatHistoryMessageCap);
+                Assert.AreEqual(4800, scope.ConfiguredTranscriptEntryCap);
+                Assert.Throws<ArgumentOutOfRangeException>(() => scope.SetConversationHistoryCaps(0, 10));
+                Assert.Throws<ArgumentOutOfRangeException>(() => scope.SetConversationHistoryCaps(10, 0));
+
+                container = new ContainerBuilder().Build();
+                System.Reflection.PropertyInfo containerProperty = typeof(LifetimeScope).GetProperty(
+                    nameof(LifetimeScope.Container));
+                Assert.IsNotNull(containerProperty);
+                containerProperty.SetValue(scope, container);
+
+                InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+                    scope.SetConversationHistoryCaps(10, 10));
+                StringAssert.Contains("before CoreAILifetimeScope builds", error.Message);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+                DisposeContainer(container);
+            }
+        }
+
+        private static IObjectResolver BuildPersistentContainer(out CoreAISettingsAsset settings)
+        {
+            ContainerBuilder builder = new();
+            builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
+            builder.RegisterCore();
+
+            settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            settings.ConfigureOffline();
+
+            builder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(settings);
+            builder.RegisterAgentPrompts(null);
+            builder.RegisterLlmPipeline(settings, null);
+            builder.Register<DefaultSoloNetworkPeer>(Lifetime.Singleton).As<IAiNetworkPeer>();
+            builder.Register<IAuthorityHost>(c =>
+                    new NetworkedAuthorityHost(c.Resolve<IAiNetworkPeer>(), AiNetworkExecutionPolicy.AllPeers),
+                Lifetime.Singleton);
+
+            CoreAILifetimeScope.RegisterConversationSummaryForCoreAiLifetimeScope(builder);
+            CoreAILifetimeScope.RegisterAgentMemoryStore(builder);
+            return builder.Build();
+        }
+
+        private static void DisposeContainer(IObjectResolver container)
+        {
+            if (container is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
         }
 
         [Test]
@@ -286,7 +406,6 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-#if !UNITY_WEBGL
         [Test]
         public void RegisterConversationSummaryForLifetimeScope_Resolves_FileConversationSummaryStore()
         {
@@ -337,7 +456,6 @@ namespace CoreAI.Tests.EditMode
                 }
             }
         }
-#endif
 
         [Test]
         public void RegisterConversationStores_SessionOnly_UsesInMemorySummaryAndMemoryBackings()

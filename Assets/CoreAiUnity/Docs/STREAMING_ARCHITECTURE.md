@@ -241,15 +241,26 @@ Inside `AiOrchestrator.RunStreamingAsync`:
 
 Since v0.24.0, streaming tool-calling uses a **dual-path architecture**:
 
-### Path 1: Text-based JSON extraction (primary)
+### Path 1: Text-based extraction (primary)
 
 The primary mechanism, designed for local models (Ollama, llama.cpp, LM Studio) that output tool calls as text.
-`MeaiLlmClient.TryExtractToolCallsFromText` scans the accumulated visible text for JSON objects containing both `"name"` and `"arguments"` keys.
+`MeaiLlmClient.TryExtractToolCallsFromText` delegates to the portable `LlmToolCallTextExtractor`, which recognises **four** text shapes, not only JSON. They differ in how much evidence of a *call* the shape itself carries, and the guards differ accordingly:
 
-- Multi-tool: extracts multiple tool calls from a single response
-- False-positive protection: ignores JSON inside fenced code blocks (` ```...``` `)
-- Pattern-aware: only matches JSON with required `name` + `arguments` structure
-- Graceful: partial/malformed JSON is silently skipped
+| Shape | Example | Evidence it is a call | Recognised |
+|-------|---------|-----------------------|------------|
+| JSON | `{"name":"memory","arguments":{…}}` (`arguments_json` string accepted too; multiple objects per reply) | the `name` + `arguments` structure | by shape; with a registry only for a declared name |
+| XML (Hermes / Qwen-Agent) | `<function=memory><parameter=action>clear</parameter></function>` | the XML tags | by shape; with a registry only for a declared name |
+| Function call | `read_skill("Alchemy")`, `world_command(action='spawn', x=1)` — the **whole** reply | **none**: `print("Привет, мир!")` is the same string | **only with a registry, and only for a declared name** |
+| Memory pseudo-write | `Action=write content="…"` ending its line | the `Action=write` keyword | by shape; maps to `memory`, so with a registry only if `memory` is declared |
+
+Guards common to every shape:
+
+- fenced code blocks (` ```...``` `) are ignored — **including an unclosed trailing fence**: a reply cut off by the token limit inside a ```` ```json ```` example must not execute the example;
+- JSON wrapped in backticks or matching quotes is a citation, not a command;
+- placeholder names (`<tool_name>`) are rejected;
+- partial/malformed JSON is skipped here; truncation repair lives in `TryBuildMalformedTextToolCall`, behind the same channel gate.
+
+**Registry of declared tool names (7.35.0).** `LlmToolCallTextExtractor.TryExtract(text, knownToolNames, …)` and `StripForDisplay(text, knownToolNames)` take the names of the tools the request declared (`ILlmTool.Name`). Invariant: **a call is an address to a declared tool** — any other name stays visible text in every shape, because it cannot execute anyway and hiding it takes a line of the lesson away from the learner. Without a registry (the legacy overloads) JSON, XML and the pseudo-write are still recognised by shape, but **function-call syntax never fires**: with no registry `read_skill("x")` and `print("x")` are indistinguishable, and a Python tutor's one-line answer used to become a call to a non-existent tool `print` — the model got `Unknown tool`, the learner an empty bubble. There is deliberately no stop-list of Python names (`print`/`input`/`len`); it would end at the first new lesson. The current call sites (`MeaiLlmClient.TryPortableToolExtract`, `SmartToolCallingChatClient.TryExtractToolCallsFromText`) still use the legacy overload; to re-enable function-call syntax for local Qwen builds pass `request.Tools.Select(t => t.Name)` there.
 
 ### Path 2: Native SSE `delta.tool_calls` (enhancement)
 
@@ -258,9 +269,22 @@ For cloud providers (OpenAI, Anthropic via OpenRouter) that emit `delta.tool_cal
 
 If the SSE stream contains `FunctionCallContent`, `MeaiLlmClient` uses native detection instead of text extraction.
 
-### Hybrid hold when tools are declared (v1.7.3+)
+### Prose is interpreted only on the fallback path (7.35.0+)
 
-When **`Tools`** is non-empty, **`MeaiLlmClient.CompleteStreamingAsync`** applies the **hybrid JSON hold** to **bound** and **unbound** tool registrations alike — unless **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`** is **`true`**, which buffers the entire assistant iteration before any **`LlmStreamChunk.Text`** (escape hatch for exotic delta fragmentation). After Path 1 extraction or Path 2 **`delta.tool_calls`**, any assistant prose that was not yet forwarded is reconciled against the JSON-stripped held tail and emitted as trailing **`Text`** chunks so short prefixes (for example “Working…”) are not lost.
+**One decision, taken by CHANNEL, governs everything the loop does with the model's prose:** holding it back, reading tool calls out of it, and repairing truncated JSON in it. Since 7.35.0 all three run only when **`Tools`** is non-empty **and** the endpoint has no native tool channel (**`SupportsNativeToolCalling == false`**) **or** the declared tools bound nothing (**`aiTools.Count == 0`**). A remote OpenAI-compatible endpoint is native, so its text streams live, delta by delta, and is never parsed.
+
+**The channel is declared where the endpoint is created, never guessed.** `MeaiLlmClient.CreateHttp` and the `OpenAiChatLlmClient` constructors take `supportsNativeToolCalling` (default `true` — that is what an OpenAI-compatible server means), and every place that builds a **local llama.cpp / LLMUnity** endpoint passes **`false`** explicitly: `LlmEndpointClientFactory.ActivateLlmUnityAsync`, the LlmUnity profile in `LlmClientRegistry`, and `LlmPipelineInstaller`'s LLMUnity client. That server speaks the same HTTP dialect *without* a tool channel — its model calls a tool by writing JSON in the answer — so for it prose interpretation must stay ON. Wrong in that direction and every local-model tool stops working with no error anywhere; wrong in the other and a teacher's JSON example is executed as a command.
+
+Two reasons, both from real use:
+
+- **Correctness.** Reading prose for calls means acting on what the model *said* instead of on the channel it said it through. A tutor explaining JSON — the everyday job of a programming teacher — writes an object shaped exactly like a call, and the engine executed the example instead of showing it. Shape can never separate an example from a command; the channel can. The malformed-JSON repair is the sharpest case: it *reconstructs* a truncated object out of prose and runs it.
+- **Feel.** The hold begins at the first still-open `{`, which a Python teacher types constantly (a dict, a set, an f-string), so prose froze mid-sentence and then arrived in a lump.
+
+Behind this gate: the hybrid hold and its span scanning (`GetHybridSafeSegments`, `GetFirstIncompleteBraceStart`, `FindToolCallJsonSpans`), `TryExtractToolCallsFromText` (Path 2), `TryBuildMalformedTextToolCall`, the `<think>`-block tool-call diagnostic, `SmartToolCallingChatClient`'s own text extraction on the non-streaming path (constructor flag `allowTextShapedToolCalls`, default **false**), and in `AiOrchestrator` both `LlmToolCallTextExtractor.StripForDisplay` and the tool-result repetition filter. Deliberately NOT behind it: execution of `FunctionCallContent` that arrived on the provider's own channel, and `LlmResponseSanitizer.StripLeadingSystemPromptEcho` (an identity match against the prompt we sent, not a guess about content).
+
+**Escape hatch:** **`LlmCompletionRequest.AllowTextShapedToolCallsOnNativeEndpoint = true`** restores prose interpretation for an endpoint that advertises a native channel and then answers with JSON in the text (proxies in front of local models do this). The symptom that calls for it is a tool that never runs while the reply contains its call. Off by default; nothing in the runtime sets it.
+
+There is no second escape hatch. The former **`BufferFullStreamingIterationWhenToolsDeclared`** — buffer the whole assistant iteration before any **`LlmStreamChunk.Text`** — was removed in **7.35.0**: nothing in the runtime ever set it, and full-turn buffering is precisely what the note below forbids. The hold now has exactly one cause: we hold prose because we are parsing it as tool calls (`hybridToolJsonHold == interpretProseAsToolCalls`). After Path 1 extraction or Path 2 **`delta.tool_calls`**, any assistant prose that was not yet forwarded is reconciled against the JSON-stripped held tail and emitted as trailing **`Text`** chunks so short prefixes (for example “Working…”) are not lost.
 
 > **Never** reintroduce full-turn buffering of bound-tool turns. In 4.10.4 all bound-tool turns were buffered to hide the pre-tool preamble; that killed token-by-token streaming for the teacher chat and was reverted in 4.10.5. The hybrid hold below must keep visible prose streaming live on every tool turn.
 
@@ -275,7 +299,7 @@ The hybrid hold hides **only** the tool-call JSON, never the surrounding prose/p
 
 Mechanism (`MeaiLlmClient`):
 
-- **`GetHybridSafeSegments(text, out exclusiveSafeEnd)`** walks the accumulated visible text and returns ordered **`HybridProseSegment`** ranges: prose segments (`IsToolJson=false`, emitted live) and completed tool-JSON spans (`IsToolJson=true`, hidden). `exclusiveSafeEnd` is the start of the first still-incomplete object (the hold boundary). Reuses **`GetExclusiveEndForSafeUnboundRawStreaming`** (hold boundary) + **`FindToolCallJsonSpans`** (completed spans).
+- **`GetHybridSafeSegments(text, out exclusiveSafeEnd)`** walks the accumulated visible text and returns ordered **`HybridProseSegment`** ranges: prose segments (`IsToolJson=false`, emitted live) and completed tool-JSON spans (`IsToolJson=true`, hidden). `exclusiveSafeEnd` is the start of the first still-incomplete object (the hold boundary). Built from **`GetFirstIncompleteBraceStart`** (hold boundary) + **`FindToolCallJsonSpans`** (completed spans).
 - The streaming loop drains these segments each delta via the local iterator **`DrainHybridSafeSegments`**, advancing **`hybridRawExclusiveEndEmitted`** over both emitted prose and hidden JSON, and emitting the tool-progress marker the first time a hold begins.
 - After the turn ends and tool calls are extracted, **`GetHybridUnemittedSuffix(visibleText, hybridRawExclusiveEndEmitted)`** returns the JSON-stripped remainder of the held tail (the only prose not yet streamed), so post-tool prose is emitted exactly once with no duplication.
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -464,7 +464,7 @@ namespace CoreAI.Tests.PlayMode
             if (settings != null && settings.UseHttpApi && !string.IsNullOrWhiteSpace(settings.ApiBaseUrl) &&
                 !string.IsNullOrWhiteSpace(settings.ModelName))
             {
-                ILlmClient client = new OpenAiChatLlmClient(settings);
+                ILlmClient client = new OpenAiChatLlmClient(settings, supportsNativeToolCalling: true);
                 if (modelOverride != null && !string.IsNullOrWhiteSpace(modelOverride))
                 {
                     // The asset path cannot retarget the model without mutating the shared asset; surface a clear hint.
@@ -478,7 +478,7 @@ namespace CoreAI.Tests.PlayMode
                     client,
                     PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
                     coreAiSettings: settings,
-                    rebuildWithMemoryStore: store => new OpenAiChatLlmClient(settings, store));
+                    rebuildWithMemoryStore: store => new OpenAiChatLlmClient(settings, supportsNativeToolCalling: true, memoryStore: store));
                 ignoreReason = null;
                 return true;
             }
@@ -531,11 +531,13 @@ namespace CoreAI.Tests.PlayMode
 
             ILlmClient BuildClient(IAgentMemoryStore memoryStore)
             {
-                ILlmClient client = MeaiLlmClient.CreateHttp(
-                    httpSettings, behavior, GameLoggerUnscopedFallback.Instance, memoryStore);
-                // WHY: CreateHttp wires native tool calling ON; an explicit native-tools=false toggle has to
-                // survive the memory-store rebuild as well, or the live suite silently changes contract.
-                return config.NativeTools ? client : new NonNativeToolsLlmClientDecorator(client);
+                ILlmClient client = MeaiLlmClient.CreateHttp(httpSettings,
+                    behavior,
+                    GameLoggerUnscopedFallback.Instance,
+                    supportsNativeToolCalling: config.NativeTools,
+                    memoryStore: memoryStore);
+                // WHY: the executing client carries the channel across memory-store rebuilds.
+                return client;
             }
 
             return new PlayModeProductionLikeLlmHandle(
@@ -624,72 +626,25 @@ namespace CoreAI.Tests.PlayMode
             string model = settings != null && !string.IsNullOrWhiteSpace(settings.ModelName)
                 ? settings.ModelName
                 : "local";
-            ILlmClient client = new OpenAiChatLlmClient(
-                new LlmUnityServerHttpSettings(settings, port, model, ""),
+            ILlmClient client = new OpenAiChatLlmClient(new LlmUnityServerHttpSettings(settings, port, model, ""),
                 settings,
                 GameLoggerUnscopedFallback.Instance,
-                new InMemoryStore());
+                supportsNativeToolCalling: LlmToolChannelResolution.ResolveWithoutProbe(settings.LlmUnityToolChannel, LlmToolChannelResolution.BundledLlamaLibReason).Native,
+                memoryStore: new InMemoryStore());
             handle = new PlayModeProductionLikeLlmHandle(
                 client,
                 PlayModeProductionLikeLlmBackend.LlmUnity,
                 coreAiSettings: settings,
                 llmUnityHarnessRoot: go,
-                rebuildWithMemoryStore: store => new OpenAiChatLlmClient(
-                    new LlmUnityServerHttpSettings(settings, port, model, ""),
+                rebuildWithMemoryStore: store => new OpenAiChatLlmClient(new LlmUnityServerHttpSettings(settings, port, model, ""),
                     settings,
                     GameLoggerUnscopedFallback.Instance,
-                    store));
+                    supportsNativeToolCalling: LlmToolChannelResolution.ResolveWithoutProbe(settings.LlmUnityToolChannel, LlmToolChannelResolution.BundledLlamaLibReason).Native,
+                    memoryStore: store));
             ignoreReason = null;
             return true;
 #endif
         }
     }
 
-#if COREAI_LLM
-    /// <summary>
-    /// Forwarding <see cref="ILlmClient"/> decorator that forces native tool calling OFF, so the
-    /// orchestrator falls back to the text/prompt tool contract. Used by the live-suite config when
-    /// <c>COREAI_TEST_NATIVE_TOOLS=false</c> against providers/models whose native function-calling is
-    /// unreliable. All completion/streaming behavior is delegated unchanged to the inner client.
-    /// </summary>
-    internal sealed class NonNativeToolsLlmClientDecorator : ILlmClient
-    {
-        private readonly ILlmClient _inner;
-
-        public NonNativeToolsLlmClientDecorator(ILlmClient inner)
-        {
-            _inner = inner ?? throw new ArgumentNullException(nameof(inner));
-        }
-
-        public bool SupportsNativeToolCalling => false;
-
-        public bool SupportsNativeToolCallingForRole(string agentRoleId)
-        {
-            return false;
-        }
-
-        public void SetTools(IReadOnlyList<ILlmTool> tools)
-        {
-            _inner.SetTools(tools);
-        }
-
-        public Task<LlmCompletionResult> CompleteAsync(
-            LlmCompletionRequest request,
-            System.Threading.CancellationToken cancellationToken = default)
-        {
-            return _inner.CompleteAsync(request, cancellationToken);
-        }
-
-        public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
-            LlmCompletionRequest request,
-            [System.Runtime.CompilerServices.EnumeratorCancellation]
-            System.Threading.CancellationToken cancellationToken = default)
-        {
-            await foreach (LlmStreamChunk chunk in _inner.CompleteStreamingAsync(request, cancellationToken))
-            {
-                yield return chunk;
-            }
-        }
-    }
-#endif
 }

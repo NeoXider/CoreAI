@@ -4,693 +4,986 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.36.0] - Unreleased
+
+> Release preparation after merging with the published 7.35.0. This version is not released yet. Before the merge, the Core, Source, Tests, MCP and MCP.Tests assemblies compiled without errors; the full EditMode/PlayMode run and the final audit of the merged tree are still to be done. The 7.35.0 verification results below apply only to the published version.
+
+### Recovery 2026-09-07
+
+- `SkillSetAsset` preserves document boundaries through a portable definition. The runtime API
+  `SetInstructionAssets` takes `TextAsset` entries and logical relative paths without `AssetDatabase`;
+  the main document is not replaced by a reference, even if it is empty. Reflection was removed from the affected tests.
+- The MEAI transport and consumer carry message boundaries via `MessageId`, preserve response metadata
+  and use typed cached/reasoning token counters. Final-text verification
+  and successful turns without a visible reply are included in the adapter recovery.
+- Regressions were added for skill reads via Unity/MCP, document transfer and cancellation. A successful
+  pre-merge compilation does not replace the full EditMode/PlayMode run and an independent audit before release.
+
+### Fixed
+
+- **Disabling the panel no longer loses the teacher's answer at a host that asked to play the turn out.**
+  `CoreAiChatPanel.OnDisable` advanced the turn generation UNCONDITIONALLY, while `CancelsActiveRequestOnDisable`
+  (7.6.0) was only checked in request cancellation — i.e. it affected only token yanking. When
+  overridden to `false` (in RedoSchool — the briefing chat, where Esc means "left focus") the next
+  chunk saw itself as stale, the panel left the enumeration, `CoreAiChatService` in `finally`
+  released the iterator, the orchestrator closed early and only the student's reply landed in history:
+  the assistant reply is written in `SanitizeAndPublish` after the end of the stream, which the stream never reached.
+  For the child: the panel went dark — the answer vanished both from the screen and from history, the model started the next turn
+  as if it had never answered, tokens burned. Now the decision is ONE and taken in `OnDisable`: with `true`
+  everything is as before (generation, cancellation, busy reset); with `false` the turn stays current, runs to the end,
+  writes the answer into history and into the role feed cache, calls `OnResponseReceived` and clears busy in its own
+  `finally`; while it runs, the panel is busy and a new teacher reply will not interrupt it. The UI tree on
+  disable is still released — playing a turn out does not mean drawing into a dead bubble. If the tree
+  was rebound mid-answer (re-enable, `PanelRenderer` reload), the current
+  segment opens a bubble in the new tree FROM THE SEGMENT START (`segmentRendered` in
+  `SendStreamingAsync`), not as a headless tail; previously shown segments are returned by hydration from
+  storage. Guards — the new `CoreAiChatPanelDisableKeepsTurnEditModeTests` on the combat
+  `AiOrchestrator` + `CoreAiChatService` (a mock orchestrator would prove nothing, the defect lived at
+  the junction of three layers): with `false` the answer is in history and at the handler, the disabled panel's tree is
+  untouched; on rebind the continuation opens the bubble whole; the batch `true` path is
+  unchanged — the turn is dropped and history holds only the student's reply.
+- **An answer tail before `<` is no longer lost.** Two causes at once. (a) The panel called only
+  `ProcessChunk` and `Reset` on `ThinkBlockStreamFilter`, never `Flush` — the tail held back in case of
+  a tag was simply thrown away at the end of the stream. (b) `Flush` itself returned an empty string for an
+  opening-tag-prefix tail (`<`, `<t`, `<th>…`) "to avoid showing a half-written tag". For the Python teacher
+  this is a live case: the answer "comparison operator: <" lost its last character both in the feed and in history, even though
+  `STREAMING_ARCHITECTURE.md` promises a lone `<` renders. Now `Flush` returns the tail
+  as is (the stream is over — it can no longer become a tag, so it is text), and `SendStreamingAsync` calls
+  it after the end of the stream via the same path as a regular chunk (`AppendVisibleText`). (c) Along the way, the branch
+  where a CLOSING-tag-prefix tail buffered all accumulated visible text: after already shown
+  student text, a lone `</think>` is a stray tag, not a reasoning boundary, and the held remainder of
+  the chunk was lost ("Answer: yes." + " More <" + "/think>" → " More " vanished; the same line in one chunk —
+  not). The filter remembers whether any visible character was shown (`_visibleShown`): before the first visible
+  output a lone `</think>` still hides the reasoning before it (models streaming thoughts without
+  `<think>`); after — only the tag itself is removed. `Reset` forgets this flag too.
+- **The filter tests thought for the product.** `ThinkBlockFilterEditModeTests` declared INSIDE the file
+  its own twin class of the streaming automaton ("Mirrors the logic in CoreAiChatPanel.FilterStreamChunk")
+  and its own regex cleanup: 13 tests passed under ANY implementation of the combat filter, while the twin knew
+  neither the lone closing tag nor the reasoning sink — it described nonexistent behavior. The file
+  was rewritten onto the combat `CoreAiChatPanel.StripThinkBlocks` (now `internal`) and the panel's combat stream;
+  of the seven twin streaming tests, five matching ones already existing in
+  `ThinkBlockStreamFilterEditModeTests` were deleted, two (checking each individual return on a
+  split tag, a block in every chunk) were moved there onto the combat `ThinkBlockStreamFilter`.
+  **Norm replacement:** `Flush_PartialOpenTagBuffered_Hidden` pinned "cut off mid-tag —
+  drop the buffer" — which was cause (b) above; the test was replaced with `Flush_PartialOpenTagAlone_IsReturnedNotDropped`.
+  New guards in `ThinkBlockStreamFilterEditModeTests`: `<` as the answer's last character is kept;
+  visible text, a lone `<` on a chunk boundary, then `/think>` — visible text does not vanish;
+  `2 < 3 and 5 > 4` cut as `"2 <"` + `" 3"`; Cyrillic around whole and split tags;
+  `Reset` forgets that visible text already appeared. In `ThinkBlockFilterEditModeTests` — the same tail
+  through the panel: the answer "Comparison operator: <" reaches the bubble and the full answer whole, while a `<`
+  that becomes a real `<think>` in the next chunk hides the reasoning.
+- **The channel is now declared where the endpoint is created — otherwise the gate would have switched tools off
+  at local models.** The single `MeaiLlmClient.CreateHttp` factory hardcoded
+  `supportsNativeToolCalling: true`, and the LLMUnity llama.cpp server also rises through it: there was no way
+  in configuration to say "this endpoint has no call channel" at all. With a prose-parsing gate that would mean
+  a local model's tools silently stop working — no error,
+  the call just never happens. The flag was threaded into `CreateHttp` and into the
+  `OpenAiChatLlmClient` constructors (the `true` default is exactly what "an OpenAI-compatible server" means), and the three places
+  that build a local endpoint pass `false` explicitly: `LlmEndpointClientFactory` (the
+  `LlmEndpointKind.LlmUnity` branch), the LlmUnity profile in `LlmClientRegistry`, and the LLMUnity client in
+  `LlmPipelineInstaller`. The remote HTTP endpoint in the factory declares `true` just as explicitly: there is nowhere
+  left to guess the channel.
+- **`MeaiLlmClient` no longer interprets model prose on the native channel — in any form.** A single
+  per-CHANNEL decision (`interpretProseAsToolCalls`) governs three things at once: text retention,
+  parsing text into calls (Path 2), and repairing truncated JSON into a call that then gets EXECUTED.
+  All of it works only where a call can arrive as prose: `SupportsNativeToolCalling == false` or
+  tools declared but nothing wired up (`aiTools.Count == 0`). At a remote
+  OpenAI-compatible endpoint the channel is native, so text there streams delta-by-delta and is never
+  parsed at all.
+  The old behavior cost two things at once: a teacher's example JSON could be executed as a command, and
+  retention started at the first unclosed `{` — which the Python teacher writes constantly (dicts,
+  sets, f-strings), so prose froze mid-sentence and then arrived in a lump.
+  `BufferFullStreamingIterationWhenToolsDeclared` (full iteration buffering) was not set anywhere
+  at runtime and was removed — see the "Removed" section below.
+- **The `MeaiLlmClient` streaming loop closes the turn after a successful tool with `EndsTurn`** — on all
+  three paths (native tool-calls, text-extracted, malformed-tool-json). The terminal chunk carries
+  traces and usage exactly like the other clean loop exits: without them a turn looks zero-valued and
+  tool-free to accounting, while a prose-free turn loses the traces a tool-only reply is synthesized from.
+- **A one-line Python teacher answer no longer turns into a tool call.**
+  `LlmToolCallTextExtractor` treated ANY `ident(...)`-shaped answer as a call — `print("Hello, world!")`,
+  `input("Enter your name")`, `len(my_list)` became calls of a nonexistent `print` tool:
+  the model got `Unknown tool`, the child got an empty bubble (on the fallback channel, i.e. on a local
+  model, this reproduced right in the chat). The `ident(...)` shape carries no evidence of a call —
+  `read_skill("Alchemy")` and `print("x")` are the same code line — so now it is recognized
+  ONLY against the declared-tool registry and only for a declared name. The registry is a new
+  `TryExtract(text, knownToolNames, …)` / `StripForDisplay(text, knownToolNames)` overload with the
+  invariant "a call is a reference to a declared tool": a name outside the registry in no form
+  (JSON, XML, `ident(...)`, `Action=write`) counts as a call and stays visible text — it cannot be executed
+  anyway, and hiding it takes a lesson line away from the student. There is deliberately no python-name stoplist:
+  it would end at the first new lesson. Without a registry (the old overloads — still used by
+  `MeaiLlmClient.TryPortableToolExtract` and `SmartToolCallingChatClient.TryExtractToolCallsFromText`)
+  JSON/XML/pseudo-notation still parse by shape as before, while `ident(...)` never parses; to bring the shape
+  back for local Qwen builds, those call sites must pass `request.Tools` by
+  name. Two lesson-example holes were closed along the way: the `<function=…>` XML branch searched raw text
+  past code fences, and an unclosed fence (an answer cut by the token limit inside a ```` ```json ```` example)
+  did not count as a code block — now neither executes.
+  **Test-norm replacement:** `ToolCallExtractionParityEditModeTests` pinned
+  `lookup_item("Flame Sword")` and `read_skill("Alchemy")` as commands with no registry at all — a norm
+  harmful to the Python teacher — replaced: the same tests now pass the registry explicitly, and child-side
+  guards were added (a Python line is text, not a call: in the extractor, in the non-streamed and streamed loops; a
+  `spawn_quiz` example in a fence does not execute, including on a broken fence; a call sliced by tokens
+  across chunks is extracted; Cyrillic and escaped quotes split on a chunk boundary reach
+  the tool whole). JSON-leak-into-feed checks moved to the regex `"name"\s*:\s*"…"` —
+  an exact substring missed a leak with a space after the colon, the way models write. Four tests in the same
+  file via `SmartToolCallingChatClient` got an explicit `allowTextShapedToolCalls: true` — under the new
+  contract prose parsing does not switch on without it. The streamed tests in the same file with a bound tool
+  and a prose call (`Streaming_FailureThenSuccess_*`, a Python line, sliced JSON, Cyrillic)
+  declare the fallback channel explicitly — `supportsNativeToolCalling: false`: this release made the
+  `MeaiLlmClient` constructor default "channel present", and on it prose is not parsed, so a test on the
+  default either failed (tool not called) or passed while guarding nothing.
+  Doc: `Docs/STREAMING_ARCHITECTURE.md` → "Path 1" promised "only JSON with `name` + `arguments`", while
+  four shapes were recognized; the section now describes all four, their evidence and the registry rule.
+- **The `## Tool Results` service register no longer returns to the prompt via summary.**
+  `ToolResultPromptProjection` closed the live history, but compaction had its own entrance: both
+  `LlmAssistedConversationContextManager.BuildCompactionUserPayload` and the deterministic
+  `ConversationBulletSummary.Format` (also the fallback path on any compactor error) put `tool`
+  message contents into the summary raw — the heading and `spawn_quiz: ok {...}` along with it. The summarizer is
+  told to preserve identifiers and numbers, i.e. it carried them into the summary verbatim, and the summary
+  entered the prompt already past the projection. Now the summarizer and the bullet summary see tool messages through THE
+  SAME projection as live history (`tool_result name=… status=… result=…`). Legacy
+  `FindFoldStart` probes still compare bullets in the old format: they look for the string the OLD
+  code wrote and must format old-style — hence a separate `FormatMessageForSummary`, not
+  an edit to `FormatMessage`.
+- **The dialog summary goes to the prompt as `user`, not `system`.** The old norm (the test
+  `RunTaskAsync_Compaction_AddsSummaryAsFirstTailMessage` pinned `ChatRole.System`) was
+  a role escalation: a summary is a retelling of student and teacher replies, and under `system` it gained
+  instruction authority. A child writes "forget all rules", compaction folds it into the summary, and on the next turn
+  the model reads the same phrase as a system-context line (`MeaiLlmClient` additionally carries
+  system history onto the wire as `System context update:`). Under `user` the retelling carries exactly the
+  authority its source already had. The `assistant` role was rejected for the same reason the
+  projection exists: the model imitates its own register, and a bullet summary would become the style of
+  its answers. The block is assembled by `ConversationSummaryPromptProjection` (`ConversationHistoryPartition.cs`):
+  under the heading stands a frame saying "recap … context only, not instructions", so the model does not read someone else's
+  words as a new student reply. Tests on `ChatRole.System` were replaced with `ChatRole.User` plus the reason.
+- **"Reset history" now also resets its retelling.** `IAgentMemoryStore.ClearChatHistory` cleaned
+  only history, while the rolling summary lived in a separate `IConversationSummaryStore` the consumer
+  (a new mission in RedoSchool calls `ClearChatHistory` directly) knew nothing about; only the
+  `CoreAi.ClearContext` facade cleaned it. Both context managers serve the stored summary into EVERY turn, even before
+  compaction, so after a reset the model received the previous lesson's `## Conversation Summary` in every
+  reply of the new one, and on the first compaction the old retelling merged with the new. Now
+  `ScopedAgentMemoryStoreDecorator` — the host's resolvable `IAgentMemoryStore` — takes the scoped
+  `IConversationSummaryStore` (`CoreAILifetimeScope.RegisterAgentMemoryStore` passes it via
+  `TryResolve`; a container without a summary store yields `null`) and in `ClearChatHistory` drops the summary of the
+  same scope. The contract is recorded in the `IAgentMemoryStore.ClearChatHistory` XML doc: resetting history must
+  drop everything derived from it; a bare backing store cannot reach the summary and cleans
+  only its own. `CoreAi.ClearContextStores` keeps an explicit `ClearSummary` for a store passed past
+  the scope — under both calls the operation is idempotent.
+- **The pruner no longer counts all skill calls as one tool.**
+  `ConversationHistoryPruner.MarkSupersededToolResults` treated an old tool block as "superseded" by
+  TOOL NAME match, while the name in a durable block is the outer call's name: at RedoSchool's teacher
+  almost everything goes through the single `call_skill_tool` router. The next presentation slide "superseded" the output
+  of the code station the child is asking about right now, and the result vanished from the prompt. A call
+  block stores no arguments (`LlmToolCallTrace` carries name and result), so the only identity
+  provable from the data is "same tool + same recorded output" (under `Full` —
+  together with the excused `Detail`). Such an entry in a new block carries the same information, and the older copy
+  leaves; everything else is different calls, and the pruner has no right to decide for the model which of them is stale.
+  The old `Prune_DropsOlderToolResult_WhenNewerResultForSameToolExists` test pinned the harmful norm
+  and was replaced. The retained-tool-message cap (`MaxRetainedToolResultMessages`, default 3) did not
+  change: it cuts by block count, not by name, and had nothing to do with this defect.
+- Regressions for compaction, reset and pruner: `ConversationContextCompactionEditModeTests`
+  (summarizer payload and bullet summary without `## Tool Results`, including on compactor failure),
+  `AiOrchestratorHistoryEditModeTests` (summary under `user` with a frame; tool-result replay as a
+  machine record), the new `ChatHistoryResetClearsSummaryEditModeTests` (after `ClearChatHistory` not a
+  line of the old summary reaches the next turn's prompt; `Clear` of long-term memory touches neither history
+  nor summary; a foreign scope under the same role is unaffected),
+  `ConversationHistoryPrunerEditModeTests` (skill guard: three `call_skill_tool` calls with different
+  outputs all survive; identical output is superseded; under `Full` a `Detail`-only difference is already
+  a different call).
+- Regressions for everything above — in the existing EditMode suites:
+  `ToolResultRegisterEditModeTests` (the machine tool-result register and the verbatim-replay filter,
+  including replay breaks on chunk boundaries), `MeaiStreamingToolCallEditModeTests` (phrased from the
+  defect's side: on the native channel a valid JSON call in prose is NOT executed and reaches the student
+  verbatim — in the streamed and non-streamed loop; on the fallback channel the same text still invokes
+  the tool; an explicit opt-in brings parsing back; prose with `{` on the native path flows delta-by-delta and
+  no buffering is declared, while on the fallback path retention from the first brace stays and the retained part
+  is delivered), `AiOrchestratorHistoryEditModeTests`
+  (fallback path: a replay reaches neither feed nor history, and feed matches history; on the
+  native path an answer with both an example and a call result is not edited at all; the structural role
+  keeps the tool output inside its payload), `ScopedAgentMemoryStoreDecoratorEditModeTests` (anonymous `"local"` does not
+  override the host scope, a named actor does), `ToolExecutionPolicyEditModeTests` /
+  `SmartToolCallingChatClientEditModeTests` (`EndsTurn`: success closes the turn, failure keeps
+  the recovery roundtrip, a plain tool is unaffected).
+- **An executed tool forbids turn retry regardless of error code.**
+  `RetryingStreamingLlmClientDecorator` and the `FallbackLlmClientDecorator` streaming branch checked
+  "is the code retryable" BEFORE "does the chunk carry `ExecutedToolCalls`". Protection against a second launch
+  of a tool rested on the producer leaving `ErrorCode = None` on such a chunk (not on the
+  whitelist) — i.e. on somebody else's omission, not on a contract: honestly stamping
+  `Timeout`/`BackendUnavailable` on a terminal chunk with an already fired `spawn_quiz` was enough for the card
+  to show twice and memory to be written twice. The check order was reversed; guards —
+  `RetryingStreamingLlmClientDecoratorEditModeTests.ErrorChunkAfterToolExecution_IsNeverRetried_EvenWithRetryableCode`
+  and `RetryFallbackToolTraceSuppressionEditModeTests.FallbackDecorator_Streaming_RetryableErrorChunkAfterToolExecution_DoesNotFallBack`.
+- **`LoggingLlmClientDecorator`: one retry budget per request and error typing on the exception
+  branch.** There were two loops — over a thrown `LlmClientException` and over an `Ok=false` result — each
+  with its own full budget: an adapter that threw 429 and then returned 429 as a result got up to
+  `2N+1` calls instead of `1+N`, all while the student watched a typing indicator. Both shapes of the same
+  failure now spin in one loop with one counter. Separately: three exits of the exception branch
+  (budget exhaustion, a non-retryable exception on retry, an empty result) returned `Ok=false` with the
+  code only inside the STRING, but not in the `ErrorCode`/`HttpStatus`/`RetryAfterSeconds` fields; the consumer
+  picks the "teacher unavailable" banner by code, `None` belongs to no category — and the same 429
+  arrived as `RateLimited` or as `None` depending on whether the adapter threw or returned
+  a result. Now typing does not depend on the reporting path (`BuildRetriesExhaustedFailure`,
+  `BuildThrownFailure`, `EmptyResponse` for a `null` result), and the code table is one for the streamed and
+  non-streamed path (`ResolveErrorCode`). Guards in `LoggingLlmClientDecoratorEditModeTests`:
+  `RetryBudget_IsSharedBetweenThrownAndReturnedFailures`,
+  `ThrownRetryableFailure_ExhaustedRetries_KeepsTypedErrorCode`,
+  `ThrownNonRetryableFailureDuringRetry_KeepsTypedErrorCode`,
+  `ThrownUntypedFailureDuringRetry_IsNotReportedAsNone`, `NullResult_IsTypedAsEmptyResponse`.
+- **`QueuedAiOrchestrator`: a timeout stays a timeout, a cancellation stays a cancellation, and raw exceptions never
+  reach the chat.** `LlmOperationTimeoutException` inherits `OperationCanceledException`, and the queue collapsed
+  it into `TrySetCanceled()` / a `Cancelled` chunk: the caller got a bare `TaskCanceledException`, and
+  the presentation told the child "request stopped" — as if they had interrupted the teacher's answer themselves. In the same
+  place, "cancellation" meant any exception with `OperationCanceledException` somewhere in the `InnerException`
+  chain — including a transport error wrapping a `TaskCanceledException` with a live token. Now a timeout with a
+  live token arrives typed (`TrySetException(timeout)` / a `Timeout` chunk), the
+  `InnerException` chain counts as cancellation only when the work token is genuinely cancelled, and in a
+  "timer vs cancellation" race cancellation wins. A stream-producer failure wrote a terminal chunk
+  `Error = ex.Message` with no code, and a queue overflow — text with an internal `actorId` and `MaxPending`;
+  the child saw it in the bubble as the teacher's reply. The full cause goes to the log (`Log.Instance`); the chat gets
+  a meaningful code and an `LlmErrorPresentation` phrase (for `LlmClientException` — via `ToUserMessage`,
+  without the transport `HTTP error 4xx:` prefix). Guards in `QueuedAiOrchestratorEditModeTests`:
+  `LibraryTimeout_RunTaskAsync_SurfacesAsTimeout_NotAsUserStop`,
+  `LibraryTimeout_RunStreamingAsync_EmitsTimeoutChunk_NotCancellation`,
+  `TransportFaultWrappingCancellation_WithLiveToken_IsAFault_NotCancellation`,
+  `CallerCancellation_WithFaultWrappingCancellation_StaysCancellation`,
+  `LibraryTimeoutRacingCallerCancellation_StaysCancellation`,
+  `StreamProducerFault_CarriesTypedCode_AndKeepsInternalMessageOutOfChat`,
+  `StreamProducerLlmFault_KeepsAdapterClassification`; rewritten:
+  `MaxPending_Exceeded_StreamingEnqueue_EmitsTerminalErrorChunk` (it used to pin the `actorId` leak into
+  chat as the norm).
+
+### Removed
+
+- **The custom stream slicer `SplitForLiveUiStreaming` + the `LiveUiStreamMaxCharsPerChunk`
+  constant (48 chars) and all eight of its call sites.** There were two smoothing layers, and the outer one decided
+  nothing. On the SSE branch it could never fire in principle: `MeaiOpenAiChatClient.SplitForSmoothStreaming` splits
+  any text-only delta longer than 24 chars into pieces of **≤13 chars**, i.e. a delta never grows
+  to the 48 threshold.
+  **One branch is the exception, and it must be named honestly:** when the transport has no SSE
+  (`MeaiOpenAiChatClient.GetStreamingResponseAsync` → `FullResponseToSimulatedStreamingUpdates`; that is
+  WebGL without native streaming and the "stream → non-stream" fallback), the whole answer arrives as ONE delta, and there
+  the threshold is reachable — so "unreachable ever" would be untrue. It still made no visible
+  difference: pieces were emitted back-to-back, with no pause and no frame yield — `CoreAiChatPanel` appends them into
+  the streaming label immediately (`AppendToStreaming`), and `SwitchToMainThreadForUiOptional` on WebGL is
+  `UniTask.CompletedTask`. The same argument closes the buffered paths (final reply, retained
+  tail, post-parse remainder): one piece or fifteen — the frame is the same.
+  Each call was replaced with a single emission of the same text; behavior did not change because all eight
+  places already filtered the empty string above in the code. The real smoothing — `SplitForSmoothStreaming` and
+  the 15 ms pause in `MeaiOpenAiChatClient` — is untouched: without it the stream tears on models packing tokens
+  into one delta.
+  A cost worth knowing: a consumer that paces display PER CHUNK gets one big chunk instead of a fan on the non-SSE branch.
+  The smoothness lever there is not slicing but the pause between pieces, and no layer
+  does that on WebGL (`DelayBetweenSyntheticStreamPiecesAsync` is a no-op there too).
+- **`MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming`** — zero callers at runtime (superseded by
+  `GetHybridSafeSegments` + `GetFirstIncompleteBraceStart`); only its own tests held it.
+- **`MeaiLlmClient.GetCleanedTextSuffixAfterHybridPrefix`** — zero callers at runtime; tail reconciliation
+  is done by `GetHybridUnemittedSuffix`.
+- **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`** and derived
+  `fullIterationBuffer`. Nobody set the flag except one test, while full turn buffering is exactly
+  what the warning in `STREAMING_ARCHITECTURE.md` forbids (in 4.10.4 such buffering
+  killed streamed output in the teacher chat and was rolled back in 4.10.5). The retention condition simplified to
+  "we retain exactly when we parse prose as calls": `hybridToolJsonHold ==
+  interpretProseAsToolCalls`.
+- The tests guarding that code were removed with it: six in `MeaiLlmClientEditModeTests`
+  (`GetExclusiveEndForSafeUnboundRawStreaming_*`, `GetCleanedTextSuffixAfterHybridPrefix_*`) and
+  `MeaiStreamingToolCallEditModeTests.CompleteStreamingAsync_NativeToolWithBufferedEcho_StripsEmbeddedToolJson`
+  (it tested exactly the full-buffering mode). A green test on a nonexistent mechanism is worse than
+  a missing one.
+
+### Docs
+
+- `Docs/STREAMING_ARCHITECTURE.md` — section rewritten in full: prose is interpreted only on the
+  fallback path, with a named list of what is under the gate, what is deliberately NOT under it and why, plus both
+  kill switches. `Docs/TOOL_CALL_SPEC.md` — the rule "a call is recognized by channel, not by text
+  shape" was factored out, so a tool author for someone else's project does not treat prose parsing as a guarantee.
+  `Docs/CONTEXT_MANAGEMENT_ROADMAP.md` — §3: tool-result projection into the prompt and the replay filter's exact scope
+  with its honest boundary; `Docs/ARCHITECTURE.md` — actor vs scope priority in the memory key; `Docs/TOOL_AUTHORING_GUIDE.md` — the `EndsTurn` section.
+
 ## [7.35.0] - 2026-09-06
 
 ### Fixed
 
-- **Демо-смок по сценам починен и впервые с 30 августа зелёный.** Три причины, две внесены работой
-  по демкам: замороженный список вырос до 17 сцен при `Assert.AreEqual(15, ...)`; падение до первой
-  `Single`-загрузки оставляло загруженной bootstrap-сцену тест-раннера, и `PlayModeSceneSandbox`
-  выгружал её вместе с самим раннером — упавший assert превращался в мёртвый batchmode-редактор без
-  файла результатов. Песочница больше не трогает сцену раннера.
-- **`OnlineAuthorityDemo` не имела `CoreAILifetimeScope`** — поймано этим самым смоком в первом же
-  прогоне, дошедшем до конца. Билдер сцены теперь создаёт стандартную композицию, как остальные
-  шестнадцать демок.
+- **The scene demo smoke is fixed and green for the first time since August 30.** Three causes, two introduced by
+  the demo work: the frozen list grew to 17 scenes while `Assert.AreEqual(15, ...)`; a failure before the first
+  `Single` load left the test-runner bootstrap scene loaded, and `PlayModeSceneSandbox`
+  unloaded it together with the runner itself — a failed assert turned into a dead batchmode editor with no
+  results file. The sandbox no longer touches the runner scene.
+- **`OnlineAuthorityDemo` had no `CoreAILifetimeScope`** — caught by this very smoke on the first run that
+  made it to the end. The scene builder now creates the standard composition, like the other
+  sixteen demos.
 
 ### Notes
 
-- PlayMode с камерой нельзя гонять под `-nographics`: `RenderTexture.Create failed` роняет пять
-  тестов, которые с графическим устройством зелёные. Это не регрессия, а свойство прогона.
-- Локально установленный Mirror (он в `.gitignore`) останавливает Play Mode из своей
-  `NetworkScenePostProcess`, вызывая `EditorApplication.isPlaying = false`. Доказательства по
-  демо-сценам берутся в поставочной конфигурации — без Mirror.
+- Camera PlayMode runs must not be launched under `-nographics`: `RenderTexture.Create failed` fails five
+  tests that are green with a graphics device. This is a property of the run, not a regression.
+- A locally installed Mirror (it is in `.gitignore`) stops Play Mode from its own
+  `NetworkScenePostProcess` by setting `EditorApplication.isPlaying = false`. Demo-scene
+  evidence is taken in the shipping configuration — without Mirror.
 
 ## [7.34.0] - 2026-09-06
 
 ### Changed
 
-- **IMGUI выведен из всех десяти демо-контроллеров** на общую `CoreAiDemoPanel`; список исключений в
-  рэтчете пуст. Smoke по 16 сценам висит по причине, которая старше этой работы (A/B в примечаниях
-  основного changelog).
+- **IMGUI was removed from all ten demo controllers** onto the shared `CoreAiDemoPanel`; the exception list in
+  the ratchet is empty. The 16-scene smoke hangs for a reason older than this work (A/B in the main
+  changelog's notes).
 
 ## [7.33.0] - 2026-09-06
 
 ### Added
 
-- **Демо-сцена MVP11/12** (`OnlineAuthorityDemo`): отказ → грант → отказ, с PlayMode-гейтом на всю
-  последовательность. Кнопка хоста показывает, что его запись не идёт путём намерений вовсе.
+- **The MVP11/12 demo scene** (`OnlineAuthorityDemo`): denial → grant → denial, with a PlayMode gate over the whole
+  sequence. The host button shows that its write never travels the intent path at all.
 
 ## [7.32.0] - 2026-09-06
 
 ### Added
 
-- **Демо-сцена MVP8** (`GameplayServicesDemo`) на настоящем Canvas, без IMGUI, с PlayMode-гейтом,
-  который её реально запускает.
+- **The MVP8 demo scene** (`GameplayServicesDemo`) on a real Canvas, without IMGUI, with a PlayMode gate that
+  genuinely runs it.
 
 ### Fixed
 
-- NeoxiderTools больше не используется в CoreAI: ссылка сборки, импорт и компонент в сцене убраны,
-  дальше это стережёт тест независимости пакетов.
+- NeoxiderTools is no longer used in CoreAI: the assembly reference, the import and the scene component were removed;
+  the package-independence test guards this going forward.
 
 ## [7.31.0] - 2026-09-05
 
 ### Added
 
-- **MVP12** — `IntentGateway`: единственное место, где судится клиентская запись (отправитель от
-  моста, отказ неограниченному актору, бюджет, размер, грант, ACL, конверт мутации).
+- **MVP12** — `IntentGateway`: the single place where client writes are judged (sender from the
+  bridge, denial of the unrestricted actor, budget, size, grant, ACL, mutation envelope).
 
 ## [7.30.0] - 2026-09-05
 
 ### Added
 
-- **MVP12** — `IReplicationFilter` (ServerStorage и ServerScriptService не реплицируются никогда) и
-  `ReplicationDirtySet` (одна дельта на экземпляр за шаг, удаление побеждает изменение).
+- **MVP12** — `IReplicationFilter` (ServerStorage and ServerScriptService are never replicated) and
+  `ReplicationDirtySet` (one delta per instance per step, deletion beats modification).
 
 ## [7.29.0] - 2026-09-05
 
 ### Added
 
-- **MVP12** — `ClientWritePolicy` (`RobloxParity`/`Strict`, значения `Open` нет) и `MutationIntent`
-  без единого поля идентичности; запись по гранту уходит намерением, ничего не предсказывая.
+- **MVP12** — `ClientWritePolicy` (`RobloxParity`/`Strict`, no `Open` value) and `MutationIntent`
+  without a single identity field; a granted write leaves as an intent, predicting nothing.
 
 ## [7.28.0] - 2026-09-05
 
 ### Added
 
-- **MVP12** — `WriteGrantLedger`: хост выдаёт клиенту право записи (экземпляр/поддерево/мир, набор
-  действий, срок, отзыв), область считается по живому дереву, хоста в реестре нет по устройству.
+- **MVP12** — `WriteGrantLedger`: the host grants a client write rights (instance/subtree/world, action set,
+  expiry, revocation), scope resolves against the live tree, and the host is absent from the registry by design.
 
 ## [7.27.0] - 2026-09-05
 
 ### Added
 
-- **MVP11 N11.6** — топология `RunService` выводится из моста; серверные часы на клиенте учитывают
-  смещение транспорта (на сервере и петле — ноль, соло не меняется).
+- **MVP11 N11.6** — `RunService` topology is derived from the bridge; the client-side server clock accounts for
+  the transport offset (zero on server and loopback, solo unchanged).
 
 ## [7.26.0] - 2026-09-05
 
 ### Added
 
-- **MVP11** — `CoreAiMirrorSessionHost` (допуск → актор → снос при разрыве) и
-  `IRbxActorIdentitySource`: `Player.UserId` берётся из допуска, а не из счётчика сессии.
+- **MVP11** — `CoreAiMirrorSessionHost` (admission → actor → teardown on disconnect) and
+  `IRbxActorIdentitySource`: `Player.UserId` comes from admission, not from a session counter.
 
 ## [7.25.0] - 2026-09-05
 
 ### Added
 
-- **MVP11** — гейты правил Mirror-моста (12 проверок приёмного пути). Модульность подтверждена
-  прогоном без `Assets/Mirror`: 0 ошибок, пакет транспорта не компилируется, EditMode 3588/0 failed.
+- **MVP11** — Mirror-bridge rule gates (12 receive-path checks). Modularity confirmed
+  by a run without `Assets/Mirror`: 0 errors, the transport package not compiled, EditMode 3588/0 failed.
 
 ## [7.24.0] - 2026-09-05
 
 ### Added
 
-- **MVP11** — `CoreAiMirrorAuthenticator` (допуск до аутентификации соединения, отказ по умолчанию)
-  и `MirrorNetworkBridge` (отправитель из карты соединений, а не из пакета; корреляция по паре
-  соединение+номер; общий бюджет; потолок пакета от транспорта).
+- **MVP11** — `CoreAiMirrorAuthenticator` (admission before connection authentication, deny by default)
+  and `MirrorNetworkBridge` (sender from the connection map, not from the packet; correlation by the
+  connection+number pair; shared budget; packet ceiling from the transport).
 
 ## [7.23.0] - 2026-09-05
 
 ### Added
 
-- **MVP11** — шов `INetworkBridge` v2 (`MaxPayloadBytes`, `ServerClockOffsetSeconds`,
-  `PeerDisconnected`) и общий `RbxNetworkRateLimiter`, который транспорт не может потерять молча.
+- **MVP11** — the `INetworkBridge` v2 seam (`MaxPayloadBytes`, `ServerClockOffsetSeconds`,
+  `PeerDisconnected`) and a shared `RbxNetworkRateLimiter` a transport cannot silently lose.
 
 ## [7.22.0] - 2026-09-05
 
 ### Added
 
-- **MVP8 срез 8.7** — корпус Tier-B (10 игровых идиом) и гейт «не меньше 60 % Tier-A + Tier-B без
-  правок исходника», с отрицательными близнецами на испорченных копиях. **MVP8 закрыт целиком.**
+- **MVP8 slice 8.7** — the Tier-B corpus (10 gameplay idioms) and the "at least 60% of Tier-A + Tier-B with no
+  source edits" gate, with negative twins on corrupted copies. **MVP8 fully closed.**
 
 ## [7.21.0] - 2026-09-05
 
 ### Added
 
-- **MVP8 срез 8.6** — `Humanoid` (здоровье, параметры движения, автомат состояний, `MoveTo` с
-  таймаутом на масштабированном времени) и собственный `UnityRbxCharacterMotor` за интерфейсом
-  `IRbxCharacterMotor`; PlayMode-гейт меряет 16 стадов/с как 16 × 0,28 м/с ±2 %.
+- **MVP8 slice 8.6** — `Humanoid` (health, movement parameters, state machine, `MoveTo` with a
+  scaled-time timeout) and a built-in `UnityRbxCharacterMotor` behind the
+  `IRbxCharacterMotor` interface; the PlayMode gate measures 16 studs/s as 16 × 0.28 m/s ±2%.
 
 ## [7.20.0] - 2026-09-05
 
 ### Added
 
-- **MVP8 срез 8.5** — `workspace:Raycast`, `Workspace.Gravity` (по телам, хозяйская `Physics.gravity`
-  не трогается), `Touched`/`TouchEnded` от настоящих столкновений; первая PlayMode-папка пакета
-  модов и помпа на `FixedUpdate`.
-- **MVP11** — порт допуска `IActorAdmissionProvider` и седьмой пакет `com.neoxider.coreaimirror`
-  (скелет за `defineConstraints: ["MIRROR"]`) с тестом границы пакетов.
+- **MVP8 slice 8.5** — `workspace:Raycast`, `Workspace.Gravity` (per body, the host `Physics.gravity`
+  untouched), `Touched`/`TouchEnded` from real collisions; the mod package's first PlayMode folder
+  and a `FixedUpdate` pump.
+- **MVP11** — the `IActorAdmissionProvider` admission port and the seventh package `com.neoxider.coreaimirror`
+  (skeleton behind `defineConstraints: ["MIRROR"]`) with a package-boundary test.
 
 ## [7.19.0] - 2026-09-05
 
 ### Added
 
-- **MVP8 срез 8.3** — `Players`/`Player` целиком: поиск по `UserId` и по персонажу, `Kick`,
-  профиль через `IRbxPlayerProfileProvider`, пустые контейнеры игрока.
-- **MVP8 срез 8.4** — `TweenService` и `TweenInfo`: полный автомат воспроизведения на
-  масштабированном времени, 11 стилей сглаживания, отмена конфликтующего твина.
+- **MVP8 slice 8.3** — `Players`/`Player` in full: lookup by `UserId` and by character, `Kick`,
+  profile via `IRbxPlayerProfileProvider`, empty player containers.
+- **MVP8 slice 8.4** — `TweenService` and `TweenInfo`: a complete playback state machine on
+  scaled time, 11 easing styles, conflicting-tween cancellation.
 
 ### Fixed
 
-- **Обработчик `PlayerRemoving` не мог прочитать уходящего игрока** — «надгробие» разрушенного
-  экземпляра покрывало только `Name`/`ClassName`/`Parent`, поэтому канонический для зеркала
-  сценарий «сохранить данные при выходе» (ключ — `player.UserId`) падал молча. Чтения открыты
-  целиком; запись, вызов метода и чужой разрушенный экземпляр отказываются как прежде.
+- **The `PlayerRemoving` handler could not read the leaving player** — the destroyed
+  instance's "tombstone" covered only `Name`/`ClassName`/`Parent`, so the mirror-canonical
+  "save data on exit" scenario (keyed by `player.UserId`) failed silently. Reads are now open
+  in full; writes, method calls and foreign destroyed instances are refused as before.
 
 ## [7.18.0] - 2026-09-05
 
 ### Added
 
-- **MVP8 срез 8.1** — восемь Value-объектов с `Changed` и поддержкой в пакете мира; `leaderstats`
-  задокументирован как соглашение Roblox, а не API.
-- **MVP8 срез 8.2** — `CollectionService` поверх существующего хранилища тегов.
+- **MVP8 slice 8.1** — eight Value objects with `Changed` and world-packet support; `leaderstats`
+  documented as a Roblox convention, not an API.
+- **MVP8 slice 8.2** — `CollectionService` on top of the existing tag storage.
 
 ### Fixed
 
-- Запись значения двигала ревизию дважды, пустая — один раз.
-- Маршалинг аргументов сигнала отдавал `nil` для long/CFrame/Color3.
+- A value write moved the revision twice, an empty one — once.
+- Signal-argument marshalling returned `nil` for long/CFrame/Color3.
 
 ## [7.17.0] - 2026-09-05
 
 ### Fixed
 
-- **После failover память переставала работать молча** — резервный HTTP-клиент собирался без
-  `IAgentMemoryStore`, промпт продолжал обещать `memory`, вызовы вырезались без исполнения.
-- Обвязка живых тестов больше не возвращает клиент без хранилища тихо — бросает исключение.
+- **After failover, memory silently stopped working** — the fallback HTTP client was built without
+  `IAgentMemoryStore`, the prompt kept promising `memory`, calls were cut out without executing.
+- The live-test harness no longer returns a storageless client quietly — it throws.
 
 ### Added
 
-- Тест контракта «промпт — инструменты» для всех девяти встроенных ролей.
-- Живой сценарий отличает слабую модель от потери инструментов и говорит это прямо.
-- `McpToolResidencyPolicies.Lean(...)` — резидентность по ролям.
+- A "prompt — tools" contract test for all nine built-in roles.
+- The live scenario tells a weak model apart from tool loss, and says so directly.
+- `McpToolResidencyPolicies.Lean(...)` — per-role residency.
 
 ## [7.16.0] - 2026-09-05
 
 ### Fixed
 
-- **Ответ после раунда инструментов дописывался в ЧУЖОЙ пузырь.** Границу хода `CoreAiChatPanel`
-  ловила только эвристикой по подсказке прогресса инструмента
-  (`BufferedStreamingUseToolProgressHint`), а на нативном tool-calling такой подсказки нет — вторая
-  реплика приклеивалась к концу первой. Ученик читал «Проверь себя:**Ход завершён — ждём ответ
-  ученика на карточке.**» одним пузырём. Теперь панель разворачивает новый пузырь по явному признаку
-  `LlmStreamChunk.StartsNewMessage`, а полный ответ хода (он уходит в историю роли и обработчикам
-  одной строкой) получает на этой границе пустую строку.
+- **A post-tool-round answer was appended to SOMEONE ELSE'S bubble.** `CoreAiChatPanel`
+  caught the turn boundary only via a tool-progress-hint heuristic
+  (`BufferedStreamingUseToolProgressHint`), and on native tool-calling there is no such hint — the second
+  reply glued itself to the end of the first. The student read "Check yourself:**Turn over — waiting for
+  the student's card answer.**" as one bubble. Now the panel opens a new bubble on the explicit
+  `LlmStreamChunk.StartsNewMessage` flag, and the turn's full answer (which goes to role history and handlers as
+  one line) gets a blank line at that boundary.
 
 ### Added
 
-- **`MeaiLlmClient` проставляет `LlmStreamChunk.StartsNewMessage`** — на первом видимом чанке каждой
-  итерации tool-цикла, кроме самой первой, и перед итоговым ходом без инструментов. Все места выдачи
-  видимого текста сведены к одной точке (`MarkVisibleChunk`): раньше факт «речь пошла» ставился в
-  четырнадцати местах, и любое новое место молча теряло бы границу.
+- **`MeaiLlmClient` stamps `LlmStreamChunk.StartsNewMessage`** — on the first visible chunk of every
+  tool-loop iteration except the very first, and before the tool-free final turn. All visible-text emission
+  points are reduced to one (`MarkVisibleChunk`): the "speech started" fact used to be set in
+  fourteen places, and any new place would silently lose the boundary.
 
 ## [7.15.0] - 2026-09-05
 
 ### Fixed
 
-- **Гейт памяти в стенде масштабирования мерил сборщик мусора, а не программу** — валил все ступени,
-  включая двадцать акторов. Заменён на удержанную память и аллокации на актора за кадр.
+- **The memory gate in the scaling rig measured the garbage collector, not the program** — it failed every rung,
+  including twenty actors. Replaced with retained memory and per-actor-per-frame allocations.
 
 ### Added
 
-- `AiOrchestrationQueueOptions.ForActorCount(n)` — размер очереди из числа акторов.
-- `Debris:AddItem` — первый срез MVP2.5.
+- `AiOrchestrationQueueOptions.ForActorCount(n)` — queue size from the actor count.
+- `Debris:AddItem` — the first MVP2.5 slice.
 
 ### Measured
 
-- **200 акторов проходят бюджет 60 Гц, память и чат** (0 отказов, p95 1346 мс). Предел CoreAI на
-  поддельном провайдере, не развёрнутой системы.
+- **200 actors pass the 60 Hz budget, memory and chat** (0 refusals, p95 1346 ms). A CoreAI limit on a
+  fake provider, not a deployed system's.
 
 ## [7.14.0] - 2026-09-05
 
 ### Added
 
-- **Скилл из нескольких документов читается по частям** — `read_skill(name)` отдаёт входной документ
-  и оглавление, `read_skill(name, section)` приносит одну секцию. Односекционный скилл не изменился.
-- **Динамические MCP-инструменты**: резидентность `Native`/`Dynamic`, брокер `coreai_tools`,
-  переопределение политикой хоста и переменными окружения. Умолчание прежнее.
+- **A multi-document skill reads in parts** — `read_skill(name)` returns the entry document
+  and a table of contents, `read_skill(name, section)` brings one section. A single-section skill is unchanged.
+- **Dynamic MCP tools**: `Native`/`Dynamic` residency, the `coreai_tools` broker,
+  host-policy and environment-variable override. Default unchanged.
 
 ### Fixed
 
-- Вдвое меньше аллокаций на кадр в фазе сигналов (пул записей потоков с полным сбросом полей).
+- Half the per-frame allocations in the signal phase (a thread-record pool with full field reset).
 
 ## [7.13.0] - 2026-09-04
 
 ### Added
 
-- **Часы Rbx через сменный источник** (`IRbxClockSource`): `time`, `os.time`, `os.clock`, `tick`,
-  `workspace:GetServerTimeNow`. Игра подставляет свой источник и переопределяет время.
-- **Топологические запросы `RunService`** (`IsServer`/`IsClient`/`IsStudio`/`IsRunning`) через
-  сменный `IRbxRuntimeTopology`.
+- **Rbx clocks via a swappable source** (`IRbxClockSource`): `time`, `os.time`, `os.clock`, `tick`,
+  `workspace:GetServerTimeNow`. A game plugs in its own source and overrides time.
+- **Topological `RunService` queries** (`IsServer`/`IsClient`/`IsStudio`/`IsRunning`) via a
+  swappable `IRbxRuntimeTopology`.
 
 ### Changed
 
-- Дорожная карта MVP2 приведена к правде: корпусный гейт Tier-A был зелёным всё это время.
+- The MVP2 roadmap was brought back to the truth: the Tier-A corpus gate had been green all along.
 
 ## [7.12.0] - 2026-09-04
 
 ### Added
 
-- **Шов наблюдаемости гварда** (`ILuaCsGuardObserver` через `LuaCsScriptEngine`) — предварительная
-  работа для гейта кадра MVP2, без которой бюджет нельзя измерить, не обойдя измеряемый путь.
-  Без наблюдателя поведение не меняется.
-- **Регрессионные тесты на различение отмен и отказов провайдера в замере G10** — счётчик, на котором
-  стоят выводы о ёмкости, был починен без теста.
+- **The guard observability seam** (`ILuaCsGuardObserver` via `LuaCsScriptEngine`) — groundwork
+  for the MVP2 frame gate, without which the budget cannot be measured except by bypassing the measured path.
+  Without an observer behavior does not change.
+- **Regression tests for telling provider cancellations apart from failures in the G10 measurement** — the counter that
+  capacity conclusions stand on had been fixed without a test.
 
 ### Changed
 
-- Решения владельца по MVP2.5 (аутентификация, упаковка Mirror, политика записи, обещание релиза,
-  объём физики) зафиксированы в `dev-docs/MVP25_ONLINE_PLAN.md`; ступени больше не заблокированы.
+- The owner's MVP2.5 decisions (authentication, Mirror packaging, write policy, release promise,
+  physics scope) are pinned in `dev-docs/MVP25_ONLINE_PLAN.md`; the rungs are no longer blocked.
 
 ## [7.11.0] - 2026-09-04
 
 ### Fixed
 
-- **Замена списка тулов роли молча отключала все её скиллы.** `SetToolsForRole` возвращал
-  `read_skill` и `call_skill_tool` только из зарегистрированного живого каталога, а он появляется
-  лишь при включённом авторстве скиллов — у агента, собранного обычным `WithSkill(...)`, оба прокси
-  исчезали, и ни один тул скилла больше не вызывался. Ничего при этом не падало: пропавший тул
-  возвращается обычным результатом, а не исключением, поэтому модель читала «not found», извинялась
-  прозой и шла дальше.
+- **Replacing a role's tool list silently disabled all of its skills.** `SetToolsForRole` returned
+  `read_skill` and `call_skill_tool` only from a registered live catalog, which appears
+  only with skill authorship enabled — for an agent built with a plain `WithSkill(...)`, both proxies
+  vanished and no skill tool could be called anymore. Nothing failed visibly: a missing tool
+  returns a plain result, not an exception, so the model read "not found", apologized
+  in prose and moved on.
 
 ### Added
 
-- **`SkillSetAsset` принимает несколько файлов инструкций.** В инспекторе появился список
-  дополнительных `TextAsset`: они идут за основным в порядке списка, каждый под заголовком
-  `## имя-файла`. Скилл из одного файла сохраняет текст без изменений и заголовка не получает.
-- Тесты `SkillSetAssetInstructionsEditModeTests` и `SkillToolAvailabilityEditModeTests`: тул скилла
-  вызывается без предварительного `read_skill`, а каталог в системном промпте не несёт тела
-  инструкций.
-- **Агентский текст `Resources/AgentSkills/RbxApi` дополнен `MaterialVariant`** и приведён к правде
-  по числу упакованных текстурных наборов — тридцать шесть, а не шесть.
+- **`SkillSetAsset` takes several instruction files.** The inspector gained a list of extra
+  `TextAsset` entries: they follow the main one in list order, each under a
+  `## file-name` heading. A single-file skill keeps its text unchanged and gets no heading.
+- `SkillSetAssetInstructionsEditModeTests` and `SkillToolAvailabilityEditModeTests`: a skill tool
+  is callable without a prior `read_skill`, and the catalog in the system prompt carries no instruction
+  bodies.
+- The agent text `Resources/AgentSkills/RbxApi` gained `MaterialVariant` and was brought back to the truth
+  on the packaged texture-set count — thirty-six, not six.
 
 ## [7.10.0] - 2026-09-04
 
 ### Added
 
-- **`MaterialVariant`: игра заводит свои материалы и меняет их на лету.** Экземпляр в
-  `MaterialService` с `BaseMaterial`, четырьмя картами и `StudsPerTile`; деталь выбирает его строкой
-  `BasePart.MaterialVariant`. Пути карт — обычные `Resources`-пути проекта. Варианты и ссылки на них
-  переживают сохранение мира.
-- **Живой рендер-пруф в Play Mode.** `RbxMaterialVariantRenderPlayModeTests` фотографирует три слэба
-  и требует, чтобы деталь с вариантом ушла от кирпича и встала рядом с травой.
+- **`MaterialVariant`: a game defines its own materials and swaps them live.** An instance in
+  `MaterialService` with `BaseMaterial`, four maps and `StudsPerTile`; a part picks it via the
+  `BasePart.MaterialVariant` string. Map paths are plain project `Resources` paths. Variants and their references
+  survive world saves.
+- **A live render proof in Play Mode.** `RbxMaterialVariantRenderPlayModeTests` photographs three slabs
+  and requires the variant part to leave brick behind and stand next to grass.
 
 ## [7.9.0] - 2026-09-04
 
 ### Added
 
-- **В пакет входят все 36 CC0-наборов, а не шесть.** Каталог, который едет внутри пакета, описывал
-  шесть материалов, тогда как проектный override — все тридцать шесть; поэтому у потребителя, который
-  не импортировал наборы сам, тридцать материалов из тридцати шести падали в процедурный шейдер.
-  Теперь в `Resources/CoreAIRbxTextures` лежат все наборы в 1K (Color, NormalGL, Roughness и Metalness
-  там, где источник его даёт), а `RbxMaterialTextureCatalog.asset` описывает их все.
-  Проверено так: проектный override был целиком убран из проекта, после чего все 36 материалов снова
-  отсняты — картинка не изменилась, то есть их действительно отдаёт пакет, а не игнорируемая папка.
-- **Команда `CoreAI/Materials/Rebuild packaged catalog from packaged textures`.** Пересобирает
-  упакованный каталог из того, что лежит в папке, применяя те же профили поверхностей. Добавление
-  набора теперь состоит из двух шагов: положить карты и выполнить команду.
-- **Сторож от расхождения рантайм-списка и каталога.** `PackagedTexturedMaterialIds` — рукописный
-  список рядом с генерируемым ассетом, а такая пара в этом репозитории уже разъезжалась молча.
-  `PackagedTexturedCatalog_MatchesRuntimeTexturedListExactly` требует точного совпадения пар
-  «имя → значение» в обе стороны.
+- **The package includes all 36 CC0 sets, not six.** The catalog shipped inside the package described
+  six materials, while the project override described all thirty-six; so a consumer who
+  did not import the sets themselves saw thirty of thirty-six materials fall back to the procedural shader.
+  Now `Resources/CoreAIRbxTextures` holds all sets in 1K (Color, NormalGL, Roughness and Metalness
+  where the source provides it), and `RbxMaterialTextureCatalog.asset` describes them all.
+  Verified like this: the project override was removed from the project entirely, after which all 36 materials were
+  photographed again — the picture did not change, meaning the package really serves them, not an ignored folder.
+- **The `CoreAI/Materials/Rebuild packaged catalog from packaged textures` command.** Rebuilds the
+  packaged catalog from whatever lies in the folder, applying the same surface profiles. Adding a
+  set is now two steps: drop the maps in and run the command.
+- **A guard against runtime-list vs catalog drift.** `PackagedTexturedMaterialIds` is a handwritten
+  list next to a generated asset, and such a pair already drifted apart silently in this repository.
+  `PackagedTexturedCatalog_MatchesRuntimeTexturedListExactly` requires the "name → value" pairs to match
+  exactly in both directions.
 
 ### Changed
 
-- `RbxMaterialCatalogEditorUtility.MergeCatalogAt` принимает путь: тем же слиянием теперь собираются
-  оба каталога — проектный override и упакованный.
-- Материалы, у которых раньше не было упакованного набора (`Concrete`, `DiamondPlate` и остальные
-  тридцать), идут по текстурному пути вместо процедурного. Процедурная реализация сохранена для всех
-  них как запасной путь: контракт «у каждого текстурного материала есть процедурный двойник»
-  по-прежнему проверяется тестом.
+- `RbxMaterialCatalogEditorUtility.MergeCatalogAt` takes a path: the same merge now builds
+  both catalogs — the project override and the packaged one.
+- Materials that previously had no packaged set (`Concrete`, `DiamondPlate` and the other
+  thirty) take the textured path instead of the procedural one. The procedural implementation is kept for all of
+  them as a fallback: the "every textured material has a procedural twin" contract
+  is still verified by a test.
 
-### Известная цена
+### Known cost
 
-Папка текстур пакета выросла с 15 МБ до 113 МБ на диске; резидентно после загрузки — около 99 МБ
-против прежних ~15 МБ (сжатые BC-форматы с мип-цепочкой). Git LFS сознательно не применён: пакет
-ставится по git-URL через UPM, и у потребителя без установленного LFS вместо текстур приедут
-файлы-указатели, то есть материалы отвалятся молча.
+The packaged texture folder grew from 15 MB to 113 MB on disk; resident after load — about 99 MB
+versus ~15 MB before (compressed BC formats with a mip chain). Git LFS was deliberately not used: the package
+installs via a git URL through UPM, and a consumer without LFS installed would receive
+pointer files instead of textures, i.e. materials would break silently.
 
-`RbxTextureMaterialProvider` создаёт общий материал на каждую запись каталога при первой созданной
-детали, а каталог держит прямые ссылки на текстуры, поэтому эти ~99 МБ платятся независимо от того,
-сколько материалов сцена реально использует. Хранение путей вместо прямых ссылок и загрузка текстуры
-при первом обращении к материалу сделали бы расход пропорциональным сцене — это записано как TODO в
-`dev-docs/MATERIAL_DEFECT_AUDIT_2026-09-04.md` и стоит сделать до серьёзной работы с WebGL.
+`RbxTextureMaterialProvider` creates one shared material per catalog entry on the first created
+part, and the catalog holds direct texture references, so these ~99 MB are paid regardless of how many
+materials a scene actually uses. Storing paths instead of direct references and loading a texture
+on first use of a material would make the cost proportional to the scene — recorded as TODO in
+`dev-docs/MATERIAL_DEFECT_AUDIT_2026-09-04.md` and worth doing before serious WebGL work.
 
 ## [7.8.0] - 2026-09-04
 
 ### Fixed
 
-- **Детали Rbx не получали прямого света вообще.** Проект рендерит Forward+
-  (`Assets/Settings/PC_Renderer.asset`, `m_RenderingMode: 2`), а URP 17 в этом режиме отдаёт основной
-  свет через кластерный световой цикл — проход обязан объявить
-  `#pragma multi_compile _ _CLUSTER_LIGHT_LOOP`, как это делает собственный `Lit.shader` пакета URP.
-  В `RbxTexturedSurface`, `RbxProceduralSurface` и `RbxProceduralTransparent` этой строки не было,
-  поэтому компилировался некластерный вариант и `UniversalFragmentPBR` не видел солнца. Всё
-  освещалось только ambient — без солнца и без падающих теней, и в редакторе, и в плеере. Ошибка
-  выглядела как «плосковатая картинка», а не как сбой, поэтому долго оставалась незамеченной.
-  Замер плиты до и после: Sand `77,67,55` → `227,177,120`, Grass `44,53,41` → `125,135,69`.
-  Регрессия закрыта тестом `RbxShaderClusterLightLoopEditModeTests`, который разбирает каждый шейдер
-  на блоки `Pass` и требует ключевое слово в каждом проходе, вызывающем точку входа освещения URP.
-- **`AdoptWorldObject` возвращал неверный `Size` под масштабированным предком.** Читался
-  `transform.localScale`, который не учитывает масштаб предка, поэтому усыновлённая деталь внутри
-  детали, отмасштабированной через `Size`, сообщала не тот размер, который видит пользователь.
-  Теперь используется `lossyScale`; покрыто `AdoptWorldObjectScaleEditModeTests`.
-- **`Grass` в поставке был бракованной текстурой.** `Grass005` — однотонный зелёный войлок: разброс
-  альбедо 8.5 при нормали, слишком слабой, чтобы прорисовать травинки. Заменён на `Grass004`, плитка
-  снижена с 7 до 4.5 стада (при 7 травинки уходили меньше экранного пикселя).
+- **Rbx parts received no direct light at all.** The project renders Forward+
+  (`Assets/Settings/PC_Renderer.asset`, `m_RenderingMode: 2`), and URP 17 in this mode serves the main
+  light through the clustered light loop — the pass must declare
+  `#pragma multi_compile _ _CLUSTER_LIGHT_LOOP`, as the URP package's own `Lit.shader` does.
+  `RbxTexturedSurface`, `RbxProceduralSurface` and `RbxProceduralTransparent` lacked this line,
+  so the non-clustered variant compiled and `UniversalFragmentPBR` never saw the sun. Everything
+  was lit by ambient only — no sun and no cast shadows, in the editor and in the player. The bug
+  looked like a "flat picture", not a failure, which is why it went unnoticed for so long.
+  Slab measurement before and after: Sand `77,67,55` → `227,177,120`, Grass `44,53,41` → `125,135,69`.
+  The regression is closed by `RbxShaderClusterLightLoopEditModeTests`, which parses every shader
+  into `Pass` blocks and requires the keyword in each pass calling the URP lighting entry point.
+- **`AdoptWorldObject` returned a wrong `Size` under a scaled ancestor.** It read
+  `transform.localScale`, which ignores the ancestor scale, so an adopted part inside
+  a part scaled via `Size` reported a size the user does not see.
+  Now `lossyScale` is used; covered by `AdoptWorldObjectScaleEditModeTests`.
+- **`Grass` shipped as a defective texture.** `Grass005` is a flat green felt: albedo spread
+  8.5 with a normal map too weak to draw blades. Replaced with `Grass004`, tiling
+  lowered from 7 to 4.5 studs (at 7 the blades shrank below a screen pixel).
 
 ### Changed
 
-- **Каталог CC0-материалов пересобран: шестнадцать из тридцати шести наборов заменены.** Каждый
-  `Enum.Material` снят отдельным кадром на трёх формах (плита, цилиндр, шар) и осмотрен; вердикт
-  опирался и на замер исходников (разброс альбедо и отклонение карты нормалей), и на сам рендер.
-  Худшие случаи: `Leather037` с разбросом альбедо 0.37 из 255 — фактически одноцветная заливка;
-  `Fabric081C` с 0.77; `Snow015` — белый камень во мху вместо снега; `RoofingTiles013A` — сетка
-  квадратов вместо черепицы. Ширины плиток и силы нормалей перенастроены вместе с заменами: мелкое
-  зерно при плитке в 13–16 стадов уходит меньше экранного пикселя, и это была половина причины
-  «плоского» вида. Подробности — `dev-docs/MATERIAL_DEFECT_AUDIT_2026-09-04.md`.
-- **Единственная таблица «материал → CC0-набор».** Отображение жило в двух местах — загрузчике
-  ambientCG и импортёре локального каталога — и молча разъехалось, когда бракованные наборы заменили
-  только в одном из них. Обе стороны теперь читают `RbxCc0TextureSets.Sets`; расхождение закрыто
-  тестами `RbxCc0TextureSetsEditModeTests`.
-- **Мировые привязки Lua перешли на стады.** `coreai_world_pos` и `coreai_world_raycast` отдавали и
-  принимали сырые метры Unity, тогда как весь Rbx-API работает в стадах, — расхождение в 1/0.28 ≈ 3.57
-  раза при смешивании с `Part.Position`. Покрыто `WorldBindingsStudUnitsEditModeTests`.
+- **The CC0 material catalog was rebuilt: sixteen of thirty-six sets replaced.** Each
+  `Enum.Material` was photographed in a separate frame on three shapes (slab, cylinder, sphere) and inspected; the verdict
+  rested both on source measurement (albedo spread and normal-map deviation) and on the render itself.
+  Worst cases: `Leather037` with an albedo spread of 0.37 out of 255 — effectively a flat fill;
+  `Fabric081C` at 0.77; `Snow015` — white mossy stone instead of snow; `RoofingTiles013A` — a grid of
+  squares instead of roof tiles. Tile widths and normal strengths were retuned together with the replacements: fine
+  grain at 13–16-stud tiling drops below a screen pixel, and that was half the reason for
+  the "flat" look. Details — `dev-docs/MATERIAL_DEFECT_AUDIT_2026-09-04.md`.
+- **A single "material → CC0 set" table.** The mapping lived in two places — the
+  ambientCG loader and the local-catalog importer — and silently diverged when the defective sets were replaced
+  in only one of them. Both sides now read `RbxCc0TextureSets.Sets`; the divergence is closed
+  by `RbxCc0TextureSetsEditModeTests`.
+- **World Lua bindings moved to studs.** `coreai_world_pos` and `coreai_world_raycast` gave and
+  took raw Unity meters, while the whole Rbx API works in studs — a 1/0.28 ≈ 3.57x
+  discrepancy when mixed with `Part.Position`. Covered by `WorldBindingsStudUnitsEditModeTests`.
 
-Версия выровнена с `com.neoxider.coreai` 7.8.0 (диагностика аллоулиста, вырезавшего входы в скиллы, —
-изменение ядра). Собственных изменений слоя Unity в этом выпуске нет.
+Version aligned with `com.neoxider.coreai` 7.8.0 (the allowlist diagnostics that cut skill entries —
+a core change). No Unity-layer changes of its own in this release.
 
 ### Added
 
-- **Команда `CoreAI/Materials/Apply import policy to packaged textures`.** Меты упакованных текстур
-  лежат в репозитории и были правильными лишь потому, что их однажды выставили руками; новая карта
-  приходила с настройками Unity по умолчанию — шероховатость как sRGB, нормаль как цветная текстура.
-  Команда прогоняет упакованную папку через ту же политику импорта, что и локальный каталог.
-- **Настройки импорта упакованных текстур приведены к единой политике.** Все шестнадцать карт в
-  `Resources/CoreAIRbxTextures` прогнаны через ту же политику, что и локальный каталог: анизотропия 8,
-  явный потолок 4096 и override для WebGL на 1024. Раньше блока платформ не было вовсе, то есть в
-  WebGL-сборку уезжал полный размер.
+- **The `CoreAI/Materials/Apply import policy to packaged textures` command.** The packaged texture metas
+  live in the repository and were correct only because someone once set them by hand; a new map
+  arrived with Unity defaults — roughness as sRGB, normal map as a color texture.
+  The command runs the packaged folder through the same import policy as the local catalog.
+- **Packaged-texture import settings brought under one policy.** All sixteen maps in
+  `Resources/CoreAIRbxTextures` were run through the same policy as the local catalog: anisotropy 8,
+  an explicit 4096 ceiling and a WebGL override at 1024. Previously there was no platform block at all, so
+  the WebGL build shipped full size.
 
 ## [7.7.0] - 2026-09-04
 
 ### Added
 
-- **`FollowFeedAfterLearnerAction()` — действие человека прямо в ленте возвращает её к низу.**
-  Режим `FollowIfAtBottom` отпускает читателя, ушедшего вверх, и для сообщений, приходящих самих
-  по себе, это верно. Но встроенная в ленту карточка своего пузыря не создаёт: нажав в ней кнопку,
-  человек сделал то же, что отправив сообщение, — а лента считала его «ушедшим вверх», потому что
-  карточка выше низа на целый экран, и ответ приходил за пределами видимой области. Хост зовёт
-  метод там, где обрабатывает такое нажатие.
+- **`FollowFeedAfterLearnerAction()` — a human action right in the feed snaps it back to the bottom.**
+  `FollowIfAtBottom` mode releases a reader who scrolled up, and for messages arriving on their
+  own that is correct. But a card embedded in the feed creates no bubble of its own: by pressing a button in it,
+  the human did the same thing as sending a message — while the feed considered them "scrolled up", because the
+  card sits a full screen above the bottom, and the answer arrived outside the visible area. The host calls the
+  method where it handles such a press.
 
 ## [7.6.0] - 2026-09-03
 
 ### Added
 
-- **Отмена запроса при выключении панели стала политикой — `CancelsActiveRequestOnDisable`.**
-  Пакетное значение прежнее (`true`): исчезла панель — показывать ответ некому. Но там, где чат
-  часть занятия, выключение панели значит лишь «человек вышел из фокуса», и обрывать на этом ход
-  собеседника нельзя: он ничего не прерывал, а вернувшись, видел, что ему не ответили. Хост, у
-  которого стенограмма живёт вне панели, переопределяет свойство и получает ход, доигранный до конца.
+- **Request cancellation on panel disable became a policy — `CancelsActiveRequestOnDisable`.**
+  The batch default is unchanged (`true`): the panel is gone — nobody left to show the answer to. But where chat is
+  part of the lesson, disabling the panel only means "the human left focus", and the interlocutor's turn must not
+  be cut on that: they interrupted nothing, and returning, they saw they got no answer. A host whose
+  transcript lives outside the panel overrides the property and gets a turn played out to the end.
 
 ## [7.5.0] - 2026-09-03
 
-> Номера 7.3.0 и 7.4.0 заняты выпусками режима ленты чата на `main`; работа этой
-> ветки, ранее помеченная как 7.3.0 и 7.3.1, наружу не публиковалась и целиком входит
-> в 7.5.0.
+> Numbers 7.3.0 and 7.4.0 are taken by chat-feed-mode releases on `main`; this
+> branch's work, previously tagged 7.3.0 and 7.3.1, was never published outward and is included
+> in 7.5.0 in full.
 
 ### Added
 
-- **Живой бенчмарк материалов и форм `RbxCastleMaterialsShowcaseLivePlayModeTests`.** Один
-  естественно-языковой промпт заставляет встроенного Programmer построить средневековый замок через
-  Rbx API; тест меряет сцену тем же Lua (число `Castle*`-частей, различные `Enum.Material`, все пять
-  `Enum.PartType`) и снимает кадр в `artifacts/castle-showcase-<модель>.png` для человеческой оценки
-  материалов. Порог: 30 частей, 12 различных материалов, 5 форм. Общая обвязка живых сценариев
-  Programmer вынесена в `ProgrammerLiveHarness`.
-- **Визуальный сценарий бенчмарка G6 строит через Rbx API.** Новый `RbxBenchmarkWorld` поднимает
-  живой `RbxWorldHost` с продакшен-стеком модов и отдаёт сценарию инструмент `execute_lua`, а мир
-  создаётся под корнем визуального исполнителя, поэтому попадает в геройский кадр. Промпт переписан
-  на `Instance.new('Part')` с `Size`/`CFrame`/`Material`/`Color`/`Shape`, оценка читает сцену обратно
-  тем же Lua и добавляет чекпоинты `material_variety` (12+ материалов, 20 очков), `material_breadth`
-  (20+), `shape_variety` (все пять `Enum.PartType`, 20 очков), `shape_beyond_blocks` и `scene_depth`.
-  Раньше G6 ходил через нативные примитивы `world_command`, где материалов нет вообще, а форм четыре.
-- `dev-docs/MEGASCANS_FAB_SHOPPING_LIST_2026-09-02.md` — список поисковых запросов Megascans на
-  fab.com по каждому `Enum.Material`, порядок скачивания (Surface, 2K, JPG, Albedo/Normal/Roughness/AO),
-  раскладка папок под `RbxMegascansCatalogImporter` и оговорка лицензии Fab (в пакет не коммитить).
+- **The live materials-and-shapes benchmark `RbxCastleMaterialsShowcaseLivePlayModeTests`.** A single
+  natural-language prompt makes the built-in Programmer build a medieval castle via the
+  Rbx API; the test measures the scene with the same Lua (the count of `Castle*` parts, distinct `Enum.Material`, all five
+  `Enum.PartType`) and captures a frame to `artifacts/castle-showcase-<model>.png` for human evaluation of
+  materials. Thresholds: 30 parts, 12 distinct materials, 5 shapes. The shared harness for live Programmer
+  scenarios was extracted into `ProgrammerLiveHarness`.
+- **The visual G6 benchmark scenario builds via the Rbx API.** The new `RbxBenchmarkWorld` raises a
+  live `RbxWorldHost` with the production mod stack and hands the scenario the `execute_lua` tool, while the world
+  is created under the visual runner's root, so it lands in the hero frame. The prompt was rewritten
+  onto `Instance.new('Part')` with `Size`/`CFrame`/`Material`/`Color`/`Shape`; evaluation reads the scene back
+  with the same Lua and adds `material_variety` (12+ materials, 20 points), `material_breadth`
+  (20+), `shape_variety` (all five `Enum.PartType`, 20 points), `shape_beyond_blocks` and `scene_depth` checkpoints.
+  G6 used to go through native `world_command` primitives, where there are no materials at all and four shapes.
+- `dev-docs/MEGASCANS_FAB_SHOPPING_LIST_2026-09-02.md` — the Megascans search-query list for
+  fab.com per `Enum.Material`, download order (Surface, 2K, JPG, Albedo/Normal/Roughness/AO),
+  folder layout for `RbxMegascansCatalogImporter`, and the Fab license caveat (never commit into the package).
 
 ### Changed
 
-- **`ProgrammerLiveHarness` материализует построенное.** Раньше он собирал `LuaCsRbxApiBindings()`
-  без реестра, то есть Rbx API работал вхолостую: `workspace` наполнялся инстансами, которые никогда
-  не становились GameObject'ами. Живой прогон замка отчитывался о 86 частях, 15 материалах и всех
-  пяти формах, а скриншот показывал пустую сцену. Теперь харнесс создаёт настоящий `RbxWorldHost` и
-  передаёт в биндинги реестр, `game`, биндер, риг камеры и источник пиков — как в продакшене.
-- **Скилл `Full Lua` зарегистрирован в живом харнессе.** Промпт Programmer и описание `execute_lua`
-  оба велят перед рефлексией звать `read_skill('Full Lua')`, `CoreAiModsInstaller` его регистрирует, а
-  харнесс — нет; из-за этого первый же вызов в каждом живом прогоне падал и съедал бюджет
-  последовательных ошибок.
-- **Геройский кадр перестал быть серым.** Сцена собирается из кода, скайбокса в ней нет, поэтому
-  `CameraClearFlags.Skybox` заливал фон плоским ambient-серым, а всё, что отвёрнуто от единственной
-  направленной лампы, уходило в чёрное — материалы читались одинаково плоскими независимо от
-  нормалей. Теперь риг ставит цвет неба, вторую заполняющую лампу и трёхцветный ambient-градиент.
-- **Камера геройского кадра кадрирует построенное.** `RbxCastleMaterialsShowcaseLivePlayModeTests`
-  считает границы материализованной геометрии и ставит камеру по ним, а не по зашитой позиции под
-  замок 40×40 — модель сама выбирает размах, и раньше кадр либо обрезал постройку, либо снимал небо.
-- **Живой замок снимает два кадра.** Общий план фитит всю постройку, и на нём один тайл текстуры
-  занимает несколько пикселей — по нему нельзя судить о материалах. Второй кадр
-  `castle-showcase-<модель>-detail.png` подходит к юго-западной стене на высоту самой постройки, где
-  читаются и тайлинг, и нормали.
-- **Промпт живого замка требует самопроверки форм.** Sonnet 5 в одном прогоне из трёх обходился
-  Wedge вместо CornerWedge и тест падал на `shape_variety`. Теперь промпт велит перед завершением
-  отдельным `execute_lua` вернуть множество использованных `Enum.PartType`/`Enum.Material` и
-  дозаполнить недостающую форму.
-- **Промпт живого замка просит строить по секциям.** Один огромный `execute_lua` на 40+ частей — это
-  ~10k токенов в одной генерации; на нём локальный `ling-3.0-tiny` вставал на все 600 c таймаута
-  транспорта (замер через прокси: 376 c на первый ответ, 602 c на второй). Восемь коротких секций по
-  8–14 частей — та же формулировка, что и в G6, и обе оценки гоняют одну форму задачи. Потаймаутный
-  бюджет одного запроса снижен с 1800 до 600 c.
-- **Живые PlayMode-тесты ходят в модель, выбранную в ассете `CoreAISettings`.** Порядок разрешения
-  `PlayModeOpenAiTestConfig` теперь: переменные окружения → ассет проекта (адрес и модель, если он
-  ведёт HTTP-бэкенд с моделью) → гитигнорный `coreai-live-tests.local.json` (ключ, флаги, поля тела
-  запроса и адрес/модель, если ассет их не даёт) → опциональные хардкод-фолбэки. Раньше локальный файл
-  перекрывал ассет, и выбранная в проекте модель на тесты не влияла. Тест
-  `PlayModeOpenAiTestConfigPrecedencePlayModeTests`; `RUNNING_LIVE_TESTS.md` обновлён.
+- **`ProgrammerLiveHarness` materializes what was built.** It used to assemble `LuaCsRbxApiBindings()`
+  without a registry, i.e. the Rbx API spun idly: `workspace` filled with instances that never
+  became GameObjects. The live castle run reported 86 parts, 15 materials and all
+  five shapes, while the screenshot showed an empty scene. Now the harness creates a real `RbxWorldHost` and
+  passes the bindings the registry, `game`, the binder, the camera rig and the peaks source — as in production.
+- **The `Full Lua` skill is registered in the live harness.** The Programmer prompt and the `execute_lua` description
+  both tell the model to call `read_skill('Full Lua')` before reflection, `CoreAiModsInstaller` registers it, but the
+  harness did not; so the very first call in every live run failed and ate the consecutive-error
+  budget.
+- **The hero frame stopped being gray.** The scene is assembled from code with no skybox in it, so
+  `CameraClearFlags.Skybox` flooded the background with flat ambient gray, and everything turned away from the single
+  directional lamp went black — materials read equally flat regardless of
+  normals. Now the rig sets a sky color, a second fill lamp and a three-color ambient gradient.
+- **The hero-frame camera frames what was built.** `RbxCastleMaterialsShowcaseLivePlayModeTests`
+  computes the materialized geometry's bounds and places the camera by them, not by a hardcoded position for a
+  40×40 castle — the model picks the scale itself, and the frame used to either crop the build or shoot the sky.
+- **The live castle captures two frames.** The wide shot fits the whole build, and in it one texture tile
+  spans a few pixels — no judging materials by it. The second frame,
+  `castle-showcase-<model>-detail.png`, approaches the south-west wall at the build's own height, where
+  both tiling and normals read.
+- **The live-castle prompt requires a shape self-check.** Sonnet 5 in one run of three managed with
+  Wedge instead of CornerWedge and the test failed on `shape_variety`. Now the prompt tells the model to return the used
+  `Enum.PartType`/`Enum.Material` set via a separate `execute_lua` before finishing and
+  top up any missing shape.
+- **The live-castle prompt asks to build in sections.** One giant 40+-part `execute_lua` is
+  ~10k tokens in a single generation; on it the local `ling-3.0-tiny` stood for the full 600 s transport
+  timeout (measured via proxy: 376 s to the first answer, 602 s to the second). Eight short sections of
+  8–14 parts — the same phrasing as in G6, and both evaluations run one task shape. The post-timeout
+  per-request budget was lowered from 1800 to 600 s.
+- **Live PlayMode tests go to the model picked in the `CoreAISettings` asset.** The `PlayModeOpenAiTestConfig`
+  resolution order is now: environment variables → the project asset (address and model, if it
+  points at an HTTP backend with a model) → the git-ignored `coreai-live-tests.local.json` (key, flags, body fields
+  and address/model if the asset does not provide them) → optional hardcoded fallbacks. The local file used to
+  override the asset, so the project-picked model never affected tests. The
+  `PlayModeOpenAiTestConfigPrecedencePlayModeTests` test; `RUNNING_LIVE_TESTS.md` updated.
 
-### Вошло в 7.5.0: работа, которая на ветке называлась 7.3.1 (2026-09-02)
-
-### Added
-
-- `MeaiLlmClient` под `LogMeaiToolCallingSteps` пишет `native tool batch complete (streamed=…,
-  anyFailed=…, allFailed=…); continuing the turn` — граница между исполнением инструментов и вторым
-  запросом к модели в трассе хода.
-- Страж `WebGlUnsafeAsyncPrimitivesEditModeTests` знает пятый примитив — `ConfigureAwait(false)`
-  (причина — запись о зависании tool-call в WebGL в `com.neoxider.coreai`): новое вхождение в
-  чистом файле любого из трёх runtime-корней краснеет; 19 унаследованных файлов заморожены в
-  списке исключений с причиной, путь `execute_lua` / `manage_mods` в него не входит. Подсадная
-  проба и декои расширены.
-
-### Вошло в 7.5.0: работа, которая на ветке называлась 7.3.0 (2026-09-02)
+### Included in 7.5.0: work called 7.3.1 on the branch (2026-09-02)
 
 ### Added
 
-- 15 замороженных демо-сцен G11 добавлены в `EditorBuildSettings` (были только три); smoke-тест
-  `CoreAiDemoScenesSmokePlayModeTests` закреплён на том же замороженном списке и сверяет его со
-  сборочной точкой входа.
-- `README.md` для `MultiplayerFoundationDemo` и `CoreAiChatDemo`; инвентарь демо пересобран по
-  YAML сцен (UI-технология, `storeId`, WebGL-раздел).
-- Тесты `CoreAiWebGlQaEditModeTests`: страница мира не объявляет сохранение до колбэка
-  `FS.syncfs`, охранник LLMUnity не пересканирует сцену каждый кадр.
+- `MeaiLlmClient` under `LogMeaiToolCallingSteps` writes `native tool batch complete (streamed=…,
+  anyFailed=…, allFailed=…); continuing the turn` — the boundary between tool execution and the second
+  model request in the turn trace.
+- The `WebGlUnsafeAsyncPrimitivesEditModeTests` guard knows a fifth primitive — `ConfigureAwait(false)`
+  (the cause being the WebGL tool-call hang record in `com.neoxider.coreai`): a new occurrence in a
+  clean file of any of the three runtime roots goes red; 19 inherited files are frozen in
+  the exception list with reasons; the `execute_lua` / `manage_mods` path is not in it. The planted
+  probe and decoys were extended.
+
+### Included in 7.5.0: work called 7.3.0 on the branch (2026-09-02)
+
+### Added
+
+- 15 frozen G11 demo scenes added to `EditorBuildSettings` (there were only three); the
+  `CoreAiDemoScenesSmokePlayModeTests` smoke test is pinned to the same frozen list and reconciles it with the
+  build entry point.
+- `README.md` for `MultiplayerFoundationDemo` and `CoreAiChatDemo`; the demo inventory rebuilt from scene
+  YAML (UI technology, `storeId`, WebGL section).
+- `CoreAiWebGlQaEditModeTests` tests: the world page does not declare a save before the
+  `FS.syncfs` callback, the LLMUnity guard does not rescan the scene every frame.
 
 ### Fixed
 
-- Qwen-демо в браузере сразу показывают документированное ограничение локальной модели вместо
-  120-секундного ожидания несуществующего `LLMUnity.LLM`.
-- `DGF_SPEC.md` приведён к решению дорожной карты: транспорт-референс — Mirror за engine-free
-  `INetworkBridge`, NGO — альтернатива.
+- Qwen demos in the browser immediately show the documented local-model limitation instead of
+  a 120-second wait for a nonexistent `LLMUnity.LLM`.
+- `DGF_SPEC.md` brought to the roadmap decision: the transport reference is Mirror behind engine-free
+  `INetworkBridge`, NGO is the alternative.
 
 ## [7.4.0] - 2026-09-03
 
 ### Added
 
-- **`ChatScrollAnchor.FollowIfAtBottom` — поведение мессенджера, и оно же теперь рекомендуемое.**
-  Безусловное `KeepPosition` из 7.3.0 оказалось слишком строгим: читатель, только что отправивший
-  сообщение, стоит У НИЗА, и ответ вместе с карточкой задания появлялся под кромкой экрана — то есть
-  его будто и не было, а задание, которого ждёт собеседник, не показывалось вовсе. Новый режим
-  решает по МЕСТУ читателя, а не только по политике: стоит у низа — лента едет дальше; ушёл вверх
-  перечитать разобранное — не трогается ничто. Место читателя снимается ДО вставки строки (после неё
-  высота уже выросла и отличить одно от другого нельзя) и переоценивается на каждом потоковом чанке,
-  поэтому уход вверх посреди ответа сразу отпускает ленту.
-- `MovesViewForAssistantContent(anchor, readerAtBottom)` — правило целиком, чистой функцией; покрыто
-  таблицей режимов в `ChatScrollAnchorEditModeTests`.
+- **`ChatScrollAnchor.FollowIfAtBottom` — messenger behavior, and now the recommended one.**
+  The unconditional `KeepPosition` from 7.3.0 proved too strict: a reader who just sent
+  a message stands AT THE BOTTOM, and the answer together with the task card appeared below the screen edge — as if
+  it never arrived, while the task the interlocutor waits for never showed. The new mode
+  decides by the reader's PLACE, not only by policy: standing at the bottom — the feed moves on; scrolled up
+  to reread something parsed — nothing moves. The reader's place is captured BEFORE the row insert (after it
+  the height already grew and one cannot be told from the other) and re-evaluated on every streamed chunk,
+  so leaving upward mid-answer releases the feed immediately.
+- `MovesViewForAssistantContent(anchor, readerAtBottom)` — the whole rule as a pure function; covered by
+  a mode table in `ChatScrollAnchorEditModeTests`.
 
-`KeepPosition` остаётся как есть — «не двигать никогда».
+`KeepPosition` stays as is — "never move".
 
 ## [7.3.0] - 2026-09-03
 
 ### Added
 
-- **Режим ленты «не трогать прокрутку» — `ChatScrollAnchor.KeepPosition`.** Прижатый к верху новый
-  ответ (`AssistantMessageStart`) — это всё равно перехват вида: читатель, который осознанно ушёл
-  ВВЕРХ, чтобы перечитать разобранную теорию, уезжал вниз на каждое сообщение ассистента и
-  возвращался обратно руками. В новом режиме вид не двигается вообще: то, на что человек смотрит,
-  остаётся под глазами, а новые сообщения просто дорисовываются ниже — как лента канала. Сообщения
-  пользователя и восстановление истории по-прежнему уходят к низу: это его собственное действие, а
-  не помеха.
-- **Политика прокрутки выставляется в инспекторе** — сериализованное поле `scrollAnchor` за
-  `protected virtual ChatScrollAnchor ScrollAnchor`. Хост, которому политика принадлежит в коде,
-  по-прежнему переопределяет свойство (тогда значение из инспектора игнорируется).
-- **`CoreAiChatPanel.MovesViewForAssistantContent(anchor)`** — чистое правило «двигает ли этот режим
-  вид под содержимое ассистента», одно на все три точки прокрутки, покрыто тестом
-  `ChatScrollAnchorEditModeTests`.
+- **The "do not touch scrolling" feed mode — `ChatScrollAnchor.KeepPosition`.** A new answer pinned to the top
+  (`AssistantMessageStart`) is still a view hijack: a reader who deliberately went
+  UP to reread parsed theory was dragged down on every assistant message and
+  travelled back by hand. In the new mode the view never moves at all: whatever the human looks at
+  stays under their eyes, while new messages simply finish drawing below — like a channel feed. User
+  messages and history restoration still go to the bottom: that is their own action, not
+  an interruption.
+- **The scroll policy is set in the inspector** — a serialized `scrollAnchor` field behind
+  `protected virtual ChatScrollAnchor ScrollAnchor`. A host that owns the policy in code
+  still overrides the property (then the inspector value is ignored).
+- **`CoreAiChatPanel.MovesViewForAssistantContent(anchor)`** — the pure "does this mode move the view
+  for assistant content" rule, one for all three scroll points, covered by the
+  `ChatScrollAnchorEditModeTests` test.
 
 ### Fixed
 
-- **Строка вызова инструмента больше не прыгает к низу мимо политики.** `AppendToolCallBubble` звал
-  `ScrollToBottom()` безусловно, поэтому вид перехватывался даже там, где режим это запрещает.
-  Теперь она идёт через `ScrollForNewAssistantRow`, как и любое другое содержимое ассистента.
+- **A tool-call row no longer jumps to the bottom past the policy.** `AppendToolCallBubble` called
+  `ScrollToBottom()` unconditionally, so the view was hijacked even where the mode forbids it.
+  Now it goes through `ScrollForNewAssistantRow` like any other assistant content.
 
 ## [7.2.0] - 2026-09-02
 
 ### Added
 
-- **Якорь прокрутки «читать с начала» — `CoreAiChatPanel.ScrollAnchor`.** До сих пор чат вёл себя
-  как мессенджер: каждое сообщение и каждый потоковый чанк прижимали ленту к низу, и длинный ответ
-  ученик видел с КОНЦА — RedoSchool нужно
-  поведение как в Telegram/ChatGPT/Claude: новый ответ открывается с начала, и лента не убегает вниз,
-  пока он печатается. Новый
-  `protected virtual ChatScrollAnchor ScrollAnchor` (по умолчанию `Bottom` — поведение пакета не
-  меняется) в режиме `AssistantMessageStart` прижимает ВЕРХ первой строки ассистента в ходе к верху
-  видимой области и не следует за потоковым хвостом; сообщения пользователя и восстановление
-  истории по-прежнему уходят к низу. Хосту даны `ScrollForNewAssistantRow`, `ScrollToRevealRow`
-  (минимальная прокрутка, показывающая карточку целиком; строка становится якорем хода) и
-  `ScrollToTurnAnchor` (повторный снап после смены высоты — подмена Label на markdown). Чистые
-  расчёты `ResolveRowStartScrollValue` / `ResolveRevealScrollValue` вынесены в статику и покрыты
-  EditMode-тестами; снап идёт той же цепочкой доводки (0/80/200/500 мс), что и `ScrollToBottom`, и
-  через тот же `ScheduleOnMessageScroll`, поэтому уничтоженную панель не трогает. Устаревшую цепочку
-  (уже сменился якорь) снап пропускает по ссылке на строку.
+- **The "read from the top" scroll anchor — `CoreAiChatPanel.ScrollAnchor`.** Until now the chat behaved
+  like a messenger: every message and every streamed chunk pinned the feed to the bottom, and the student saw a long answer
+  from the END — RedoSchool needs
+  Telegram/ChatGPT/Claude-style behavior: a new answer opens from the top, and the feed does not run away downward
+  while it prints. The new
+  `protected virtual ChatScrollAnchor ScrollAnchor` (default `Bottom` — package behavior unchanged)
+  in `AssistantMessageStart` mode pins the TOP of the turn's first assistant line to the top of
+  the visible area and does not chase the streaming tail; user messages and history restoration
+  still go to the bottom. The host gets `ScrollForNewAssistantRow`, `ScrollToRevealRow`
+  (a minimal scroll showing the card whole; the row becomes the turn anchor) and
+  `ScrollToTurnAnchor` (a re-snap after a height change — a Label swapped for markdown). The pure
+  computations `ResolveRowStartScrollValue` / `ResolveRevealScrollValue` were extracted to statics and covered by
+  EditMode tests; the snap rides the same settle chain (0/80/200/500 ms) as `ScrollToBottom` and
+  through the same `ScheduleOnMessageScroll`, so it never touches a destroyed panel. A stale chain
+  (the anchor already changed) is skipped by row reference.
 
 ## [7.1.2] - 2026-08-31
 
 ### Added
 
-- Тесты на поштучный предел вызова (`ILlmTool.ToolTimeoutMsOverride`, ядро — `Assets/CoreAI/CHANGELOG.md`):
-  инструмент со своим бОльшим бюджетом переживает общий предел, со своим меньшим — обрывается по
-  своему (и сообщение называет сработавшее значение, иначе лог уводит расследование не туда), с
-  выключенным — не обрывается вовсе, **а инструмент, который ничего не объявил, остаётся ровно там же,
-  где был**. Отдельно закреплено, что переопределение переживает починку регистра имени: оно ищется ПО
-  ИМЕНИ, и без этого ожидающая карточка тихо возвращалась бы к общему бюджету именно на тех вызовах,
-  где модель ошиблась регистром.
-- Два теста на путь ограниченного слива (`CompleteStreamedTurnAsync`): слив ждёт карточку с бОльшим
-  собственным бюджетом дольше общего предела, а с выключенным пределом и непрерываемым токеном
-  досиживает до естественного завершения. Обе проверки — про **отказ**, а не про задержку: без правки
-  слот складывался в «вызов не завершился», и модель получала отказ инструмента, пока ученик отвечал.
-- Документация: `Docs/TOOL_AUTHORING_GUIDE.md` описывает новый член в таблице контракта и объясняет,
-  почему ожидающему инструменту нужен большой КОНЕЧНЫЙ бюджет, а не выключенный предел.
+- Per-call limit tests (`ILlmTool.ToolTimeoutMsOverride`, core — `Assets/CoreAI/CHANGELOG.md`):
+  a tool with its own larger budget survives the shared limit; with its own smaller one it is cut by
+  its own (and the message names the fired value, otherwise the log leads the investigation astray); with a
+  disabled one it is never cut, **while a tool that declared nothing stays exactly where it
+  was**. Separately pinned: the override survives the name-registry fix — it is looked up BY
+  NAME, and without that the waiting card would quietly fall back to the shared budget on exactly those calls
+  where the model got the case wrong.
+- Two tests for the bounded-drain path (`CompleteStreamedTurnAsync`): the drain waits out a card with a larger
+  own budget past the shared limit, and with a disabled limit and an uncancelable token it sits
+  through to natural completion. Both checks are about **refusal**, not delay: without the fix
+  the slot folded into "call did not finish" and the model got a tool refusal while the student answered.
+- Documentation: `Docs/TOOL_AUTHORING_GUIDE.md` describes the new member in the contract table and explains
+  why a waiting tool needs a large FINITE budget rather than a disabled limit.
 
 ### Changed
 
-- Версия пакетов поднята до **7.1.2** (`com.neoxider.coreai` и `com.neoxider.coreaiunity` вместе с
-  зависимостью между ними) — как и в 7.1.1, остальные четыре пакета остаются на 7.1.0.
+- Package versions raised to **7.1.2** (`com.neoxider.coreai` and `com.neoxider.coreaiunity` together with
+  the dependency between them) — as in 7.1.1, the other four packages stay on 7.1.0.
 
 ## [7.1.1] - 2026-08-31
 
 ### Added
 
-- Тесты `SkillSetEditModeTests` на новый приём вызова: обёрнутый верхнеуровневый инструмент
-  выполняется, неизвестное имя по-прежнему отклоняется, сессионный allowlist продолжает действовать
-  и через обёртку, а `call_skill_tool("call_skill_tool")` не уходит в рекурсию. Проверка allowlist
-  парная — разрешённое имя ОБЯЗАНО выполниться: без этой половины запрет зеленел бы и в случае, если
-  `RestrictTo` потерял бы провайдер и инструмент стал просто недостижим.
+- `SkillSetEditModeTests` tests for the new call intake: a wrapped top-level tool
+  executes, an unknown name is still declined, the session allowlist keeps working
+  through the wrapper, and `call_skill_tool("call_skill_tool")` does not recurse. The allowlist check is
+  paired — an allowed name MUST execute: without that half a ban would stay green even if
+  `RestrictTo` lost its provider and the tool simply became unreachable.
 
 ## [7.1.0] - 2026-08-30
 
 ### Changed
 
-- **Версия поднята до 7.1.0 — минор, потому что вырос Lua-видимый API.** Все шесть `package.json`,
-  внутренние зависимости и `McpServerInfo.Version` синхронизированы штатным `tools/bump_version.py`.
-  Содержание релиза — в `Assets/CoreAI/CHANGELOG.md`: заведены `BasePart.Orientation`/`Rotation`,
-  заложено engine-free ядро планировщика MVP2 (пока не подключённое к Lua), закрыты остаточные
-  пункты MVP1 и переписаны оси движения в обоих игровых сэмплах.
-- **Версии двух бандл-модов подняты** (`sample_lane_racer` 2.1.0 → 2.3.0, `sample_tetris3d`
-  3.0.0 → 3.3.0). Это обязательная часть правки, а не косметика: сидер бандл-модов перезаписывает
-  установленную копию только при строго большей версии, поэтому без бампа игроки с уже
-  установленными сэмплами не получили бы ни исправление осей, ни фикс столкновений.
+- **Version raised to 7.1.0 — a minor, because the Lua-visible API grew.** All six `package.json` files,
+  internal dependencies and `McpServerInfo.Version` synced with the standard `tools/bump_version.py`.
+  The release contents are in `Assets/CoreAI/CHANGELOG.md`: `BasePart.Orientation`/`Rotation` wired up,
+  the engine-free MVP2 scheduler core laid down (not yet connected to Lua), MVP1 leftovers
+  closed and movement axes rewritten in both game samples.
+- **The two bundle-mod versions raised** (`sample_lane_racer` 2.1.0 → 2.3.0, `sample_tetris3d`
+  3.0.0 → 3.3.0). This is a mandatory part of the fix, not cosmetics: the bundle-mod seeder overwrites the
+  installed copy only on a strictly greater version, so without the bump players with already
+  installed samples would get neither the axis fix nor the collision fix.
 
 ## [7.0.7] - 2026-08-27
 
 ### Fixed
 
-- **Версия пакетов поднята до 7.0.7 для исправления утечки reasoning в ответы RedoSchool.** Все шесть
-  `package.json`, внутренние зависимости и `McpServerInfo.Version` синхронизированы штатным
-  `tools/bump_version.py`. Нестримовый результат сохраняет рассуждения только в
-  `LlmCompletionResult.ReasoningContent`, потоковый — только в `LlmStreamChunk.ReasoningText`; текст,
-  который UI показывает и consumer собирает как финальный ответ, формируется исключительно из
-  provider `content`.
-- **8 EditMode- и 4 PlayMode-регрессии закрывают маршрут provider → consumer.** Новый детерминированный
-  `ReasoningIsolationPlayModeTests` в `CoreAI.Tests.PlayMode.FastNoLlm` проводит подставной transport
-  через реальные `MeaiOpenAiChatClient`, `MeaiLlmClient`, `AiOrchestrator` и `CoreAiChatService` без
-  модели и сети. Проверены content+reasoning, reasoning-only, живые SSE-дельты, отдельная диагностика,
-  ChatHistory и command publication. Пакетные руководства фиксируют запрет долговременной и любой
-  автоматической записи reasoning.
+- **Package versions raised to 7.0.7 to fix the reasoning leak into RedoSchool answers.** All six
+  `package.json` files, internal dependencies and `McpServerInfo.Version` synced with the standard
+  `tools/bump_version.py`. A non-streamed result keeps reasoning only in
+  `LlmCompletionResult.ReasoningContent`, a streamed one only in `LlmStreamChunk.ReasoningText`; the text
+  the UI shows and the consumer collects as the final answer is built solely from provider
+  `content`.
+- **8 EditMode and 4 PlayMode regressions close the provider → consumer route.** The new deterministic
+  `ReasoningIsolationPlayModeTests` in `CoreAI.Tests.PlayMode.FastNoLlm` runs a stub transport
+  through the real `MeaiOpenAiChatClient`, `MeaiLlmClient`, `AiOrchestrator` and `CoreAiChatService` without a
+  model or network. Covered: content+reasoning, reasoning-only, live SSE deltas, separate diagnostics,
+  ChatHistory and command publication. The batch guides pin the ban on long-lived and any
+  automatic recording of reasoning.
 
 ## [7.0.5] - 2026-08-20
 
 ### Fixed
 
-- **Версия пакетов поднята до 7.0.5: 7.0.4 закрыл на пути инструмента таймеры, но не потерю
-  продолжения.** Софтлок брифинга воспроизвёлся в свежем WebGL-билде b241 уже с 7.0.4 на борту.
-  Настоящая причина оказалась не в `System.Threading.Timer`, а в `ConfigureAwait(false)`:
-  в WebGL-плеере пула потоков нет, поэтому продолжение такого `await` не выполняется НИКОГДА.
-  Пока каждый инструмент завершался синхронно, приостановки не возникало; первый же ОЖИДАЮЩИЙ
-  инструмент (карточка квиза ждёт ответа ученика) вешал ход учителя насмерть — вечный индикатор
-  набора текста и заблокированный ввод. Подробности и полный разбор — в changelog `com.neoxider.coreai`.
-  Версия проставлена во всех шести `package.json` (включая межпакетные зависимости), в
-  `McpServerInfo.Version` и в `bundleVersion`.
-- **Замечание по стражу.** `WebGlUnsafeAsyncPrimitivesEditModeTests` этот дефект поймать не мог: он
-  сканирует четыре примитива (`RunContinuationsAsynchronously`, `CancelAfter`, `Task.Delay`,
-  `Task.Run`), а `ConfigureAwait(false)` не входит ни в его список, ни в зону анализатора `CAIU001`
-  (тот покрывает только `CoreAiUnity`, а `ToolExecutionPolicy` живёт в переносимом `CoreAI`). Записи
-  списка исключений уточнены: у `QueuedAiOrchestrator` и `LlmClientRegistry.AwaitWithoutCancelling…`
-  `RunContinuationsAsynchronously` **проверен и безвреден** — их читатели ждут БЕЗ
-  `ConfigureAwait(false)`, поэтому продолжение уходит в `SynchronizationContext` хоста, а не в пул.
+- **Package versions raised to 7.0.5: 7.0.4 closed timers on the tool path, but not the lost
+  continuation.** The briefing softlock reproduced in a fresh WebGL build b241 with 7.0.4 already aboard.
+  The true cause was not `System.Threading.Timer` but `ConfigureAwait(false)`:
+  the WebGL player has no thread pool, so such an `await` continuation NEVER runs.
+  While every tool completed synchronously no suspension arose; the first WAITING
+  tool (a quiz card awaiting the student's answer) hung the teacher's turn dead — an eternal typing
+  indicator and blocked input. Details and the full analysis are in the `com.neoxider.coreai` changelog.
+  The version is stamped in all six `package.json` files (including inter-package dependencies), in
+  `McpServerInfo.Version` and in `bundleVersion`.
+- **A note on the guard.** `WebGlUnsafeAsyncPrimitivesEditModeTests` could not catch this defect: it
+  scans four primitives (`RunContinuationsAsynchronously`, `CancelAfter`, `Task.Delay`,
+  `Task.Run`), while `ConfigureAwait(false)` is in neither its list nor the `CAIU001` analyzer scope
+  (that covers only `CoreAiUnity`, while `ToolExecutionPolicy` lives in portable `CoreAI`). The exception-list
+  entries were refined: at `QueuedAiOrchestrator` and `LlmClientRegistry.AwaitWithoutCancelling…`
+  `RunContinuationsAsynchronously` is **verified and harmless** — their readers wait WITHOUT
+  `ConfigureAwait(false)`, so the continuation goes to the host's `SynchronizationContext`, not the pool.
 
 ## [7.0.4] - 2026-08-19
 
 ### Fixed
 
-- **Версия пакетов поднята до 7.0.4, чтобы исправление дренажа tool-вызовов доехало до игры.**
-  Правка `ToolExecutionPolicy` + `ILlmAsyncMarshaler.DelayAsync` лежала в `[Unreleased]`, а
-  потребитель (RedoSchool) закреплён на git-теге, поэтому в браузере продолжал работать код 7.0.3:
-  после интерактивного инструмента ученик видел бесконечный индикатор набора текста. Версия
-  проставлена во всех шести `package.json` (включая межпакетные зависимости), в `McpServerInfo.Version`
-  и в `bundleVersion`.
-- **Unity-хост планирует внутренние задержки LLM кадровым циклом, а не таймером.**
-  `UnityMainThreadLlmAsyncMarshaler` реализует новый хук `ILlmAsyncMarshaler.DelayAsync` через
-  `UniTask.Delay(DelayType.Realtime, PlayerLoopTiming.Update)`. В WebGL-плеере нет
-  `System.Threading.Timer`, поэтому дедлайны на `CancelAfter`/`Task.Delay` там не срабатывали вовсе:
-  дренаж отложенных tool-вызовов и per-call таймаут инструмента (`ToolExecutionPolicy`) висели молча, и
-  после интерактивного инструмента ученик видел бесконечный индикатор набора текста. `DelayType.Realtime`
-  — чтобы пауза или изменённый `timeScale` не растягивали внутренний дедлайн.
-- **Страж на мёртвые в WebGL асинхронные примитивы.** `WebGlUnsafeAsyncPrimitivesEditModeTests`
-  сканирует `Assets/CoreAI/Runtime` и `Assets/CoreAiUnity/Runtime` на `RunContinuationsAsynchronously`,
-  `CancelAfter`, `Task.Delay` и `Task.Run`: вырезает комментарии и строковые литералы и отбрасывает
-  только те ветки препроцессора, которых в WebGL-сборке ДОСТОВЕРНО нет (условия считаются трёхзначно —
-  неизвестный define и `#else` к нему остаются под проверкой). Исключения заморожены парой
-  «файл + примитив», каждое с причиной; сам сканер, вычислитель условий и разметка достижимости покрыты
-  подсадными случаями, иначе поломка стража выглядела бы как «нарушений не найдено». Новый
-  `StreamedTurnDeferredToolEditModeTests` закрывает непокрытую форму — инструмент, который завершается
-  внешним сигналом уже во время дренажа.
-- **WebGL: `WorldStateManager.Reset()` больше не воскрешает удалённый сейв.** Reset удалял save-файл и
-  `.tmp`, но не делал flush файловой системы, поэтому на WebGL удалённый сейв возвращался из IndexedDB
-  после перезагрузки страницы. Теперь Reset вызывает `CoreAiWebGlPersistence.Sync()` так же, как `Save()`;
-  регрессия закрыта `WorldStateManagerResetPersistenceEditModeTests`.
-- **`bundleVersion` синхронизирован с пакетами** (6.11.1 → 7.0.3 в `ProjectSettings.asset`).
-- **Демо-моды переведены с withheld `coreai_world_*` build API на Rbx API.** FullAccess Tetris
-  (встроенный источник в `LuaPlatformExampleController.cs`) и LuaMods `WaveDirectorMod.lua.txt` падали в
-  production-конфигурации (`RegisterWorldEditBuildBindings = false`); теперь используют
-  `Instance.new('Part')`, `Position`/`CFrame`, `Color3.fromHex`, `instance:Destroy()`. Регрессия закрыта
-  `DemoModProductionSurfaceEditModeTests` (линт источников + headless-загрузка в production-конфигурации);
-  раздел в `KNOWN_ISSUES.md` удалён как решённый.
-- Документация: в `Docs/ARCHITECTURE_RULES.md` исправлены устаревшие идентификаторы
-  `RobloxSpace`/`RobloxApi` → `RbxSpace`/`RbxApi`.
+- **Package versions raised to 7.0.4 so the tool-call drain fix reaches the game.**
+  The `ToolExecutionPolicy` + `ILlmAsyncMarshaler.DelayAsync` fix sat in `[Unreleased]` while the
+  consumer (RedoSchool) pins to a git tag, so the browser kept running 7.0.3 code:
+  after an interactive tool the student saw an endless typing indicator. The version
+  is stamped in all six `package.json` files (including inter-package dependencies), in `McpServerInfo.Version`
+  and in `bundleVersion`.
+- **The Unity host schedules internal LLM delays on the frame loop, not on a timer.**
+  `UnityMainThreadLlmAsyncMarshaler` implements the new `ILlmAsyncMarshaler.DelayAsync` hook via
+  `UniTask.Delay(DelayType.Realtime, PlayerLoopTiming.Update)`. The WebGL player has no
+  `System.Threading.Timer`, so `CancelAfter`/`Task.Delay` deadlines never fired there at all:
+  the deferred tool-call drain and the per-call tool timeout (`ToolExecutionPolicy`) hung silently, and
+  after an interactive tool the student saw an endless typing indicator. `DelayType.Realtime`
+  keeps a pause or a changed `timeScale` from stretching the internal deadline.
+- **A guard for async primitives dead in WebGL.** `WebGlUnsafeAsyncPrimitivesEditModeTests`
+  scans `Assets/CoreAI/Runtime` and `Assets/CoreAiUnity/Runtime` for `RunContinuationsAsynchronously`,
+  `CancelAfter`, `Task.Delay` and `Task.Run`: it cuts out comments and string literals and discards
+  only those preprocessor branches RELIABLY absent from a WebGL build (conditions evaluated three-valued —
+  an unknown define and its `#else` stay under inspection). Exceptions are frozen as
+  "file + primitive" pairs, each with a reason; the scanner itself, the condition evaluator and the reachability markup are covered by
+  planted cases, otherwise a broken guard would look like "no violations found". The new
+  `StreamedTurnDeferredToolEditModeTests` closes an uncovered shape — a tool that completes on an
+  external signal during the drain.
+- **WebGL: `WorldStateManager.Reset()` no longer resurrects a deleted save.** Reset deleted the save file and
+  `.tmp` but never flushed the filesystem, so on WebGL a deleted save came back from IndexedDB
+  after a page reload. Reset now calls `CoreAiWebGlPersistence.Sync()` just like `Save()`;
+  the regression is closed by `WorldStateManagerResetPersistenceEditModeTests`.
+- **`bundleVersion` synced with the packages** (6.11.1 → 7.0.3 in `ProjectSettings.asset`).
+- **Demo mods moved from withheld `coreai_world_*` build APIs to the Rbx API.** FullAccess Tetris
+  (embedded source in `LuaPlatformExampleController.cs`) and the LuaMods `WaveDirectorMod.lua.txt` failed in
+  the production configuration (`RegisterWorldEditBuildBindings = false`); now they use
+  `Instance.new('Part')`, `Position`/`CFrame`, `Color3.fromHex`, `instance:Destroy()`. The regression is closed by
+  `DemoModProductionSurfaceEditModeTests` (source lint + headless load in the production configuration);
+  the `KNOWN_ISSUES.md` section was removed as resolved.
+- Documentation: `Docs/ARCHITECTURE_RULES.md` fixed stale `RobloxSpace`/`RobloxApi` → `RbxSpace`/`RbxApi` identifiers.
 
 ## [7.0.3] - 2026-08-12
 
@@ -712,168 +1005,168 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Fixed
 
-- **Восстановлена сборка на Unity 6.0–6.6, где пакет Input System не установлен.** В 7.0.1 гейт был
-  сведён к одному `ENABLE_INPUT_SYSTEM`, но движок выставляет этот символ по настройке
-  *Active Input Handling*, а не по факту наличия пакета. До 6.7 `com.unity.inputsystem` — обычный
-  UPM-пакет, поэтому конфигурация «Active Input Handling = New/Both, пакета нет» давала `CS0246`
-  на `using UnityEngine.InputSystem;`. Условие стало
-  `ENABLE_INPUT_SYSTEM && (COREAI_HAS_INPUT_SYSTEM || UNITY_6000_7_OR_NEWER)`: до 6.7 нужны и
-  включённый бэкенд, и реально установленный пакет; с 6.7, где Input System становится встроенным
-  модулем движка и `versionDefines` перестаёт срабатывать, достаточно версии редактора. Так закрыты
-  оба провала сразу — ошибка сборки на старых версиях и молчаливое отключение ввода на новых.
-  `versionDefines` в трёх asmdef возвращены, но больше не являются единственной опорой.
+- **The Unity 6.0–6.6 build restored where the Input System package is not installed.** In 7.0.1 the gate
+  was reduced to a single `ENABLE_INPUT_SYSTEM`, but the engine raises that symbol from the
+  *Active Input Handling* setting, not from the package actually being present. Before 6.7 `com.unity.inputsystem` is a plain
+  UPM package, so the "Active Input Handling = New/Both, no package" configuration produced `CS0246`
+  on `using UnityEngine.InputSystem;`. The condition became
+  `ENABLE_INPUT_SYSTEM && (COREAI_HAS_INPUT_SYSTEM || UNITY_6000_7_OR_NEWER)`: before 6.7 both an
+  enabled backend and a genuinely installed package are needed; from 6.7, where Input System becomes a built-in
+  engine module and `versionDefines` stops firing, the editor version suffices. This closes
+  both failures at once — the build error on old versions and the silent input kill on new ones.
+  `versionDefines` in the three asmdef files were restored but are no longer the only support.
 
 ## [7.0.1] - 2026-08-12
 
 ### Fixed
 
-- **Исправлена компиляция UI Toolkit на Unity 6.6.** `CoreAiChatMessageBubbleElement` переведён с удалённых
-  `UxmlFactory` / `UxmlTraits` на `[UxmlElement]`, `partial` и `[UxmlAttribute]`; UXML-имена `is-user`,
-  `message-text` и `avatar-sprite`, значения по умолчанию и открытый конструктор без параметров сохранены.
-- **Зафиксирован UXML-контракт chat bubble.** EditMode-тест клонирует штатный `CoreAiChatMessageBubble.uxml`
-  и проверяет полное имя пользовательского элемента и значения его стабильных атрибутов.
+- **The Unity 6.6 UI Toolkit compilation fixed.** `CoreAiChatMessageBubbleElement` moved from the removed
+  `UxmlFactory` / `UxmlTraits` to `[UxmlElement]`, `partial` and `[UxmlAttribute]`; the `is-user`,
+  `message-text` and `avatar-sprite` UXML names, defaults and the open parameterless constructor are kept.
+- **The chat-bubble UXML contract pinned.** An EditMode test clones the stock `CoreAiChatMessageBubble.uxml`
+  and verifies the custom element's full name and its stable attribute values.
 
 ### Changed
 
-- **Минимальная версия Unity в манифесте осознанно оставлена на `6000.0`.** `[UxmlElement]` и
-  `[UxmlAttribute]` доступны с Unity 6000.0 — в 6.6 сломался ровно старый путь, а не новый. Мигрированный
-  код собирается на всём диапазоне 6000.0+, поэтому сужать поддержку в патч-релизе не за что.
-- **Input System определяется `ENABLE_INPUT_SYSTEM` вместе с доступностью реализации для версии Unity.**
-  В Unity 6.7 `com.unity.inputsystem` перестаёт быть обычным UPM-пакетом и становится встроенным
-  precompiled-модулем движка (проектам с жёсткой зависимостью выдаётся shim-пакет 2.0.0), то есть версии
-  пакета, по которой срабатывал `versionDefines`, у него больше нет. Символ `COREAI_HAS_INPUT_SYSTEM`
-  молча перестал бы определяться, и `OrchestrationDashboard`, `CoreAiTokenBudgetOverlay` и
-  `UnityNewInputSource` так же молча ушли бы в ветку «Input System нет»: горячие клавиши диагностических
-  панелей и Lua-`UserInputService` перестали бы работать без единой ошибки в консоли. Запись
-  `com.unity.inputsystem` сохранена в `versionDefines` для Unity 6.0–6.6, а все `#if` требуют
-  `ENABLE_INPUT_SYSTEM && (COREAI_HAS_INPUT_SYSTEM || UNITY_6000_7_OR_NEWER)`. Первый символ движок
-  выставляет по *Active Input Handling*, второй подтверждает пакет на старых редакторах, а ветка версии
-  включает встроенный модуль начиная с 6.7. `ENABLE_INPUT_SYSTEM` существует с Unity 2019.x, поэтому
-  поддержка старых версий не сужается. Ссылка на сборку `Unity.InputSystem` в `references` сохранена:
-  в 6.7 сборка присутствует всегда, а нерезолвнутая ссылка на отсутствующую сборку компиляцию asmdef
-  не ломает (так же устроен, например, `Unity.VisualScripting.Core`).
-- **`UnityNewInputSource` следует *Active Input Handling*, когда реализация Input System доступна.** При
-  `Input Manager (Old)` или отсутствующем пакете на Unity до 6.7 backend компилируется в no-op-заглушку
-  вместо обращения к недоступным `Keyboard` / `Mouse` / `Gamepad`. Lua-поверхность `UserInputService`
-  не меняется: она по-прежнему грузится, подключается и опрашивается, просто сообщает об отсутствии ввода.
+- **The manifest's minimum Unity version was deliberately left at `6000.0`.** `[UxmlElement]` and
+  `[UxmlAttribute]` are available since Unity 6000.0 — in 6.6 exactly the old path broke, not the new one. The migrated
+  code builds across the whole 6000.0+ range, so there is nothing to narrow support for in a patch release.
+- **Input System is detected by `ENABLE_INPUT_SYSTEM` together with version-appropriate implementation availability.**
+  In Unity 6.7 `com.unity.inputsystem` stops being a plain UPM package and becomes a built-in
+  precompiled engine module (projects with a hard dependency get shim package 2.0.0), i.e. the package
+  version `versionDefines` fired on is gone. The `COREAI_HAS_INPUT_SYSTEM` symbol
+  would silently stop being defined, and `OrchestrationDashboard`, `CoreAiTokenBudgetOverlay` and
+  `UnityNewInputSource` would just as silently take the "no Input System" branch: the diagnostic panels'
+  hotkeys and Lua `UserInputService` would stop working with zero console errors. The
+  `com.unity.inputsystem` entry is kept in `versionDefines` for Unity 6.0–6.6, while all `#if`s require
+  `ENABLE_INPUT_SYSTEM && (COREAI_HAS_INPUT_SYSTEM || UNITY_6000_7_OR_NEWER)`. The first symbol the engine
+  raises from *Active Input Handling*, the second confirms the package on old editors, and the version branch
+  enables the built-in module from 6.7 on. `ENABLE_INPUT_SYSTEM` exists since Unity 2019.x, so
+  old-version support does not narrow. The `Unity.InputSystem` assembly reference in `references` is kept:
+  in 6.7 the assembly is always present, and an unresolved reference to a missing assembly does not break asmdef
+  compilation (e.g. `Unity.VisualScripting.Core` works the same way).
+- **`UnityNewInputSource` follows *Active Input Handling* when the Input System implementation is available.** With
+  `Input Manager (Old)` or a missing package on Unity before 6.7, the backend compiles into a no-op stub
+  instead of touching unreachable `Keyboard` / `Mouse` / `Gamepad`. The Lua `UserInputService` surface
+  does not change: it still loads, connects and polls, it just reports no input.
 
 ## [7.0.0] - 2026-08-01
 
 ### Breaking
 
-- **Editor setup управляет двумя положительными opt-in символами.** `Enable LLM` / `Enable Lua` добавляют
-  `COREAI_LLM` / `COREAI_LUA`, Disable-команды удаляют соответствующий символ, а status dialog показывает
-  effective state обоих независимых модулей. Миграция с 6.x удаляет `COREAI_NO_LLM` и `COREAI_NO_LUA`;
-  проект без новых символов сохраняет portable orchestration/chat, scripted/stub clients и обязательные MEAI-контракты;
-  `COREAI_LLM` включает provider-backed HTTP/MEAI/LLMUnity реализации, а оба символа включают full provider + Lua runtime.
-- **Unity/CI guard фиксирует четырёхрежимный breaking contract.** Активные source/tests/setup/current docs
-  не могут вернуть старые символы, Lua security fixture компилируется только при `COREAI_LUA`, LLM tests —
-  только при `COREAI_LLM`, а matrix `core` / `llm` / `lua` / `full` проверяет инъекцию Standalone/WebGL.
-  Asmdef целиком positive define не отключаются.
+- **Editor setup manages the two positive opt-in symbols.** `Enable LLM` / `Enable Lua` add
+  `COREAI_LLM` / `COREAI_LUA`, the Disable commands remove the respective symbol, and the status dialog shows the
+  effective state of both independent modules. Migrating from 6.x removes `COREAI_NO_LLM` and `COREAI_NO_LUA`;
+  a project without the new symbols keeps portable orchestration/chat, scripted/stub clients and the mandatory MEAI contracts;
+  `COREAI_LLM` enables the provider-backed HTTP/MEAI/LLMUnity implementations, and both symbols enable full provider + Lua runtime.
+- **The Unity/CI guard pins the four-mode breaking contract.** Active source/tests/setup/current docs
+  cannot bring back the old symbols, the Lua security fixture compiles only with `COREAI_LUA`, LLM tests only
+  with `COREAI_LLM`, and the `core` / `llm` / `lua` / `full` matrix verifies Standalone/WebGL injection.
+  Asmdefs are never disabled by a positive define wholesale.
 
 ### Fixed
 
-- **`CoreAILifetimeScope` больше не оставляет role-only обходы вокруг memory scope.** Production DI публикует
-  scoped memory, transcript и conversation-summary decorators поверх private file/in-memory backing stores;
-  `IConversationTranscriptStore` остаётся отдельной честной capability, а memory facade сохраняет native/fallback
-  atomic mutation. Два ученика одной роли больше не видят memory, flat chat, structured transcript или compacted
-  summary друг друга.
-- **Host-owned `IAgentMemoryScopeProvider` выигрывает backward-compatible empty default.** Provider можно назначить
-  inspector-компонентом `AgentMemoryScopeProviderBehaviour` либо вызвать
-  `CoreAILifetimeScope.SetAgentMemoryScopeProvider(...)` до container build. `AgentMemoryScope.Empty` по-прежнему
-  даёт exact legacy role key для однопользовательских проектов.
-- **Scoped persistence не раскрывает PII и не зависит от case sensitivity файловой системы.** Любой непустой
-  tenant/user/session/topic пишется под `scope-v1-<full SHA-256>`; этот же ключ защищает file mutation lock.
-  File memory/summary errors логируют только operation + exception type, а legacy bare-role import остаётся явной миграцией.
-- **Queue latest-wins и stop изолированы по `AgentMemoryScope`.** Production DI передаёт scope provider в
-  `QueuedAiOrchestrator`; stock chat и `CoreAi.StopAgent(roleId)` не могут cross-cancel ту же роль другого ученика,
-  одноаргументный stop корректно работает и для domain scope, не равного role id, а
-  `IScopedAiTaskCancellation.CancelTasks(scope, roleId)` даёт явный API для конкретной роли.
-- **Запущенная очередь не теряет enqueue-time identity.** Каждый sync/stream work item хранит immutable
-  `AgentMemoryScope`; inner execution, cancellation teardown и `RecordUnstartedTurn` продолжают работать под
-  тем учеником, который стоял в provider при enqueue, даже если host сменил его до pump.
-- **Unity production wiring больше не теряет пользовательский ход на границе очереди.** Регрессии
-      фиксируют sync/stream pre-cancel, pending и claimed-before-inner cancellation, замену scope,
-      `CancelTasks`, queue-full и `Dispose`, а также direct authority denial. Во всех случаях в
-      правильную роль попадает исходный `Hint` (и компактные attachment placeholders), а ошибка store
-      не подменяет исходный terminal outcome. Гарантия ограничена одной orchestration invocation / одним
-      admitted item и не заявляет дедупликацию отдельного внешнего retry без idempotency key в store.
-- **Персональный контекст вынесен из общего provider-cache prefix.** Unity-регрессии проверяют, что
-      память ученика, per-request инструкции, allowlist текущего слайда и world state образуют
-      упорядоченный system tail, а стабильный role/tool prefix совпадает между учениками и слайдами.
-- **`CoreAi.ClearContext(..., clearChatHistory: true)` очищает и scoped conversation summary.** Раньше
-      flat/structured history исчезала, но compacted summary сохранялась и могла вернуть старый контекст
-      ученика в следующий запрос. Исправление покрывает `Persistent` и `SessionOnly` backing stores.
-- **Отключение панели во время стрима больше не оставляет мёртвый пузырь активным.** В embedded UI
-      дерево остаётся у хоста после `OnDisable`, но ссылка на текущий пузырь раньше терялась до
-      снятия `coreai-streaming-active`. Из-за этого внешний индикатор мог считать, что ответ всё ещё
-      печатается, пока UI не был перестроен. Теперь класс снимается до сброса UI-ссылок.
-- **Уборка stale-хода защищает только его собственные пузыри.** Это defense-in-depth для возможного
-      будущего supersede-пути: текущие публичные generation-bump пути уже завершают streaming UI,
-      а stale teardown не имеет права снимать класс с пузыря нового хода.
+- **`CoreAILifetimeScope` no longer leaves role-only bypasses around the memory scope.** Production DI publishes
+  scoped memory, transcript and conversation-summary decorators over private file/in-memory backing stores;
+  `IConversationTranscriptStore` stays a separate honest capability, and the memory facade keeps native/fallback
+  atomic mutation. Two students of one role no longer see each other's memory, flat chat, structured transcript or compacted
+  summary.
+- **A host-owned `IAgentMemoryScopeProvider` wins over the backward-compatible empty default.** The provider can be assigned
+  as the `AgentMemoryScopeProviderBehaviour` inspector component or via
+  `CoreAILifetimeScope.SetAgentMemoryScopeProvider(...)` before container build. `AgentMemoryScope.Empty` still
+  yields the exact legacy role key for single-user projects.
+- **Scoped persistence exposes no PII and does not depend on filesystem case sensitivity.** Any non-empty
+  tenant/user/session/topic is written under `scope-v1-<full SHA-256>`; the same key guards the file mutation lock.
+  File memory/summary errors log only operation + exception type, and the legacy bare-role import stays an explicit migration.
+- **Queue latest-wins and stop are isolated by `AgentMemoryScope`.** Production DI passes the scope provider into
+  `QueuedAiOrchestrator`; stock chat and `CoreAi.StopAgent(roleId)` cannot cross-cancel the same role of another student,
+  the single-argument stop also works correctly for a domain scope different from the role id, and
+  `IScopedAiTaskCancellation.CancelTasks(scope, roleId)` provides an explicit API for a specific role.
+- **A running queue does not lose enqueue-time identity.** Every sync/stream work item stores an immutable
+  `AgentMemoryScope`; inner execution, cancellation teardown and `RecordUnstartedTurn` keep running under
+  the student that stood in the provider at enqueue, even if the host swapped them before the pump.
+- **Unity production wiring no longer loses the user turn at the queue boundary.** Regressions
+      pin sync/stream pre-cancel, pending and claimed-before-inner cancellation, scope replacement,
+      `CancelTasks`, queue-full and `Dispose`, plus direct authority denial. In every case the original `Hint`
+      (and compact attachment placeholders) reaches the right role, while a store error
+      never replaces the original terminal outcome. The guarantee is limited to one orchestration invocation / one
+      admitted item and claims no dedup of a separate external retry without an idempotency key in the store.
+- **Personal context moved out of the shared provider-cache prefix.** Unity regressions verify that the
+      student's memory, per-request instructions, the current slide's allowlist and world state form an
+      ordered system tail, while the stable role/tool prefix matches across students and slides.
+- **`CoreAi.ClearContext(..., clearChatHistory: true)` also clears the scoped conversation summary.** Previously
+      flat/structured history vanished but the compacted summary survived and could return the student's old context
+      into the next request. The fix covers `Persistent` and `SessionOnly` backing stores.
+- **Disabling the panel mid-stream no longer leaves a dead bubble active.** In the embedded UI the
+      tree stays with the host after `OnDisable`, but the current-bubble reference used to be lost before
+      clearing `coreai-streaming-active`. An external indicator could then believe the answer was still
+      printing until the UI was rebuilt. Now the class is removed before the UI references reset.
+- **Stale-turn cleanup guards only its own bubbles.** This is defense-in-depth for a possible
+      future supersede path: current public generation-bump paths already finalize the streaming UI,
+      and a stale teardown has no right to strip the class off a new turn's bubble.
 
 ### Added
 
-- **`ServerManagedApi` получил dynamic custom-header hook без пересборки клиента.**
+- **`ServerManagedApi` gained a dynamic custom-header hook without a client rebuild.**
   `ServerManagedAuthorization.SetRequestHeaderProvider(IRequestHeaderProvider)` / `ClearRequestHeaderProvider()`
-  позволяют host-у передавать валидируемый lesson/cohort/experiment id на backend. Inner settings provider
-  и global provider композятся с приоритетом inner; snapshot снимается один раз на invocation и повторно
-  используется в transport/auth-retry, внешних sync retry после result/exception и streaming pre-commit retry,
-  но следующий invocation (даже с тем же `LlmCompletionRequest` object) читает актуальные значения.
-  Custom headers не могут подменить `Authorization`, `Content-Type`,
-  `Idempotency-Key` и `X-Request-Id`; trace/idempotency остаются request-owned.
-- **Host выбирает persistence policy до сборки `CoreAILifetimeScope`.** Новый
-  `AgentMemoryPersistenceMode.Persistent|SessionOnly` и
-  `SetAgentMemoryPersistenceMode(...)` сохраняют прежний file-backed режим по умолчанию, но позволяют
-  переключить memory, flat chat, structured transcript и compacted summary на process-only backing с теми
-  же scoped decorators и без файловых записей. На WebGL `Persistent` по-прежнему использует file memory/chat/
-  transcript и in-memory summary; `SessionOnly` держит в памяти все четыре набора. Вызов setter после build
-  fail-fast отклоняется.
-- **Provider-specific HTTP body теперь настраивается публично и безопасно из Unity-кода.**
-  `OpenAiHttpLlmSettings` и `CoreAISettingsAsset` получили `SetProviderBodyParameter(string, JToken)` /
-  `RemoveProviderBodyParameter`; они используют portable atomic/deterministic API CoreAI 7.0.0. Raw
-  `ExtraBodyJson` остаётся только совместимым advanced escape hatch. Для OpenRouter документированы opaque
-  application/agent-cohort `session_id` без student id/PII и точный измерительный pin
-  `provider.order=["cloudflare/fp8"]`, `allow_fallbacks=false`.
-- **Gitignored live-конфиг поддерживает проверенные provider fields и явный prompt-cache probe.**
-  `coreai-live-tests.local.json.extraBody` / `COREAI_TEST_EXTRA_BODY_JSON` валидируются без логирования API key
-  или body values и проходят safe setters фабрики. `PromptCacheLivePlayModeTests` запускается только при
-  `COREAI_TEST_PROMPT_CACHE=true`: три разных synthetic student tails идут через реальный production-like
-  orchestrator с byte-identical длинным role/tool prefix; к третьему запросу требуется provider-reported
-  `CacheReadTokens > 0`, а диагностика показывает provider/model/token/cache read-write без секретов.
-- **`CoreAiChatPanel.StreamingActiveUssClassName`** — публичная константа класса пузыря, в который
-      ход стримит прямо сейчас. Хостам, опрашивающим дерево на «идёт ли ход», больше не нужно
-      хардкодить строку `coreai-streaming-active` у себя.
+  let the host pass a validated lesson/cohort/experiment id to the backend. The inner settings provider
+  and the global provider compose with inner priority; the snapshot is taken once per invocation and reused
+  in transport/auth-retry, outer sync retries after result/exception and streaming pre-commit retry,
+  but the next invocation (even with the same `LlmCompletionRequest` object) reads current values.
+  Custom headers cannot override `Authorization`, `Content-Type`,
+  `Idempotency-Key` or `X-Request-Id`; trace/idempotency stay request-owned.
+- **The host picks a persistence policy before the `CoreAILifetimeScope` build.** The new
+  `AgentMemoryPersistenceMode.Persistent|SessionOnly` and
+  `SetAgentMemoryPersistenceMode(...)` keep the previous file-backed mode by default but allow
+  switching memory, flat chat, structured transcript and compacted summary to process-only backing with the
+  same scoped decorators and no file writes. On WebGL `Persistent` still uses file memory/chat/
+  transcript and in-memory summary; `SessionOnly` keeps all four sets in memory. Calling the setter after build
+  is fail-fast rejected.
+- **Provider-specific HTTP bodies are now configured publicly and safely from Unity code.**
+  `OpenAiHttpLlmSettings` and `CoreAISettingsAsset` gained `SetProviderBodyParameter(string, JToken)` /
+  `RemoveProviderBodyParameter`; they use the portable atomic/deterministic CoreAI 7.0.0 API. Raw
+  `ExtraBodyJson` remains only a compatible advanced escape hatch. For OpenRouter, an opaque
+  application/agent-cohort `session_id` without student id/PII and the exact measurement pin
+  `provider.order=["cloudflare/fp8"]`, `allow_fallbacks=false` are documented.
+- **The gitignored live config supports verified provider fields and an explicit prompt-cache probe.**
+  `coreai-live-tests.local.json.extraBody` / `COREAI_TEST_EXTRA_BODY_JSON` are validated without logging API keys
+  or body values and go through the factory's safe setters. `PromptCacheLivePlayModeTests` runs only with
+  `COREAI_TEST_PROMPT_CACHE=true`: three different synthetic student tails go through a real production-like
+  orchestrator with a byte-identical long role/tool prefix; by the third request a provider-reported
+  `CacheReadTokens > 0` is required, and diagnostics show provider/model/token/cache read-write without secrets.
+- **`CoreAiChatPanel.StreamingActiveUssClassName`** — the public constant for the bubble class the
+      turn is streaming into right now. Hosts polling the tree for "is a turn running" no longer need to
+      hardcode the `coreai-streaming-active` string themselves.
 
 ## [6.14.0] - 2026-07-31
 
 ### Fixed
 
-- **Фолбэк на второй бэкенд больше не срабатывает на постоянном отказе — и, симметрично, исключение
-      и результат теперь классифицируются одинаково.** `FallbackLlmClientDecorator` уже давно НЕ
-      переключался на secondary, когда primary возвращал `AuthExpired` / `QuotaExceeded` /
-      `InvalidRequest` **результатом** (белый список `IsRetryableError`), но ветка `catch (Exception)`
-      уходила в фолбэк на ЛЮБОМ исключении — то есть один и тот же отказ вёл себя по-разному в
-      зависимости от того, вернул его адаптер результатом или бросил. Теперь типизированный
-      `LlmClientException` с непочинибельным кодом (в том числе новый `PaymentRequired` — HTTP 402)
-      пробрасывается наверх, а `FallbackCount` не растёт: у secondary свой базовый URL и свой ключ,
-      но он не может ни оплатить чужой счёт, ни исправить кривой запрос, и второй круговой рейс —
-      это только удвоенное ожидание для ученика. Транзиентные ошибки (5xx, 429, таймаут, обрыв)
-      фолбэчатся ровно как раньше.
-- **`CoreAiChatPanel` больше не теряет своё состояние, когда `PanelRenderer` пересобирает дерево
-      UI.** При перезагрузке (`RegisterUIReloadCallback`) панель сбрасывает все ссылки
-      (`ResetUiReferences`) и заново находит элементы в `BindUI` — а свежие элементы несут только то,
-      что объявлено в UXML. Всё, что панель успела переключить на СТАРОМ дереве, просто пропадало:
-      прежде всего класс `coreai-collapsed`, поэтому `IsCollapsed` продолжал докладывать
-      «свёрнута», пока на экране висел полностью развёрнутый чат с историей — а произойдёт это или
-      нет, зависело от гонки «пересборка до или после `SetCollapsed`». Появилась одна точка
-      применения состояния к текущему дереву, `ApplyPanelStateToTree()`, через которую проходят и
-      `SetCollapsed`, и конец `BindUI`, так что третьего пути «состояние применили, а после
-      пересборки забыли» больше нет. Кроме класса свёрнутости она восстанавливает FAB (единственный
-      способ развернуть свёрнутый чат — при потере состояния он оставался скрытым), индикатор
-      набора вместе с подсказкой про инструменты (пересборка посреди хода гасила «ассистент
-      печатает», хотя запрос продолжал идти), видимость кнопки очистки и вид кнопки
-      «Отправить/Стоп». Состояние индикатора теперь живёт в панели, а не только в DOM.
+- **Fallback to the second backend no longer fires on a permanent refusal — and, symmetrically, exceptions
+      and results are now classified identically.** `FallbackLlmClientDecorator` long ago stopped switching
+      to secondary when primary returned `AuthExpired` / `QuotaExceeded` /
+      `InvalidRequest` **as a result** (the `IsRetryableError` whitelist), but the `catch (Exception)` branch
+      fell back on ANY exception — i.e. the same refusal behaved differently depending on
+      whether the adapter returned it as a result or threw. Now a typed
+      `LlmClientException` with an unfixable code (including the new `PaymentRequired` — HTTP 402)
+      propagates upward, and `FallbackCount` does not grow: secondary has its own base URL and its own key,
+      but it can neither pay somebody else's bill nor fix a crooked request, and a second round trip is
+      just doubled waiting for the student. Transient errors (5xx, 429, timeout, break)
+      fall back exactly as before.
+- **`CoreAiChatPanel` no longer loses its state when `PanelRenderer` rebuilds the
+      UI tree.** On reload (`RegisterUIReloadCallback`) the panel resets all references
+      (`ResetUiReferences`) and re-finds elements in `BindUI` — while fresh elements carry only what
+      is declared in UXML. Everything the panel had toggled on the OLD tree simply vanished:
+      first of all the `coreai-collapsed` class, so `IsCollapsed` kept reporting
+      "collapsed" while the screen showed a fully expanded chat with history — and whether it happened or
+      not depended on the "rebuild before or after `SetCollapsed`" race. A single point now
+      applies state to the current tree, `ApplyPanelStateToTree()`, which both
+      `SetCollapsed` and the end of `BindUI` pass through, so the third path of "state applied, then forgotten
+      after a rebuild" no longer exists. Besides the collapsed class it restores the FAB (the only
+      way to expand a collapsed chat — on state loss it stayed hidden), the typing
+      indicator together with the tool hint (a rebuild mid-turn extinguished "assistant
+      is typing" while the request kept going), the clear-button visibility and the
+      "Send/Stop" button look. The indicator state now lives in the panel, not only in the DOM.
 
 ## [6.13.1] - 2026-07-31
 

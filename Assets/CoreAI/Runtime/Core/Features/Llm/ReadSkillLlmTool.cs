@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Threading;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -27,6 +28,21 @@ namespace CoreAI.Ai
             return new ReadSkillProxy(skills, allowedToolNames);
         }
 
+        /// <summary>Shared read contract for model tools and host adapters: complete entry, one document, or all.</summary>
+        public static string ReadSkillJson(IReadOnlyList<SkillSet> skills, string skillName,
+            string section = null, bool all = false, IReadOnlyCollection<string> allowedToolNames = null)
+        {
+            if (skills == null) throw new ArgumentNullException(nameof(skills));
+            List<SkillSet> snapshot = new(skills);
+            SkillSetToolResolver.ValidateCatalog(snapshot);
+            Dictionary<string, SkillSet> byName = new(StringComparer.OrdinalIgnoreCase);
+            foreach (SkillSet skill in snapshot)
+            {
+                if (skill != null) byName.Add(skill.Name, skill);
+            }
+            return Execute(skillName, section, all, byName, allowedToolNames);
+        }
+
         private sealed class ReadSkillProxy : LlmToolBase, IAIFunctionLlmTool, ISkillSetMetaLlmTool
         {
             private readonly IReadOnlyList<SkillSet> _skills;
@@ -40,9 +56,11 @@ namespace CoreAI.Ai
 
             public ReadSkillProxy(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames)
             {
-                _skills = skills ?? throw new ArgumentNullException(nameof(skills));
+                if (skills == null) throw new ArgumentNullException(nameof(skills));
+                _skills = skills is MutableSkillCatalog ? skills : new List<SkillSet>(skills).AsReadOnly();
+                SkillSetToolResolver.ValidateCatalog(_skills);
                 _isLive = skills is MutableSkillCatalog;
-                _allowedToolNames = allowedToolNames;
+                _allowedToolNames = allowedToolNames == null ? null : new List<string>(allowedToolNames).AsReadOnly();
                 _skillsByName = new Dictionary<string, SkillSet>(StringComparer.OrdinalIgnoreCase);
                 _skillToolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -90,10 +108,10 @@ namespace CoreAI.Ai
             public override string Description =>
                 "Read the full instructions and tool list for a skill. Call this BEFORE using " +
                 "call_skill_tool so you know which tools are available and what parameters they need. " +
-                "Pass the skill name exactly as listed in the catalog.";
+                "Pass the skill name exactly as listed in the catalog. The default is the complete entry document " +
+                "and a reference index; use section for one reference or all=true for every document.";
 
-            public override string ParametersSchema =>
-                "{\"type\":\"object\",\"properties\":{\"skill_name\":{\"type\":\"string\",\"description\":\"Skill name exactly as listed in the catalog.\"},\"section\":{\"type\":\"string\",\"description\":\"Optional. One section name from the sections index of a previous read_skill call. Omit it to get the entry document plus that index.\"}},\"required\":[\"skill_name\"]}";
+            public override string ParametersSchema => CreateAIFunction().JsonSchema.GetRawText();
 
             public override bool AllowDuplicates => true;
 
@@ -123,13 +141,14 @@ namespace CoreAI.Ai
 
             public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)
             {
-                return new ReadSkillProxy(_skills, allowedToolNames);
+                return new ReadSkillProxy(_skills,
+                    SkillSetToolResolver.IntersectAllowlist(_allowedToolNames, allowedToolNames));
             }
 
             public AIFunction CreateAIFunction()
             {
                 return AIFunctionFactory.Create(
-                    (Func<string, string, string>)Execute,
+                    (Func<string, string, bool, CancellationToken, string>)Execute,
                     new AIFunctionFactoryOptions
                     {
                         Name = Name,
@@ -141,22 +160,26 @@ namespace CoreAI.Ai
                 [Description("Skill name exactly as listed in the catalog.")]
                 string skill_name,
                 [Description("Optional section name from a previous read_skill call's sections index.")]
-                string section = null)
+                string section = null,
+                [Description("Read every document in order. Cannot be combined with section.")]
+                bool all = false,
+                CancellationToken cancellationToken = default)
             {
-                return ReadSkillLlmTool.Execute(skill_name, section, ResolveSkillsByName(),
+                cancellationToken.ThrowIfCancellationRequested();
+                return ReadSkillLlmTool.Execute(skill_name, section, all, ResolveSkillsByName(),
                     _allowedToolNames);
             }
         }
 
-        private static string Execute(string skillName, string sectionName,
+        private static string Execute(string skillName, string sectionName, bool all,
             Dictionary<string, SkillSet> skillsByName,
             IReadOnlyCollection<string> allowedToolNames)
         {
             return JsonConvert.SerializeObject(
-                ExecuteObject(skillName, sectionName, skillsByName, allowedToolNames));
+                ExecuteObject(skillName, sectionName, all, skillsByName, allowedToolNames));
         }
 
-        private static object ExecuteObject(string skillName, string sectionName,
+        private static object ExecuteObject(string skillName, string sectionName, bool all,
             Dictionary<string, SkillSet> skillsByName,
             IReadOnlyCollection<string> allowedToolNames)
         {
@@ -205,7 +228,7 @@ namespace CoreAI.Ai
                     };
                 }
 
-                return BuildSkillResult(skill, sectionName, toolSchemas);
+                return BuildSkillResult(skill, sectionName, all, toolSchemas);
             }
 
             foreach (KeyValuePair<string, SkillSet> kvp in skillsByName)
@@ -250,34 +273,8 @@ namespace CoreAI.Ai
                 return null;
             }
 
-            List<object> toolSchemas = new();
-            foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(skill))
-            {
-                if (string.IsNullOrWhiteSpace(descriptor.Name))
-                {
-                    continue;
-                }
-
-                toolSchemas.Add(new
-                {
-                    tool_name = descriptor.Name,
-                    description = descriptor.Description,
-                    parameters_schema = ParseSchemaOrRaw(descriptor.ParametersSchema),
-                    invocable = descriptor.CanInvoke
-                });
-            }
-
-            return JsonConvert.SerializeObject(new
-            {
-                success = true,
-                skill = skill.Name,
-                instructions = skill.Instructions,
-                tools = toolSchemas,
-                usage = "Call call_skill_tool(tool_name, arguments_json) to use any tool listed above. " +
-                        "arguments_json is a JSON object string with the parameter names and values."
-            });
+            return ReadSkillJson(new[] { skill }, skill.Name, all: true);
         }
-
 
         /// <summary>
         /// Builds the read_skill payload, staged: the entry document plus a section index when the
@@ -288,7 +285,7 @@ namespace CoreAI.Ai
         /// all of it to use any of it. A single-part skill is returned exactly as it always was — the
         /// staging must not change what an existing skill looks like.
         /// </remarks>
-        private static object BuildSkillResult(SkillSet skill, string sectionName,
+        private static object BuildSkillResult(SkillSet skill, string sectionName, bool all,
             List<object> toolSchemas)
         {
             const string ToolUsage =
@@ -297,6 +294,24 @@ namespace CoreAI.Ai
 
             IReadOnlyList<SkillSection> sections = skill.Sections;
             bool staged = sections != null && sections.Count > 1;
+
+            if (all && !string.IsNullOrWhiteSpace(sectionName))
+            {
+                return new { success = false, skill = skill.Name, error = "Choose either section or all, not both." };
+            }
+
+            if (all)
+            {
+                return new
+                {
+                    success = true,
+                    skill = skill.Name,
+                    instructions = skill.Instructions,
+                    sections = SectionNames(sections, 0),
+                    tools = toolSchemas,
+                    usage = ToolUsage
+                };
+            }
 
             if (!string.IsNullOrWhiteSpace(sectionName))
             {
@@ -345,7 +360,7 @@ namespace CoreAI.Ai
                 usage = ToolUsage +
                         " This skill is written across several documents: the text above is its entry " +
                         "document, and `sections` lists the rest. Call read_skill(skill_name, section) " +
-                        "for one of them only when you need it."
+                        "for one of them only when you need it, or read_skill(skill_name, all=true) for all documents."
             };
         }
 
@@ -368,7 +383,7 @@ namespace CoreAI.Ai
 
         private static bool IsAllowed(string toolName, IReadOnlyCollection<string> allowedToolNames)
         {
-            if (allowedToolNames == null || allowedToolNames.Count == 0)
+            if (allowedToolNames == null)
             {
                 return true;
             }
@@ -387,7 +402,7 @@ namespace CoreAI.Ai
         private static List<string> AvailableSkillNames(Dictionary<string, SkillSet> skillsByName,
             IReadOnlyCollection<string> allowedToolNames)
         {
-            if (allowedToolNames == null || allowedToolNames.Count == 0)
+            if (allowedToolNames == null)
             {
                 return new List<string>(skillsByName.Keys);
             }

@@ -36,10 +36,10 @@ namespace CoreAI.Tests.EditMode.Audit
 
             using (IObjectResolver container = builder.Build())
             {
-                MeaiLlmClient client = new(
-                    new ToolThenTextChatClient(),
+                MeaiLlmClient client = new(new ToolThenTextChatClient(),
                     GameLoggerUnscopedFallback.Instance,
-                    new CoreAISettingsOptions());
+                    new CoreAISettingsOptions(),
+                    supportsNativeToolCalling: true);
                 DelegateLlmTool tool = new(
                     "spawn",
                     "Fails for audit coverage.",

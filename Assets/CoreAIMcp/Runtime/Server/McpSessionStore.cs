@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 
 namespace CoreAI.Mcp.Server
@@ -8,7 +7,7 @@ namespace CoreAI.Mcp.Server
     /// Issues and validates <c>Mcp-Session-Id</c> values. Sessions are intentionally lightweight: the
     /// server is stateless behind the scenes, so a session id is a correlation token, never a security
     /// boundary (that is the bearer token in <see cref="McpRequestGuard"/>). Clients that never send one
-    /// still work - session ids are optional on every call except as an echo convenience.
+    /// still work for POST; notification GET streams require a retained session.
     /// <para>
     /// WHY (bounded): every <c>initialize</c> issues a new id and a client that reconnects in a loop -
     /// which MCP clients do on every editor play/stop cycle - would grow this store without limit.
@@ -23,7 +22,8 @@ namespace CoreAI.Mcp.Server
         /// <summary>Hard cap on retained session ids, regardless of TTL.</summary>
         public const int DefaultMaxSessions = 64;
 
-        private readonly ConcurrentDictionary<string, DateTimeOffset> _sessions = new(StringComparer.Ordinal);
+        private readonly object _gate = new();
+        private readonly Dictionary<string, DateTimeOffset> _sessions = new(StringComparer.Ordinal);
         private readonly TimeSpan _timeToLive;
         private readonly int _maxSessions;
         private readonly Func<DateTimeOffset> _clock;
@@ -40,43 +40,41 @@ namespace CoreAI.Mcp.Server
         }
 
         /// <summary>Number of live sessions (diagnostics/tests).</summary>
-        public int Count => _sessions.Count;
+        public int Count { get { lock (_gate) return _sessions.Count; } }
 
         /// <summary>Creates a fresh session id and records it, pruning expired and excess entries first.</summary>
         public string Issue()
         {
-            DateTimeOffset now = _clock();
-            Prune(now);
-
-            string id = Guid.NewGuid().ToString("N");
-            _sessions[id] = now;
-            return id;
+            lock (_gate)
+            {
+                DateTimeOffset now = _clock();
+                Prune(now);
+                string id = Guid.NewGuid().ToString("N");
+                _sessions.Add(id, now);
+                return id;
+            }
         }
 
-        /// <summary>True when <paramref name="sessionId"/> was issued by this store and has not expired.</summary>
+        /// <summary>True when the issued session has not expired or been evicted.</summary>
         public bool IsKnown(string sessionId)
         {
-            if (string.IsNullOrEmpty(sessionId) || !_sessions.TryGetValue(sessionId, out DateTimeOffset issuedAt))
+            lock (_gate)
             {
+                if (string.IsNullOrEmpty(sessionId) || !_sessions.TryGetValue(sessionId, out DateTimeOffset issuedAt))
+                    return false;
+                if (_clock() - issuedAt <= _timeToLive) return true;
+                _sessions.Remove(sessionId);
                 return false;
             }
-
-            if (_clock() - issuedAt <= _timeToLive)
-            {
-                return true;
-            }
-
-            _sessions.TryRemove(sessionId, out _);
-            return false;
         }
 
         private void Prune(DateTimeOffset now)
         {
-            foreach (KeyValuePair<string, DateTimeOffset> entry in _sessions)
+            foreach (KeyValuePair<string, DateTimeOffset> entry in new List<KeyValuePair<string, DateTimeOffset>>(_sessions))
             {
                 if (now - entry.Value > _timeToLive)
                 {
-                    _sessions.TryRemove(entry.Key, out _);
+                    _sessions.Remove(entry.Key);
                 }
             }
 
@@ -88,14 +86,14 @@ namespace CoreAI.Mcp.Server
                 DateTimeOffset oldestAt = DateTimeOffset.MaxValue;
                 foreach (KeyValuePair<string, DateTimeOffset> entry in _sessions)
                 {
-                    if (entry.Value < oldestAt)
+                    if (oldest == null || entry.Value < oldestAt)
                     {
                         oldestAt = entry.Value;
                         oldest = entry.Key;
                     }
                 }
 
-                if (oldest == null || !_sessions.TryRemove(oldest, out _))
+                if (oldest == null || !_sessions.Remove(oldest))
                 {
                     return;
                 }

@@ -28,7 +28,10 @@ namespace CoreAI.Ai
         public float CompactionTriggerRatio { get; set; }
 
         /// <summary>
-        /// When true, roadmap §7 context editing prunes stale prompt-history entries before budget partitioning.
+        /// When true, roadmap §7 context editing prunes stale prompt-history entries on the emitted recent
+        /// tail AFTER budget partitioning and compaction — never before. Compaction must fold the full
+        /// prefix, including messages the pruner would discard, or they would vanish from every future
+        /// prompt without a trace.
         /// </summary>
         public bool EnableContextPruning { get; set; }
 

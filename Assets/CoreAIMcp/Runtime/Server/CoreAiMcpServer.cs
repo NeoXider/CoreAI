@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -76,14 +75,29 @@ namespace CoreAI.Mcp.Server
         [SerializeField]
         private float mainThreadTimeoutSeconds = DefaultMainThreadTimeoutSeconds;
 
+        [Tooltip("Milliseconds available to start queued tools in one frame. Running synchronous tool code must yield cooperatively.")]
+        [SerializeField, Min(0f)]
+        private float mainThreadPumpBudgetMilliseconds = 2f;
+
         [Tooltip("Optional CoreAI/mods LifetimeScope to resolve services from. When empty, the scene is " +
                  "searched for the scope that exposes the Lua executor.")]
         [SerializeField]
         private LifetimeScope scope;
 
-        private readonly ConcurrentQueue<QueuedMainThreadCall> _mainThreadQueue = new();
+        /// <summary>Maximum queued plus still-running calls admitted by one host, including across restart.</summary>
+        public const int MainThreadCallCapacity = 64;
+
+        private readonly object _callsGate = new();
+        private readonly LinkedList<QueuedMainThreadCall> _mainThreadQueue = new();
+        private int _runningCalls;
+
+        /// <summary>Calls occupying admission capacity, including running work which has not actually finished.</summary>
+        public int AdmittedMainThreadCalls { get { lock (_callsGate) return _mainThreadQueue.Count + _runningCalls; } }
         private McpHttpServer _server;
         private McpSessionStore _sessions;
+
+        /// <summary>Live host catalog while listening. AddOrReplace, Remove and Replace take effect without restarting.</summary>
+        public McpToolRegistry Registry { get; private set; }
         private string _activeAuthToken;
         private IActorIdentityProvider _hostAdminActorIdentityProvider;
 
@@ -190,17 +204,39 @@ namespace CoreAI.Mcp.Server
         /// Drains queued tool invocations on the main thread. Called from <c>Update</c>; public so a host
         /// driving its own loop (and the EditMode tests) can pump the queue explicitly.
         /// </summary>
-        public void PumpMainThreadQueue()
+        public void PumpMainThreadQueue() => PumpMainThreadQueue(
+            TimeSpan.FromMilliseconds(Math.Max(0, mainThreadPumpBudgetMilliseconds)));
+
+        /// <summary>
+        /// Starts one snapshot of queued work within the host's frame budget. Zero starts at most one call;
+        /// this cannot preempt a tool's synchronous body or move Unity work off the game thread.
+        /// </summary>
+        public void PumpMainThreadQueue(TimeSpan budget)
         {
-            // Each item is fire-and-forget: its TaskCompletionSource (created in RunOnMainThreadAsync)
-            // bridges completion back to the awaiting HTTP worker, and any async continuations resume on
-            // Unity's synchronization context. Claiming skips items already failed by timeout or shutdown.
-            while (_mainThreadQueue.TryDequeue(out QueuedMainThreadCall call))
+            if (budget < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(budget));
+            QueuedMainThreadCall[] snapshot;
+            lock (_callsGate)
             {
-                if (call.TryClaim())
+                if (_mainThreadQueue.Count == 0) return;
+                snapshot = new QueuedMainThreadCall[_mainThreadQueue.Count];
+                _mainThreadQueue.CopyTo(snapshot, 0);
+            }
+            System.Diagnostics.Stopwatch elapsed = System.Diagnostics.Stopwatch.StartNew();
+            bool startedAny = false;
+            // WHY: claiming and timeout removal share one lock, but user work never runs under it.
+            foreach (QueuedMainThreadCall call in snapshot)
+            {
+                if (startedAny && elapsed.Elapsed >= budget) return;
+                lock (_callsGate)
                 {
-                    _ = call.Body();
+                    if (call.Node == null) continue;
+                    _mainThreadQueue.Remove(call.Node);
+                    call.Node = null;
+                    _runningCalls++;
                 }
+                startedAny = true;
+                call.QueueExited.TrySetResult(true);
+                _ = call.Body();
             }
         }
 
@@ -214,37 +250,47 @@ namespace CoreAI.Mcp.Server
 
             TaskCompletionSource<T> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
             QueuedMainThreadCall call = new(
-                async () =>
-                {
-                    try
-                    {
-                        T result = await work().ConfigureAwait(true);
-                        tcs.TrySetResult(result);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        tcs.TrySetCanceled();
-                    }
-                    catch (Exception ex)
-                    {
-                        tcs.TrySetException(ex);
-                    }
-                },
+                () => ExecuteMainThreadCallAsync(work, tcs),
                 error => tcs.TrySetException(error));
 
-            _mainThreadQueue.Enqueue(call);
+            lock (_callsGate)
+            {
+                if (_mainThreadQueue.Count + _runningCalls >= MainThreadCallCapacity)
+                    return Task.FromException<T>(new InvalidOperationException(
+                        "The CoreAI MCP main-thread admission capacity is full; wait for active calls to finish."));
+                call.Node = _mainThreadQueue.AddLast(call);
+            }
 
             float timeout = mainThreadTimeoutSeconds;
             if (timeout > 0f)
             {
-                _ = FailOnTimeoutAsync(call, tcs.Task, TimeSpan.FromSeconds(timeout));
+                _ = FailOnTimeoutAsync(call, TimeSpan.FromSeconds(timeout));
             }
 
             return tcs.Task;
         }
 
+        private async Task ExecuteMainThreadCallAsync<T>(Func<Task<T>> work, TaskCompletionSource<T> completion)
+        {
+            T result = default;
+            Exception failure = null;
+            try { result = await work().ConfigureAwait(true); }
+            catch (Exception exception) { failure = exception; }
+            finally
+            {
+                // WHY: Stop and queue deadlines cannot release a running body's lease; only actual completion can.
+                lock (_callsGate) _runningCalls--;
+            }
+            if (failure is OperationCanceledException) completion.TrySetCanceled();
+            else if (failure != null) completion.TrySetException(failure);
+            else completion.TrySetResult(result);
+        }
+
         /// <summary>Starts the server, building the tool registry from the current composition.</summary>
-        public void StartListening()
+        public void StartListening() => StartListening(null);
+
+        /// <summary>Starts with an explicit live host catalog, or resolves composition when null. Port is optional.</summary>
+        public void StartListening(McpToolRegistry registry, int? listenPort = null)
         {
             if (IsRunning)
             {
@@ -269,22 +315,18 @@ namespace CoreAI.Mcp.Server
                     $"will fail after {mainThreadTimeoutSeconds}s. Enable the component and its GameObject.");
             }
 
-            IObjectResolver resolver = ResolveContainer();
-            if (resolver == null)
+            if (registry == null)
             {
-                Log.Instance.Warn(
-                    "[CoreAI MCP] No CoreAI LifetimeScope with a built container was found; server not started. " +
-                    "Ensure a CoreAILifetimeScope (and CoreAiModsLifetimeScope) is present and built.");
-                return;
+                IObjectResolver resolver = ResolveContainer();
+                if (resolver == null)
+                {
+                    Log.Instance.Warn("[CoreAI MCP] No built CoreAI LifetimeScope; server not started.");
+                    return;
+                }
+                registry = BuildRegistry(resolver);
             }
-
-            McpToolRegistry registry = BuildRegistry(resolver);
-            if (registry.Count == 0)
-            {
-                Log.Instance.Warn(
-                    "[CoreAI MCP] No MCP tools resolved from the composition; server not started.");
-                return;
-            }
+            if (listenPort.HasValue) port = listenPort.Value;
+            Registry = registry;
 
             string token = ResolveAuthToken();
             _sessions = new McpSessionStore();
@@ -303,7 +345,9 @@ namespace CoreAI.Mcp.Server
             }
             catch (Exception ex)
             {
+                _server?.Dispose();
                 _server = null;
+                Registry = null;
                 _activeAuthToken = null;
                 // WHY: HttpListener on Windows can need a URL ACL for a non-admin process; point the user
                 // at the fix instead of a bare stack trace.
@@ -319,6 +363,7 @@ namespace CoreAI.Mcp.Server
         {
             _server?.Dispose();
             _server = null;
+            Registry = null;
             _activeAuthToken = null;
             FailPendingMainThreadCalls();
             if (_active == this)
@@ -368,34 +413,40 @@ namespace CoreAI.Mcp.Server
 
         private void FailPendingMainThreadCalls()
         {
-            // WHY: nothing will ever drain the queue after a stop, so resolve every pending call instead of
-            // leaking its TaskCompletionSource and leaving the HTTP worker awaiting forever.
-            while (_mainThreadQueue.TryDequeue(out QueuedMainThreadCall call))
+            List<QueuedMainThreadCall> pending;
+            lock (_callsGate)
             {
-                if (call.TryClaim())
-                {
-                    call.Fail(new OperationCanceledException(
-                        "the CoreAI MCP server stopped before this call reached the Unity main thread."));
-                }
+                pending = new List<QueuedMainThreadCall>(_mainThreadQueue);
+                _mainThreadQueue.Clear();
+                foreach (QueuedMainThreadCall call in pending) call.Node = null;
+            }
+            foreach (QueuedMainThreadCall call in pending)
+            {
+                call.QueueExited.TrySetResult(true);
+                call.Fail(new OperationCanceledException(
+                    "the CoreAI MCP server stopped before this call reached the Unity main thread."));
             }
         }
 
-        private async Task FailOnTimeoutAsync(QueuedMainThreadCall call, Task pending, TimeSpan timeout)
+        private async Task FailOnTimeoutAsync(QueuedMainThreadCall call, TimeSpan timeout)
         {
-            Task finished = await Task.WhenAny(pending, Task.Delay(timeout)).ConfigureAwait(false);
-            if (finished == pending)
+            using CancellationTokenSource timer = new();
+            Task finished = await Task.WhenAny(call.QueueExited.Task, Task.Delay(timeout, timer.Token)).ConfigureAwait(false);
+            if (finished == call.QueueExited.Task)
             {
+                timer.Cancel();
                 return;
             }
-
-            // TryClaim wins only when the call is still queued, which tells the two causes apart.
-            bool neverDequeued = call.TryClaim();
-            string reason = neverDequeued
-                ? $"the Unity main thread never drained the MCP queue within {timeout.TotalSeconds:0.#}s - " +
-                  "the game is paused, the CoreAiMcpServer component is disabled, or its GameObject is inactive"
-                : $"the tool did not finish within {timeout.TotalSeconds:0.#}s";
-
-            call.Fail(new TimeoutException($"{reason}."));
+            lock (_callsGate)
+            {
+                if (call.Node == null) return;
+                _mainThreadQueue.Remove(call.Node);
+                call.Node = null;
+            }
+            call.QueueExited.TrySetResult(true);
+            call.Fail(new TimeoutException(
+                $"the Unity main thread never drained the MCP queue within {timeout.TotalSeconds:0.#}s - " +
+                "the game is paused, the CoreAiMcpServer component is disabled, or its GameObject is inactive."));
         }
 
         internal McpToolRegistry BuildRegistry(IObjectResolver resolver)
@@ -581,7 +632,8 @@ namespace CoreAI.Mcp.Server
         private sealed class QueuedMainThreadCall
         {
             private readonly Action<Exception> _fail;
-            private int _claimed;
+            public LinkedListNode<QueuedMainThreadCall> Node { get; set; }
+            public TaskCompletionSource<bool> QueueExited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
             public QueuedMainThreadCall(Func<Task> body, Action<Exception> fail)
             {
@@ -591,12 +643,6 @@ namespace CoreAI.Mcp.Server
 
             /// <summary>The work to run on the main thread.</summary>
             public Func<Task> Body { get; }
-
-            /// <summary>True for the first caller only; everyone else must leave the call alone.</summary>
-            public bool TryClaim()
-            {
-                return Interlocked.Exchange(ref _claimed, 1) == 0;
-            }
 
             /// <summary>Completes the awaiting HTTP worker with an error.</summary>
             public void Fail(Exception error)

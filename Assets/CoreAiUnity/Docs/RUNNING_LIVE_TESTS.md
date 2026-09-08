@@ -105,30 +105,30 @@ This path is already in `.gitignore`, so a real API key never gets committed.
 Keys are case-insensitive and accept `snake_case` aliases (`base_url`, `api_key`, `native_tools`).
 You can also point at a file in a custom location with `COREAI_TEST_CONFIG=/abs/path/to/config.json`.
 
-`extraBody` проходит тот же safe API, что production code: root должен быть объектом, duplicate properties и
-CoreAI-owned keys (`messages`, `model`, `stream`, `tools`, …) отклоняются до запроса. Значения и API key не
-печатаются при ошибке. Для обратной совместимости файл также принимает строковый `extraBodyJson`, но после
-разбора применяет каждый верхнеуровневый ключ через safe setter.
+`extraBody` goes through the same safe API as production code: the root must be an object; duplicate properties and
+CoreAI-owned keys (`messages`, `model`, `stream`, `tools`, …) are rejected before the request. Values and the API key are not
+printed on error. For backward compatibility the file also accepts a string `extraBodyJson`, but after
+parsing it applies each top-level key through the safe setter.
 
-`session_id` должен быть непрозрачным id приложения/когорты агента — никогда `studentId`, email, login, GUID
-ученика или другое PII. Пример выше одновременно фиксирует OpenRouter на одном endpoint для воспроизводимого
-измерения. `allow_fallbacks: false` отключает failover: не переносите pin в production без отдельного решения по
-доступности. Если throughput требует шардирования, используйте малый фиксированный набор cohort id, а не id
-каждого ученика.
+`session_id` must be an opaque app/agent-cohort id — never a `studentId`, email, login, student
+GUID, or other PII. The example above also pins OpenRouter to a single endpoint for a reproducible
+measurement. `allow_fallbacks: false` disables failover: do not carry the pin into production without a separate availability decision.
+If throughput requires sharding, use a small fixed set of cohort ids, not one id
+per student.
 
-### Оплачиваемая проверка prompt cache
+### Paid prompt cache probe
 
-`PromptCacheLivePlayModeTests.ThreeDifferentStudentTails_ReuseStableRolePrefix_ByThirdRequest` не запускается
-в обычном CI. Для него нужны полностью настроенный HTTP endpoint и явный
-`COREAI_TEST_PROMPT_CACHE=true`. Тест делает ровно три запроса с output cap 32 и timeout 90 секунд, оставляет
-длинный реальный role/tool `SystemPrompt` byte-identical, меняет только синтетический student tail и ждёт короткую
-bounded pause между запросами. К третьему запросу provider должен вернуть `CacheReadTokens > 0`; если он
-экспонирует cache writes, они также выводятся. Failure содержит endpoint host, configured/served model,
-prompt/completion/cache-read/cache-write по каждой попытке, но не key и не provider body.
+`PromptCacheLivePlayModeTests.ThreeDifferentStudentTails_ReuseStableRolePrefix_ByThirdRequest` does not run
+in regular CI. It needs a fully configured HTTP endpoint and an explicit
+`COREAI_TEST_PROMPT_CACHE=true`. The test makes exactly three requests with output cap 32 and a 90-second timeout, keeps
+the long real role/tool `SystemPrompt` byte-identical, changes only the synthetic student tail, and waits a short
+bounded pause between requests. By the third request the provider must return `CacheReadTokens > 0`; if it
+exposes cache writes, they are printed too. A failure reports the endpoint host, configured/served model,
+prompt/completion/cache-read/cache-write for each attempt, but not the key or the provider body.
 
-Этот green доказывает только выбранную пару model/endpoint. Повторите probe для всех production routes. Без
-точного pin OpenRouter может прогреть несколько физических кешей; это корректное поведение router-а, а не
-per-student cache CoreAI.
+This green proves only the selected model/endpoint pair. Repeat the probe for every production route. Without
+an exact pin, OpenRouter may warm several physical caches; that is correct router behavior, not
+a per-student CoreAI cache.
 
 ---
 

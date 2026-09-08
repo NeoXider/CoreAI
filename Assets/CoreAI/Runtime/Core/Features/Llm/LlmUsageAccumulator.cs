@@ -1,5 +1,4 @@
 #if COREAI_LLM
-using System.Collections.Generic;
 using MEAI = Microsoft.Extensions.AI;
 
 namespace CoreAI.Infrastructure.Llm
@@ -16,10 +15,16 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Adds <paramref name="add"/> into <paramref name="total"/> and returns the running total.
         /// A <c>null</c> <paramref name="add"/> leaves the total untouched; a <c>null</c>
-        /// <paramref name="total"/> starts a fresh one. Additional provider counts (e.g. cache
-        /// read/write tokens) are summed key-by-key. The returned instance is a dedicated
+        /// <paramref name="total"/> starts a fresh one. The returned instance is a dedicated
         /// accumulator object - the provider's own <see cref="MEAI.UsageDetails"/> is never mutated.
         /// </summary>
+        /// <remarks>
+        /// Само сложение делает штатный <c>UsageDetails.Add</c>: он суммирует ВСЕ типизированные
+        /// поля (включая <c>CachedInputTokenCount</c> и <c>ReasoningTokenCount</c>) и сливает
+        /// <c>AdditionalCounts</c> ключ-к-ключу. Прежняя ручная версия складывала только
+        /// input/output/total и словарь, из-за чего чтение промпт-кэша, пришедшее штатным полем,
+        /// терялось на каждом многораундовом ходе с инструментами.
+        /// </remarks>
         public static MEAI.UsageDetails Accumulate(MEAI.UsageDetails total, MEAI.UsageDetails add)
         {
             if (add == null)
@@ -27,37 +32,8 @@ namespace CoreAI.Infrastructure.Llm
                 return total;
             }
 
-            if (total == null)
-            {
-                total = new MEAI.UsageDetails();
-            }
-
-            if (add.InputTokenCount.HasValue)
-            {
-                total.InputTokenCount = (total.InputTokenCount ?? 0) + add.InputTokenCount.Value;
-            }
-
-            if (add.OutputTokenCount.HasValue)
-            {
-                total.OutputTokenCount = (total.OutputTokenCount ?? 0) + add.OutputTokenCount.Value;
-            }
-
-            if (add.TotalTokenCount.HasValue)
-            {
-                total.TotalTokenCount = (total.TotalTokenCount ?? 0) + add.TotalTokenCount.Value;
-            }
-
-            if (add.AdditionalCounts != null)
-            {
-                total.AdditionalCounts ??= new MEAI.AdditionalPropertiesDictionary<long>();
-                foreach (KeyValuePair<string, long> kv in add.AdditionalCounts)
-                {
-                    total.AdditionalCounts[kv.Key] = total.AdditionalCounts.TryGetValue(kv.Key, out long existing)
-                        ? existing + kv.Value
-                        : kv.Value;
-                }
-            }
-
+            total ??= new MEAI.UsageDetails();
+            total.Add(add);
             return total;
         }
     }

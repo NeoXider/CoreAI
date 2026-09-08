@@ -143,5 +143,23 @@ namespace CoreAI.Ai
         /// Propagated to <see cref="LlmCompletionRequest.MaxToolCallRoundtrips"/> by the orchestrator.
         /// </summary>
         public int? MaxToolCallRoundtrips { get; set; }
+
+        /// <summary>
+        /// Per-call opt-in: let the engine read the assistant's PROSE as tool calls even on an endpoint
+        /// that advertises a native tool channel. <c>null</c>/<c>false</c> (the default) does not.
+        /// <para>
+        /// The default is the safe one: interpreting prose means acting on what the model SAID instead of
+        /// on the channel it said it through, and an agent explaining JSON writes objects shaped exactly
+        /// like a call — the engine would execute the example instead of showing it.
+        /// </para>
+        /// <para>
+        /// Set it only for an endpoint you have observed advertising a native channel and then answering
+        /// with JSON in the text; the symptom is a tool that never runs while the reply contains its call.
+        /// The right fix for a local llama.cpp/LLMUnity server is not this flag but declaring the endpoint
+        /// honestly (<c>supportsNativeToolCalling: false</c> where the client is created).
+        /// Propagated to <see cref="LlmCompletionRequest.AllowTextShapedToolCallsOnNativeEndpoint"/>.
+        /// </para>
+        /// </summary>
+        public bool? AllowTextShapedToolCallsOnNativeEndpoint { get; set; }
     }
 }

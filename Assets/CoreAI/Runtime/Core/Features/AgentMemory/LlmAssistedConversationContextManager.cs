@@ -75,18 +75,17 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot();
             }
 
-            history = PruneIfEnabled(history, buildArgs);
-            if (history == null || history.Length == 0)
-            {
-                return new ConversationContextSnapshot();
-            }
-
+            // WHY: Compaction folds the old prefix into the durable rolling summary, so it must see
+            // the FULL history. Pruning first would drop superseded tool results before they are
+            // summarized and they would vanish from every future prompt without a trace. Pruning
+            // still applies, but only to the emitted recent tail (prompt-level noise control).
             string storedSummary = _summaryStore.LoadSummary(roleId) ?? "";
             // WHY: The persisted summary carries a machine-only fold marker as its final line; every
             // snapshot/LLM-facing path must see only the clean prose.
             string cleanStoredSummary = ConversationFoldMarker.Strip(storedSummary);
             int budget = ConversationContextBudgetTokens.ResolveHistoryChatBudget(roleConfig, buildArgs);
-            if (!ConversationContextBudgetTokens.ShouldPartitionForCompaction(
+            if (history.Length <= DeterministicConversationContextManager.ResolveMessageLimit(roleConfig) &&
+                !ConversationContextBudgetTokens.ShouldPartitionForCompaction(
                     history,
                     _estimator,
                     budget,
@@ -95,13 +94,13 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot
                 {
                     Summary = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs),
-                    RecentMessages = history,
+                    RecentMessages = PruneIfEnabled(history, buildArgs),
                     WasCompacted = false
                 };
             }
 
             (int splitExclusive, List<ChatMessage> recent) =
-                ConversationHistoryPartition.PartitionByBudget(history, _estimator, budget);
+                DeterministicConversationContextManager.PartitionHistory(history, _estimator, budget, roleConfig);
 
             if (splitExclusive <= 0)
             {
@@ -109,7 +108,7 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot
                 {
                     Summary = summaryOut,
-                    RecentMessages = recent.ToArray(),
+                    RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs),
                     WasCompacted = !string.IsNullOrWhiteSpace(summaryOut)
                 };
             }
@@ -130,7 +129,7 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot
                 {
                     Summary = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs),
-                    RecentMessages = recent.ToArray(),
+                    RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs),
                     WasCompacted = true
                 };
             }
@@ -175,7 +174,7 @@ namespace CoreAI.Ai
             ConversationContextSnapshot snapshot = new()
             {
                 Summary = compactedSummary,
-                RecentMessages = recent.ToArray(),
+                RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs),
                 WasCompacted = true
             };
 
@@ -246,7 +245,12 @@ namespace CoreAI.Ai
             for (int i = Math.Max(0, startInclusive); i < splitExclusive; i++)
             {
                 string role = string.IsNullOrWhiteSpace(history[i].Role) ? "unknown" : history[i].Role.Trim();
-                string content = history[i].Content ?? "";
+                // WHY: Суммаризатор видит tool-сообщения через ТУ ЖЕ проекцию, что и основной промпт.
+                // Без неё сырой durable-блок «## Tool Results» с JSON-хвостами уезжал в компактор, тот
+                // по инструкции «сохраняй идентификаторы и числа» переносил его в summary, а summary
+                // возвращался в промпт уже мимо ToolResultPromptProjection — и модель снова повторяла
+                // ребёнку служебный регистр, который проекция как раз убирала.
+                string content = ToolResultPromptProjection.ForPrompt(history[i].Role, history[i].Content ?? "");
                 if (content.Length > maxPerMsg)
                 {
                     content = content.Substring(0, maxPerMsg).TrimEnd() + "…";

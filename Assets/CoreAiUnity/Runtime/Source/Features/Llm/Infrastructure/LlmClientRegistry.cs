@@ -1433,7 +1433,8 @@ namespace CoreAI.Infrastructure.Llm
                 descriptor.MaxTokens,
                 descriptor.ReasoningMode,
                 descriptor.ThinkingBudgetTokens,
-                descriptor.ExtraBodyJson);
+                descriptor.ExtraBodyJson,
+                descriptor.ToolChannel);
         }
 
         private async Task<LlmEndpointClientActivation> BuildRuntimeClientAsync(
@@ -1672,7 +1673,7 @@ namespace CoreAI.Infrastructure.Llm
                     ILlmClient http = mode == LlmExecutionMode.ServerManagedApi
                         ? (ILlmClient)new RefreshOnUnauthorizedDecorator(
                             new ServerManagedLlmClient(p.httpSettings, _settings, _logger, _memoryStore))
-                        : new OpenAiChatLlmClient(p.httpSettings, _settings, _logger, _memoryStore);
+                        : new OpenAiChatLlmClient(p.httpSettings, _settings, _logger, supportsNativeToolCalling: true, memoryStore: _memoryStore);
                     if (mode != LlmExecutionMode.ClientLimited)
                     {
                         return http;
@@ -1740,7 +1741,19 @@ namespace CoreAI.Infrastructure.Llm
 
                     LlmUnityServerHttpSettings adapter = new(
                         llmUnityAssetSettings, llmUnityAssetSettings.LlmUnityServerPort, modelName, "");
-                    return new OpenAiChatLlmClient(adapter, _settings, _logger, _memoryStore);
+                    // WHY: канал у llama.cpp есть (нативные tool_calls при jinja-шаблоне), и сервер
+                    // LlamaLib v2.0.5 из комплекта LLMUnity включает jinja по умолчанию — проверено
+                    // живым прогоном 2026-09-06. Профиль строит клиент синхронно, до старта сервера, —
+                    // пробы нет, канал берётся из настройки ассета (Auto = нативный по установленному
+                    // факту, Text — для сборки без jinja). Прежняя константа `false` «у сервера нет
+                    // канала» была ложью и молча переводила профиль на разбор прозы.
+                    LlmToolChannelDecision toolChannel = LlmToolChannelResolution.ResolveWithoutProbe(
+                        llmUnityAssetSettings.LlmUnityToolChannel,
+                        LlmToolChannelResolution.BundledLlamaLibReason);
+                    _logger.LogInfo(
+                        GameLogFeature.Llm,
+                        LlmToolChannelLog.Format(p.profileId, agent.gameObject.name, toolChannel));
+                    return new OpenAiChatLlmClient(adapter, _settings, _logger, supportsNativeToolCalling: toolChannel.Native, memoryStore: _memoryStore);
 #endif
                 default:
                     return new StubLlmClient();

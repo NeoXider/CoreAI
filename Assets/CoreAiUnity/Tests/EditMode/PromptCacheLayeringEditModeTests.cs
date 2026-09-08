@@ -112,7 +112,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task NativeBackend_KeepsFullSharedRoleContract_ButFiltersNativeRequestTools()
+        public async Task NativeBackend_OmitsTextualToolDefinitions_ButFiltersNativeRequestTools()
         {
             CapturingLlmClient llm = new() { SupportsNativeToolCalling = true };
             AgentMemoryPolicy policy = BuildPolicy();
@@ -132,11 +132,15 @@ namespace CoreAI.Tests.EditMode
                 RequiredToolName = "tool_beta"
             });
 
-            StringAssert.Contains("Role tool definitions:", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("tool_alpha", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("alpha_field", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("tool_beta", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("beta_field", llm.LastRequest.SystemPrompt);
+            // Native endpoint: the tool definitions (names AND schemas) travel in the provider's tool
+            // list, generated from the delegate signature. The stable prefix carries the calling rules
+            // only — a second hand-written schema in it diverged from the native one and doubled the
+            // tokens. The prefix stays byte-stable: it depends on the role and the channel, not on the
+            // per-request filter below.
+            StringAssert.Contains("## Tool Contract", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("Role tool definitions:", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("alpha_field", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("beta_field", llm.LastRequest.SystemPrompt);
             CollectionAssert.AreEqual(new[] { "tool_beta" }, llm.LastRequest.Tools.Select(tool => tool.Name));
             AssertOrderedTail(
                 llm.LastRequest,

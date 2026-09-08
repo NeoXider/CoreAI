@@ -10,11 +10,156 @@ using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using MEAI = Microsoft.Extensions.AI;
 using NUnit.Framework;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Tests.EditMode
 {
     public sealed class MeaiOpenAiChatClientSseEditModeTests
     {
+        [Test]
+        public async Task ToolOptions_ModeIsSentToProvider(
+            [Values(false, true)] bool streaming,
+            [Values(null, "auto", "none", "required", "specific")] string mode)
+        {
+            MEAI.ChatOptions options = new()
+            {
+                ToolMode = mode switch
+                {
+                    "auto" => MEAI.ChatToolMode.Auto,
+                    "none" => MEAI.ChatToolMode.None,
+                    "required" => MEAI.ChatToolMode.RequireAny,
+                    "specific" => MEAI.ChatToolMode.RequireSpecific("lookup"),
+                    _ => null
+                },
+                Tools = new List<MEAI.AITool>
+                {
+                    MEAI.AIFunctionFactory.Create((Func<string>)(() => "unused"),
+                        new MEAI.AIFunctionFactoryOptions { Name = "lookup" })
+                }
+            };
+            JObject request = await CaptureToolOptionsRequestAsync(streaming, options);
+            Assert.AreEqual("lookup", request["tools"]?[0]?["function"]?["name"]?.Value<string>());
+            if (mode == "specific")
+            {
+                Assert.AreEqual("function", request["tool_choice"]?["type"]?.Value<string>());
+                Assert.AreEqual("lookup", request["tool_choice"]?["function"]?["name"]?.Value<string>());
+            }
+            else
+            {
+                Assert.AreEqual(mode, request["tool_choice"]?.Value<string>(),
+                    "The provider must receive the caller's native tool-choice contract; null uses its default.");
+            }
+        }
+
+        [Test]
+        public async Task ToolOptions_MultipleCallsPolicyIsSentToProvider(
+            [Values(false, true)] bool streaming, [Values(null, false, true)] bool? allowMultiple)
+        {
+            JObject request = await CaptureToolOptionsRequestAsync(streaming,
+                new MEAI.ChatOptions { AllowMultipleToolCalls = allowMultiple });
+            Assert.AreEqual(allowMultiple, request["parallel_tool_calls"]?.Value<bool?>(),
+                "False constrains one provider response; null preserves the provider's own default.");
+        }
+
+        [Test]
+        public async Task ToolOptions_ExplicitRestrictionsWinOverProviderDefaults_EvenWithoutTools(
+            [Values(false, true)] bool streaming, [Values(false, true)] bool hasTools)
+        {
+            MEAI.ChatOptions options = new()
+            {
+                ToolMode = MEAI.ChatToolMode.None,
+                AllowMultipleToolCalls = false,
+                Tools = hasTools ? new List<MEAI.AITool>
+                {
+                    MEAI.AIFunctionFactory.Create((Func<string>)(() => "unused"),
+                        new MEAI.AIFunctionFactoryOptions { Name = "lookup" })
+                } : null
+            };
+            JObject request = await CaptureToolOptionsRequestAsync(streaming, options,
+                "{\"tool_choice\":\"required\",\"parallel_tool_calls\":true}");
+            Assert.AreEqual("none", request["tool_choice"]?.Value<string>());
+            Assert.AreEqual(false, request["parallel_tool_calls"]?.Value<bool?>());
+        }
+
+        [Test]
+        public async Task TextEndpoint_RemovesNativeFieldsAfterProviderOverrides(
+            [Values(false, true)] bool streaming, [Values(false, true)] bool injected)
+        {
+            MEAI.ChatOptions options = new()
+            {
+                Tools = new List<MEAI.AITool>
+                {
+                    MEAI.AIFunctionFactory.Create((Func<string>)(() => "unused"),
+                        new MEAI.AIFunctionFactoryOptions { Name = "lookup" })
+                },
+                ToolMode = MEAI.ChatToolMode.RequireAny,
+                AllowMultipleToolCalls = true
+            };
+            string extra = injected
+                ? "{\"tools\":[{\"type\":\"function\"}],\"tool_choice\":\"required\",\"parallel_tool_calls\":true,\"top_k\":7}"
+                : "";
+            JObject request = await CaptureToolOptionsRequestAsync(streaming, options, extra,
+                supportsNativeToolCalling: false);
+            Assert.IsNull(request["tools"], "A text endpoint rejecting tools must not receive them again.");
+            Assert.IsNull(request["tool_choice"]);
+            Assert.IsNull(request["parallel_tool_calls"]);
+            if (injected) Assert.AreEqual(7, request["top_k"].Value<int>());
+            Assert.AreEqual(1, options.Tools.Count, "Local invocation bindings must remain available.");
+            Assert.IsInstanceOf<MEAI.RequiredChatToolMode>(options.ToolMode);
+        }
+
+        private static async Task<JObject> CaptureToolOptionsRequestAsync(bool streaming,
+            MEAI.ChatOptions options, string extraBodyJson = "", bool supportsNativeToolCalling = true)
+        {
+            ToolOptionsCaptureTransport transport = new();
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings { ExtraBodyJson = extraBodyJson }, transport, supportsNativeToolCalling);
+            MEAI.ChatMessage[] messages = { new(MEAI.ChatRole.User, "hello") };
+            if (streaming)
+            {
+                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(messages, options))
+                {
+                    Assert.IsNotNull(update);
+                }
+            }
+            else
+            {
+                await client.GetResponseAsync(messages, options);
+            }
+            Assert.IsNotNull(transport.Request);
+            Assert.AreEqual(streaming, transport.Request.AcceptEventStream);
+            return JObject.Parse(transport.Request.JsonBody);
+        }
+
+        private sealed class ToolOptionsCaptureTransport : IOpenAiHttpTransport
+        {
+            public OpenAiHttpPostRequest Request { get; private set; }
+            public string DebugLabel => "ToolOptionsCapture";
+            public bool SupportsSseStreaming => true;
+            public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                Request = request;
+                return Task.FromResult(new OpenAiHttpPostResult
+                {
+                    StatusCode = 200,
+                    BodyText = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}"
+                });
+            }
+            public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                Request = request;
+                const string sse = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+                OpenAiHttpSseOpenResult result = new()
+                {
+                    StatusCode = 200,
+                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>
+                        { ["Content-Type"] = new[] { "text/event-stream" } }
+                };
+                return Task.FromResult(result.WithRawStream(new MemoryStream(Encoding.UTF8.GetBytes(sse))));
+            }
+        }
+
         [Test]
         public void ParseSseUpdates_MessageOnlyChunk_ParsesText()
         {
@@ -394,6 +539,193 @@ namespace CoreAI.Tests.EditMode
                 .SelectMany(u => u.Contents ?? new List<MEAI.AIContent>())
                 .OfType<MEAI.TextReasoningContent>()
                 .Single().Text);
+        }
+
+        [Test]
+        public void FullResponseToSimulatedStreamingUpdates_PropagatesNativeContracts()
+        {
+            MEAI.ChatMessage msg = new(MEAI.ChatRole.Assistant, "hi")
+            {
+                MessageId = "msg-1"
+            };
+            MEAI.ChatResponse full = new(msg)
+            {
+                ResponseId = "resp-1",
+                ModelId = "served-model",
+                FinishReason = MEAI.ChatFinishReason.Length,
+                Usage = new MEAI.UsageDetails
+                {
+                    InputTokenCount = 3,
+                    OutputTokenCount = 5,
+                    TotalTokenCount = 8,
+                    CachedInputTokenCount = 1,
+                    ReasoningTokenCount = 2
+                }
+            };
+
+            List<MEAI.ChatResponseUpdate> updates =
+                MeaiOpenAiChatClient.FullResponseToSimulatedStreamingUpdatesForTests(full);
+
+            Assert.Greater(updates.Count, 1);
+            foreach (MEAI.ChatResponseUpdate u in updates)
+            {
+                Assert.AreEqual("resp-1", u.ResponseId);
+                Assert.AreEqual("msg-1", u.MessageId);
+                Assert.AreEqual("served-model", u.ModelId);
+
+            }
+
+            Assert.AreEqual(MEAI.ChatFinishReason.Length, updates.Last().FinishReason);
+            Assert.IsTrue(updates.Take(updates.Count - 1).All(update => !update.FinishReason.HasValue));
+
+            MEAI.UsageContent usage = updates
+                .SelectMany(u => u.Contents ?? new List<MEAI.AIContent>())
+                .OfType<MEAI.UsageContent>()
+                .Single();
+            Assert.AreEqual(1L, usage.Details.CachedInputTokenCount);
+            Assert.AreEqual(2L, usage.Details.ReasoningTokenCount);
+        }
+
+        [Test]
+        public void ParseSseUpdates_WireIdSharedAcrossChunks_BackfillsIdLessChunk()
+        {
+            const string sse =
+                "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n" +
+                "data: {\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n";
+            List<MEAI.ChatResponseUpdate> list = MeaiOpenAiChatClient.ParseSseUpdatesForTests(sse).ToList();
+            Assert.AreEqual(2, list.Count);
+            Assert.AreEqual("chatcmpl-1", list[0].ResponseId);
+            Assert.AreEqual("chatcmpl-1", list[0].MessageId);
+            Assert.AreEqual("chatcmpl-1", list[1].ResponseId);
+            Assert.AreEqual("chatcmpl-1", list[1].MessageId);
+        }
+
+        [Test]
+        public void ParseSseUpdates_ChangedWireIdWithinAttempt_KeepsOriginalMessageIdentity()
+        {
+            const string sse =
+                "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n" +
+                "data: {\"id\":\"chatcmpl-2\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n";
+            List<MEAI.ChatResponseUpdate> list = MeaiOpenAiChatClient.ParseSseUpdatesForTests(sse).ToList();
+            Assert.AreEqual(2, list.Count);
+            Assert.AreEqual("chatcmpl-1", list[0].MessageId);
+            Assert.AreEqual("chatcmpl-1", list[1].MessageId);
+        }
+
+        [Test]
+        public void ParseSseUpdates_LateWireId_DoesNotInventAnotherAssistantMessage()
+        {
+            const string sse =
+                "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n" +
+                "data: {\"id\":\"wire-id\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n";
+            List<MEAI.ChatResponseUpdate> updates = MeaiOpenAiChatClient.ParseSseUpdatesForTests(sse).ToList();
+            Assert.AreEqual(updates[0].MessageId, updates[1].MessageId);
+            Assert.AreEqual("wire-id", updates[1].ResponseId);
+            Assert.AreEqual("ab", string.Concat(updates.Select(update => update.Text)));
+        }
+
+        [Test]
+        public void ParseSseUpdates_FinishOnlyFrame_PreservesTerminalSignal()
+        {
+            MEAI.ChatResponseUpdate update = MeaiOpenAiChatClient.ParseSseDataLineForTests(
+                "{\"id\":\"terminal\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}");
+            Assert.IsNotNull(update);
+            Assert.AreEqual(MEAI.ChatFinishReason.Stop, update.FinishReason);
+            Assert.IsEmpty(update.Text);
+        }
+
+        [Test]
+        public void ParseSseDataLine_IdLessChunk_GetsSyntheticMessageId()
+        {
+            MEAI.ChatResponseUpdate u = MeaiOpenAiChatClient.ParseSseDataLineForTests(
+                "{\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}");
+            Assert.IsNotNull(u);
+            Assert.IsNotEmpty(u.ResponseId);
+            StringAssert.StartsWith("synth_", u.ResponseId);
+            Assert.AreEqual(u.ResponseId, u.MessageId);
+        }
+
+        [Test]
+        public void ParseSseDataLine_FinishReasonChunk_MapsToNativeContract()
+        {
+            MEAI.ChatResponseUpdate u = MeaiOpenAiChatClient.ParseSseDataLineForTests(
+                "{\"id\":\"chatcmpl-f\",\"choices\":[{\"finish_reason\":\"tool_calls\",\"delta\":{\"content\":\"done\"}}]}");
+            Assert.IsNotNull(u);
+            Assert.AreEqual("done", u.Text);
+            Assert.AreEqual(MEAI.ChatFinishReason.ToolCalls, u.FinishReason);
+            Assert.AreEqual("chatcmpl-f", u.MessageId);
+        }
+
+        [Test]
+        public void DrainPerChunk_WireId_PropagatesToDrainedToolCallUpdate()
+        {
+            string[] chunks =
+            {
+                "{\"id\":\"chatcmpl-t\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"go\",\"arguments\":\"{\\\"a\\\":1}\"}}]}}]}"
+            };
+            List<MEAI.ChatResponseUpdate> perChunk = MeaiOpenAiChatClient.DrainPerChunkForTests(chunks);
+            Assert.IsNotNull(perChunk[0]);
+            Assert.AreEqual("chatcmpl-t", perChunk[0].ResponseId);
+            Assert.AreEqual("chatcmpl-t", perChunk[0].MessageId);
+            Assert.IsNull(perChunk[1]);
+        }
+
+        [Test]
+        public void ParseSseDataLine_TextAndUsageTogether_PreservesBoth()
+        {
+            MEAI.ChatResponseUpdate update = MeaiOpenAiChatClient.ParseSseDataLineForTests(
+                "{\"choices\":[{\"delta\":{\"content\":\"answer\"}}],\"usage\":{\"prompt_tokens_details\":{\"cached_tokens\":7}}}");
+            Assert.AreEqual("answer", update.Text);
+            MEAI.UsageContent usage = update.Contents.OfType<MEAI.UsageContent>().Single();
+            Assert.AreEqual(7L, usage.Details.CachedInputTokenCount);
+            Assert.IsNull(usage.Details.AdditionalCounts);
+        }
+
+        [Test]
+        public void ParseSseUpdates_UsageChunkWithDetails_PopulatesTypedCounts()
+        {
+            const string sse =
+                "data: {\"id\":\"chatcmpl-u\",\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":7,\"total_tokens\":17," +
+                "\"prompt_tokens_details\":{\"cached_tokens\":4},\"completion_tokens_details\":{\"reasoning_tokens\":6}}}\n\n";
+            List<MEAI.ChatResponseUpdate> updates = MeaiOpenAiChatClient.ParseSseUpdatesForTests(sse).ToList();
+            Assert.AreEqual(1, updates.Count);
+            Assert.AreEqual("chatcmpl-u", updates[0].ResponseId);
+            Assert.AreEqual("chatcmpl-u", updates[0].MessageId);
+            MEAI.UsageContent usage = updates[0].Contents?.OfType<MEAI.UsageContent>().FirstOrDefault();
+            Assert.NotNull(usage);
+            Assert.AreEqual(4L, usage.Details.CachedInputTokenCount);
+            Assert.AreEqual(6L, usage.Details.ReasoningTokenCount);
+            Assert.AreEqual(17L, usage.Details.TotalTokenCount);
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_SplitSmoothing_PropagatesNativeContracts()
+        {
+            const string sse =
+                "data: {\"id\":\"chatcmpl-s\",\"model\":\"router/smooth\",\"choices\":[{\"delta\":{\"content\":\"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ\"}}]}\n\n" +
+                "data: [DONE]\n\n";
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), new DoneSentinelTransport(sse));
+            List<MEAI.ChatResponseUpdate> textUpdates = new();
+
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                                new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+            {
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    textUpdates.Add(update);
+                }
+            }
+
+            Assert.Greater(textUpdates.Count, 1, "The 46-char delta must be split for smooth streaming.");
+            Assert.AreEqual(
+                "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ",
+                string.Concat(textUpdates.Select(u => u.Text)));
+            foreach (MEAI.ChatResponseUpdate u in textUpdates)
+            {
+                Assert.AreEqual("router/smooth", u.ModelId);
+                Assert.AreEqual("chatcmpl-s", u.ResponseId);
+                Assert.AreEqual("chatcmpl-s", u.MessageId);
+            }
         }
 
         [Test]
@@ -1557,6 +1889,7 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class DoneSentinelSettings : IOpenAiHttpSettings
         {
+            public string ExtraBodyJson { get; set; } = "";
             public string ApiBaseUrl => "https://example.invalid/v1";
             public string ApiKey => "";
             public string AuthorizationHeader => "";

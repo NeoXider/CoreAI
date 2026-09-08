@@ -404,6 +404,7 @@ namespace CoreAI.Ai
             // See Pump().
             w.PendingCancellation.Dispose();
             CancellationTokenSource linkedCts = null;
+            CancellationToken token = CancellationToken.None;
             try
             {
                 using (AiCancellationAttributionContext.Push(w.CancellationAttribution))
@@ -415,7 +416,7 @@ namespace CoreAI.Ai
                     // WHY: Link the orchestrator's lifetime signal so Dispose() cancels in-flight work even
                     // when neither the caller nor the cancellation scope token was ever cancelled.
                     linkedCts = CancellationTokenSource.CreateLinkedTokenSource(baseToken, _lifetimeCts.Token);
-                    CancellationToken token = linkedCts.Token;
+                    token = linkedCts.Token;
                     if (token.IsCancellationRequested)
                     {
                         // WHY: Pump already removed the item, so CancelPending can no longer own persistence.
@@ -436,7 +437,15 @@ namespace CoreAI.Ai
                     w.Tcs.TrySetResult(result);
                 }
             }
-            catch (Exception ex) when (IsCancellationLike(ex))
+            // WHY: Таймаут библиотеки наследует OperationCanceledException, но это НЕ отмена: никто
+            // (ни ученик, ни scope, ни Dispose) не просил остановить ход. Схлопывание его в
+            // TrySetCanceled() отдавало вызывающему голый TaskCanceledException, и презентация
+            // сообщала ребёнку «запрос остановлен» — то есть что он сам прервал ответ учителя.
+            catch (Exception ex) when (TryFindLibraryTimeout(ex, token, out LlmOperationTimeoutException timeout))
+            {
+                w.Tcs.TrySetException(timeout);
+            }
+            catch (Exception ex) when (IsCancellationLike(ex, token))
             {
                 w.Tcs.TrySetCanceled();
             }
@@ -463,6 +472,7 @@ namespace CoreAI.Ai
             // WHY: Blocking dispose - see RunOneAsync. This method must never be started under _lock.
             w.PendingCancellation.Dispose();
             CancellationTokenSource linkedCts = null;
+            CancellationToken token = CancellationToken.None;
             try
             {
                 using (AiCancellationAttributionContext.Push(w.CancellationAttribution))
@@ -478,7 +488,7 @@ namespace CoreAI.Ai
                         ? CancellationTokenSource.CreateLinkedTokenSource(
                             baseToken, w.ConsumerCancellation.Token, _lifetimeCts.Token)
                         : CancellationTokenSource.CreateLinkedTokenSource(baseToken, _lifetimeCts.Token);
-                    CancellationToken token = linkedCts.Token;
+                    token = linkedCts.Token;
 
                     if (token.IsCancellationRequested)
                     {
@@ -501,7 +511,18 @@ namespace CoreAI.Ai
                     w.Queue.Complete();
                 }
             }
-            catch (Exception ex) when (IsCancellationLike(ex))
+            // WHY: См. RunOneAsync — таймаут библиотеки остаётся таймаутом, а не «ученик остановил ответ».
+            catch (Exception ex) when (TryFindLibraryTimeout(ex, token, out LlmOperationTimeoutException timeout))
+            {
+                w.Queue.Write(new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = timeout.Message,
+                    ErrorCode = LlmErrorCode.Timeout
+                });
+                w.Queue.Complete();
+            }
+            catch (Exception ex) when (IsCancellationLike(ex, token))
             {
                 w.Queue.Write(new LlmStreamChunk
                 {
@@ -513,7 +534,14 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                w.Queue.Write(new LlmStreamChunk { IsDone = true, Error = ex.Message });
+                // WHY: Полная причина — в лог; в чат уходит типизированный код и фраза для игрока.
+                // Терминальный чанк с Error = ex.Message и ErrorCode = None показывал ребёнку текст
+                // внутреннего исключения как реплику учителя: потребитель выбирает плашку по коду, а
+                // None ни в одну категорию недоступности не входит.
+                Log.Instance.Error(
+                    $"[QueuedAiOrchestrator] Stream for actor '{w.ActorId}' failed: {ex}",
+                    LogTag.Llm);
+                w.Queue.Write(DescribeStreamFailure(ex));
                 w.Queue.Complete();
             }
             finally
@@ -976,12 +1004,16 @@ namespace CoreAI.Ai
             {
                 work.PendingCancellation.Dispose();
                 RecordUnstartedTurn(work, "stream queue full");
+                // WHY: Текст исключения с внутренним actorId и MaxPending — для разработчика и уходит в
+                // лог целиком; в чат ученика доезжают только код и фраза, которую потребитель показал бы
+                // по этому коду сам.
                 AiOrchestrationQueueFullException rejection =
                     new(work.ActorId, _maxPending);
+                Log.Instance.Warn($"[QueuedAiOrchestrator] {rejection.Message}", LogTag.Llm);
                 work.Queue.Write(new LlmStreamChunk
                 {
                     IsDone = true,
-                    Error = rejection.Message,
+                    Error = LlmErrorPresentation.ForErrorCode(LlmErrorCode.BackendUnavailable),
                     ErrorCode = LlmErrorCode.BackendUnavailable
                 });
                 work.Queue.Complete();
@@ -1247,37 +1279,109 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Some runtimes / stacks surface cancellation as <see cref="AggregateException"/> or types that do not
-        /// inherit <see cref="OperationCanceledException"/> the way modern .NET does. Map those to a clean cancel
-        /// on the public <see cref="Task"/> from <see cref="RunTaskAsync"/> instead of faulting the work item.
+        /// Таймаут библиотеки (<see cref="LlmOperationTimeoutException"/>, в том числе завёрнутый в
+        /// <see cref="AggregateException"/>), пришедший при живом токене работы. Если токен уже отменён,
+        /// это не таймаут, а отмена — кто-то из владельцев (ученик, scope, Dispose) действительно просил
+        /// остановиться, и гонка с таймером решается в пользу отмены.
         /// </summary>
-        private static bool IsCancellationLike(Exception ex)
+        private static bool TryFindLibraryTimeout(
+            Exception ex,
+            CancellationToken token,
+            out LlmOperationTimeoutException timeout)
         {
-            for (Exception cur = ex; cur != null; cur = cur.InnerException)
+            timeout = token.IsCancellationRequested ? null : FindLibraryTimeout(ex);
+            return timeout != null;
+        }
+
+        private static LlmOperationTimeoutException FindLibraryTimeout(Exception ex)
+        {
+            switch (ex)
+            {
+                case LlmOperationTimeoutException typed:
+                    return typed;
+                case AggregateException aggregate:
+                    foreach (Exception inner in aggregate.InnerExceptions)
+                    {
+                        LlmOperationTimeoutException found = FindLibraryTimeout(inner);
+                        if (found != null)
+                        {
+                            return found;
+                        }
+                    }
+
+                    return null;
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>
+        /// Отмена: <see cref="OperationCanceledException"/> само по себе либо внутри
+        /// <see cref="AggregateException"/> (некоторые стеки заворачивают отмену именно так).
+        /// Цепочка <see cref="Exception.InnerException"/> просматривается ТОЛЬКО когда токен работы
+        /// действительно отменён: тогда любая ошибка, выросшая из отмены, и есть отмена. При живом токене
+        /// транспортная ошибка с вложенным <see cref="TaskCanceledException"/> — это сбой, а не отмена, и
+        /// раньше она молча превращалась в «ученик остановил ответ».
+        /// </summary>
+        private static bool IsCancellationLike(Exception ex, CancellationToken token)
+        {
+            return IsCancellationLike(ex, followInnerExceptions: token.IsCancellationRequested);
+        }
+
+        private static bool IsCancellationLike(Exception ex, bool followInnerExceptions)
+        {
+            for (Exception cur = ex; cur != null; cur = followInnerExceptions ? cur.InnerException : null)
             {
                 if (cur is OperationCanceledException)
                 {
                     return true;
                 }
 
-                if (cur is TaskCanceledException)
+                if (cur is AggregateException aggregate)
                 {
-                    return true;
-                }
-            }
-
-            if (ex is AggregateException agg)
-            {
-                foreach (Exception inner in agg.InnerExceptions)
-                {
-                    if (IsCancellationLike(inner))
+                    foreach (Exception inner in aggregate.InnerExceptions)
                     {
-                        return true;
+                        if (IsCancellationLike(inner, followInnerExceptions))
+                        {
+                            return true;
+                        }
                     }
                 }
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Терминальный чанк для сбоя производителя потока: категория всегда осмысленная, текст — фраза
+        /// для игрока. У <see cref="LlmClientException"/> классификация адаптера (код, HTTP-статус,
+        /// retry-after) сохраняется, а текст проходит через <see cref="LlmErrorPresentation"/>: сырой
+        /// <c>Message</c> адаптера — это <c>HTTP error 4xx: …</c> с телом провайдера, то есть строка для
+        /// лога, а не для пузыря чата. Внутренние сообщения прочих исключений в чат не попадают.
+        /// </summary>
+        private static LlmStreamChunk DescribeStreamFailure(Exception ex)
+        {
+            if (ex is LlmClientException typed)
+            {
+                return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = LlmErrorPresentation.ToUserMessage(typed),
+                    ErrorCode = typed.ErrorCode,
+                    HttpStatus = typed.HttpStatus,
+                    RetryAfterSeconds = typed.RetryAfterSeconds
+                };
+            }
+
+            LlmErrorCode code = ex is AiOrchestrationQueueFullException || ex is ObjectDisposedException
+                ? LlmErrorCode.BackendUnavailable
+                : LlmErrorCode.ProviderError;
+            return new LlmStreamChunk
+            {
+                IsDone = true,
+                Error = LlmErrorPresentation.ForErrorCode(code),
+                ErrorCode = code
+            };
         }
 
         /// <summary>

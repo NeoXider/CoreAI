@@ -681,13 +681,22 @@ namespace CoreAI.Chat
             // WHY: BusyStateChanged(false) is raised later by teardown and handlers may submit reentrantly.
             // Publish lifecycle ownership first so that submit is rejected before it can reach a provider.
             _lifecycleActive = false;
-            bool invalidatedActiveTurn = InvalidateTurnOwnershipOnDisable();
-            CancelActiveRequestOnDisable();
-            if (invalidatedActiveTurn)
+            // WHY: единственная точка решения «обрывать ли ход». Раньше поколение сдвигалось на ЛЮБОМ
+            // выключении, а флаг проверялся только в отмене запроса — и хост, отключивший отмену, всё
+            // равно терял ответ: первый же чанк видел себя устаревшим, выходил из перечисления, сервис
+            // досрочно закрывал итератор оркестратора, а тот в finally записывал в историю только реплику
+            // ученика. При false ход остаётся владельцем поколения, запроса и busy-флагов: никто его не
+            // прерывал, значит он обязан дойти до конца и записаться — см. CancelsActiveRequestOnDisable.
+            if (CancelsActiveRequestOnDisable)
             {
-                // WHY: the stale turn is no longer allowed to clear these flags in its own finally. Reset
-                // them here, under lifecycle ownership, so an immediate OnEnable can start a successor.
-                ResetBusyStateWithoutCancellation();
+                bool invalidatedActiveTurn = InvalidateTurnOwnershipOnDisable();
+                CancelActiveRequestOnDisable();
+                if (invalidatedActiveTurn)
+                {
+                    // WHY: the stale turn is no longer allowed to clear these flags in its own finally. Reset
+                    // them here, under lifecycle ownership, so an immediate OnEnable can start a successor.
+                    ResetBusyStateWithoutCancellation();
+                }
             }
 
             if (_embeddedHost != null)
@@ -715,6 +724,9 @@ namespace CoreAI.Chat
 
         /// <summary>
         /// Transfers turn ownership away from the lifecycle being disabled before the panel drops its UI tree.
+        /// Only for panels that cancel on disable (<see cref="CancelsActiveRequestOnDisable"/>): a host that
+        /// keeps the turn alive must leave the generation alone, or the turn sees itself as stale on the
+        /// next chunk and abandons the stream before the reply reaches history.
         /// </summary>
         private bool InvalidateTurnOwnershipOnDisable()
         {
@@ -729,11 +741,26 @@ namespace CoreAI.Chat
         /// <summary>
         /// Отменять ли активный запрос, когда панель выключается.
         /// <para>
-        /// Пакетное значение — <c>true</c>: панель исчезла, ответ показывать некому. Но у хоста,
-        /// где чат — часть урока, выключение панели значит лишь «человек вышел из фокуса»
-        /// (в RedoSchool это Esc). Обрывать на этом ход учителя нельзя: собеседник ничего не
-        /// прерывал, а по возвращении он видел «ничего не ответили». Хост, у которого история
-        /// живёт вне панели, переопределяет свойство и получает ход, доигранный до конца.
+        /// Пакетное значение — <c>true</c>: панель исчезла, ответ показывать некому. Ход становится
+        /// устаревшим (поколение сдвигается), запрос отменяется, busy-флаги сбрасываются здесь же.
+        /// </para>
+        /// <para>
+        /// Но у хоста, где чат — часть урока, выключение панели значит лишь «человек вышел из
+        /// фокуса» (в RedoSchool это Esc). Обрывать на этом ход учителя нельзя: собеседник ничего не
+        /// прерывал, а по возвращении он видел «ничего не ответили». Хост, у которого история живёт
+        /// вне панели, переопределяет свойство в <c>false</c> и получает ход, доигранный до конца:
+        /// <see cref="OnDisable"/> не трогает ни поколение, ни запрос, ни busy-флаги — ход остаётся
+        /// текущим, доходит до конца потока (ответ попадает в историю оркестратора и в кэш ленты роли),
+        /// вызывает <see cref="OnResponseReceived"/> и сам снимает busy в своём <c>finally</c>. Пока он
+        /// идёт, панель занята: новая реплика не отправится, учитель не будет перебит.
+        /// </para>
+        /// <para>
+        /// Дерево UI при выключении всё равно отпускается (<see cref="ResetUiReferences"/>): ход после
+        /// этого рисовать некуда, и он не рисует. Когда дерево привязано заново (включение,
+        /// перезагрузка <c>PanelRenderer</c>), сегмент ответа, который стримится в этот момент, открывает
+        /// пузырь в новом дереве целиком — с начала сегмента, а не с хвоста. Уже показанные до
+        /// выключения сегменты (до границы инструментов) в новое дерево не переносятся: их вернёт
+        /// следующая гидрация из хранилища.
         /// </para>
         /// </summary>
         protected virtual bool CancelsActiveRequestOnDisable => true;
@@ -743,15 +770,11 @@ namespace CoreAI.Chat
         /// standalone panel never keeps a zombie streaming turn alive. The Hub collapse path is
         /// unaffected: collapsing only toggles a USS class and never disables the panel GameObject,
         /// so generation intentionally keeps running while the Hub is collapsed. Hosts that own the
-        /// transcript outside the panel opt out via <see cref="CancelsActiveRequestOnDisable"/>.
+        /// transcript outside the panel opt out via <see cref="CancelsActiveRequestOnDisable"/>; the
+        /// single decision point is <see cref="OnDisable"/>, this method assumes the opt-out was checked.
         /// </summary>
         private void CancelActiveRequestOnDisable()
         {
-            if (!CancelsActiveRequestOnDisable)
-            {
-                return;
-            }
-
             CancellationTokenSource active = _activeRequestCts;
             if (!IsCancellationSourceActive(active))
             {
@@ -2827,6 +2850,70 @@ namespace CoreAI.Chat
             // WHY: the bubbles THIS turn opened, tracked locally because _turnStreamingBubbles is reset by
             // whichever turn starts next — and an abandoned turn unwinds after that reset.
             List<Label> ownStreamingBubbles = new();
+            // Текст сегмента, который сейчас стримится в текущий пузырь (с момента его открытия).
+            // Нужен ровно для одного случая: дерево UI перепривязали посреди хода (панель выключили и
+            // включили, PanelRenderer перезагрузил документ) — пузырь отпущен, лента очищена гидрацией,
+            // а ответ продолжает идти. Тогда сегмент открывает пузырь в новом дереве с начала, а не
+            // хвостом без начала.
+            string segmentRendered = string.Empty;
+
+            // Дописывает один видимый кусок в полный ответ и в пузырь на экране. Общий путь для чанков
+            // потока и для хвоста, который фильтр удерживал до конца потока.
+            void AppendVisibleText(string visible, bool startsNewMessage)
+            {
+                if (fullResponse.Length == 0)
+                {
+                    visible = NormalizeAssistantDisplayText(visible);
+                }
+
+                if (string.IsNullOrEmpty(visible))
+                {
+                    return;
+                }
+
+                // Явная граница из клиента: началась СЛЕДУЮЩАЯ реплика того же потока.
+                // Раньше границу ловила только эвристика по tool-progress подсказке
+                // (см. BufferedStreamingUseToolProgressHint выше), а её нет на нативном
+                // tool-calling — вторая реплика дописывалась в конец первой, и ученик
+                // читал слипшееся «Проверь себя:**Ход завершён…**» одним пузырём.
+                if (startsNewMessage)
+                {
+                    SealStreamingBubbleIfAny();
+                    segmentRendered = string.Empty;
+                }
+
+                bool opensSegment = !_streamingStartedVisible || _streamingBubbleSealed;
+                bool bubbleLostToRebind = !opensSegment && _streamingLabel == null && MessageScroll != null;
+                if (opensSegment || bubbleLostToRebind)
+                {
+                    if (opensSegment)
+                    {
+                        segmentRendered = string.Empty;
+                    }
+
+                    _streamingStartedVisible = true;
+                    Label opened = StartStreaming();
+                    if (opened != null)
+                    {
+                        ownStreamingBubbles.Add(opened);
+                        if (bubbleLostToRebind && segmentRendered.Length > 0)
+                        {
+                            AppendToStreaming(segmentRendered, turnGeneration);
+                        }
+                    }
+                }
+
+                // WHY: fullResponse keeps the complete text for history/handlers; only the
+                // rendered streaming label is capped (see AppendToStreaming).
+                string formatted = FormatResponseText(visible);
+                // Пузыри разъехались, но fullResponse уходит в историю и обработчикам
+                // одной строкой — там граница обязана остаться пустой строкой, иначе
+                // склейка вернётся при следующем показе той же истории.
+                fullResponse = AppendStreamedMessage(fullResponse, formatted, startsNewMessage);
+                segmentRendered += formatted;
+                AppendToStreaming(formatted, turnGeneration);
+            }
+
             try
             {
                 await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
@@ -2884,6 +2971,10 @@ namespace CoreAI.Chat
                             // (matches claude/cursor behaviour) instead of being appended to the bubble that
                             // was opened before the tools (which would leave tools below the answer).
                             SealStreamingBubbleIfAny();
+                            // WHY: сегмент до инструментов закончился; если пузыря уже нет (дерево
+                            // отпущено), запечатать нечего, и без сброса следующая проза после
+                            // инструментов открылась бы в новом дереве вместе с чужим началом.
+                            segmentRendered = string.Empty;
                         }
 
                         if (chunk.BufferedStreamingUseToolProgressHint)
@@ -2908,43 +2999,7 @@ namespace CoreAI.Chat
 
                     if (!string.IsNullOrEmpty(chunk.Text))
                     {
-                        string visible = FilterStreamChunk(chunk.Text);
-                        if (fullResponse.Length == 0)
-                        {
-                            visible = NormalizeAssistantDisplayText(visible);
-                        }
-
-                        if (!string.IsNullOrEmpty(visible))
-                        {
-                            // Явная граница из клиента: началась СЛЕДУЮЩАЯ реплика того же потока.
-                            // Раньше границу ловила только эвристика по tool-progress подсказке
-                            // (см. BufferedStreamingUseToolProgressHint выше), а её нет на нативном
-                            // tool-calling — вторая реплика дописывалась в конец первой, и ученик
-                            // читал слипшееся «Проверь себя:**Ход завершён…**» одним пузырём.
-                            if (chunk.StartsNewMessage)
-                            {
-                                SealStreamingBubbleIfAny();
-                            }
-
-                            if (!_streamingStartedVisible || _streamingBubbleSealed)
-                            {
-                                _streamingStartedVisible = true;
-                                Label opened = StartStreaming();
-                                if (opened != null)
-                                {
-                                    ownStreamingBubbles.Add(opened);
-                                }
-                            }
-
-                            // WHY: fullResponse keeps the complete text for history/handlers; only the
-                            // rendered streaming label is capped (see AppendToStreaming).
-                            string formatted = FormatResponseText(visible);
-                            // Пузыри разъехались, но fullResponse уходит в историю и обработчикам
-                            // одной строкой — там граница обязана остаться пустой строкой, иначе
-                            // склейка вернётся при следующем показе той же истории.
-                            fullResponse = AppendStreamedMessage(fullResponse, formatted, chunk.StartsNewMessage);
-                            AppendToStreaming(formatted, turnGeneration);
-                        }
+                        AppendVisibleText(FilterStreamChunk(chunk.Text), chunk.StartsNewMessage);
                     }
                 }
 
@@ -2953,6 +3008,11 @@ namespace CoreAI.Chat
                 {
                     return null;
                 }
+
+                // WHY: фильтр удерживает хвост, похожий на начало тега («<», «<th»), пока следующий чанк
+                // не докажет обратное. В конце потока следующего чанка нет — без Flush ответ учителя
+                // «оператор сравнения: <» терял последний символ и в ленте, и в истории.
+                AppendVisibleText(_thinkFilter.Flush(), false);
 
                 if (string.IsNullOrEmpty(fullResponse))
                 {
@@ -3068,7 +3128,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>Removes hidden think blocks from a complete model response string.</summary>
-        private static string StripThinkBlocks(string text)
+        internal static string StripThinkBlocks(string text)
         {
             if (string.IsNullOrEmpty(text))
             {

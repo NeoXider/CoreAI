@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.AiMemory;
 using CoreAI.Logging;
 using NUnit.Framework;
@@ -444,6 +445,120 @@ namespace CoreAI.Tests.EditMode
             summaries.SaveSummary("Teacher", "legacy-summary");
 
             Assert.AreEqual("legacy-summary", backing.LoadSummary("Teacher"));
+        }
+
+        /// <summary>
+        /// The anonymous local default actor ("local", empty scope) is what every host gets for free.
+        /// It names nobody, so it must never redirect memory away from the scope the host declared:
+        /// when it did, writes made inside a turn went to the bare-role file while reads outside the turn
+        /// used the learner's scoped file, and the lesson silently vanished from that learner's history.
+        /// </summary>
+        [Test]
+        public void AmbientDefaultLocalActor_DoesNotOverrideHostDeclaredScope()
+        {
+            AgentMemoryScope hostScope = new("redoschool", "student-42", "lesson-1", "");
+            FixedScopeProvider provider = new(hostScope);
+            KeyCapturingStore store = new();
+            ScopedAgentMemoryStoreDecorator decorator = new(store, provider);
+
+            decorator.Save("Teacher", new AgentMemoryState());
+            using (AgentMemoryScopeExecutionContext.Push(DefaultLocalActorContext("Teacher")))
+            {
+                decorator.Save("Teacher", new AgentMemoryState());
+            }
+
+            Assert.AreEqual(store.SavedKeys[0], store.SavedKeys[1],
+                "Inside a turn the anonymous local actor must resolve the same key as outside it.");
+            Assert.AreNotEqual("Teacher", store.SavedKeys[1],
+                "A host-declared scope must survive the anonymous local actor default.");
+        }
+
+        [Test]
+        public void AmbientDefaultLocalActor_WritesInsideTurn_StayInTheLearnerHistory()
+        {
+            FixedScopeProvider provider = new(new AgentMemoryScope("redoschool", "student-42", "lesson-1", ""));
+            InMemoryCapabilityStore backing = new();
+            ScopedAgentMemoryStoreDecorator decorator = new(backing, provider);
+
+            using (AgentMemoryScopeExecutionContext.Push(DefaultLocalActorContext("Teacher")))
+            {
+                decorator.AppendChatMessage("Teacher", "assistant", "lesson turn", false);
+            }
+
+            ChatMessage[] history = decorator.GetChatHistory("Teacher");
+            Assert.AreEqual(1, history.Length,
+                "A turn written under the anonymous local actor must be readable from the learner scope.");
+            Assert.AreEqual("lesson turn", history[0].Content);
+        }
+
+        [Test]
+        public void AmbientNamedActor_StillOwnsItsDurableKey_RegardlessOfHostScope()
+        {
+            FixedScopeProvider provider = new(new AgentMemoryScope("redoschool", "student-42", "lesson-1", ""));
+            KeyCapturingStore store = new();
+            ScopedAgentMemoryStoreDecorator decorator = new(store, provider);
+            LocalActorIdentityProvider named = new(
+                "durable-actor",
+                "connection-1",
+                "",
+                ActorGrantSet.None,
+                AgentMemoryScope.Empty);
+
+            using (AgentMemoryScopeExecutionContext.Push(named.GetActorContext("Teacher")))
+            {
+                decorator.Save("Teacher", new AgentMemoryState());
+            }
+
+            StringAssert.IsMatch("^actor-v1-[0-9a-f]{64}$", store.SavedKeys[0]);
+        }
+
+        [Test]
+        public void AmbientDefaultLocalActor_CarryingItsOwnScope_UsesThatScope()
+        {
+            AgentMemoryScope turnScope = new("redoschool", "student-7", "lesson-9", "");
+            FixedScopeProvider provider = new(new AgentMemoryScope("redoschool", "other-student", "", ""));
+            KeyCapturingStore store = new();
+            ScopedAgentMemoryStoreDecorator decorator = new(store, provider);
+            LocalActorIdentityProvider local = new(
+                LocalActorIdentityProvider.DefaultActorId,
+                "connection-1",
+                "",
+                ActorGrantSet.None,
+                turnScope);
+
+            using (AgentMemoryScopeExecutionContext.Push(local.GetActorContext("Teacher")))
+            {
+                decorator.Save("Teacher", new AgentMemoryState());
+            }
+
+            Assert.AreEqual(ScopedKeyFor(turnScope, "Teacher"), store.SavedKeys[0],
+                "A scope captured for the turn must win over the ambient host provider.");
+        }
+
+        [Test]
+        public void AmbientDefaultLocalActor_WithoutAnyScope_KeepsLegacyBareRoleKey()
+        {
+            KeyCapturingStore store = new();
+            ScopedAgentMemoryStoreDecorator decorator = new(store, new DefaultAgentMemoryScopeProvider());
+
+            using (AgentMemoryScopeExecutionContext.Push(DefaultLocalActorContext("Teacher")))
+            {
+                decorator.Save("Teacher", new AgentMemoryState());
+            }
+
+            Assert.AreEqual("Teacher", store.SavedKeys[0],
+                "With no scope anywhere the legacy bare-role file must still be the target.");
+        }
+
+        private static ActorContext DefaultLocalActorContext(string roleId)
+        {
+            LocalActorIdentityProvider provider = new(
+                LocalActorIdentityProvider.DefaultActorId,
+                "connection-1",
+                "",
+                ActorGrantSet.None,
+                AgentMemoryScope.Empty);
+            return provider.GetActorContext(roleId);
         }
 
         [Test]

@@ -121,7 +121,7 @@ namespace CoreAI.Tests.PlayMode
         {
             Debug.Log($"[TestAgentSetup] Initializing HTTP: {settings.ApiBaseUrl}");
             SetupHttpLogAsserts();
-            Client = MeaiLlmClient.CreateHttp(settings, GameLoggerUnscopedFallback.Instance, MemoryStore);
+            Client = MeaiLlmClient.CreateHttp(settings, GameLoggerUnscopedFallback.Instance, supportsNativeToolCalling: true, memoryStore: MemoryStore);
             BackendName = "HTTP";
             CreateOrchestrator();
         }

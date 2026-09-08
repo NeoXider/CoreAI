@@ -15,6 +15,19 @@ namespace CoreAI.Ai
         private bool _insideThink;
 
         /// <summary>
+        /// Показан ли уже хоть один видимый символ этого потока.
+        /// <para>
+        /// Одиночный <c>&lt;/think&gt;</c> без открывающего тега прячет текст перед собой только ДО
+        /// первого видимого вывода: модели, которые стримят рассуждение без <c>&lt;think&gt;</c>,
+        /// делают это в начале ответа. После того как текст уже на экране, прятать нечего — и
+        /// удержанный остаток чанка тоже прятать нельзя, иначе результат зависит от того, где
+        /// провайдер порезал поток: «Ответ: да.» + « Ещё &lt;» + «/think&gt;» терял « Ещё », а
+        /// та же строка одним чанком — нет.
+        /// </para>
+        /// </summary>
+        private bool _visibleShown;
+
+        /// <summary>
         /// Optional sink receiving the hidden reasoning text the moment it is suppressed from the
         /// visible stream, so hosts can show a live "thinking" section instead of losing the span.
         /// Null (the default) preserves the original suppress-only behavior.
@@ -26,6 +39,7 @@ namespace CoreAI.Ai
         {
             _buffer.Clear();
             _insideThink = false;
+            _visibleShown = false;
         }
 
         /// <summary>Forwards one suppressed reasoning span to <see cref="ReasoningSink"/>, if set.</summary>
@@ -43,6 +57,8 @@ namespace CoreAI.Ai
         /// <remarks>
         /// The filter preserves partial <c>&lt;think&gt;</c> and <c>&lt;/think&gt;</c> tags across
         /// chunk boundaries so hidden reasoning is not leaked when providers split tokens mid-tag.
+        /// Удержанный хвост, который так и не стал тегом, отдаёт <see cref="Flush"/> — вызывать его
+        /// в конце потока обязательно, иначе ответ «оператор сравнения: &lt;» теряет последний символ.
         /// </remarks>
         public string ProcessChunk(string chunk)
         {
@@ -73,7 +89,7 @@ namespace CoreAI.Ai
                         EmitReasoning(buf.Substring(0, buf.Length - keptTail.Length));
                         _buffer.Clear();
                         _buffer.Append(keptTail);
-                        return visible.ToString();
+                        return Publish(visible);
                     }
                 }
                 else
@@ -82,10 +98,21 @@ namespace CoreAI.Ai
                     int closeIdx = buf.IndexOf(CloseTag, StringComparison.OrdinalIgnoreCase);
                     if (closeIdx >= 0 && (openIdx < 0 || closeIdx < openIdx))
                     {
-                        // WHY: Some OpenAI-compatible reasoning models stream hidden thought text without
-                        // the opening tag but still include </think> before the visible answer.
-                        // Treat the buffered prefix as hidden and resume after the orphan close tag.
-                        EmitReasoning(buf.Substring(0, closeIdx));
+                        string beforeClose = buf.Substring(0, closeIdx);
+                        if (_visibleShown || visible.Length > 0)
+                        {
+                            // WHY: видимый текст уже пошёл ученику, значит это не рассуждение, а
+                            // залётный тег: сам тег убираем, текст вокруг него — обычный ответ.
+                            visible.Append(beforeClose);
+                        }
+                        else
+                        {
+                            // WHY: Some OpenAI-compatible reasoning models stream hidden thought text without
+                            // the opening tag but still include </think> before the visible answer.
+                            // Treat the buffered prefix as hidden and resume after the orphan close tag.
+                            EmitReasoning(beforeClose);
+                        }
+
                         buf = buf.Substring(closeIdx + CloseTag.Length);
                         continue;
                     }
@@ -102,19 +129,23 @@ namespace CoreAI.Ai
                     }
                     else
                     {
-                        // WHY: Hold a possible opening tag until the next chunk proves whether it is real.
+                        // WHY: Hold a possible tag until the next chunk proves whether it is real.
                         int lastLt = buf.LastIndexOf('<');
                         if (lastLt >= 0)
                         {
                             string possibleTag = buf.Substring(lastLt);
-                            if (IsPrefixOf(possibleTag, CloseTag))
+                            bool mayBecomeClose = IsPrefixOf(possibleTag, CloseTag);
+                            bool mayBecomeOpen = IsPrefixOf(possibleTag, OpenTag);
+                            if (mayBecomeClose && !_visibleShown && visible.Length == 0)
                             {
+                                // WHY: ничего ещё не показано, и весь накопленный текст может оказаться
+                                // рассуждением перед одиночным </think> — удерживаем его целиком.
                                 _buffer.Clear();
                                 _buffer.Append(buf);
-                                return visible.ToString();
+                                return string.Empty;
                             }
 
-                            if (IsPrefixOf(possibleTag, OpenTag))
+                            if (mayBecomeClose || mayBecomeOpen)
                             {
                                 if (lastLt > 0)
                                 {
@@ -123,7 +154,7 @@ namespace CoreAI.Ai
 
                                 _buffer.Clear();
                                 _buffer.Append(possibleTag);
-                                return visible.ToString();
+                                return Publish(visible);
                             }
                         }
 
@@ -134,12 +165,17 @@ namespace CoreAI.Ai
             }
 
             _buffer.Clear();
-            return visible.ToString();
+            return Publish(visible);
         }
 
         /// <summary>
         /// Returns any buffered visible tail at the end of a stream.
         /// </summary>
+        /// <remarks>
+        /// Хвост удерживался лишь потому, что МОГ стать тегом. Поток закончился — не стал, значит это
+        /// обычный текст ответа: «2 &lt;» на конце реплики учителя Python ничем не хуже «2 &lt; 3».
+        /// Прятать его как «недописанный тег» — терять законный символ ради случая, которого не было.
+        /// </remarks>
         public string Flush()
         {
             if (_insideThink)
@@ -151,16 +187,25 @@ namespace CoreAI.Ai
                 return string.Empty;
             }
 
-            if (_buffer.Length == 0)
-            {
-                return string.Empty;
-            }
-
             string tail = _buffer.ToString();
             _buffer.Clear();
+            if (tail.Length > 0)
+            {
+                _visibleShown = true;
+            }
 
-            // WHY: A partial opening tag at end-of-stream should not be shown to the user.
-            return IsPrefixOf(tail, OpenTag) ? string.Empty : tail;
+            return tail;
+        }
+
+        /// <summary>Отдаёт накопленный видимый текст и запоминает, что ученик его уже увидел.</summary>
+        private string Publish(StringBuilder visible)
+        {
+            if (visible.Length > 0)
+            {
+                _visibleShown = true;
+            }
+
+            return visible.ToString();
         }
 
         /// <summary>

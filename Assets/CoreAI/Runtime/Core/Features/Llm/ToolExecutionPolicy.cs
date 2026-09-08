@@ -1,4 +1,4 @@
-﻿#if COREAI_LLM
+#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -41,8 +41,21 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     public sealed class ToolExecutionPolicy
     {
-        private const string EmptyToolResultPayload =
-            "{\"Success\":true,\"Message\":\"Tool completed without an explicit result payload.\"}";
+        /// <summary>
+        /// Что видит модель вместо ПУСТОГО результата инструмента. Пустое tool-сообщение провайдеры
+        /// отвергают, а молчаливая подмена на «успех» скрывала бы, что инструменту нечего было сказать —
+        /// поэтому конверт честный: <c>empty:true</c> отличает «данных нет» от настоящего ответа, а
+        /// <c>ok:true</c> ровно повторяет вердикт <see cref="IsToolResultSuccess"/> для пустой строки.
+        /// </summary>
+        internal const string EmptyToolResultPayload =
+            "{\"ok\":true,\"empty\":true,\"message\":\"The tool returned an empty result. It counts as completed; there is no data to read from it.\"}";
+
+        /// <summary>
+        /// Пометка, которой заканчивается обрезанный по <see cref="ICoreAISettings.MaxToolResultChars"/>
+        /// результат. Обрезка обязана быть видна модели явно — иначе она дочитывает оборванный JSON как
+        /// полный и строит ответ на половине данных.
+        /// </summary>
+        internal const string TruncatedResultMarker = "...[truncated: ";
 
         private readonly ILog _logger;
         private readonly ICoreAISettings _settings;
@@ -62,8 +75,27 @@ namespace CoreAI.Infrastructure.Llm
         private const int DrainGraceMarginMs = 1000;
 
         private int _consecutiveErrors;
-        private readonly HashSet<string> _executedSignatures = new();
-        private readonly Dictionary<string, bool[]> _partialBatchSuccesses = new();
+        private int _hasAbandonedInvocation;
+
+        /// <summary>
+        /// Non-zero once a tool declaring <see cref="ILlmTool.EndsTurn"/> completed SUCCESSFULLY in this
+        /// request. An <see cref="int"/> written with <see cref="Interlocked"/> rather than a bool field:
+        /// <see cref="ExecuteSingleAsync"/> runs concurrently under
+        /// <see cref="ICoreAISettings.MaxParallelToolCalls"/> &gt; 1, so several calls may finish on
+        /// different threads at once.
+        /// </summary>
+        private int _turnEndingToolSucceeded;
+
+        /// <summary>
+        /// Сигнатуры <c>имя(канонизированные аргументы)</c> ОТДЕЛЬНЫХ вызовов, которые УСПЕШНО
+        /// выполнились в предыдущих ходах этого запроса. Ключ per-call, а не по батчу: батчевая
+        /// сигнатура пропускала эхо, если модель добавляла или убирала соседний вызов
+        /// (ход 1 = [A], ход 2 = [A, B] → A исполнялся второй раз), и обещание доков «свой ключ
+        /// идемпотентности не нужен» не выполнялось ровно там, где автор инструмента на него положился.
+        /// Регистрируется только успех: упавший вызов обязан оставаться повторяемым с теми же аргументами.
+        /// </summary>
+        private readonly HashSet<string> _succeededCallSignatures = new();
+
         private readonly List<LlmToolCallTrace> _executedTraces = new();
 
         /// <summary>
@@ -118,7 +150,21 @@ namespace CoreAI.Infrastructure.Llm
         public int ConsecutiveErrors => _consecutiveErrors;
 
         /// <summary>Whether max consecutive errors threshold has been reached.</summary>
-        public bool IsMaxErrorsReached => _consecutiveErrors >= _maxConsecutiveErrors;
+        public bool IsMaxErrorsReached => _consecutiveErrors >= _maxConsecutiveErrors ||
+                                          Volatile.Read(ref _hasAbandonedInvocation) != 0;
+
+        /// <summary>
+        /// True once a tool declaring <see cref="ILlmTool.EndsTurn"/> completed SUCCESSFULLY during this
+        /// request. The agentic loops (<see cref="SmartToolCallingChatClient"/> and the streaming loop in
+        /// <c>MeaiLlmClient</c>) read it right after a batch/turn and close the turn instead of sending the
+        /// tool result back for another roundtrip — see <see cref="ILlmTool.EndsTurn"/> for why the model
+        /// must not get that roundtrip.
+        /// <para>
+        /// A FAILED call of the same tool deliberately leaves this false: the error result has to reach the
+        /// model so it can retry, exactly like every other failure in this class.
+        /// </para>
+        /// </summary>
+        public bool TurnEndingToolSucceeded => Volatile.Read(ref _turnEndingToolSucceeded) != 0;
 
         /// <summary>
         /// Snapshot of every tool call observed during this request lifetime
@@ -141,14 +187,14 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Reset duplicate signatures, error counter, and trace log. Call at the start of each
+        /// Reset duplicate signatures, error counter, and trace log. An abandoned invocation keeps execution blocked. Call at the start of each
         /// top-level request to allow the same tool to be used across independent requests.
         /// </summary>
         public void Reset()
         {
             _consecutiveErrors = 0;
-            _executedSignatures.Clear();
-            _partialBatchSuccesses.Clear();
+            Interlocked.Exchange(ref _turnEndingToolSucceeded, 0);
+            _succeededCallSignatures.Clear();
             lock (_traceLock)
             {
                 _executedTraces.Clear();
@@ -178,146 +224,138 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Check whether the given tool calls contain duplicate slots. Returns duplicate
-        /// error messages for the suppressed slots if any were found, otherwise null.
+        /// План одного батча: какие слоты — эхо уже успевшего вызова (заполнены no-op'ом заранее), какие
+        /// исполняются, и какая per-call сигнатура регистрируется у слота ПОСЛЕ его успеха.
         /// </summary>
-        public List<MEAI.FunctionResultContent> CheckDuplicate(List<MEAI.FunctionCallContent> toolCalls)
-        {
-            DuplicatePlan plan = BuildDuplicatePlan(toolCalls);
-            // This entry point has no execution phase, so register the signature immediately
-            // (legacy semantics: a checked batch counts as seen).
-            if (plan.PendingBatchSignature != null && !plan.HasDuplicates)
-            {
-                _executedSignatures.Add(plan.PendingBatchSignature);
-            }
-
-            if (!plan.HasDuplicates)
-            {
-                return null;
-            }
-
-            List<MEAI.FunctionResultContent> errs = new();
-            for (int i = 0; i < plan.IndexedResults.Length; i++)
-            {
-                if (plan.IsDuplicateIndex[i])
-                {
-                    errs.Add(plan.IndexedResults[i].Result);
-                }
-            }
-
-            return errs;
-        }
-
         private sealed class DuplicatePlan
         {
             public ToolCallResult[] IndexedResults = Array.Empty<ToolCallResult>();
             public bool[] IsDuplicateIndex = Array.Empty<bool>();
-            public bool HasDuplicates;
-            public bool HasExecutable;
             public string[] Signatures = Array.Empty<string>();
-
-            /// <summary>
-            /// Batch signature awaiting registration. Registered only AFTER the batch executes
-            /// with at least one success: a failed call must stay retryable with identical args
-            /// (e.g. after a transient tool timeout), otherwise the echo guard suppresses the
-            /// very retry the error feedback asks the model to make.
-            /// </summary>
-            public string PendingBatchSignature;
+            public ResolvedCall[] Calls = Array.Empty<ResolvedCall>();
+            public bool HasExecutable;
         }
 
-        private DuplicatePlan BuildDuplicatePlan(List<MEAI.FunctionCallContent> toolCalls)
+        /// <summary>One immutable resolution shared by scheduling, policy metadata and invocation.</summary>
+        private sealed class ResolvedCall
         {
+            public MEAI.FunctionCallContent Call;
+            public ILlmTool Metadata;
+            public ResolvedLlmToolInvocation Invocation;
+            public string Error;
+        }
+
+        private ResolvedCall ResolveCall(MEAI.FunctionCallContent call, MEAI.ChatOptions options)
+        {
+            if (options?.ToolMode is MEAI.NoneChatToolMode) return new ResolvedCall { Call = call };
+            GetCanonicalToolName(call?.Name, out ILlmTool metadata, out _);
+            ResolvedCall resolved = new() { Call = call, Metadata = metadata };
+            if (metadata is IResolvedLlmToolCallProvider provider && !HasParseErrorMarker(call?.Arguments))
+            {
+                if (provider.TryResolveInvocation(call.Arguments, out ResolvedLlmToolInvocation invocation,
+                        out string error))
+                {
+                    resolved.Invocation = invocation;
+                    resolved.Metadata = invocation.SourceTool;
+                }
+                else
+                {
+                    resolved.Error = error ?? "The delegated tool could not be resolved.";
+                }
+            }
+
+            return resolved;
+        }
+
+        private DuplicatePlan BuildDuplicatePlan(List<MEAI.FunctionCallContent> toolCalls, MEAI.ChatOptions options)
+        {
+            int count = toolCalls?.Count ?? 0;
             DuplicatePlan plan = new()
             {
-                IndexedResults = new ToolCallResult[toolCalls?.Count ?? 0],
-                IsDuplicateIndex = new bool[toolCalls?.Count ?? 0],
-                Signatures = new string[toolCalls?.Count ?? 0],
-                HasExecutable = toolCalls != null && toolCalls.Count > 0
+                IndexedResults = new ToolCallResult[count],
+                IsDuplicateIndex = new bool[count],
+                Signatures = new string[count],
+                Calls = toolCalls.Select(call => ResolveCall(call, options)).ToArray(),
+                HasExecutable = count > 0
             };
 
-            if (_allowDuplicateToolCalls || toolCalls == null || toolCalls.Count == 0)
+            if (options?.ToolMode is MEAI.NoneChatToolMode || _allowDuplicateToolCalls || count == 0)
             {
                 return plan;
             }
 
-            List<string> reducedSignatures = new();
-            for (int i = 0; i < toolCalls.Count; i++)
+            // Сравнение только с ПРЕДЫДУЩИМИ ходами: три одинаковых «spawn tree» в одном ходе — законная
+            // просьба, и все три исполняются (паритет с Claude/Cursor). Повтор из следующего хода —
+            // эхо, и оно гасится по своему ключу независимо от того, что ещё пришло рядом с ним.
+            bool anyExecutable = false;
+            for (int i = 0; i < count; i++)
             {
-                if (TryBuildDuplicateSignature(toolCalls[i], out string signature))
+                if (TryBuildDuplicateSignature(plan.Calls[i], out string signature))
                 {
                     plan.Signatures[i] = signature;
-                    reducedSignatures.Add(signature);
-                }
-            }
-
-            if (reducedSignatures.Count == 0)
-            {
-                return plan;
-            }
-
-            string batchSig = string.Join("|", reducedSignatures.OrderBy(s => s, StringComparer.Ordinal));
-            if (_executedSignatures.Contains(batchSig))
-            {
-                for (int i = 0; i < toolCalls.Count; i++)
-                {
-                    if (plan.Signatures[i] != null)
+                    if (_succeededCallSignatures.Contains(signature))
                     {
-                        MarkDuplicate(plan, i, toolCalls[i]);
+                        plan.IsDuplicateIndex[i] = true;
+                        plan.IndexedResults[i] = CreateDuplicateNoOp(toolCalls[i]);
+                        continue;
                     }
                 }
 
-                return plan;
+                anyExecutable = true;
             }
 
-            if (_partialBatchSuccesses.TryGetValue(batchSig, out bool[] succeededSlots))
-            {
-                int count = Math.Min(toolCalls.Count, succeededSlots.Length);
-                for (int i = 0; i < count; i++)
-                {
-                    if (succeededSlots[i] && plan.Signatures[i] != null)
-                    {
-                        MarkDuplicate(plan, i, toolCalls[i]);
-                    }
-                }
-            }
-
-            plan.PendingBatchSignature = batchSig;
-
-            // Intra-batch repeats are deliberately NOT suppressed: "spawn tree x3" in one turn is a
-            // legitimate request and must execute all three (Claude/Cursor parity). The runaway-echo
-            // bug this used to guard (one turn's calls re-executing every roundtrip) is fixed at the
-            // wire level - every tool_call_id gets its own tool-role reply - and the cross-turn
-            // whole-batch echo branch above still catches a model re-sending an identical turn.
+            plan.HasExecutable = anyExecutable;
             return plan;
         }
 
-        private void MarkDuplicate(DuplicatePlan plan, int index, MEAI.FunctionCallContent fc)
+        /// <summary>
+        /// Структурированный no-op для эха: модель получает <c>ok:true, duplicate:true</c> и объяснение, что
+        /// вызов уже выполнялся и не повторён. Это НЕ ошибка — ни для модели, ни для счётчика подряд идущих
+        /// сбоев: «покажи карточку ещё раз» с теми же аргументами не должно засчитываться как провал хода
+        /// и через три повтора обрывать ход сообщением об аборте.
+        /// </summary>
+        private ToolCallResult CreateDuplicateNoOp(MEAI.FunctionCallContent fc)
         {
-            string duplicate = $"Duplicate tool call '{fc.Name}' with same arguments - skipped.";
-            AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate", duplicate));
-            plan.IndexedResults[index] = new ToolCallResult
+            string message = BuildDuplicateNoOpPayload(fc?.Name ?? "");
+            AddTrace(new LlmToolCallTrace(fc?.Name ?? "", true, 0d, "duplicate", message));
+            return new ToolCallResult
             {
-                Result = new MEAI.FunctionResultContent(fc.CallId, duplicate),
-                Succeeded = false
+                Result = new MEAI.FunctionResultContent(fc?.CallId, message),
+                Succeeded = true
             };
-            plan.IsDuplicateIndex[index] = true;
-            plan.HasDuplicates = true;
-            plan.HasExecutable = plan.IsDuplicateIndex.Any(isDuplicate => !isDuplicate);
         }
 
-        private bool TryBuildDuplicateSignature(MEAI.FunctionCallContent fc, out string signature)
+        /// <summary>Текст no-op'а для эха; вынесен, чтобы потоковый и батчевый пути отдавали одно и то же.</summary>
+        internal static string BuildDuplicateNoOpPayload(string toolName)
         {
+            return JsonConvert.SerializeObject(new
+            {
+                ok = true,
+                duplicate = true,
+                message =
+                    $"Duplicate tool call '{toolName}' with identical arguments: this exact call already " +
+                    "succeeded earlier in this request and was NOT executed again. Use its earlier result; " +
+                    "do not repeat the call."
+            });
+        }
+
+        /// <summary>
+        /// Per-call сигнатура <c>имя(канонизированные аргументы)</c> или <c>false</c>, если инструмент
+        /// исключён из проверки. Исключение — целиком по флагу автора: <see cref="ILlmTool.AllowDuplicates"/>
+        /// означает «повторный идентичный вызов осмыслен» (перезапустить тот же код, перечитать состояние),
+        /// и молча отменять это для «особых» имён нельзя — автор строит поведение на обещании доков.
+        /// </summary>
+        private bool TryBuildDuplicateSignature(ResolvedCall resolved, out string signature)
+        {
+            MEAI.FunctionCallContent fc = resolved.Call;
             signature = null;
-            string canonicalName = GetCanonicalToolName(fc?.Name, out ILlmTool match, out bool ambiguous);
+            string canonicalName = GetCanonicalToolName(fc?.Name, out ILlmTool match, out _);
             if (canonicalName == null)
             {
                 canonicalName = fc?.Name ?? "";
             }
 
-            // Mutating built-ins are never exempt from the cross-turn replay guard. A tool can
-            // legitimately allow identical calls inside one turn (manage_skills is one example),
-            // but replaying the same completed turn must not apply its side effects again.
-            if (match != null && match.AllowDuplicates && !IsSerializedToolName(canonicalName))
+            if (resolved.Metadata != null && resolved.Metadata.AllowDuplicates)
             {
                 return false;
             }
@@ -325,13 +363,13 @@ namespace CoreAI.Infrastructure.Llm
             string argsSig = "";
             try
             {
-                argsSig = CanonicalizeArguments(fc?.Arguments);
+                argsSig = CanonicalizeArguments(resolved.Invocation?.Arguments ?? fc?.Arguments);
             }
             catch
             {
             }
 
-            signature = $"{canonicalName}({argsSig})";
+            signature = $"{resolved.Invocation?.Name ?? canonicalName}({argsSig})";
             return true;
         }
 
@@ -434,27 +472,6 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Effective per-call timeout for one tool: <see cref="ILlmTool.ToolTimeoutMsOverride"/> when the
-        /// tool declares one, otherwise <see cref="ICoreAISettings.DefaultToolTimeoutMs"/>. The returned
-        /// value keeps the global meaning unchanged — positive = budget in ms, <c>&lt;= 0</c> = no
-        /// per-call deadline — so every caller stays a plain <c>&gt; 0</c> check.
-        /// <para>
-        /// Resolution is BY NAME through <see cref="GetCanonicalToolName"/> (the same case-insensitive
-        /// repair the rest of the policy uses) because the invocation site only has the model's
-        /// <see cref="MEAI.FunctionCallContent"/> and an <see cref="MEAI.AIFunction"/> resolved out of
-        /// <see cref="MEAI.ChatOptions.Tools"/> — never the <see cref="ILlmTool"/> instance. A name the
-        /// role's tool list does not contain (an unbound call, a function expanded out of
-        /// <see cref="IAIFunctionsLlmTool"/> under a different name) simply falls back to the global
-        /// setting, which is what happened before overrides existed.
-        /// </para>
-        /// </summary>
-        private int ResolveToolTimeoutMs(string toolName)
-        {
-            GetCanonicalToolName(toolName, out ILlmTool tool, out _);
-            return tool?.ToolTimeoutMsOverride ?? _settings.DefaultToolTimeoutMs;
-        }
-
-        /// <summary>
         /// Effective grace budget for the bounded drain of one streamed turn: the LONGEST per-call
         /// timeout among the calls scheduled into <see cref="StreamedTurn.InFlight"/>, or <c>0</c>
         /// ("wait for natural completion") as soon as one of them runs with its deadline disabled.
@@ -492,17 +509,51 @@ namespace CoreAI.Infrastructure.Llm
         /// Execute a single tool call: resolve AIFunction, invoke, track success/failure,
         /// and send <see cref="IToolExecutionNotifier.NotifyToolExecuted"/>.
         /// </summary>
-        public async Task<ToolCallResult> ExecuteSingleAsync(
+        public Task<ToolCallResult> ExecuteSingleAsync(
             MEAI.FunctionCallContent fc,
             MEAI.ChatOptions chatOptions,
             CancellationToken cancellationToken)
         {
+            return ExecuteResolvedAsync(ResolveCall(fc, chatOptions), chatOptions, cancellationToken);
+        }
+
+        private async Task<ToolCallResult> ExecuteResolvedAsync(
+            ResolvedCall resolved,
+            MEAI.ChatOptions chatOptions,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            MEAI.FunctionCallContent fc = resolved.Call;
+            if (chatOptions?.ToolMode is MEAI.NoneChatToolMode)
+            {
+                string disabled = "Error: Tool execution is disabled for this request.";
+                RecordSyntheticTrace(fc.Name ?? "", false, 0d, "tools-disabled", disabled);
+                return new ToolCallResult
+                {
+                    Result = new MEAI.FunctionResultContent(fc.CallId, disabled),
+                    Succeeded = false
+                };
+            }
+            if (Volatile.Read(ref _hasAbandonedInvocation) != 0)
+            {
+                string stopped = "Error: Tool execution stopped because an earlier invocation did not observe its deadline.";
+                RecordSyntheticTrace(fc.Name, false, 0d, "blocked", stopped);
+                return new ToolCallResult
+                {
+                    Result = new MEAI.FunctionResultContent(fc.CallId, stopped),
+                    Succeeded = false
+                };
+            }
             MEAI.FunctionCallContent repairedFc = TryRepairToolName(fc);
             if (repairedFc == null)
             {
                 // Name not found even after case-insensitive search
                 string unknown =
                     $"Error: Unknown tool '{fc.Name}'. Available tools: [{string.Join(", ", _originalTools.Select(t => t.Name))}]";
+                // Событие сбоя публикуется и для выдуманного моделью имени: подписчик, который ждёт
+                // LlmToolCallFailed «в том числе для отсутствующего инструмента», иначе его не увидит,
+                // хотя соседняя ветка (имя известно, привязки нет) публикует.
+                _eventPublisher.PublishFailed(BuildInfo(fc), unknown, 0d);
                 RecordSyntheticTrace(fc.Name ?? "", false, 0d, "unknown-tool", unknown);
                 LogCallLine(fc, false, 0d, $"Tool '{fc.Name}' not found (no repair match)");
                 return new ToolCallResult
@@ -527,6 +578,18 @@ namespace CoreAI.Infrastructure.Llm
                 return new ToolCallResult
                 {
                     Result = new MEAI.FunctionResultContent(fc.CallId, parseError),
+                    Succeeded = false
+                };
+            }
+
+            if (!string.IsNullOrEmpty(resolved.Error))
+            {
+                string error = "Error: " + resolved.Error;
+                _eventPublisher.PublishFailed(BuildInfo(fc), error, 0d);
+                RecordSyntheticTrace(fc.Name, false, 0d, "schema-validation", error);
+                return new ToolCallResult
+                {
+                    Result = new MEAI.FunctionResultContent(fc.CallId, error),
                     Succeeded = false
                 };
             }
@@ -570,29 +633,22 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 MEAI.AIFunctionArguments args = null;
+                Dictionary<string, object> normalized = null;
                 if (fc.Arguments != null)
                 {
-                    // MEAI's AIFunctionFactory cannot convert Newtonsoft JObject/JArray to CLR
-                    // chokepoint for ALL tool calls (native, text-extracted, function-call syntax).
-                    Dictionary<string, object> normalized = new(fc.Arguments);
-                    foreach (string key in new List<string>(normalized.Keys))
-                    {
-                        if (normalized[key] is JObject jo)
-                        {
-                            normalized[key] = jo.ToString(Formatting.None);
-                        }
-                        else if (normalized[key] is JArray ja)
-                        {
-                            normalized[key] = ja.ToString(Formatting.None);
-                        }
-                    }
+                    // WHY: shared chokepoint (LlmToolArgumentNormalizer) for ALL tool calls
+                    // (native, text-extracted, function-call syntax). A copy keeps the raw
+                    // tokens on FunctionCallContent for tracing.
+                    normalized = LlmToolArgumentNormalizer.NormalizedCopy(fc.Arguments);
 
                     args = new MEAI.AIFunctionArguments(normalized);
                 }
 
+                // WHY: MEAI owns argument binding. Exceptions crossing its invocation boundary
+                // are conservatively treated as possibly invoked, so a retry cannot repeat a mutation.
                 ILlmAsyncMarshaler marshaler =
                     _settings.ToolInvocationMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
-                int toolTimeoutMs = ResolveToolTimeoutMs(fc.Name);
+                int toolTimeoutMs = resolved.Metadata?.ToolTimeoutMsOverride ?? _settings.DefaultToolTimeoutMs;
                 object result;
                 if (toolTimeoutMs > 0)
                 {
@@ -609,7 +665,7 @@ namespace CoreAI.Infrastructure.Llm
                         Task<object> invokeTask = marshaler
                             .InvokeAsync<object>(
                                 async () =>
-                                    await aiFunc.InvokeAsync(args, cts.Token),
+                                    await InvokeResolvedAsync(resolved, aiFunc, args, cts.Token),
                                 cts.Token);
                         TraceStep(fc, "invoke-started", invokeTask.IsCompleted ? "sync" : "async");
 
@@ -620,6 +676,15 @@ namespace CoreAI.Infrastructure.Llm
                         // tool body observe the deadline, on a normal finish it releases the delay the host
                         // still has scheduled. Cancel is idempotent, so one unconditional call covers both.
                         cts.Cancel();
+                        if (!invokeTask.IsCompleted)
+                        {
+                            // WHY: A cancellation-ignoring body cannot hold the request forever. Its
+                            // outcome is unknown, so stop future calls and prohibit retrying this turn.
+                            Interlocked.Exchange(ref _hasAbandonedInvocation, 1);
+                            _ = ObserveAsync(invokeTask);
+                            cancellationToken.ThrowIfCancellationRequested();
+                            throw new OperationCanceledException(cts.Token);
+                        }
                         result = await invokeTask;
                         TraceStep(fc, "result-awaited", null);
                     }
@@ -656,7 +721,7 @@ namespace CoreAI.Infrastructure.Llm
                     // CoreAiChatService's PlayerLoop timer — remains the only thing that ends a tool body
                     // that never returns.
                     result = await marshaler.InvokeAsync<object>(
-                        async () => await aiFunc.InvokeAsync(args, cancellationToken),
+                        async () => await InvokeResolvedAsync(resolved, aiFunc, args, cancellationToken),
                         cancellationToken);
                     TraceStep(fc, "result-awaited", "no-timeout");
                 }
@@ -668,8 +733,10 @@ namespace CoreAI.Infrastructure.Llm
                 if (maxResultChars > 0 && resultText.Length > maxResultChars)
                 {
                     int originalLen = resultText.Length;
+                    // Обрезка видна модели явной пометкой, а не молча: оборванный JSON без неё дочитывается
+                    // как полный. Вердикт успех/сбой уже снят с ПОЛНОГО текста выше.
                     resultText = resultText.Substring(0, maxResultChars) +
-                                 $"\n...[truncated: {originalLen} chars total -> {maxResultChars} shown]";
+                                 $"\n{TruncatedResultMarker}{originalLen} chars total -> {maxResultChars} shown]";
                     _logger.Info(
                         $"[ToolPolicy] Tool '{fc.Name}' result truncated: {originalLen} -> {maxResultChars} chars",
                         LogTag.Llm);
@@ -694,6 +761,15 @@ namespace CoreAI.Infrastructure.Llm
                 AddTrace(new LlmToolCallTrace(fc.Name ?? "", succeeded, elapsedMs, "native",
                     resultText));
                 LogCallLine(fc, succeeded, elapsedMs, resultText);
+
+                // WHY: the flag is raised HERE, on the only path that knows the call actually produced a
+                // successful result. A failing turn-ending tool must keep its ordinary error round: the
+                // model is the only thing that can recover from it, and cutting the turn would leave the
+                // student in front of a card that was never shown.
+                if (succeeded && resolved.Metadata?.EndsTurn == true)
+                {
+                    Interlocked.Exchange(ref _turnEndingToolSucceeded, 1);
+                }
 
                 // Notify subscribers
                 try
@@ -720,13 +796,10 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                // Argument/JSON conversion failures (MEAI could not coerce the model's arguments
-                // into the delegate's parameter types) are actionable: append the tool's compact
-                // schema so the model can retry with correctly-shaped arguments instead of
-                // guessing from an opaque exception message.
+                // Подсказка со схемой добавляется по ФОРМЕ исключения — это только текст для модели,
+                // чтобы она перевыпустила аргументы, а не гадала по непрозрачному сообщению.
                 string errorMessage = ex.Message;
-                bool argConversion = LooksLikeArgumentConversionError(ex);
-                if (argConversion)
+                if (LooksLikeArgumentConversionError(ex))
                 {
                     string schemaHint = BuildSchemaRetryHint(fc.Name);
                     if (!string.IsNullOrEmpty(schemaHint))
@@ -737,11 +810,9 @@ namespace CoreAI.Infrastructure.Llm
 
                 _logger.Error($"[ToolPolicy] {fc.Name} threw: {errorMessage}", LogTag.Llm);
                 _eventPublisher.PublishFailed(BuildInfo(fc), errorMessage, 0d);
-                // WHY: Tool bodies convert their own exceptions to error results; first-party tools and
-                // the DelegateLlmTool wrapper enforce this. Exceptions escaping InvokeAsync are therefore
-                // MEAI argument-coercion failures that occur before the body runs and remain retry-safe.
-                AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d,
-                    argConversion ? "arg-conversion" : "native", errorMessage));
+                // WHY: MEAI owns binding and execution; this boundary cannot prove the body was
+                // never entered. Conservatively prevent request retries after a possible side effect.
+                AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "native", errorMessage));
                 LogCallLine(fc, false, 0d, $"threw: {errorMessage}");
                 return new ToolCallResult
                 {
@@ -751,11 +822,19 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
+        private static async Task<object> InvokeResolvedAsync(ResolvedCall resolved,
+            MEAI.AIFunction function, MEAI.AIFunctionArguments arguments, CancellationToken cancellationToken)
+        {
+            return resolved.Invocation != null
+                ? await resolved.Invocation.InvokeAsync(cancellationToken)
+                : await function.InvokeAsync(arguments, cancellationToken);
+        }
+
         /// <summary>
-        /// Whether an exception thrown by a tool invocation looks like an argument/JSON type
-        /// conversion failure (as opposed to a genuine tool-body error). Checks the whole exception
-        /// chain: MEAI's AIFunctionFactory frequently wraps the real JsonException/FormatException
-        /// in an outer InvalidOperationException.
+        /// Похоже ли исключение вызова на сбой преобразования аргументов. Используется ТОЛЬКО для текста
+        /// подсказки со схемой; на источник трассы и retry-безопасность не влияет — это решает
+        /// консервативная классификация границы вызова. Проверяется вся цепочка: MEAI часто
+        /// заворачивает настоящую JsonException/FormatException во внешнюю InvalidOperationException.
         /// </summary>
         internal static bool LooksLikeArgumentConversionError(Exception ex)
         {
@@ -1024,12 +1103,13 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Names of state-mutating built-in tools that must never run concurrently. These tools write to a
-        /// shared store (long-term memory, the installed Lua mods registry, the skills registry); racing two
-        /// of them risks lost updates or torn reads. Matched case-insensitively against the (possibly repaired)
-        /// tool name. See <see cref="IsSerializedTool"/> and <see cref="ExecuteBatchAsync"/>.
+        /// Встроенные мутирующие инструменты, которые политика узнаёт ПО ИМЕНИ даже без
+        /// <see cref="ILlmTool.IsMutating"/> у их класса: они пишут в общее хранилище (память, реестр
+        /// Lua-модов, реестр навыков, мир), и гонка двух таких вызовов теряет записи. Список — только
+        /// обратная совместимость для встроенных имён; расширение делается флагом у инструмента, а не
+        /// правкой этого файла. Сравнение без учёта регистра, по (возможно исправленному) имени.
         /// </summary>
-        private static readonly HashSet<string> SerializedMutatingToolNames = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly HashSet<string> BuiltInMutatingToolNames = new(StringComparer.OrdinalIgnoreCase)
         {
             "memory",
             "manage_mods",
@@ -1041,20 +1121,26 @@ namespace CoreAI.Infrastructure.Llm
         };
 
         /// <summary>
-        /// Whether a tool call must be serialized relative to other mutating calls in the same batch.
-        /// The rule is intentionally conservative: any call whose name is in
-        /// <see cref="SerializedMutatingToolNames"/> joins a single ordered serialization chain so that no two
-        /// state-mutating built-ins ever overlap, even with different names. All other (independent / read-only)
-        /// tools run fully in parallel under the concurrency limit.
+        /// Обязан ли вызов идти в общей цепочке сериализации мутаций. Правило: инструмент объявил
+        /// <see cref="ILlmTool.IsMutating"/> (разрешение по имени из списка роли, как у таймаутов) ИЛИ
+        /// его имя — встроенное мутирующее. Все мутирующие вызовы хода делят ОДНУ упорядоченную цепочку,
+        /// так что два разных мутирующих инструмента тоже не перекрываются; остальные идут параллельно
+        /// под лимитом <see cref="ICoreAISettings.MaxParallelToolCalls"/>.
         /// </summary>
-        private static bool IsSerializedTool(MEAI.FunctionCallContent fc)
+        private bool IsMutatingTool(MEAI.FunctionCallContent fc)
         {
-            return IsSerializedToolName(fc?.Name);
+            return IsMutatingToolName(fc?.Name);
         }
 
-        private static bool IsSerializedToolName(string toolName)
+        private bool IsMutatingToolName(string toolName)
         {
-            return toolName != null && SerializedMutatingToolNames.Contains(toolName);
+            if (string.IsNullOrEmpty(toolName))
+            {
+                return false;
+            }
+
+            string canonical = GetCanonicalToolName(toolName, out ILlmTool tool, out _) ?? toolName;
+            return (tool != null && tool.IsMutating) || BuiltInMutatingToolNames.Contains(canonical);
         }
 
         /// <summary>
@@ -1063,13 +1149,21 @@ namespace CoreAI.Infrastructure.Llm
         /// <para>
         /// Concurrency model (<see cref="ICoreAISettings.MaxParallelToolCalls"/>): when the limit is &gt; 1 and
         /// the batch has more than one call, independent tool calls execute concurrently with bounded
-        /// parallelism (a <see cref="SemaphoreSlim"/> of that size). State-mutating built-ins
-        /// (<see cref="SerializedMutatingToolNames"/>) are run on a single ordered serialization chain so they
-        /// never race each other. Regardless of completion order, results are collated back into the
-        /// <b>original call order</b> (indexed array). The consecutive-error counter is updated exactly once,
-        /// after ordered collation, with the same semantics as the sequential path. A value &lt;= 1 (or a
-        /// single-call batch) takes a strictly-sequential fast path that is byte-identical to the legacy loop.
+        /// parallelism (a <see cref="SemaphoreSlim"/> of that size). Mutating tools
+        /// (<see cref="ILlmTool.IsMutating"/> or a name from <see cref="BuiltInMutatingToolNames"/>) are run
+        /// on a single ordered serialization chain so they never race each other. Regardless of completion
+        /// order, results are collated back into the <b>original call order</b> (indexed array). The
+        /// consecutive-error counter is updated exactly once, after ordered collation, with the same
+        /// semantics as the sequential path. A value &lt;= 1 (or a single-call batch) takes a
+        /// strictly-sequential fast path that is byte-identical to the legacy loop.
         /// Outer cancellation cancels all in-flight calls and propagates as <see cref="OperationCanceledException"/>.
+        /// </para>
+        /// <para>
+        /// Эхо (вызов, чья per-call сигнатура уже успела раньше в этом запросе) не исполняется и получает
+        /// структурированный no-op с <c>ok:true</c>. Учёт хода ведётся ТОЛЬКО по исполненным слотам:
+        /// no-op — не успех и не сбой, а отсутствие движения. Ход из одних no-op'ов не двигает счётчик
+        /// подряд идущих сбоев ни в какую сторону; от модели, которая эхо-ит бесконечно, защищает
+        /// лимит roundtrip'ов, а не счётчик ошибок.
         /// </para>
         /// </summary>
         public async Task<BatchToolCallResult> ExecuteBatchAsync(
@@ -1077,19 +1171,21 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions chatOptions,
             CancellationToken cancellationToken)
         {
-            // 1. Check duplicates per slot so mixed batches can still execute allowed calls.
-            DuplicatePlan duplicatePlan = BuildDuplicatePlan(toolCalls);
-            if (duplicatePlan.HasDuplicates && !duplicatePlan.HasExecutable)
+            if (toolCalls == null || toolCalls.Count == 0)
             {
-                // Every call in the batch was a duplicate - this counts as a failed iteration for the
-                // consecutive-error guard, same as the sequential/concurrent paths below. Without this, a
-                // model stuck repeating the same call forever never trips the max-consecutive-errors guard.
-                RecordFailure();
+                return new BatchToolCallResult { Results = new List<MEAI.AIContent>() };
+            }
+
+            // 1. Эхо решается по слотам, чтобы смешанный батч исполнил всё, что не эхо.
+            DuplicatePlan duplicatePlan = BuildDuplicatePlan(toolCalls, chatOptions);
+            if (!duplicatePlan.HasExecutable)
+            {
                 return new BatchToolCallResult
                 {
                     Results = duplicatePlan.IndexedResults.Select(r => (MEAI.AIContent)r.Result).ToList(),
-                    AnyFailed = true,
-                    AllFailed = true
+                    AnyFailed = false,
+                    AllFailed = false,
+                    AllDuplicates = true
                 };
             }
 
@@ -1098,54 +1194,24 @@ namespace CoreAI.Infrastructure.Llm
             // 2a. Sequential fast-path: byte-identical to the legacy loop.
             if (maxParallel <= 1 || toolCalls.Count <= 1)
             {
-                List<MEAI.AIContent> seqResults = new();
-                bool seqAnyFailed = false;
-                bool seqAllFailed = true;
-
                 for (int i = 0; i < toolCalls.Count; i++)
                 {
-                    ToolCallResult r = duplicatePlan.IsDuplicateIndex[i]
-                        ? duplicatePlan.IndexedResults[i]
-                        : await ExecuteSingleAsync(toolCalls[i], chatOptions, cancellationToken);
-                    duplicatePlan.IndexedResults[i] = r;
-                    seqResults.Add(r.Result);
-                    if (!r.Succeeded)
+                    if (!duplicatePlan.IsDuplicateIndex[i])
                     {
-                        seqAnyFailed = true;
-                    }
-                    else
-                    {
-                        seqAllFailed = false;
+                        duplicatePlan.IndexedResults[i] =
+                            await ExecuteResolvedAsync(duplicatePlan.Calls[i], chatOptions, cancellationToken);
                     }
                 }
 
-                // Partial success IS forward progress: only a batch where EVERY call failed counts
-                // toward the consecutive-error abort. Otherwise three 4-of-5-successful spawn
-                // batches in a row would kill a run that is visibly building the scene.
-                if (seqAnyFailed && seqAllFailed)
-                {
-                    RecordFailure();
-                }
-                else
-                {
-                    RecordSuccess();
-                    RegisterExecutionOutcome(duplicatePlan, duplicatePlan.IndexedResults, seqAnyFailed, seqAllFailed);
-                }
-
-                return new BatchToolCallResult
-                {
-                    Results = seqResults,
-                    AnyFailed = seqAnyFailed,
-                    AllFailed = seqAnyFailed && seqAllFailed
-                };
+                return CollateBatch(duplicatePlan);
             }
 
-            // 2b. Concurrent path with bounded parallelism + serialization of mutating built-ins.
+            // 2b. Concurrent path with bounded parallelism + serialization of mutating tools.
             ToolCallResult[] indexed = duplicatePlan.IndexedResults;
             using SemaphoreSlim gate = new(maxParallel, maxParallel);
 
-            // Single ordered chain for all serialized (mutating) tool calls so none of them overlap.
-            // Each serialized call awaits the previous serialized call before running.
+            // Single ordered chain for all mutating tool calls so none of them overlap.
+            // Each mutating call awaits the previous mutating call before running.
             Task serialChain = Task.CompletedTask;
             List<Task> tasks = new(toolCalls.Count);
 
@@ -1153,12 +1219,13 @@ namespace CoreAI.Infrastructure.Llm
             {
                 int index = i;
                 MEAI.FunctionCallContent fc = toolCalls[index];
+                ResolvedCall resolved = duplicatePlan.Calls[index];
                 if (duplicatePlan.IsDuplicateIndex[index])
                 {
                     continue;
                 }
 
-                if (IsSerializedTool(fc))
+                if (IsMutatingTool(fc) || resolved.Metadata?.IsMutating == true)
                 {
                     Task previous = serialChain;
                     serialChain = RunGuardedAsync(previous);
@@ -1197,7 +1264,7 @@ namespace CoreAI.Infrastructure.Llm
                     try
                     {
                         indexed[index] =
-                            await ExecuteSingleAsync(fc, chatOptions, cancellationToken);
+                            await ExecuteResolvedAsync(resolved, chatOptions, cancellationToken);
                     }
                     finally
                     {
@@ -1209,42 +1276,79 @@ namespace CoreAI.Infrastructure.Llm
             // Awaiting WhenAll surfaces OperationCanceledException on outer cancellation (never swallowed).
             await Task.WhenAll(tasks);
 
-            // 3. Collate strictly in original call order.
-            List<MEAI.AIContent> results = new(indexed.Length);
-            bool anyFailed = false;
-            bool allFailed = true;
-            foreach (ToolCallResult r in indexed)
+            // 3-4. Collate strictly in original call order, then record the turn exactly once
+            // (deterministic regardless of completion order).
+            return CollateBatch(duplicatePlan);
+        }
+
+        /// <summary>
+        /// Общий хвост батча: результаты в исходном порядке вызовов, ОДНА запись в счётчик подряд идущих
+        /// сбоев и регистрация per-call сигнатур успевших слотов. Частичный успех — движение вперёд: к
+        /// аборту ведёт только батч, где упал КАЖДЫЙ исполненный вызов, иначе три батча «4 из 5 удались»
+        /// подряд убивали бы прогон, который на глазах строит сцену. Слоты-эхо в учёте не участвуют.
+        /// </summary>
+        private BatchToolCallResult CollateBatch(DuplicatePlan plan)
+        {
+            List<MEAI.AIContent> results = new(plan.IndexedResults.Length);
+            int executed = 0;
+            int executedFailed = 0;
+            for (int i = 0; i < plan.IndexedResults.Length; i++)
             {
+                ToolCallResult r = plan.IndexedResults[i];
                 results.Add(r.Result);
+                if (plan.IsDuplicateIndex[i])
+                {
+                    continue;
+                }
+
+                executed++;
                 if (!r.Succeeded)
                 {
-                    anyFailed = true;
+                    executedFailed++;
                 }
-                else
+                else if (plan.Signatures[i] != null)
                 {
-                    allFailed = false;
+                    _succeededCallSignatures.Add(plan.Signatures[i]);
                 }
             }
 
-            // 4. Update error counter once, after ordered collation (deterministic regardless of
-            // completion order). Partial success is forward progress: only an ALL-failed batch
-            // counts toward the consecutive-error abort.
-            if (anyFailed && allFailed)
+            RecordTurnOutcome(executed, executedFailed);
+            return new BatchToolCallResult
+            {
+                Results = results,
+                AnyFailed = executedFailed > 0,
+                AllFailed = executed > 0 && executedFailed == executed,
+                AllDuplicates = executed == 0
+            };
+        }
+
+        /// <summary>
+        /// Одна запись в счётчик за ход: все исполненные упали — сбой; хоть один удался — успех (сброс);
+        /// исполненных нет (ход из одних no-op'ов эха) — счётчик не трогается вовсе, потому что не было
+        /// ни ошибки, ни движения.
+        /// </summary>
+        private void RecordTurnOutcome(int executed, int executedFailed)
+        {
+            if (executed == 0)
+            {
+                if (_settings.LogMeaiToolCallingSteps)
+                {
+                    _logger.Info(
+                        "[ToolPolicy] Echo-only turn (every call already succeeded earlier); error counter untouched",
+                        LogTag.Llm);
+                }
+
+                return;
+            }
+
+            if (executedFailed == executed)
             {
                 RecordFailure();
             }
             else
             {
                 RecordSuccess();
-                RegisterExecutionOutcome(duplicatePlan, indexed, anyFailed, allFailed);
             }
-
-            return new BatchToolCallResult
-            {
-                Results = results,
-                AnyFailed = anyFailed,
-                AllFailed = anyFailed && allFailed
-            };
         }
 
         /// <summary>
@@ -1269,7 +1373,14 @@ namespace CoreAI.Infrastructure.Llm
             /// </summary>
             internal readonly List<StreamedSlot> Slots = new();
 
-            internal readonly List<string> Signatures = new();
+            /// <summary>
+            /// Per-call сигнатура каждого слота (<c>null</c> — инструмент исключён из проверки эха),
+            /// параллельно <see cref="Slots"/>. Регистрируется при финализации только у успевших слотов.
+            /// </summary>
+            internal readonly List<string> SlotSignatures = new();
+
+            /// <summary>Слоты, заполненные no-op'ом эха: в учёте хода они не участвуют.</summary>
+            internal readonly HashSet<StreamedSlot> DuplicateSlots = new();
 
             /// <summary>Scheduled (parallel-mode) call tasks, drained at turn completion.</summary>
             internal readonly List<Task> InFlight = new();
@@ -1282,19 +1393,11 @@ namespace CoreAI.Infrastructure.Llm
             /// </summary>
             internal readonly List<int> InFlightTimeoutsMs = new();
 
-            /// <summary>
-            /// Mutating calls are buffered until the complete streamed turn is known. This lets the
-            /// whole-turn replay guard reject an echoed multi-call turn before any side effect runs.
-            /// Production streaming always completes through <see cref="CompleteStreamedTurnAsync"/>.
-            /// </summary>
-            internal readonly List<DeferredStreamedCall> DeferredMutations = new();
-
-            internal readonly HashSet<StreamedSlot> PreviouslySuccessfulSlots = new();
             internal bool IsFinalized;
 
             /// <summary>
-            /// Single ordered chain for serialized (mutating) tool calls, batch parity: each
-            /// serialized call awaits the previous one so no two mutating built-ins ever overlap.
+            /// Single ordered chain for mutating tool calls, batch parity: each mutating call awaits
+            /// the previous one so no two mutating tools ever overlap.
             /// </summary>
             internal Task SerialChain = Task.CompletedTask;
 
@@ -1341,23 +1444,6 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        internal sealed class DeferredStreamedCall
-        {
-            internal readonly MEAI.FunctionCallContent FunctionCall;
-            internal readonly MEAI.ChatOptions ChatOptions;
-            internal readonly StreamedSlot Slot;
-
-            internal DeferredStreamedCall(
-                MEAI.FunctionCallContent functionCall,
-                MEAI.ChatOptions chatOptions,
-                StreamedSlot slot)
-            {
-                FunctionCall = functionCall;
-                ChatOptions = chatOptions;
-                Slot = slot;
-            }
-        }
-
         /// <summary>Starts a streamed turn (execute-as-you-stream counterpart of one batch).</summary>
         public StreamedTurn BeginStreamedTurn()
         {
@@ -1366,18 +1452,18 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Executes one tool call the moment it arrives in the stream. Mirrors the batch path per
-        /// call: only a CROSS-turn echo (a single call whose signature was already registered by an
-        /// earlier turn in this request) is suppressed with the same "Duplicate tool call" result
-        /// the batch path produces; exact repeats WITHIN the same turn ("spawn tree x3") execute,
-        /// and tools with AllowDuplicates are exempt entirely. Signature bookkeeping and the
-        /// cross-turn echo check always resolve synchronously at arrival (arrival ORDER is what
-        /// makes them deterministic), so a suppressed call fills its slot immediately and returns
-        /// its result in both modes.
+        /// call: only a CROSS-turn echo (a call whose per-call signature already SUCCEEDED in an
+        /// earlier turn of this request) is answered with the same structured no-op the batch path
+        /// produces — without executing; exact repeats WITHIN the same turn ("spawn tree x3") execute,
+        /// and tools with AllowDuplicates are exempt entirely. The echo check resolves synchronously
+        /// at arrival (arrival ORDER is what makes it deterministic) and BEFORE any side effect, for
+        /// mutating and read-only tools alike — a per-call key needs no knowledge of the rest of the
+        /// turn, which is why mutations are no longer buffered until completion.
         /// <para>
         /// Sequential mode (<see cref="ICoreAISettings.MaxParallelToolCalls"/> &lt;= 1): the call
         /// executes inline and its result is returned, byte-identical to the pre-parallel
         /// behavior. Parallel mode: the call's arrival slot is reserved and a bounded-concurrency
-        /// worker is scheduled mirroring the batch concurrent path (mutating built-ins join the
+        /// worker is scheduled mirroring the batch concurrent path (mutating tools join the
         /// turn's single serialization chain, everything else is gate-bounded); the method
         /// returns <c>null</c> and the result surfaces in <see cref="CompleteStreamedTurnAsync"/>,
         /// collated in arrival order. The streaming caller discards the per-call return value
@@ -1391,46 +1477,21 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions chatOptions,
             CancellationToken cancellationToken)
         {
+            ResolvedCall resolved = ResolveCall(fc, chatOptions);
             string signature = null;
-            bool hasSignature = !_allowDuplicateToolCalls && TryBuildDuplicateSignature(fc, out signature);
-            if (hasSignature)
-            {
-                turn.Signatures.Add(signature);
-            }
-
-            // Cross-turn echo guard, batch parity for the single-call turn: a one-call batch
-            // registers the call's own signature as its turn signature, so when a model re-issues
-            // the identical single call it already ran last turn, ExecuteBatchAsync suppresses it —
-            // mirror that here. A multi-call echo turn cannot be detected mid-stream (its combined
-            // signature only exists once the turn ends); that direction is covered by the wire
-            // protocol sending every tool result (models stop re-issuing "unanswered" calls).
-            bool crossTurnEcho = hasSignature && _executedSignatures.Contains(signature);
+            bool hasSignature = chatOptions?.ToolMode is not MEAI.NoneChatToolMode &&
+                !_allowDuplicateToolCalls && TryBuildDuplicateSignature(resolved, out signature);
 
             StreamedSlot slot = new(fc.CallId);
             turn.Slots.Add(slot);
+            turn.SlotSignatures.Add(hasSignature ? signature : null);
 
-            // Batch parity with BuildDuplicatePlan: only the CROSS-turn echo is suppressed. An exact
-            // repeat within the same turn ("spawn tree x3") is a legitimate request and executes.
-            if (hasSignature && crossTurnEcho)
+            if (hasSignature && _succeededCallSignatures.Contains(signature))
             {
-                string duplicate = $"Duplicate tool call '{fc.Name}' with same arguments - skipped.";
-                AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate", duplicate));
-                ToolCallResult suppressed = new()
-                {
-                    Result = new MEAI.FunctionResultContent(fc.CallId, duplicate),
-                    Succeeded = false
-                };
+                ToolCallResult suppressed = CreateDuplicateNoOp(fc);
+                turn.DuplicateSlots.Add(slot);
                 slot.Set(suppressed);
                 return suppressed;
-            }
-
-            // A streamed multi-call echo cannot be identified until the turn is complete. Buffer
-            // state-mutating calls so CompleteStreamedTurnAsync can compare the combined signature
-            // before any side effect is applied. Read-only calls keep execute-as-you-stream latency.
-            if (IsSerializedTool(fc))
-            {
-                turn.DeferredMutations.Add(new DeferredStreamedCall(fc, chatOptions, slot));
-                return null;
             }
 
             int maxParallel = Math.Max(1, _settings.MaxParallelToolCalls);
@@ -1438,21 +1499,21 @@ namespace CoreAI.Infrastructure.Llm
             {
                 // Sequential fast-path: byte-identical to the pre-parallel streamed behavior.
                 ToolCallResult executed =
-                    await ExecuteSingleAsync(fc, chatOptions, cancellationToken);
+                    await ExecuteResolvedAsync(resolved, chatOptions, cancellationToken);
                 TraceStep(fc, "streamed-sequential-done", executed.Succeeded ? "ok" : "failed");
                 slot.Set(executed);
                 return executed;
             }
 
             // Parallel scheduling, batch parity with the ExecuteBatchAsync concurrent path:
-            // mutating built-ins chain onto SerialChain so they never overlap; everything else
+            // mutating tools chain onto SerialChain so they never overlap; everything else
             // runs gate-bounded. The per-call result is deferred to CompleteStreamedTurnAsync.
             turn.Gate ??= new SemaphoreSlim(maxParallel, maxParallel);
 
             // Captured here, not at drain time: this is the last place the call's NAME is available,
             // and the drain deadline must cover the longest budget it scheduled.
-            turn.InFlightTimeoutsMs.Add(ResolveToolTimeoutMs(fc.Name));
-            if (IsSerializedTool(fc))
+            turn.InFlightTimeoutsMs.Add(resolved.Metadata?.ToolTimeoutMsOverride ?? _settings.DefaultToolTimeoutMs);
+            if (IsMutatingTool(fc) || resolved.Metadata?.IsMutating == true)
             {
                 Task previous = turn.SerialChain;
                 Task chained = RunGuardedAsync(previous);
@@ -1486,7 +1547,7 @@ namespace CoreAI.Infrastructure.Llm
                 await turn.Gate.WaitAsync(cancellationToken);
                 try
                 {
-                    slot.Set(await ExecuteSingleAsync(fc, chatOptions, cancellationToken));
+                    slot.Set(await ExecuteResolvedAsync(resolved, chatOptions, cancellationToken));
                 }
                 finally
                 {
@@ -1505,13 +1566,6 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         public BatchToolCallResult CompleteStreamedTurn(StreamedTurn turn)
         {
-            if (turn.DeferredMutations.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    "CompleteStreamedTurn cannot execute deferred mutating tool calls synchronously. " +
-                    "Use CompleteStreamedTurnAsync.");
-            }
-
             foreach (Task inFlight in turn.InFlight)
             {
                 if (!inFlight.IsCompleted)
@@ -1532,13 +1586,10 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Ends a streamed turn: drains every scheduled in-flight call, collates the slots
         /// strictly in ARRIVAL order, records ONE success/failure against the consecutive-error
-        /// counter (batch parity) and registers the turn's combined signature so a later turn that
-        /// re-sends the exact same batch through <see cref="ExecuteBatchAsync"/> is still caught
-        /// as an echo. If the combined signature was ALREADY registered earlier in this request,
-        /// the whole turn is a cross-turn echo: it records ONE failure (never a success) and
-        /// reports AnyFailed and AllFailed, exactly like the all-duplicate batch branch in
-        /// <see cref="ExecuteBatchAsync"/>. Otherwise returns the same shape
-        /// <see cref="ExecuteBatchAsync"/> would for the whole turn.
+        /// counter (batch parity) and registers the per-call signature of every slot that SUCCEEDED,
+        /// so a later turn that re-sends any of those calls — through this path or through
+        /// <see cref="ExecuteBatchAsync"/> — gets the structured no-op instead of a second execution.
+        /// Returns the same shape <see cref="ExecuteBatchAsync"/> would for the whole turn.
         /// <para>
         /// Finalization never throws away the turn's accounting — it is also the mid-stream-abort
         /// path. On outer cancellation (or a tool that ignores its token) it stops waiting once
@@ -1550,58 +1601,6 @@ namespace CoreAI.Infrastructure.Llm
             StreamedTurn turn,
             CancellationToken cancellationToken)
         {
-            if (turn.DeferredMutations.Count > 0)
-            {
-                string combined = BuildStreamedTurnSignature(turn);
-                bool fullEcho = combined != null && _executedSignatures.Contains(combined);
-                _partialBatchSuccesses.TryGetValue(combined ?? "", out bool[] partialSuccesses);
-                for (int deferredIndex = 0; deferredIndex < turn.DeferredMutations.Count; deferredIndex++)
-                {
-                    DeferredStreamedCall deferred = turn.DeferredMutations[deferredIndex];
-                    int slotIndex = turn.Slots.IndexOf(deferred.Slot);
-                    bool alreadySucceeded = partialSuccesses != null &&
-                                            slotIndex >= 0 &&
-                                            slotIndex < partialSuccesses.Length &&
-                                            partialSuccesses[slotIndex];
-                    if (fullEcho || alreadySucceeded)
-                    {
-                        string duplicate =
-                            $"Duplicate tool call '{deferred.FunctionCall.Name}' with same arguments - skipped.";
-                        AddTrace(new LlmToolCallTrace(
-                            deferred.FunctionCall.Name ?? "", false, 0d, "duplicate", duplicate));
-                        deferred.Slot.Set(new ToolCallResult
-                        {
-                            Result = new MEAI.FunctionResultContent(deferred.FunctionCall.CallId, duplicate),
-                            Succeeded = false
-                        });
-                        if (alreadySucceeded)
-                        {
-                            turn.PreviouslySuccessfulSlots.Add(deferred.Slot);
-                        }
-
-                        continue;
-                    }
-
-                    // All mutating built-ins share this ordered loop, so different mutation types
-                    // cannot race each other even when MaxParallelToolCalls is greater than one.
-                    try
-                    {
-                        deferred.Slot.Set(await ExecuteSingleAsync(
-                            deferred.FunctionCall,
-                            deferred.ChatOptions,
-                            cancellationToken));
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        deferred.Slot.Set(CreateFinalizedFailure(
-                            deferred.Slot.CallId,
-                            "Error: Tool call was cancelled while finalizing the streamed turn."));
-                    }
-                }
-
-                turn.DeferredMutations.Clear();
-            }
-
             if (turn.InFlight.Count > 0)
             {
                 Task allInFlight = Task.WhenAll(turn.InFlight);
@@ -1722,8 +1721,9 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Shared completion tail of <see cref="CompleteStreamedTurn"/> and
-        /// <see cref="CompleteStreamedTurnAsync"/>: arrival-order slot collation, the whole-turn
-        /// echo branch, and exactly one consecutive-error record for the turn.
+        /// <see cref="CompleteStreamedTurnAsync"/>: arrival-order slot collation, per-call signature
+        /// registration for the slots that succeeded, and exactly one consecutive-error record for
+        /// the turn (echo no-op slots take no part in it — same rule as <see cref="CollateBatch"/>).
         /// </summary>
         private BatchToolCallResult FinalizeStreamedTurn(StreamedTurn turn)
         {
@@ -1738,9 +1738,8 @@ namespace CoreAI.Infrastructure.Llm
             // before finalization (cancelled / stream aborted mid-flight): it collates as an
             // explicit failure so a partially-applied turn keeps full result accounting.
             List<MEAI.AIContent> results = new(turn.Slots.Count);
-            bool anyFailed = false;
-            bool allFailed = true;
-            bool[] logicalSuccesses = new bool[turn.Slots.Count];
+            int executed = 0;
+            int executedFailed = 0;
             for (int slotIndex = 0; slotIndex < turn.Slots.Count; slotIndex++)
             {
                 StreamedSlot slot = turn.Slots[slotIndex];
@@ -1751,17 +1750,20 @@ namespace CoreAI.Infrastructure.Llm
                         "or stream aborted) while the call was still in flight.");
                 }
 
-                logicalSuccesses[slotIndex] =
-                    r.Succeeded || turn.PreviouslySuccessfulSlots.Contains(slot);
-
                 results.Add(r.Result);
+                if (turn.DuplicateSlots.Contains(slot))
+                {
+                    continue;
+                }
+
+                executed++;
                 if (!r.Succeeded)
                 {
-                    anyFailed = true;
+                    executedFailed++;
                 }
-                else
+                else if (turn.SlotSignatures[slotIndex] != null)
                 {
-                    allFailed = false;
+                    _succeededCallSignatures.Add(turn.SlotSignatures[slotIndex]);
                 }
             }
 
@@ -1773,90 +1775,18 @@ namespace CoreAI.Infrastructure.Llm
                 turn.Gate.Dispose();
             }
 
-            if (turn.Signatures.Count > 0)
-            {
-                // Check the combined turn signature BEFORE recording the turn's outcome, mirroring
-                // ExecuteBatchAsync where BuildDuplicatePlan checks the whole-batch signature first.
-                // Contains() means this exact turn already executed earlier in the request: a
-                // whole-turn echo. Read-only calls may already have executed because a multi-call
-                // signature does not exist mid-stream; mutating calls are deferred and suppressed in
-                // CompleteStreamedTurnAsync. This branch restores turn-level error accounting: otherwise
-                // successful read-only results reset the counter, and a model stuck
-                // echoing the same batch never trips the max-consecutive-errors guard (it runs to the
-                // iteration cap instead).
-                string combined = BuildStreamedTurnSignature(turn);
-                if (_executedSignatures.Contains(combined))
-                {
-                    string echoDetail =
-                        $"Whole-turn echo: identical streamed turn ({turn.Slots.Count} calls) already executed " +
-                        "earlier in this request - counted as a failed iteration.";
-                    AddTrace(new LlmToolCallTrace("", false, 0d, "duplicate", echoDetail));
-                    RecordFailure();
-                    return new BatchToolCallResult
-                    {
-                        Results = results,
-                        AnyFailed = true,
-                        AllFailed = true
-                    };
-                }
-
-                // Register only when the turn made progress: a fully-failed turn must stay
-                // retryable with identical args (the error feedback explicitly asks for a retry).
-                if (!anyFailed)
-                {
-                    _executedSignatures.Add(combined);
-                    _partialBatchSuccesses.Remove(combined);
-                }
-                else if (!allFailed || logicalSuccesses.Any(succeeded => succeeded))
-                {
-                    if (_partialBatchSuccesses.TryGetValue(combined, out bool[] existing) &&
-                        existing.Length == logicalSuccesses.Length)
-                    {
-                        for (int i = 0; i < logicalSuccesses.Length; i++)
-                        {
-                            logicalSuccesses[i] = logicalSuccesses[i] || existing[i];
-                        }
-                    }
-
-                    if (logicalSuccesses.All(succeeded => succeeded))
-                    {
-                        _partialBatchSuccesses.Remove(combined);
-                        _executedSignatures.Add(combined);
-                    }
-                    else
-                    {
-                        _partialBatchSuccesses[combined] = logicalSuccesses;
-                    }
-                }
-            }
-
             if (turn.Slots.Count > 0)
             {
-                // Partial success is forward progress: only an ALL-failed turn counts toward the
-                // consecutive-error abort (see ExecuteBatchAsync for the same rule).
-                if (anyFailed && allFailed)
-                {
-                    RecordFailure();
-                }
-                else
-                {
-                    RecordSuccess();
-                }
+                RecordTurnOutcome(executed, executedFailed);
             }
 
             return new BatchToolCallResult
             {
                 Results = results,
-                AnyFailed = anyFailed,
-                AllFailed = turn.Slots.Count > 0 && anyFailed && allFailed
+                AnyFailed = executedFailed > 0,
+                AllFailed = executed > 0 && executedFailed == executed,
+                AllDuplicates = turn.Slots.Count > 0 && executed == 0
             };
-        }
-
-        private static string BuildStreamedTurnSignature(StreamedTurn turn)
-        {
-            return turn.Signatures.Count == 0
-                ? null
-                : string.Join("|", turn.Signatures.OrderBy(s => s, StringComparer.Ordinal));
         }
 
         private static ToolCallResult CreateFinalizedFailure(string callId, string message)
@@ -1866,52 +1796,6 @@ namespace CoreAI.Infrastructure.Llm
                 Result = new MEAI.FunctionResultContent(callId, message),
                 Succeeded = false
             };
-        }
-
-        /// <summary>
-        /// Registers a batch signature for the cross-turn echo guard. Called only after the batch
-        /// executed with at least one success, so a fully-failed batch stays retryable verbatim.
-        /// </summary>
-        private void RegisterExecutionOutcome(
-            DuplicatePlan plan,
-            ToolCallResult[] indexedResults,
-            bool anyFailed,
-            bool allFailed)
-        {
-            if (plan?.PendingBatchSignature == null || allFailed)
-            {
-                return;
-            }
-
-            if (!anyFailed)
-            {
-                _executedSignatures.Add(plan.PendingBatchSignature);
-                _partialBatchSuccesses.Remove(plan.PendingBatchSignature);
-                return;
-            }
-
-            bool[] successes = _partialBatchSuccesses.TryGetValue(plan.PendingBatchSignature, out bool[] existing)
-                ? (bool[])existing.Clone()
-                : new bool[indexedResults.Length];
-            if (successes.Length != indexedResults.Length)
-            {
-                successes = new bool[indexedResults.Length];
-            }
-
-            for (int i = 0; i < indexedResults.Length; i++)
-            {
-                successes[i] = successes[i] || plan.IsDuplicateIndex[i] || indexedResults[i].Succeeded;
-            }
-
-            if (successes.All(succeeded => succeeded))
-            {
-                _partialBatchSuccesses.Remove(plan.PendingBatchSignature);
-                _executedSignatures.Add(plan.PendingBatchSignature);
-            }
-            else
-            {
-                _partialBatchSuccesses[plan.PendingBatchSignature] = successes;
-            }
         }
 
         /// <summary>Record that all tools in the current iteration succeeded.</summary>
@@ -1937,14 +1821,50 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <summary>Build a terminal error response when max errors reached.</summary>
+        /// <summary>
+        /// Терминальный ответ, когда предел подряд идущих сбоев достигнут, а сводочный ход без
+        /// инструментов текста не дал. Это текст ассистента, который увидит ПОЛЬЗОВАТЕЛЬ, — поэтому
+        /// обычная фраза с причиной, а не служебный JSON: раньше наружу уходило
+        /// <c>{"error":"Agent aborted …"}</c> как реплика, и ученик читал сырой объект.
+        /// </summary>
         public MEAI.ChatResponse BuildMaxErrorsResponse()
         {
             _logger.Warn(
                 $"[ToolPolicy] Max consecutive errors ({_maxConsecutiveErrors}) reached, stopping.", LogTag.Llm);
 
-            return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
-                "{\"error\":\"Agent aborted due to hitting maximum consecutive tool processing errors.\"}"))
+            bool hasFailure = false;
+            LlmToolCallTrace lastFailure = default;
+            lock (_traceLock)
+            {
+                for (int i = _executedTraces.Count - 1; i >= 0; i--)
+                {
+                    if (!_executedTraces[i].Success)
+                    {
+                        lastFailure = _executedTraces[i];
+                        hasFailure = true;
+                        break;
+                    }
+                }
+            }
+
+            string text =
+                $"I could not finish this request: {_maxConsecutiveErrors} tool calls in a row failed, " +
+                "so I stopped instead of retrying further.";
+            if (hasFailure && !string.IsNullOrWhiteSpace(lastFailure.Name))
+            {
+                const int maxDetailChars = 200;
+                string detail = (lastFailure.Detail ?? "").Replace('\n', ' ').Trim();
+                if (detail.Length > maxDetailChars)
+                {
+                    detail = detail.Substring(0, maxDetailChars) + "...";
+                }
+
+                text += string.IsNullOrEmpty(detail)
+                    ? $" The last failing tool was '{lastFailure.Name}'."
+                    : $" The last failing tool was '{lastFailure.Name}': {detail}";
+            }
+
+            return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, text))
             {
                 FinishReason = MEAI.ChatFinishReason.Stop
             };
@@ -1961,14 +1881,24 @@ namespace CoreAI.Infrastructure.Llm
         public struct BatchToolCallResult
         {
             public List<MEAI.AIContent> Results;
+
+            /// <summary>True when at least one EXECUTED call failed. Echo no-op slots never count.</summary>
             public bool AnyFailed;
 
             /// <summary>
-            /// True when every tool call in the batch failed (including duplicate-suppressed batches).
-            /// Used by <see cref="SmartToolCallingChatClient"/> to mark the iteration's messages as
-            /// pure error feedback that can be dropped from history once a later retry succeeds.
+            /// True when every EXECUTED tool call in the batch failed. Used by
+            /// <see cref="SmartToolCallingChatClient"/> to mark the iteration's messages as pure error
+            /// feedback that can be dropped from history once a later retry succeeds. An echo-only
+            /// batch is NOT "all failed" — see <see cref="AllDuplicates"/>.
             /// </summary>
             public bool AllFailed;
+
+            /// <summary>
+            /// True when every call of the batch was an echo of a call that already succeeded earlier in
+            /// this request: nothing executed, the model got structured no-ops, and the turn is neither
+            /// progress nor failure (the consecutive-error counter was left untouched).
+            /// </summary>
+            public bool AllDuplicates;
         }
 
         /// <summary>

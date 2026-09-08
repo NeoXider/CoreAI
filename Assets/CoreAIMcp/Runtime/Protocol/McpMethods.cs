@@ -12,6 +12,9 @@ namespace CoreAI.Mcp.Protocol
         /// <summary>Lists the available tools with their JSON Schemas.</summary>
         public const string ToolsList = "tools/list";
 
+        /// <summary>Server notification telling clients to refresh available tools.</summary>
+        public const string ToolsListChangedNotification = "notifications/tools/list_changed";
+
         /// <summary>Invokes a tool by name with an arguments object.</summary>
         public const string ToolsCall = "tools/call";
 
@@ -29,11 +32,10 @@ namespace CoreAI.Mcp.Protocol
         /// Advertised server version. MUST equal the <c>version</c> field of the package manifest;
         /// <c>McpPackageVersionEditModeTests</c> fails the build when the two drift apart.
         /// </summary>
-        public const string Version = "7.35.0";
+        public const string Version = "7.36.0";
 
         /// <summary>
-        /// Protocol version echoed when the client omits one. The server echoes the client's requested
-        /// version verbatim when present, per the MCP version-negotiation rule.
+        /// Supported protocol version returned during negotiation, including when a client requests an unsupported version.
         /// </summary>
         public const string DefaultProtocolVersion = "2025-06-18";
 

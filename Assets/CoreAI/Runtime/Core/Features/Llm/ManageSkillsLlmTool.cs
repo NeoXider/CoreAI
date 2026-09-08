@@ -45,7 +45,7 @@ namespace CoreAI.Ai
             "you). After create/update the skill appears in your skill catalog - call read_skill(name) to " +
             "load it and call_skill_tool to use its tools. " +
             "Actions: create (name, description, instructions, tool_names[]), " +
-            "update (revise description/instructions/tool_names of an existing skill; bumps its version), " +
+            "update (revise description/main instructions/tool_names; preserves reference documents and bumps version), " +
             "list (all skills with versions), get (read one skill's full definition), delete (remove a skill). " +
             "Each create/update records a new auditable revision; the original is version 0.";
 
@@ -54,7 +54,7 @@ namespace CoreAI.Ai
             ("action", "string", true, "One of: create, update, list, get, delete"),
             ("name", "string", false, "Skill name/id (required for create, update, get, delete)"),
             ("description", "string", false, "Short one-line catalog description (create/update)"),
-            ("instructions", "string", false, "Full step-by-step instructions returned by read_skill (create/update)"),
+            ("instructions", "string", false, "Full main-document instructions; update replaces only the main document and preserves references; omit to keep unchanged"),
             ("tool_names", "string", false,
                 "JSON array (or comma-separated string) of EXISTING tool names this skill exposes via call_skill_tool")
         );
@@ -79,7 +79,7 @@ namespace CoreAI.Ai
             string name = null,
             [Description("Short one-line catalog description (create/update)")]
             string description = null,
-            [Description("Full step-by-step instructions returned by read_skill (create/update)")]
+            [Description("Full main-document instructions; update replaces only the main document and preserves references; omit to keep unchanged")]
             string instructions = null,
             [Description(
                 "JSON array (or comma-separated string) of EXISTING tool names this skill exposes via call_skill_tool")]
@@ -159,6 +159,7 @@ namespace CoreAI.Ai
                 name = record.Id,
                 description = record.Description,
                 instructions = record.Instructions,
+                sections = record.Sections,
                 tool_names = record.ToolNames,
                 version = record.Version,
                 revision_count = revisions.Count
@@ -218,7 +219,11 @@ namespace CoreAI.Ai
             return r.Success
                 ? Ok(r.Message, r.Record == null
                     ? null
-                    : new { name = r.Record.Id, version = r.Record.Version })
+                    : new
+                    {
+                        name = r.Record.Id, version = r.Record.Version, committed = r.Committed,
+                        revision_recorded = r.RevisionRecorded, warning = r.Warning
+                    })
                 : Fail(r.Message);
         }
 

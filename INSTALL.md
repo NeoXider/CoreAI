@@ -1,17 +1,24 @@
 # CoreAI — Installation
 
-CoreAI ships as **six UPM packages**. `coreai` + `coreaiunity` are the required base (lockstep semver);
-`coreaimods`, `coreaihub`, `coreaibenchmark`, and `coreaimcp` are optional installs on top of the base:
+Choose your environment: **Unity** with ready-made adapters and chat, or a **plain .NET host** with the portable core. For .NET start with the [DLL build](tools/portable/README.md) and the [console sample](examples/dotnet/README.md); Unity and UPM are not needed there.
 
-| Package | What it is | Depends on |
+Seven **UPM packages** are available for Unity. The base is `coreai` + `coreaiunity`; the rest are added per task. Package versions in one installation must match a single release.
+
+| Package | Purpose | CoreAI dependencies |
 |---|---|---|
-| `com.neoxider.coreai` | Portable C# core (orchestration, tools, memory, routing). No `UnityEngine`. | — |
-| `com.neoxider.coreaiunity` | Unity layer (MonoBehaviours, LLM clients, chat UI, editor menus). | `coreai` |
-| `com.neoxider.coreaimods` | Optional Lua modding layer (Lua-CSharp sandbox, `execute_lua`/`manage_mods` tools, mod runtime). | `coreai` + `coreaiunity` |
-| `com.neoxider.coreaihub` | Optional UI Toolkit Hub window (tabbed Chat/Settings/Statistics/Mods pages). | `coreai` + `coreaiunity` |
-| `com.neoxider.coreaibenchmark` | Dev/test-only LLM game-creation benchmark harness. | `coreai` + `coreaiunity` + `coreaimods` |
-| `com.neoxider.coreaimcp` | Optional in-game **MCP server** — an external MCP client (Claude Code, …) drives the *running* game over loopback HTTP. Off by default. | `coreaiunity` + `coreaimods` |
+| `com.neoxider.coreai` | Portable C# core: agents, tools, memory, and routing; no `UnityEngine` | — |
+| `com.neoxider.coreaiunity` | Unity host, chat, settings, DI, and platform adapters | `coreai` |
+| `com.neoxider.coreaimods` | Lua sandbox, mods, and game-world tools | `coreai` + `coreaiunity` |
+| `com.neoxider.coreaihub` | Chat / Settings / Statistics / Mods panel | `coreai` + `coreaiunity` |
+| `com.neoxider.coreaibenchmark` | Developer game-scenario benchmark | `coreai` + `coreaiunity` + `coreaimods` |
+| `com.neoxider.coreaimcp` | MCP server inside the running game; an external MCP client connects to it | `coreaiunity` + `coreaimods` |
+| `com.neoxider.coreaimirror` | Optional networked-world transport | `coreai` + `coreaimods`, Mirror separately |
 
+Mirror is connected via URL `https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIMirror`. An installed Mirror with the `MIRROR` symbol is required; the package does not include Mirror itself. See the [package manifest](Assets/CoreAIMirror/package.json).
+
+A Git URL without `#tag` tracks the branch. For a reproducible install, pin the packages to one existing tag from the repository. Current versions are in `package.json`, published changes in the [changelog](Assets/CoreAI/CHANGELOG.md); Unreleased is not a finished release.
+
+Detailed Unity installation steps follow below; part of the guide is still in English.
 Mods and Hub are installed independently — neither requires the other. When both are present, Mods'
 Hub integration assembly (`CoreAI.Mods.Hub`) auto-enables via the `COREAI_HAS_HUB` version define and
 adds a Mods page to the Hub window; without Hub, that assembly compiles out and Mods still works
@@ -34,9 +41,9 @@ in the base in every configuration. The required Microsoft.Extensions.AI assembl
 a Core dependency; `COREAI_LLM` controls the concrete HTTP/MEAI/LLMUnity provider implementations,
 not whether orchestration or chat types exist.
 
-Requirements: **Unity 6000.0+**. Пользовательские UI Toolkit элементы используют UXML-путь
-`[UxmlElement]` / `[UxmlAttribute]` — он доступен с Unity 6000.0 и остаётся единственным в Unity 6.6+,
-где legacy `UxmlFactory` / `UxmlTraits` удалены из движка.
+Requirements: **Unity 6000.0+**. Custom UI Toolkit elements use the `[UxmlElement]`
+/ `[UxmlAttribute]` UXML path — available since Unity 6000.0 and the only one in Unity 6.6+,
+where the legacy `UxmlFactory` / `UxmlTraits` were removed from the engine.
 
 ---
 
@@ -96,7 +103,7 @@ required by the base even when provider implementations are compiled out. They a
 Install [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity), then install a **single** package:
 
 ```
-Microsoft.Extensions.AI
+Microsoft.Extensions.AI 10.9.0
 ```
 
 NuGetForUnity resolves the rest of the chain automatically as transitive dependencies

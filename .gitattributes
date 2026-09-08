@@ -19,6 +19,7 @@
 *.hlsl text eol=lf
 *.cginc text eol=lf
 *.compute text eol=lf
+Assets/CoreAIMods/Runtime/RbxApi/Unity/Resources/CoreAIRbxMaterials/NoiseShader/LICENSE text eol=lf
 
 # Visual Studio / Unity generated project files are Windows-native.
 *.sln text eol=crlf

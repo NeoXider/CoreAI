@@ -88,7 +88,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [Test]
-        public void HttpHandle_WrapWithMemoryStore_KeepsTheNonNativeToolsDecorator()
+        public void HttpHandle_WrapWithMemoryStore_PreservesTextChannelAndBindsMemory()
         {
 #if !COREAI_LLM
             Assert.Ignore("COREAI_LLM is not set: HTTP LLM clients are excluded from the build.");
@@ -100,10 +100,13 @@ namespace CoreAI.Tests.PlayMode
                 PlayModeProductionLikeLlmFactory.CreateOpenAiHandle(config, 0.1f, 5);
             try
             {
-                ILlmClient wrapped = handle.WrapWithMemoryStore(new InMemoryStore());
+                MeaiLlmClient wrapped = (MeaiLlmClient)handle.WrapWithMemoryStore(new InMemoryStore());
 
-                Assert.IsInstanceOf<NonNativeToolsLlmClientDecorator>(wrapped);
+                Assert.IsFalse(handle.Client.SupportsNativeToolCalling);
                 Assert.IsFalse(wrapped.SupportsNativeToolCalling);
+                List<ILlmTool> memoryOnly = new() { new MemoryLlmTool() };
+                Assert.AreEqual(1, wrapped.BuildAIFunctions(memoryOnly, BuiltInAgentRoleIds.Programmer).Count,
+                    "Text channel clients must bind memory after rebuilding with its store.");
                 Assert.AreNotSame(handle.Client, wrapped);
             }
             finally

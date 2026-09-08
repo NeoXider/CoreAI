@@ -10,7 +10,9 @@ namespace CoreAI.Infrastructure.Llm
     /// Overrides only the endpoint/model/auth; every other knob (temperature, timeout, max tokens,
     /// reasoning, logging) is delegated to <see cref="CoreAISettingsAsset"/> so the local-server path
     /// behaves identically to any other OpenAI-compatible backend. The LLMUnity server exposes
-    /// <c>POST /v1/chat/completions</c> with native <c>tools</c>/<c>tool_calls</c> and SSE streaming;
+    /// <c>POST /v1/chat/completions</c> with native <c>tools</c>/<c>tool_calls</c> and SSE streaming
+    /// (LlamaLib v2.0.5: verified live 2026-09-06; a build started without jinja rejects <c>tools</c>,
+    /// which is why the channel is declared or probed — see <see cref="LlmToolChannelResolution"/>);
     /// it does NOT implement <c>/v1/models</c>, so the model name is supplied explicitly here.
     /// </summary>
     public sealed class LlmUnityServerHttpSettings : IOpenAiHttpSettings

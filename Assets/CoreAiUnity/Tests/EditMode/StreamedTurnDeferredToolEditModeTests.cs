@@ -182,7 +182,7 @@ namespace CoreAI.Tests.EditMode
             BlockingTool tool = new("spawn_quiz");
             CountingNativeToolClient inner = new();
             ClientStubSettings settings = new();
-            MeaiLlmClient client = new(inner, new SilentLogger(), settings, null);
+            MeaiLlmClient client = new(inner, new SilentLogger(), settings, supportsNativeToolCalling: true, memoryStore: null);
 
             // Kept and awaited below, for the same reason as in the policy-level test above.
             Task releaser = Task.Run(async () =>

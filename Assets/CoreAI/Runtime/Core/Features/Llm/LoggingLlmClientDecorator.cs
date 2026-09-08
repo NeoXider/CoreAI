@@ -151,182 +151,83 @@ namespace CoreAI.Infrastructure.Llm
             LlmCompletionResult result = null;
             // Timeout is now enforced by the Unity-aware caller (CoreAiChatService)
             // This decorator only handles logging and HTTP 429/5xx retries.
+            //
+            // WHY: Ретраебельный сбой хранится в ОДНОЙ из двух форм — брошенное исключение либо
+            // результат с Ok=false — и обе крутятся одним циклом с одним бюджетом. Раньше было два
+            // цикла: по исключению и по результату, каждый со своим полным бюджетом. Адаптер, который
+            // на первой попытке бросил 429, а на второй вернул 429 результатом, переводил запрос из
+            // первого цикла во второй с обнулённым счётчиком — до 2N+1 вызовов и до минуты ожидания при
+            // N=3, всё это время ученик смотрел на индикатор набора.
+            LlmClientException retryableException = null;
+            int retryAfterSeconds = 0;
             try
             {
-                // WebGL player: keep continuation on Unity SynchronizationContext. See note in
-                // browser stack hangs the await chain after HTTP completes, leaving chat UI stuck.
-#if UNITY_WEBGL && !UNITY_EDITOR
-                result = await _inner.CompleteAsync(request, cancellationToken);
-#else
-                result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
-#endif
+                result = await CompleteInner(request, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw; // honour caller cancellation (timeout or user stop)
             }
             catch (LlmClientException httpEx) when (
-                IsRetryableHttpError(httpEx, out int httpWait) &&
-                _maxHttpRetryAttempts > 0)
+                _maxHttpRetryAttempts > 0 &&
+                IsRetryableHttpError(httpEx, out retryAfterSeconds))
             {
-                bool exhausted = true;
-                for (int attempt = 0; attempt < _maxHttpRetryAttempts; attempt++)
-                {
-                    int waitSec = httpWait > 0 ? Math.Min(httpWait, MaxRetryCapSeconds) : ComputeBackoff(attempt);
-                    _logger.Warn(
-                        $"LLM ~ traceId={trace} role={role} | {httpEx.ErrorCode} - retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s",
-                        LogTag.Llm);
-                    await _asyncMarshaler.DelayAsync(waitSec * 1000, cancellationToken);
-#if UNITY_WEBGL && !UNITY_EDITOR
-                    try
-                    {
-                        result = await _inner.CompleteAsync(request, cancellationToken);
-                        exhausted = false;
-                        break;
-                    }
-#else
-                    try
-                    {
-                        result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
-                        exhausted = false;
-                        break;
-                    }
-#endif
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        throw; // honour caller cancellation during a retry attempt
-                    }
-                    catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
-                    {
-                    }
-                    catch (Exception nonRetryEx)
-                    {
-                        // A non-retryable fault thrown during a retry attempt (e.g. the 429 cleared but the
-                        // next call returned a non-retryable 400, or an unexpected error). Stop retrying and
-                        // return it as a structured failure instead of letting a raw exception escape past
-                        // the unified error path, matching the result-based retry loop's catch-all below.
-                        sw.Stop();
-                        string failMsg = nonRetryEx is LlmClientException lce
-                            ? $"{lce.ErrorCode}: {lce.Message}"
-                            : nonRetryEx.Message;
-                        _logger.Warn(
-                            $"LLM x traceId={trace} role={role} backend={backendLine} | {failMsg}", LogTag.Llm);
-                        return new LlmCompletionResult { Ok = false, Error = failMsg };
-                    }
-                }
-
-                if (exhausted)
-                {
-                    sw.Stop();
-                    string msg = $"{httpEx.ErrorCode} after {_maxHttpRetryAttempts} retries: {httpEx.Message}";
-                    _logger.Warn(
-                        $"LLM x traceId={trace} role={role} backend={backendLine} | {msg}", LogTag.Llm);
-                    return new LlmCompletionResult { Ok = false, Error = msg };
-                }
+                retryableException = httpEx;
             }
 
-            if (result != null &&
-                !result.Ok &&
-                !HasExecutedToolCalls(result) &&
-                IsRetryableFailureResult(result, out int httpWaitFromResult) &&
-                _maxHttpRetryAttempts > 0)
+            int retriesUsed = 0;
+            while (_maxHttpRetryAttempts > 0 &&
+                   (retryableException != null ||
+                    (!HasExecutedToolCalls(result) && IsRetryableFailureResult(result, out retryAfterSeconds))))
             {
-                int httpWait = httpWaitFromResult;
-                bool exhausted = true;
-                for (int attempt = 0; attempt < _maxHttpRetryAttempts; attempt++)
-                {
-                    int waitSec = httpWait > 0 ? Math.Min(httpWait, MaxRetryCapSeconds) : ComputeBackoff(attempt);
-                    _logger.Warn(
-                        $"LLM ~ traceId={trace} role={role} | {result.ErrorCode} - retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s (failed completion)",
-                        LogTag.Llm);
-                    await _asyncMarshaler.DelayAsync(waitSec * 1000, cancellationToken);
-#if UNITY_WEBGL && !UNITY_EDITOR
-                    try
-                    {
-                        result = await _inner.CompleteAsync(request, cancellationToken);
-                        if (result != null && result.Ok)
-                        {
-                            exhausted = false;
-                            break;
-                        }
-
-                        if (HasExecutedToolCalls(result))
-                        {
-                            exhausted = false;
-                            break;
-                        }
-
-                        if (!IsRetryableFailureResult(result, out httpWait))
-                        {
-                            exhausted = false;
-                            break;
-                        }
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-                    catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
-                    {
-                    }
-                    catch (Exception)
-                    {
-                        exhausted = false;
-                        break;
-                    }
-#else
-                    try
-                    {
-                        result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
-                        if (result != null && result.Ok)
-                        {
-                            exhausted = false;
-                            break;
-                        }
-
-                        if (HasExecutedToolCalls(result))
-                        {
-                            exhausted = false;
-                            break;
-                        }
-
-                        if (!IsRetryableFailureResult(result, out httpWait))
-                        {
-                            exhausted = false;
-                            break;
-                        }
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-                    catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
-                    {
-                    }
-                    catch (Exception)
-                    {
-                        exhausted = false;
-                        break;
-                    }
-#endif
-                }
-
-                if (exhausted && result != null && !result.Ok)
+                if (retriesUsed >= _maxHttpRetryAttempts)
                 {
                     sw.Stop();
-                    string msg = $"{result.ErrorCode} after {_maxHttpRetryAttempts} retries: {result.Error}";
+                    LlmCompletionResult exhausted = BuildRetriesExhaustedFailure(retryableException, result);
                     _logger.Warn(
-                        $"LLM x traceId={trace} role={role} backend={backendLine} | {msg}", LogTag.Llm);
-                    return new LlmCompletionResult
-                    {
-                        Ok = false,
-                        Error = msg,
-                        ErrorCode = result.ErrorCode,
-                        HttpStatus = result.HttpStatus,
-                        RetryAfterSeconds = result.RetryAfterSeconds,
-                        ProviderErrorBody = result.ProviderErrorBody,
-                        ExecutedToolCalls = result.ExecutedToolCalls
-                    };
+                        $"LLM x traceId={trace} role={role} backend={backendLine} | {exhausted.Error}", LogTag.Llm);
+                    return exhausted;
+                }
+
+                LlmErrorCode failureCode = retryableException?.ErrorCode ?? result.ErrorCode;
+                string failureKind = retryableException != null ? "" : " (failed completion)";
+                int waitSec = retryAfterSeconds > 0
+                    ? Math.Min(retryAfterSeconds, MaxRetryCapSeconds)
+                    : ComputeBackoff(retriesUsed);
+                _logger.Warn(
+                    $"LLM ~ traceId={trace} role={role} | {failureCode} - retry {retriesUsed + 1}/{_maxHttpRetryAttempts} after {waitSec}s{failureKind}",
+                    LogTag.Llm);
+                await _asyncMarshaler.DelayAsync(waitSec * 1000, cancellationToken);
+                retriesUsed++;
+
+                try
+                {
+                    result = await CompleteInner(request, cancellationToken);
+                    retryableException = null;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw; // honour caller cancellation during a retry attempt
+                }
+                catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out retryAfterSeconds))
+                {
+                    retryableException = retryEx;
+                    result = null;
+                }
+                catch (Exception nonRetryEx)
+                {
+                    // A non-retryable fault thrown during a retry attempt (e.g. the 429 cleared but the
+                    // next call returned a non-retryable 400, or an unexpected error). Stop retrying and
+                    // return it as a structured failure instead of letting a raw exception escape past
+                    // the unified error path.
+                    // WHY: Код ошибки кладётся в ПОЛЕ, а не только в строку: потребитель выбирает
+                    // плашку по ErrorCode, и потерянный код превращал плашку «учитель недоступен» в сырой
+                    // английский текст в пузыре чата.
+                    sw.Stop();
+                    LlmCompletionResult failure = BuildThrownFailure(nonRetryEx);
+                    _logger.Warn(
+                        $"LLM x traceId={trace} role={role} backend={backendLine} | {failure.Error}", LogTag.Llm);
+                    return failure;
                 }
             }
 
@@ -338,7 +239,14 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.Warn(
                     $"LLM x traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | result is null",
                     LogTag.Llm);
-                return new LlmCompletionResult { Ok = false, Error = "null result" };
+                // WHY: Отсутствие результата — это «провайдер ничего не отдал», и код обязан это сказать:
+                // None не входит ни в один список категорий недоступности у потребителей.
+                return new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = "null result",
+                    ErrorCode = LlmErrorCode.EmptyResponse
+                };
             }
 
             if (!result.Ok)
@@ -497,6 +405,71 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
+        /// Один вызов внутреннего клиента с правильным для хоста режимом продолжения. Ветка WebGL держит
+        /// продолжение на Unity SynchronizationContext: браузерный стек без него подвешивал цепочку await
+        /// после завершения HTTP, и чат замирал.
+        /// </summary>
+        private ConfiguredTaskAwaitable<LlmCompletionResult> CompleteInner(
+            LlmCompletionRequest request,
+            CancellationToken cancellationToken)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(true);
+#else
+            return _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+#endif
+        }
+
+        /// <summary>
+        /// Структурный отказ после исчерпания бюджета. Типизация берётся из той формы, в которой пришёл
+        /// последний сбой (исключение или результат) — код, HTTP-статус и подсказка retry-after
+        /// доезжают до потребителя одинаково, независимо от способа, которым адаптер о них сообщил.
+        /// </summary>
+        private LlmCompletionResult BuildRetriesExhaustedFailure(
+            LlmClientException thrown,
+            LlmCompletionResult returned)
+        {
+            if (thrown != null)
+            {
+                return new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = $"{thrown.ErrorCode} after {_maxHttpRetryAttempts} retries: {thrown.Message}",
+                    ErrorCode = thrown.ErrorCode,
+                    HttpStatus = thrown.HttpStatus,
+                    RetryAfterSeconds = thrown.RetryAfterSeconds,
+                    ProviderErrorBody = thrown.ProviderErrorBody
+                };
+            }
+
+            return new LlmCompletionResult
+            {
+                Ok = false,
+                Error = $"{returned.ErrorCode} after {_maxHttpRetryAttempts} retries: {returned.Error}",
+                ErrorCode = returned.ErrorCode,
+                HttpStatus = returned.HttpStatus,
+                RetryAfterSeconds = returned.RetryAfterSeconds,
+                ProviderErrorBody = returned.ProviderErrorBody,
+                ExecutedToolCalls = returned.ExecutedToolCalls
+            };
+        }
+
+        /// <summary>Структурный отказ из исключения, брошенного на повторной попытке.</summary>
+        private static LlmCompletionResult BuildThrownFailure(Exception exception)
+        {
+            LlmClientException typed = exception as LlmClientException;
+            return new LlmCompletionResult
+            {
+                Ok = false,
+                Error = typed != null ? $"{typed.ErrorCode}: {typed.Message}" : exception.Message,
+                ErrorCode = ResolveErrorCode(exception),
+                HttpStatus = typed?.HttpStatus,
+                RetryAfterSeconds = typed?.RetryAfterSeconds,
+                ProviderErrorBody = typed?.ProviderErrorBody ?? ""
+            };
+        }
+
+        /// <summary>
         /// Decorated streaming: forwards chunks to the caller as-is (so UI sees tokens
         /// as they arrive) while accumulating a preview for the final log line.
         /// Timeout from <c>_requestTimeoutSeconds</c> applies to the whole stream.
@@ -567,7 +540,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 sw.Stop();
                 initError = ex.Message;
-                initErrorCode = ResolveStreamErrorCode(ex);
+                initErrorCode = ResolveErrorCode(ex);
                 _logger.Warn(
                     $"LLM x (stream) traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | init failed: {ex.Message}",
                     LogTag.Llm);
@@ -610,7 +583,7 @@ namespace CoreAI.Infrastructure.Llm
                     catch (Exception ex)
                     {
                         exceptionMessage = ex.Message;
-                        exceptionCode = ResolveStreamErrorCode(ex);
+                        exceptionCode = ResolveErrorCode(ex);
                         hasNext = false;
                     }
 
@@ -997,10 +970,12 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Maps a streaming fault to a stable <see cref="LlmErrorCode"/> so consumers never receive a
-        /// terminal chunk that reports a failure with <see cref="LlmErrorCode.None"/>.
+        /// Maps a thrown fault to a stable <see cref="LlmErrorCode"/> so consumers never receive a
+        /// terminal chunk or a failed result that reports a failure with <see cref="LlmErrorCode.None"/>.
+        /// Одна таблица для потокового и непотокового пути: категория ошибки не должна зависеть от того,
+        /// каким из двух путей о ней сообщили.
         /// </summary>
-        private static LlmErrorCode ResolveStreamErrorCode(Exception ex)
+        private static LlmErrorCode ResolveErrorCode(Exception ex)
         {
             return ex switch
             {

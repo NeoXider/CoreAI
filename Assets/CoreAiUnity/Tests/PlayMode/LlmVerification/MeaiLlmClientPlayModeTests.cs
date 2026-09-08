@@ -42,7 +42,7 @@ namespace CoreAI.Tests.PlayMode
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
             InMemoryStore store = new();
 
-            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, logger, store);
+            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, logger, supportsNativeToolCalling: true, memoryStore: store);
             Assert.IsNotNull(client, "MeaiLlmClient.CreateHttp should not return null");
 
             Debug.Log("[MeaiLlmClient.HTTP] Client created, sending request...");
@@ -75,7 +75,9 @@ namespace CoreAI.Tests.PlayMode
 
             Assert.Throws<ArgumentNullException>(() =>
                 MeaiLlmClient.CreateHttp((IOpenAiHttpSettings)null,
-                    ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger));
+                    ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    logger,
+                    supportsNativeToolCalling: true));
         }
     }
 #endif

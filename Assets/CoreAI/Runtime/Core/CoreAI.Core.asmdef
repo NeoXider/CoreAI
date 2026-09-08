@@ -9,6 +9,7 @@
   "precompiledReferences": [
     "Microsoft.Extensions.AI.dll",
     "Microsoft.Extensions.AI.Abstractions.dll",
+    "Microsoft.Extensions.Logging.Abstractions.dll",
     "Microsoft.Bcl.AsyncInterfaces.dll",
     "Newtonsoft.Json.dll",
     "System.Security.Cryptography.Algorithms.dll",

@@ -96,33 +96,106 @@ the client forever.
 - **Response framing is negotiated by the `Accept` header:** clients that ask for `text/event-stream`
   get the single JSON-RPC response as one SSE `message` event; everyone else gets plain
   `application/json`. Both carry the same payload.
-- **Sessions are optional.** `initialize` issues an `Mcp-Session-Id` header, but no call ever requires
-  one — the server is stateless behind the scenes.
-- **Version tolerant.** The server echoes the client's `protocolVersion` when present, otherwise
-  advertises its latest; it never hard-fails on an unknown version.
+- For POST the session id is optional. `initialize` issues `Mcp-Session-Id`; it is required
+  for the GET tool-change subscription, but it does not replace the bearer token.
+- The server supports `2025-06-18` and returns that version during negotiation, including for an unknown
+  client version. The client decides whether the supported version is compatible with its implementation.
 - Errors: unknown method → `-32601`, unknown/absent tool name → `-32602`, malformed JSON → `-32700`,
   non-object JSON → `-32600`, a stalled main thread → `-32603` (message names the cause).
-- Transport-level refusals never reach JSON-RPC: `401` (no/wrong token), `403` (foreign `Origin` or
-  `Host`, non-local socket), `413` (body over 4 MB), `415` (non-JSON body). A refused request's body is
-  drained (up to 64 KB) before the connection closes, so the client reads the status instead of a reset
-  connection; a body larger than that is still dropped mid-flight, which is the point of the cap.
+- Transport rejections: `401` — token, `403` — foreign Origin/Host or non-local address,
+  `413` — body size exceeded in **UTF-8 bytes**, including chunked requests, `415` — not JSON,
+  `408` — body not received in time, `503` — all 64 request-processing slots busy.
+  The body is read for at most 10 seconds (`BodyReadTimeout`); a small rejected request with a known
+  length is drained at most 64 KB and 250 ms. An incomplete body never blocks the rejection indefinitely.
 - **`serverInfo.version` is the package version.** It comes from `McpServerInfo.Version`, which
   `tools/bump_version.py` rewrites together with every `package.json`; `McpPackageVersionEditModeTests`
   fails the build if the two ever drift apart.
-- `GET /mcp` returns `405 Method Not Allowed` (this server offers no server-initiated SSE stream).
-  Legacy HTTP+SSE-only clients should bridge with `npx mcp-remote` (see below).
+- `GET /mcp` with `Accept: text/event-stream` and a valid `Mcp-Session-Id` opens an SSE subscription.
+  After the HTTP server has started successfully, `initialize` advertises `capabilities.tools.listChanged: true`.
+  Without Accept the server returns `406`, without a session — `400`, with an unknown/expired session — `404`.
+  Sessions are limited by count and lifetime: after a `404` the client runs `initialize` again.
 
-### Main-thread semantics
+### Live catalog: switching stages without a restart
 
-HTTP requests arrive on `HttpListener` worker threads, but tool handlers touch live game state. Every
-`tools/call` is therefore marshalled onto the Unity main thread: the `CoreAiMcpServer` component queues
-the invocation and drains it from `Update()`, while the HTTP worker awaits a `TaskCompletionSource`.
-Handlers run exactly as the in-game agent's do, one per drained frame.
+`McpToolRegistry` is available even without Unity. In a running game use `CoreAiMcpServer.Registry`:
 
-If nothing drains the queue (paused game, disabled component) the call fails after
-**Main Thread Timeout Seconds** with `-32603` and a message naming the likely cause; a call the client
-already gave up on is never executed by a later frame. Stopping the server resolves everything still
-queued instead of leaking it.
+```csharp
+McpToolRegistry catalog = server.Registry;
+catalog.AddOrReplace(briefingTool);
+catalog.Remove("previous_stage");
+catalog.Replace(new IMcpTool[] { sharedTool, nextStageTool });
+```
+
+`AddOrReplace` changes the binding and schema of a single name, `Remove` closes access to a name, `Replace`
+publishes a complete new set in one operation. You can start from an empty catalog and add tools
+later: `server.StartListening(new McpToolRegistry(null), listenPort: 8590)`. The standard
+`StartListening()` still collects the available tools from the CoreAI composition.
+
+Each publication is atomic. Names, descriptions and schemas are frozen until the next registration;
+changing the properties of the passed object alone does not change the declared schema. An invalid schema,
+an empty name, or a duplicate name inside `Replace` rejects the whole update. For replacement use
+`AddOrReplace` explicitly; the former "first duplicate wins" rule is removed. The name `coreai_tools`
+is reserved for the automatically managed broker.
+
+`Native`/`Dynamic` controls only schema exposure: Native is visible in `tools/list`, Dynamic —
+via `coreai_tools` (`list`, `describe`, `call`). Both are available by direct name while they stay
+in the catalog. For a targeted update you can specify `AddOrReplace(tool, McpToolResidency.Dynamic)`;
+without the argument the host policy applies. A removed tool is unavailable both directly and via the broker.
+The broker reads the current catalog and forbids recursively calling itself.
+
+Before execution in the Unity queue, **the same binding** selected when the request arrived is re-checked.
+Deleting, replacing, or remove/add of a single name before execution starts yields `-32602`
+asking to re-read the tools. This also applies to the internal broker-mediated call tool.
+An execution that has started may finish: a catalog change does not roll back actions already performed.
+The catalog pins both bindings and an independent copy of the arguments in one call plan. The broker's internal JSON
+is parsed once; after admission no new name lookup is performed. Therefore replacing
+a tool between admission and body start cannot redirect old arguments to a new handler.
+
+After publication, connected clients receive `notifications/tools/list_changed` and re-read
+`tools/list`. `params._meta["coreai/catalogRevision"]` carries an increasing catalog revision.
+On reconnect GET immediately sends the current revision; a new stream replaces the previous stream of the same
+session. Only notifications about the current list are repeated, not tool calls.
+
+There is one stream per session, 16 by default (`MaxNotificationStreams`); at most
+64 HTTP requests are processed concurrently. Frequent changes are coalesced to the current revision:
+notification history does not accumulate without bound. A heartbeat is sent every 15 seconds,
+writes to a slow stream are limited to 5 seconds (`WriteTimeout`). Exhausting the subscription count yields
+`409`, POST keeps being served in the remaining slots. `Stop()` cancels the transport and closes
+connections; `Completion` can be awaited asynchronously for handlers to finish without blocking Unity.
+The HTTP listener is unavailable in WebGL player; the typed live catalog does not depend on Unity or sockets.
+
+### Game-thread queue and frame budget
+
+HTTP accepts requests off the game thread. `CoreAiMcpServer` starts handlers from `Update`,
+while the network handler asynchronously waits for the result. A single host admits at most
+`MainThreadCallCapacity` calls (64), including the queue and bodies still executing;
+`AdmittedMainThreadCalls` shows the occupied slots. Overflow immediately returns an error.
+
+One `PumpMainThreadQueue` considers only the queue snapshot taken on entry: child calls wait for
+the next frame. The time budget is checked between starts, 2 ms by default in the inspector.
+A host with its own loop can call `PumpMainThreadQueue(TimeSpan budget)`; a zero budget starts
+at most one handler so the queue keeps moving. There is no task waiting on the game thread.
+
+**Main Thread Timeout Seconds** limits only the wait for the start. An expired item is removed
+from the queue, frees its slot and receives `-32603`; a later frame does not execute it. After the start
+this timer does not produce a false timeout: the result arrives after the body actually finishes.
+`StopListening` removes pending calls and cancels the lifetime token of network requests. A body already started
+receives cancellation but occupies its slot until it actually finishes, even after the server is restarted.
+Other tools can use the free slots; asynchronous bodies may execute in parallel.
+
+The budget is checked **between** handlers and does not interrupt arbitrary synchronous code. The host tool contract:
+a short synchronous part, cooperative cancellation and asynchronous I/O; heavy computations should be
+split or moved off the game thread, keeping Unity accesses on it. A handler that
+permanently blocks the thread or ignores cancellation does not become safe thanks to the queue.
+
+### Protocol version and expired sessions
+
+A passed but unknown, evicted, or expired `Mcp-Session-Id` yields HTTP `404` for any
+request, including POST: the tool body is not started. The client runs a new `initialize`
+**without the old header**. POST without an identifier stays available for compatible stateless clients.
+An unknown or malformed `MCP-Protocol-Version` yields HTTP `400`. `2025-06-18`
+and the compatible `2025-03-26` are supported; `initialize` negotiates `2025-06-18`. If the version header is absent,
+the negotiated version is used for a stored session, and `2025-03-26` compatibility without a session.
 
 ## Tools
 
@@ -224,9 +297,10 @@ curl -s http://127.0.0.1:8590/mcp \
 A `401` means the token is wrong or missing; a `403` means the request carried a foreign `Origin`/`Host`
 (you are going through a proxy or a browser — connect to `127.0.0.1` directly).
 
-**Verification status:** the wire protocol (JSON-RPC framing, JSON + SSE responses, session-optional,
-version echo, `405` on `GET`) and the admission rules (`401`/`403`/`413`/`415`) are covered by this
-package's EditMode tests, including real loopback HTTP round trips. The Claude Code, Codex, opencode, and
+**Checks:** EditMode covers JSON/SSE HTTP round trips, version negotiation, live add/remove/replace,
+notification reconnects, request limits, the UTF-8 byte cap, and the incomplete request body.
+PlayMode verifies catalog changes through one running `CoreAiMcpServer` with real loopback
+requests, a single session, and execution on the game thread; separately — a remote call in the queue. The Claude Code, Codex, opencode, and
 LM Studio **config snippets** follow each tool's published configuration format and target this server's
 standard streamable-HTTP endpoint; the header syntax in particular varies between client versions — check
 yours if the connection returns `401`.
@@ -269,4 +343,3 @@ without Unity; only the adapters (`McpHttpServer`, `MainCameraScreenshotSource`,
 touch `UnityEngine` / `HttpListener`. `McpArchitectureFitnessEditModeTests` enforces that split
 (grep-based, per §5). Coupling to the world/screenshot services is soft: those tools register only when
 their services resolve at runtime (`CoreAiMcpToolProvider`).
-```

@@ -64,7 +64,15 @@ namespace CoreAI.Ai
         /// The provider refused the request permanently and no more specific category applies
         /// (an unclassified 4xx). Same-request replay is pointless, so it is never retried.
         /// </summary>
-        PermanentProviderError = 13
+        PermanentProviderError = 13,
+
+        /// <summary>
+        /// A LOCAL client-side cap rejected the request before it left the process: the
+        /// <c>ClientLimited</c> per-session request budget or its prompt-size cap. Neither the account
+        /// quota (<see cref="QuotaExceeded"/>) nor a provider rate limit (<see cref="RateLimited"/>) is
+        /// involved — the backend was never asked. Never retried, never used to switch backends.
+        /// </summary>
+        ClientLimitExceeded = 14
     }
 
     /// <summary>
@@ -202,13 +210,22 @@ namespace CoreAI.Ai
         public string RequiredToolName { get; set; } = "";
 
         /// <summary>
-        /// When <see cref="Tools"/> is non-empty, streaming can either buffer the entire assistant
-        /// iteration before emitting any <see cref="LlmStreamChunk.Text"/> (<c>true</c>), or use the default
-        /// hybrid hold (<c>null</c>/<c>false</c>): stream only the prefix that cannot be part of an
-        /// incomplete text-shaped tool JSON, then hold until balanced <c>{...}</c> closes. Full buffer is a
-        /// compatibility escape hatch for exotic delta fragmentation.
+        /// Opt-in: interpret the assistant's PROSE as tool calls even on an endpoint that advertises a
+        /// native tool channel. Default (<c>null</c>/<c>false</c>) does not interpret it.
+        /// <para>
+        /// The safe default is the whole point. Parsing prose means acting on what the model SAID instead
+        /// of on the channel it said it through, and a tutor explaining JSON — the everyday job of a
+        /// programming teacher — writes objects that look exactly like a tool call. The framework would
+        /// execute the example instead of showing it. Where a native channel exists, calls arrive on it
+        /// and the text needs no interpretation at all.
+        /// </para>
+        /// <para>
+        /// Set it to <c>true</c> only for an endpoint you have OBSERVED advertising native tool calling and
+        /// then answering with JSON in the text (proxies in front of local models do this). The symptom is
+        /// a tool that never runs while the reply contains its call. Nothing in the runtime sets it.
+        /// </para>
         /// </summary>
-        public bool? BufferFullStreamingIterationWhenToolsDeclared { get; set; }
+        public bool? AllowTextShapedToolCallsOnNativeEndpoint { get; set; }
     }
 
     /// <summary>

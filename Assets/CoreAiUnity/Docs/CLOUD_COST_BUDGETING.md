@@ -54,18 +54,18 @@ a stable agent/role prompt version and provider route. Student memory, history, 
 state remain ordinary volatile tail input. Provider/account isolation, minimum prefix length, TTL, and routing
 still decide whether those shared leading bytes produce a physical cache hit.
 
-При сотнях агентов и тысячах учеников число потенциальных записей кеша растёт по числу **уникальных стабильных
-префиксов**, а не по числу учеников или экземпляров C#-объекта. Сто экземпляров роли `Teacher` с одинаковыми
-universal/role/persona/tool байтами используют один и тот же cache-eligible prefix. Сто действительно разных
-persona prompt дают до ста отдельных префиксов на каждый фактически выбранный endpoint. Данные ученика,
-прогресс, история и состояние урока должны оставаться в tail; иначе каждый ученик создаст отдельный префикс.
+With hundreds of agents and thousands of students, the number of potential cache entries grows with the number of **unique stable
+prefixes**, not with the number of students or C# object instances. One hundred instances of the `Teacher` role with identical
+universal/role/persona/tool bytes use the same cache-eligible prefix. One hundred genuinely different
+persona prompts yield up to one hundred separate prefixes per actually selected endpoint. Student data,
+progress, history, and lesson state must stay in the tail; otherwise each student creates a separate prefix.
 
 - [OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching) uses sticky routing
   at account + model + conversation granularity. Without `session_id`, the conversation key is derived from the
   first system/developer message and first non-system message. Different student conversations can therefore
   warm the same stable prefix on several provider endpoints; do not assume one global physical cache. For
   deliberate sticky routing, set `session_id` through `SetProviderBodyParameter` to an opaque application/agent
-  cohort such as `coreai-teacher-v3` — never `studentId`, email, login, GUID ученика или иное PII. A small fixed
+  cohort such as `coreai-teacher-v3` — never `studentId`, email, login, student GUID, or other PII. A small fixed
   shard set (`coreai-teacher-v3-0` … `-3`) is acceptable only when you intentionally trade cache concentration
   for throughput. To measure one concrete OpenRouter endpoint, use
   `provider.order: ["cloudflare/fp8"]` together with `provider.allow_fallbacks: false`; remove that pin after the
@@ -78,22 +78,22 @@ persona prompt дают до ста отдельных префиксов на �
   reuse, or choose an opaque tenant/cohort boundary only when that privacy/throughput trade-off is deliberate.
   CoreAI keeps the reusable prefix deterministic and does not attempt to manage provider cache entries.
 
-**Живая проверка:** `PromptCacheLivePlayModeTests` делает три ограниченных по времени/выходу запроса через
-production-like CoreAI pipeline с одним длинным role/tool prefix и разными синтетическими student tails. Тест
-запускается только при `COREAI_TEST_PROMPT_CACHE=true`, требует `CacheReadTokens > 0` не позднее третьего запроса
-и печатает provider/model/prompt/completion/cache-read/cache-write. Настройка и точный provider pin описаны в
-[`RUNNING_LIVE_TESTS.md`](RUNNING_LIVE_TESTS.md). Это доказывает один настроенный маршрут; реальные hit rate всё
-равно измеряйте по endpoint/model, потому что byte-stability доказывает лишь eligibility.
+**Live check:** `PromptCacheLivePlayModeTests` makes three time/output-bounded requests through a
+production-like CoreAI pipeline with one long role/tool prefix and different synthetic student tails. The test
+runs only with `COREAI_TEST_PROMPT_CACHE=true`, requires `CacheReadTokens > 0` no later than the third request
+and prints provider/model/prompt/completion/cache-read/cache-write. Setup and the exact provider pin are described in
+[`RUNNING_LIVE_TESTS.md`](RUNNING_LIVE_TESTS.md). This proves one configured route; still measure real hit rates
+per endpoint/model, because byte-stability only proves eligibility.
 
-Кеш префикса не изолирует состояние ученика. `CoreAILifetimeScope` теперь сам проводит memory, flat chat,
-structured transcript и compacted conversation summary через scoped decorators с одним каноническим ключом.
-Host должен до container build назначить inspector-компонент `AgentMemoryScopeProviderBehaviour` или вызвать
-`SetAgentMemoryScopeProvider(IAgentMemoryScopeProvider)` на неактивном scope GameObject. Provider возвращает
-`AgentMemoryScope` с tenant/user/session/topic для текущего авторизованного ученика. `AgentMemoryScope.Empty`
-сохраняет legacy role-only key и безопасен только для одного пользователя, отключённой или намеренно общей памяти.
-Точный Unity API и пример для student id приведены в [`ARCHITECTURE.md`](ARCHITECTURE.md#runtime-context-and-memory-scope).
-Никогда не используйте этот персональный scope как provider `session_id`: OpenRouter routing cohort и локальная
-изоляция истории имеют разные назначения.
+The prefix cache does not isolate student state. `CoreAILifetimeScope` itself now routes memory, flat chat,
+structured transcript, and compacted conversation summary through scoped decorators with one canonical key.
+Before container build, the host must assign the inspector `AgentMemoryScopeProviderBehaviour` component or call
+`SetAgentMemoryScopeProvider(IAgentMemoryScopeProvider)` on the inactive scope GameObject. The provider returns
+`AgentMemoryScope` with tenant/user/session/topic for the currently authorized student. `AgentMemoryScope.Empty`
+preserves the legacy role-only key and is safe only for a single user, disabled, or deliberately shared memory.
+The exact Unity API and the student-id example are given in [`ARCHITECTURE.md`](ARCHITECTURE.md#runtime-context-and-memory-scope).
+Never use this personal scope as the provider `session_id`: the OpenRouter routing cohort and local
+history isolation serve different purposes.
 
 ### Worked example (illustrative numbers)
 

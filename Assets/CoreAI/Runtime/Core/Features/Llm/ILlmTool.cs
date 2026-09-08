@@ -48,12 +48,59 @@ namespace CoreAI.Ai
         /// <see cref="CancellationToken.None"/> on purpose and therefore has nothing but this deadline.
         /// </para>
         /// <para>
-        /// Applies where the tool execution policy invokes the tool itself, i.e. to the role's own tool list.
-        /// A tool executed INSIDE another tool's body (behind the <c>call_skill_tool</c> proxy) runs under the
-        /// WRAPPER's budget, because the policy only ever sees the wrapper.
+        /// The <c>call_skill_tool</c> proxy resolves its target once before scheduling; the same target's
+        /// timeout and binding are used for the entire call, including live skill catalogs.
         /// </para>
         /// </summary>
         int? ToolTimeoutMsOverride => null;
+
+        /// <summary>
+        /// True when a SUCCESSFUL call of this tool ENDS the model's turn: the agentic loop closes the
+        /// turn instead of handing the tool result back for another roundtrip. Other calls already
+        /// emitted in the same batch still complete under the normal ordering policy.
+        /// <para>
+        /// Exists for tools that hand control to a HUMAN — a quiz card, a drag-and-drop exercise, a
+        /// confirmation prompt. Their result ("card shown, waiting for the student") is not material the
+        /// model can continue from: given another roundtrip it writes the reaction to an answer nobody has
+        /// given yet, and the student reads "Correct!" under a card they have not touched. Holding that with
+        /// prompt text alone does not hold it at all, which is why the rule lives in the contract.
+        /// </para>
+        /// <para>
+        /// Only a SUCCESSFUL call ends the turn — a failed one must still reach the model so it can recover.
+        /// Prose the model produced BEFORE the call stays visible to the user; only the NEXT roundtrip is
+        /// cut. A turn that ends with no visible text at all is already handled upstream (the orchestrator
+        /// must not synthesize an extra chat line).
+        /// </para>
+        /// <para>
+        /// Enforced by <c>ToolExecutionPolicy.TurnEndingToolSucceeded</c>. Direct calls use the tool's
+        /// metadata; <c>call_skill_tool</c> captures the permitted inner target and applies its metadata
+        /// before invocation. A later live-catalog update cannot change an in-flight call.
+        /// </para>
+        /// </summary>
+        bool EndsTurn => false;
+
+        /// <summary>
+        /// True, когда инструмент МЕНЯЕТ общее состояние — мир, память, файлы, реестр. Мутирующие
+        /// инструменты никогда не выполняются ОДНОВРЕМЕННО друг с другом внутри одного хода: политика
+        /// исполнения ставит их в одну упорядоченную цепочку, а read-only инструменты продолжают идти
+        /// параллельно под <see cref="ICoreAISettings.MaxParallelToolCalls"/>. Две мутации, гоняющиеся за
+        /// одним хранилищем, теряют записи или читают рваное состояние, и автор инструмента не может
+        /// защититься от этого изнутри тела — поэтому флаг объявляется в контракте.
+        /// <para>
+        /// По умолчанию <c>false</c>: необъявленный инструмент считается read-only и МОЖЕТ перекрываться с
+        /// любым другим вызовом хода. Объявляйте флаг у каждого инструмента с побочным эффектом. Встроенные
+        /// мутирующие инструменты (<c>memory</c>, <c>manage_mods</c>, <c>manage_skills</c>,
+        /// <c>world_command</c>, <c>component_command</c>, <c>execute_lua</c>, <c>call_skill_tool</c>)
+        /// политика узнаёт и по имени, поэтому хост, зарегистрировавший их под этими именами, сохраняет
+        /// гарантию без правок.
+        /// </para>
+        /// <para>
+        /// Флаг НЕ связан с подавлением эха: повторный вызов подавляется по своей per-call сигнатуре у
+        /// любого инструмента с <see cref="AllowDuplicates"/> = <c>false</c>, мутирующего или нет.
+        /// Разрешается ПО ИМЕНИ из списка инструментов роли, как и <see cref="ToolTimeoutMsOverride"/>.
+        /// </para>
+        /// </summary>
+        bool IsMutating => false;
     }
 
     /// <summary>
@@ -106,6 +153,19 @@ namespace CoreAI.Ai
         /// for the value meaning and for what still bounds the turn when the deadline is removed.
         /// </summary>
         public virtual int? ToolTimeoutMsOverride => null;
+
+        /// <summary>
+        /// Override in a tool that hands control to a human and therefore must be the LAST thing that
+        /// happens in the turn; see <see cref="ILlmTool.EndsTurn"/> for the exact semantics and for what
+        /// still reaches the model when the call fails.
+        /// </summary>
+        public virtual bool EndsTurn => false;
+
+        /// <summary>
+        /// Переопределите в инструменте с побочным эффектом; см. <see cref="ILlmTool.IsMutating"/> — что
+        /// именно гарантирует флаг и почему он не заменяет подавление эха.
+        /// </summary>
+        public virtual bool IsMutating => false;
 
         protected static string JsonParams(params (string name, string type, bool required, string desc)[] p)
         {

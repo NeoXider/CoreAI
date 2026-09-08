@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.AgentMemory;
 using Microsoft.Extensions.AI;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -193,6 +194,113 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, calls,
                 "the skill's tools must still run after the role's tool list was replaced; " +
                 "response was: " + response);
+        }
+
+        [Test]
+        public async Task ResolvedInvocation_KeepsBindingAndArgumentsAcrossCatalogReplacement()
+        {
+            string observed = null;
+            DelegateLlmTool first = new("capture", "capture", new Action<string>(value => observed = value));
+            MutableSkillCatalog catalog = new(new[] { new SkillSet("capture-skill", "", "first", first) });
+            IResolvedLlmToolCallProvider proxy = (IResolvedLlmToolCallProvider)CallSkillToolLlmTool.Create(catalog);
+            Dictionary<string, object> arguments = new()
+            {
+                ["tool_name"] = "capture", ["arguments_json"] = "{\"value\":\"original\"}"
+            };
+            Assert.IsTrue(proxy.TryResolveInvocation(arguments, out ResolvedLlmToolInvocation invocation, out string error), error);
+            arguments["arguments_json"] = "{\"value\":\"changed\"}";
+            catalog.AddOrReplace(new SkillSet("capture-skill", "", "second",
+                new DelegateLlmTool("capture", "capture", new Action<string>(_ => observed = "wrong binding"))));
+            Assert.AreSame(first, invocation.SourceTool);
+            await invocation.InvokeAsync(CancellationToken.None);
+            Assert.AreEqual("original", observed);
+        }
+
+        [Test]
+        public async Task RestrictedLiveProxy_DoesNotGainNewPermissionsOrPermitWidening()
+        {
+            int allowedCalls = 0;
+            int deniedCalls = 0;
+            MutableSkillCatalog catalog = new();
+            catalog.AddOrReplace(new SkillSet("allowed", "", "", CountingTool("safe", () => allowedCalls++)));
+            ILlmTool proxy = ((ISkillSetMetaLlmTool)CallSkillToolLlmTool.Create(catalog)).RestrictTo(new[] { "safe" });
+            catalog.AddOrReplace(new SkillSet("added", "", "", CountingTool("blocked", () => deniedCalls++)));
+            ILlmTool attemptedWidening = ((ISkillSetMetaLlmTool)proxy).RestrictTo(new[] { "safe", "blocked" });
+            await CallSkillToolAsync(attemptedWidening, "safe");
+            await CallSkillToolAsync(attemptedWidening, "blocked");
+            Assert.AreEqual(1, allowedCalls);
+            Assert.AreEqual(0, deniedCalls);
+            ILlmTool empty = ((ISkillSetMetaLlmTool)proxy).RestrictTo(Array.Empty<string>());
+            await CallSkillToolAsync(empty, "safe");
+            Assert.AreEqual(1, allowedCalls);
+        }
+
+        [Test]
+        public async Task ExistingReadersAndCallers_ObserveUpdateAndRemoval()
+        {
+            int calls = 0;
+            MutableSkillCatalog catalog = new();
+            ILlmTool caller = CallSkillToolLlmTool.Create(catalog);
+            AIFunction reader = ((IAIFunctionLlmTool)ReadSkillLlmTool.Create(catalog)).CreateAIFunction();
+            DelegateLlmTool target = CountingTool("live", () => calls++);
+            catalog.AddOrReplace(new SkillSet("live-skill", "", "old", target));
+            catalog.AddOrReplace(new SkillSet("live-skill", "", "new", target));
+            object read = await reader.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object>
+                { ["skill_name"] = "live-skill" }), CancellationToken.None);
+            Assert.AreEqual("new", Newtonsoft.Json.Linq.JObject.Parse(read.ToString())["instructions"].Value<string>());
+            await CallSkillToolAsync(caller, "live");
+            catalog.Remove("live-skill");
+            await CallSkillToolAsync(caller, "live");
+            Assert.AreEqual(1, calls);
+            object missing = await reader.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object>
+                { ["skill_name"] = "live-skill" }), CancellationToken.None);
+            Assert.IsFalse(Newtonsoft.Json.Linq.JObject.Parse(missing.ToString())["success"].Value<bool>());
+        }
+
+        [Test]
+        public void ConflictingSkillTools_AreRejectedBeforeCatalogPublication()
+        {
+            SkillSet first = new("first", "", "", CountingTool("shared", () => { }));
+            SkillSet conflict = new("second", "", "", CountingTool("shared", () => { }));
+            Assert.Throws<ArgumentException>(() => ReadSkillLlmTool.Create(new[] { first, conflict }));
+            Assert.Throws<ArgumentException>(() => CallSkillToolLlmTool.Create(new[] { first, conflict }));
+            MutableSkillCatalog catalog = new(new[] { first });
+            Assert.Throws<ArgumentException>(() => catalog.AddOrReplace(conflict));
+            Assert.IsNull(catalog.Get("second"));
+            Assert.AreSame(first, catalog.Get("first"));
+        }
+
+        [Test]
+        public void ResolvedInvocation_PreCancelled_DoesNotEnterToolBody()
+        {
+            int calls = 0;
+            ILlmTool caller = CallSkillToolLlmTool.Create(new[]
+            {
+                new SkillSet("cancel", "", "", CountingTool("mutate", () => calls++))
+            });
+            Assert.IsTrue(((IResolvedLlmToolCallProvider)caller).TryResolveInvocation(
+                new Dictionary<string, object> { ["tool_name"] = "mutate", ["arguments_json"] = "{}" },
+                out ResolvedLlmToolInvocation invocation, out string error), error);
+            Assert.ThrowsAsync<OperationCanceledException>(async () => await invocation.InvokeAsync(new CancellationToken(true)));
+            Assert.AreEqual(0, calls);
+        }
+
+        [TestCase("[]")]
+        [TestCase("null")]
+        [TestCase("broken")]
+        public void MalformedProxyArguments_AreRejectedBeforeBinding(string json)
+        {
+            int calls = 0;
+            ILlmTool caller = CallSkillToolLlmTool.Create(new[]
+            {
+                new SkillSet("parse", "", "", CountingTool("mutate", () => calls++))
+            });
+            Assert.IsFalse(((IResolvedLlmToolCallProvider)caller).TryResolveInvocation(
+                new Dictionary<string, object> { ["tool_name"] = "mutate", ["arguments_json"] = json },
+                out ResolvedLlmToolInvocation invocation, out string error));
+            Assert.IsNull(invocation);
+            Assert.IsNotEmpty(error);
+            Assert.AreEqual(0, calls);
         }
     }
 }

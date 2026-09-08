@@ -10,6 +10,22 @@
 - `ServerManagedApi` — production backend/proxy owns provider keys, subscriptions, quotas, model allowlists, usage, and audit.
 - `Offline` / `Stub` — deterministic fallback for tests and demos.
 
+`ClientLimitedLlmClientDecorator` reserves a slot before the request starts, so concurrent calls
+cannot bypass the session limit. A failed attempt returns exactly one slot: this covers exceptions,
+cancellation, and stream errors even after a partial response, including errors without an `ErrorCode` and iterator-release
+failures. An empty stream and a stream of only `null` items also do not consume the limit. A successful response consumes
+a slot; if the consumer simply closed the stream after a partial response, the slot stays taken. Explicit cancellation
+by the caller differs from such closing and returns the slot after the inner stream finishes.
+
+The limiter counts requests and does not introduce a second timer: the outer `TimeoutLlmClientDecorator` is responsible
+for bounded waiting and observing late completion of a client that ignores cancellation.
+The inner iterator is released sequentially after `MoveNextAsync`; it must not be released
+in parallel with a still-running read. A standalone limiter requires a cooperative inner
+client; if it hangs forever in reading or resource release, an outer timeout boundary is needed.
+If reading and release both finish with exceptions, the caller receives the original read exception:
+the cleanup error is kept in its `Data[ClientLimitedLlmClientDecorator.StreamDisposeExceptionDataKey]`.
+This preserves the failure cause for auth handling and retries without losing cleanup diagnostics.
+
 ## Portable Contracts
 
 ### Runtime endpoints and agent profiles (5.9)
@@ -93,8 +109,8 @@ authenticated backend.
 
 ### Provider-specific request body (7.0)
 
-Для произвольных OpenAI-compatible полей используйте публичный AOT/WebGL-safe API на
-`OpenAiHttpOptions`, `OpenAiHttpLlmSettings` или `CoreAISettingsAsset`:
+For arbitrary OpenAI-compatible fields, use the public AOT/WebGL-safe API on
+`OpenAiHttpOptions`, `OpenAiHttpLlmSettings` or `CoreAISettingsAsset`:
 
 ```csharp
 settings.SetProviderBodyParameter("provider", new JObject
@@ -106,27 +122,27 @@ settings.SetProviderBodyParameter("session_id", "coreai-teacher-v3");
 settings.RemoveProviderBodyParameter("session_id");
 ```
 
-`JObject`/`JArray` позволяют передавать вложенные структуры без `dynamic` и reflection. Объекты
-сериализуются компактно с рекурсивной сортировкой ключей; порядок массивов сохраняется. Передача C# `null`
-удаляет ключ, `JValue.CreateNull()` отправляет JSON `null`. Операция атомарна: невалидный исходный JSON,
-duplicate property или reserved key оставляет прежний `ExtraBodyJson` без изменений. CoreAI защищает
-`model`, `messages`, `temperature`, `max_tokens`, `stream`, `stream_options`, `tools`, `tool_choice`, потому что
-эти поля строит transport/orchestrator.
+`JObject`/`JArray` allow passing nested structures without `dynamic` and reflection. Objects
+serialize compactly with recursive key sorting; array order is preserved. Passing C# `null`
+removes the key, `JValue.CreateNull()` sends JSON `null`. The operation is atomic: invalid source JSON,
+duplicate property or reserved key leaves the previous `ExtraBodyJson` unchanged. CoreAI protects
+`model`, `messages`, `temperature`, `max_tokens`, `stream`, `stream_options`, `tools`, `tool_choice` because
+these fields are built by the transport/orchestrator.
 
-Raw `ExtraBodyJson` остаётся совместимым advanced escape hatch и исторически может переопределить даже
-reserved field. Новому application-коду следует использовать safe setters. Тексты исключений safe API не
-содержат JSON values/body, поэтому provider secret не попадает в ошибку.
+Raw `ExtraBodyJson` remains a compatible advanced escape hatch and historically may override even
+a reserved field. New application code should use the safe setters. Safe API exception texts do not
+contain JSON values/body, so a provider secret never leaks into an error.
 
-Для OpenRouter `session_id` — непрозрачный id приложения/когорты агента, например `coreai-teacher-v3`, а не
-student/user id и не PII. Малое фиксированное шардирование допустимо только как осознанный throughput trade-off.
-Комбинация `provider.order: ["cloudflare/fp8"]` и `provider.allow_fallbacks: false` полезна для измерения одного
-endpoint, но отключает failover. Физический cache остаётся scoped к provider/account/model/route; CoreAI не
-обещает один cache между endpoint-ами.
+For OpenRouter, `session_id` is an opaque application/agent-cohort id, for example `coreai-teacher-v3`, not
+a student/user id and not PII. Small fixed sharding is acceptable only as a deliberate throughput trade-off.
+The combination of `provider.order: ["cloudflare/fp8"]` and `provider.allow_fallbacks: false` is useful for measuring a single
+endpoint, but disables failover. The physical cache stays scoped to provider/account/model/route; CoreAI does not
+promise one shared cache across endpoints.
 
-У прямого DeepSeek API другое поле: `user_id` является границей KV-cache/content-safety/scheduling. CoreAI его
-не устанавливает. Не передавайте туда student id или PII; per-student opaque `user_id` также намеренно разделит
-provider cache на учеников и уберёт общий прогрев role prefix. Если такая privacy-изоляция не требуется, оставьте
-поле пустым; если требуется — выберите стабильную непрозрачную tenant/cohort-гранулярность осознанно.
+The direct DeepSeek API has a different field: `user_id` is a KV-cache/content-safety/scheduling boundary. CoreAI does
+not set it. Do not pass a student id or PII there; a per-student opaque `user_id` would also deliberately split
+the provider cache by student and remove the shared role-prefix warmup. If such privacy isolation is not needed, leave
+the field empty; if it is needed, choose a stable opaque tenant/cohort granularity deliberately.
 
 ## Runtime Policy Integration
 

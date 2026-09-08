@@ -90,7 +90,16 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Appends runtime prompt context sections for a single request.
+        /// Заголовок блока рантайм-контекста на ЛЕГАСИ-пути <see cref="AppendRuntimeContext"/>, где блок
+        /// дописывается прямо в системный промпт и ему нужен собственный заголовок.
+        /// </summary>
+        public const string RuntimeContextHeading = "## Runtime Context";
+
+        /// <summary>
+        /// Дописывает рантайм-контекст запроса в конец системного промпта под заголовком
+        /// <see cref="RuntimeContextHeading"/>. Легаси-путь для вызывающих вне оркестратора; сам оркестратор
+        /// кладёт тот же блок хвостовым сообщением <c>## World State</c> (см.
+        /// <c>AiOrchestrator.BuildWorldStateInstructions</c>) и берёт его через <see cref="BuildRuntimeContext"/>.
         /// </summary>
         public string AppendRuntimeContext(string systemPrompt, AiTaskRequest request, string roleId, string traceId)
         {
@@ -100,11 +109,19 @@ namespace CoreAI.Ai
                 return systemPrompt ?? "";
             }
 
-            return (systemPrompt ?? "").TrimEnd() + "\n\n" + runtimeContext;
+            return (systemPrompt ?? "").TrimEnd() + "\n\n" + RuntimeContextHeading + "\n" + runtimeContext;
         }
 
         /// <summary>
-        /// Builds runtime prompt context sections for a single request without appending them to a system prompt.
+        /// Собирает секции рантайм-контекста запроса БЕЗ заголовка: сначала per-role
+        /// <see cref="IAgentRuntimeContextProvider"/>, затем глобальные <see cref="IAiPromptContextProvider"/>,
+        /// секции разделены пустой строкой. Заголовок ставит тот, кто размещает блок: оркестратор — свой
+        /// <c>## World State</c>, <see cref="AppendRuntimeContext"/> — <see cref="RuntimeContextHeading"/>.
+        /// <para>
+        /// Раньше заголовок <c>## Runtime Context</c> ставился здесь, и оркестратор оборачивал его во второй,
+        /// <c>## World State</c>: модель получала два заголовка подряд для одного блока, а два дока описывали
+        /// один блок под разными именами.
+        /// </para>
         /// </summary>
         public string BuildRuntimeContext(AiTaskRequest request, string roleId, string traceId)
         {
@@ -146,16 +163,22 @@ namespace CoreAI.Ai
                 return;
             }
 
-            if (sections.Length == 0)
-            {
-                sections.AppendLine("## Runtime Context");
-            }
-
             sections.AppendLine(section.Trim());
             sections.AppendLine();
         }
 
-        /// <summary>Builds the user-facing prompt payload from session state and the requested AI task.</summary>
+        /// <summary>
+        /// Builds the user-facing prompt payload from session state and the requested AI task.
+        /// <para>
+        /// Два пути. Без пользовательского шаблона роли — <see cref="BuildDefaultUserBody"/>: либо сырая
+        /// подсказка, либо JSON-конверт, где каждая подстановка экранирована <see cref="EscapeJson"/>.
+        /// С шаблоном (<see cref="IAgentUserPromptTemplateProvider"/>) — шаблон это ПРОЗА автора роли
+        /// (пример: <c>Designer hint: {hint}</c>), поэтому <c>{hint}</c>, <c>{source_tag}</c> и ключи
+        /// телеметрии подставляются дословно: экранирование здесь показало бы модели обратные слэши
+        /// посреди фразы. Единственная подстановка с JSON-контрактом — <c>{telemetry}</c>: это готовый
+        /// самодостаточный объект, экранированный внутри.
+        /// </para>
+        /// </summary>
         public string BuildUserPayload(GameSessionSnapshot snap, AiTaskRequest task)
         {
             string roleId = task.RoleId ?? BuiltInAgentRoleIds.Creator;
@@ -295,6 +318,13 @@ namespace CoreAI.Ai
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Экранирует строку для вставки внутрь JSON-литерала конверта. Экранируются ВСЕ символы, которые
+        /// JSON запрещает в строке сырыми: обратный слэш, кавычка и управляющие символы ниже U+0020.
+        /// Раньше экранировались только слэш и кавычка, и перевод строки в подсказке ученика или табуляция
+        /// в значении телеметрии давали невалидный конверт. Кириллица и прочий не-ASCII остаются как есть:
+        /// в JSON они законны, а в промпте читаемы.
+        /// </summary>
         private static string EscapeJson(string s)
         {
             if (string.IsNullOrEmpty(s))
@@ -302,7 +332,33 @@ namespace CoreAI.Ai
                 return "";
             }
 
-            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            StringBuilder escaped = null;
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                string replacement = c switch
+                {
+                    '\\' => "\\\\",
+                    '"' => "\\\"",
+                    '\n' => "\\n",
+                    '\r' => "\\r",
+                    '\t' => "\\t",
+                    '\b' => "\\b",
+                    '\f' => "\\f",
+                    _ => c < ' ' ? "\\u" + ((int)c).ToString("x4") : null
+                };
+
+                if (replacement == null)
+                {
+                    escaped?.Append(c);
+                    continue;
+                }
+
+                escaped ??= new StringBuilder(s.Length + 16).Append(s, 0, i);
+                escaped.Append(replacement);
+            }
+
+            return escaped == null ? s : escaped.ToString();
         }
 
         private static string AppendLuaRepairContext(string body, AiTaskRequest task)

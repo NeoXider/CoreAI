@@ -1,12 +1,12 @@
 # Megascans (Fab) shopping list for the Rbx material catalog — 2026-09-02
 
-> **Проверено 2026-09-03: «бесплатные Megascans» на Fab больше не бесплатны.** Раздача всей
-> библиотеки закончилась 31.12.2024; сейчас поверхности продаются поштучно или идут по подписке Fab,
-> а бесплатным остался только стартовый набор (~1500 ассетов). Список ниже применим в одном из двух
-> случаев: (а) библиотека была забрана в аккаунт до 01.01.2025 — тогда она навсегда ваша и качается
-> из **My Library**, а не из каталога; (б) нужный материал попал в бесплатный стартовый набор.
-> Для остальных строк придётся брать другой бесплатный источник (ambientCG, Poly Haven) или платить.
-> Проверять цену нужно на каждой странице: «Megascans» больше не означает «бесплатно».
+> **Verified 2026-09-03: "free Megascans" on Fab are no longer free.** The full-library
+> giveaway ended 31.12.2024; surfaces are now sold individually or via a Fab subscription,
+> and only the starter set (~1500 assets) remains free. The list below applies in one of two
+> cases: (a) the library was claimed into the account before 01.01.2025 — then it is yours forever and downloads
+> from **My Library**, not from the catalog; (b) the needed material is in the free starter set.
+> For the remaining rows, use another free source (ambientCG, Poly Haven) or pay.
+> Check the price on each page: "Megascans" no longer means "free".
 
 Purpose: the owner downloads Quixel Megascans **surfaces** from fab.com by hand (own Epic
 account, Fab Standard License — see the availability note above) and imports them locally with

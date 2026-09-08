@@ -705,6 +705,9 @@ namespace CoreAI
 
             if (clearChatHistory)
             {
+                // WHY: The scope's resolved IAgentMemoryStore (ScopedAgentMemoryStoreDecorator) already drops
+                // the derived summary with the history; the explicit clear stays for a bare backing store
+                // handed in directly, and is idempotent when both apply.
                 memoryStore?.ClearChatHistory(roleId);
                 summaryStore?.ClearSummary(roleId);
             }

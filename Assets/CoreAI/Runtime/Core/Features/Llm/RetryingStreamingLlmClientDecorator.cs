@@ -163,7 +163,12 @@ namespace CoreAI.Infrastructure.Llm
 
                         if (!string.IsNullOrEmpty(current.Error))
                         {
-                            if (IsRetryableError(current.ErrorCode))
+                            // WHY: Проверка «уже исполнено» идёт ПЕРЕД проверкой кода. Раньше порядок был
+                            // обратный, и защита от повторного запуска инструмента держалась только на том,
+                            // что производитель чанков оставлял ErrorCode = None (не в белом списке). Стоило
+                            // честно поставить Timeout/BackendUnavailable на чанк с ExecutedToolCalls — и
+                            // spawn_quiz исполнялся бы второй раз, а память писалась бы дважды.
+                            if (IsRetryableError(current.ErrorCode) && !IsCommittingChunk(current))
                             {
                                 retryablePreCommitFailure = true;
                                 terminalErrorChunk = current;

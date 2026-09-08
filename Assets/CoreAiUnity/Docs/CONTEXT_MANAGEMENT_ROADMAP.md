@@ -122,6 +122,26 @@ when shared memory/history is deliberate.
   survives across turns; all other built-in roles keep `CompactSummary`.
 - Tool-call results are persisted into history per policy as one `tool` chat-history entry headed
   `## Tool Results`; stored tool entries replay as provider-safe user observations.
+- **The stored markdown never reaches the model as markdown.** `ToolResultPromptProjection` re-renders
+  every `tool` entry at prompt-build time into machine records
+  (`tool_result name=<tool> status=ok|failed result=<payload>`), dropping the heading and the bullets.
+  The durable encoding is untouched, so §7 pruning and history written by older versions keep working.
+  Reason: a model imitates the register it sees in its own history, and a learner read
+  `## Tool Results` with the raw `spawn_quiz` envelope inside the teacher's reply. The transport role
+  stays `user` — an OpenAI-compatible endpoint rejects a `tool` role message with no `tool_call_id`
+  pairing, and durable history carries no such pairing.
+- **A word-for-word repetition of a tool result is stripped — on the FALLBACK path only.**
+  `ToolResultEchoStreamFilter` is the result-side twin of `LlmToolCallTextExtractor.StripForDisplay`:
+  it matches by identity against the exact `LlmToolCallTrace.Detail` strings the engine fed back, never
+  by keyword or heading. `AiOrchestrator.ShouldStripToolResultEcho` enables it only when tools are
+  configured, the endpoint has NO native tool channel, and the role has no structured contract. Where
+  calls and results travel on their own API channel there is nothing for it to catch, and a filter that
+  can delete a sentence from a teacher's reply must not run where it has no work; where the answer is a
+  validated machine payload, cutting a span out of it after validation is worse than the leak.
+  Honest limit on the streaming path: the filter can only remove a repetition of a result it has
+  already been told about, and a streaming client reports its executed calls on the terminal chunk, so
+  text streamed earlier in the same turn is cleaned in history and in the published turn but was
+  already displayed. The guard against the incident itself is the prompt projection above.
 - Intra-turn duplicate results are collapsed by tool name + normalized detail. Cross-turn pruning of
   outdated/superseded results is now handled by §7 context editing before compaction.
 - **Truncate large outputs** (head/tail, byte/line cap) instead of dropping them whole.

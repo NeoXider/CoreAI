@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -81,6 +82,47 @@ namespace CoreAI.Mcp.Tests
             McpToolResult result = await tool.InvokeAsync(new JObject(), CancellationToken.None);
 
             Assert.IsTrue(result.IsError);
+        }
+
+        [TestCase(null, false)]
+        [TestCase("references/api.md", false)]
+        [TestCase(null, true)]
+        public async Task MultiFileRead_UsesSameContractAsInGameAgent(string section, bool all)
+        {
+            SkillSet skill = SkillSet.FromTextParts("portable", "", new[]
+            {
+                new KeyValuePair<string, string>("SKILL.md", "complete entry\nlast entry line"),
+                new KeyValuePair<string, string>("references/api.md", "reference body")
+            });
+            ReadSkillMcpTool tool = new(new[] { skill });
+            JObject arguments = new() { ["name"] = skill.Name, ["all"] = all };
+            if (section != null) arguments["section"] = section;
+            McpToolResult result = await tool.InvokeAsync(arguments, CancellationToken.None);
+            Assert.IsFalse(result.IsError);
+            JObject expected = JObject.Parse(ReadSkillLlmTool.ReadSkillJson(new[] { skill }, skill.Name, section, all));
+            JObject actual = JObject.Parse(result.Content[0].Text);
+            Assert.That(actual["usage"].Value<string>(), Does.Not.Contain("call_skill_tool("));
+            expected.Remove("usage");
+            actual.Remove("usage");
+            Assert.IsTrue(JToken.DeepEquals(expected, actual));
+        }
+
+        [TestCase("{\"name\":12}")]
+        [TestCase("{\"name\":\"Lua Modding\",\"all\":\"true\"}")]
+        [TestCase("{\"name\":\"Lua Modding\",\"section\":[]}")]
+        [TestCase("{\"name\":\"Lua Modding\",\"section\":\"ref.md\",\"all\":true}")]
+        public async Task MalformedRead_ReturnsToolFailure(string json)
+        {
+            McpToolResult result = await NewTool().InvokeAsync(JObject.Parse(json), CancellationToken.None);
+            Assert.IsTrue(result.IsError);
+            Assert.IsFalse(JObject.Parse(result.Content[0].Text)["success"].Value<bool>());
+        }
+
+        [Test]
+        public void PreCancelledRead_DoesNotReturnSuccess()
+        {
+            Assert.Throws<OperationCanceledException>(() => NewTool().InvokeAsync(
+                new JObject { ["name"] = "Lua Modding" }, new CancellationToken(true)));
         }
     }
 }

@@ -37,18 +37,17 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot();
             }
 
-            history = PruneIfEnabled(history, buildArgs);
-            if (history == null || history.Length == 0)
-            {
-                return new ConversationContextSnapshot();
-            }
-
+            // WHY: Compaction folds the old prefix into the durable rolling summary, so it must see
+            // the FULL history. Pruning first would drop superseded tool results before they are
+            // summarized and they would vanish from every future prompt without a trace. Pruning
+            // still applies, but only to the emitted recent tail (prompt-level noise control).
             string storedSummary = _summaryStore.LoadSummary(roleId) ?? "";
             // WHY: The persisted summary carries a machine-only fold marker as its final line; every
             // snapshot-facing path must see only the clean prose.
             string cleanStoredSummary = ConversationFoldMarker.Strip(storedSummary);
             int historyBudget = ConversationContextBudgetTokens.ResolveHistoryChatBudget(roleConfig, buildArgs);
-            if (!ConversationContextBudgetTokens.ShouldPartitionForCompaction(
+            if (history.Length <= ResolveMessageLimit(roleConfig) &&
+                !ConversationContextBudgetTokens.ShouldPartitionForCompaction(
                     history,
                     _estimator,
                     historyBudget,
@@ -57,13 +56,13 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot
                 {
                     Summary = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs),
-                    RecentMessages = history,
+                    RecentMessages = PruneIfEnabled(history, buildArgs),
                     WasCompacted = false
                 };
             }
 
             (int splitExclusive, List<ChatMessage> recent) =
-                ConversationHistoryPartition.PartitionByBudget(history, _estimator, historyBudget);
+                PartitionHistory(history, _estimator, historyBudget, roleConfig);
 
             if (splitExclusive <= 0)
             {
@@ -71,7 +70,7 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot
                 {
                     Summary = summaryOut,
-                    RecentMessages = recent.ToArray(),
+                    RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs),
                     WasCompacted = !string.IsNullOrWhiteSpace(summaryOut)
                 };
             }
@@ -93,7 +92,7 @@ namespace CoreAI.Ai
             ConversationContextSnapshot snapshot = new()
             {
                 Summary = compactedSummary,
-                RecentMessages = recent.ToArray(),
+                RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs),
                 WasCompacted = true
             };
 
@@ -126,6 +125,27 @@ namespace CoreAI.Ai
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(BuildSnapshot(roleId, history, roleConfig, buildArgs));
+        }
+
+        internal static int ResolveMessageLimit(AgentMemoryPolicy.RoleMemoryConfig roleConfig)
+        {
+            return roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30;
+        }
+
+        internal static (int splitExclusive, List<ChatMessage> recentTail) PartitionHistory(
+            ChatMessage[] history, ITokenEstimator estimator, int tokenBudget,
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig)
+        {
+            (int split, List<ChatMessage> recent) =
+                ConversationHistoryPartition.PartitionByBudget(history, estimator, tokenBudget);
+            int countSplit = Math.Max(0, history.Length - ResolveMessageLimit(roleConfig));
+            if (countSplit > split)
+            {
+                recent.RemoveRange(0, countSplit - split);
+                split = countSplit;
+            }
+
+            return (split, recent);
         }
 
         private string LimitSummaryIfNeeded(string summary, ConversationContextBuildArgs buildArgs)

@@ -38,11 +38,12 @@ namespace CoreAI.Tests.EditMode
                 MakeTool("ask_question"));
         }
 
-        private static async Task<JObject> ReadSkillAsync(SkillSet skill, string section = null)
+        private static async Task<JObject> ReadSkillAsync(SkillSet skill, string section = null, bool all = false)
         {
             ILlmTool tool = ReadSkillLlmTool.Create(new[] { skill });
             AIFunction function = ((IAIFunctionLlmTool)tool).CreateAIFunction();
             Dictionary<string, object> args = new() { ["skill_name"] = skill.Name };
+            args["all"] = all;
             if (section != null)
             {
                 args["section"] = section;
@@ -151,6 +152,115 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual("ask_question", entry["tools"][0]["tool_name"].Value<string>());
             Assert.AreEqual("ask_question", section["tools"][0]["tool_name"].Value<string>());
+        }
+
+        [Test]
+        public async Task ReadAll_ReturnsEveryDocumentExactlyOnceAndRejectsSectionConflict()
+        {
+            SkillSet skill = MultiDocSkill();
+            JObject all = await ReadSkillAsync(skill, all: true);
+            Assert.IsTrue(all["success"].Value<bool>());
+            Assert.AreEqual(skill.Instructions, all["instructions"].Value<string>());
+            CollectionAssert.AreEqual(new[] { "overview.md", "scoring.md", "edge-cases.md" },
+                all["sections"].ToObject<string[]>());
+            JObject conflict = await ReadSkillAsync(skill, "scoring.md", true);
+            Assert.IsFalse(conflict["success"].Value<bool>());
+            Assert.IsNull(conflict["instructions"]);
+        }
+
+        [Test]
+        public async Task EmptyEntry_IsNotReplacedByReference()
+        {
+            SkillSet skill = SkillSet.FromTextParts("empty-entry", "", new[]
+            {
+                new KeyValuePair<string, string>("SKILL.md", ""),
+                new KeyValuePair<string, string>("references/api.md", "reference")
+            });
+            JObject response = await ReadSkillAsync(skill);
+            Assert.AreEqual("SKILL.md", response["section"].Value<string>());
+            Assert.AreEqual("", response["instructions"].Value<string>());
+            CollectionAssert.Contains(response["sections"].ToObject<string[]>(), "references/api.md");
+        }
+
+        [TestCase("../secret.md")]
+        [TestCase("/absolute.md")]
+        [TestCase("C:/secret.md")]
+        [TestCase("references//api.md")]
+        public void InvalidDocumentPaths_AreRejected(string path)
+        {
+            Assert.Throws<ArgumentException>(() => SkillSet.FromTextParts("paths", "", new[]
+            {
+                new KeyValuePair<string, string>(path, "body")
+            }));
+        }
+
+        [Test]
+        public void DuplicateNormalizedPaths_AreRejected()
+        {
+            Assert.Throws<ArgumentException>(() => SkillSet.FromTextParts("paths", "", new[]
+            {
+                new KeyValuePair<string, string>("references\\api.md", "one"),
+                new KeyValuePair<string, string>("References/api.md", "two")
+            }));
+        }
+
+        [Test]
+        public void FileLoader_RetainsDirectoriesForEqualBasenames()
+        {
+            string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "coreai-skill-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                System.IO.Directory.CreateDirectory(System.IO.Path.Combine(root, "a"));
+                System.IO.Directory.CreateDirectory(System.IO.Path.Combine(root, "b"));
+                System.IO.File.WriteAllText(System.IO.Path.Combine(root, "SKILL.md"), "entry");
+                System.IO.File.WriteAllText(System.IO.Path.Combine(root, "a", "api.md"), "first");
+                System.IO.File.WriteAllText(System.IO.Path.Combine(root, "b", "api.md"), "second");
+                SkillSet skill = SkillSet.FromFiles("files", "", root, new[] { "SKILL.md", "a/api.md", "b/api.md" });
+                Assert.IsTrue(skill.TryGetSection("a/api.md", out SkillSection first));
+                Assert.IsTrue(skill.TryGetSection("b/api.md", out SkillSection second));
+                Assert.AreEqual("first", first.Content);
+                Assert.AreEqual("second", second.Content);
+            }
+            finally
+            {
+                if (System.IO.Directory.Exists(root)) System.IO.Directory.Delete(root, true);
+            }
+        }
+
+        [Test]
+        public void SkillSnapshots_CannotBeMutatedThroughExposedCollections()
+        {
+            SkillSet skill = MultiDocSkill();
+            Assert.Throws<NotSupportedException>(() => ((IList<SkillSection>)skill.Sections).Clear());
+            Assert.Throws<NotSupportedException>(() => ((IList<ILlmTool>)skill.Tools).Clear());
+            string[] names = skill.ToolNames;
+            names[0] = "tampered";
+            Assert.AreEqual("ask_question", skill.ToolNames[0]);
+        }
+
+        [Test]
+        public void DefinitionJsonRoundtrip_PreservesDocumentsWithBothSupportedSerializers()
+        {
+            SkillSetDefinition definition = new()
+            {
+                Name = "portable",
+                Sections = new[]
+                {
+                    new SkillSection("SKILL.md", "whole entry\nlast line"),
+                    new SkillSection("references/api.md", "reference")
+                }
+            };
+            SkillSetDefinition newtonsoft = Newtonsoft.Json.JsonConvert.DeserializeObject<SkillSetDefinition>(
+                Newtonsoft.Json.JsonConvert.SerializeObject(definition));
+            SkillSetDefinition systemText = System.Text.Json.JsonSerializer.Deserialize<SkillSetDefinition>(
+                System.Text.Json.JsonSerializer.Serialize(definition));
+            foreach (SkillSetDefinition restored in new[] { newtonsoft, systemText })
+            {
+                SkillSet skill = restored.BuildSkillSet();
+                Assert.AreEqual(definition.Sections[0].Content, skill.Sections[0].Content);
+                Assert.IsTrue(skill.TryGetSection("references/api.md", out SkillSection reference));
+                Assert.AreEqual(definition.Sections[1].Content, reference.Content);
+            }
         }
     }
 }

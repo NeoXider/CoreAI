@@ -47,11 +47,11 @@ namespace CoreAI.Tests.PlayMode
 
             CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             string model = _llm != null && !string.IsNullOrWhiteSpace(_llm.model) ? _llm.model : "local";
-            return new OpenAiChatLlmClient(
-                new LlmUnityServerHttpSettings(settings, settings.LlmUnityServerPort, model, ""),
+            return new OpenAiChatLlmClient(new LlmUnityServerHttpSettings(settings, settings.LlmUnityServerPort, model, ""),
                 settings,
                 GameLoggerUnscopedFallback.Instance,
-                store);
+                supportsNativeToolCalling: LlmToolChannelResolution.ResolveWithoutProbe(settings.LlmUnityToolChannel, LlmToolChannelResolution.BundledLlamaLibReason).Native,
+                memoryStore: store);
         }
 
         /// <summary>

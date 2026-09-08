@@ -52,6 +52,8 @@ namespace CoreAI.Tests.EditMode
 
             public int SaveSummaryCalls { get; private set; }
             public string LastSavedSummary { get; private set; }
+            public bool FailNextSave { get; set; }
+            public Action OnSaving { get; set; }
 
             public void Seed(string roleId, string summary)
             {
@@ -66,6 +68,12 @@ namespace CoreAI.Tests.EditMode
             public void SaveSummary(string roleId, string summary)
             {
                 SaveSummaryCalls++;
+                OnSaving?.Invoke();
+                if (FailNextSave)
+                {
+                    FailNextSave = false;
+                    throw new System.IO.IOException("simulated durable write failure");
+                }
                 LastSavedSummary = summary;
                 if (string.IsNullOrWhiteSpace(summary))
                 {
@@ -80,6 +88,103 @@ namespace CoreAI.Tests.EditMode
             {
                 _summaries.Remove(roleId);
             }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task MessageCountOverflow_FoldsOldPrefixEvenBelowTokenTrigger(bool useLlm)
+        {
+            RecordingSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            IAsyncConversationContextManager manager = useLlm
+                ? new LlmAssistedConversationContextManager(store, new FlatTokenEstimator(1), llm)
+                : new DeterministicConversationContextManager(store, new FlatTokenEstimator(1));
+            ChatMessage[] history = Enumerable.Range(0, 6)
+                .Select(i => new ChatMessage("user", "fact-" + i)).ToArray();
+            AgentMemoryPolicy.RoleMemoryConfig config = new() { MaxChatHistoryMessages = 2 };
+
+            ConversationContextSnapshot snapshot = await manager.BuildSnapshotAsync("r", history, config,
+                new ConversationContextBuildArgs { HistoryTokenBudget = 1000 }, "count", CancellationToken.None);
+
+            Assert.IsTrue(snapshot.WasCompacted);
+            CollectionAssert.AreEqual(new[] { "fact-4", "fact-5" }, snapshot.RecentMessages.Select(m => m.Content));
+            string foldedInput = useLlm ? llm.LastRequest.UserPayload : snapshot.Summary;
+            foreach (ChatMessage message in history.Take(4))
+            {
+                Assert.That(foldedInput, Does.Contain(message.Content));
+            }
+            Assert.AreEqual(1, store.SaveSummaryCalls);
+        }
+
+        [Test]
+        public void DeferredCommit_FailedDurableWriteCanBeRetriedWithoutLosingSource()
+        {
+            RecordingSummaryStore store = new() { FailNextSave = true };
+            DeterministicConversationContextManager manager = new(store, new FlatTokenEstimator(1));
+            ChatMessage[] history = { new("user", "old fact"), new("user", "latest") };
+            ConversationContextSnapshot snapshot = manager.BuildSnapshot("r", history,
+                new AgentMemoryPolicy.RoleMemoryConfig { MaxChatHistoryMessages = 1 },
+                new ConversationContextBuildArgs { HistoryTokenBudget = 1000, DeferSummaryPersistence = true });
+
+            Assert.Throws<System.IO.IOException>(() => snapshot.Commit());
+            Assert.AreEqual("", store.LoadSummary("r"));
+            Assert.AreEqual("old fact", history[0].Content);
+            snapshot.Commit();
+            snapshot.Commit();
+
+            Assert.That(store.LoadSummary("r"), Does.Contain("old fact"));
+            Assert.AreEqual(2, store.SaveSummaryCalls, "Only the failed attempt and one successful commit may write.");
+        }
+
+        [Test]
+        public async Task DeferredCommit_ConcurrentConsumersPublishOnlyOnce()
+        {
+            RecordingSummaryStore store = new();
+            TaskCompletionSource<bool> firstEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<bool> secondEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<bool> secondStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            using ManualResetEventSlim release = new(false);
+            int entries = 0;
+            store.OnSaving = () =>
+            {
+                if (Interlocked.Increment(ref entries) == 1)
+                {
+                    firstEntered.TrySetResult(true);
+                    if (!release.Wait(TimeSpan.FromSeconds(5)))
+                    {
+                        throw new TimeoutException("test failed to release durable write");
+                    }
+                }
+                else
+                {
+                    secondEntered.TrySetResult(true);
+                }
+            };
+            ConversationContextSnapshot snapshot = new DeterministicConversationContextManager(store)
+                .BuildSnapshot("r", new[] { new ChatMessage("user", "old"), new ChatMessage("user", "new") },
+                    new AgentMemoryPolicy.RoleMemoryConfig { MaxChatHistoryMessages = 1 },
+                    new ConversationContextBuildArgs { HistoryTokenBudget = 1000, DeferSummaryPersistence = true });
+            Task first = Task.Run(() => snapshot.Commit());
+            Task second = null;
+            try
+            {
+                Assert.AreSame(firstEntered.Task, await Task.WhenAny(firstEntered.Task, Task.Delay(3000)));
+                second = Task.Run(() => { secondStarted.TrySetResult(true); snapshot.Commit(); });
+                Assert.AreSame(secondStarted.Task, await Task.WhenAny(secondStarted.Task, Task.Delay(3000)));
+                Assert.AreNotSame(secondEntered.Task, await Task.WhenAny(secondEntered.Task, Task.Delay(250)),
+                    "A second writer cannot enter while the first durable commit is blocked.");
+            }
+            finally
+            {
+                release.Set();
+                await first;
+                if (second != null)
+                {
+                    await second;
+                }
+            }
+            Assert.AreEqual(1, store.SaveSummaryCalls);
+            Assert.That(store.LoadSummary("r"), Does.Contain("old"));
         }
 
         [Test]
@@ -1315,6 +1420,192 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(0, llm.CompleteCallCount,
                 "The deterministic marker must be honored by the LLM-assisted manager.");
+        }
+
+        private sealed class FailingLlmClient : ILlmClient
+        {
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = false, Error = "compactor down" });
+            }
+        }
+
+        /// <summary>
+        /// История, где второе сообщение — durable-блок результата инструмента в том виде, в каком его
+        /// пишет оркестратор. С FlatTokenEstimator(10) и бюджетом 25 сворачиваются первые три сообщения,
+        /// то есть tool-блок точно попадает в компакцию.
+        /// </summary>
+        private static ChatMessage[] HistoryWithFoldedToolBlock()
+        {
+            return new ChatMessage[]
+            {
+                new() { Role = "user", Content = "сделай квиз" },
+                new()
+                {
+                    Role = "tool",
+                    Content = "## Tool Results\n- spawn_quiz: ok {\"success\":true,\"tool\":\"spawn_quiz\"}"
+                },
+                new() { Role = "assistant", Content = "готово" },
+                new() { Role = "user", Content = "дальше" },
+                new() { Role = "assistant", Content = "идём" }
+            };
+        }
+
+        /// <summary>
+        /// Дефект: сырой блок «## Tool Results» уезжал в компактор, тот по инструкции «сохраняй
+        /// идентификаторы и числа» переносил его в summary, а summary возвращался в промпт уже мимо
+        /// проекции — и ребёнок снова читал служебный регистр в ответе учителя. Суммаризатор обязан
+        /// видеть tool-сообщения через ту же проекцию, что и основной промпт.
+        /// </summary>
+        [Test]
+        public async Task LlmAssisted_CompactionPayload_ShowsToolResultsInTheMachineRegister_NotTheRawBlock()
+        {
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            await mgr.BuildSnapshotAsync(
+                "r", HistoryWithFoldedToolBlock(), DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.AreEqual(1, llm.CompleteCallCount);
+            string payload = llm.LastRequest.UserPayload;
+            StringAssert.DoesNotContain("## Tool Results", payload,
+                "The raw durable heading must never reach the summarizer.");
+            StringAssert.Contains("- tool: tool_result name=spawn_quiz status=ok", payload,
+                "The summarizer sees the same projected record as the live prompt.");
+        }
+
+        /// <summary>
+        /// Детерминированный путь пишет summary сам, без LLM, — и он же служит запасным при любой
+        /// ошибке компактора. Его bullet-строки обязаны быть спроецированы так же.
+        /// </summary>
+        [Test]
+        public void DeterministicManager_BulletSummary_ProjectsToolResults_NotTheRawBlock()
+        {
+            RecordingSummaryStore store = new();
+            DeterministicConversationContextManager mgr = new(store, new FlatTokenEstimator(10));
+
+            ConversationContextSnapshot snap = mgr.BuildSnapshot(
+                "r", HistoryWithFoldedToolBlock(), DefaultRoleConfig(),
+                new ConversationContextBuildArgs { HistoryTokenBudget = 25, CompactionTriggerRatio = 0.8f });
+
+            Assert.IsTrue(snap.WasCompacted);
+            StringAssert.DoesNotContain("## Tool Results", snap.Summary);
+            StringAssert.Contains("- tool: tool_result name=spawn_quiz status=ok", snap.Summary);
+            StringAssert.DoesNotContain("## Tool Results", store.LoadSummary("r"),
+                "The persisted summary re-enters every later prompt; the raw heading must not be stored either.");
+        }
+
+        [Test]
+        public async Task LlmAssisted_WhenCompactorFails_BulletFallbackProjectsToolResults()
+        {
+            InMemoryConversationSummaryStore store = new();
+            LlmAssistedConversationContextManager mgr =
+                new(store, new FlatTokenEstimator(10), new FailingLlmClient());
+
+            ConversationContextSnapshot snap = await mgr.BuildSnapshotAsync(
+                "r", HistoryWithFoldedToolBlock(), DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.IsTrue(snap.WasCompacted);
+            StringAssert.DoesNotContain("## Tool Results", snap.Summary);
+            StringAssert.Contains("- tool: tool_result name=spawn_quiz status=ok", snap.Summary);
+        }
+
+        /// <summary>
+        /// Порядок «сначала компакция, потом прунинг»: старый tool-блок дословно повторён новым (поэтому
+        /// прунер выкинул бы его из хвоста), но сводка обязана его увидеть — иначе он исчезнет из всех
+        /// будущих промптов бесследно. Мутация для проверки: свернуть <c>history</c> через
+        /// <c>PruneIfEnabled</c> до партиции в <c>DeterministicConversationContextManager.BuildSnapshot</c> —
+        /// маркер из summary пропадёт.
+        /// </summary>
+        [Test]
+        public void DeterministicManager_CompactionFoldsPrefix_BeforePruningDiscardsIt()
+        {
+            const string oldBlock = "## Tool Results\n- old_tool: ok OLD-MARKER-7";
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "opening" },
+                new() { Role = "tool", Content = oldBlock },
+                new() { Role = "assistant", Content = "noted" },
+                new() { Role = "tool", Content = oldBlock },
+                new() { Role = "user", Content = "continue" }
+            };
+
+            RecordingSummaryStore store = new();
+            DeterministicConversationContextManager mgr = new(store, new FlatTokenEstimator(10));
+            ConversationContextSnapshot snap = mgr.BuildSnapshot(
+                "r",
+                history,
+                DefaultRoleConfig(),
+                new ConversationContextBuildArgs
+                {
+                    HistoryTokenBudget = 25,
+                    CompactionTriggerRatio = 0.8f,
+                    EnableContextPruning = true,
+                    MaxRetainedToolResultMessages = 10
+                });
+
+            Assert.IsTrue(snap.WasCompacted);
+            Assert.AreEqual(1, store.SaveSummaryCalls);
+            StringAssert.Contains("OLD-MARKER-7", snap.Summary,
+                "The folded prefix held a tool block the pruner would discard; compaction must see it first.");
+            StringAssert.DoesNotContain("continue", snap.Summary,
+                "Only the evicted prefix is folded; the live tail is not summarized.");
+            Assert.AreEqual(2, snap.RecentMessages.Length);
+            Assert.AreEqual(oldBlock, snap.RecentMessages[0].Content);
+            Assert.AreEqual("continue", snap.RecentMessages[1].Content);
+        }
+
+        /// <summary>
+        /// Флаг <c>EnableContextPruning</c> действует и на LLM-пути: хвост с дословно повторённым
+        /// tool-блоком выходит без старшей копии. До правки async-путь игнорировал флаг молча.
+        /// </summary>
+        [Test]
+        public async Task LlmAssisted_EnableContextPruning_PrunesEmittedTail()
+        {
+            const string repeatedBlock = "## Tool Results\n- dup_tool: ok DUP-MARKER-3";
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "u0" },
+                new() { Role = "tool", Content = repeatedBlock },
+                new() { Role = "tool", Content = repeatedBlock },
+                new() { Role = "user", Content = "u1" },
+                new() { Role = "user", Content = "u2" }
+            };
+
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr =
+                new(store, new FlatTokenEstimator(10), llm);
+            ConversationContextSnapshot snap = await mgr.BuildSnapshotAsync(
+                "r",
+                history,
+                DefaultRoleConfig(),
+                new ConversationContextBuildArgs
+                {
+                    HistoryTokenBudget = 40,
+                    CompactionTriggerRatio = 0.8f,
+                    EnableContextPruning = true,
+                    MaxRetainedToolResultMessages = 10,
+                    UseLlmContextCompaction = true
+                },
+                "t",
+                CancellationToken.None).ConfigureAwait(false);
+
+            Assert.AreEqual(1, llm.CompleteCallCount);
+            Assert.AreEqual(3, snap.RecentMessages.Length,
+                "The older verbatim-repeated tool block must be pruned from the emitted tail.");
+            Assert.AreEqual(repeatedBlock, snap.RecentMessages[0].Content);
+            Assert.AreEqual("u1", snap.RecentMessages[1].Content);
+            Assert.AreEqual("u2", snap.RecentMessages[2].Content);
         }
     }
 }

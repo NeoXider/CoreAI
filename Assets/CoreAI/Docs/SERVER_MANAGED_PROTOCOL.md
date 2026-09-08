@@ -23,26 +23,26 @@
 | `X-Coreai-Client` | No | Client version string (e.g. semver from `com.neoxider.coreaiunity` `package.json`). |
 | Host-specific attribution header | No | For example `X-RedoSchool-Lesson-Id`; supplied dynamically by the host and validated by the backend. |
 
-### 2.1. Динамические заголовки продукта
+### 2.1. Dynamic product headers
 
-Хост может зарегистрировать `IRequestHeaderProvider` через
-`ServerManagedAuthorization.SetRequestHeaderProvider(...)`. Уже созданные `ServerManagedLlmClient`
-подхватывают provider без пересборки клиента. Заголовки снимаются один раз на invocation
-`CompleteAsync` / `CompleteStreamingAsync`: внутренние HTTP-повторы, повтор после обновления JWT, внешние sync
-retry после retryable result/exception и streaming pre-commit retry получают тот же snapshot, а следующий
-invocation читает актуальные значения заново, даже если host повторно использует
-тот же объект `LlmCompletionRequest`. `ClearRequestHeaderProvider()` удаляет только этот hook и не сбрасывает
-Authorization provider/refresher; вызывайте его отдельно при logout и в `TearDown` интеграционных тестов.
+The host may register an `IRequestHeaderProvider` via
+`ServerManagedAuthorization.SetRequestHeaderProvider(...)`. Already created `ServerManagedLlmClient`
+instances pick up the provider without rebuilding the client. Headers are captured once per invocation of
+`CompleteAsync` / `CompleteStreamingAsync`: internal HTTP retries, the retry after JWT refresh, outer sync
+retries after a retryable result/exception, and streaming pre-commit retries receive the same snapshot, while the next
+invocation re-reads current values even if the host reuses
+the same `LlmCompletionRequest` object. `ClearRequestHeaderProvider()` removes only this hook and does not reset
+the Authorization provider/refresher; call it separately on logout and in integration-test `TearDown`.
 
-Если одновременно задан `IOpenAiHttpSettings.HeaderProvider`, его значения имеют приоритет, а глобальный
-ServerManaged provider дополняет отсутствующие имена. Custom provider не может подменить transport-owned
-`Authorization`, `Content-Type`, `Idempotency-Key` и `X-Request-Id`; его одноимённые элементы и свойства
-игнорируются. Trace и idempotency продолжают приходить из `LlmCompletionRequest`/`LlmRequestContext`.
+If `IOpenAiHttpSettings.HeaderProvider` is also set, its values take precedence, while the global
+ServerManaged provider fills in missing names. A custom provider cannot override transport-owned
+`Authorization`, `Content-Type`, `Idempotency-Key` and `X-Request-Id`; its same-named entries and properties
+are ignored. Trace and idempotency still come from `LlmCompletionRequest`/`LlmRequestContext`.
 
-Backend обязан проверять host-specific значение в контексте аутентифицированного пользователя. Например,
-`X-RedoSchool-Lesson-Id` можно использовать для атрибуции расходов только после проверки, что урок существует
-и доступен текущему пользователю; заголовок из WebGL-клиента нельзя считать доверенным источником биллинга.
-При cross-origin WebGL добавьте точное имя custom header в `Access-Control-Allow-Headers`.
+The backend must validate a host-specific value in the context of the authenticated user. For example,
+`X-RedoSchool-Lesson-Id` may be used for cost attribution only after verifying that the lesson exists
+and is available to the current user; a header from a WebGL client must not be treated as a trusted billing source.
+For cross-origin WebGL, add the exact custom header name to `Access-Control-Allow-Headers`.
 
 ## 3. Request Body (JSON)
 
@@ -117,7 +117,7 @@ If `ApiBaseUrl` starts with `/` (e.g., `/api/llm/v1`):
 
 To implement a basic compliant backend, ensure:
 - [ ] JWT Validation (JWKS or static secret).
-- [ ] Header parsing (`X-Tenant-Id`, `X-User-Id`, `Idempotency-Key`, разрешённые host-specific headers).
+- [ ] Header parsing (`X-Tenant-Id`, `X-User-Id`, `Idempotency-Key`, allowed host-specific headers).
 - [ ] Idempotency store (Redis/InMemory with TTL).
 - [ ] SSE pass-through with `Transfer-Encoding: chunked`.
 - [ ] Error mapping (401, 409, 429).

@@ -1,5 +1,11 @@
 # 🏗️ Agent Builder — Custom Agent Constructor
 
+## Usage without Unity
+
+`AgentBuilder`, `SkillSet`, tool and memory contracts belong to the portable core. It can be built into `CoreAI.Core.dll` for `netstandard2.1` without the Unity Editor: [building and referencing in .NET](../../../tools/portable/README.md).
+
+[The console sample](../../../examples/dotnet/README.md) shows a real HTTP client, tool loop, and a skill with `SKILL.md` plus an extra document. The `CoreAi` Unity facade, scene components, and UI belong to CoreAiUnity; a plain host provides its own storage, settings, and lifecycle.
+
 ## Overview
 
 **AgentBuilder** is a fluent API for quickly creating custom agents with unique tools, prompts, and operating modes. It makes it easy to add new NPCs to a game without changing the CoreAI core.
@@ -51,7 +57,7 @@ declaration, or a built-in fallback, `MissingSystemPrompt` is still reported. No
 - `read_skill(skill_name)` — load instructions + tool schemas
 - `call_skill_tool(tool_name, arguments_json)` — execute a skill's tool
 
-The model always sees exactly **2 meta-tools** regardless of how many skills/tools exist. This keeps the token count constant even with hundreds of tools across dozens of skills.
+Skills add two meta-tools, regardless of the number of nested tools. Their schemas load on demand; the catalog of names and descriptions grows with the skill set. The role's regular tools may be available at the same time.
 
 ### Creating skills
 
@@ -87,8 +93,9 @@ var quiz = SkillSet.FromFile("Quiz", "Quizzes and tests",
 var quiz = SkillSet.FromTextContent("Quiz", "Quizzes", textAsset.text, tool1, tool2);
 ```
 
-A skill too long for one document can be written across several. The parts join in the order given,
-each under a `## name` heading so the model can tell the sections apart; an empty part is skipped.
+A skill can be authored across several files. The first document is the complete main file, usually `SKILL.md`;
+the rest are references, examples, and case-specific rules. Empty additional documents
+are skipped, but an empty main file is never replaced by a reference.
 
 ```csharp
 var quiz = SkillSet.FromFiles("Quiz", "Quizzes and tests",
@@ -110,12 +117,11 @@ var quiz = SkillSet.FromTextParts("Quiz", "Quizzes and tests",
 A skill built from exactly **one** source keeps its text unchanged and gets no heading, so `FromFile`
 and `FromTextContent` behave exactly as they always did.
 
-### Reading a long skill one document at a time
+### Main file, single reference, or whole skill
 
-A skill assembled from several documents is **not** delivered as one blob. `read_skill(skill_name)`
-returns the **entry document** plus a `sections` index naming the rest; `read_skill(skill_name, section)`
-fetches one of them. So a five-document reference costs the entry page to start with, and the reader
-pays for a section only when it decides it needs one.
+`read_skill(skill_name)` returns the main document in full plus an index of the remaining documents.
+`section` selects one document, while `all: true` loads the whole skill in registration order.
+Passing `section` and `all: true` together is not allowed: the response contains an explicit error.
 
 ```text
 read_skill("Quiz")
@@ -124,18 +130,39 @@ read_skill("Quiz")
 
 read_skill("Quiz", "scoring.md")
   → instructions: <scoring.md body>       section: "scoring.md"
+
+read_skill(skill_name: "Quiz", all: true)
+  → instructions: <all documents in order>
 ```
 
 A skill built from a **single** source is returned exactly as it always was — full text, no `section`,
 no index. Nothing about existing one-document skills changes.
 
-This is the same staged disclosure other agent harnesses get from a `SKILL.md` that links to
-`references/*.md`, with one deliberate difference: those agents follow the link with their own file
-reader, and a CoreAI agent has no file system — it reaches a skill only through `read_skill`. A
-markdown link would be dead text here, so the second level is an argument instead of a link.
+For a link such as `[API](references/api.md)`, register a document named `references/api.md`.
+The agent can read it via `section: "references/api.md"`, including in WebGL without a file system.
+Relative paths preserve directories: `examples/api.md` and `references/api.md` are different documents.
+Absolute paths, `..`, and duplicate names after normalization are rejected when the skill is created.
+
+```csharp
+SkillSet skill = SkillSet.FromFiles("Crafting", "Создание предметов", skillRoot,
+    new[] { "SKILL.md", "references/api.md", "examples/api.md" }, craftTool);
+```
+
+For an embedded application, use `FromTextParts` with the same relative names and already
+loaded strings. `SkillSetDefinition.Sections` preserves documents when moving between CoreAI
+and Unity. `SkillSetAsset.SetInstructionAssets` accepts `TextAsset` instances and logical paths; it is a runtime API
+that does not need `AssetDatabase`. Single-file `Instructions` stays compatible.
+
+The MCP `read_skill` tool uses the same read result and `section`/`all` arguments, keeping
+the historic `name` argument instead of `skill_name`.
 
 Tool schemas are listed at **every** stage, entry and section alike: a reader that fetched one section
 still needs to know what it may call, and hiding that would only cost it another round trip.
+
+`MutableSkillCatalog` updates already created read and call tools without re-registration:
+additions, replacements, and removals are visible to the next request. A narrowed permission list is not widened
+by a catalog update. Different implementations of one tool name are rejected before publication:
+the schema read by the agent must match the invoked implementation.
 
 ### Tools do not depend on reading the skill
 
@@ -155,6 +182,8 @@ names and one-line descriptions; the body arrives solely through `read_skill`.
 | **Description** | Short one-liner |
 | **Instructions Asset** | `.txt` / `.md` TextAsset with full instructions |
 | **Additional Instruction Assets** | More files for a skill written across several documents; they follow the one above, in list order |
+| **Instruction Path** | Logical path of the main document, e.g. `SKILL.md`; when empty, the TextAsset name is used |
+| **Additional Instruction Paths** | Relative paths of additional documents in the order of the matching TextAssets |
 | **Inline Instructions** | Or type directly in Inspector (used if no TextAsset is assigned) |
 
 With more than one file assigned, each is introduced by a `## filename` heading. A single file keeps
@@ -231,13 +260,91 @@ The message is stored with the internal `"tool"` history role: it is **replayed 
 orchestrator maps `"tool"` history to a user-role context message) but **hidden from the visible chat**,
 so the conversation stays clean. Returns `false` for a null store/skill or a blank role id.
 
-### How it works
+### Saving authored skills and write errors
+
+`SkillAuthoringCoordinator` first validates the change, then persists it via `ISkillStore`
+and only after a successful write updates the `MutableSkillCatalog`. A create, update, or
+delete error keeps the previous skill in the catalog; a disk error is never reported as a successful publication.
+`NullSkillStore` deliberately keeps skills in the current process only.
+
+`SkillRecord.Sections` preserves the skill structure: the first document is the complete main file,
+the rest are addressable references. Legacy JSON without `Sections` stays single-file and uses
+`Instructions`. On `Update`, `instructions: null` keeps all documents; a non-empty
+or empty string value replaces **only the main document**, keeping its path and all
+additional files. Changing the description or allowlist does not flatten the package. `Instructions`
+is kept as a compatible rendering of the whole skill; `Sections` is the structural source.
+
+`FileSkillStore` uses a shared canonical-directory lock across all instances for reading,
+legacy-file discovery, migration, `Save`, `Delete`, and publication. This serializes operations even
+across different skills in one directory; separate directories are independent. On Windows, case and
+a trailing path separator do not create a second lock. Do not access one
+store via different file symlinks/aliases or from several processes at once: this synchronous adapter provides no
+inter-process lock.
+
+A skill's logical name is case-insensitive on Windows, Linux/Android, and WebGL. A new path looks like
+`skill-v2-<SHA-256>.json`, where the hash is computed over the strict UTF-8 bytes of the originally persisted `Id.Trim()`.
+Case-variant lookup uses `OrdinalIgnoreCase`; an update keeps the original `Id` and path.
+Upper-casing is not used as identity: different Unicode names may share
+the same upper-cased form. Malformed Unicode identifiers are rejected by strict UTF-8 encoding so that replacing damaged characters cannot create the same key. Colons and other name characters no longer depend on file-system
+rules. Writes go through a unique temporary file plus atomic replacement.
+
+Legacy JSON files are discovered by persisted `Id`, checking the old Windows
+or Unix file name as well as the former `skill-<SHA-256>.json`. A single found copy is moved by atomic rename in the same directory,
+byte-for-byte, then the content change is applied. If the change fails, the previous
+content is preserved; the name may already be canonical. Deleting by a different case removes the same
+logical skill and leaves no stale copy behind for recovery on the next start.
+
+If two copies of one name are found, the store picks no winner and publishes neither
+via `List`. A corrupt, inaccessible, or misnamed existing JSON blocks
+mutations in that directory: it cannot be safely proven that it holds no mutable skill.
+`TryLoad` returns `false` with an empty result and diagnostics; writes/deletes throw.
+To recover, stop using the store, back up the directory, inspect
+the `Id` and contents of the conflicting files, then manually keep one verified record under its
+correct legacy or canonical name. Do not delete an unknown copy just to bypass the error;
+there is no automatic conflict resolution.
+A store with its own transactions may implement `ICommittedSkillStore.MutateAndPublish`:
+the publication callback runs after the write, before the key lock is released. Coordinator order is
+the directory lock first, then the store lock. The callback must be short, synchronous, and must not re-enter
+the store or coordinator; re-entry is rejected before waiting on the lock. If the callback
+throws, `SkillStorePublicationException` explicitly reports that the write already completed
+and was not rolled back. Such an operation must not be retried as a failed write without checking state.
+For legacy implementations, the extension orders the transaction and publication within one instance;
+shared physical storage behind different instances must provide its own committed contract.
+
+`ListSkills` and `GetSkill` return content and version from a single record snapshot. In the no-persistence
+mode, versions are kept within the live catalog, including across
+coordinator replacement; separate catalogs do not share this data. Deletion clears both the record and its metadata.
+History recording follows the main commit and publication inside the same store lock, so
+another coordinator cannot write the next revision before the previous one. If only
+history is unavailable, the change is already in effect: `manage_skills` returns `success: true`, `committed: true`,
+`revision_recorded: false` plus a warning. Do not retry such a change: restore the history
+store separately. Without configured history, `revision_recorded` is `null`.
+`ListRevisions` accepts name case variants, including after a skill deletion. Re-creating
+with different case (`Guide` → delete → `guide`) plus a restart uses the single
+surviving history key `skill:Guide`: the original revision is preserved and the new body is written as
+the next revision. This rule applies to skills only; plain Lua-key comparison is unchanged.
+Matching uses `OrdinalIgnoreCase`, without converting Unicode names to upper or lower case.
+If legacy data already holds several keys for one skill (`skill:Guide` and `skill:guide`),
+CoreAI merges and overwrites neither. After a skill change, `committed: true`,
+`revision_recorded: false` and a warning are returned; history reads and conflicting-skill loads explicitly
+report an error. Fix the key conflict separately, keeping both histories. Without surviving
+history, creation seeds it as usual. Key resolution and writes are ordered across coordinators of one
+revision-store instance; on catalog load, keys are read in one batched snapshot.
+`ListSkills` takes one batched store snapshot per call and merges only live-catalog records.
+
+On WebGL, the synchronous `FileSkillStore` acknowledges the write to the virtual file system and calls
+`CoreAiWebGlPersistence.Sync()`, which only queues IndexedDB synchronization. This is **not**
+a durability ack for an immediate tab close. For such an ack, the host separately
+awaits `CoreAiWebGlPersistence.SyncAsync` after the locks are released. A synchronous `ISkillStore`
+does not promise to wait for a browser callback; a busy lock on WebGL fails explicitly without blocking the thread.
+
+### Registration and execution
 
 1. `WithSkill()` stores the `SkillSet` — tools are **not** added to the model's tool list
 2. `ApplyToPolicy()` appends the static skill catalog to the stable system prompt prefix and registers `read_skill` + `call_skill_tool`
 3. Model sees the catalog (skill names + descriptions), calls `read_skill(name)` to load instructions + tool schemas
 4. Model calls `call_skill_tool(tool_name, arguments_json)` to execute tools through the proxy
-5. Token overhead: **constant** (2 meta-tools) regardless of skill/tool count
+5. The two meta-tools stay constant; the catalog and read documents occupy context as skills grow.
 6. Tool results are returned to the model as normal tool output; empty or void action results become
    `{"success":true}` instead of disappearing.
 
@@ -398,7 +505,10 @@ await orch.RunTaskAsync(new AiTaskRequest
 });
 
 // Or via a manual LLM client (for tests / custom pipeline):
-MeaiLlmClient client = MeaiLlmClient.CreateHttp(coreAiSettings, logger, memoryStore);
+// supportsNativeToolCalling берётся из явной настройки или пробы выбранного endpoint.
+// Для LLMUnity нельзя без проверки подставлять true.
+MeaiLlmClient client = MeaiLlmClient.CreateHttp(coreAiSettings, logger,
+    supportsNativeToolCalling: supportsNativeToolCalling, memoryStore: memoryStore);
 LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
 {
     AgentRoleId = "Blacksmith",

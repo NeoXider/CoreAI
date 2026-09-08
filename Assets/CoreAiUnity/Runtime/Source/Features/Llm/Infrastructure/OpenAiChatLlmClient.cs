@@ -16,18 +16,22 @@ namespace CoreAI.Infrastructure.Llm
     {
         private readonly MeaiLlmClient _client;
 
-        public OpenAiChatLlmClient(OpenAiHttpLlmSettings settings, IAgentMemoryStore? memoryStore = null)
-            : this(settings, CoreAISettingsAsset.Instance, GameLoggerUnscopedFallback.Instance, memoryStore)
+        public OpenAiChatLlmClient(OpenAiHttpLlmSettings settings, bool supportsNativeToolCalling, IAgentMemoryStore? memoryStore = null)
+            : this(settings, CoreAISettingsAsset.Instance, GameLoggerUnscopedFallback.Instance, supportsNativeToolCalling, memoryStore)
         {
         }
 
-        public OpenAiChatLlmClient(CoreAISettingsAsset settings, IAgentMemoryStore? memoryStore = null)
-            : this(new HttpSettingsAdapter(settings), settings, GameLoggerUnscopedFallback.Instance, memoryStore)
+        public OpenAiChatLlmClient(CoreAISettingsAsset settings, bool supportsNativeToolCalling, IAgentMemoryStore? memoryStore = null)
+            : this(new HttpSettingsAdapter(settings), settings, GameLoggerUnscopedFallback.Instance, supportsNativeToolCalling, memoryStore)
         {
         }
 
+        /// <param name="supportsNativeToolCalling">
+        /// Канал эндпойнта после пробы или явной настройки. Синхронный конструктор не проверяет сервер:
+        /// передавайте решение runtime-фабрики либо известную возможность конкретного адаптера.
+        /// </param>
         public OpenAiChatLlmClient(IOpenAiHttpSettings settings, ICoreAISettings coreSettings, IGameLogger logger,
-            IAgentMemoryStore? memoryStore)
+            bool supportsNativeToolCalling, IAgentMemoryStore? memoryStore = null)
         {
             if (settings == null)
             {
@@ -44,7 +48,11 @@ namespace CoreAI.Infrastructure.Llm
                 throw new ArgumentNullException(nameof(logger));
             }
 
-            _client = MeaiLlmClient.CreateHttp(settings, coreSettings, logger, memoryStore);
+            _client = MeaiLlmClient.CreateHttp(settings,
+                coreSettings,
+                logger,
+                supportsNativeToolCalling: supportsNativeToolCalling,
+                memoryStore: memoryStore);
         }
 
         public void SetTools(IReadOnlyList<ILlmTool> tools)

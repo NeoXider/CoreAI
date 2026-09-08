@@ -54,8 +54,10 @@ namespace CoreAI.Tests.EditMode
 
         private static LlmToolCallTrace RejectedDuplicateTrace()
         {
-            return new LlmToolCallTrace("spawn", false, 0d, "duplicate",
-                "Duplicate tool call 'spawn' with same arguments - skipped.");
+            // Эхо — успешный no-op (ok:true, duplicate:true), но тело НЕ исполнялось: для ретрая это
+            // всё равно «ничего не вызывалось», решает источник трассы, а не её Success.
+            return new LlmToolCallTrace("spawn", true, 0d, "duplicate",
+                "{\"ok\":true,\"duplicate\":true,\"message\":\"Duplicate tool call 'spawn' with identical arguments: not executed again.\"}");
         }
 
         private static LlmToolCallTrace InvokedNativeTrace()
@@ -271,6 +273,45 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0, secondary.CompleteCallCount);
         }
 
+        /// <summary>
+        /// Дефект: потоковый fallback проверял ретраебельность кода раньше, чем наличие ExecutedToolCalls на
+        /// ошибочном чанке. Чанк «инструмент сработал, потом 503» переключал ход на secondary, и инструмент
+        /// исполнялся второй раз.
+        /// </summary>
+        [Test]
+        [Timeout(20_000)]
+        public async Task FallbackDecorator_Streaming_RetryableErrorChunkAfterToolExecution_DoesNotFallBack()
+        {
+            LlmStreamChunk failedAfterTool = new()
+            {
+                IsDone = true,
+                Error = "HTTP 503 after the tool already ran",
+                ErrorCode = LlmErrorCode.BackendUnavailable,
+                ExecutedToolCalls = new[] { InvokedNativeTrace() }
+            };
+            ScriptedStreamingLlm primary = new(failedAfterTool);
+            ScriptedStreamingLlm secondary = new(
+                new LlmStreamChunk { Text = "secondary" },
+                new LlmStreamChunk { IsDone = true });
+            FallbackLlmClientDecorator dec = new(primary, secondary, NullLog.Instance);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in dec.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Tester",
+                               UserPayload = "x"
+                           }))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(0, secondary.StreamCallCount,
+                "A turn whose tool body ran must not be replayed on the secondary backend");
+            Assert.AreEqual(0, dec.FallbackCount);
+            Assert.AreEqual(1, chunks.Count);
+            Assert.AreSame(failedAfterTool, chunks[0], "The post-tool failure must reach the caller unchanged");
+        }
+
         [Test]
         [Timeout(20_000)]
         public async Task FallbackDecorator_TimeoutFailureResult_IsFallbackEligible()
@@ -339,6 +380,36 @@ namespace CoreAI.Tests.EditMode
                 RejectedDuplicateTrace(),
                 InvokedNativeTrace()
             }));
+        }
+
+        private sealed class ScriptedStreamingLlm : ILlmClient
+        {
+            private readonly LlmStreamChunk[] _chunks;
+            public int StreamCallCount;
+
+            public ScriptedStreamingLlm(params LlmStreamChunk[] chunks)
+            {
+                _chunks = chunks;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = false, Error = "streaming only" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                StreamCallCount++;
+                foreach (LlmStreamChunk chunk in _chunks)
+                {
+                    await Task.Yield();
+                    yield return chunk;
+                }
+            }
         }
 
         private sealed class FixedResultClient : ILlmClient

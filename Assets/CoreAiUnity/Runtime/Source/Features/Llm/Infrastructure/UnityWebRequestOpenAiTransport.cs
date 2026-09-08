@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using UnityEngine;
 using UnityEngine.Networking;
 
 namespace CoreAI.Infrastructure.Llm
@@ -21,6 +22,7 @@ namespace CoreAI.Infrastructure.Llm
         public async Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
             CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             byte[] raw = Encoding.UTF8.GetBytes(request.JsonBody ?? "");
             UnityWebRequest uwr = new(request.Url, UnityWebRequest.kHttpVerbPOST);
             try
@@ -63,27 +65,37 @@ namespace CoreAI.Infrastructure.Llm
         /// Awaits the request through <see cref="UnityWebRequestAsyncOperation.completed"/> instead of
         /// polling, aborting the in-flight request when <paramref name="cancellationToken"/> fires.
         /// </summary>
-        private static async Task AwaitCompletionAsync(
+        internal static async Task AwaitCompletionAsync(
             UnityWebRequestAsyncOperation op,
             UnityWebRequest uwr,
             CancellationToken cancellationToken)
         {
             TaskCompletionSource<bool> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            op.completed += _ => completion.TrySetResult(true);
-            if (op.isDone)
+            Action<AsyncOperation> onCompleted = _ => completion.TrySetResult(true);
+            op.completed += onCompleted;
+            try
             {
-                completion.TrySetResult(true);
-            }
+                if (op.isDone)
+                {
+                    completion.TrySetResult(true);
+                }
 
-            // WHY: aborting before Dispose tears down the native socket/handles instead of leaking them
-            // until GC finalization.
-            using (cancellationToken.Register(() =>
-                   {
-                       AbortQuietly(uwr);
-                       completion.TrySetCanceled(cancellationToken);
-                   }))
+                // WHY: cancellation may run off-thread. Only signal there; abort on the captured Unity
+                // context after await, so registration disposal never waits for a Unity callback.
+                using (cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken)))
+                {
+                    await completion.Task;
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+            }
+            catch (OperationCanceledException)
             {
-                await completion.Task;
+                AbortQuietly(uwr);
+                throw;
+            }
+            finally
+            {
+                op.completed -= onCompleted;
             }
         }
 

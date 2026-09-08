@@ -21,7 +21,7 @@ namespace CoreAI.Tests.EditMode
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
             settings.SetRuntimeConfiguration(true, "http://localhost:1234/v1", "", "gpt-4o-mini");
 
-            OpenAiChatLlmClient client = new(settings);
+            OpenAiChatLlmClient client = new(settings, supportsNativeToolCalling: true);
             Assert.IsNotNull(client);
 
             Object.DestroyImmediate(settings);
@@ -33,7 +33,7 @@ namespace CoreAI.Tests.EditMode
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             settings.ConfigureHttpApi("http://localhost:1234/v1", "", "test-model");
 
-            OpenAiChatLlmClient client = new(settings);
+            OpenAiChatLlmClient client = new(settings, supportsNativeToolCalling: true);
             Assert.IsNotNull(client);
 
             Object.DestroyImmediate(settings);
@@ -45,8 +45,11 @@ namespace CoreAI.Tests.EditMode
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
             settings.SetRuntimeConfiguration(true, "http://localhost:1234/v1", "", "test-model");
 
-            OpenAiChatLlmClient client = new(settings, ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
-                GameLoggerUnscopedFallback.Instance, null);
+            OpenAiChatLlmClient client = new(settings,
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                GameLoggerUnscopedFallback.Instance,
+                supportsNativeToolCalling: true,
+                memoryStore: null);
             Assert.IsNotNull(client);
 
             Object.DestroyImmediate(settings);
@@ -57,7 +60,7 @@ namespace CoreAI.Tests.EditMode
         {
             Assert.Throws<System.ArgumentNullException>(() =>
             {
-                new OpenAiChatLlmClient((OpenAiHttpLlmSettings)null);
+                new OpenAiChatLlmClient((OpenAiHttpLlmSettings)null, supportsNativeToolCalling: true);
             });
         }
 
@@ -67,7 +70,7 @@ namespace CoreAI.Tests.EditMode
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
             settings.SetRuntimeConfiguration(true, "http://invalid-host-test:9999/v1", "", "test", 0.2f, 5);
 
-            OpenAiChatLlmClient client = new(settings);
+            OpenAiChatLlmClient client = new(settings, supportsNativeToolCalling: true);
 
             // Network failure or timeout: UnityWebRequest text, HttpClient SendAsync, or TaskCanceledException.
             LogAssert.Expect(LogType.Warning,

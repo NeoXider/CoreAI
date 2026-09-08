@@ -19,6 +19,31 @@ namespace CoreAI.Ai
         Offline = 2
     }
 
+    /// <summary>
+    /// Каким каналом эндпойнт передаёт вызовы инструментов. Это свойство СЕРВЕРА, а не вида эндпойнта:
+    /// llama.cpp отдаёт нативные <c>tool_calls</c> на своём OpenAI-совместимом маршруте, когда запущен
+    /// с jinja-шаблоном, и отвергает параметр <c>tools</c> («tools param requires --jinja flag»), когда
+    /// запущен без него. Поэтому канал объявляется конфигурацией, а там, где конфигурация молчит,
+    /// устанавливается пробой при активации — и никогда не зашивается константой в исходник.
+    /// </summary>
+    public enum LlmToolChannel
+    {
+        /// <summary>
+        /// Решить при активации: для OpenAI-совместимого HTTP-эндпойнта канал есть по определению API;
+        /// для локального llama.cpp под LLMUnity — один пробный запрос с объявленным инструментом.
+        /// </summary>
+        Auto = 0,
+
+        /// <summary>Сервер принимает <c>tools</c> и возвращает <c>tool_calls</c>; проза не разбирается.</summary>
+        Native = 1,
+
+        /// <summary>
+        /// Сервер отвергает <c>tools</c> (llama.cpp без <c>--jinja</c>); вызов может прийти только текстом
+        /// в ответе модели, и CoreAI разбирает прозу.
+        /// </summary>
+        Text = 2
+    }
+
     /// <summary>Lifecycle state shared by HTTP and local endpoints.</summary>
     public enum LlmEndpointLifecycleState
     {
@@ -80,6 +105,12 @@ namespace CoreAI.Ai
 
         /// <summary>Raw JSON merged into the request body for provider-specific switches.</summary>
         public string ExtraBodyJson { get; set; } = "";
+
+        /// <summary>
+        /// Канал вызовов инструментов у этого эндпойнта. Явное значение имеет приоритет над пробой и
+        /// не стоит лишнего запроса; <see cref="LlmToolChannel.Auto"/> отдаёт решение фабрике.
+        /// </summary>
+        public LlmToolChannel ToolChannel { get; set; } = LlmToolChannel.Auto;
 
         /// <summary>Derives a portable endpoint-id slug from a display name.</summary>
         public static string DeriveEndpointSlug(string displayName)

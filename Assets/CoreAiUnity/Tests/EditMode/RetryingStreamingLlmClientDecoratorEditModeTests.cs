@@ -104,6 +104,36 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(HasError(chunks), "The post-commit error must propagate unchanged.");
         }
 
+        /// <summary>
+        /// Дефект: ошибочный чанк нёс ExecutedToolCalls И ретраебельный код — декоратор проверял код раньше,
+        /// чем «инструмент уже исполнялся», и открывал поток заново. Для ученика это второй spawn_quiz и
+        /// вторая запись в память за один вопрос.
+        /// </summary>
+        [Test]
+        public async Task ErrorChunkAfterToolExecution_IsNeverRetried_EvenWithRetryableCode()
+        {
+            StubStreamingClient inner = new();
+            LlmStreamChunk failedAfterTool = new()
+            {
+                IsDone = true,
+                Error = "HTTP 503 after the tool already ran",
+                ErrorCode = LlmErrorCode.BackendUnavailable,
+                ExecutedToolCalls = new[] { new LlmToolCallTrace("spawn_quiz", true, 2d, "native") }
+            };
+            inner.NextStreams.Enqueue(new[] { failedAfterTool });
+            inner.NextStreams.Enqueue(new[] { Text("second run"), Done() });
+
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3, null);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(0, sut.RetryCount, "A tool already ran in this turn: re-opening the stream would run it twice.");
+            Assert.AreEqual(1, inner.StreamCallCount);
+            Assert.AreEqual(1, chunks.Count);
+            Assert.AreSame(failedAfterTool, chunks[0], "The post-tool failure must propagate unchanged.");
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, chunks[0].ErrorCode);
+        }
+
         [Test]
         public async Task RetriesExhausted_SurfacesTerminalError()
         {

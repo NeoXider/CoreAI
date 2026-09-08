@@ -6,22 +6,42 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// Decorates an existing memory store and maps role ids to scoped keys.
+    /// <para>
+    /// Также это единственное место, где «сбросить историю» дотягивается до свёрнутого summary.
+    /// Rolling summary — производная от истории: он хранится в отдельном
+    /// <see cref="IConversationSummaryStore"/>, но существует только как пересказ ТЕХ реплик, которые
+    /// лежали в истории. Потребитель, который зовёт <see cref="ClearChatHistory"/> (новая миссия в
+    /// RedoSchool, кнопка «очистить чат»), про второй стор не знает и знать не должен; когда он об этом
+    /// забывал, оба менеджера контекста отдавали summary прошлого урока в КАЖДЫЙ ход нового — ещё до
+    /// всякой компакции, — а при первой компакции старый пересказ сливался с новым.
+    /// </para>
     /// </summary>
     public sealed class ScopedAgentMemoryStoreDecorator : IAgentMemoryStore, IAgentMemoryLoadDiagnostics,
         IAtomicAgentMemoryStore
     {
         private readonly IAgentMemoryStore _inner;
         private readonly IAgentMemoryScopeProvider _scopeProvider;
+        private readonly IConversationSummaryStore _conversationSummaries;
 
         /// <summary>
         /// Creates a scoped memory store wrapper.
         /// </summary>
+        /// <param name="inner">Backing store; keys it receives are already scoped.</param>
+        /// <param name="scopeProvider">Scope provider shared with every other scoped decorator of this host.</param>
+        /// <param name="conversationSummaries">
+        /// Стор summary, зарегистрированный в этом же скоупе как <see cref="IConversationSummaryStore"/>
+        /// (то есть уже обёрнутый в <see cref="ScopedConversationSummaryStoreDecorator"/> с тем же
+        /// <paramref name="scopeProvider"/>): ему передаётся сырой role id, ключ он выводит сам, и выводит
+        /// тот же. <c>null</c> — у хоста нет rolling summary, чистить нечего.
+        /// </param>
         public ScopedAgentMemoryStoreDecorator(
             IAgentMemoryStore inner,
-            IAgentMemoryScopeProvider scopeProvider)
+            IAgentMemoryScopeProvider scopeProvider,
+            IConversationSummaryStore conversationSummaries = null)
         {
             _inner = inner ?? new NullAgentMemoryStore();
             _scopeProvider = scopeProvider ?? new DefaultAgentMemoryScopeProvider();
+            _conversationSummaries = conversationSummaries;
         }
 
         /// <inheritdoc />
@@ -62,6 +82,11 @@ namespace CoreAI.Ai
         public void ClearChatHistory(string roleId)
         {
             _inner.ClearChatHistory(ToScopedKey(roleId));
+            // WHY: Summary без истории, из которой он свёрнут, — не память, а чужой урок в промпте.
+            // Сценария «сбросить историю, но оставить её пересказ» в коде нет ни у одного вызывающего
+            // (CoreAi.ClearContext, CoreAiChatService.ClearHistory, AgentConfig.ClearMemory, сброс миссии в
+            // RedoSchool), поэтому и флага-исключения нет.
+            _conversationSummaries?.ClearSummary(roleId);
         }
 
         /// <inheritdoc />

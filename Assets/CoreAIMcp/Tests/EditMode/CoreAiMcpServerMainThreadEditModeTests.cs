@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Authority;
@@ -166,8 +168,160 @@ namespace CoreAI.Mcp.Tests
             }
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AdmissionCapacity_BoundsQueuedAndRunningWork(bool startBodies)
+        {
+            _server.MainThreadTimeoutSeconds = 0;
+            TaskCompletionSource<int> release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            List<Task<int>> admitted = new();
+            int started = 0;
+            try
+            {
+                for (int index = 0; index < CoreAiMcpServer.MainThreadCallCapacity; index++)
+                    admitted.Add(_server.RunOnMainThreadAsync(() => { started++; return release.Task; }));
+                if (startBodies) _server.PumpMainThreadQueue(TimeSpan.MaxValue);
+                Exception rejected = await CaptureAsync(_server.RunOnMainThreadAsync(() => Task.FromResult(-1)));
+                Assert.IsInstanceOf<InvalidOperationException>(rejected);
+                Assert.AreEqual(CoreAiMcpServer.MainThreadCallCapacity, _server.AdmittedMainThreadCalls);
+                Assert.AreEqual(startBodies ? admitted.Count : 0, started);
+            }
+            finally
+            {
+                release.TrySetResult(7);
+                _server.PumpMainThreadQueue(TimeSpan.MaxValue);
+                await Task.WhenAll(admitted);
+            }
+            Assert.AreEqual(0, _server.AdmittedMainThreadCalls);
+            Task<int> next = _server.RunOnMainThreadAsync(() => Task.FromResult(8));
+            _server.PumpMainThreadQueue();
+            Assert.AreEqual(8, await next);
+        }
+
+        [Test]
+        public async Task QueueTimeout_ReclaimsResidencyAcrossRepeatedUnpumpedWaves()
+        {
+            _server.MainThreadTimeoutSeconds = 0.05f;
+            int executed = 0;
+            for (int wave = 0; wave < 3; wave++)
+            {
+                List<Task<int>> pending = new();
+                for (int index = 0; index < CoreAiMcpServer.MainThreadCallCapacity; index++)
+                    pending.Add(_server.RunOnMainThreadAsync(() => Task.FromResult(++executed)));
+                foreach (Task<int> call in pending)
+                    Assert.IsInstanceOf<TimeoutException>(await CaptureAsync(call));
+                Assert.AreEqual(0, _server.AdmittedMainThreadCalls,
+                    "A paused host must recover capacity without retaining timed-out queued requests.");
+            }
+            _server.PumpMainThreadQueue(TimeSpan.MaxValue);
+            Assert.AreEqual(0, executed);
+        }
+
+        [TestCase("result")]
+        [TestCase("exception")]
+        [TestCase("cancel")]
+        public async Task QueueDeadline_CannotFinishAnAlreadyStartedBody(string outcome)
+        {
+            _server.MainThreadTimeoutSeconds = 0.05f;
+            TaskCompletionSource<int> body = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task<int> running = _server.RunOnMainThreadAsync(() => body.Task);
+            _server.PumpMainThreadQueue();
+            try
+            {
+                Task<int> laterQueued = _server.RunOnMainThreadAsync(() => Task.FromResult(-1));
+                Assert.IsInstanceOf<TimeoutException>(await CaptureAsync(laterQueued));
+                Assert.IsFalse(running.IsCompleted, "The queue deadline must not report fake completion of a running mutation.");
+                Assert.AreEqual(1, _server.AdmittedMainThreadCalls);
+                if (outcome == "exception") body.SetException(new InvalidOperationException("body failure"));
+                else if (outcome == "cancel") body.SetCanceled();
+                else body.SetResult(42);
+                Exception failure = await CaptureAsync(running);
+                if (outcome == "exception") Assert.IsInstanceOf<InvalidOperationException>(failure);
+                else if (outcome == "cancel") Assert.IsInstanceOf<OperationCanceledException>(failure);
+                else { Assert.IsNull(failure); Assert.AreEqual(42, await running); }
+                Assert.AreEqual(0, _server.AdmittedMainThreadCalls);
+            }
+            finally
+            {
+                body.TrySetResult(0);
+                await CaptureAsync(running);
+            }
+        }
+
+        [Test]
+        public async Task Stop_ReclaimsOnlyQueuedCallsAndKeepsRunningLeasesUntilActualCompletion()
+        {
+            _server.MainThreadTimeoutSeconds = 0;
+            TaskCompletionSource<int> body = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task<int> running = _server.RunOnMainThreadAsync(() => body.Task);
+            _server.PumpMainThreadQueue();
+            Task<int> queued = _server.RunOnMainThreadAsync(() => Task.FromResult(-1));
+            try
+            {
+                _server.StopListening();
+                Assert.IsInstanceOf<OperationCanceledException>(await CaptureAsync(queued));
+                Assert.IsFalse(running.IsCompleted);
+                Assert.AreEqual(1, _server.AdmittedMainThreadCalls);
+                Task<int> unrelated = _server.RunOnMainThreadAsync(() => Task.FromResult(9));
+                _server.PumpMainThreadQueue();
+                Assert.AreEqual(9, await unrelated, "Independent work can use remaining capacity.");
+                Assert.AreEqual(1, _server.AdmittedMainThreadCalls);
+            }
+            finally { body.TrySetResult(4); await running; }
+            Assert.AreEqual(0, _server.AdmittedMainThreadCalls);
+        }
+
+        [Test]
+        public async Task Pump_SelfEnqueuedChildrenWaitForAnotherFrame()
+        {
+            _server.MainThreadTimeoutSeconds = 0;
+            List<Task<int>> pending = new();
+            int started = 0;
+            int finiteWitness = CoreAiMcpServer.MainThreadCallCapacity + 2;
+            Func<Task<int>> body = null;
+            body = () =>
+            {
+                started++;
+                if (started < finiteWitness) pending.Add(_server.RunOnMainThreadAsync(body));
+                return Task.FromResult(started);
+            };
+            pending.Add(_server.RunOnMainThreadAsync(body));
+            try
+            {
+                _server.PumpMainThreadQueue(TimeSpan.MaxValue);
+                Assert.AreEqual(1, started, "A self-enqueuing body must not monopolize the frame.");
+                _server.PumpMainThreadQueue(TimeSpan.MaxValue);
+                Assert.AreEqual(2, started);
+            }
+            finally
+            {
+                for (int index = 0; index < finiteWitness; index++) _server.PumpMainThreadQueue(TimeSpan.MaxValue);
+                await Task.WhenAll(pending);
+            }
+        }
+
+        [Test]
+        public async Task Pump_ZeroFrameBudgetStartsOneCallAndPreservesRemainingOrder()
+        {
+            _server.MainThreadTimeoutSeconds = 0;
+            List<int> order = new();
+            Task<int> first = _server.RunOnMainThreadAsync(() => { order.Add(1); return Task.FromResult(1); });
+            Task<int> second = _server.RunOnMainThreadAsync(() => { order.Add(2); return Task.FromResult(2); });
+            try
+            {
+                _server.PumpMainThreadQueue(TimeSpan.Zero);
+                CollectionAssert.AreEqual(new[] { 1 }, order);
+                Assert.IsFalse(second.IsCompleted);
+                _server.PumpMainThreadQueue(TimeSpan.Zero);
+                CollectionAssert.AreEqual(new[] { 1, 2 }, order);
+            }
+            finally { _server.PumpMainThreadQueue(TimeSpan.MaxValue); await Task.WhenAll(first, second); }
+        }
+
         private static async Task<Exception> CaptureAsync(Task pending)
         {
+            Task completed = await Task.WhenAny(pending, Task.Delay(TimeSpan.FromSeconds(5)));
+            Assert.AreSame(pending, completed, "The MCP operation exceeded the bounded test deadline.");
             try
             {
                 await pending;

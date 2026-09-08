@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using System.Security.Cryptography;
+using System.Text;
 using CoreAI.Ai;
 using CoreAI.Infrastructure;
 using CoreAI.Logging;
@@ -12,80 +14,101 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// File-backed Unity implementation of <see cref="ISkillStore"/>: the persistent store for
-    /// agent-authored skills (name, description, instructions, and the allowlist of existing tool names),
-    /// so a skill the model wrote survives a restart and reappears in its <c>read_skill</c> catalog.
-    /// Modeled on <c>FileLuaModSourceStore</c>.
-    /// <para>
-    /// Each skill lives in its own file
-    /// <c>persistentDataPath/CoreAI/Skills/&lt;sanitizedId&gt;.json</c>. Writes are serialized through a
-    /// <see cref="SemaphoreSlim"/> gate and applied atomically (temp file then swap) so a crash mid-write
-    /// cannot corrupt an existing skill.
-    /// </para>
+    /// Atomic skill storage. All instances serialize writes and publication through the same canonical
+    /// directory gate, including discovery and migration of legacy filenames. Existing unreadable records
+    /// are never treated as missing during mutation. Logical ids are case-insensitive on every platform.
+    /// WebGL Sync queues browser persistence; synchronous success is not an IndexedDB completion receipt.
     /// </summary>
-    public sealed class FileSkillStore : ISkillStore, IAtomicSkillStore, IDisposable
+    public sealed class FileSkillStore : ISkillStore, ICommittedSkillStore, IDisposable
     {
-        private static readonly JsonSerializerSettings JsonSettings = new()
-        {
-            Formatting = Formatting.Indented
-        };
-
-        private static readonly IReadOnlyList<SkillRecord> Empty = new SkillRecord[0];
-
-        /// <summary>
-        /// Process-wide mutation locks keyed by each skill's file path, one entry per distinct skill id
-        /// ever mutated (not per active/loaded skill), so cardinality tracks the lifetime skill count
-        /// rather than the current catalog size. Entries are intentionally never evicted: a caller could
-        /// already hold the <see cref="SemaphoreSlim"/> instance fetched from this dictionary while a
-        /// concurrent eviction-then-<c>GetOrAdd</c> for the same key hands a second caller a fresh
-        /// instance, which would silently break the mutual exclusion this lock exists for. In practice the
-        /// key set is bounded by the number of distinct skills an agent has authored on this install, which
-        /// is small relative to process lifetime.
-        /// </summary>
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks =
-            new(StringComparer.Ordinal);
-
+        private static readonly JsonSerializerSettings JsonSettings = new() { Formatting = Formatting.Indented };
+        private static readonly StringComparer PathComparer = Path.DirectorySeparatorChar == '\\'
+            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        private static readonly StringComparison PathComparison = Path.DirectorySeparatorChar == '\\'
+            ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        // WHY: never evict a live path gate; a waiter may still hold its instance.
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks = new(PathComparer);
         private readonly string _dir;
         private readonly ILog _log;
-        private readonly SemaphoreSlim _gate = new(1, 1);
+        private readonly SemaphoreSlim _gate;
+        private bool _disposed;
 
-        /// <summary>Creates a file-backed skill store under CoreAI persistent data.</summary>
-        /// <param name="rootDirectory">
-        /// Optional override for the storage directory; defaults to the CoreAI skills folder under
-        /// <see cref="Application.persistentDataPath"/>.
-        /// </param>
-        /// <param name="log">Optional logger.</param>
         public FileSkillStore(string rootDirectory = null, ILog log = null)
         {
-            _dir = !string.IsNullOrWhiteSpace(rootDirectory)
+            _dir = Path.GetFullPath(!string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
                 : Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                    CoreAiPersistentPaths.Skills);
+                    CoreAiPersistentPaths.Skills));
+            if (_dir.Length > Path.GetPathRoot(_dir).Length)
+                _dir = _dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            _gate = MutationLocks.GetOrAdd(_dir, _ => new SemaphoreSlim(1, 1));
             _log = log;
         }
 
-        /// <inheritdoc />
         public void Save(SkillRecord record)
         {
-            if (record == null)
-            {
-                return;
-            }
+            ThrowIfDisposed();
+            if (record == null || string.IsNullOrWhiteSpace(record.Id)) return;
+            Mutate(record.Id, _ => SkillStoreMutation<bool>.SaveRecord(record, true));
+        }
 
-            string id = Normalize(record.Id);
-            if (id.Length == 0)
-            {
-                return;
-            }
+        public void Delete(string id)
+        {
+            ThrowIfDisposed();
+            if (string.IsNullOrWhiteSpace(id)) return;
+            Mutate(id, current => current == null
+                ? SkillStoreMutation<bool>.NoChange(false)
+                : SkillStoreMutation<bool>.DeleteRecord(true));
+        }
 
-            _gate.Wait();
+        public TResult Mutate<TResult>(string id, Func<SkillRecord, SkillStoreMutation<TResult>> mutator)
+        {
+            return MutateAndPublish(id, mutator, null);
+        }
+
+        public TResult MutateAndPublish<TResult>(string id, Func<SkillRecord, SkillStoreMutation<TResult>> mutator,
+            Action<TResult> publish)
+        {
+            ThrowIfDisposed();
+            if (mutator == null) throw new ArgumentNullException(nameof(mutator));
+            string skillId = Normalize(id);
+            if (skillId.Length == 0) throw new ArgumentException("Skill id must not be empty.", nameof(id));
+            _ = GetSkillPath(skillId);
+            Enter(_gate);
             try
             {
-                SaveCore(id, record);
+                SkillRecord current = FindRecord(skillId, out string existingPath);
+                string stableId = current?.Id ?? skillId;
+                string path = GetSkillPath(stableId);
+                _ = ReadRecordStrict(path, stableId);
+                if (current != null) MigrateRecord(existingPath, path);
+                SkillStoreMutation<TResult> mutation = SkillStoreCallbackContext.Run(() => mutator(current))
+                    ?? throw new InvalidOperationException("Skill store mutator returned null.");
+                if (mutation.Delete)
+                {
+                    if (current != null)
+                    {
+                        File.Delete(path);
+                        CoreAiWebGlPersistence.Sync();
+                    }
+                }
+                else if (mutation.Save)
+                {
+                    if (mutation.Record == null) throw new InvalidOperationException("Save mutation requires a record.");
+                    if (!string.Equals(Normalize(mutation.Record.Id), skillId, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("A skill mutation cannot write a different key.");
+                    _ = ReadRecordStrict(path, stableId);
+                    SaveCore(stableId, mutation.Record, path);
+                }
+                // WHY: a later commit must not publish ahead of this one; callback stays inside the key gate.
+                SkillStoreCallbackContext.Publish(skillId, mutation.Result, publish);
+                return mutation.Result;
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileSkillStore] Save failed for {id}: {ex}");
+                string stage = ex is SkillStorePublicationException ? "Publication failed after commit" : "Mutation failed";
+                _log?.Error($"[FileSkillStore] {stage} for {skillId}: {ex}");
+                throw;
             }
             finally
             {
@@ -93,105 +116,39 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <inheritdoc />
-        public TResult Mutate<TResult>(string id, Func<SkillRecord, SkillStoreMutation<TResult>> mutator)
+        private void SaveCore(string stableId, SkillRecord record, string path)
         {
-            if (mutator == null)
-            {
-                throw new ArgumentNullException(nameof(mutator));
-            }
-
-            string skillId = Normalize(id);
-            if (skillId.Length == 0)
-            {
-                return mutator(null).Result;
-            }
-
-            string path = GetSkillPath(skillId);
-            SemaphoreSlim mutationGate = MutationLocks.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
-            mutationGate.Wait();
-            try
-            {
-                _gate.Wait();
-                try
-                {
-                    SkillRecord current = File.Exists(path) ? ReadRecord(path) : null;
-                    SkillStoreMutation<TResult> mutation = mutator(current);
-                    if (mutation == null)
-                    {
-                        throw new InvalidOperationException("Skill store mutator returned null.");
-                    }
-
-                    if (mutation.Delete)
-                    {
-                        if (File.Exists(path))
-                        {
-                            File.Delete(path);
-                            CoreAiWebGlPersistence.Sync();
-                        }
-                    }
-                    else if (mutation.Save && mutation.Record != null)
-                    {
-                        SaveCore(skillId, mutation.Record);
-                    }
-
-                    return mutation.Result;
-                }
-                finally
-                {
-                    _gate.Release();
-                }
-            }
-            catch (Exception ex)
-            {
-                _log?.Error($"[FileSkillStore] Mutate failed for {skillId}: {ex}");
-                throw;
-            }
-            finally
-            {
-                mutationGate.Release();
-            }
-        }
-
-        private void SaveCore(string id, SkillRecord record)
-        {
-            record.Id = id;
-            if (!Directory.Exists(_dir))
-            {
-                Directory.CreateDirectory(_dir);
-            }
-
-            string json = JsonConvert.SerializeObject(record, JsonSettings);
-            AtomicWriteAllText(GetSkillPath(id), json, _log);
+            SkillRecord snapshot = new(stableId, record.Description, record.Instructions, record.ToolNames,
+                record.Version, record.Sections);
+            if (snapshot.Version < 0) throw new InvalidDataException("Skill version must not be negative.");
+            Directory.CreateDirectory(_dir);
+            AtomicWriteAllText(path, JsonConvert.SerializeObject(snapshot, JsonSettings));
             CoreAiWebGlPersistence.Sync();
         }
 
-        /// <inheritdoc />
         public bool TryLoad(string id, out SkillRecord record)
         {
+            ThrowIfDisposed();
             record = null;
             string skillId = Normalize(id);
-            if (skillId.Length == 0)
-            {
-                return false;
-            }
-
-            _gate.Wait();
+            if (skillId.Length == 0) return false;
+            _ = GetSkillPath(skillId);
+            Enter(_gate);
             try
             {
-                string path = GetSkillPath(skillId);
-                if (!File.Exists(path))
+                record = FindRecord(skillId, out string existingPath);
+                if (record != null)
                 {
-                    return false;
+                    string path = GetSkillPath(record.Id);
+                    _ = ReadRecordStrict(path, record.Id);
+                    MigrateRecord(existingPath, path);
                 }
-
-                record = ReadRecord(path);
                 return record != null;
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileSkillStore] Load failed for {skillId}: {ex}");
                 record = null;
+                _log?.Error($"[FileSkillStore] Load failed for {skillId}: {ex}");
                 return false;
             }
             finally
@@ -200,182 +157,199 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <inheritdoc />
         public IReadOnlyList<SkillRecord> List()
         {
-            _gate.Wait();
+            ThrowIfDisposed();
+            Enter(_gate);
             try
             {
-                if (!Directory.Exists(_dir))
+                Dictionary<string, SkillRecord> unique = new(StringComparer.OrdinalIgnoreCase);
+                HashSet<string> ambiguous = new(StringComparer.OrdinalIgnoreCase);
+                foreach (string path in GetRecordPaths())
                 {
-                    return Empty;
-                }
-
-                List<SkillRecord> result = new();
-                foreach (string path in Directory.GetFiles(_dir, "*.json"))
-                {
-                    SkillRecord record = ReadRecord(path);
-                    if (record != null && !string.IsNullOrWhiteSpace(record.Id))
+                    try
                     {
-                        result.Add(record);
+                        SkillRecord record = ReadRecordStrict(path, null);
+                        if (record == null) continue;
+                        ValidateRecordPath(path, record.Id);
+                        string key = Normalize(record.Id);
+                        if (unique.ContainsKey(key)) ambiguous.Add(key);
+                        else unique.Add(key, record);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log?.Error($"[FileSkillStore] Record read failed for {path}: {ex}");
                     }
                 }
-
-                return result;
-            }
-            catch (Exception ex)
-            {
-                _log?.Error($"[FileSkillStore] List failed: {ex}");
-                return Empty;
-            }
-            finally
-            {
-                _gate.Release();
-            }
-        }
-
-        /// <inheritdoc />
-        public void Delete(string id)
-        {
-            string skillId = Normalize(id);
-            if (skillId.Length == 0)
-            {
-                return;
-            }
-
-            _gate.Wait();
-            try
-            {
-                string path = GetSkillPath(skillId);
-                if (File.Exists(path))
+                foreach (string key in ambiguous)
                 {
-                    File.Delete(path);
-                    CoreAiWebGlPersistence.Sync();
+                    unique.Remove(key);
+                    _log?.Error($"[FileSkillStore] Ambiguous skill '{key}': preserve files and resolve the duplicate before writing.");
                 }
+                List<SkillRecord> records = new(unique.Values);
+                records.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Id, right.Id));
+                return records.AsReadOnly();
             }
-            catch (Exception ex)
-            {
-                _log?.Error($"[FileSkillStore] Delete failed for {skillId}: {ex}");
-            }
-            finally
-            {
-                _gate.Release();
-            }
+            finally { _gate.Release(); }
         }
 
-        /// <summary>Releases the internal file-access semaphore.</summary>
-        public void Dispose()
+        private string[] GetRecordPaths()
         {
-            _gate.Dispose();
+            try { return Directory.GetFiles(_dir, "*.json"); }
+            catch (DirectoryNotFoundException) { return Array.Empty<string>(); }
         }
 
-        private SkillRecord ReadRecord(string path)
+        private SkillRecord FindRecord(string id, out string existingPath)
         {
+            SkillRecord found = null;
+            existingPath = null;
+            // WHY: legacy filenames encode the old case and platform-specific sanitization. Discover by
+            // validated stored identity before migration; an unreadable record may be this same skill.
+            foreach (string path in GetRecordPaths())
+            {
+                SkillRecord record = ReadRecordStrict(path, null);
+                if (record == null) continue;
+                ValidateRecordPath(path, record.Id);
+                if (!string.Equals(Normalize(record.Id), id, StringComparison.OrdinalIgnoreCase)) continue;
+                if (found != null)
+                    throw new InvalidDataException($"Ambiguous skill '{id}': multiple records exist; all files preserved.");
+                found = record;
+                existingPath = path;
+            }
+            return found;
+        }
+
+        private void ValidateRecordPath(string path, string id)
+        {
+            string filename = Path.GetFileName(path);
+            if (PathComparer.Equals(GetSkillPath(id), Path.GetFullPath(path)) ||
+                string.Equals(filename, HashedFileName(id, true) + ".json", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(filename, LegacyFileName(id, true) + ".json", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(filename, LegacyFileName(id, false) + ".json", StringComparison.OrdinalIgnoreCase)) return;
+            throw new InvalidDataException("Existing skill filename does not match its identity; preserved without changes.");
+        }
+
+        private static void MigrateRecord(string existingPath, string canonicalPath)
+        {
+            if (PathComparer.Equals(Path.GetFullPath(existingPath), canonicalPath)) return;
+            // WHY: one same-directory rename preserves the complete old bytes if the later content write fails.
+            // File.Move refuses an occupied destination; migration never chooses a winning duplicate.
+            File.Move(existingPath, canonicalPath);
+            CoreAiWebGlPersistence.Sync();
+        }
+        private static SkillRecord ReadRecordStrict(string path, string expectedId)
+        {
+            string json;
             try
             {
-                string json = File.ReadAllText(path);
-                return JsonConvert.DeserializeObject<SkillRecord>(json, JsonSettings);
+                json = File.ReadAllText(path);
             }
-            catch (Exception ex)
+            catch (FileNotFoundException)
             {
-                _log?.Error($"[FileSkillStore] Record read failed for {path}: {ex}");
                 return null;
             }
+            catch (DirectoryNotFoundException)
+            {
+                return null;
+            }
+            SkillRecord record;
+            try
+            {
+                record = JsonConvert.DeserializeObject<SkillRecord>(json, JsonSettings);
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidDataException("Existing skill record is not readable JSON; preserved without changes.", ex);
+            }
+            if (record == null || string.IsNullOrWhiteSpace(record.Id) || record.Version < 0 ||
+                (expectedId != null && !string.Equals(Normalize(record.Id), expectedId, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidDataException("Existing skill record has invalid identity or version; preserved without changes.");
+            }
+            return record;
         }
 
         private string GetSkillPath(string id)
         {
-            string combined = Path.Combine(_dir, SanitizedFileName(id) + ".json");
-            return EnsureWithinRoot(combined);
+            string path = Path.GetFullPath(Path.Combine(_dir, CanonicalFileName(id) + ".json"));
+            string prefix = _dir.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? _dir : _dir + Path.DirectorySeparatorChar;
+            if (!path.StartsWith(prefix, PathComparison)) throw new InvalidOperationException("Skill path escapes its store root.");
+            return path;
         }
 
-        /// <summary>
-        /// Guards against path traversal: <see cref="Path.GetInvalidFileNameChars"/> does NOT strip
-        /// <c>..</c>, so an id like <c>..</c> or <c>../x</c> could resolve outside <see cref="_dir"/> and
-        /// read/write/delete arbitrary files. Reject any combined path that escapes the store root.
-        /// </summary>
-        private string EnsureWithinRoot(string combinedPath)
+        private static string CanonicalFileName(string id)
         {
-            string rootFull = Path.GetFullPath(_dir);
-            string rootPrefix = rootFull.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
-                ? rootFull
-                : rootFull + Path.DirectorySeparatorChar;
-            string fullPath = Path.GetFullPath(combinedPath);
-            if (!fullPath.StartsWith(rootPrefix, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    "[FileSkillStore] Skill id resolves outside the store root; rejected to prevent path traversal.");
-            }
-
-            return fullPath;
+            return HashedFileName(id, false);
         }
 
-        /// <summary>
-        /// Maps a raw skill id to a unique file name. Invalid filename characters are replaced, and when
-        /// the replacement changed anything a short hash of the raw id is appended so distinct ids cannot
-        /// collide on the same file.
-        /// </summary>
-        private static string SanitizedFileName(string id)
+        private static string HashedFileName(string id, bool legacyCaseFold)
         {
-            string safe = string.Join("_", id.Split(Path.GetInvalidFileNameChars()));
-            if (string.Equals(safe, id, StringComparison.Ordinal))
-            {
-                return safe;
-            }
+            using SHA256 hash = SHA256.Create();
+            // WHY: replacement fallback maps different invalid surrogate ids onto the same file key.
+            string source = Normalize(id);
+            if (legacyCaseFold) source = source.ToUpperInvariant();
+            byte[] bytes = hash.ComputeHash(new UTF8Encoding(false, true).GetBytes(source));
+            // WHY: ToUpperInvariant is not OrdinalIgnoreCase identity (for example, long-s and ASCII S).
+            // Preserve the original stored id; aliases resolve it through FindRecord instead of renaming it.
+            StringBuilder name = new(legacyCaseFold ? "skill-" : "skill-v2-");
+            foreach (byte value in bytes) name.Append(value.ToString("x2"));
+            return name.ToString();
+        }
 
-            uint hash = 2166136261u;
+        private static string LegacyFileName(string id, bool windows)
+        {
+            StringBuilder safe = new();
+            bool changed = false;
             foreach (char c in id)
             {
-                hash = (hash ^ c) * 16777619u;
+                bool invalid = c == '\0' || c == '/' || (windows && (c < 32 || "<>:\"\\|?*".IndexOf(c) >= 0));
+                safe.Append(invalid ? '_' : c);
+                changed |= invalid;
             }
-
+            if (!changed) return safe.ToString();
+            uint hash = 2166136261u;
+            foreach (char c in id) hash = unchecked((hash ^ c) * 16777619u);
             return $"{safe}_{hash:x8}";
         }
-
-        private static void AtomicWriteAllText(string path, string contents, ILog log)
+        private void AtomicWriteAllText(string path, string contents)
         {
-            string dir = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-            {
-                Directory.CreateDirectory(dir);
-            }
-
-            string tmpPath = path + ".tmp";
-            File.WriteAllText(tmpPath, contents);
-
+            string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                if (File.Exists(path))
-                {
-                    File.Replace(tmpPath, path, null);
-                }
-                else
-                {
-                    File.Move(tmpPath, path);
-                }
+                File.WriteAllText(temporary, contents);
+                if (File.Exists(path)) File.Replace(temporary, path, null);
+                else File.Move(temporary, path);
             }
-            catch (Exception ex)
+            finally
             {
-                log?.Error($"[FileSkillStore] Atomic write failed for {path}: {ex}");
-                if (File.Exists(tmpPath))
+                try
                 {
-                    try
-                    {
-                        File.Delete(tmpPath);
-                    }
-                    catch (Exception cleanupEx)
-                    {
-                        log?.Error($"[FileSkillStore] Atomic write cleanup failed for {tmpPath}: {cleanupEx}");
-                    }
+                    if (File.Exists(temporary)) File.Delete(temporary);
                 }
-
-                throw;
+                catch (Exception ex)
+                {
+                    _log?.Error($"[FileSkillStore] Temporary file cleanup failed: {ex}");
+                }
             }
         }
 
-        private static string Normalize(string value)
+        private static void Enter(SemaphoreSlim gate)
         {
-            return (value ?? "").Trim();
+            SkillStoreCallbackContext.ThrowIfActive();
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (!gate.Wait(0)) throw new InvalidOperationException("Skill store is busy; retry after the current operation.");
+#else
+            gate.Wait();
+#endif
         }
+
+        private void ThrowIfDisposed()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(FileSkillStore));
+        }
+
+        public void Dispose() => _disposed = true;
+        private static string Normalize(string value) => (value ?? "").Trim();
     }
 }

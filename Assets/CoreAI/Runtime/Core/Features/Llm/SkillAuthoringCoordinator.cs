@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace CoreAI.Ai
 {
@@ -28,7 +29,12 @@ namespace CoreAI.Ai
     {
         private const string VersionKeyPrefix = "skill:";
 
-        private readonly object _lock = new();
+        private static readonly ConditionalWeakTable<MutableSkillCatalog, object> CatalogLocks = new();
+        private static readonly ConditionalWeakTable<ILuaScriptVersionStore, object> RevisionLocks = new();
+        private static readonly ConditionalWeakTable<MutableSkillCatalog, Dictionary<string, SkillRecord>> SessionRecords = new();
+        private readonly Dictionary<string, SkillRecord> _sessionRecords;
+        private readonly object _lock;
+        private readonly object _revisionLock;
         private readonly MutableSkillCatalog _catalog;
         private readonly ISkillStore _store;
         private readonly ILuaScriptVersionStore _versionStore;
@@ -36,7 +42,7 @@ namespace CoreAI.Ai
         private readonly bool _requireKnownTools;
 
         /// <param name="catalog">Live catalog the role's read_skill / call_skill_tool read from.</param>
-        /// <param name="store">Persistent skill store (best-effort; may be a null implementation).</param>
+        /// <param name="store">Persistent skill store; write failures prevent publication. Null provides session-only skills.</param>
         /// <param name="versionStore">
         /// Version store for skill revisions, keyed by <c>skill:&lt;id&gt;</c>. Optional; when null no
         /// history is recorded but create/update still work.
@@ -56,8 +62,12 @@ namespace CoreAI.Ai
             bool requireKnownTools = true)
         {
             _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
+            _lock = CatalogLocks.GetValue(_catalog, _ => new object());
             _store = store ?? new NullSkillStore();
+            if (_store is NullSkillStore)
+                _sessionRecords = SessionRecords.GetValue(_catalog, _ => new Dictionary<string, SkillRecord>(StringComparer.OrdinalIgnoreCase));
             _versionStore = versionStore;
+            _revisionLock = versionStore == null ? new object() : RevisionLocks.GetValue(versionStore, _ => new object());
             _toolResolver = toolResolver ?? (_ => null);
             _requireKnownTools = requireKnownTools;
         }
@@ -65,76 +75,103 @@ namespace CoreAI.Ai
         /// <summary>
         /// Loads every persisted skill into the live catalog (and seeds version history) at startup, so
         /// skills authored in a previous session reappear in the agent's <c>read_skill</c> catalog.
-        /// Best-effort: a single bad record is skipped, never aborting rehydration.
+        /// Invalid skill records are skipped. Revision-store failures or ambiguous legacy keys are
+        /// surfaced before publishing the affected skill; existing history is never guessed or merged.
         /// </summary>
         public int RehydrateFromStore()
         {
-            int loaded = 0;
-            foreach (SkillRecord record in _store.List())
+            SkillStoreCallbackContext.ThrowIfActive();
+            lock (_lock)
             {
-                if (record == null || string.IsNullOrWhiteSpace(record.Id))
+                List<KeyValuePair<SkillRecord, SkillSet>> prepared = new();
+                foreach (SkillRecord record in _store.List())
                 {
-                    continue;
+                    if (record != null && !string.IsNullOrWhiteSpace(record.Id) &&
+                        TryBuildSkill(record, out SkillSet skill, out _, true))
+                    {
+                        prepared.Add(new KeyValuePair<SkillRecord, SkillSet>(record, skill));
+                    }
                 }
 
-                if (TryBuildSkill(record, out SkillSet skill, out _, true))
+                // WHY: Resolve tools and read skill storage before the revision gate; writers acquire
+                // the skill-store gate first. One key snapshot serves the whole startup batch.
+                lock (_revisionLock)
                 {
-                    _catalog.AddOrReplace(skill);
-                    SeedVersion(record);
-                    loaded++;
+                    Dictionary<string, string> keys = _versionStore == null ? null : ReadVersionKeys();
+                    foreach (KeyValuePair<SkillRecord, SkillSet> pair in prepared)
+                    {
+                        SeedVersion(pair.Key, keys);
+                        _catalog.AddOrReplace(pair.Value);
+                    }
                 }
+                return prepared.Count;
             }
-
-            return loaded;
         }
 
         /// <summary>
         /// Returns a snapshot of the current authored skills in the catalog (id, description, version,
-        /// tool names). Host-registered skills are included too, with version 0.
+        /// tool names). Host-registered skills are included too, with version 0. Takes one coherent
+        /// batch snapshot of the store per call; only live catalog entries are merged.
         /// </summary>
         public IReadOnlyList<SkillRecord> ListSkills()
         {
-            List<SkillRecord> result = new();
-            foreach (SkillSet skill in _catalog)
+            SkillStoreCallbackContext.ThrowIfActive();
+            lock (_lock)
             {
-                if (skill == null || string.IsNullOrWhiteSpace(skill.Name))
+                Dictionary<string, SkillRecord> snapshot = new(StringComparer.OrdinalIgnoreCase);
+                foreach (SkillRecord stored in _store.List())
                 {
-                    continue;
+                    if (stored == null || string.IsNullOrWhiteSpace(stored.Id))
+                    {
+                        continue;
+                    }
+
+                    if (!snapshot.ContainsKey(stored.Id))
+                    {
+                        snapshot[stored.Id] = stored;
+                    }
                 }
 
-                int version = 0;
-                if (_store.TryLoad(skill.Name, out SkillRecord stored) && stored != null)
+                List<SkillRecord> result = new();
+                foreach (SkillSet skill in _catalog)
                 {
-                    version = stored.Version;
+                    if (skill == null || string.IsNullOrWhiteSpace(skill.Name)) continue;
+                    SkillRecord record = ReadRecordSnapshot(skill.Name, snapshot);
+                    if (record != null) result.Add(record);
                 }
-
-                result.Add(new SkillRecord(skill.Name, skill.Description, skill.Instructions,
-                    skill.ToolNames, version));
+                return result.AsReadOnly();
             }
-
-            return result;
         }
 
-        /// <summary>Returns the persisted record for a skill, or null when absent.</summary>
+        /// <summary>Returns one coherent persisted/session snapshot, or the host-registered definition.</summary>
         public SkillRecord GetSkill(string id)
         {
-            if (string.IsNullOrWhiteSpace(id))
-            {
-                return null;
-            }
-
-            if (_store.TryLoad(id.Trim(), out SkillRecord record) && record != null)
-            {
-                return record;
-            }
-
-            // Fall back to a catalog-only (host-registered) skill so `get` still describes it.
-            SkillSet skill = _catalog.Get(id.Trim());
-            return skill == null
-                ? null
-                : new SkillRecord(skill.Name, skill.Description, skill.Instructions, skill.ToolNames);
+            SkillStoreCallbackContext.ThrowIfActive();
+            if (string.IsNullOrWhiteSpace(id)) return null;
+            lock (_lock) { return ReadRecordSnapshot(id.Trim()); }
         }
 
+        private SkillRecord ReadRecordSnapshot(string id)
+        {
+            return ReadRecordSnapshot(id, null);
+        }
+
+        private SkillRecord ReadRecordSnapshot(string id, Dictionary<string, SkillRecord> batch)
+        {
+            if (batch != null)
+            {
+                if (batch.TryGetValue(id, out SkillRecord batched) && batched != null) return CopyRecord(batched);
+            }
+            else if (_store.TryLoad(id, out SkillRecord stored) && stored != null) return CopyRecord(stored);
+            if (_sessionRecords != null && _sessionRecords.TryGetValue(id, out SkillRecord session))
+                return CopyRecord(session);
+            SkillSet skill = _catalog.Get(id);
+            return skill == null ? null : new SkillRecord(skill.Name, skill.Description, skill.Instructions,
+                skill.ToolNames, sections: skill.Sections);
+        }
+
+        private static SkillRecord CopyRecord(SkillRecord record) => new(record.Id, record.Description,
+            record.Instructions, record.ToolNames, record.Version, record.Sections);
         /// <summary>
         /// Creates a new authored skill: validates the tool allowlist, adds it to the live catalog,
         /// persists it (revision 0), and records the original revision. Fails when the id is blank, the
@@ -143,6 +180,7 @@ namespace CoreAI.Ai
         public SkillAuthoringResult Create(string id, string description, string instructions,
             IEnumerable<string> toolNames)
         {
+            SkillStoreCallbackContext.ThrowIfActive();
             if (string.IsNullOrWhiteSpace(id))
             {
                 return SkillAuthoringResult.Failure("create: 'name' is required.");
@@ -151,7 +189,10 @@ namespace CoreAI.Ai
             string skillId = id.Trim();
             lock (_lock)
             {
-                SkillAuthoringResult result = _store.Mutate(
+                SkillSet preparedSkill = null;
+                bool? revisionRecorded = null;
+                string revisionWarning = "";
+                SkillAuthoringResult result = _store.MutateAndPublish(
                     skillId,
                     current =>
                     {
@@ -170,29 +211,35 @@ namespace CoreAI.Ai
                                 SkillAuthoringResult.Failure($"create: {error}"));
                         }
 
-                        _catalog.AddOrReplace(skill);
+                        ValidateCatalogCandidate(skill);
+                        preparedSkill = skill;
                         SkillAuthoringResult created =
                             SkillAuthoringResult.Ok(record, $"Skill '{skillId}' created (version 0).");
                         return SkillStoreMutation<SkillAuthoringResult>.SaveRecord(record, created);
+                    }, committed =>
+                    {
+                        if (committed.Success && preparedSkill != null)
+                        {
+                            _catalog.AddOrReplace(preparedSkill);
+                            if (_sessionRecords != null) _sessionRecords[preparedSkill.Name] = CopyRecord(committed.Record);
+                            RecordVersionAfterCommit(committed.Record, out revisionRecorded, out revisionWarning);
+                        }
                     });
 
-                if (result.Success && result.Record != null)
-                {
-                    SeedVersion(result.Record);
-                }
-
-                return result;
+                return result.Success ? result.WithRevisionOutcome(revisionRecorded, revisionWarning) : result;
             }
         }
 
         /// <summary>
         /// Updates an existing authored skill. Null arguments leave the corresponding field unchanged;
         /// a non-null <paramref name="toolNames"/> replaces the allowlist. Auto-increments the version
-        /// and records a new revision. Fails when the skill is unknown or a referenced tool is unknown.
+        /// and records a new revision. Instructions replaces only the main document, preserving reference
+        /// documents. Fails when the skill is unknown or a referenced tool is unknown.
         /// </summary>
         public SkillAuthoringResult Update(string id, string description, string instructions,
             IEnumerable<string> toolNames)
         {
+            SkillStoreCallbackContext.ThrowIfActive();
             if (string.IsNullOrWhiteSpace(id))
             {
                 return SkillAuthoringResult.Failure("update: 'name' is required.");
@@ -201,10 +248,15 @@ namespace CoreAI.Ai
             string skillId = id.Trim();
             lock (_lock)
             {
-                SkillAuthoringResult result = _store.Mutate(
+                SkillSet preparedSkill = null;
+                bool? revisionRecorded = null;
+                string revisionWarning = "";
+                SkillAuthoringResult result = _store.MutateAndPublish(
                     skillId,
                     current =>
                     {
+                        if (current == null && _sessionRecords != null &&
+                            _sessionRecords.TryGetValue(skillId, out SkillRecord session)) current = CopyRecord(session);
                         if (current == null)
                         {
                             SkillSet existingSkill = _catalog.Get(skillId);
@@ -217,15 +269,17 @@ namespace CoreAI.Ai
 
                             // Promote a host-registered (un-persisted) skill into an authored, versioned one.
                             current = new SkillRecord(existingSkill.Name, existingSkill.Description,
-                                existingSkill.Instructions, existingSkill.ToolNames);
+                                existingSkill.Instructions, existingSkill.ToolNames, sections: existingSkill.Sections);
                         }
 
                         SkillRecord revised = new(
-                            skillId,
+                            current.Id,
                             description ?? current.Description,
                             instructions ?? current.Instructions,
                             toolNames != null ? new List<string>(toolNames) : current.ToolNames,
-                            current.Version + 1);
+                            current.Version + 1, current.Sections);
+                        if (instructions != null && revised.Sections.Count > 0)
+                            revised.Sections[0] = new SkillSection(revised.Sections[0].Name, instructions);
 
                         if (!TryBuildSkill(revised, out SkillSet skill, out string error, false))
                         {
@@ -233,24 +287,31 @@ namespace CoreAI.Ai
                                 SkillAuthoringResult.Failure($"update: {error}"));
                         }
 
-                        _catalog.AddOrReplace(skill);
+                        revised.Instructions = skill.Instructions;
+
+                        ValidateCatalogCandidate(skill);
+                        preparedSkill = skill;
                         SkillAuthoringResult updated = SkillAuthoringResult.Ok(revised,
                             $"Skill '{skillId}' updated (now version {revised.Version}).");
                         return SkillStoreMutation<SkillAuthoringResult>.SaveRecord(revised, updated);
+                    }, committed =>
+                    {
+                        if (committed.Success && preparedSkill != null)
+                        {
+                            _catalog.AddOrReplace(preparedSkill);
+                            if (_sessionRecords != null) _sessionRecords[preparedSkill.Name] = CopyRecord(committed.Record);
+                            RecordVersionAfterCommit(committed.Record, out revisionRecorded, out revisionWarning);
+                        }
                     });
 
-                if (result.Success && result.Record != null)
-                {
-                    RecordRevision(result.Record);
-                }
-
-                return result;
+                return result.Success ? result.WithRevisionOutcome(revisionRecorded, revisionWarning) : result;
             }
         }
 
         /// <summary>Removes a skill from the live catalog and persistent store.</summary>
         public SkillAuthoringResult Delete(string id)
         {
+            SkillStoreCallbackContext.ThrowIfActive();
             if (string.IsNullOrWhiteSpace(id))
             {
                 return SkillAuthoringResult.Failure("delete: 'name' is required.");
@@ -259,11 +320,11 @@ namespace CoreAI.Ai
             string skillId = id.Trim();
             lock (_lock)
             {
-                return _store.Mutate(
+                return _store.MutateAndPublish(
                     skillId,
                     current =>
                     {
-                        bool inCatalog = _catalog.Remove(skillId);
+                        bool inCatalog = _catalog.Get(skillId) != null;
                         if (!inCatalog && current == null)
                         {
                             return SkillStoreMutation<SkillAuthoringResult>.NoChange(
@@ -272,6 +333,13 @@ namespace CoreAI.Ai
 
                         return SkillStoreMutation<SkillAuthoringResult>.DeleteRecord(
                             SkillAuthoringResult.Ok(null, $"Skill '{skillId}' deleted."));
+                    }, committed =>
+                    {
+                        if (committed.Success)
+                        {
+                            _catalog.Remove(skillId);
+                            _sessionRecords?.Remove(skillId);
+                        }
                     });
             }
         }
@@ -279,14 +347,22 @@ namespace CoreAI.Ai
         /// <summary>Lists the recorded revisions for a skill (oldest first; revision 0 is the original).</summary>
         public IReadOnlyList<LuaScriptRevision> ListRevisions(string id)
         {
+            SkillStoreCallbackContext.ThrowIfActive();
             if (_versionStore == null || string.IsNullOrWhiteSpace(id))
             {
                 return Array.Empty<LuaScriptRevision>();
             }
 
-            return _versionStore.TryGetSnapshot(VersionKey(id.Trim()), out LuaScriptVersionRecord snap) && snap != null
-                ? snap.History
-                : Array.Empty<LuaScriptRevision>();
+            lock (_lock)
+            {
+                lock (_revisionLock)
+                {
+                    string key = ResolveVersionKey(id.Trim(), ReadVersionKeys());
+                    return _versionStore.TryGetSnapshot(key, out LuaScriptVersionRecord snap) && snap != null
+                        ? snap.History
+                        : Array.Empty<LuaScriptRevision>();
+                }
+            }
         }
 
         private bool TryBuildSkill(SkillRecord record, out SkillSet skill, out string error, bool allowUnknownTools)
@@ -324,18 +400,98 @@ namespace CoreAI.Ai
                 return false;
             }
 
-            skill = new SkillSet(record.Id, record.Description, record.Instructions, tools);
-            return true;
+            try
+            {
+                if (record.Sections != null && record.Sections.Count > 0)
+                {
+                    List<KeyValuePair<string, string>> parts = new();
+                    foreach (SkillSection section in record.Sections)
+                        parts.Add(new KeyValuePair<string, string>(section.Name, section.Content));
+                    skill = SkillSet.FromTextParts(record.Id, record.Description, parts, tools.ToArray());
+                }
+                else skill = new SkillSet(record.Id, record.Description, record.Instructions, tools);
+                return true;
+            }
+            catch (ArgumentException ex)
+            {
+                error = ex.Message;
+                return false;
+            }
         }
 
-        private void SeedVersion(SkillRecord record)
+        /// <summary>Checks a prospective catalog without publishing it before the storage commit.</summary>
+        private void ValidateCatalogCandidate(SkillSet skill)
         {
-            _versionStore?.SeedOriginal(VersionKey(record.Id), SerializeRevision(record));
+            List<SkillSet> proposed = new();
+            foreach (SkillSet existing in _catalog)
+            {
+                if (!string.Equals(existing.Name, skill.Name, StringComparison.OrdinalIgnoreCase)) proposed.Add(existing);
+            }
+            proposed.Add(skill);
+            SkillSetToolResolver.ValidateCatalog(proposed);
         }
 
-        private void RecordRevision(SkillRecord record)
+        private void SeedVersion(SkillRecord record, Dictionary<string, string> keys)
         {
-            _versionStore?.RecordSuccessfulExecution(VersionKey(record.Id), SerializeRevision(record));
+            if (_versionStore == null) return;
+            string key = ResolveVersionKey(record.Id, keys);
+            _versionStore.SeedOriginal(key, SerializeRevision(record));
+            keys[record.Id] = key;
+        }
+
+        private void RecordVersionAfterCommit(SkillRecord record, out bool? recorded, out string warning)
+        {
+            recorded = null;
+            warning = "";
+            if (_versionStore == null) return;
+            try
+            {
+                lock (_revisionLock)
+                {
+                    // WHY: Case aliases share the surviving key even after deletion. Resolve and write
+                    // under one per-store gate so concurrent coordinators cannot create two aliases.
+                    Dictionary<string, string> keys = ReadVersionKeys();
+                    string key = ResolveVersionKey(record.Id, keys);
+                    if (record.Version == 0)
+                    {
+                        if (_versionStore.TryGetSnapshot(key, out LuaScriptVersionRecord existing) &&
+                            existing != null && existing.History.Count > 0)
+                            _versionStore.RecordSuccessfulExecution(key, SerializeRevision(record));
+                        else SeedVersion(record, keys);
+                    }
+                    else _versionStore.RecordSuccessfulExecution(key, SerializeRevision(record));
+                }
+                recorded = true;
+            }
+            catch (Exception ex)
+            {
+                recorded = false;
+                warning = "The skill change was committed, but revision history could not be recorded: " +
+                    ex.Message + ". Do not repeat the edit; inspect or repair revision history separately.";
+            }
+        }
+
+        private Dictionary<string, string> ReadVersionKeys()
+        {
+            Dictionary<string, string> keys = new(StringComparer.OrdinalIgnoreCase);
+            foreach (string key in _versionStore.GetKnownKeys())
+            {
+                if (key == null || !key.StartsWith(VersionKeyPrefix, StringComparison.Ordinal)) continue;
+                string id = key.Substring(VersionKeyPrefix.Length);
+                if (keys.TryGetValue(id, out string existing) && !string.Equals(existing, key, StringComparison.Ordinal))
+                    keys[id] = null;
+                else if (!keys.ContainsKey(id)) keys.Add(id, key);
+            }
+            return keys;
+        }
+
+        private static string ResolveVersionKey(string id, Dictionary<string, string> keys)
+        {
+            if (!keys.TryGetValue(id, out string key)) return VersionKey(id);
+            if (key == null)
+                throw new InvalidOperationException($"Ambiguous revision history for skill '{id}': multiple case aliases exist. " +
+                    "Repair the conflicting history keys explicitly; no history was merged or overwritten.");
+            return key;
         }
 
         /// <summary>
@@ -345,7 +501,9 @@ namespace CoreAI.Ai
         private static string SerializeRevision(SkillRecord record)
         {
             string tools = record.ToolNames != null ? string.Join(",", record.ToolNames) : "";
-            return $"# {record.Description}\n# tools: {tools}\n{record.Instructions}";
+            string sections = record.Sections != null && record.Sections.Count > 0
+                ? Newtonsoft.Json.JsonConvert.SerializeObject(record.Sections) : "";
+            return $"# {record.Description}\n# tools: {tools}\n{record.Instructions}\n# sections: {sections}";
         }
 
         private static string VersionKey(string id)
@@ -360,13 +518,22 @@ namespace CoreAI.Ai
         public bool Success { get; }
         public string Message { get; }
         public SkillRecord Record { get; }
+        public bool Committed => Success;
+        public bool? RevisionRecorded { get; }
+        public string Warning { get; }
 
-        private SkillAuthoringResult(bool success, string message, SkillRecord record)
+        private SkillAuthoringResult(bool success, string message, SkillRecord record,
+            bool? revisionRecorded = null, string warning = "")
         {
             Success = success;
             Message = message;
             Record = record;
+            RevisionRecorded = revisionRecorded;
+            Warning = warning;
         }
+
+        internal SkillAuthoringResult WithRevisionOutcome(bool? recorded, string warning) =>
+            new(Success, string.IsNullOrEmpty(warning) ? Message : Message + " " + warning, Record, recorded, warning);
 
         public static SkillAuthoringResult Ok(SkillRecord record, string message)
         {

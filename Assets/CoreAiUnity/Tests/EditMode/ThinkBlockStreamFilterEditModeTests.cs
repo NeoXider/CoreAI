@@ -7,6 +7,10 @@ namespace CoreAI.Tests.EditMode
     /// <summary>
     /// EditMode coverage for <see cref="ThinkBlockStreamFilter"/> streaming filtering:
     /// split tags, multiple blocks, flush/reset behavior, case-insensitivity, and edge cases.
+    /// <para>
+    /// Часть тестов сформулирована от лица ученика, который читает ответ учителя Python по-русски:
+    /// в таком ответе <c>&lt;</c> — оператор сравнения, а не начало тега, и терять его нельзя.
+    /// </para>
     /// </summary>
     [TestFixture]
     public sealed class ThinkBlockStreamFilterEditModeTests
@@ -76,6 +80,18 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("Hello World", result);
         }
 
+        [Test]
+        public void ProcessChunk_ThinkBlockInEachChunk_EachStripped()
+        {
+            // Блок в каждом чанке: состояние «внутри блока» обязано корректно закрываться между вызовами.
+            ThinkBlockStreamFilter filter = new();
+            string r1 = filter.ProcessChunk("<think>a</think>Hello ");
+            string r2 = filter.ProcessChunk("<think>b</think>World");
+
+            Assert.AreEqual("Hello ", r1);
+            Assert.AreEqual("World", r2);
+        }
+
         // ===================== Split tags across chunks =====================
 
         [Test]
@@ -87,6 +103,26 @@ namespace CoreAI.Tests.EditMode
                 "ink>hidden</think>",
                 "Suffix");
             Assert.AreEqual("Prefix Suffix", result);
+        }
+
+        /// <summary>
+        /// Не только итог, но и каждый отдельный возврат: ни кусок тега, ни рассуждение не должны
+        /// мелькнуть на экране даже на один чанк.
+        /// </summary>
+        [Test]
+        public void ProcessChunk_SplitOpenTag_NothingLeaksOnAnySingleChunk()
+        {
+            ThinkBlockStreamFilter filter = new();
+
+            string r1 = filter.ProcessChunk("<thi");
+            string r2 = filter.ProcessChunk("nk>I am thinking about this");
+            string r3 = filter.ProcessChunk("</think>");
+            string r4 = filter.ProcessChunk("The answer is 42.");
+
+            Assert.AreEqual("", r1, "Partial tag buffered");
+            Assert.AreEqual("", r2, "Inside think block");
+            Assert.AreEqual("", r3, "Closing tag consumed");
+            Assert.AreEqual("The answer is 42.", r4, "After think block");
         }
 
         [Test]
@@ -117,6 +153,39 @@ namespace CoreAI.Tests.EditMode
                 "ink>Answer");
 
             Assert.AreEqual("Answer", result);
+        }
+
+        /// <summary>
+        /// Ученик уже читает ответ, и тут модель роняет одиночный <c>&lt;/think&gt;</c>. Прятать перед
+        /// ним нечего — текст на экране, — а удержанный остаток чанка (« Ещё ») терялся: ученик читал
+        /// «Ответ: да. хвост» вместо «Ответ: да. Ещё  хвост». Одиночный тег после видимого текста —
+        /// мусор, который убирается сам по себе, без текста вокруг.
+        /// </summary>
+        [Test]
+        public void ProcessChunk_OrphanCloseTagAfterVisibleText_StripsOnlyTheTag()
+        {
+            ThinkBlockStreamFilter filter = new();
+            StringBuilder reasoning = new();
+            filter.ReasoningSink = s => reasoning.Append(s);
+
+            string result = FeedChunks(filter, "Ответ: да.", " Ещё <", "/think> хвост");
+
+            Assert.AreEqual("Ответ: да. Ещё  хвост", result);
+            Assert.AreEqual(string.Empty, reasoning.ToString(),
+                "После видимого текста прятать нечего: в рассуждение ничего уходить не должно.");
+        }
+
+        /// <summary>
+        /// Видимый текст, потом одиночный <c>&lt;</c> на границе чанка, потом <c>/think&gt;</c>:
+        /// то, что ученик уже прочитал, исчезнуть не может.
+        /// </summary>
+        [Test]
+        public void ProcessChunk_VisibleTextThenLoneLessThanThenOrphanClose_KeepsVisibleText()
+        {
+            ThinkBlockStreamFilter filter = new();
+            string result = FeedChunks(filter, "Сравни числа", "<", "/think>");
+
+            Assert.AreEqual("Сравни числа", result);
         }
 
         [Test]
@@ -162,6 +231,34 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("OK", result);
         }
 
+        // ===================== Кириллица =====================
+
+        [Test]
+        public void ProcessChunk_CyrillicAroundTags_HiddenSpanStrippedTextPreserved()
+        {
+            ThinkBlockStreamFilter filter = new();
+            StringBuilder reasoning = new();
+            filter.ReasoningSink = s => reasoning.Append(s);
+
+            string whole = filter.ProcessChunk("Привет!<think>думаю по-русски</think>Ответ: да");
+
+            Assert.AreEqual("Привет!Ответ: да", whole);
+            Assert.AreEqual("думаю по-русски", reasoning.ToString());
+        }
+
+        [Test]
+        public void ProcessChunk_CyrillicAroundSplitTags_SameAsUnsplit()
+        {
+            ThinkBlockStreamFilter filter = new();
+            StringBuilder reasoning = new();
+            filter.ReasoningSink = s => reasoning.Append(s);
+
+            string result = FeedChunks(filter, "Прив", "ет!<th", "ink>ду", "маю</th", "ink>От", "вет: да");
+
+            Assert.AreEqual("Привет!Ответ: да", result);
+            Assert.AreEqual("думаю", reasoning.ToString());
+        }
+
         // ===================== Unclosed think block =====================
 
         [Test]
@@ -175,13 +272,44 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(string.Empty, tail, "Flush inside unclosed think returns nothing");
         }
 
+        // ===================== Flush: хвост, не ставший тегом =====================
+
+        /// <summary>
+        /// Ответ учителя кончается на <c>&lt;</c> («оператор сравнения: &lt;»). Фильтр удерживает
+        /// символ на случай, что это начало <c>&lt;think&gt;</c>, — но поток кончился, тега не будет.
+        /// Раньше Flush выбрасывал такой хвост, и ученик читал ответ без последнего символа.
+        /// </summary>
         [Test]
-        public void Flush_PartialOpenTagBuffered_Hidden()
+        public void Flush_AnswerEndsWithLessThan_KeepsIt()
+        {
+            ThinkBlockStreamFilter separateChunk = new();
+            Assert.AreEqual("Оператор сравнения: <", FeedChunks(separateChunk, "Оператор сравнения: ", "<"));
+
+            ThinkBlockStreamFilter sameChunk = new();
+            Assert.AreEqual("Оператор сравнения: <", FeedChunks(sameChunk, "Оператор сравнения: <"));
+        }
+
+        [TestCase("<")]
+        [TestCase("<t")]
+        [TestCase("<thin")]
+        [TestCase("</")]
+        [TestCase("</thin")]
+        public void Flush_PartialTagAtEndOfStream_IsVisibleText(string tail)
         {
             ThinkBlockStreamFilter filter = new();
+            Assert.AreEqual("Хвост " + tail, FeedChunks(filter, "Хвост ", tail),
+                "Хвост удерживался только на случай тега; поток закончился — значит, это текст.");
+        }
+
+        [Test]
+        public void Flush_PartialOpenTagAlone_IsReturnedNotDropped()
+        {
+            // Раньше тест закреплял обратное («обрыв на половине тега — выбросить буфер»). Это неверно:
+            // «<thi» без «nk>» ничем не отличается от любого другого текста с «<», а выбрасывание
+            // хвоста ровно и теряло «<» на конце ответа.
+            ThinkBlockStreamFilter filter = new();
             Assert.AreEqual(string.Empty, filter.ProcessChunk("<thi"));
-            // Stream oborvan na polovine taga — safely drop the buffer
-            Assert.AreEqual(string.Empty, filter.Flush());
+            Assert.AreEqual("<thi", filter.Flush());
         }
 
         [Test]
@@ -230,6 +358,20 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("two", second);
         }
 
+        /// <summary>
+        /// Reset обязан забыть и то, что в прошлом потоке уже был видимый текст: иначе одиночный
+        /// <c>&lt;/think&gt;</c> в начале следующего ответа перестал бы прятать рассуждение.
+        /// </summary>
+        [Test]
+        public void Reset_ForgetsThatVisibleTextWasShown()
+        {
+            ThinkBlockStreamFilter filter = new();
+            Assert.AreEqual("first", FeedChunks(filter, "first"));
+            filter.Reset();
+
+            Assert.AreEqual("Answer", FeedChunks(filter, "reasoning</think>Answer"));
+        }
+
         // ===================== Edge cases =====================
 
         [Test]
@@ -237,6 +379,18 @@ namespace CoreAI.Tests.EditMode
         {
             ThinkBlockStreamFilter filter = new();
             string result = FeedChunks(filter, "2 < 3 and 5 > 4");
+            Assert.AreEqual("2 < 3 and 5 > 4", result);
+        }
+
+        /// <summary>
+        /// Провайдер режет поток прямо после <c>&lt;</c>: «2 &lt;» + « 3». Сравнение обязано дойти
+        /// целиком — символ лишь задерживается до следующего чанка, а не пропадает.
+        /// </summary>
+        [Test]
+        public void ProcessChunk_ComparisonSplitRightAfterLessThan_PassedThrough()
+        {
+            ThinkBlockStreamFilter filter = new();
+            string result = FeedChunks(filter, "2 <", " 3 and 5 > 4");
             Assert.AreEqual("2 < 3 and 5 > 4", result);
         }
 

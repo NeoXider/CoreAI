@@ -43,11 +43,11 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             _authorizationSettings = new ServerManagedAuthorizationSettings(settings);
-            _client = MeaiLlmClient.CreateHttp(
-                _authorizationSettings,
+            _client = MeaiLlmClient.CreateHttp(_authorizationSettings,
                 coreSettings,
                 logger,
-                memoryStore);
+                supportsNativeToolCalling: true,
+                memoryStore: memoryStore);
         }
 
         /// <inheritdoc />

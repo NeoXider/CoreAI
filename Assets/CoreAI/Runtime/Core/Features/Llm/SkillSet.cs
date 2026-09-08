@@ -33,6 +33,8 @@ namespace CoreAI.Ai
     /// </summary>
     public readonly struct SkillSection
     {
+        [Newtonsoft.Json.JsonConstructor]
+        [System.Text.Json.Serialization.JsonConstructor]
         public SkillSection(string name, string content)
         {
             Name = name ?? "";
@@ -84,7 +86,8 @@ namespace CoreAI.Ai
         /// <summary>
         /// Stable names of tools available through this skill's <c>call_skill_tool</c> proxy.
         /// </summary>
-        public string[] ToolNames { get; }
+        private readonly string[] _toolNames;
+        public string[] ToolNames => (string[])_toolNames.Clone();
 
         /// <summary>
         /// Creates a skill with name, description, full instructions, and tools.
@@ -111,10 +114,11 @@ namespace CoreAI.Ai
         private SkillSet(IReadOnlyList<SkillSection> sections, string name, string description,
             string instructions, params ILlmTool[] tools)
         {
-            Name = name ?? throw new ArgumentNullException(nameof(name));
+            Name = name?.Trim() ?? throw new ArgumentNullException(nameof(name));
+            if (Name.Length == 0) throw new ArgumentException("Skill name must not be empty.", nameof(name));
             Description = string.IsNullOrWhiteSpace(description) ? name : description;
             Instructions = instructions ?? "";
-            Sections = sections ?? new[] { new SkillSection(name, Instructions) };
+            Sections = new List<SkillSection>(sections ?? new[] { new SkillSection(name, Instructions) }).AsReadOnly();
             tools ??= Array.Empty<ILlmTool>();
 
             List<ILlmTool> toolList = new(tools.Length);
@@ -128,8 +132,8 @@ namespace CoreAI.Ai
                 toolList.Add(tool);
             }
 
-            Tools = toolList;
-            ToolNames = SkillSetToolResolver.BuildToolNames(toolList);
+            Tools = toolList.AsReadOnly();
+            _toolNames = SkillSetToolResolver.BuildToolNames(toolList);
         }
 
         /// <summary>
@@ -285,27 +289,29 @@ namespace CoreAI.Ai
                 throw new ArgumentException("At least one instruction part is required.", nameof(namedParts));
             }
 
+            HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < parts.Count; i++)
             {
-                if (string.IsNullOrWhiteSpace(parts[i].Key))
+                string path = NormalizeSectionPath(parts[i].Key);
+                if (!names.Add(path))
                 {
-                    throw new ArgumentException($"Part name at index {i} must not be empty.", nameof(namedParts));
+                    throw new ArgumentException($"Duplicate instruction path '{path}'.", nameof(namedParts));
                 }
+                parts[i] = new KeyValuePair<string, string>(path, parts[i].Value ?? "");
             }
 
             List<SkillSection> sections = new(parts.Count);
             foreach (KeyValuePair<string, string> part in parts)
             {
-                // WHY: an empty part is skipped by the joiner, so keeping it here would advertise a
-                // section index entry that fetches nothing.
-                if (!string.IsNullOrWhiteSpace(part.Value))
+                // WHY: preserve the entry even when empty; a reference must never silently become the entry.
+                if (sections.Count == 0 || !string.IsNullOrWhiteSpace(part.Value))
                 {
                     sections.Add(new SkillSection(part.Key, part.Value));
                 }
             }
 
             return new SkillSet(sections.Count > 0 ? sections : null, name, description,
-                JoinInstructionParts(parts), tools);
+                sections.Count == 1 ? sections[0].Content : JoinInstructionParts(parts), tools);
         }
 
         /// <summary>
@@ -316,7 +322,16 @@ namespace CoreAI.Ai
         {
             if (!string.IsNullOrWhiteSpace(sectionName) && Sections != null)
             {
-                string wanted = sectionName.Trim();
+                string wanted;
+                try
+                {
+                    wanted = NormalizeSectionPath(sectionName);
+                }
+                catch (ArgumentException)
+                {
+                    section = default;
+                    return false;
+                }
                 foreach (SkillSection candidate in Sections)
                 {
                     if (string.Equals(candidate.Name, wanted, StringComparison.OrdinalIgnoreCase))
@@ -329,6 +344,33 @@ namespace CoreAI.Ai
 
             section = default;
             return false;
+        }
+
+        /// <summary>Normalizes a portable relative document path and rejects ambiguous or escaping paths.</summary>
+        public static string NormalizeSectionPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("Instruction path must not be empty.", nameof(path));
+            }
+
+            string normalized = path.Trim().Replace('\\', '/');
+            if (normalized.StartsWith("/", StringComparison.Ordinal) || normalized.IndexOf(':') >= 0)
+            {
+                throw new ArgumentException("Instruction path must be relative.", nameof(path));
+            }
+
+            string[] segments = normalized.Split('/');
+            foreach (string segment in segments)
+            {
+                if (string.IsNullOrWhiteSpace(segment) || segment == "." || segment == ".." ||
+                    segment.IndexOf('\0') >= 0)
+                {
+                    throw new ArgumentException("Instruction path contains an invalid segment.", nameof(path));
+                }
+            }
+
+            return normalized;
         }
 
         /// <summary>
@@ -390,14 +432,38 @@ namespace CoreAI.Ai
                 {
                     throw new ArgumentException($"File path at index {i} must not be empty.", nameof(instructionFilePaths));
                 }
+                paths[i] = System.IO.Path.GetFullPath(paths[i]);
             }
 
-            // WHY: Read here and delegate to FromTextParts so the joining rule lives in one place.
+            return FromFiles(name, description, System.IO.Path.GetDirectoryName(paths[0]), paths, tools);
+        }
+
+        /// <summary>Loads ordered files under an explicit skill root, retaining their relative document paths.</summary>
+        public static SkillSet FromFiles(string name, string description, string baseDirectory,
+            IEnumerable<string> instructionFilePaths, params ILlmTool[] tools)
+        {
+            if (string.IsNullOrWhiteSpace(baseDirectory))
+            {
+                throw new ArgumentException("Skill root is required.", nameof(baseDirectory));
+            }
+            if (instructionFilePaths == null)
+            {
+                throw new ArgumentNullException(nameof(instructionFilePaths));
+            }
+
+            string root = System.IO.Path.GetFullPath(baseDirectory);
+            List<string> paths = new(instructionFilePaths);
             List<KeyValuePair<string, string>> parts = new(paths.Count);
             foreach (string path in paths)
             {
-                string content = System.IO.File.ReadAllText(path);
-                parts.Add(new KeyValuePair<string, string>(System.IO.Path.GetFileName(path), content));
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    throw new ArgumentException("Instruction file path is required.", nameof(instructionFilePaths));
+                }
+                string fullPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, path));
+                string relative = NormalizeSectionPath(System.IO.Path.GetRelativePath(root, fullPath));
+                string content = System.IO.File.ReadAllText(fullPath);
+                parts.Add(new KeyValuePair<string, string>(relative, content));
             }
 
             return FromTextParts(name, description, parts, tools);

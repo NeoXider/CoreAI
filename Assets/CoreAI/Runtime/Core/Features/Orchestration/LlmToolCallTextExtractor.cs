@@ -9,6 +9,14 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// Extracts tool-call text payloads from model responses.
+    /// <para>
+    /// Распознаются четыре формы (все — только на запасном канале, см. <c>STREAMING_ARCHITECTURE.md</c>):
+    /// JSON <c>{"name":…,"arguments":…}</c>, XML Hermes/Qwen <c>&lt;function=…&gt;</c>,
+    /// вызов-функция <c>ident(...)</c> целым ответом и псевдозапись памяти <c>Action=write content="…"</c>.
+    /// Формы различаются силой улики: у JSON и XML есть структура, которую в уроке никто не пишет случайно;
+    /// у <c>ident(...)</c> улики нет вовсе — это обычная строка кода. Поэтому вызов-функция принимается
+    /// ТОЛЬКО при переданном реестре имён и только для объявленного инструмента.
+    /// </para>
     /// </summary>
     public static class LlmToolCallTextExtractor
     {
@@ -50,8 +58,32 @@ namespace CoreAI.Ai
         /// Returns <c>true</c> when at least one match is found; otherwise <c>false</c> and
         /// <paramref name="cleanedText"/> equals the input. JSON inside <c>```...```</c> blocks
         /// is ignored.
+        /// <para>
+        /// Перегрузка БЕЗ реестра имён: вызывающий не сказал, какие инструменты объявлены. JSON, XML и
+        /// псевдозапись памяти разбираются по форме; форма <c>ident(...)</c> не разбирается никогда —
+        /// без реестра <c>read_skill("x")</c> и <c>print("x")</c> неотличимы, а второе учитель Python
+        /// пишет каждым ответом. Чтобы вызов-функция работал, передайте имена через перегрузку
+        /// <c>TryExtract(text, knownToolNames, out matches, out cleanedText)</c>.
+        /// </para>
         /// </summary>
         public static bool TryExtract(string text, out List<Match> matches, out string cleanedText)
+        {
+            return TryExtract(text, null, out matches, out cleanedText);
+        }
+
+        /// <summary>
+        /// То же, что перегрузка без реестра, но с реестром объявленных инструментов. Инвариант: <b>вызов — это обращение к объявленному инструменту</b>.
+        /// Имя вне реестра ни в одной форме не считается вызовом и остаётся видимым текстом: исполнить
+        /// его нельзя, а спрятать — значит отнять у ученика строку урока ради защиты от того, чего не
+        /// случится. Только с реестром включается форма <c>ident(...)</c>.
+        /// </summary>
+        /// <param name="knownToolNames">
+        /// Имена объявленных инструментов (<c>ILlmTool.Name</c>). <c>null</c> — реестра нет (поведение
+        /// перегрузки без реестра). Пустая коллекция — реестр есть и в нём ничего нет: ни одна форма не
+        /// распознаётся.
+        /// </param>
+        public static bool TryExtract(string text, IReadOnlyCollection<string> knownToolNames,
+            out List<Match> matches, out string cleanedText)
         {
             matches = new List<Match>();
             cleanedText = text ?? string.Empty;
@@ -64,17 +96,7 @@ namespace CoreAI.Ai
             List<(int Start, int Length)> spans = FindBalancedToolCallSpans(searchText);
             if (spans.Count == 0)
             {
-                if (TryExtractXmlToolCallSyntax(text, out matches, out cleanedText))
-                {
-                    return true;
-                }
-
-                if (TryExtractFunctionCallSyntax(text, out matches, out cleanedText))
-                {
-                    return true;
-                }
-
-                return TryExtractMemoryPseudoWriteSyntax(text, out matches, out cleanedText);
+                return TryExtractNonJsonForms(text, searchText, knownToolNames, out matches, out cleanedText);
             }
 
             StringBuilder cleanBuilder = new(text.Length);
@@ -112,6 +134,14 @@ namespace CoreAI.Ai
                         continue;
                     }
 
+                    // ПОЧЕМУ: при известном реестре JSON с чужим именем — пример из объяснения или
+                    // галлюцинация; исполнить его всё равно нельзя, а вырезать — значит показать
+                    // ученику пустоту вместо текста.
+                    if (!IsDeclaredTool(name, knownToolNames))
+                    {
+                        continue;
+                    }
+
                     if (args.Type == JTokenType.String)
                     {
                         string argsStr = args.ToString();
@@ -139,7 +169,8 @@ namespace CoreAI.Ai
 
             if (matches.Count == 0)
             {
-                return TryExtractMemoryPseudoWriteSyntax(text, out matches, out cleanedText);
+                // Все JSON-кандидаты отвергнуты (цитата, чужое имя) — остальные формы всё ещё возможны.
+                return TryExtractNonJsonForms(text, searchText, knownToolNames, out matches, out cleanedText);
             }
 
             if (lastEnd < text.Length)
@@ -152,30 +183,54 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Формы, которые пробуются, когда JSON-вызова в тексте нет: XML, затем <c>ident(...)</c>,
+        /// затем псевдозапись памяти. Порядок — по силе улики.
+        /// </summary>
+        private static bool TryExtractNonJsonForms(string text, string searchText,
+            IReadOnlyCollection<string> knownToolNames, out List<Match> matches, out string cleanedText)
+        {
+            if (TryExtractXmlToolCallSyntax(text, searchText, knownToolNames, out matches, out cleanedText))
+            {
+                return true;
+            }
+
+            if (TryExtractFunctionCallSyntax(text, knownToolNames, out matches, out cleanedText))
+            {
+                return true;
+            }
+
+            return TryExtractMemoryPseudoWriteSyntax(text, knownToolNames, out matches, out cleanedText);
+        }
+
+        /// <summary>
         /// Extracts Hermes / Qwen-Agent XML tool-call syntax that many local GGUF models emit as assistant
         /// text when their native <c>tool_calls</c> array is empty:
         /// <c>&lt;function=NAME&gt;&lt;parameter=KEY&gt;VALUE&lt;/parameter&gt;...&lt;/function&gt;</c>.
         /// Each <c>&lt;parameter&gt;</c> value is kept as a string (so an inner <c>arguments_json</c> JSON
         /// string stays intact for tools like <c>call_skill_tool</c>). The wrapping
         /// <c>&lt;tool_call&gt;</c> tags are stripped from the cleaned reply.
+        /// <para>
+        /// Ищем по <paramref name="searchText"/> — копии без code-fence той же длины, — а подстроки берём
+        /// из <paramref name="text"/>: XML-пример внутри <c>```...```</c> в объяснении не исполняется.
+        /// </para>
         /// </summary>
-        private static bool TryExtractXmlToolCallSyntax(string text, out List<Match> matches,
-            out string cleanedText)
+        private static bool TryExtractXmlToolCallSyntax(string text, string searchText,
+            IReadOnlyCollection<string> knownToolNames, out List<Match> matches, out string cleanedText)
         {
             matches = new List<Match>();
             cleanedText = text;
             if (string.IsNullOrEmpty(text) ||
-                text.IndexOf("<function", StringComparison.OrdinalIgnoreCase) < 0)
+                searchText.IndexOf("<function", StringComparison.OrdinalIgnoreCase) < 0)
             {
                 return false;
             }
 
             StringBuilder clean = new(text.Length);
             int lastEnd = 0;
-            foreach (System.Text.RegularExpressions.Match fn in XmlFunctionRegex.Matches(text))
+            foreach (System.Text.RegularExpressions.Match fn in XmlFunctionRegex.Matches(searchText))
             {
                 string name = fn.Groups[1].Value.Trim();
-                if (string.IsNullOrEmpty(name))
+                if (string.IsNullOrEmpty(name) || !IsDeclaredTool(name, knownToolNames))
                 {
                     continue;
                 }
@@ -220,12 +275,14 @@ namespace CoreAI.Ai
         /// prefix is allowed) and must not sit inside a fenced code block, so quoting the syntax in
         /// running prose never synthesizes a memory write.
         /// </summary>
-        private static bool TryExtractMemoryPseudoWriteSyntax(string text, out List<Match> matches,
-            out string cleanedText)
+        private static bool TryExtractMemoryPseudoWriteSyntax(string text, IReadOnlyCollection<string> knownToolNames,
+            out List<Match> matches, out string cleanedText)
         {
             matches = new List<Match>();
             cleanedText = text ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(text))
+            // ПОЧЕМУ: псевдозапись синтезирует вызов ИМЕННО инструмента memory; если его не объявляли,
+            // синтезировать нечего.
+            if (string.IsNullOrWhiteSpace(text) || !IsDeclaredTool(MemoryToolName, knownToolNames))
             {
                 return false;
             }
@@ -295,7 +352,7 @@ namespace CoreAI.Ai
                 ["content"] = content
             });
 
-            matches.Add(new Match("memory", argsJson, aw, spanEnd - aw));
+            matches.Add(new Match(MemoryToolName, argsJson, aw, spanEnd - aw));
 
             string cleaned = spanEnd <= text.Length
                 ? text.Substring(0, aw) + text.Substring(spanEnd)
@@ -311,17 +368,64 @@ namespace CoreAI.Ai
         /// </summary>
         public static string StripForDisplay(string assistantText)
         {
+            return StripForDisplay(assistantText, null);
+        }
+
+        /// <summary>
+        /// То же, что <c>StripForDisplay(text)</c>, но с реестром объявленных инструментов — семантика
+        /// реестра описана у <c>TryExtract(text, knownToolNames, …)</c>.
+        /// </summary>
+        public static string StripForDisplay(string assistantText, IReadOnlyCollection<string> knownToolNames)
+        {
             if (string.IsNullOrWhiteSpace(assistantText))
             {
                 return assistantText ?? string.Empty;
             }
 
-            return TryExtract(assistantText, out _, out string cleaned) ? cleaned : assistantText;
+            return TryExtract(assistantText, knownToolNames, out _, out string cleaned) ? cleaned : assistantText;
+        }
+
+        private const string MemoryToolName = "memory";
+        private const string CodeFence = "```";
+
+        /// <summary>
+        /// Принадлежит ли имя реестру объявленных инструментов. Без реестра (<c>null</c>) ответ «да»:
+        /// вызывающий не дал списка, и решать за него по форме — единственное, что остаётся.
+        /// Сравнение ординальное: исполнитель ищет инструмент по точному имени, и «почти то» имя всё
+        /// равно закончилось бы «Unknown tool».
+        /// </summary>
+        private static bool IsDeclaredTool(string name, IReadOnlyCollection<string> knownToolNames)
+        {
+            if (knownToolNames == null)
+            {
+                return true;
+            }
+
+            if (string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+
+            foreach (string known in knownToolNames)
+            {
+                if (string.Equals(known, name, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
         /// Replaces fenced code blocks with whitespace of equal length so they are excluded
         /// from extraction without shifting the offsets of the remaining text.
+        /// <para>
+        /// Незакрытая последняя ограда тоже считается блоком кода до конца текста. ПОЧЕМУ: ответ,
+        /// обрезанный лимитом токенов посреди <c>```json</c>-примера, оставлял пример без закрывающей
+        /// ограды, и он исполнялся как вызов. Цена: вызов после одинокой сломанной ограды будет пропущен;
+        /// пропущенный вызов модель может повторить, исполненный пример — уже нет.
+        /// </para>
         /// </summary>
         public static string StripCodeBlocks(string text)
         {
@@ -331,6 +435,12 @@ namespace CoreAI.Ai
             }
 
             string result = CodeBlockRegex.Replace(text, m => new string(' ', m.Length));
+            int openFence = result.IndexOf(CodeFence, StringComparison.Ordinal);
+            if (openFence >= 0)
+            {
+                result = result.Substring(0, openFence) + new string(' ', result.Length - openFence);
+            }
+
             // BUG-6 safety: StripCodeBlocks MUST preserve length so that span offsets
             // found in the replaced text map correctly back to the original.
             System.Diagnostics.Debug.Assert(result.Length == text.Length,
@@ -484,16 +594,25 @@ namespace CoreAI.Ai
         /// function-call syntax instead of JSON, e.g.:
         /// <c>read_skill("Alchemy")</c> or <c>read_skill(Crafting)</c> or
         /// <c>call_skill_tool("get_recipes", "{\"item\":\"sword\"}")</c>
+        /// <para>
+        /// Единственная форма без собственной улики: <c>read_skill("Alchemy")</c> и
+        /// <c>print("Привет, мир!")</c> — одна и та же строка кода, и второе учитель Python отдаёт
+        /// ребёнку целым ответом. Раньше такой ответ становился вызовом инструмента <c>print</c>:
+        /// модель получала «Unknown tool», ребёнок — пустой пузырь. Поэтому ветка работает ТОЛЬКО при
+        /// переданном реестре и только для объявленного имени; списка стоп-слов вроде
+        /// print/input/len здесь нет намеренно — он кончился бы на первом новом уроке.
+        /// </para>
         /// </summary>
         private static readonly Regex FunctionCallHeadRegex = new(
             @"^([a-z_][a-z0-9_]*)\s*\(",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-        private static bool TryExtractFunctionCallSyntax(string text, out List<Match> matches, out string cleanedText)
+        private static bool TryExtractFunctionCallSyntax(string text, IReadOnlyCollection<string> knownToolNames,
+            out List<Match> matches, out string cleanedText)
         {
             matches = new List<Match>();
             cleanedText = text ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(text))
+            if (string.IsNullOrWhiteSpace(text) || knownToolNames == null)
             {
                 return false;
             }
@@ -501,7 +620,7 @@ namespace CoreAI.Ai
             // Only match if the ENTIRE trimmed text looks like a function call (not embedded in prose).
             string trimmed = text.Trim();
             System.Text.RegularExpressions.Match head = FunctionCallHeadRegex.Match(trimmed);
-            if (!head.Success)
+            if (!head.Success || !IsDeclaredTool(head.Groups[1].Value, knownToolNames))
             {
                 return false;
             }

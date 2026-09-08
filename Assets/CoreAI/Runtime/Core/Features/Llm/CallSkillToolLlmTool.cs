@@ -1,14 +1,52 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Logging;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Ai
 {
+    /// <summary>Resolves a proxy call once so execution policy and invocation use the same permitted target.</summary>
+    public interface IResolvedLlmToolCallProvider
+    {
+        bool TryResolveInvocation(IDictionary<string, object> arguments,
+            out ResolvedLlmToolInvocation invocation, out string error);
+    }
+
+    /// <summary>A bound target and argument snapshot; resolving a later catalog version cannot change this call.</summary>
+    public sealed class ResolvedLlmToolInvocation
+    {
+        private readonly SkillToolDescriptor _descriptor;
+        private readonly string _argumentsJson;
+
+        internal ResolvedLlmToolInvocation(SkillToolDescriptor descriptor, string argumentsJson)
+        {
+            _descriptor = descriptor;
+            _argumentsJson = argumentsJson;
+        }
+
+        public ILlmTool SourceTool => _descriptor.SourceTool;
+        public string Name => _descriptor.Name;
+        public IDictionary<string, object> Arguments => new ReadOnlyDictionary<string, object>(
+            SkillSetToolResolver.CreateArguments(_argumentsJson));
+
+        /// <summary>Invokes the captured binding, honoring cancellation before any tool body is entered.</summary>
+        public async Task<object> InvokeAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            object result = _descriptor.JsonTool != null
+                ? await _descriptor.JsonTool.InvokeJsonAsync(_argumentsJson, cancellationToken)
+                : await _descriptor.Function.InvokeAsync(SkillSetToolResolver.CreateArguments(_argumentsJson),
+                    cancellationToken);
+            return SkillSetToolResolver.SerializeResult(result);
+        }
+    }
+
     /// <summary>
     /// LLM tool that invokes a named runtime skill.
     /// </summary>
@@ -50,7 +88,8 @@ namespace CoreAI.Ai
             return new CallSkillToolProxy(skills, allowedToolNames, directToolsProvider);
         }
 
-        private sealed class CallSkillToolProxy : LlmToolBase, IAIFunctionLlmTool, ISkillSetMetaLlmTool
+        private sealed class CallSkillToolProxy : LlmToolBase, IAIFunctionLlmTool, ISkillSetMetaLlmTool,
+            IResolvedLlmToolCallProvider
         {
             private readonly IReadOnlyList<SkillSet> _skills;
 
@@ -68,8 +107,10 @@ namespace CoreAI.Ai
                 IReadOnlyCollection<string> allowedToolNames,
                 Func<IReadOnlyList<ILlmTool>> directToolsProvider)
             {
-                _skills = skills ?? throw new ArgumentNullException(nameof(skills));
-                _allowedToolNames = allowedToolNames;
+                if (skills == null) throw new ArgumentNullException(nameof(skills));
+                _skills = skills is MutableSkillCatalog ? skills : new List<SkillSet>(skills).AsReadOnly();
+                SkillSetToolResolver.ValidateCatalog(_skills);
+                _allowedToolNames = allowedToolNames == null ? null : new List<string>(allowedToolNames).AsReadOnly();
                 _directToolsProvider = directToolsProvider;
                 _isLive = skills is MutableSkillCatalog;
                 _toolsByName = _isLive ? null : BuildToolMap(_skills, allowedToolNames);
@@ -89,10 +130,7 @@ namespace CoreAI.Ai
             public override string ParametersSchema =>
                 "{\"type\":\"object\",\"properties\":{\"tool_name\":{\"type\":\"string\",\"description\":\"Skill tool name returned by read_skill.\"},\"arguments_json\":{\"type\":\"string\",\"description\":\"JSON object string with the skill tool parameters.\"}},\"required\":[\"tool_name\",\"arguments_json\"]}";
 
-            // WHY: call_skill_tool dispatches to an arbitrary resolved skill tool whose effect the outer
-            // policy cannot see, so it is treated conservatively as mutating: AllowDuplicates=false so
-            // ToolExecutionPolicy suppresses only a CROSS-TURN byte-identical echo (structured no-op)
-            // while still allowing intra-turn repeats and never suppressing the retry of a FAILED call.
+            // WHY: unresolved proxies are conservative; policy uses the captured target contract once resolved.
             public override bool AllowDuplicates => false;
 
             public bool ContainsSkillTool(string toolName)
@@ -102,7 +140,72 @@ namespace CoreAI.Ai
 
             public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)
             {
-                return new CallSkillToolProxy(_skills, allowedToolNames, _directToolsProvider);
+                return new CallSkillToolProxy(_skills,
+                    SkillSetToolResolver.IntersectAllowlist(_allowedToolNames, allowedToolNames), _directToolsProvider);
+            }
+
+            public bool TryResolveInvocation(IDictionary<string, object> arguments,
+                out ResolvedLlmToolInvocation invocation, out string error)
+            {
+                invocation = null;
+                error = null;
+                if (!TryReadString(arguments, "tool_name", out string name) || string.IsNullOrWhiteSpace(name))
+                {
+                    error = "tool_name must be a non-empty string.";
+                    return false;
+                }
+                if (!TryReadString(arguments, "arguments_json", out string json))
+                {
+                    error = "arguments_json must be a JSON object string.";
+                    return false;
+                }
+                string trimmed = name.Trim();
+                Dictionary<string, SkillToolDescriptor> map = ResolveToolMap();
+                if (!map.TryGetValue(trimmed, out SkillToolDescriptor descriptor))
+                {
+                    descriptor = ResolveDirectTool(trimmed);
+                }
+                if (descriptor == null || !descriptor.CanInvoke)
+                {
+                    error = $"Tool '{trimmed}' is unavailable for this skill call.";
+                    return false;
+                }
+                try
+                {
+                    JObject parsed = JObject.Parse(json);
+                    invocation = new ResolvedLlmToolInvocation(descriptor, parsed.ToString(Formatting.None));
+                    return true;
+                }
+                catch (JsonException ex)
+                {
+                    error = $"Invalid JSON arguments: {ex.Message}";
+                    return false;
+                }
+            }
+
+            private static bool TryReadString(IDictionary<string, object> arguments, string name, out string value)
+            {
+                value = null;
+                if (arguments == null || !arguments.TryGetValue(name, out object raw))
+                {
+                    return false;
+                }
+                if (raw is string text)
+                {
+                    value = text;
+                    return true;
+                }
+                if (raw is System.Text.Json.JsonElement element && element.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    value = element.GetString();
+                    return true;
+                }
+                if (raw is JValue token && token.Type == JTokenType.String)
+                {
+                    value = token.Value<string>();
+                    return true;
+                }
+                return false;
             }
 
             /// <summary>
@@ -160,15 +263,35 @@ namespace CoreAI.Ai
                     });
             }
 
-            private Task<string> ExecuteAsync(
+            private async Task<string> ExecuteAsync(
                 [Description("Skill tool name returned by read_skill.")]
                 string tool_name,
                 [Description("JSON object string with the skill tool parameters.")]
                 string arguments_json,
                 CancellationToken cancellationToken = default)
             {
-                return CallSkillToolLlmTool.ExecuteAsync(tool_name, arguments_json, ResolveToolMap(),
-                    ResolveDirectTool, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                Dictionary<string, object> arguments = new()
+                {
+                    ["tool_name"] = tool_name,
+                    ["arguments_json"] = arguments_json
+                };
+                if (!TryResolveInvocation(arguments, out ResolvedLlmToolInvocation invocation, out string error))
+                {
+                    return SkillSetToolResolver.SerializeFailure(error, ResolveToolMap().Keys);
+                }
+                try
+                {
+                    return (await invocation.InvokeAsync(cancellationToken))?.ToString();
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    return SkillSetToolResolver.SerializeFailure($"Tool execution failed: {Unwrap(ex).Message}");
+                }
             }
         }
 
@@ -189,17 +312,13 @@ namespace CoreAI.Ai
                     continue;
                 }
 
-                // WHY: First-registered wins (deterministic, matches the order read_skill enumerates skills).
-                // Previously this was last-write-wins, so two skills exposing a same-named tool silently
-                // shadowed each other: read_skill advertised skill A's tool while call_skill_tool ran
-                // skill B's. Keeping the first and warning makes the collision visible and predictable.
+                // WHY: shared instances may belong to several skills, but different bindings must never shadow schemas.
                 if (toolsByName.TryGetValue(descriptor.Name, out SkillToolDescriptor existing))
                 {
-                    Log.Instance.Warn(
-                        $"[call_skill_tool] Duplicate skill tool name '{descriptor.Name}' from skill " +
-                        $"'{descriptor.Skill?.Name}' shadowed by '{existing.Skill?.Name}' (first wins). " +
-                        "Rename one of the tools to avoid silent misrouting.",
-                        LogTag.Llm);
+                    if (!ReferenceEquals(existing.SourceTool, descriptor.SourceTool))
+                    {
+                        throw new InvalidOperationException($"Skill tool name '{descriptor.Name}' has conflicting bindings.");
+                    }
                     continue;
                 }
 
@@ -209,81 +328,9 @@ namespace CoreAI.Ai
             return toolsByName;
         }
 
-        private static async Task<string> ExecuteAsync(string toolName, string argumentsJson,
-            Dictionary<string, SkillToolDescriptor> toolsByName,
-            Func<string, SkillToolDescriptor> resolveDirectTool, CancellationToken cancellationToken)
-        {
-            if (string.IsNullOrWhiteSpace(toolName))
-            {
-                Log.Instance.Warn("[call_skill_tool] Called without tool_name; nothing was invoked.", LogTag.Llm);
-                return SkillSetToolResolver.SerializeFailure(
-                    "tool_name is required.",
-                    toolsByName.Keys);
-            }
-
-            string trimmed = toolName.Trim();
-
-            if (!toolsByName.TryGetValue(trimmed, out SkillToolDescriptor descriptor))
-            {
-                descriptor = resolveDirectTool?.Invoke(trimmed);
-                if (descriptor == null)
-                {
-                    // WHY: this refusal reaches the model as an ordinary tool RESULT, so nothing throws
-                    // and nothing surfaces — the user sees only that the action never happened. Without
-                    // this line a wrong tool name is invisible and can only be argued about by guesswork.
-                    Log.Instance.Warn(
-                        $"[call_skill_tool] Tool '{trimmed}' not found and not invoked. " +
-                        $"Available: {string.Join(", ", toolsByName.Keys)}.",
-                        LogTag.Llm);
-                    return SkillSetToolResolver.SerializeFailure(
-                        $"Tool '{trimmed}' not found.",
-                        toolsByName.Keys);
-                }
-
-                Log.Instance.Info(
-                    $"[call_skill_tool] '{trimmed}' is a top-level tool, not a skill tool; invoked it anyway.",
-                    LogTag.Llm);
-            }
-
-            if (!descriptor.CanInvoke)
-            {
-                return SkillSetToolResolver.SerializeFailure(
-                    $"Tool '{trimmed}' is registered in a skill but does not expose an invocable MEAI binding.",
-                    toolsByName.Keys);
-            }
-
-            try
-            {
-                object result = descriptor.JsonTool != null
-                    ? await descriptor.JsonTool.InvokeJsonAsync(argumentsJson ?? "{}", cancellationToken)
-                        .ConfigureAwait(false)
-                    : await descriptor.Function
-                        .InvokeAsync(SkillSetToolResolver.CreateArguments(argumentsJson ?? "{}"), cancellationToken)
-                        .ConfigureAwait(false);
-
-                return SkillSetToolResolver.SerializeResult(result);
-            }
-            catch (JsonException ex)
-            {
-                return SkillSetToolResolver.SerializeFailure($"Invalid JSON arguments: {ex.Message}", toolsByName.Keys);
-            }
-            catch (OperationCanceledException)
-            {
-                // WHY: ToolExecutionPolicy detects a per-tool timeout by CATCHING this. Collapsing it into a
-                // plain {"success":false} hid the timeout, skipped the "timed out after Nms" path, and let
-                // RecordFailure grow the consecutive-error counter until the turn aborted with a bogus
-                // "maximum consecutive tool processing errors". Mirrors DelegateLlmTool.
-                throw;
-            }
-            catch (Exception ex)
-            {
-                return SkillSetToolResolver.SerializeFailure($"Tool execution failed: {Unwrap(ex).Message}");
-            }
-        }
-
         private static bool IsAllowed(string toolName, IReadOnlyCollection<string> allowedToolNames)
         {
-            if (allowedToolNames == null || allowedToolNames.Count == 0)
+            if (allowedToolNames == null)
             {
                 return true;
             }

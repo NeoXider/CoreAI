@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -52,7 +53,7 @@ namespace CoreAI.Tests.EditMode
             SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
                 true,
                 new List<ILlmTool> { new TestTool("memory") },
-                "Teacher", 3);
+                "Teacher", 3, allowTextShapedToolCalls: true);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { memTool } };
             MEAI.ChatResponse response =
@@ -65,7 +66,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(client.LastExecutedToolCalls[0].Success);
             // Final assistant text must not contain the tool-call JSON.
             string finalText = response.Messages?.LastOrDefault()?.Text ?? "";
-            Assert.That(finalText, Does.Not.Contain("\"name\":\"memory\""));
+            AssertNoToolCallJsonFor(finalText, "memory");
         }
 
         [Test]
@@ -85,7 +86,7 @@ namespace CoreAI.Tests.EditMode
             CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
                 true,
-                new List<ILlmTool>(), "X", 3);
+                new List<ILlmTool>(), "X", 3, allowTextShapedToolCalls: true);
 
             // Tools list non-empty so the text-extraction path activates, but the AIFunction
             // for "memory" is *not* in the dictionary — extraction will succeed, but execution
@@ -116,7 +117,7 @@ namespace CoreAI.Tests.EditMode
 
             StubSettings settings = new();
             // memoryStore is null → BuildAIFunctions drops MemoryLlmTool → aiTools=0
-            MeaiLlmClient client = new(inner, new NullGameLogger(), settings, null);
+            MeaiLlmClient client = new(inner, new NullGameLogger(), settings, supportsNativeToolCalling: false, memoryStore: null);
 
             LlmCompletionRequest request = new()
             {
@@ -133,7 +134,7 @@ namespace CoreAI.Tests.EditMode
             }
 
             string visible = string.Concat(chunks.Where(c => !string.IsNullOrEmpty(c.Text)).Select(c => c.Text));
-            Assert.That(visible, Does.Not.Contain("\"name\":\"memory\""),
+            AssertNoToolCallJsonFor(visible, "memory",
                 "Tool-call JSON must be stripped from the visible stream even when the tool is not bound.");
             Assert.That(visible, Does.Contain("Saved!"), "Visible prefix must survive the strip.");
 
@@ -155,7 +156,7 @@ namespace CoreAI.Tests.EditMode
                 });
 
             StubSettings settings = new();
-            MeaiLlmClient client = new(inner, new NullGameLogger(), settings, null);
+            MeaiLlmClient client = new(inner, new NullGameLogger(), settings, supportsNativeToolCalling: false, memoryStore: null);
 
             LlmCompletionRequest request = new()
             {
@@ -178,7 +179,7 @@ namespace CoreAI.Tests.EditMode
                 "Multiple inner prose deltas should yield multiple streamed text chunks before JSON.");
             string visible = string.Concat(textChunks);
             Assert.AreEqual("Saved! ", visible);
-            Assert.That(visible, Does.Not.Contain("\"name\":\"memory\""));
+            AssertNoToolCallJsonFor(visible, "memory");
         }
 
         [Test]
@@ -188,7 +189,7 @@ namespace CoreAI.Tests.EditMode
             StreamingScripted inner = new(
                 new[] { "Plain reply with {braces} but no tool keys." });
 
-            MeaiLlmClient client = new(inner, new NullGameLogger(), new StubSettings(), null);
+            MeaiLlmClient client = new(inner, new NullGameLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
             LlmCompletionRequest request = new()
             {
                 AgentRoleId = "X",
@@ -245,7 +246,7 @@ namespace CoreAI.Tests.EditMode
             SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
                 false,
                 new List<ILlmTool> { new TestTool("tool_a"), new TestTool("tool_b") },
-                "Chain", 3);
+                "Chain", 3, allowTextShapedToolCalls: true);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { toolA, toolB } };
             MEAI.ChatResponse response =
@@ -258,8 +259,8 @@ namespace CoreAI.Tests.EditMode
             // Final reply visible to user contains the closing text but no leaked JSON.
             string finalText = response.Messages?.LastOrDefault()?.Text ?? "";
             Assert.That(finalText, Does.Contain("Done."));
-            Assert.That(finalText, Does.Not.Contain("\"name\":\"tool_a\""));
-            Assert.That(finalText, Does.Not.Contain("\"name\":\"tool_b\""));
+            AssertNoToolCallJsonFor(finalText, "tool_a");
+            AssertNoToolCallJsonFor(finalText, "tool_b");
 
             // Both tool traces captured, in order, both successful.
             Assert.AreEqual(2, client.LastExecutedToolCalls.Count);
@@ -396,7 +397,14 @@ namespace CoreAI.Tests.EditMode
             };
 
             StubSettings settings = new();
-            MeaiLlmClient client = new(inner, new NullGameLogger(), settings, null);
+            // Вызов написан ПРОЗОЙ, а связанный инструмент обязан выполниться — это запасной канал
+            // (у эндпойнта нет нативного канала вызовов); канал объявляется явно, а не умолчанием
+            // конструктора: умолчание — «канал есть», и на нём проза не разбирается.
+            MeaiLlmClient client = new(inner,
+                new NullGameLogger(),
+                settings,
+                supportsNativeToolCalling: false,
+                memoryStore: null);
 
             LlmCompletionRequest request = new()
             {
@@ -509,7 +517,7 @@ namespace CoreAI.Tests.EditMode
             string clean = LlmToolCallTextExtractor.StripForDisplay(input);
             Assert.That(clean, Does.Contain("Hi!"));
             Assert.That(clean, Does.Contain("Bye!"));
-            Assert.That(clean, Does.Not.Contain("\"name\":\"memory\""));
+            AssertNoToolCallJsonFor(clean, "memory");
         }
 
         [Test]
@@ -533,7 +541,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("a", matches[0].Name);
             Assert.AreEqual("b", matches[1].Name);
             Assert.That(cleaned, Does.Contain("mid"));
-            Assert.That(cleaned, Does.Not.Contain("\"name\""));
+            AssertNoToolCallJson(cleaned);
         }
 
         // ------------ LLMUnity Qwen3.5: arguments_json key (instead of arguments) --------
@@ -598,13 +606,61 @@ namespace CoreAI.Tests.EditMode
         }
 
         // ------------ LLMUnity Qwen3.5: function-call syntax --------
+        //
+        // Форма `ident(...)` не несёт никакой улики вызова: read_skill("Alchemy") и print("Привет, мир!")
+        // — одна и та же строка кода. Поэтому она распознаётся ТОЛЬКО против реестра объявленных
+        // инструментов (перегрузка TryExtract с knownToolNames) и только для объявленного имени.
+        // Тесты ниже передают реестр явно; без реестра форма не работает — это отдельные стражи.
+
+        [Test]
+        public void PortableExtractor_PythonOneLinerAnswer_IsTextForTheChild_NotAToolCall(
+            [Values("print(\"Привет, мир!\")", "input(\"Введи своё имя\")", "len(my_list)")]
+            string pythonAnswer)
+        {
+            // Дефект: ответ учителя, состоящий из одной строки Python, целиком становился вызовом
+            // несуществующего инструмента `print` — модель получала «Unknown tool», ребёнок — пустой пузырь.
+            bool ok = LlmToolCallTextExtractor.TryExtract(pythonAnswer, Declared("spawn_quiz", "memory"),
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "Строка Python для ребёнка не является вызовом инструмента.");
+            Assert.AreEqual(0, matches.Count);
+            Assert.AreEqual(pythonAnswer, cleaned, "Ребёнок должен увидеть строку кода целиком.");
+            Assert.AreEqual(pythonAnswer,
+                LlmToolCallTextExtractor.StripForDisplay(pythonAnswer, Declared("spawn_quiz", "memory")));
+        }
+
+        [Test]
+        public void PortableExtractor_FunctionCallSyntax_WithoutToolRegistry_NeverFires()
+        {
+            // Без реестра read_skill("x") и print("x") неотличимы — значит, форма `ident(...)`
+            // не распознаётся вовсе, а текст доходит до ребёнка нетронутым.
+            string input = "read_skill(\"Alchemy\")";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "Без реестра имён форма ident(...) не считается вызовом.");
+            Assert.AreEqual(input, cleaned);
+            Assert.AreEqual(input, LlmToolCallTextExtractor.StripForDisplay(input));
+        }
+
+        [Test]
+        public void PortableExtractor_FunctionCallSyntax_UndeclaredTool_StaysVisible()
+        {
+            // Реестр есть, но такого инструмента в нём нет: исполнить нечего, прятать нельзя.
+            string input = "lookup_item(\"Flame Sword\")";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("memory", "read_skill"),
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "Имя вне реестра — не вызов.");
+            Assert.AreEqual(input, cleaned);
+        }
 
         [Test]
         public void PortableExtractor_FunctionCallSyntax_ReadSkillQuoted()
         {
             // Qwen3.5 via LLMUnity: read_skill("Alchemy")
             string input = "read_skill(\"Alchemy\")";
-            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("read_skill"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
             Assert.IsTrue(ok, "Function-call syntax should be extracted.");
@@ -619,7 +675,7 @@ namespace CoreAI.Tests.EditMode
         {
             // Qwen3.5 via LLMUnity: read_skill(Crafting)
             string input = "read_skill(Crafting)";
-            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("read_skill"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
             Assert.IsTrue(ok, "Unquoted function-call syntax should be extracted.");
@@ -633,7 +689,7 @@ namespace CoreAI.Tests.EditMode
         {
             // call_skill_tool("get_recipes", '{"item":"sword"}')
             string input = "call_skill_tool(\"get_recipes\", '{\"item\":\"sword\"}')";
-            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("call_skill_tool"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
             Assert.IsTrue(ok, "Multi-arg function-call syntax should be extracted.");
@@ -651,7 +707,7 @@ namespace CoreAI.Tests.EditMode
             // into {"input":"action='spawn'"} and failed required-argument validation.
             string input =
                 "world_command(action='spawn', targetName='Goal', prefabKey=\"Cube\", x=0, y=1.5, z=2, solid=true)";
-            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("world_command"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
             Assert.IsTrue(ok, "Keyword-argument function-call syntax should be extracted.");
@@ -672,9 +728,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void PortableExtractor_FunctionCallSyntax_PositionalStillUsesInput()
         {
-            // A single positional argument (no key=value) keeps the legacy generic behavior.
+            // A single positional argument (no key=value) keeps the legacy generic behavior —
+            // for a DECLARED tool. The same text with the name outside the registry is plain code
+            // (see UndeclaredTool_StaysVisible): the former norm "any ident(...) is a command" blanked
+            // every one-line Python answer a teacher gives.
             string input = "lookup_item(\"Flame Sword\")";
-            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("lookup_item"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
             Assert.IsTrue(ok);
@@ -686,9 +745,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void PortableExtractor_FunctionCallSyntax_DoesNotMatchProseWithParens()
         {
-            // Prose with parentheses should NOT be extracted as a function call.
+            // Prose with parentheses should NOT be extracted as a function call — even with a registry.
             string input = "The player crafted a sword (iron + oak) and it was successful.";
-            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("lookup_item"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
             Assert.IsFalse(ok, "Prose with parentheses should NOT trigger function-call extraction.");
@@ -700,7 +759,7 @@ namespace CoreAI.Tests.EditMode
             // FINDING-2c: the old lazy (.*?) regex stopped at the first ')' and silently
             // truncated (then rejected) arguments containing parentheses.
             string input = "lookup_item(\"Flame (Fire) Sword\")";
-            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("lookup_item"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
             Assert.IsTrue(ok, "Parentheses inside a quoted argument must not break extraction.");
@@ -713,7 +772,7 @@ namespace CoreAI.Tests.EditMode
         public void PortableExtractor_FunctionCallSyntax_ParensInsideKeywordValuePreserved()
         {
             string input = "world_command(action='say', text='hello (world)')";
-            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("world_command"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
             Assert.IsTrue(ok);
@@ -831,6 +890,131 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(ok, "Pseudo write inside a fenced code block is an example.");
         }
 
+        [Test]
+        public void PortableExtractor_PseudoWrite_MemoryNotDeclared_NotExecuted()
+        {
+            // Псевдозапись синтезирует вызов ИМЕННО `memory`; если роли его не давали — синтезировать нечего.
+            string input = "Okay. Action=write content=\"hello\"";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("spawn_quiz"),
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "Без объявленного memory псевдозапись — просто текст.");
+            Assert.AreEqual(input, cleaned);
+        }
+
+        // ------------ Пример JSON в уроке — не вызов (реестр имён и ограды) --------
+
+        [Test]
+        public void PortableExtractor_SpawnQuizJsonExampleInFencedBlock_ShownToTheChild_NotExecuted()
+        {
+            // Учитель объясняет формат квиза и приводит JSON примером внутри ```json … ```. Имя
+            // инструмента — настоящее и объявленное, так что отличить пример от вызова может только ограда.
+            string example =
+                "{\"name\": \"spawn_quiz\", \"arguments\": {\"question\": \"Что выведет print(2 + 2)?\", " +
+                "\"options\": [\"4\", \"22\"], \"answer\": 0}}";
+            string input =
+                "Квиз описывается вот таким объектом:\n```json\n" + example + "\n```\nПопробуй составить свой!";
+
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("spawn_quiz"),
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "JSON-пример внутри ограды кода не исполняется.");
+            Assert.AreEqual(0, matches.Count);
+            Assert.AreEqual(input, cleaned, "Пример остаётся в тексте урока целиком.");
+        }
+
+        [Test]
+        public void PortableExtractor_JsonExampleInFenceCutOffByTokenLimit_NotExecuted()
+        {
+            // Ответ оборвался лимитом токенов внутри ```json-примера: закрывающей ограды нет.
+            // Раньше незакрытая ограда не считалась блоком кода, и пример исполнялся как вызов.
+            string input =
+                "Вот пример вызова:\n```json\n" +
+                "{\"name\": \"spawn_quiz\", \"arguments\": {\"question\": \"Сколько будет 2 + 2?\"}}\n" +
+                "И дальше я объясню, что значит каждое по";
+
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("spawn_quiz"),
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "Открытая, но не закрытая ограда — всё ещё блок кода до конца текста.");
+            Assert.AreEqual(input, cleaned);
+        }
+
+        [Test]
+        public void PortableExtractor_JsonWithUndeclaredToolName_StaysVisibleWhenRegistryKnown()
+        {
+            // Пример с выдуманным именем: исполнить его нельзя, а вырезать — значит показать ребёнку
+            // пустоту вместо строки объяснения.
+            string input = "Формат такой: {\"name\": \"example_tool\", \"arguments\": {\"x\": 1}} — имя и аргументы.";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("spawn_quiz", "memory"),
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "Имя вне реестра — не вызов.");
+            Assert.AreEqual(input, cleaned);
+        }
+
+        [Test]
+        public void PortableExtractor_JsonForDeclaredTool_StillExtractedWithRegistry()
+        {
+            // Реестр сужает, а не ломает: настоящий вызов объявленного инструмента извлекается как раньше,
+            // причём и с пробелом после двоеточия — так пишут модели.
+            string input = "Запоминаю. {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"любит котов\"}}";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("memory", "spawn_quiz"),
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok);
+            Assert.AreEqual(1, matches.Count);
+            Assert.AreEqual("memory", matches[0].Name);
+            StringAssert.Contains("любит котов", matches[0].ArgumentsJson);
+            Assert.AreEqual("Запоминаю.", cleaned);
+        }
+
+        [Test]
+        public void PortableExtractor_EmptyRegistry_NothingIsACall()
+        {
+            // Реестр передан и пуст — объявленных инструментов нет, значит и вызовов быть не может.
+            string input = "{\"name\":\"memory\",\"arguments\":{\"action\":\"clear\"}}";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared(),
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok);
+            Assert.AreEqual(input, cleaned);
+        }
+
+        [Test]
+        public void PortableExtractor_XmlExampleInsideFence_NotExecuted()
+        {
+            // Дыра сверх описанной: XML-ветка искала по сырому тексту, минуя ограды кода.
+            string input =
+                "Некоторые модели пишут вызов так:\n```xml\n<function=memory><parameter=action>clear</parameter></function>\n```\n";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("memory"),
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "XML-пример внутри ограды кода не исполняется.");
+            Assert.AreEqual(input, cleaned);
+        }
+
+        [Test]
+        public void PortableExtractor_XmlUndeclaredTool_NotExecuted()
+        {
+            string input = "<tool_call><function=lookup_item><parameter=input>sword</parameter></function></tool_call>";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("memory"),
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "XML-вызов инструмента вне реестра — не вызов.");
+        }
+
+        [Test]
+        public void StripCodeBlocks_UnclosedFence_BlanksToEndAndKeepsLength()
+        {
+            string input = "text ```json\n{\"name\":\"x\",\"arguments\":{}}";
+            string stripped = LlmToolCallTextExtractor.StripCodeBlocks(input);
+
+            Assert.AreEqual(input.Length, stripped.Length, "Длина обязана сохраняться — на неё завязаны смещения.");
+            StringAssert.StartsWith("text ", stripped);
+            Assert.That(stripped.Substring(5).Trim(), Is.Empty, "Всё после открытой ограды — пробелы.");
+        }
+
         // ------------ Non-streaming: arguments_json key through SmartToolCallingChatClient --------
 
         [Test]
@@ -858,7 +1042,7 @@ namespace CoreAI.Tests.EditMode
             SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
                 true,
                 new List<ILlmTool> { new TestTool("read_skill") },
-                "Test", 3);
+                "Test", 3, allowTextShapedToolCalls: true);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { readSkillTool } };
             MEAI.ChatResponse response =
@@ -873,7 +1057,220 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(client.LastExecutedToolCalls[0].Success);
         }
 
+        // ------------ Non-streaming: строка Python доходит до ребёнка --------
+
+        [Test]
+        public async Task NonStreaming_PythonOneLinerAnswer_ReachesTheChildUnchanged()
+        {
+            // Дефект целиком: на запасном канале модель ответила одной строкой кода, и цикл превращал её
+            // в вызов инструмента `print`. Ребёнок должен получить ровно эту строку, инструменты — молчать.
+            const string answer = "print(\"Привет, мир!\")";
+            int iter = 0;
+            int quizInvocations = 0;
+            ScriptedChatClient inner = new(_ =>
+            {
+                iter++;
+                return MakeTextResponse(answer);
+            });
+
+            MEAI.AIFunction quizTool = MakeAIFunction("spawn_quiz", _ =>
+            {
+                quizInvocations++;
+                return Task.FromResult<object>("{\"Success\":true}");
+            });
+
+            CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                true,
+                new List<ILlmTool> { new TestTool("spawn_quiz") },
+                "Teacher", 3, allowTextShapedToolCalls: true);
+
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { quizTool } };
+            MEAI.ChatResponse response =
+                await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
+
+            Assert.AreEqual(1, iter, "Строка кода — обычный ответ: второй итерации быть не должно.");
+            Assert.AreEqual(0, quizInvocations);
+            Assert.AreEqual(0, client.LastExecutedToolCalls.Count, "Ни одного вызова, даже «missing».");
+            Assert.AreEqual(answer, response.Messages?.LastOrDefault()?.Text ?? "");
+        }
+
+        // ------------ Streaming: боевые формы — нарезка по токенам, кириллица, экранирование --------
+
+        [Test]
+        public async Task Streaming_PythonOneLinerAnswer_IsShownToTheChild_NotTurnedIntoToolCall()
+        {
+            // Тот же дефект в потоковом цикле MeaiLlmClient на запасном канале — там проза разбирается
+            // на вызовы, и именно там строка кода становилась вызовом. Канал объявлен явно
+            // (`supportsNativeToolCalling: false`): на нативном канале проза не разбирается вовсе, и тест
+            // прошёл бы, ничего не охраняя. Один инструмент объявлен и связан, ответ — строка Python по токенам.
+            StreamingScripted inner = new(new[] { "print(", "\"Привет, ", "мир!\")" });
+            MeaiLlmClient client = new(inner,
+                new NullGameLogger(),
+                new StubSettings(),
+                supportsNativeToolCalling: false,
+                memoryStore: null);
+
+            int quizInvocations = 0;
+            Func<string, string> quizDelegate = (string question) =>
+            {
+                quizInvocations++;
+                return "{\"Success\":true}";
+            };
+
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "x",
+                UserPayload = "x",
+                Tools = new List<ILlmTool> { new DelegateLlmTool("spawn_quiz", "test", quizDelegate) }
+            };
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk c in client.CompleteStreamingAsync(request, CancellationToken.None))
+            {
+                chunks.Add(c);
+            }
+
+            string visible = string.Concat(chunks.Where(c => !string.IsNullOrEmpty(c.Text)).Select(c => c.Text));
+            Assert.AreEqual("print(\"Привет, мир!\")", visible, "Ребёнок видит строку кода целиком.");
+            Assert.AreEqual(0, quizInvocations);
+            LlmStreamChunk done = chunks.LastOrDefault(c => c.IsDone);
+            Assert.IsNotNull(done, "Stream must yield an IsDone terminator.");
+            Assert.IsNull(done!.Error, $"Ответ без вызова не должен заканчиваться ошибкой: {done.Error}");
+            Assert.That(done.ExecutedToolCalls ?? new List<LlmToolCallTrace>(), Is.Empty,
+                "Никакого вызова — ни настоящего, ни «missing» — из строки кода синтезировать нельзя.");
+        }
+
+        [Test]
+        public async Task Streaming_ToolCallJsonSplitAcrossTokenBoundaries_ExtractedAndStripped()
+        {
+            // Боевой случай: модель отдаёт JSON вызова десятками дельт, ключи и имя рвутся посреди слова.
+            // До этого все тесты подавали JSON одной дельтой. Запасной канал объявлен явно; инструмент
+            // объявлен, но не связан (memoryStore == null) — извлечение обязано сработать, JSON — исчезнуть
+            // из ленты.
+            StreamingScripted inner = new(
+                new[]
+                {
+                    "Сейчас запомню. ",
+                    "{\"name\":\"mem", "ory\",\"argu", "ments\":{\"action\":\"wri", "te\",\"content\":\"hel", "lo\"}}"
+                });
+            MeaiLlmClient client = new(inner,
+                new NullGameLogger(),
+                new StubSettings(),
+                supportsNativeToolCalling: false,
+                memoryStore: null);
+
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "x",
+                UserPayload = "x",
+                Tools = new List<ILlmTool> { new AgentMemory.MemoryLlmTool() }
+            };
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk c in client.CompleteStreamingAsync(request, CancellationToken.None))
+            {
+                chunks.Add(c);
+            }
+
+            string visible = string.Concat(chunks.Where(c => !string.IsNullOrEmpty(c.Text)).Select(c => c.Text));
+            Assert.That(visible, Does.Contain("Сейчас запомню."));
+            AssertNoToolCallJsonFor(visible, "memory", "Нарезанный по токенам JSON вызова не должен утечь в ленту.");
+            Assert.That(visible, Does.Not.Contain("\"arguments\""));
+
+            LlmStreamChunk done = chunks.LastOrDefault(c => c.IsDone);
+            Assert.IsNotNull(done);
+            Assert.That(done!.ExecutedToolCalls, Is.Not.Null);
+            Assert.That(done.ExecutedToolCalls.Any(t => t.Name == "memory" && t.Source == "missing"), Is.True,
+                "Вызов собран из кусков и дошёл до политики (инструмент не связан — трейс «missing»).");
+        }
+
+        [Test]
+        public async Task Streaming_CyrillicAndEscapedQuotesSplitAtChunkBoundary_ArgumentsArriveIntact()
+        {
+            // Боевой spawn_quiz: русский вопрос с экранированными кавычками внутри, разрезанный так, что
+            // одна дельта кончается одиноким `\` (экранирование рвётся на границе чанка), а кириллица
+            // рвётся посреди слова. Инструмент связан: аргумент обязан прийти в него без потерь.
+            StreamingScripted inner = new(
+                new[]
+                {
+                    "Проверим! ",
+                    "{\"name\":\"spawn_",
+                    "quiz\",\"arguments\":{\"ques",
+                    "tion\":\"Что выве",
+                    "дет print(\\",
+                    "\"Привет\\\")?\"}}"
+                },
+                new[] { "Готово!" });
+
+            string capturedQuestion = null;
+            Func<string, string> quizDelegate = (string question) =>
+            {
+                capturedQuestion = question;
+                return "{\"Success\":true}";
+            };
+
+            // Запасной канал объявлен явно: вызов приходит прозой только там, где нативного канала нет.
+            MeaiLlmClient client = new(inner,
+                new NullGameLogger(),
+                new StubSettings(),
+                supportsNativeToolCalling: false,
+                memoryStore: null);
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "x",
+                UserPayload = "x",
+                TraceId = "stream-quiz",
+                Tools = new List<ILlmTool> { new DelegateLlmTool("spawn_quiz", "test", quizDelegate) }
+            };
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk c in client.CompleteStreamingAsync(request, CancellationToken.None))
+            {
+                chunks.Add(c);
+            }
+
+            Assert.AreEqual("Что выведет print(\"Привет\")?", capturedQuestion,
+                "Кириллица и экранированные кавычки, разрезанные на границе чанков, обязаны дойти целиком.");
+
+            string visible = string.Concat(chunks.Where(c => !string.IsNullOrEmpty(c.Text)).Select(c => c.Text));
+            Assert.That(visible, Does.Contain("Проверим!"));
+            Assert.That(visible, Does.Contain("Готово!"));
+            AssertNoToolCallJsonFor(visible, "spawn_quiz");
+            Assert.That(visible, Does.Not.Contain("\"arguments\""));
+
+            LlmStreamChunk done = chunks.LastOrDefault(c => c.IsDone);
+            Assert.IsNotNull(done);
+            Assert.IsNull(done!.Error, $"Expected no terminal error; got: {done.Error}");
+            Assert.That(done.ExecutedToolCalls, Is.Not.Null);
+            Assert.That(done.ExecutedToolCalls.Any(t => t.Name == "spawn_quiz" && t.Success), Is.True);
+        }
+
         // ------------ Helpers ------------
+
+        /// <summary>Реестр объявленных инструментов для перегрузки <c>TryExtract</c> с именами.</summary>
+        private static IReadOnlyCollection<string> Declared(params string[] names)
+        {
+            return names;
+        }
+
+        /// <summary>
+        /// ПОЧЕМУ: модели пишут JSON и как <c>"name":"x"</c>, и как <c>"name": "x"</c>; проверка по точной
+        /// подстроке пропускала утечку с пробелом после двоеточия.
+        /// </summary>
+        private static void AssertNoToolCallJsonFor(string text, string toolName, string message = null)
+        {
+            string pattern = "\"name\"\\s*:\\s*\"" + Regex.Escape(toolName) + "\"";
+            Assert.That(text ?? "", Does.Not.Match(pattern), message ?? $"Tool-call JSON for '{toolName}' leaked.");
+        }
+
+        private static void AssertNoToolCallJson(string text, string message = null)
+        {
+            Assert.That(text ?? "", Does.Not.Match("\"name\"\\s*:"), message ?? "Tool-call JSON leaked.");
+        }
 
         private static MEAI.ChatResponse MakeTextResponse(string text)
         {

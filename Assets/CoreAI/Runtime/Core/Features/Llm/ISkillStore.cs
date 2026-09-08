@@ -17,9 +17,9 @@ namespace CoreAI.Ai
     /// </para>
     /// <para>
     /// A host wires an implementation (file system, player prefs, cloud, etc.); the
-    /// authoring coordinator calls it best-effort and never lets a store failure abort the in-memory
-    /// catalog update. Implementations should write atomically so a crash mid-write cannot corrupt an
-    /// existing skill.
+    /// authoring coordinator publishes to the live catalog only after a successful store operation.
+    /// Implementations must report write failures and write atomically so a crash mid-write cannot
+    /// corrupt an existing skill. A no-op store deliberately provides session-only skills.
     /// </para>
     /// </summary>
     public interface ISkillStore
@@ -52,6 +52,57 @@ namespace CoreAI.Ai
         TResult Mutate<TResult>(string id, Func<SkillRecord, SkillStoreMutation<TResult>> mutator);
     }
 
+    /// <summary>
+    /// Publishes a committed mutation before releasing its durable key lock. Callbacks are synchronous,
+    /// must not wait or re-enter skill stores/coordinators, and should not throw. A publication exception
+    /// means the storage operation completed; implementations must not report it as a storage rollback.
+    /// </summary>
+    public interface ICommittedSkillStore : IAtomicSkillStore
+    {
+        TResult MutateAndPublish<TResult>(string id, Func<SkillRecord, SkillStoreMutation<TResult>> mutator,
+            Action<TResult> publish);
+    }
+
+    /// <summary>The store committed, but publication failed; retrying the write is not a rollback.</summary>
+    public sealed class SkillStorePublicationException : InvalidOperationException
+    {
+        public SkillStorePublicationException(string id, Exception innerException)
+            : base($"Skill '{id}' storage operation completed, but publication failed; stored data was not rolled back.", innerException)
+        {
+        }
+    }
+
+    internal static class SkillStoreCallbackContext
+    {
+        [ThreadStatic] private static bool _active;
+
+        internal static void ThrowIfActive()
+        {
+            if (_active) throw new InvalidOperationException("Skill store callbacks must not re-enter skill stores or coordinators.");
+        }
+
+        internal static TResult Run<TResult>(Func<TResult> callback)
+        {
+            ThrowIfActive();
+            _active = true;
+            try { return callback(); }
+            finally { _active = false; }
+        }
+
+        internal static void Publish<TResult>(string id, TResult result, Action<TResult> publish)
+        {
+            if (publish == null) return;
+            try
+            {
+                Run(() => { publish(result); return true; });
+            }
+            catch (Exception ex)
+            {
+                throw new SkillStorePublicationException(id, ex);
+            }
+        }
+    }
+
     /// <summary>Result of one atomic skill store mutation.</summary>
     public sealed class SkillStoreMutation<TResult>
     {
@@ -70,6 +121,7 @@ namespace CoreAI.Ai
 
         public static SkillStoreMutation<TResult> SaveRecord(SkillRecord record, TResult result)
         {
+            if (record == null) throw new ArgumentNullException(nameof(record));
             return new SkillStoreMutation<TResult>(result, record, true, false);
         }
 
@@ -105,6 +157,17 @@ namespace CoreAI.Ai
             string id,
             Func<SkillRecord, SkillStoreMutation<TResult>> mutator)
         {
+            return MutateAndPublish(store, id, mutator, null);
+        }
+
+        /// <summary>
+        /// Commits before publication. The fallback orders coordinators sharing this store instance;
+        /// stores shared through different instances implement ICommittedSkillStore for a common key lock.
+        /// </summary>
+        public static TResult MutateAndPublish<TResult>(this ISkillStore store, string id,
+            Func<SkillRecord, SkillStoreMutation<TResult>> mutator, Action<TResult> publish)
+        {
+            SkillStoreCallbackContext.ThrowIfActive();
             if (store == null)
             {
                 throw new ArgumentNullException(nameof(store));
@@ -115,20 +178,37 @@ namespace CoreAI.Ai
                 throw new ArgumentNullException(nameof(mutator));
             }
 
-            if (store is IAtomicSkillStore atomic)
+            if (store is ICommittedSkillStore committed)
             {
-                return atomic.Mutate(id, mutator);
+                return committed.MutateAndPublish(id, mutator, publish);
             }
 
             string skillId = (id ?? "").Trim();
+            if (skillId.Length == 0) throw new ArgumentException("Skill id must not be empty.", nameof(id));
             ConcurrentDictionary<string, SemaphoreSlim> gates = MutationLocks.GetValue(
-                store, _ => new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal));
+                store, _ => new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.OrdinalIgnoreCase));
             SemaphoreSlim gate = gates.GetOrAdd(skillId, _ => new SemaphoreSlim(1, 1));
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (!gate.Wait(0)) throw new InvalidOperationException("Skill store is busy; retry after the current operation.");
+#else
             gate.Wait();
+#endif
             try
             {
+                if (store is IAtomicSkillStore atomic)
+                {
+                    TResult result = atomic.Mutate(skillId,
+                        current => SkillStoreCallbackContext.Run(() => mutator(current)));
+                    SkillStoreCallbackContext.Publish(skillId, result, publish);
+                    return result;
+                }
                 store.TryLoad(skillId, out SkillRecord current);
-                SkillStoreMutation<TResult> mutation = mutator(current);
+                if (current != null)
+                {
+                    current = new SkillRecord(current.Id, current.Description, current.Instructions, current.ToolNames,
+                        current.Version, current.Sections);
+                }
+                SkillStoreMutation<TResult> mutation = SkillStoreCallbackContext.Run(() => mutator(current));
                 if (mutation == null)
                 {
                     throw new InvalidOperationException("Skill store mutator returned null.");
@@ -140,9 +220,12 @@ namespace CoreAI.Ai
                 }
                 else if (mutation.Save && mutation.Record != null)
                 {
+                    if (!string.Equals(mutation.Record.Id?.Trim(), skillId, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("A skill mutation cannot write a different key.");
                     store.Save(mutation.Record);
                 }
 
+                SkillStoreCallbackContext.Publish(skillId, mutation.Result, publish);
                 return mutation.Result;
             }
             finally
@@ -168,6 +251,12 @@ namespace CoreAI.Ai
         public string Instructions { get; set; } = "";
 
         /// <summary>
+        /// Ordered instruction documents, first being the complete main document. Empty means a legacy
+        /// single-file record using Instructions. Tools and executable implementations are never embedded.
+        /// </summary>
+        public List<SkillSection> Sections { get; set; } = new();
+
+        /// <summary>
         /// Names of <b>already-registered</b> tools this skill exposes through <c>call_skill_tool</c>.
         /// Tools are referenced by name, never embedded.
         /// </summary>
@@ -186,13 +275,14 @@ namespace CoreAI.Ai
 
         /// <summary>Creates a populated record.</summary>
         public SkillRecord(string id, string description, string instructions,
-            IEnumerable<string> toolNames, int version = 0)
+            IEnumerable<string> toolNames, int version = 0, IEnumerable<SkillSection> sections = null)
         {
             Id = id ?? "";
             Description = description ?? "";
             Instructions = instructions ?? "";
             ToolNames = toolNames != null ? new List<string>(toolNames) : new List<string>();
             Version = version;
+            Sections = sections != null ? new List<SkillSection>(sections) : new List<SkillSection>();
         }
     }
 }

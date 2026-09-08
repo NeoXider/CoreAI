@@ -50,6 +50,7 @@ namespace CoreAI.Infrastructure.Llm
     {
         private readonly IOpenAiHttpSettings _settings;
         private readonly IOpenAiHttpTransport _transport;
+        private readonly bool _supportsNativeToolCalling;
         private readonly ILog _log;
         private readonly ILlmAsyncMarshaler? _asyncMarshaler;
 
@@ -166,7 +167,19 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         public MeaiOpenAiChatClient(IOpenAiHttpSettings settings, IOpenAiHttpTransport transport, ILog? log,
             ILlmAsyncMarshaler? asyncMarshaler)
+            : this(settings, transport, true, log, asyncMarshaler)
         {
+        }
+
+        /// <summary>
+        /// Creates an HTTP endpoint adapter with an explicit native tool-channel capability. The older
+        /// generic OpenAI constructors retain their native protocol contract. False strips native tool
+        /// fields from the final wire payload, including fields injected by provider-specific options.
+        /// </summary>
+        public MeaiOpenAiChatClient(IOpenAiHttpSettings settings, IOpenAiHttpTransport transport,
+            bool supportsNativeToolCalling, ILog? log = null, ILlmAsyncMarshaler? asyncMarshaler = null)
+        {
+            _supportsNativeToolCalling = supportsNativeToolCalling;
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _transport = transport ?? throw new ArgumentNullException(nameof(transport));
             _log = log ?? Log.Instance;
@@ -289,6 +302,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             ApplyProviderSpecificRequestBody(reqBody);
+            ApplyToolCallingOptions(reqBody, options);
 
             string json = JsonConvert.SerializeObject(reqBody);
 
@@ -455,6 +469,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             ApplyProviderSpecificRequestBody(reqBody);
+            ApplyToolCallingOptions(reqBody, options);
 
             string json = JsonConvert.SerializeObject(reqBody);
 
@@ -676,14 +691,20 @@ namespace CoreAI.Infrastructure.Llm
                             // deltas and skip this path.
                             if (textOnly && updateText.Length > 24)
                             {
-                                foreach (string piece in SplitForSmoothStreaming(updateText))
+                                List<string> pieces = SplitForSmoothStreaming(updateText).ToList();
+                                for (int pieceIndex = 0; pieceIndex < pieces.Count; pieceIndex++)
                                 {
-                                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, piece)
+                                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, pieces[pieceIndex])
                                     {
                                         // WHY: the re-emitted pieces replace the original delta, so the
                                         // served model id has to travel with them or the consumer never
-                                        // sees which model answered a smoothly-streamed turn.
-                                        ModelId = update.ModelId
+                                        // sees which model answered a smoothly-streamed turn. The native
+                                        // response identity and finish reason travel for the same reason:
+                                        // without them the pieces would split the message boundary.
+                                        ModelId = update.ModelId,
+                                        ResponseId = update.ResponseId,
+                                        MessageId = update.MessageId,
+                                        FinishReason = pieceIndex == pieces.Count - 1 ? update.FinishReason : null
                                     };
                                     await DelayBetweenSyntheticStreamPiecesAsync(cancellationToken);
                                 }
@@ -1170,67 +1191,36 @@ namespace CoreAI.Infrastructure.Llm
                 yield break;
             }
 
-            // WHY: this path replaces a real stream (WebGL without native SSE, and the stream->non-stream
-            // fallback), so the served model id has to be re-emitted on every synthetic update — otherwise
-            // those turns are the only ones that cannot report which model answered.
-            string servedModel = response.ModelId;
-
-            if (response.Messages != null && response.Messages.Count > 0)
+            // WHY: content updates must not look terminal before their trailing contents/usage arrive.
+            MEAI.ChatResponseUpdate terminal = new(MEAI.ChatRole.Assistant, "")
             {
-                MEAI.ChatMessage msg = response.Messages[0];
-
-                if (msg.Contents != null && msg.Contents.Count > 0)
+                ModelId = response.ModelId,
+                ResponseId = response.ResponseId,
+                FinishReason = response.FinishReason
+            };
+            foreach (MEAI.ChatMessage message in response.Messages)
+            {
+                terminal.MessageId = message.MessageId;
+                foreach (MEAI.AIContent content in EnumerableContents(message))
                 {
-                    foreach (MEAI.AIContent c in EnumerableContents(msg))
+                    yield return new MEAI.ChatResponseUpdate(message.Role, "")
                     {
-                        if (c is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
-                        {
-                            yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, tc.Text)
-                            {
-                                ModelId = servedModel
-                            };
-                        }
-                        else if (c is MEAI.TextReasoningContent rc && !string.IsNullOrEmpty(rc.Text))
-                        {
-                            MEAI.ChatResponseUpdate ru = new(MEAI.ChatRole.Assistant, "")
-                            {
-                                ModelId = servedModel
-                            };
-                            ru.Contents = new List<MEAI.AIContent> { rc };
-                            yield return ru;
-                        }
-                        else if (c is MEAI.FunctionCallContent fc)
-                        {
-                            MEAI.ChatResponseUpdate u = new(MEAI.ChatRole.Assistant, "")
-                            {
-                                ModelId = servedModel
-                            };
-                            u.Contents = new List<MEAI.AIContent> { fc };
-                            yield return u;
-                        }
-                    }
-                }
-                else if (!string.IsNullOrEmpty(msg.Text))
-                {
-                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, msg.Text)
-                    {
-                        ModelId = servedModel
+                        ModelId = response.ModelId,
+                        ResponseId = response.ResponseId,
+                        MessageId = message.MessageId,
+                        Contents = new List<MEAI.AIContent> { content }
                     };
                 }
             }
 
             if (response.Usage != null)
             {
-                // WHY: The full response's usage was invisible to streaming consumers on the
-                // WebGL non-native-streaming path and the stream->non-stream fallback, so those
-                // turns reported 0 tokens. Re-emit it as a trailing UsageContent update, mirroring
-                // OpenAI's final stream_options.include_usage chunk.
-                MEAI.ChatResponseUpdate usageUpdate = new(MEAI.ChatRole.Assistant, "")
-                {
-                    ModelId = servedModel
-                };
-                usageUpdate.Contents = new List<MEAI.AIContent> { new MEAI.UsageContent(response.Usage) };
-                yield return usageUpdate;
+                terminal.Contents.Add(new MEAI.UsageContent(response.Usage));
+            }
+
+            if (response.Usage != null || response.FinishReason.HasValue)
+            {
+                yield return terminal;
             }
         }
 
@@ -1562,7 +1552,8 @@ namespace CoreAI.Infrastructure.Llm
                     return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, ""));
                 }
 
-                JToken msg = choices[0]?["message"];
+                JToken choice0 = choices[0];
+                JToken msg = choice0?["message"];
                 string content = ParseAssistantMessageVisibleText(msg);
                 string reasoning = ExtractAssistantMessageReasoningText(msg);
 
@@ -1599,7 +1590,30 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                MEAI.ChatResponse response = new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, contents));
+                MEAI.ChatMessage assistant = new(MEAI.ChatRole.Assistant, contents);
+                string wireId = root["id"]?.ToString();
+                if (string.IsNullOrWhiteSpace(wireId))
+                {
+                    // WHY: llama.cpp / LM Studio omit the response id. A stable per-response id is
+                    // what groups streamed updates into messages downstream, so synthesize one.
+                    wireId = SynthResponseId();
+                }
+                else
+                {
+                    wireId = wireId.Trim();
+                }
+
+                assistant.MessageId = wireId;
+                MEAI.ChatResponse response = new(assistant)
+                {
+                    ResponseId = wireId
+                };
+
+                string finishValue = choice0?["finish_reason"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(finishValue))
+                {
+                    response.FinishReason = MapFinishReason(finishValue.Trim());
+                }
 
                 // WHY: the provider names the model it ACTUALLY served (a proxy/router may pick a different
                 // one than the client asked for, and under ServerManagedApi the client asks for nothing at
@@ -1908,16 +1922,46 @@ namespace CoreAI.Infrastructure.Llm
                 return null;
             }
 
+            accumulator.LatchWireId(root["id"]?.ToString());
+            string finishValue = (root["choices"] as JArray)?.First?["finish_reason"]?.ToString();
             MEAI.ChatResponseUpdate update = ExtractDeltaUpdateCore(root, accumulator);
+            if (update == null && !string.IsNullOrWhiteSpace(finishValue))
+            {
+                update = new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "");
+            }
             if (update == null)
             {
                 return null;
+            }
+
+            if (!update.Contents.OfType<MEAI.UsageContent>().Any())
+            {
+                MEAI.ChatResponseUpdate usageUpdate = TryParseStreamingUsageChunk(root);
+                if (usageUpdate != null)
+                {
+                    foreach (MEAI.AIContent usageContent in usageUpdate.Contents)
+                    {
+                        update.Contents.Add(usageContent);
+                    }
+                }
             }
 
             string servedModel = root["model"]?.ToString();
             if (string.IsNullOrEmpty(update.ModelId) && !string.IsNullOrWhiteSpace(servedModel))
             {
                 update.ModelId = servedModel.Trim();
+            }
+
+            // WHY: one latch per attempt (the accumulator is created fresh per attempt): the first
+            // chunk carrying a wire id fixes the response identity, later id-less chunks backfill
+            // from it, and id-less providers share one synthetic id for the whole attempt.
+            string wireId = accumulator.LatchedOrSyntheticId();
+            update.ResponseId = wireId;
+            update.MessageId = accumulator.MessageId;
+
+            if (!string.IsNullOrWhiteSpace(finishValue))
+            {
+                update.FinishReason = MapFinishReason(finishValue.Trim());
             }
 
             return update;
@@ -2046,7 +2090,10 @@ namespace CoreAI.Infrastructure.Llm
             int completion = usage["completion_tokens"]?.ToObject<int>() ?? 0;
             int total = usage["total_tokens"]?.ToObject<int>() ?? 0;
             MEAI.AdditionalPropertiesDictionary<long> additionalCounts = BuildAdditionalUsageCounts(usage);
+            long? cachedInput = ReadUsageInt64(usage["prompt_tokens_details"] as JObject, "cached_tokens");
+            long? reasoning = ReadUsageInt64(usage["completion_tokens_details"] as JObject, "reasoning_tokens");
             if (prompt == 0 && completion == 0 && total == 0 &&
+                !cachedInput.HasValue && !reasoning.HasValue &&
                 (additionalCounts == null || additionalCounts.Count == 0))
             {
                 return null;
@@ -2062,8 +2109,64 @@ namespace CoreAI.Infrastructure.Llm
                 InputTokenCount = prompt,
                 OutputTokenCount = completion,
                 TotalTokenCount = total,
+                CachedInputTokenCount = cachedInput,
+                ReasoningTokenCount = reasoning,
                 AdditionalCounts = additionalCounts
             };
+        }
+
+        /// <summary>
+        /// Maps an OpenAI <c>finish_reason</c> string onto the native MEAI contract. Known values use
+        /// the shared statics; anything else (e.g. a vendor-specific reason) is preserved verbatim so
+        /// no provider signal is lost.
+        /// </summary>
+        private static MEAI.ChatFinishReason MapFinishReason(string value)
+        {
+            if (string.Equals(value, "stop", StringComparison.OrdinalIgnoreCase))
+            {
+                return MEAI.ChatFinishReason.Stop;
+            }
+
+            if (string.Equals(value, "length", StringComparison.OrdinalIgnoreCase))
+            {
+                return MEAI.ChatFinishReason.Length;
+            }
+
+            if (string.Equals(value, "tool_calls", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "function_call", StringComparison.OrdinalIgnoreCase))
+            {
+                return MEAI.ChatFinishReason.ToolCalls;
+            }
+
+            if (string.Equals(value, "content_filter", StringComparison.OrdinalIgnoreCase))
+            {
+                return MEAI.ChatFinishReason.ContentFilter;
+            }
+
+            return new MEAI.ChatFinishReason(value);
+        }
+
+        /// <summary>Reads one integer leaf of an OpenAI usage details object; null when absent/non-integer.</summary>
+        private static long? ReadUsageInt64(JObject parent, string child)
+        {
+            if (parent == null)
+            {
+                return null;
+            }
+
+            JToken token = parent[child];
+            if (token == null || token.Type != JTokenType.Integer)
+            {
+                return null;
+            }
+
+            return token.Value<long>();
+        }
+
+        /// <summary>Synthetic per-response id for providers that omit the OpenAI response <c>id</c>.</summary>
+        private static string SynthResponseId()
+        {
+            return "synth_chatcmpl_" + Guid.NewGuid().ToString("N");
         }
 
         private static MEAI.AdditionalPropertiesDictionary<long> BuildAdditionalUsageCounts(JObject usage)
@@ -2110,7 +2213,9 @@ namespace CoreAI.Infrastructure.Llm
             if (value > 0 &&
                 !string.Equals(prefix, "prompt_tokens", StringComparison.Ordinal) &&
                 !string.Equals(prefix, "completion_tokens", StringComparison.Ordinal) &&
-                !string.Equals(prefix, "total_tokens", StringComparison.Ordinal))
+                !string.Equals(prefix, "total_tokens", StringComparison.Ordinal) &&
+                !string.Equals(prefix, "prompt_tokens_details.cached_tokens", StringComparison.Ordinal) &&
+                !string.Equals(prefix, "completion_tokens_details.reasoning_tokens", StringComparison.Ordinal))
             {
                 counts[prefix] = value;
             }
@@ -2204,9 +2309,49 @@ namespace CoreAI.Infrastructure.Llm
             private readonly ILog _log;
             private int _nextSequence;
 
+            /// <summary>Wire response id latched from the first chunk that carries one (per attempt).</summary>
+            internal string LatchedResponseId { get; private set; }
+
+            private string _syntheticResponseId;
+            private string _messageId;
+
+            internal string MessageId => _messageId ??= LatchedOrSyntheticId();
+
             public SseToolCallAccumulator(ILog log = null)
             {
                 _log = log ?? NullLog.Instance;
+            }
+
+            /// <summary>
+            /// Latches the OpenAI wire response <c>id</c> for this attempt. First non-empty id wins,
+            /// so later id-less chunks retain provider response metadata. The message id separately
+            /// freezes at first emission, including when the wire id arrives after text.
+            /// </summary>
+            internal void LatchWireId(string wireId)
+            {
+                if (!string.IsNullOrWhiteSpace(wireId) && string.IsNullOrEmpty(LatchedResponseId))
+                {
+                    LatchedResponseId = wireId.Trim();
+                }
+            }
+
+            /// <summary>
+            /// The latched wire id, or one synthetic id shared by the whole attempt when the provider
+            /// never sends any (same rule as the non-streaming path).
+            /// </summary>
+            internal string LatchedOrSyntheticId()
+            {
+                if (!string.IsNullOrEmpty(LatchedResponseId))
+                {
+                    return LatchedResponseId;
+                }
+
+                if (string.IsNullOrEmpty(_syntheticResponseId))
+                {
+                    _syntheticResponseId = SynthResponseId();
+                }
+
+                return _syntheticResponseId;
             }
 
             /// <summary>
@@ -2482,6 +2627,9 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
+                string wireId = LatchedOrSyntheticId();
+                update.ResponseId = wireId;
+                update.MessageId = MessageId;
                 return update;
             }
 
@@ -2600,7 +2748,15 @@ namespace CoreAI.Infrastructure.Llm
                 _pending.Clear();
                 _pendingById.Clear();
                 _pendingByIndex.Clear();
-                return update.Contents.Count > 0 ? update : null;
+                if (update.Contents.Count == 0)
+                {
+                    return null;
+                }
+
+                string wireId = LatchedOrSyntheticId();
+                update.ResponseId = wireId;
+                update.MessageId = MessageId;
+                return update;
             }
 
             /// <summary>
@@ -2916,6 +3072,44 @@ namespace CoreAI.Infrastructure.Llm
             return string.IsNullOrEmpty(mediaType) ? "image/jpeg" : mediaType;
         }
 
+        /// <summary>Maps the native MEAI tool policy to the shared chat/completions wire contract.</summary>
+        private void ApplyToolCallingOptions(Dictionary<string, object> request, MEAI.ChatOptions options)
+        {
+            if (!_supportsNativeToolCalling)
+            {
+                request.Remove("tools");
+                request.Remove("tool_choice");
+                request.Remove("parallel_tool_calls");
+                return;
+            }
+
+            // WHY: Explicit per-request policy wins over provider defaults, including raw ExtraBodyJson.
+            // The restriction must survive even when there are no tool definitions in this request.
+            switch (options?.ToolMode)
+            {
+                case MEAI.NoneChatToolMode:
+                    request["tool_choice"] = "none";
+                    break;
+                case MEAI.AutoChatToolMode:
+                    request["tool_choice"] = "auto";
+                    break;
+                case MEAI.RequiredChatToolMode required:
+                    request["tool_choice"] = string.IsNullOrEmpty(required.RequiredFunctionName)
+                        ? "required"
+                        : new Dictionary<string, object>
+                        {
+                            ["type"] = "function",
+                            ["function"] = new Dictionary<string, object> { ["name"] = required.RequiredFunctionName }
+                        };
+                    break;
+            }
+
+            if (options?.AllowMultipleToolCalls is bool allowMultiple)
+            {
+                request["parallel_tool_calls"] = allowMultiple;
+            }
+        }
+
         private static List<Dictionary<string, object>> BuildToolsPayload(MEAI.ChatOptions? options)
         {
             List<Dictionary<string, object>> toolsList = new();
@@ -3011,7 +3205,65 @@ namespace CoreAI.Infrastructure.Llm
 
         public object? GetService(Type serviceType, object? serviceKey = null)
         {
+            if (serviceType == null)
+            {
+                throw new ArgumentNullException(nameof(serviceType));
+            }
+
+            if (serviceKey != null)
+            {
+                return null;
+            }
+
+            if (serviceType == typeof(MEAI.ChatClientMetadata))
+            {
+                return BuildClientMetadata();
+            }
+
+            // WHY: self fallback for MEAI middleware that resolves the inner client by its own
+            // type (IChatClient or this concrete type) instead of asking for metadata.
+            if (serviceType.IsInstanceOfType(this))
+            {
+                return this;
+            }
+
             return null;
+        }
+
+        /// <summary>
+        /// Builds the native MEAI client metadata from this client's own configuration (self
+        /// fallback): the provider name honoring the OpenTelemetry GenAI system values where they
+        /// exist, the configured endpoint URI, and the configured default model id (null under
+        /// ServerManagedApi, where the backend picks the model).
+        /// </summary>
+        private MEAI.ChatClientMetadata BuildClientMetadata()
+        {
+            string baseUrl = _settings.ApiBaseUrl ?? "";
+            string providerName = baseUrl.IndexOf("openrouter", StringComparison.OrdinalIgnoreCase) >= 0
+                ? "openrouter"
+                : "openai";
+
+            Uri providerUri = null;
+            string trimmedUrl = baseUrl.Trim();
+            if (!string.IsNullOrEmpty(trimmedUrl))
+            {
+                try
+                {
+                    providerUri = new Uri(trimmedUrl);
+                }
+                catch (UriFormatException)
+                {
+                    providerUri = null;
+                }
+            }
+
+            string model = _settings.Model?.Trim();
+            if (string.IsNullOrEmpty(model))
+            {
+                model = null;
+            }
+
+            return new MEAI.ChatClientMetadata(providerName, providerUri, model);
         }
     }
 }

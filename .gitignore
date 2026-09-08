@@ -124,6 +124,7 @@ FirebaseCppApp-*.so
 # Roslyn analyzer tool projects (Unity .gitignore ignores *.sln / *.csproj globally)
 !Tools/**/*.csproj
 !Tools/**/*.sln
+!examples/dotnet/*.csproj
 /Docs/Local/
 
 # Local-only config for the LIVE PlayMode test suite (provider base URL / API key / model).

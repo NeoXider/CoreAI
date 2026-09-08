@@ -164,7 +164,17 @@ namespace CoreAI.Ai
 
         private string ReadMemory()
         {
-            string current = LoadMemory(out AgentMemoryState state);
+            if (!TryLoadMemory(out string current, out AgentMemoryState state))
+            {
+                // WHY: документ есть, но не читается. Ответить «память пуста» — значит выдать модели
+                // пустоту за факт, и она перезапишет то, чего не видела.
+                return SerializeResult(new MemoryResult
+                {
+                    Success = false,
+                    Error = new AgentMemoryLoadException(_roleId).Message
+                });
+            }
+
             int latestVersion = 0;
             AgentMemoryVersionSnapshot[] versions = state?.Versions;
             if (versions != null)
@@ -340,49 +350,103 @@ namespace CoreAI.Ai
                 cancellationToken);
         }
 
-        private Task<string> MutateMemoryAsync(string action, Func<string, MemoryMutationPlan> planner,
+        private async Task<string> MutateMemoryAsync(string action, Func<string, MemoryMutationPlan> planner,
             CancellationToken cancellationToken)
         {
-            return _store.MutateAsync(
-                _roleId,
-                state =>
-                {
-                    string previous = state.Memory ?? "";
-                    MemoryMutationPlan plan = planner(previous);
-                    if (!plan.Success)
+            // WHY: мутатор только МЕНЯЕТ состояние и описывает исход. Ответ «сохранено» собирается ниже,
+            // когда MutateAsync уже вернулся, то есть когда стор по своему контракту записал результат
+            // (IAtomicAgentMemoryStore: «сохраняет результат до освобождения замка»). Раньше и лог SUCCESS,
+            // и ответ формировались внутри мутатора — ДО записи, — и сбой диска, проглоченный стором, не
+            // менял ничего: модель и ученик видели, что учитель запомнил, а на диске было пусто.
+            MutationOutcome outcome = await _store.MutateAsync(
+                    _roleId,
+                    state =>
                     {
-                        return SerializeResult(new MemoryResult { Success = false, Error = plan.Error });
-                    }
-
-                    if (!plan.Changed)
-                    {
-                        return SerializeResult(new MemoryResult
+                        string previous = state.Memory ?? "";
+                        MemoryMutationPlan plan = planner(previous);
+                        if (!plan.Success)
                         {
-                            Success = true,
-                            Message = plan.Message,
-                            MemoryLength = previous.Length
-                        });
-                    }
+                            return MutationOutcome.Failed(plan.Error);
+                        }
 
-                    state.Memory = plan.NextMemory ?? "";
-                    AgentMemoryVersionSnapshot snapshot = state.RecordVersion(action, state.Memory,
-                        CreateMutationNote(previous, state.Memory));
+                        if (!plan.Changed)
+                        {
+                            return MutationOutcome.Unchanged(plan.Message, previous.Length);
+                        }
 
-                    if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
-                    {
-                        Log.Instance.Info($"[Tool Call] memory: SUCCESS - {plan.MessagePrefix} for {_roleId}",
-                            LogTag.Memory);
-                    }
+                        state.Memory = plan.NextMemory ?? "";
+                        AgentMemoryVersionSnapshot snapshot = state.RecordVersion(action, state.Memory,
+                            CreateMutationNote(previous, state.Memory));
+                        return MutationOutcome.Saved(plan.MessagePrefix, snapshot.Version, state.Memory.Length);
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
 
-                    return SerializeResult(new MemoryResult
-                    {
-                        Success = true,
-                        Message = $"DONE: {plan.MessagePrefix} for {_roleId}.",
-                        Version = snapshot.Version,
-                        MemoryLength = state.Memory.Length
-                    });
-                },
-                cancellationToken);
+            if (!outcome.Success)
+            {
+                return SerializeResult(new MemoryResult { Success = false, Error = outcome.Error });
+            }
+
+            if (!outcome.Changed)
+            {
+                return SerializeResult(new MemoryResult
+                {
+                    Success = true,
+                    Message = outcome.Message,
+                    MemoryLength = outcome.MemoryLength
+                });
+            }
+
+            if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
+            {
+                Log.Instance.Info($"[Tool Call] memory: SUCCESS - {outcome.Message} for {_roleId}",
+                    LogTag.Memory);
+            }
+
+            return SerializeResult(new MemoryResult
+            {
+                Success = true,
+                Message = $"DONE: {outcome.Message} for {_roleId}.",
+                Version = outcome.Version,
+                MemoryLength = outcome.MemoryLength
+            });
+        }
+
+        /// <summary>Исход мутации, каким его видит мутатор; в ответ инструмента превращается после записи.</summary>
+        private readonly struct MutationOutcome
+        {
+            private MutationOutcome(bool success, bool changed, string message, string error, int version,
+                int memoryLength)
+            {
+                Success = success;
+                Changed = changed;
+                Message = message;
+                Error = error;
+                Version = version;
+                MemoryLength = memoryLength;
+            }
+
+            public bool Success { get; }
+            public bool Changed { get; }
+            public string Message { get; }
+            public string Error { get; }
+            public int Version { get; }
+            public int MemoryLength { get; }
+
+            public static MutationOutcome Failed(string error)
+            {
+                return new MutationOutcome(false, false, null, error, 0, 0);
+            }
+
+            public static MutationOutcome Unchanged(string message, int memoryLength)
+            {
+                return new MutationOutcome(true, false, message, null, 0, memoryLength);
+            }
+
+            public static MutationOutcome Saved(string messagePrefix, int version, int memoryLength)
+            {
+                return new MutationOutcome(true, true, messagePrefix, null, version, memoryLength);
+            }
         }
 
         private sealed class MemoryMutationPlan
@@ -431,14 +495,29 @@ namespace CoreAI.Ai
                 cancellationToken);
         }
 
-        private string LoadMemory(out AgentMemoryState state)
+        /// <summary>
+        /// Читает документ роли. <c>false</c> — документ существует, но прочитать его не удалось: стор,
+        /// умеющий это различать (<see cref="IAgentMemoryLoadDiagnostics"/>), сообщил
+        /// <see cref="AgentMemoryLoadStatus.Failed"/>. Отсутствующий документ — это пустая память.
+        /// </summary>
+        private bool TryLoadMemory(out string memory, out AgentMemoryState state)
         {
-            if (!_store.TryLoad(_roleId, out state) || state == null)
+            if (_store is IAgentMemoryLoadDiagnostics diagnostics)
             {
-                state = new AgentMemoryState();
+                if (diagnostics.TryLoadDetailed(_roleId, out state) == AgentMemoryLoadStatus.Failed)
+                {
+                    memory = "";
+                    return false;
+                }
+            }
+            else if (!_store.TryLoad(_roleId, out state))
+            {
+                state = null;
             }
 
-            return state.Memory ?? "";
+            state ??= new AgentMemoryState();
+            memory = state.Memory ?? "";
+            return true;
         }
 
         private static string ReplaceFirst(string value, string oldText, string newText)

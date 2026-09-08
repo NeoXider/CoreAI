@@ -496,7 +496,7 @@ namespace CoreAI.Diagnostics.G10
             }
 
             G10OpenAiHttpSettings httpSettings = new G10OpenAiHttpSettings(configuration);
-            return MeaiLlmClient.CreateHttp(httpSettings, settings, logger);
+            return MeaiLlmClient.CreateHttp(httpSettings, settings, logger, supportsNativeToolCalling: true);
         }
 
         private sealed class G10OpenAiHttpSettings : IOpenAiHttpSettings

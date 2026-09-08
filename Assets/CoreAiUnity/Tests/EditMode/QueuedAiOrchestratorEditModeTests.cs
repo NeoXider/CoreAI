@@ -308,6 +308,65 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Внутренний оркестратор, который падает заданным исключением — сразу либо (при
+        /// <see cref="WaitForCancellation"/>) только после того, как его токен отменили.
+        /// </summary>
+        private sealed class FaultingOrchestrator : IAiOrchestrationService
+        {
+            private readonly Func<Exception> _failure;
+
+            public FaultingOrchestrator(Func<Exception> failure)
+            {
+                _failure = failure;
+            }
+
+            public bool WaitForCancellation { get; set; }
+
+            public bool Started { get; private set; }
+
+            public async Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+            {
+                Started = true;
+                await Task.Yield();
+                await WaitIfRequestedAsync(cancellationToken);
+                throw _failure();
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest task,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                Started = true;
+                await Task.Yield();
+                await WaitIfRequestedAsync(cancellationToken);
+                throw _failure();
+#pragma warning disable CS0162
+                yield break;
+#pragma warning restore CS0162
+            }
+
+            public void CancelTasks(string cancellationScope)
+            {
+            }
+
+            private async Task WaitIfRequestedAsync(CancellationToken cancellationToken)
+            {
+                if (!WaitForCancellation)
+                {
+                    return;
+                }
+
+                // WHY: Ждём отмену БЕЗ броска OperationCanceledException: проверяется, как очередь
+                // классифицирует именно то исключение, которое бросит внутренний слой поверх отмены.
+                TaskCompletionSource<bool> cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                using CancellationTokenRegistration registration =
+                    cancellationToken.Register(() => cancelled.TrySetResult(true));
+                await cancelled.Task;
+            }
+        }
+
         private sealed class MutableScopeProvider : IAgentMemoryScopeProvider
         {
             public string UserId { get; set; } = "";
@@ -1784,9 +1843,12 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, chunks.Count,
                 "A streaming request rejected by admission control gets exactly one terminal chunk.");
             Assert.IsTrue(chunks[0].IsDone);
-            Assert.That(chunks[0].Error, Does.Contain("MaxPending"));
-            Assert.That(chunks[0].Error, Does.Contain("stream-overflow-actor"));
             Assert.AreEqual(LlmErrorCode.BackendUnavailable, chunks[0].ErrorCode);
+            // WHY: Текст чанка показывается в пузыре чата как есть. Внутренний actorId и MaxPending —
+            // для лога, а не для ученика.
+            Assert.IsNotEmpty(chunks[0].Error);
+            Assert.That(chunks[0].Error, Does.Not.Contain("MaxPending"));
+            Assert.That(chunks[0].Error, Does.Not.Contain("stream-overflow-actor"));
             AssertSingleUnstartedTurn(inner, "Teacher", "overflow-stream");
 
             inner.Gates[0].TrySetResult(null);
@@ -1794,6 +1856,180 @@ namespace CoreAI.Tests.EditMode
             inner.Gates[1].TrySetResult(null);
 
             await Task.WhenAll(blocker, p1);
+        }
+
+        // ──────────────────────────────────────────────────────────
+        // Классификация сбоев внутреннего слоя: таймаут ≠ отмена, чужие формулировки — не в чат
+        // ──────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Дефект: LlmOperationTimeoutException наследует OperationCanceledException, и очередь
+        /// схлопывала её в TrySetCanceled(). Вызывающий получал голый TaskCanceledException, а презентация
+        /// говорила ребёнку «запрос остановлен» — будто он сам прервал ответ учителя.
+        /// </summary>
+        [Test]
+        public async Task LibraryTimeout_RunTaskAsync_SurfacesAsTimeout_NotAsUserStop()
+        {
+            FaultingOrchestrator inner = new(() => new LlmOperationTimeoutException());
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions());
+
+            Task<string> turn = queue.RunTaskAsync(new AiTaskRequest { Hint = "slow teacher" });
+
+            await CaptureExceptionAsync<LlmOperationTimeoutException>(() => turn);
+            Assert.IsTrue(turn.IsFaulted, "A library timeout is a fault with a typed exception, not a cancellation.");
+            Assert.IsFalse(turn.IsCanceled);
+            queue.Dispose();
+        }
+
+        [Test]
+        public async Task LibraryTimeout_RunStreamingAsync_EmitsTimeoutChunk_NotCancellation()
+        {
+            FaultingOrchestrator inner = new(() => new LlmOperationTimeoutException());
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions());
+
+            List<LlmStreamChunk> chunks = await DrainAsync(
+                queue.RunStreamingAsync(new AiTaskRequest { Hint = "slow stream" }));
+
+            Assert.AreEqual(1, chunks.Count);
+            Assert.IsTrue(chunks[0].IsDone);
+            Assert.AreEqual(LlmErrorCode.Timeout, chunks[0].ErrorCode,
+                "The queue must keep the timeout typed; Cancelled would tell the learner they stopped the answer.");
+            queue.Dispose();
+        }
+
+        /// <summary>
+        /// Дефект: «отменой» считалось любое исключение, у которого где-то в цепочке InnerException лежит
+        /// OperationCanceledException. Транспортная ошибка с вложенным TaskCanceledException при живом
+        /// токене превращалась в «ученик остановил ответ».
+        /// </summary>
+        [Test]
+        public async Task TransportFaultWrappingCancellation_WithLiveToken_IsAFault_NotCancellation()
+        {
+            FaultingOrchestrator inner = new(
+                () => new InvalidOperationException("socket closed", new TaskCanceledException()));
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions());
+
+            Task<string> turn = queue.RunTaskAsync(new AiTaskRequest { Hint = "flaky transport" });
+
+            InvalidOperationException thrown = await CaptureExceptionAsync<InvalidOperationException>(() => turn);
+            Assert.AreEqual("socket closed", thrown.Message);
+            Assert.IsFalse(turn.IsCanceled, "Nobody asked to stop this turn, so it must not read as a cancellation.");
+            queue.Dispose();
+        }
+
+        [Test]
+        public async Task CallerCancellation_WithFaultWrappingCancellation_StaysCancellation()
+        {
+            FaultingOrchestrator inner = new(
+                () => new InvalidOperationException("torn down", new TaskCanceledException()))
+            {
+                WaitForCancellation = true
+            };
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions());
+            using CancellationTokenSource cts = new();
+
+            Task<string> turn = queue.RunTaskAsync(new AiTaskRequest { Hint = "stopped by learner" }, cts.Token);
+            await WaitUntilAsync(() => inner.Started, "The inner turn must start before the learner stops it.");
+            cts.Cancel();
+
+            await CaptureExceptionAsync<OperationCanceledException>(() => turn);
+            Assert.IsTrue(turn.IsCanceled,
+                "The learner stopped the turn: whatever the inner layer threw on top of that is still a cancellation.");
+            queue.Dispose();
+        }
+
+        [Test]
+        public async Task LibraryTimeoutRacingCallerCancellation_StaysCancellation()
+        {
+            FaultingOrchestrator inner = new(() => new LlmOperationTimeoutException())
+            {
+                WaitForCancellation = true
+            };
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions());
+            using CancellationTokenSource cts = new();
+
+            Task<string> turn = queue.RunTaskAsync(new AiTaskRequest { Hint = "stopped then timed out" }, cts.Token);
+            await WaitUntilAsync(() => inner.Started, "The inner turn must start before the learner stops it.");
+            cts.Cancel();
+
+            await CaptureExceptionAsync<OperationCanceledException>(() => turn);
+            Assert.IsTrue(turn.IsCanceled, "A cancelled token wins the race against the library timer.");
+            queue.Dispose();
+        }
+
+        /// <summary>
+        /// Дефект: сбой производителя потока уходил в чат как Error = ex.Message с ErrorCode = None.
+        /// Потребитель выбирает плашку по коду, None ни в одну категорию не входит — ребёнок видел текст
+        /// внутреннего исключения как реплику учителя.
+        /// </summary>
+        [Test]
+        public async Task StreamProducerFault_CarriesTypedCode_AndKeepsInternalMessageOutOfChat()
+        {
+            const string internalDetail = "actor 'student-42' state pointer is null";
+            CoreAI.Logging.ILog savedLog = CoreAI.Logging.Log.Instance;
+            CoreAI.Logging.Log.Instance = CoreAI.Logging.NullLog.Instance;
+            try
+            {
+                FaultingOrchestrator inner = new(() => new InvalidOperationException(internalDetail));
+                QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions());
+
+                List<LlmStreamChunk> chunks = await DrainAsync(
+                    queue.RunStreamingAsync(new AiTaskRequest { Hint = "broken producer" }));
+
+                Assert.AreEqual(1, chunks.Count);
+                Assert.IsTrue(chunks[0].IsDone);
+                Assert.AreEqual(LlmErrorCode.ProviderError, chunks[0].ErrorCode,
+                    "None is not an availability failure for consumers; the chunk must carry a real category.");
+                Assert.IsNotEmpty(chunks[0].Error);
+                StringAssert.DoesNotContain("student-42", chunks[0].Error,
+                    "Internal identifiers belong in the log, not in the learner's chat bubble.");
+                queue.Dispose();
+            }
+            finally
+            {
+                CoreAI.Logging.Log.Instance = savedLog;
+            }
+        }
+
+        [Test]
+        public async Task StreamProducerLlmFault_KeepsAdapterClassification()
+        {
+            CoreAI.Logging.ILog savedLog = CoreAI.Logging.Log.Instance;
+            CoreAI.Logging.Log.Instance = CoreAI.Logging.NullLog.Instance;
+            try
+            {
+                FaultingOrchestrator inner = new(
+                    () => new LlmClientException("HTTP error 429: slow down", LlmErrorCode.RateLimited, 429, 7));
+                QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions());
+
+                List<LlmStreamChunk> chunks = await DrainAsync(
+                    queue.RunStreamingAsync(new AiTaskRequest { Hint = "rate limited" }));
+
+                Assert.AreEqual(1, chunks.Count);
+                Assert.AreEqual(LlmErrorCode.RateLimited, chunks[0].ErrorCode);
+                Assert.AreEqual(429, chunks[0].HttpStatus);
+                Assert.AreEqual(7, chunks[0].RetryAfterSeconds);
+                // WHY: Message адаптера — строка для лога («HTTP error 429: …»); в пузырь чата уходит
+                // фраза для игрока без транспортного префикса.
+                Assert.IsNotEmpty(chunks[0].Error);
+                Assert.That(chunks[0].Error, Does.Not.StartWith("HTTP error"));
+                queue.Dispose();
+            }
+            finally
+            {
+                CoreAI.Logging.Log.Instance = savedLog;
+            }
+        }
+
+        private static async Task<List<LlmStreamChunk>> DrainAsync(IAsyncEnumerable<LlmStreamChunk> stream)
+        {
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in stream)
+            {
+                chunks.Add(chunk);
+            }
+
+            return chunks;
         }
 
         [Test]

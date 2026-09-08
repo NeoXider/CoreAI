@@ -39,6 +39,7 @@ From `ILlmTool.cs`:
 | `ParametersSchema` | virtual, default `"{}"` | Text-path only. Keep in sync with the attributes. `JsonParams(...)` helper builds it. |
 | `AllowDuplicates` | virtual, default `false` | `false` is correct for almost every tool — see below. |
 | `ToolTimeoutMsOverride` | virtual, default `null` | `null` = the global `DefaultToolTimeoutMs`. Only a tool that **waits for a human** needs its own — see below. |
+| `EndsTurn` | virtual, default `false` | `true` = a successful call is the LAST thing in the turn; the loop does not send the result back to the model — see below. |
 | `CreateAIFunction()` | `IAIFunctionLlmTool` | Builds the `AIFunction` via `AIFunctionFactory.Create`. |
 
 Implement `IAIFunctionLlmTool` for one function, or `IAIFunctionsLlmTool` when one tool exposes several
@@ -158,6 +159,33 @@ Rules of thumb:
 - The override is resolved **by name** from the role's tool list, so it applies where the policy invokes the
   tool itself. A tool executed inside another tool's body (behind `call_skill_tool`) runs under the wrapper's
   budget.
+
+### Understanding `EndsTurn` (tools that hand control to a human)
+
+A tool that waits for a human usually also *ends* the model's turn. Its result — "card shown, waiting for the
+student" — is not material the model can continue from, but the agentic loop's default is to feed every tool
+result back for one more roundtrip. The model then writes the reaction to an answer nobody has given yet, and
+the student reads "Correct!" under a card they have not touched. Prompt text asking the model to stop is not a
+guarantee; the flag is:
+
+```csharp
+// A successful spawn ends the turn: the next thing that happens is the STUDENT answering.
+public override bool EndsTurn => true;
+```
+
+Rules of thumb:
+
+- **Only a SUCCESSFUL call ends the turn.** A failed one keeps its ordinary error roundtrip, because the model
+  is the only thing that can recover from it — cutting the turn there leaves the student with nothing.
+- **Prose said BEFORE the call survives.** Only the next roundtrip is cut. A turn with no visible prose at all
+  is still fine: the orchestrator synthesizes the tool-only completion line from the executed-call traces.
+- **It changes nothing for other tools.** The default is `false`, and the loops read one flag
+  (`ToolExecutionPolicy.TurnEndingToolSucceeded`) that only a declaring tool can raise.
+- Resolved **by name** from the role's tool list, exactly like `ToolTimeoutMsOverride`: a tool invoked inside
+  another tool's body (behind `call_skill_tool`) is invisible to the policy and does not end the turn. Put the
+  flag on the wrapper if that path needs it.
+- Honoured in **all three** agentic paths: `SmartToolCallingChatClient` (non-streaming) and both streaming
+  paths in `MeaiLlmClient` (native tool calls and text-extracted ones).
 
 ## Common pitfalls
 

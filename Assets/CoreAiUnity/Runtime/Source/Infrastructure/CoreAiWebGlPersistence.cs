@@ -40,27 +40,86 @@ namespace CoreAI.Infrastructure
         private delegate void CompletionCallback(int callId, int succeeded, IntPtr errorPtr);
 
         [DllImport("__Internal")]
-        private static extern void CoreAi_PersistFsSync();
+        private static extern int CoreAi_PersistFsSync();
 
         [DllImport("__Internal")]
-        private static extern void CoreAi_PersistFsSyncAsync(int callId, IntPtr onCompletion);
+        private static extern int CoreAi_PersistFsSyncAsync(int callId, IntPtr onCompletion);
+
+        [DllImport("__Internal")]
+        private static extern void CoreAi_PersistFsCancelWaiter(int callId);
+
+        [DllImport("__Internal")]
+        private static extern int CoreAi_PersistFsPendingRequestCount();
+
+        [DllImport("__Internal")]
+        private static extern int CoreAi_PersistFsPendingFlushCount();
 #endif
 
         /// <summary>
-        /// On WebGL pushes the in-memory IDBFS tree into IndexedDB so a preceding write survives a
-        /// reload or tab close that never runs <c>Application.Quit</c>. On other platforms this is a
-        /// no-op (the OS filesystem is already durable once the write call returns).
+        /// Actual JS-retained waiter entries across queued, in-flight, and scheduled-delivery
+        /// states. The JS bridge admits at most 64; <see cref="SyncAsync"/> reports false when
+        /// saturated instead of queueing unboundedly. Zero outside WebGL players.
+        /// </summary>
+        public static int PendingRequestCount
+        {
+            get
+            {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                try
+                {
+                    return CoreAi_PersistFsPendingRequestCount();
+                }
+                catch (Exception)
+                {
+                    return 0;
+                }
+#else
+                return 0;
+#endif
+            }
+        }
+
+        /// <summary>
+        /// 0 when idle, 1 while one <c>FS.syncfs</c> flush is in flight, 2 when a follow-up
+        /// flush is also required. Zero outside WebGL players.
+        /// </summary>
+        public static int PendingFlushCount
+        {
+            get
+            {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                try
+                {
+                    return CoreAi_PersistFsPendingFlushCount();
+                }
+                catch (Exception)
+                {
+                    return 0;
+                }
+#else
+                return 0;
+#endif
+            }
+        }
+
+        /// <summary>
+        /// On WebGL <b>queues</b> an IDBFS-to-IndexedDB flush and returns immediately; the browser runs
+        /// <c>FS.syncfs</c> asynchronously (single-flight, later requests coalesce behind the active one).
+        /// A preceding write therefore survives a reload only once that flush has completed — a tab closed
+        /// before the completion callback can still lose it. Callers that must know whether the data is
+        /// durable use <see cref="SyncAsync"/>, which completes with the browser's result. On other
+        /// platforms this is a no-op: the OS filesystem is durable once the write call returns.
         /// </summary>
         /// <returns>
-        /// False only when the WebGL flush threw (already logged here), so callers that need to report
-        /// durability honestly can; true otherwise, including on non-WebGL platforms.
+        /// False when the flush could not be queued or its immediate start was rejected.
+        /// True means "queued", NOT "persisted" — on non-WebGL platforms it means "already durable".
         /// </returns>
         public static bool Sync()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
             try
             {
-                CoreAi_PersistFsSync();
+                return CoreAi_PersistFsSync() != 0;
             }
             catch (System.Exception ex)
             {
@@ -69,8 +128,9 @@ namespace CoreAI.Infrastructure
                     $"[CoreAiWebGlPersistence] IndexedDB flush failed; last write may not survive a reload: {ex.Message}");
                 return false;
             }
-#endif
+#else
             return true;
+#endif
         }
 
         /// <summary>
@@ -117,9 +177,16 @@ namespace CoreAI.Infrastructure
             Pending.Add(callId, completion);
             try
             {
-                CoreAi_PersistFsSyncAsync(
+                int admitted = CoreAi_PersistFsSyncAsync(
                     callId,
                     Marshal.GetFunctionPointerForDelegate(CompletionDelegate));
+                if (admitted == 0)
+                {
+                    Pending.Remove(callId);
+                    LogFailure("persistence request not admitted: queue saturated or scheduler unavailable");
+                    return false;
+                }
+
                 CompletionWaitResult outcome = await WaitForCompletionAsync(
                     completion.Task,
                     UniTask.Delay(
@@ -150,6 +217,17 @@ namespace CoreAI.Infrastructure
             {
                 waitCancellation.Cancel();
                 Pending.Remove(callId);
+                try
+                {
+                    // WHY: The C# timeout/cancellation path only drops our own waiter. The JS
+                    // bridge physically removes the entry so a late flush callback is
+                    // suppressed and capacity is freed; the in-flight FS.syncfs (if any) and
+                    // dirty intent are untouched.
+                    CoreAi_PersistFsCancelWaiter(callId);
+                }
+                catch (Exception)
+                {
+                }
             }
         }
 
@@ -178,12 +256,8 @@ namespace CoreAI.Infrastructure
             }
 
             Pending.Remove(callId);
-            if (succeeded == 0)
-            {
-                string message = Marshal.PtrToStringUTF8(errorPtr) ?? "Unknown syncfs error";
-                LogFailure(message);
-            }
-
+            // WHY: The JS bridge reports each failed physical flush once, including flushes
+            // without waiters; repeating that warning here would produce one log per waiter.
             completion.TrySetResult(succeeded != 0);
         }
 

@@ -60,6 +60,14 @@ namespace CoreAI.Mcp.Server
             _mainThread = mainThread ?? throw new ArgumentNullException(nameof(mainThread));
         }
 
+        /// <summary>The live catalog shared with host updates and notification transport.</summary>
+        public McpToolRegistry Registry => _registry;
+
+        /// <summary>True only while a notification transport is available.</summary>
+        internal bool SupportsListChanged { get; set; }
+
+        internal bool IsKnownSession(string sessionId) => _sessions.IsKnown(sessionId);
+
         /// <summary>Routes a single parsed JSON-RPC request.</summary>
         public async Task<McpDispatchResult> DispatchAsync(JObject request, CancellationToken cancellationToken)
         {
@@ -104,22 +112,14 @@ namespace CoreAI.Mcp.Server
 
         private McpDispatchResult HandleInitialize(JToken id, JObject request)
         {
-            // WHY: MCP version negotiation - echo the client's requested protocolVersion when present so
-            // clients pinned to a specific version accept us; otherwise advertise our latest. Never
-            // hard-fail on an unknown version, so newer/older clients still connect.
-            string requested = request?["params"]?["protocolVersion"]?.ToString();
-            string protocolVersion = string.IsNullOrWhiteSpace(requested)
-                ? McpServerInfo.DefaultProtocolVersion
-                : requested;
-
             string sessionId = _sessions.Issue();
 
             JObject result = new()
             {
-                ["protocolVersion"] = protocolVersion,
+                ["protocolVersion"] = McpServerInfo.DefaultProtocolVersion,
                 ["capabilities"] = new JObject
                 {
-                    ["tools"] = new JObject()
+                    ["tools"] = SupportsListChanged ? new JObject { ["listChanged"] = true } : new JObject()
                 },
                 ["serverInfo"] = new JObject
                 {
@@ -130,6 +130,8 @@ namespace CoreAI.Mcp.Server
 
             return McpDispatchResult.Reply(JsonRpc.Result(id, result), sessionId);
         }
+
+        private sealed class ToolBindingChangedException : Exception { }
 
         private async Task<McpDispatchResult> HandleToolsCallAsync(JToken id, JObject request,
             CancellationToken cancellationToken)
@@ -142,24 +144,37 @@ namespace CoreAI.Mcp.Server
                     "Invalid params: tools/call requires a 'name'."));
             }
 
-            IMcpTool tool = _registry.Find(name);
-            if (tool == null)
-            {
+            JToken suppliedArguments = parameters?["arguments"];
+            if (suppliedArguments != null && !(suppliedArguments is JObject))
+                return McpDispatchResult.Reply(JsonRpc.Error(id, JsonRpcErrorCodes.InvalidParams,
+                    "Invalid params: arguments must be a JSON object."));
+            JObject arguments = suppliedArguments as JObject ?? new JObject();
+
+            McpToolRegistry.InvocationPlan invocation = _registry.CaptureInvocation(name, arguments);
+            if (invocation == null)
                 return McpDispatchResult.Reply(JsonRpc.Error(id, JsonRpcErrorCodes.InvalidParams,
                     $"Invalid params: unknown tool '{name}'."));
-            }
-
-            JObject arguments = parameters?["arguments"] as JObject ?? new JObject();
 
             try
             {
-                // Marshal the game-touching work onto the Unity main thread; the HTTP worker thread awaits.
+                cancellationToken.ThrowIfCancellationRequested();
                 McpToolResult toolResult = await _mainThread
-                    .RunOnMainThreadAsync(() => tool.InvokeAsync(arguments, cancellationToken))
+                    .RunOnMainThreadAsync(() =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (invocation == null || !invocation.TryAdmit())
+                            throw new ToolBindingChangedException();
+                        return invocation.InvokeAsync(cancellationToken);
+                    })
                     .ConfigureAwait(false);
 
                 return McpDispatchResult.Reply(JsonRpc.Result(id,
                     (toolResult ?? McpToolResult.Failure("Tool returned no result.")).ToJson()));
+            }
+            catch (ToolBindingChangedException)
+            {
+                return McpDispatchResult.Reply(JsonRpc.Error(id, JsonRpcErrorCodes.InvalidParams,
+                    $"Tool '{name}' changed or was removed; refresh tools/list and retry."));
             }
             catch (OperationCanceledException ex)
             {

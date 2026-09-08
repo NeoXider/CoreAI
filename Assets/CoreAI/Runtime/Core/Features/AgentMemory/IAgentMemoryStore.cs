@@ -19,7 +19,18 @@ namespace CoreAI.Ai
         /// <summary>Clears all memory state for the requested role.</summary>
         void Clear(string roleId);
 
-        /// <summary>Clears only the chat history stored for the requested role.</summary>
+        /// <summary>
+        /// Clears the chat history stored for the requested role — and with it everything that was
+        /// DERIVED from that history, the rolling conversation summary included. Long-term memory
+        /// (<see cref="Clear"/>) is untouched.
+        /// <para>
+        /// Contract, not a hint: a caller that resets a conversation must get a conversation that starts
+        /// empty on the next turn. A summary of the erased turns surviving in a second store is the
+        /// previous lesson leaking into the next one, and no caller is expected to know a second store
+        /// exists. The host's resolved store (<see cref="ScopedAgentMemoryStoreDecorator"/>) honours this;
+        /// a bare backing store cannot reach the summary store and only clears what it owns.
+        /// </para>
+        /// </summary>
         void ClearChatHistory(string roleId);
 
         /// <summary>

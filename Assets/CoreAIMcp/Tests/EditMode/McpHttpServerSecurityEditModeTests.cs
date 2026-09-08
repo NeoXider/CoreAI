@@ -1,3 +1,6 @@
+using System;
+using System.IO;
+using System.Threading;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -140,7 +143,7 @@ namespace CoreAI.Mcp.Tests
         }
 
         [Test]
-        public async Task Get_StillReturnsMethodNotAllowed_ForAnAuthorizedClient()
+        public async Task Get_RequiresEventStreamAccept_ForAnAuthorizedClient()
         {
             using HttpClient client = new();
             HttpRequestMessage request = new(HttpMethod.Get, Url);
@@ -148,7 +151,55 @@ namespace CoreAI.Mcp.Tests
 
             HttpResponseMessage response = await client.SendAsync(request);
 
-            Assert.AreEqual(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+            Assert.AreEqual(HttpStatusCode.NotAcceptable, response.StatusCode);
+        }
+
+        [Test]
+        public async Task ChunkedUnicodeBody_LimitCountsUtf8Bytes_NotCharacters()
+        {
+            string body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"pad\":\"" + new string('ж', 150) + "\"}";
+            _server.MaxRequestBodyBytes = body.Length + 20;
+            Assert.Greater(Encoding.UTF8.GetByteCount(body), _server.MaxRequestBodyBytes);
+            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(5) };
+            using HttpRequestMessage request = new(HttpMethod.Post, Url) { Content = new ChunkedContent(body) };
+            request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {Token}");
+            using HttpResponseMessage response = await client.SendAsync(request);
+            Assert.AreEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task IncompleteBody_IsBounded_ForAcceptedAndRejectedRequests(bool authorized)
+        {
+            _server.BodyReadTimeout = TimeSpan.FromMilliseconds(200);
+            using TcpClient socket = new();
+            await socket.ConnectAsync(IPAddress.Loopback, _port);
+            using NetworkStream stream = socket.GetStream();
+            string headers = $"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{_port}\r\nContent-Type: application/json\r\nContent-Length: 100\r\n" +
+                (authorized ? $"Authorization: Bearer {Token}\r\n" : "") + "\r\n{";
+            byte[] bytes = Encoding.ASCII.GetBytes(headers);
+            await stream.WriteAsync(bytes, 0, bytes.Length);
+            byte[] response = new byte[1024];
+            Task<int> read = stream.ReadAsync(response, 0, response.Length);
+            Assert.AreSame(read, await Task.WhenAny(read, Task.Delay(3000)), "A partial body must not stall rejection or occupy a worker indefinitely.");
+            string status = Encoding.ASCII.GetString(response, 0, await read);
+            StringAssert.Contains(authorized ? "408" : "401", status);
+            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(5) };
+            using HttpResponseMessage healthy = await PostAsync(client, ToolsListBody(), Token);
+            Assert.AreEqual(HttpStatusCode.OK, healthy.StatusCode);
+        }
+
+        private sealed class ChunkedContent : HttpContent
+        {
+            private readonly byte[] _bytes;
+            public ChunkedContent(string body)
+            {
+                _bytes = Encoding.UTF8.GetBytes(body);
+                Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            }
+            protected override bool TryComputeLength(out long length) { length = 0; return false; }
+            protected override Task SerializeToStreamAsync(Stream stream, TransportContext context)
+                => stream.WriteAsync(_bytes, 0, _bytes.Length);
         }
 
         private Task<HttpResponseMessage> PostAsync(HttpClient client, string body, string token,

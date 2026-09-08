@@ -9,20 +9,24 @@ using CoreAI.Ai;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Circuit breaker for an <see cref="ILlmClient"/>. After a backend returns
-    /// <see cref="TransientFailure"/> results <c>failureThreshold</c> times in a row, the breaker trips
-    /// <b>open</b> and short-circuits subsequent calls with a <see cref="LlmErrorCode.BackendUnavailable"/>
-    /// result <i>without invoking the inner client</i> — so a dead primary no longer costs
-    /// <c>timeout × (retries + 1)</c> on every turn. After <c>openDurationMs</c> the breaker moves to
-    /// <b>half-open</b> and lets a single probe through: if it succeeds the breaker <b>closes</b>; if it
-    /// fails it re-opens for another cooldown.
+    /// Предохранитель для <see cref="ILlmClient"/>. После <c>failureThreshold</c> ТРАНЗИЕНТНЫХ сбоев подряд
+    /// (см. <see cref="IsTransientFailure"/>) предохранитель <b>размыкается</b> и коротит последующие вызовы
+    /// результатом <see cref="LlmErrorCode.BackendUnavailable"/> <i>без обращения к внутреннему клиенту</i> —
+    /// мёртвый основной бэкенд больше не стоит <c>таймаут × (retries + 1)</c> на каждый ход. Через
+    /// <c>openDurationMs</c> предохранитель переходит в <b>полуоткрытое</b> состояние и пропускает ровно
+    /// один пробный запрос: успех — <b>замыкается</b>, сбой — снова размыкается на период охлаждения.
     /// <para>
-    /// Only TRANSIENT failures count toward tripping (timeouts, rate limits, backend-unavailable, generic
-    /// provider errors). Caller-caused failures — auth expiry, invalid request, context-length exceeded,
-    /// cancellation — never trip the breaker, because retrying a different moment would not help.
+    /// Считаются только ТРАНЗИЕНТНЫЕ сбои (таймаут, rate limit, недоступность бэкенда, общая ошибка
+    /// провайдера, ошибка маршрутизации) — и неважно, пришли они результатом, терминальным чанком или
+    /// брошенным <see cref="LlmClientException"/>. Сбои по вине вызывающего — истёкшая авторизация,
+    /// требуется оплата, неверный запрос, превышение контекста, отмена — предохранитель НИКОГДА не
+    /// размыкают: повтор в другой момент не поможет. Такие исключения перебрасываются как есть, с типом,
+    /// кодом и HTTP-статусом, чтобы внешние декораторы (retry/fallback) видели ту же классификацию, что
+    /// и без предохранителя. Поток, кончившийся без единого чанка, — сбой: бэкенд не ответил ничего.
     /// </para>
     /// <para>
-    /// Time is injected as a monotonic millisecond source so the breaker is fully deterministic under test.
+    /// Время подаётся как монотонный источник миллисекунд, поэтому предохранитель полностью
+    /// детерминирован в тестах.
     /// </para>
     /// </summary>
     public sealed class CircuitBreakerLlmClientDecorator : ILlmClient
@@ -45,12 +49,13 @@ namespace CoreAI.Infrastructure.Llm
         private int _consecutiveFailures;
         private long _openedAtMs;
         private bool _halfOpenProbeInFlight;
+        private long _generation;
 
-        /// <param name="inner">The client to protect.</param>
-        /// <param name="failureThreshold">Consecutive transient failures that trip the breaker (min 1).</param>
-        /// <param name="openDurationMs">How long the breaker stays open before a half-open probe (min 1).</param>
-        /// <param name="nowMs">Monotonic millisecond clock (injected for deterministic tests).</param>
-        /// <param name="log">Optional one-line diagnostics sink for state transitions.</param>
+        /// <param name="inner">Защищаемый клиент.</param>
+        /// <param name="failureThreshold">Сколько транзиентных сбоев подряд размыкают предохранитель (мин. 1).</param>
+        /// <param name="openDurationMs">Сколько предохранитель остаётся разомкнутым до пробного запроса (мин. 1).</param>
+        /// <param name="nowMs">Монотонные часы в миллисекундах (инъекция ради детерминированных тестов).</param>
+        /// <param name="log">Необязательный однострочный приёмник диагностики переходов состояния.</param>
         public CircuitBreakerLlmClientDecorator(
             ILlmClient inner,
             int failureThreshold,
@@ -90,7 +95,8 @@ namespace CoreAI.Infrastructure.Llm
         public async Task<LlmCompletionResult> CompleteAsync(
             LlmCompletionRequest request, CancellationToken cancellationToken = default)
         {
-            if (!TryEnter(out string rejectReason))
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryEnter(out long lease, out string rejectReason))
             {
                 return new LlmCompletionResult
                 {
@@ -108,30 +114,49 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException)
+                catch (LlmOperationTimeoutException) when (!cancellationToken.IsCancellationRequested)
                 {
-                    // WHY: Cancellation is caller intent, not a backend fault — do not count it, do not swallow it.
+                    RecordFailure(lease);
+                    classified = true;
                     throw;
                 }
-                catch (Exception ex)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    // WHY: An unexpected throw from the inner client is treated as a transient backend fault.
-                    RecordFailure();
+                    // ПОЧЕМУ: отмена — намерение вызывающего, а не сбой бэкенда: не считать и не глотать.
+                    throw;
+                }
+                catch (LlmClientException ex)
+                {
+                    // ПОЧЕМУ: типизированное исключение уже несёт классификацию адаптера. Судить по ней —
+                    // три 401 подряд не размыкают предохранитель — и перебрасывать КАК ЕСТЬ: обёртка в
+                    // ProviderError без статуса делала 402 ретраебельным для внешних декораторов.
+                    RecordResult(lease, false, ex.ErrorCode);
                     classified = true;
-                    throw new LlmClientException(ex.Message, LlmErrorCode.ProviderError);
+                    throw;
+                }
+                catch (Exception)
+                {
+                    // Нетипизированный бросок внутреннего клиента — транзиентный сбой бэкенда; сам объект
+                    // исключения перебрасывается без изменений.
+                    RecordFailure(lease);
+                    classified = true;
+                    throw;
                 }
 
-                RecordResult(result?.Ok ?? false, result?.ErrorCode ?? LlmErrorCode.ProviderError);
-                classified = true;
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    RecordResult(lease, result?.Ok ?? false, result?.ErrorCode ?? LlmErrorCode.ProviderError);
+                    classified = true;
+                }
                 return result;
             }
             finally
             {
                 if (!classified)
                 {
-                    // WHY: The call ended without a health verdict (cancellation): release the half-open
-                    // probe slot so the breaker is not stuck waiting for a result that never comes.
-                    ReleaseHalfOpenProbe();
+                    // ПОЧЕМУ: вызов закончился без вердикта о здоровье (отмена): освободить слот пробного
+                    // запроса, чтобы предохранитель не завис в ожидании результата, который не придёт.
+                    ReleaseHalfOpenProbe(lease);
                 }
             }
         }
@@ -141,7 +166,8 @@ namespace CoreAI.Infrastructure.Llm
             [EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
-            if (!TryEnter(out string rejectReason))
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryEnter(out long lease, out string rejectReason))
             {
                 yield return new LlmStreamChunk
                 {
@@ -161,17 +187,17 @@ namespace CoreAI.Infrastructure.Llm
             IAsyncEnumerator<LlmStreamChunk> e = null;
             try
             {
-                // WHY: Acquired inside the try so a synchronous throw from the inner client still runs the
-                // finally that releases the half-open probe slot, instead of wedging the breaker open.
+                // ПОЧЕМУ: получаем внутри try, чтобы синхронный бросок внутреннего клиента всё равно прошёл
+                // через finally, освобождающий слот пробного запроса, а не заклинил предохранитель.
                 e = _inner.CompleteStreamingAsync(request, cancellationToken)
                     .GetAsyncEnumerator(cancellationToken);
 
                 while (true)
                 {
                     LlmStreamChunk chunk;
-                    // WHY: C# forbids `yield` inside a catch, so capture any inner-stream fault here and emit the
-                    // terminal error chunk AFTER the try/catch instead.
-                    string moveError = null;
+                    // ПОЧЕМУ: C# запрещает `yield` внутри catch, поэтому сбой внутреннего потока
+                    // запоминается здесь, а терминальный чанк выдаётся ПОСЛЕ try/catch.
+                    LlmStreamChunk faultChunk = null;
                     try
                     {
                         if (!await e.MoveNextAsync().ConfigureAwait(false))
@@ -181,34 +207,60 @@ namespace CoreAI.Infrastructure.Llm
 
                         chunk = e.Current;
                     }
-                    catch (OperationCanceledException)
+                    catch (LlmOperationTimeoutException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        RecordFailure(lease);
+                        classified = true;
+                        faultChunk = new LlmStreamChunk
+                        {
+                            IsDone = true, Error = "LLM request timed out.", ErrorCode = LlmErrorCode.Timeout
+                        };
+                        chunk = null;
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
                         throw;
                     }
-                    catch (Exception ex)
+                    catch (LlmClientException ex)
                     {
-                        RecordFailure();
+                        // Классификация адаптера сохраняется в чанке целиком (код, статус, retry-after):
+                        // сбой по вине вызывающего не размыкает предохранитель и не становится ProviderError.
+                        RecordResult(lease, false, ex.ErrorCode);
                         classified = true;
-                        moveError = ex.Message;
-                        chunk = default;
-                    }
-
-                    if (moveError != null)
-                    {
-                        yield return new LlmStreamChunk
+                        faultChunk = new LlmStreamChunk
                         {
                             IsDone = true,
-                            Error = moveError,
+                            Error = ex.Message,
+                            ErrorCode = ex.ErrorCode,
+                            HttpStatus = ex.HttpStatus,
+                            RetryAfterSeconds = ex.RetryAfterSeconds
+                        };
+                        chunk = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        RecordFailure(lease);
+                        classified = true;
+                        faultChunk = new LlmStreamChunk
+                        {
+                            IsDone = true,
+                            Error = ex.Message,
                             ErrorCode = LlmErrorCode.ProviderError
                         };
+                        chunk = null;
+                    }
+
+                    if (faultChunk != null)
+                    {
+                        yield return faultChunk;
                         yield break;
                     }
 
-                    sawAnyChunk = true;
-                    if (!string.IsNullOrEmpty(chunk.Error) && chunk.ErrorCode != LlmErrorCode.None)
+                    sawAnyChunk |= chunk != null;
+                    if (chunk != null && (!string.IsNullOrEmpty(chunk.Error) || chunk.ErrorCode != LlmErrorCode.None))
                     {
                         sawTerminalFailure = true;
-                        terminalCode = chunk.ErrorCode;
+                        terminalCode = chunk.ErrorCode == LlmErrorCode.None ? LlmErrorCode.ProviderError : chunk.ErrorCode;
                     }
 
                     yield return chunk;
@@ -218,33 +270,46 @@ namespace CoreAI.Infrastructure.Llm
             }
             finally
             {
-                if (e != null)
+                try
                 {
-                    await e.DisposeAsync().ConfigureAwait(false);
-                }
-
-                // WHY: Classify in the finally so the breaker state also updates when the consumer
-                // abandons the await-foreach early (user stop): a stream that already produced a
-                // terminal error chunk is a failure even then; a completed stream is classified as
-                // before (an error chunk or nothing at all = failure, a clean end = success); an
-                // abandoned/cancelled healthy stream carries no verdict at all — it only releases
-                // the half-open probe slot and is never misclassified as a backend failure.
-                if (!classified)
-                {
-                    if (streamEnded || sawTerminalFailure)
+                    if (e != null)
                     {
-                        bool ok = streamEnded && sawAnyChunk && !sawTerminalFailure;
-                        RecordResult(ok, ok ? LlmErrorCode.None : terminalCode);
+                        await e.DisposeAsync().ConfigureAwait(false);
                     }
-                    else
+                }
+                finally
+                {
+                    // Cleanup may throw, but every admitted lease still receives a verdict or releases
+                    // its probe slot. Abandonment without a backend error is not a health failure.
+                    if (!classified)
                     {
-                        ReleaseHalfOpenProbe();
+                        if (cancellationToken.IsCancellationRequested &&
+                            (!sawTerminalFailure || terminalCode == LlmErrorCode.Cancelled))
+                        {
+                            ReleaseHalfOpenProbe(lease);
+                        }
+                        else if (sawTerminalFailure)
+                        {
+                            RecordResult(lease, false, terminalCode);
+                        }
+                        else if (streamEnded && !sawAnyChunk)
+                        {
+                            RecordFailure(lease);
+                        }
+                        else if (streamEnded)
+                        {
+                            RecordSuccess(lease);
+                        }
+                        else
+                        {
+                            ReleaseHalfOpenProbe(lease);
+                        }
                     }
                 }
             }
         }
 
-        /// <summary>Current state name for diagnostics/tests: "Closed", "Open", or "HalfOpen".</summary>
+        /// <summary>Имя текущего состояния для диагностики/тестов: "Closed", "Open" или "HalfOpen".</summary>
         public string StateName
         {
             get
@@ -257,18 +322,20 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Decides whether a call may proceed. Transitions Open→HalfOpen once the cooldown elapses and
-        /// admits exactly one probe. Returns false (with a reason) while the breaker is open.
+        /// Решает, можно ли пропустить вызов. Переводит Open→HalfOpen по истечении охлаждения и
+        /// допускает ровно один пробный запрос. Возвращает false (с причиной), пока предохранитель разомкнут.
         /// </summary>
-        private bool TryEnter(out string rejectReason)
+        private bool TryEnter(out long lease, out string rejectReason)
         {
             lock (_gate)
             {
+                lease = _generation;
                 if (_state == State.Open)
                 {
                     if (_nowMs() - _openedAtMs >= _openDurationMs)
                     {
                         _state = State.HalfOpen;
+                        lease = ++_generation;
                         _halfOpenProbeInFlight = true;
                         _log?.Invoke("[CircuitBreaker] half-open: admitting one probe request.");
                         rejectReason = null;
@@ -283,8 +350,8 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (_state == State.HalfOpen)
                 {
-                    // WHY: Exactly ONE probe may be in flight while half-open. Admitting every concurrent
-                    // caller here used to burst the whole backlog onto a backend that is still likely down.
+                    // ПОЧЕМУ: в полуоткрытом состоянии в полёте может быть ровно ОДИН пробный запрос. Пропуск
+                    // всех одновременных вызывающих вываливал весь бэклог на бэкенд, который скорее всего ещё лежит.
                     if (_halfOpenProbeInFlight)
                     {
                         rejectReason =
@@ -294,6 +361,7 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     _halfOpenProbeInFlight = true;
+                    lease = ++_generation;
                     _log?.Invoke("[CircuitBreaker] half-open: admitting one probe request.");
                     rejectReason = null;
                     return true;
@@ -305,61 +373,75 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Releases the half-open probe slot when a call ends without any success/failure verdict
-        /// (consumer cancelled the call or abandoned the stream). The breaker stays half-open so the
-        /// next call becomes the new probe; abandonment is never counted as a backend failure.
+        /// Освобождает слот пробного запроса, когда вызов закончился без вердикта успех/сбой (потребитель
+        /// отменил вызов или бросил поток). Предохранитель остаётся полуоткрытым, следующий вызов
+        /// становится новым пробным; брошенный поток никогда не засчитывается как сбой бэкенда.
         /// </summary>
-        private void ReleaseHalfOpenProbe()
+        private void ReleaseHalfOpenProbe(long lease)
         {
             lock (_gate)
             {
-                _halfOpenProbeInFlight = false;
+                if (lease == _generation && _state == State.HalfOpen)
+                {
+                    _halfOpenProbeInFlight = false;
+                }
             }
         }
 
-        private void RecordResult(bool ok, LlmErrorCode code)
+        private void RecordResult(long lease, bool ok, LlmErrorCode code)
         {
             if (ok)
             {
-                RecordSuccess();
+                RecordSuccess(lease);
                 return;
             }
 
-            if (IsTransientFailure(code))
+            if (code == LlmErrorCode.None || IsTransientFailure(code))
             {
-                RecordFailure();
+                RecordFailure(lease);
             }
             else
             {
-                // WHY: A caller-caused failure (auth, invalid request, context length, empty) is not the backend's
-                // health problem — do not trip the breaker, but a half-open probe that returned such a result
-                // still means the backend is reachable, so treat it as a soft success for state purposes.
-                RecordSuccess();
+                // ПОЧЕМУ: сбой по вине вызывающего (авторизация, оплата, неверный запрос, контекст, пустой
+                // ответ) — не проблема здоровья бэкенда: предохранитель не размыкать; а пробный запрос,
+                // вернувший такой результат, всё же означает, что бэкенд достижим, — для состояния это
+                // мягкий успех.
+                RecordSuccess(lease);
             }
         }
 
-        private void RecordSuccess()
+        private void RecordSuccess(long lease)
         {
             lock (_gate)
             {
+                if (lease != _generation)
+                {
+                    return;
+                }
                 _consecutiveFailures = 0;
                 _halfOpenProbeInFlight = false;
                 if (_state != State.Closed)
                 {
                     _state = State.Closed;
+                    _generation++;
                     _log?.Invoke("[CircuitBreaker] closed: backend recovered.");
                 }
             }
         }
 
-        private void RecordFailure()
+        private void RecordFailure(long lease)
         {
             lock (_gate)
             {
+                if (lease != _generation)
+                {
+                    return;
+                }
                 _halfOpenProbeInFlight = false;
                 if (_state == State.HalfOpen)
                 {
                     _state = State.Open;
+                    _generation++;
                     _openedAtMs = _nowMs();
                     _log?.Invoke("[CircuitBreaker] re-opened: half-open probe failed.");
                     return;
@@ -369,6 +451,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (_state == State.Closed && _consecutiveFailures >= _failureThreshold)
                 {
                     _state = State.Open;
+                    _generation++;
                     _openedAtMs = _nowMs();
                     _log?.Invoke(
                         $"[CircuitBreaker] opened after {_consecutiveFailures} consecutive transient failures.");
@@ -377,8 +460,8 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Transient failures worth breaking on: the backend is (temporarily) unhealthy and hammering it just
-        /// wastes the per-call timeout. Caller-caused codes are excluded — retrying would not help.
+        /// Транзиентные сбои, ради которых стоит размыкаться: бэкенд (временно) нездоров, и долбить его —
+        /// лишь тратить таймаут на каждый вызов. Коды по вине вызывающего исключены: повтор не поможет.
         /// </summary>
         private static bool IsTransientFailure(LlmErrorCode code)
         {

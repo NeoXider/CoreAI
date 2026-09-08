@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using CoreAI.Logging;
 using System.Diagnostics;
 using System.Text;
@@ -540,6 +541,12 @@ namespace CoreAI.Ai
                 // where (and whether) the user turn is persisted.
                 turn.Bundle = bundle;
                 StringBuilder accumulated = new();
+                // WHY: Per attempt, not per turn: a context-overflow rebuild replays the whole request, so
+                // held text from the abandoned attempt must not survive into the next one.
+                ToolResultEchoStreamFilter echoFilter = new();
+                bool stripToolResultEcho = ShouldStripToolResultEcho(bundle);
+                bool loggedStrippedEcho = false;
+                bool carriedStartsNewMessage = false;
                 int chunkCount = 0;
                 string terminalError = null;
                 LlmErrorCode terminalErrorCode = LlmErrorCode.None;
@@ -711,10 +718,63 @@ namespace CoreAI.Ai
                             break;
                         }
 
+                        // WHY: Register BEFORE this chunk's own text is filtered - a chunk that reports the
+                        // executed calls can carry the model's repetition of their result in the very same
+                        // text (a non-streaming client returns exactly that shape through the interface's
+                        // default streaming). Registering after would let that one through.
+                        if (stripToolResultEcho &&
+                            current?.ExecutedToolCalls != null &&
+                            current.ExecutedToolCalls.Count > 0)
+                        {
+                            echoFilter.RegisterToolResults(current.ExecutedToolCalls);
+                        }
+
                         if (current != null && !string.IsNullOrEmpty(current.Text))
                         {
-                            StreamedMessageJoiner.Append(accumulated, current);
-                            chunkCount++;
+                            if (stripToolResultEcho)
+                            {
+                                // WHY: Filtering here, before the accumulator, keeps what the reader sees
+                                // and what the turn persists identical - a divergence would change the
+                                // reply on the next reload. HOW MUCH this can catch depends on the client:
+                                // it can only remove a repetition of a result it has already been told
+                                // about, and a streaming client reports its executed calls on the terminal
+                                // chunk, so text streamed EARLIER in the same turn is cleaned in history
+                                // and in the published turn but was already displayed. That gap is why the
+                                // real fix for the incident is the prompt projection, not this filter.
+                                current.Text = echoFilter.ProcessChunk(current.Text);
+                                if (echoFilter.StrippedEcho && !loggedStrippedEcho)
+                                {
+                                    // WHY: Silent removal of text the model produced is the kind of
+                                    // behaviour that becomes impossible to reproduce. If this filter ever
+                                    // eats a live sentence, the log has to be the place that says so.
+                                    loggedStrippedEcho = true;
+                                    Log.Instance.Warn(
+                                        $"[AiOrchestrator] role='{bundle.RoleId}' trace='{bundle.TraceId}' " +
+                                        "tool result repeated verbatim in the stream; stripped before display.",
+                                        LogTag.Llm);
+                                }
+                            }
+
+                            if (string.IsNullOrEmpty(current.Text))
+                            {
+                                // WHY: the filter ate this chunk whole. Its StartsNewMessage marks the
+                                // boundary between two assistant replies in one stream, and the consumer
+                                // reacts to it exactly once - on a chunk that now carries no text it is
+                                // simply lost, and the next reply gets glued onto the previous one
+                                // ("Проверь себя:**Ход завершён…**"). Carry it to the next visible chunk.
+                                carriedStartsNewMessage |= current.StartsNewMessage;
+                            }
+                            else
+                            {
+                                if (carriedStartsNewMessage)
+                                {
+                                    current.StartsNewMessage = true;
+                                    carriedStartsNewMessage = false;
+                                }
+
+                                StreamedMessageJoiner.Append(accumulated, current);
+                                chunkCount++;
+                            }
                         }
 
                         if (current != null && !string.IsNullOrEmpty(current.Error))
@@ -847,6 +907,25 @@ namespace CoreAI.Ai
                         RetryAfterSeconds = contextOverflowFailure.RetryAfterSeconds
                     };
                     yield break;
+                }
+
+                // WHY: The stream is over, so whatever the filter still holds can no longer become a
+                // repetition of a tool result - releasing it here is what keeps a held tail from being
+                // silently dropped from both the visible stream and the persisted turn. Empty (and free)
+                // when the filter is off for this role.
+                string heldVisibleTail = echoFilter.Flush();
+                if (!string.IsNullOrEmpty(heldVisibleTail))
+                {
+                    LlmStreamChunk tailChunk = new()
+                    {
+                        Text = heldVisibleTail,
+                        // The released tail is the first visible text of its reply if the boundary chunk
+                        // was the one the filter emptied; the flag has to ride out with it.
+                        StartsNewMessage = carriedStartsNewMessage
+                    };
+                    carriedStartsNewMessage = false;
+                    StreamedMessageJoiner.Append(accumulated, tailChunk);
+                    yield return tailChunk;
                 }
 
                 string content = accumulated.ToString();
@@ -1219,7 +1298,10 @@ namespace CoreAI.Ai
             }
 
             int maxMessages = roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30;
-            ChatMessage[] history = _memoryStore.GetChatHistory(roleId, maxMessages);
+            // Compaction must receive the retained prefix as well as the prompt window. The store
+            // already bounds its history; applying the role cap here would silently skip that prefix.
+            ChatMessage[] history = _memoryStore.GetChatHistory(roleId,
+                _settings.EnableConversationHistorySummarization ? 0 : maxMessages);
             if (history == null || history.Length == 0)
             {
                 return (system, null, false, null);
@@ -1267,10 +1349,8 @@ namespace CoreAI.Ai
             }
 
             string resultSystem = system;
-            bool hasSummary = !string.IsNullOrWhiteSpace(snapshot.Summary);
-            string summaryBlock = hasSummary
-                ? "## Conversation Summary\n" + snapshot.Summary.Trim()
-                : "";
+            string summaryBlock = ConversationSummaryPromptProjection.BuildBlock(snapshot.Summary);
+            bool hasSummary = summaryBlock.Length > 0;
 
             ChatMessage[] recent = snapshot.RecentMessages ?? Array.Empty<ChatMessage>();
             if (recent.Length == 0)
@@ -1279,7 +1359,7 @@ namespace CoreAI.Ai
                 {
                     return (resultSystem, new List<Microsoft.Extensions.AI.ChatMessage>
                     {
-                        new(Microsoft.Extensions.AI.ChatRole.System, summaryBlock)
+                        new(Microsoft.Extensions.AI.ChatRole.User, summaryBlock)
                     }, snapshot.WasCompacted, snapshot);
                 }
 
@@ -1290,15 +1370,23 @@ namespace CoreAI.Ai
                 new(recent.Length + (hasSummary ? 1 : 0));
             if (hasSummary)
             {
+                // WHY: The summary is a RETELLING of the learner's and the teacher's words. Under the
+                // system role that retelling gained instruction-level authority the moment compaction
+                // folded it ("forget the rules" typed by a child became a system line), and MeaiLlmClient
+                // ships system-role history to the provider as a "System context update". The user role
+                // carries exactly the trust its sources already had. See
+                // ConversationSummaryPromptProjection for why the assistant role was rejected too.
                 chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(
-                    Microsoft.Extensions.AI.ChatRole.System,
+                    Microsoft.Extensions.AI.ChatRole.User,
                     summaryBlock));
             }
 
             foreach (ChatMessage msg in recent)
             {
                 Microsoft.Extensions.AI.ChatRole aiRole = ResolveChatHistoryRole(msg.Role);
-                chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(aiRole, msg.Content));
+                chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(
+                    aiRole,
+                    ToolResultPromptProjection.ForPrompt(msg.Role, msg.Content)));
             }
 
             return (resultSystem, chatHistory, snapshot.WasCompacted, snapshot);
@@ -1517,18 +1605,42 @@ namespace CoreAI.Ai
             string userPayload,
             LlmCompletionResult result)
         {
-            // WHY: Defense-in-depth: strip leaked tool-call JSON only when tools are actually configured.
-            // On plain text roles (no tools), parsing very large reasoning payloads for JSON spans
-            // is unnecessary and can stall WebGL UI for a long time.
-            if (bundle.Tools != null && bundle.Tools.Count > 0)
+            // WHY: Defense-in-depth for the FALLBACK path only: strip tool-call JSON that leaked into the
+            // visible answer where a call is written as text in the first place. Two gates. Tools must be
+            // configured — on plain text roles there is nothing to leak, and scanning huge reasoning
+            // payloads for JSON spans can stall the WebGL UI. The endpoint must use text tools or the
+            // host must explicitly enable native-endpoint prose fallback; otherwise a tutor may be
+            // showing JSON to a learner and the answer must remain intact.
+            if (IsTextShapedToolChannel(bundle))
             {
-                string sanitised = LlmToolCallTextExtractor.StripForDisplay(content);
+                string sanitised = LlmToolCallTextExtractor.StripForDisplay(content,
+                    bundle.Tools.Where(tool => tool != null).Select(tool => tool.Name).ToArray());
                 if (!string.Equals(sanitised, content, StringComparison.Ordinal))
                 {
                     Log.Instance.Warn(
                         $"[AiOrchestrator] role='{bundle.RoleId}' trace='{bundle.TraceId}' tool-call JSON leaked; stripped.",
                         LogTag.Llm);
                     content = sanitised;
+                }
+            }
+
+            // WHY: The twin of the strip above, for the RESULT rather than the call. The engine holds the
+            // exact strings it fed back this turn, so a word-for-word repetition is removed by identity -
+            // this is what stops the persisted turn and the published envelope from carrying the raw tool
+            // envelope a learner already should not have seen. The streaming path strips it earlier still,
+            // on the chunks, because by this point the text is on screen.
+            if (ShouldStripToolResultEcho(bundle))
+            {
+                string withoutEcho = ToolResultEchoStreamFilter.StripEchoedToolResults(
+                    content,
+                    result?.ExecutedToolCalls);
+                if (!string.Equals(withoutEcho, content, StringComparison.Ordinal))
+                {
+                    Log.Instance.Warn(
+                        $"[AiOrchestrator] role='{bundle.RoleId}' trace='{bundle.TraceId}' " +
+                        "tool result repeated verbatim in the answer; stripped.",
+                        LogTag.Llm);
+                    content = withoutEcho;
                 }
             }
 
@@ -1566,6 +1678,56 @@ namespace CoreAI.Ai
             RecordTokenObservation(bundle, result);
             RecordTrace(bundle, result, content, null);
             return content;
+        }
+
+        /// <summary>
+        /// Whether a word-for-word repetition of a tool result may be cut out of this role's answer.
+        /// Three gates, and every one of them is about not making things worse than the leak.
+        /// <para>
+        /// Tools must be configured at all — with none there is no engine string to match and no reason to
+        /// scan the text (the same gate <c>LlmToolCallTextExtractor.StripForDisplay</c> already has above).
+        /// </para>
+        /// <para>
+        /// The endpoint must use text tools or the host must explicitly opt into prose fallback, where
+        /// the model writes and reads tool traffic as text and can drag a result into its answer with it.
+        /// Where calls and results travel on their own API channel, deleting text from a teacher's reply
+        /// buys nothing and risks removing a sentence the teacher meant to say.
+        /// </para>
+        /// <para>
+        /// And the role must NOT have a structured contract. Structured content is validated BEFORE
+        /// <see cref="SanitizeAndPublish"/> runs and is then published as <c>ApplyAiGameCommand.JsonPayload</c>;
+        /// a role may legitimately put a tool's own output (a script, a JSON fragment) inside that payload,
+        /// and cutting an identical span out of it afterwards would produce a payload that is invalid
+        /// AFTER it passed the validator — a corruption far worse, and far harder to trace, than the
+        /// envelope this filter removes.
+        /// </para>
+        /// </summary>
+        private bool ShouldStripToolResultEcho(RequestBundle bundle)
+        {
+            return IsTextShapedToolChannel(bundle) && !_structuredPolicy.ShouldValidate(bundle.RoleId);
+        }
+
+        /// <summary>
+        /// Whether this turn's tool traffic can travel as TEXT: tools are configured and the request
+        /// reaches a text endpoint or the host explicitly enabled native-endpoint prose fallback.
+        /// <para>
+        /// This is the single condition under which the engine is allowed to judge the model's prose by its
+        /// content. Where a native channel exists, calls and results have their own lane, so JSON in the
+        /// answer is the model showing JSON — and for a programming tutor that is the normal case, not an
+        /// anomaly. Judging by channel instead of by content is what keeps an explanation an explanation.
+        /// </para>
+        /// </summary>
+        private bool IsTextShapedToolChannel(RequestBundle bundle)
+        {
+            if (bundle?.Tools == null || bundle.Tools.Count == 0)
+            {
+                return false;
+            }
+
+            bool native = _llm?.SupportsNativeToolCallingForRole(
+                bundle.RoleId, bundle.Task?.RoutingProfileId ?? "") == true;
+            return LlmToolChannelPolicy.InterpretsProse(native, bundle.Task?.AllowTextShapedToolCallsOnNativeEndpoint,
+                bundle.Task?.ForcedToolMode ?? LlmToolChoiceMode.Auto);
         }
 
         /// <summary>
@@ -1630,8 +1792,13 @@ namespace CoreAI.Ai
                 return Microsoft.Extensions.AI.ChatRole.User;
             }
 
-            if (string.Equals(role, "tool", StringComparison.Ordinal))
+            if (string.Equals(role, ToolResultPromptProjection.ToolHistoryRole, StringComparison.Ordinal))
             {
+                // WHY: The transport role stays "user" because an OpenAI-compatible endpoint rejects a
+                // tool-role message that has no tool_call_id pairing with the assistant message before it,
+                // and durable history carries no such pairing. What the model was imitating is the
+                // REGISTER, not the role, so ToolResultPromptProjection re-renders the content as machine
+                // log lines before it gets here.
                 return Microsoft.Extensions.AI.ChatRole.User;
             }
 
@@ -1669,7 +1836,10 @@ namespace CoreAI.Ai
                 ForcedToolMode = task.ForcedToolMode,
                 RequiredToolName = task.RequiredToolName ?? "",
                 AllowedToolNames = task.AllowedToolNames,
-                MaxOutputTokens = task.MaxOutputTokens
+                MaxOutputTokens = task.MaxOutputTokens,
+                // WHY: a structured retry is the SAME turn against the SAME endpoint; dropping the opt-in
+                // here would make the retry behave differently from the attempt it repeats.
+                AllowTextShapedToolCallsOnNativeEndpoint = task.AllowTextShapedToolCallsOnNativeEndpoint
             };
         }
 
@@ -2132,6 +2302,10 @@ namespace CoreAI.Ai
                 MaxToolCallRoundtrips = ResolveMaxToolCallRoundtrips(
                     task.MaxToolCallRoundtrips, bundle.RoleConfig.MaxToolCallRoundtrips),
                 ContextWindowTokens = bundle.ContextWindowTokens,
+                // WHY: without this line the escape hatch exists only for someone building an
+                // LlmCompletionRequest by hand - every host that goes through the package's public API
+                // (AiTaskRequest) could not reach it, while the docs prescribed it as the cure.
+                AllowTextShapedToolCallsOnNativeEndpoint = task.AllowTextShapedToolCallsOnNativeEndpoint,
                 SendTemperature = bundle.RoleConfig.Temperature.HasValue || _settings.OverrideTemperature,
                 Temperature = bundle.RoleConfig.Temperature ?? _settings.Temperature
             };

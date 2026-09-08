@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -349,7 +350,7 @@ namespace CoreAI.Tests.EditMode
             Microsoft.Extensions.AI.ChatMessage replayedToolMessage = null;
             foreach (Microsoft.Extensions.AI.ChatMessage message in compactLlm.LastRequest.ChatHistory)
             {
-                if ((message.Text ?? "").Contains("## Tool Results"))
+                if ((message.Text ?? "").Contains("lookup_inventory"))
                 {
                     replayedToolMessage = message;
                     break;
@@ -359,6 +360,10 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(replayedToolMessage);
             Assert.AreEqual(ChatRole.User, replayedToolMessage.Role,
                 "Stored tool results must replay as provider-safe user observations.");
+            StringAssert.Contains("tool_result name=lookup_inventory status=ok", replayedToolMessage.Text,
+                "Tool results reach the model as machine records.");
+            StringAssert.DoesNotContain("## Tool Results", replayedToolMessage.Text,
+                "The markdown heading is what a model copies back into its own reply; it must not reach it.");
 
             TestMemoryStore errorsOnlyMemory = new();
             ToolTraceLlmClient errorsOnlyLlm = new(new LlmCompletionResult
@@ -1399,12 +1404,302 @@ namespace CoreAI.Tests.EditMode
                 "Streaming teardown must not retry an append that may already have committed.");
         }
 
-        private static AgentMemoryPolicy BuildToolResultPolicy(string roleId)
+        private const string SpawnQuizPayload =
+            "{\"success\":true,\"tool\":\"spawn_quiz\",\"status\":\"card_shown_waiting_for_student\"}";
+
+        private sealed class QuizStubTool : LlmToolBase
+        {
+            public override string Name => "spawn_quiz";
+            public override string Description => "shows a quiz card and waits for the student";
+        }
+
+        /// <summary>
+        /// A client with no streaming of its own: the interface default turns one completion into a single
+        /// terminal chunk carrying the text AND the executed calls together. This is the shape of the
+        /// fallback path this filter is for, and the shape where it can actually act — the repetition and
+        /// the strings it repeats become known in the same chunk.
+        /// </summary>
+        private sealed class EchoingToolResultClient : ILlmClient
+        {
+            private readonly string _content;
+            private readonly bool _native;
+            private readonly LlmToolCallTrace[] _traces;
+
+            public EchoingToolResultClient(LlmToolCallTrace[] traces, string content, bool native = false)
+            {
+                _traces = traces;
+                _content = content;
+                _native = native;
+            }
+
+            public bool SupportsNativeToolCalling => _native;
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult
+                {
+                    Ok = true,
+                    Content = _content,
+                    ExecutedToolCalls = _traces
+                });
+            }
+        }
+
+        /// <summary>
+        /// Streams the way a real streaming client does on the fallback path: prose first, executed calls
+        /// reported only on the terminal chunk. A stand that announced the calls earlier would guard the
+        /// wording of the test instead of the behaviour of the product — and it would hide the honest
+        /// limit asserted here: a repetition streamed before that report is cleaned in the stored and
+        /// published turn, but the reader has already seen it.
+        /// </summary>
+        private sealed class LateReportingEchoStreamClient : ILlmClient
+        {
+            private readonly string[] _textChunks;
+            private readonly LlmToolCallTrace[] _traces;
+
+            public LateReportingEchoStreamClient(LlmToolCallTrace[] traces, params string[] textChunks)
+            {
+                _traces = traces;
+                _textChunks = textChunks;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult
+                {
+                    Ok = true,
+                    Content = string.Concat(_textChunks),
+                    ExecutedToolCalls = _traces
+                });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                await Task.Yield();
+                foreach (string text in _textChunks)
+                {
+                    yield return new LlmStreamChunk { Text = text };
+                }
+
+                yield return new LlmStreamChunk { IsDone = true, ExecutedToolCalls = _traces };
+            }
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_FallbackPath_RepetitionNeverReachesReaderOrHistory()
+        {
+            LlmToolCallTrace[] traces = { new("spawn_quiz", true, 6d, "text", SpawnQuizPayload) };
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher", new QuizStubTool());
+            EchoingToolResultClient llm = new(traces, "Вопрос на карточке. " + SpawnQuizPayload);
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            StringBuilder streamed = new();
+            await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "Teacher", Hint = "quiz" }))
+            {
+                streamed.Append(chunk.Text ?? "");
+            }
+
+            string persistedAssistant = memory.Appended.First(m => m.Role == "assistant").Content;
+            StringAssert.DoesNotContain("card_shown_waiting_for_student", streamed.ToString());
+            StringAssert.Contains("Вопрос на карточке.", streamed.ToString(),
+                "Only the repetition is removed; the teacher's own words stay.");
+            Assert.AreEqual(streamed.ToString(), persistedAssistant,
+                "What the reader saw and what is stored must not diverge — a reload would change the reply.");
+        }
+
+        /// <summary>
+        /// The honest limit of this filter on a streaming client: it can only remove a repetition of a
+        /// result it has already been told about, and the executed calls are reported on the terminal
+        /// chunk. Text streamed before that report is cleaned in history and in the published turn — which
+        /// is what this asserts — but it was already displayed. The guard against the incident itself is
+        /// the prompt projection, not this filter.
+        /// </summary>
+        [Test]
+        public async Task RunStreamingAsync_ResultReportedOnlyAtTheEnd_StillCleansTheStoredTurn()
+        {
+            LlmToolCallTrace[] traces = { new("spawn_quiz", true, 6d, "text", SpawnQuizPayload) };
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher", new QuizStubTool());
+            LateReportingEchoStreamClient llm = new(traces, "Итог: ", SpawnQuizPayload);
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await foreach (LlmStreamChunk _ in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "Teacher", Hint = "quiz" }))
+            {
+            }
+
+            string persistedAssistant = memory.Appended.First(m => m.Role == "assistant").Content;
+            StringAssert.DoesNotContain("card_shown_waiting_for_student", persistedAssistant);
+            StringAssert.Contains("Итог:", persistedAssistant);
+        }
+
+        /// <summary>
+        /// On an endpoint with a native tool channel the orchestrator must not edit the answer by its
+        /// CONTENT at all — neither the repetition filter nor the leaked-call strip. Both belong to the
+        /// path where tool traffic travels as text; where it does not, JSON in the answer is a teacher
+        /// showing JSON to a learner, and cutting it out takes the lesson away to defend against something
+        /// that cannot happen. The answer below carries both shapes: a tool RESULT and a tool CALL.
+        /// </summary>
+        [Test]
+        public async Task RunStreamingAsync_NativeToolCalling_LeavesTheAnswerExactlyAsTheModelWroteIt()
+        {
+            LlmToolCallTrace[] traces = { new("spawn_quiz", true, 6d, "native", SpawnQuizPayload) };
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher", new QuizStubTool());
+            string answer = "Результат выглядит так: " + SpawnQuizPayload +
+                            ", а вызов — так: {\"name\":\"spawn_quiz\",\"arguments\":{}} — это примеры.";
+            EchoingToolResultClient llm = new(traces, answer, true);
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            StringBuilder streamed = new();
+            await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "Teacher", Hint = "quiz" }))
+            {
+                streamed.Append(chunk.Text ?? "");
+            }
+
+            Assert.AreEqual(answer, streamed.ToString());
+            Assert.AreEqual(answer, memory.Appended.First(m => m.Role == "assistant").Content);
+        }
+
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        [TestCase(true, true)]
+        public async Task ExplicitTextChannel_CleansOnlyDeclaredCallsFromCompletedTurn(bool streaming, bool native)
+        {
+            const string knownCall = "{\"name\":\"spawn_quiz\",\"arguments\":{}}";
+            const string lessonExample = "{\"name\":\"lesson_example\",\"arguments\":{\"value\":1}}";
+            string answer = "Explanation: " + lessonExample + " Action: " + knownCall;
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher", new QuizStubTool());
+            EchoingToolResultClient llm = new(Array.Empty<LlmToolCallTrace>(), answer, native);
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+            AiTaskRequest request = new()
+            {
+                RoleId = "Teacher", Hint = "quiz",
+                AllowTextShapedToolCallsOnNativeEndpoint = native ? true : null
+            };
+
+            string completed = null;
+            if (streaming)
+            {
+                await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(request))
+                {
+                    Assert.IsTrue(string.IsNullOrEmpty(chunk.Error));
+                }
+            }
+            else
+            {
+                completed = await orchestrator.RunTaskAsync(request);
+            }
+
+            string persisted = memory.Appended.First(message => message.Role == "assistant").Content;
+            Assert.That(persisted, Does.Not.Contain(knownCall));
+            Assert.That(persisted, Does.Contain(lessonExample), "An undeclared name is teaching content, not tool traffic.");
+            Assert.That(persisted, Does.Contain("Explanation:"));
+            if (!streaming) Assert.AreEqual(persisted, completed);
+        }
+
+        /// <summary>
+        /// The escape hatch must be reachable from the package's own public API. It is the documented cure
+        /// for an endpoint that advertises a native tool channel and then answers with JSON in the text; if
+        /// it existed only for someone hand-building an <c>LlmCompletionRequest</c>, the docs would be
+        /// prescribing a treatment no host can actually apply.
+        /// </summary>
+        [Test]
+        public async Task RunTaskAsync_TextShapedToolCallOptIn_ReachesTheCompletionRequest()
+        {
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher", new QuizStubTool());
+            ToolTraceLlmClient llm = new(new LlmCompletionResult { Ok = true, Content = "ok" });
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "go",
+                AllowTextShapedToolCallsOnNativeEndpoint = true
+            });
+
+            Assert.AreEqual(true, llm.LastRequest.AllowTextShapedToolCallsOnNativeEndpoint,
+                "AiTaskRequest is the only way a host can reach this opt-in.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_WithoutOptIn_LeavesProseInterpretationOff()
+        {
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher", new QuizStubTool());
+            ToolTraceLlmClient llm = new(new LlmCompletionResult { Ok = true, Content = "ok" });
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "go" });
+
+            Assert.IsNull(llm.LastRequest.AllowTextShapedToolCallsOnNativeEndpoint,
+                "The safe default must stay untouched when nobody asked for the opt-in.");
+        }
+
+        /// <summary>
+        /// A role whose answer is a machine contract is validated BEFORE the turn is sanitized and then
+        /// published as the command payload. Such a role may legitimately carry a tool's own output inside
+        /// that payload, so cutting an identical span out of it would hand the game a payload that is
+        /// invalid AFTER it passed the validator — worse than the leak this filter removes.
+        /// </summary>
+        [Test]
+        public async Task RunTaskAsync_StructuredRole_KeepsToolOutputInsideItsPayload()
+        {
+            const string script = "function spawn() return 'a very long generated script body' end";
+            LlmToolCallTrace[] traces = { new("write_script", true, 4d, "native", script) };
+            string payload = "{\"lua\":\"" + script + "\"}";
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Programmer", new QuizStubTool());
+            ToolTraceLlmClient llm = new(new LlmCompletionResult
+            {
+                Ok = true,
+                Content = payload,
+                ExecutedToolCalls = traces
+            });
+            AiOrchestrator orchestrator = BuildOrchestrator(
+                llm,
+                memory,
+                policy,
+                structuredPolicy: new AlwaysStructuredPolicy());
+
+            string answer = await orchestrator.RunTaskAsync(
+                new AiTaskRequest { RoleId = "Programmer", Hint = "write a script" });
+
+            Assert.AreEqual(payload, answer,
+                "A validated structured payload must not be edited behind the validator's back.");
+        }
+
+        private sealed class AlwaysStructuredPolicy : IRoleStructuredResponsePolicy
+        {
+            public bool ShouldValidate(string roleId)
+            {
+                return true;
+            }
+
+            public bool TryValidate(string roleId, string rawContent, out string failureReason)
+            {
+                failureReason = "";
+                return true;
+            }
+        }
+
+        private static AgentMemoryPolicy BuildToolResultPolicy(string roleId, params ILlmTool[] tools)
         {
             AgentMemoryPolicy policy = new();
             policy.ConfigureChatHistory(roleId, true, 8192, false, 10);
             policy.DisableMemoryTool(roleId);
-            policy.SetToolsForRole(roleId, Array.Empty<ILlmTool>());
+            policy.SetToolsForRole(roleId, tools ?? Array.Empty<ILlmTool>());
             return policy;
         }
 
@@ -1412,13 +1707,15 @@ namespace CoreAI.Tests.EditMode
             ILlmClient llm,
             IAgentMemoryStore memory,
             AgentMemoryPolicy policy,
-            IConversationContextManager contextManager = null)
+            IConversationContextManager contextManager = null,
+            IRoleStructuredResponsePolicy structuredPolicy = null)
         {
             TestSettings settings = new();
             return new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings, TestActorIdentityProvider, contextManager);
+                memory, policy, structuredPolicy, null, settings, TestActorIdentityProvider,
+                contextManager);
         }
 
         private static int CountOccurrences(string value, string needle)
@@ -1574,7 +1871,9 @@ namespace CoreAI.Tests.EditMode
             }
 
             // Настраиваем агента с лимитом в 15 сообщений
-            policy.ConfigureChatHistory("test_role", true, 8192, false, 15);
+            int maxMessages = 15;
+            string[] sourceTranscript = memory.FakeHistory.Select(message => message.Content).ToArray();
+            policy.ConfigureChatHistory("test_role", true, 8192, false, maxMessages);
 
             TestSettings settings = new();
             AiOrchestrator orchestrator = new(
@@ -1588,17 +1887,10 @@ namespace CoreAI.Tests.EditMode
             // Assert
             Assert.IsNotNull(llm.LastRequest);
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
-            List<Microsoft.Extensions.AI.ChatMessage> transcript = llm.LastRequest.ChatHistory
-                .Where(m => m.Role != ChatRole.System)
-                .ToList();
-            Assert.AreEqual(15, transcript.Count,
-                "History should be truncated to exactly MaxChatHistoryMessages");
-
-            // Check that we got the *most recent* 15
-            Assert.IsTrue(transcript[14].Text.Contains("Short msg 49"),
-                "Last message should match the latest");
-            Assert.IsTrue(transcript[0].Text.Contains("Short msg 35"),
-                "First message in truncated history should match sequence");
+            string[] transcript = llm.LastRequest.ChatHistory.Select(message => message.Text)
+                .Where(text => sourceTranscript.Contains(text)).ToArray();
+            CollectionAssert.AreEqual(sourceTranscript.Skip(sourceTranscript.Length - maxMessages), transcript,
+                "The configured transcript tail survives independently of any generated summary.");
         }
 
         [Test]
@@ -1676,7 +1968,7 @@ namespace CoreAI.Tests.EditMode
             Assert.Less(llm.LastRequest.ChatHistory.Count, memory.FakeHistory.Count);
             Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
             Microsoft.Extensions.AI.ChatMessage summary = llm.LastRequest.ChatHistory.Single(m =>
-                m.Role == ChatRole.System && (m.Text ?? "").Contains("## Conversation Summary"));
+                m.Role == ChatRole.User && (m.Text ?? "").Contains("## Conversation Summary"));
             StringAssert.Contains("old-context-0", summary.Text);
             Microsoft.Extensions.AI.ChatMessage newestTranscript = llm.LastRequest.ChatHistory.Last(m =>
                 m.Role != ChatRole.System);
@@ -1695,8 +1987,14 @@ namespace CoreAI.Tests.EditMode
                 "Volatile summary should stay out of the stable system prefix.");
             Assert.IsNotNull(tailLlm.LastRequest.ChatHistory);
             Microsoft.Extensions.AI.ChatMessage summaryMessage = tailLlm.LastRequest.ChatHistory[0];
-            Assert.AreEqual(ChatRole.System, summaryMessage.Role);
+            // WHY: The summary is a retelling of the learner's and the teacher's words, so it must carry
+            // the trust those words already had - the USER role. The former norm (ChatRole.System) was
+            // wrong: a child typing "forget the rules" became, after compaction, a line of system context
+            // (MeaiLlmClient ships system-role history as a "System context update"). The block also
+            // names itself a recap so the model does not read it as a fresh learner turn.
+            Assert.AreEqual(ChatRole.User, summaryMessage.Role);
             StringAssert.Contains("## Conversation Summary", summaryMessage.Text);
+            StringAssert.Contains(ConversationSummaryPromptProjection.Framing, summaryMessage.Text);
             StringAssert.Contains("old-context-0", summaryMessage.Text);
             Assert.Greater(tailLlm.LastRequest.ChatHistory.Count, 1);
             Assert.AreNotEqual(ChatRole.System, tailLlm.LastRequest.ChatHistory[1].Role);
@@ -1731,7 +2029,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(summaryTailLlm.LastRequest.ChatHistory);
             Assert.GreaterOrEqual(summaryTailLlm.LastRequest.ChatHistory.Count, 3);
             Microsoft.Extensions.AI.ChatMessage summary = summaryTailLlm.LastRequest.ChatHistory[0];
-            Assert.AreEqual(ChatRole.System, summary.Role);
+            Assert.AreEqual(ChatRole.User, summary.Role,
+                "A retelling of chat turns carries user-level trust, never system-level.");
             StringAssert.Contains("## Conversation Summary", summary.Text);
             Microsoft.Extensions.AI.ChatMessage last = summaryTailLlm.LastRequest.ChatHistory[^1];
             Assert.AreEqual(ChatRole.System, last.Role);
@@ -2014,12 +2313,17 @@ namespace CoreAI.Tests.EditMode
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "prune" });
 
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
-            int toolMessages = llm.LastRequest.ChatHistory.Count(m =>
-                (m.Text ?? "").Contains("## Tool Results"));
-            Assert.AreEqual(3, toolMessages,
-                "Default MaxRetainedToolResultMessages (3) must prune stale tool results with summarization off.");
-            Assert.IsTrue(llm.LastRequest.ChatHistory.Any(m => (m.Text ?? "").Contains("question one")),
-                "Non-tool turns stay intact.");
+            string projected = string.Join("\n", llm.LastRequest.ChatHistory.Select(message => message.Text));
+            int retained = ((ICoreAISettings)settings).MaxRetainedToolResultMessages;
+            for (int i = 0; i < 5; i++)
+            {
+                Assert.AreEqual(i >= 5 - retained, projected.Contains($"result-{i}"),
+                    "The prompt retains only the configured newest tool results.");
+            }
+            StringAssert.Contains("question one", projected);
+            StringAssert.Contains("answer one", projected);
+            Assert.AreEqual(5, memory.FakeHistory.Count(message => message.Role == "tool"),
+                "Prompt pruning must not delete stored tool history.");
         }
 
         [Test]
@@ -2096,6 +2400,26 @@ namespace CoreAI.Tests.EditMode
                 LastBuildArgs = buildArgs;
                 return new ConversationContextSnapshot { RecentMessages = history, WasCompacted = false };
             }
+        }
+
+        [Test]
+        public async Task RunTaskAsync_CountOverflow_ReachesSummaryInsteadOfDisappearingBeforeCompaction()
+        {
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            memory.FakeHistory.AddRange(Enumerable.Range(0, 7)
+                .Select(i => new Ai.ChatMessage("user", "remember-marker-" + i)));
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 8192, false, 2);
+            InMemoryConversationSummaryStore summaries = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy,
+                new DeterministicConversationContextManager(summaries));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "continue" });
+
+            Assert.That(summaries.LoadSummary("test_role"), Does.Contain("remember-marker-0"));
+            Assert.That(summaries.LoadSummary("test_role"), Does.Contain("remember-marker-4"));
+            Assert.AreEqual(7, memory.FakeHistory.Count, "Compaction must preserve the recoverable source history.");
         }
 
         [Test]
@@ -2297,10 +2621,13 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(llm.LastRequest?.ChatHistory);
             Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
             Microsoft.Extensions.AI.ChatMessage summary = llm.LastRequest.ChatHistory.Single(m =>
-                m.Role == ChatRole.System && (m.Text ?? "").Contains("## Conversation Summary"));
+                m.Role == ChatRole.User && (m.Text ?? "").Contains("## Conversation Summary"));
             StringAssert.Contains("old-context-0", summary.Text);
+            // WHY: The summary now travels under the user role (a retelling carries user-level trust, not
+            // system-level), so "not system" no longer means "verbatim transcript" - the summary block
+            // has to be excluded by identity to count the retained turns.
             List<Microsoft.Extensions.AI.ChatMessage> transcript = llm.LastRequest.ChatHistory
-                .Where(m => m.Role != ChatRole.System)
+                .Where(m => m.Role != ChatRole.System && !ReferenceEquals(m, summary))
                 .ToList();
             Assert.AreEqual(1, transcript.Count, "The override must retain only the newest transcript turn.");
             StringAssert.Contains("old-context-9", transcript[0].Text);
@@ -2333,14 +2660,13 @@ namespace CoreAI.Tests.EditMode
                 SourceTag = "practice-slot"
             });
 
-            Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Runtime Context"));
+            string expectedContext = new StaticContextProvider().BuildContext(
+                new AiTaskRequest { SourceTag = "practice-slot" }, "Teacher", "trace-context");
+            Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains(expectedContext));
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
             Microsoft.Extensions.AI.ChatMessage worldState = llm.LastRequest.ChatHistory[^1];
             Assert.AreEqual(ChatRole.System, worldState.Role);
-            StringAssert.Contains("## World State", worldState.Text);
-            StringAssert.Contains("## Runtime Context", worldState.Text);
-            StringAssert.Contains("slot=practice-slot", worldState.Text);
-            StringAssert.Contains("trace=trace-context", worldState.Text);
+            StringAssert.Contains(expectedContext, worldState.Text);
         }
 
         [Test]
@@ -2482,6 +2808,7 @@ namespace CoreAI.Tests.EditMode
             TestLlmClient llm = new();
             AgentMemoryPolicy policy = new();
             string called = "";
+            int blockedCalls = 0;
             SkillSet skill = new(
                 "Crafting",
                 "Crafting tools",
@@ -2493,7 +2820,7 @@ namespace CoreAI.Tests.EditMode
                         return "{\"success\":true,\"value\":\"" + value + "\"}";
                     })),
                 new DelegateLlmTool("blocked_skill_tool", "Blocked skill tool",
-                    new Func<string>(() => "{\"success\":true}")));
+                    new Func<string>(() => { blockedCalls++; return "{\"success\":true}"; })));
 
             AgentConfig config = new AgentBuilder("Teacher")
                 {
@@ -2549,7 +2876,7 @@ namespace CoreAI.Tests.EditMode
                 }),
                 CancellationToken.None))?.ToString();
             Assert.IsFalse(JObject.Parse(blockedJson).Value<bool>("success"));
-            Assert.That(blockedJson, Does.Contain("not found"));
+            Assert.AreEqual(0, blockedCalls, "A disallowed tool body must remain unreachable.");
         }
 
         private sealed class FailsThenOkLlm : ILlmClient

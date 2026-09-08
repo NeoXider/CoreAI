@@ -54,28 +54,56 @@ namespace CoreAI.Ai
                     out AgentMemoryScope captured,
                     out string actorId))
             {
-                return string.IsNullOrEmpty(actorId)
-                    ? Resolve(captured, roleId)
-                    : ResolveActorId(actorId, roleId);
+                if (string.IsNullOrEmpty(actorId))
+                {
+                    return Resolve(captured, roleId);
+                }
+
+                // WHY: "local" is the anonymous single-player default that every host gets for free
+                // (CoreServicesInstaller.DefaultLocalHostIdentityProvider issues it with an EMPTY memory
+                // scope). It identifies nobody, so it must never outrank a scope the host declared through
+                // IAgentMemoryScopeProvider. It used to: every write made INSIDE a turn landed in the
+                // unscoped bare-role file while hydration and reads outside the turn used the learner's
+                // scope-v1-* file, so a whole lesson fell out of that learner's history and the shared file
+                // silently accumulated every learner's turns. A named actor still wins - see ResolveActorId.
+                if (IsDefaultLocalActor(actorId) && IsEmptyScope(captured))
+                {
+                    return ResolveFromProvider(scopeProvider, roleId);
+                }
+
+                // WHY: у именованного актора scope тоже берётся из хода, а когда ход его не принёс —
+                // из провайдера хоста. Иначе тот же класс расхождения, что чинили для "local": внутри
+                // хода ключ считался без scope, снаружи — со scope провайдера, и одна и та же память
+                // читалась под двумя разными ключами.
+                AgentMemoryScope effectiveScope = IsEmptyScope(captured)
+                    ? ScopeFromProvider(scopeProvider, roleId)
+                    : captured;
+                return ResolveActorId(actorId, effectiveScope, roleId);
             }
 
-            AgentMemoryScope scope = (scopeProvider ?? new DefaultAgentMemoryScopeProvider()).GetScope(roleId);
-            return Resolve(scope, roleId);
+            return ResolveFromProvider(scopeProvider, roleId);
         }
 
         internal static string Resolve(ActorContext actorContext, string roleId)
         {
             actorContext.AssertTrusted();
-            return ResolveActorId(actorContext.ActorId, NormalizeRoleId(roleId));
+            return ResolveActorId(actorContext.ActorId, actorContext.MemoryScope, NormalizeRoleId(roleId));
+        }
+
+        private static AgentMemoryScope ScopeFromProvider(IAgentMemoryScopeProvider scopeProvider, string roleId)
+        {
+            return (scopeProvider ?? new DefaultAgentMemoryScopeProvider()).GetScope(roleId);
+        }
+
+        private static string ResolveFromProvider(IAgentMemoryScopeProvider scopeProvider, string roleId)
+        {
+            return Resolve(ScopeFromProvider(scopeProvider, roleId), roleId);
         }
 
         internal static string Resolve(AgentMemoryScope scope, string roleId)
         {
             roleId = NormalizeRoleId(roleId);
-            if (string.IsNullOrWhiteSpace(scope.TenantId) &&
-                string.IsNullOrWhiteSpace(scope.UserId) &&
-                string.IsNullOrWhiteSpace(scope.SessionId) &&
-                string.IsNullOrWhiteSpace(scope.TopicId))
+            if (IsEmptyScope(scope))
             {
                 return roleId;
             }
@@ -93,17 +121,52 @@ namespace CoreAI.Ai
             return ScopedKeyPrefix + Sha256Hex(canonical.ToString());
         }
 
-        private static string ResolveActorId(string actorId, string roleId)
+        private static string ResolveActorId(string actorId, AgentMemoryScope scope, string roleId)
         {
-            if (string.Equals(actorId, LocalActorIdentityProvider.DefaultActorId, StringComparison.Ordinal))
+            if (IsDefaultLocalActor(actorId))
             {
-                return roleId;
+                // WHY: the default local actor carries no identity of its own, so the key is decided by the
+                // scope alone - an empty scope keeps the legacy bare-role file, a declared scope wins.
+                // Returning the bare role id unconditionally discarded the host's scope and merged
+                // every identity into one file.
+                return Resolve(scope, roleId);
             }
 
-            StringBuilder canonical = new(64);
+            // WHY: ActorContext.MemoryScope обещан как «tenant, user, session и topic, которыми пользуется
+            // персистентность памяти». Раньше для именованного актора эти поля ОТБРАСЫВАЛИСЬ: два урока
+            // (topic) или две сессии одного актора делили один файл, а два арендатора с одинаковым id
+            // актора — тем более. Пустой scope кодируется по-старому (две части), чтобы файлы уже
+            // существующих именованных акторов без scope не осиротели; непустой добавляет четыре части.
+            // Кодирование с префиксом длины остаётся инъективным: число частей восстанавливается однозначно.
+            StringBuilder canonical = new(160);
             AppendCanonicalPart(canonical, actorId);
+            if (!IsEmptyScope(scope))
+            {
+                AppendCanonicalPart(canonical, scope.TenantId);
+                AppendCanonicalPart(canonical, scope.UserId);
+                AppendCanonicalPart(canonical, scope.SessionId);
+                AppendCanonicalPart(canonical, scope.TopicId);
+            }
+
             AppendCanonicalPart(canonical, roleId);
             return ActorKeyPrefix + Sha256Hex(canonical.ToString());
+        }
+
+        /// <summary>
+        /// Whether the id is the reserved anonymous local default rather than a real, named actor.
+        /// A named actor keeps owning its durable key across reconnects, so only this one id defers.
+        /// </summary>
+        private static bool IsDefaultLocalActor(string actorId)
+        {
+            return string.Equals(actorId, LocalActorIdentityProvider.DefaultActorId, StringComparison.Ordinal);
+        }
+
+        private static bool IsEmptyScope(AgentMemoryScope scope)
+        {
+            return string.IsNullOrWhiteSpace(scope.TenantId) &&
+                   string.IsNullOrWhiteSpace(scope.UserId) &&
+                   string.IsNullOrWhiteSpace(scope.SessionId) &&
+                   string.IsNullOrWhiteSpace(scope.TopicId);
         }
 
         private static string NormalizeRoleId(string roleId)
@@ -138,6 +201,34 @@ namespace CoreAI.Ai
             }
 
             return sb.ToString();
+        }
+    }
+
+    /// <summary>
+    /// Публичный вход для доступа к памяти ОТ ИМЕНИ актора вне хода оркестратора.
+    /// <para>
+    /// Внутри хода очередь сама поднимает контекст актора, и все scoped-декораторы считают ключ по нему.
+    /// Снаружи (гидрация истории для UI, сброс контекста при отключении соединения, миграция) актора
+    /// никто не поднимает, и ключ считается только по <see cref="IAgentMemoryScopeProvider"/> — то есть
+    /// хост с именованными акторами читал и чистил НЕ ТОТ файл, что писал ход. Обёртка кода в
+    /// <c>using (AgentMemoryActorScope.Enter(actorContext))</c> даёт тот же ключ, что и внутри хода.
+    /// Контекст обязан быть выдан провайдером личности (<see cref="ActorContext.IsTrusted"/>): собранный
+    /// вручную не принимается, чтобы нельзя было «войти» в чужую память подделкой структуры.
+    /// </para>
+    /// </summary>
+    public static class AgentMemoryActorScope
+    {
+        /// <summary>Делает <paramref name="actorContext"/> текущим для памяти до <c>Dispose()</c>.</summary>
+        /// <exception cref="InvalidOperationException">Контекст не выдан провайдером личности.</exception>
+        public static IDisposable Enter(ActorContext actorContext)
+        {
+            return AgentMemoryScopeExecutionContext.Push(actorContext);
+        }
+
+        /// <summary>Делает <paramref name="scope"/> текущим для памяти до <c>Dispose()</c> (без актора).</summary>
+        public static IDisposable Enter(AgentMemoryScope scope)
+        {
+            return AgentMemoryScopeExecutionContext.Push(scope);
         }
     }
 

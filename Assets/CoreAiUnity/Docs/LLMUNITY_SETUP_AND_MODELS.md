@@ -122,6 +122,56 @@ Then **`ILlmClient` = OpenAiChatLlmClient**; scene `LLMAgent` is **not** used fo
 
 ---
 
+## 4.1. Tool-call channel of the local server (llama.cpp / LLMUnity)
+
+**Fact about llama.cpp.** On its OpenAI-compatible `/v1/chat/completions` route llama.cpp supports
+native tool calls: `tools` schemas are converted into a GBNF grammar, calls are parsed by the server and
+returned in `tool_calls` (including as SSE deltas). There is a single condition — the server must run with a jinja template
+that supports tool-use. A server **without** jinja rejects any request with `tools` with the error
+`tools param requires --jinja flag` (HTTP **500**, `server_error`; in other builds — 400). The capability
+is determined by the **server**, not by which client connected to it.
+
+**Fact about LLMUnity 3.0.3.** The `LLM` component starts the server via `llmService.StartServer("", port, APIKey)`
+with signature `StartServer(string host, int port, string apiKey)` — the first parameter is the host; command-line
+arguments cannot be passed through the component. The model is created via `LLMService.CreateLLM(...)` with a
+fixed parameter set (server command: `-m … -t -1 -np N -c … -b … --context-shift -fa off`). In the
+`UndreamAI.LlamaLib` binding there is `LLMService.FromCommand(string paramsString)`, which accepts a llama.cpp parameter
+string, but the `LLM` component does not use it.
+
+**Established by a live run on 2026-09-06.** The built-in **LlamaLib v2.0.5** server (bundled with LLMUnity 3.0.3),
+started with the same `LLMService_Construct` + `LLM_Start_Server` as the `LLM` component, **accepts `tools` and
+returns native `tool_calls`** (`finish_reason: "tool_calls"`, SSE streaming with `tool_calls` deltas) —
+its llama.cpp is built with jinja by default. `/v1/models` still answers 404. So for stock LLMUnity, native calls
+**already work**; a build with a different LlamaLib version may behave differently, which is exactly why
+the channel is not hard-coded.
+
+**How CoreAI determines the channel.**
+
+- `LlmEndpointDescriptor.ToolChannel` (`Auto` / `Native` / `Text`) — for runtime endpoints.
+  An explicit value takes priority and needs no capability probe. With `Auto`, the factory
+  `LlmEndpointClientFactory` for **LlmUnity and HttpOpenAi** performs a single probe after the readiness check:
+  `POST /v1/chat/completions` with a declared tool and `max_tokens: 1`. Accepted — `native`;
+  rejected with a jinja error — `text`; transport/other error — `text` with a warning.
+  This probe checks server acceptance of the parameter, not the call quality of a specific model.
+  Caller cancellation stays a cancellation and does not turn into a successful activation.
+- In `Text`, the local MEAI handler keeps executing extracted calls, but outgoing HTTP requests
+  do not contain `tools`, `tool_choice`, `parallel_tool_calls`, including retries and values from `ExtraBodyJson`.
+  Therefore the fallback after a jinja rejection does not repeat the same unsupported request.
+- `CoreAISettingsAsset.LlmUnityToolChannel` — for the legacy path (`LlmPipelineInstaller`, profiles
+  `LlmClientRegistry`): the client there is built before the server starts, so there is no probe; `Auto` = `native` per the established
+  fact about the specific bundled LlamaLib v2.0.5. This is the boundary of the synchronous DI adapter, not a rule for an
+  arbitrary server. Explicit `Native`/`Text` are preserved; for a different build use an explicit setting
+  or runtime registration with a probe after readiness.
+- The choice **is never silent**: `[CoreAI.LLMUnity] phase=tool_channel status=native|text … reason="…"` for
+  runtime endpoints and `[CoreAI.LLM] tool channel for endpoint "…" = native|text — …` for the other paths.
+
+**If you need the native channel but the server does not provide it** (a different LlamaLib build, your own llama.cpp): start
+llama.cpp yourself — `llama-server -m model.gguf --jinja --port 8080` (add `--chat-template …` with
+tool-use if needed) — and connect it as a regular HTTP endpoint `http://127.0.0.1:8080/v1` (section 4), or set
+`ToolChannel` explicitly.
+
+---
+
 ## 5. Default system prompts
 
 Chain: manifest (if set) → `Resources/AgentPrompts/System` → **built-in** strings in `BuiltInDefaultAgentSystemPromptProvider` / `BuiltInAgentSystemPromptTexts` (already registered in `RegisterAgentPrompts`).

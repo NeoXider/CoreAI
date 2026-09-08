@@ -485,6 +485,88 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task GetResponseAsync_PropagatesNativeResponseContracts()
+        {
+            const string body =
+                "{\"id\":\"chatcmpl-abc\",\"model\":\"router/served\",\"choices\":[" +
+                "{\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\",\"content\":\"hi\"}}]," +
+                "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":7,\"total_tokens\":17," +
+                "\"prompt_tokens_details\":{\"cached_tokens\":4,\"audio_tokens\":1}," +
+                "\"completion_tokens_details\":{\"reasoning_tokens\":5,\"audio_tokens\":2}}}";
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(_ => OkJson(body))) { Timeout = System.TimeSpan.FromSeconds(30) };
+
+            MeaiOpenAiChatClient client = new(TestHttpSettings.Instance);
+            MEAI.ChatResponse r =
+                await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") });
+
+            Assert.AreEqual("chatcmpl-abc", r.ResponseId);
+            Assert.AreEqual("chatcmpl-abc", r.Messages[0].MessageId);
+            Assert.AreEqual("router/served", r.ModelId);
+            Assert.AreEqual(MEAI.ChatFinishReason.Stop, r.FinishReason);
+            Assert.AreEqual(10L, r.Usage.InputTokenCount);
+            Assert.AreEqual(7L, r.Usage.OutputTokenCount);
+            Assert.AreEqual(17L, r.Usage.TotalTokenCount);
+            Assert.AreEqual(4L, r.Usage.CachedInputTokenCount);
+            Assert.IsFalse(r.Usage.AdditionalCounts.ContainsKey("prompt_tokens_details.cached_tokens"));
+            Assert.IsFalse(r.Usage.AdditionalCounts.ContainsKey("completion_tokens_details.reasoning_tokens"));
+            Assert.AreEqual(5L, r.Usage.ReasoningTokenCount);
+            Assert.AreEqual(1L, r.Usage.AdditionalCounts["prompt_tokens_details.audio_tokens"]);
+            Assert.AreEqual(2L, r.Usage.AdditionalCounts["completion_tokens_details.audio_tokens"]);
+        }
+
+        [TestCase("stop", "stop")]
+        [TestCase("length", "length")]
+        [TestCase("tool_calls", "tool_calls")]
+        [TestCase("content_filter", "content_filter")]
+        public void ParseResponse_FinishReason_MapsToNativeStatics(string wire, string expected)
+        {
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(
+                "{\"choices\":[{\"finish_reason\":\"" + wire + "\",\"message\":{\"content\":\"x\"}}]}");
+            Assert.AreEqual(expected, r.FinishReason.Value.Value);
+        }
+
+        [Test]
+        public void ParseResponse_UnknownFinishReason_PreservedVerbatim()
+        {
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(
+                "{\"choices\":[{\"finish_reason\":\"pause_turn\",\"message\":{\"content\":\"x\"}}]}");
+            Assert.AreEqual("pause_turn", r.FinishReason.Value.Value);
+        }
+
+        [Test]
+        public void ParseResponse_MissingWireId_SynthesizesSharedResponseAndMessageId()
+        {
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(
+                "{\"choices\":[{\"message\":{\"content\":\"x\"}}]}");
+            Assert.IsNotEmpty(r.ResponseId);
+            StringAssert.StartsWith("synth_", r.ResponseId);
+            Assert.AreEqual(r.ResponseId, r.Messages[0].MessageId);
+        }
+
+        [Test]
+        public void GetService_ChatClientMetadata_ReturnsSelfConfiguration()
+        {
+            MeaiOpenAiChatClient client = new(TestHttpSettings.Instance);
+            object svc = client.GetService(typeof(MEAI.ChatClientMetadata));
+            Assert.IsInstanceOf<MEAI.ChatClientMetadata>(svc);
+            MEAI.ChatClientMetadata meta = (MEAI.ChatClientMetadata)svc;
+            Assert.AreEqual("openai", meta.ProviderName);
+            Assert.AreEqual("test-model", meta.DefaultModelId);
+            Assert.IsTrue(meta.ProviderUri.ToString().StartsWith("http://127.0.0.1:9"));
+        }
+
+        [Test]
+        public void GetService_SelfAndUnknownTypes_FollowFallbackContract()
+        {
+            MeaiOpenAiChatClient client = new(TestHttpSettings.Instance);
+            Assert.AreSame(client, client.GetService(typeof(MEAI.IChatClient)));
+            Assert.AreSame(client, client.GetService(typeof(MeaiOpenAiChatClient)));
+            Assert.IsNull(client.GetService(typeof(string)));
+            Assert.IsNull(client.GetService(typeof(MEAI.ChatClientMetadata), new object()));
+        }
+
+        [Test]
         public async Task GetStreamingResponseAsync_RequestJson_ContainsStreamOptionsIncludeUsage()
         {
             string capturedJson = null;

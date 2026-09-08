@@ -14,7 +14,8 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Drops exact consecutive duplicate messages, strips stale <c>&lt;think&gt;</c> reasoning from
-        /// every assistant turn except the newest one, removes fully superseded older tool-result messages,
+        /// every assistant turn except the newest one, removes older tool-result messages whose every
+        /// entry (same tool, same recorded result) is repeated verbatim by a newer block,
         /// then keeps only the newest tool-result messages.
         /// The input array and durable stores are never mutated.
         /// </summary>
@@ -204,9 +205,23 @@ namespace CoreAI.Ai
             return string.Equals(message.Role, "assistant", StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Помечает tool-блок «перекрытым», когда КАЖДАЯ его запись дословно повторяется в более новом
+        /// блоке: тот же инструмент и та же записанная выдача.
+        /// <para>
+        /// Раньше перекрытием считалось совпадение одного лишь ИМЕНИ инструмента. Имя в трассе — это имя
+        /// внешнего вызова, а у учителя RedoSchool почти всё идёт через один скилл-роутер
+        /// <c>call_skill_tool</c>: следующий слайд презентации «перекрывал» вывод код-станции, про который
+        /// ребёнок в эту минуту спрашивает, и результат исчезал из промпта. Аргументов вызова durable-блок
+        /// не хранит (<c>LlmToolCallTrace</c> несёт только имя и результат), поэтому единственная
+        /// идентичность, которую можно ДОКАЗАТЬ по данным, — «тот же инструмент + та же запись результата».
+        /// Такая запись в новом блоке несёт ровно ту же информацию, и старшая копия избыточна; всё
+        /// остальное — разные вызовы, и решать за модель, что из них устарело, пруннер не вправе.
+        /// </para>
+        /// </summary>
         private static int MarkSupersededToolResults(List<ChatMessage> messages, bool[] dropped)
         {
-            HashSet<string> newerToolNames = new(StringComparer.Ordinal);
+            HashSet<string> newerEntryKeys = new(StringComparer.Ordinal);
             int supersededCount = 0;
 
             for (int i = messages.Count - 1; i >= 0; i--)
@@ -216,16 +231,16 @@ namespace CoreAI.Ai
                     continue;
                 }
 
-                List<string> toolNames = ExtractToolNames(messages[i].Content);
-                if (toolNames.Count == 0)
+                List<string> entryKeys = ExtractToolEntryKeys(messages[i].Content);
+                if (entryKeys.Count == 0)
                 {
                     continue;
                 }
 
                 bool allSuperseded = true;
-                for (int n = 0; n < toolNames.Count; n++)
+                for (int n = 0; n < entryKeys.Count; n++)
                 {
-                    if (!newerToolNames.Contains(toolNames[n]))
+                    if (!newerEntryKeys.Contains(entryKeys[n]))
                     {
                         allSuperseded = false;
                         break;
@@ -239,9 +254,9 @@ namespace CoreAI.Ai
                     continue;
                 }
 
-                for (int n = 0; n < toolNames.Count; n++)
+                for (int n = 0; n < entryKeys.Count; n++)
                 {
-                    newerToolNames.Add(toolNames[n]);
+                    newerEntryKeys.Add(entryKeys[n]);
                 }
             }
 
@@ -268,62 +283,89 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Extracts the tool names from a "## Tool Results" memory block written by
-        /// <c>AiOrchestrator.BuildToolResultsMemoryBlock</c>. Each real entry is a TOP-LEVEL bullet of the
-        /// exact shape <c>- {name}: {ok|FAILED}[ detail]</c>.
+        /// Извлекает из durable-блока «## Tool Results» (его пишет <c>AiOrchestrator.BuildToolResultsMemoryBlock</c>)
+        /// ключ идентичности каждой записи: строку записи <c>- {name}: {ok|FAILED}[ detail]</c> вместе со всеми
+        /// её отступными строками (под политикой <c>Full</c> это блок <c>  Detail:</c> с выдачей инструмента).
+        /// Ключ — это имя И результат: одно имя без результата не отличает два вызова одного инструмента
+        /// (см. <see cref="MarkSupersededToolResults"/>).
         /// <para>
-        /// Hardened against the <c>Full</c> policy, whose entries are followed by an indented
-        /// <c>  Detail:</c> block containing arbitrary tool output — which itself may contain lines like
-        /// <c>  - foo: bar</c> (markdown/YAML/diff). A naive "first '-' … first ':'" parse would treat that
-        /// nested content as tool names and wrongly supersede/drop tool messages. We therefore require:
-        /// (1) the bullet is at column 0 (no leading whitespace — nested detail is always indented), and
-        /// (2) the value after the colon starts with a known status token (<c>ok</c> / <c>FAILED</c>).
+        /// Распознавание записи то же, на которое опирается <see cref="ToolResultPromptProjection"/>: выдача
+        /// инструмента под <c>Full</c> сама может содержать строки вида <c>  - foo: bar</c> (markdown/YAML/diff),
+        /// и наивный разбор «первый '-' … первый ':'» принял бы их за записи. Поэтому запись — это только
+        /// (1) bullet в нулевой колонке (вложенная выдача всегда с отступом) и (2) значение после двоеточия,
+        /// начинающееся с известного статуса (<c>ok</c> / <c>FAILED</c>); всё прочее — хвост текущей записи.
         /// </para>
         /// </summary>
-        private static List<string> ExtractToolNames(string content)
+        private static List<string> ExtractToolEntryKeys(string content)
         {
-            List<string> toolNames = new();
+            List<string> entryKeys = new();
             if (string.IsNullOrWhiteSpace(content))
             {
-                return toolNames;
+                return entryKeys;
             }
 
             HashSet<string> seen = new(StringComparer.Ordinal);
             string normalized = content.Replace("\r\n", "\n").Replace('\r', '\n');
             string[] lines = normalized.Split('\n');
+            StringBuilder currentEntry = null;
             for (int i = 0; i < lines.Length; i++)
             {
-                string line = lines[i];
-
-                // WHY: Entry bullets are at column 0. Any leading whitespace means this is nested Detail content
-                // (Full policy indents it by two spaces), never a tool-name entry — skip it.
-                if (line.Length < 2 || line[0] != '-' || line[1] != ' ')
+                string line = lines[i].TrimEnd();
+                if (IsEntryLine(line))
                 {
+                    AddEntryKey(entryKeys, seen, currentEntry);
+                    currentEntry = new StringBuilder(line);
                     continue;
                 }
 
-                int start = 2;
-                int colon = line.IndexOf(':', start);
-                if (colon <= start)
+                // WHY: Строка без формы записи после записи — это её выдача (Detail под Full), и она часть
+                // идентичности: тот же инструмент с другой выдачей — другой вызов. Пустые строки в хвосте
+                // и заголовок до первой записи ничего не идентифицируют и в ключ не идут.
+                if (currentEntry != null && line.Length > 0)
                 {
-                    continue;
-                }
-
-                // WHY: The value after "name:" must begin with a status token; otherwise this "- x: y" line is
-                // arbitrary content that merely resembles an entry, not a real tool result.
-                if (!ValueStartsWithStatus(line, colon + 1))
-                {
-                    continue;
-                }
-
-                string name = line.Substring(start, colon - start).Trim();
-                if (name.Length > 0 && seen.Add(name))
-                {
-                    toolNames.Add(name);
+                    currentEntry.Append('\n').Append(line);
                 }
             }
 
-            return toolNames;
+            AddEntryKey(entryKeys, seen, currentEntry);
+            return entryKeys;
+        }
+
+        private static void AddEntryKey(List<string> entryKeys, HashSet<string> seen, StringBuilder entry)
+        {
+            if (entry == null)
+            {
+                return;
+            }
+
+            string key = entry.ToString();
+            if (seen.Add(key))
+            {
+                entryKeys.Add(key);
+            }
+        }
+
+        /// <summary>True для bullet нулевой колонки <c>- name: ok|FAILED …</c> с непустым именем.</summary>
+        private static bool IsEntryLine(string line)
+        {
+            if (line.Length < 2 || line[0] != '-' || line[1] != ' ')
+            {
+                return false;
+            }
+
+            const int start = 2;
+            int colon = line.IndexOf(':', start);
+            if (colon <= start)
+            {
+                return false;
+            }
+
+            if (!ValueStartsWithStatus(line, colon + 1))
+            {
+                return false;
+            }
+
+            return line.Substring(start, colon - start).Trim().Length > 0;
         }
 
         /// <summary>True when the text after a tool entry's colon begins with "ok" or "FAILED".</summary>

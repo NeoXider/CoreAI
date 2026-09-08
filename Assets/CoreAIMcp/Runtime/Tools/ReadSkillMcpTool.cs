@@ -35,7 +35,8 @@ namespace CoreAI.Mcp.Tools
             get
             {
                 string names = AvailableNamesText();
-                return "Read the full API reference text for a registered in-game skill - the same docs " +
+                return "Read the complete entry document and reference index of an in-game skill; " +
+                       "use section for one reference or all=true for every document. These are the same docs " +
                        "the on-board agent uses. Call this BEFORE execute_lua or manage_mods so you know " +
                        "the exact globals, hooks, and datatypes the running game exposes. " +
                        (string.IsNullOrEmpty(names)
@@ -48,36 +49,41 @@ namespace CoreAI.Mcp.Tools
         public string InputSchemaJson =>
             "{\"type\":\"object\"," +
             "\"properties\":{\"name\":{\"type\":\"string\"," +
-            "\"description\":\"Skill name exactly as listed in the description (e.g. 'Lua Modding' or 'Rbx API').\"}}," +
+            "\"description\":\"Skill name exactly as listed in the description (e.g. 'Lua Modding' or 'Rbx API').\"}," +
+            "\"section\":{\"type\":\"string\",\"description\":\"Relative document path from the section index.\"}," +
+            "\"all\":{\"type\":\"boolean\",\"description\":\"Read all documents. Cannot be combined with section.\"}}," +
             "\"required\":[\"name\"]}";
 
         /// <inheritdoc />
         public Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)
         {
-            string name = arguments?["name"]?.ToString();
+            cancellationToken.ThrowIfCancellationRequested();
+            JToken nameToken = arguments?["name"];
+            JToken sectionToken = arguments?["section"];
+            JToken allToken = arguments?["all"];
+            if (nameToken?.Type != JTokenType.String ||
+                (sectionToken != null && sectionToken.Type != JTokenType.String) ||
+                (allToken != null && allToken.Type != JTokenType.Boolean))
+            {
+                return Task.FromResult(McpToolResult.Failure(Fail("name and section must be strings; all must be a boolean.")));
+            }
+            string name = nameToken.Value<string>();
             if (string.IsNullOrWhiteSpace(name))
             {
                 return Task.FromResult(McpToolResult.Failure(Fail("read_skill: 'name' is required.")));
             }
 
-            string trimmed = name.Trim();
-            foreach (SkillSet skill in _skills)
+            JObject content = JObject.Parse(ReadSkillLlmTool.ReadSkillJson(_skills, name,
+                sectionToken?.Value<string>(), allToken?.Value<bool>() ?? false));
+            bool success = content["success"]?.Value<bool>() == true;
+            if (success)
             {
-                if (skill != null && string.Equals(skill.Name, trimmed, StringComparison.OrdinalIgnoreCase))
-                {
-                    string instructions = skill.Instructions ?? "";
-                    string payload = JsonConvert.SerializeObject(new
-                    {
-                        success = true,
-                        skill = skill.Name,
-                        instructions
-                    });
-                    return Task.FromResult(new McpToolResult(new[] { McpContent.CreateText(payload) }));
-                }
+                // WHY: skill execution in an external client goes through the MCP composition, not the in-game proxy.
+                content["usage"] = "Use section to read a referenced document or all=true to read the whole skill. " +
+                    "Discover executable tools through MCP tools/list and coreai_tools; reading a skill grants no additional tools.";
             }
-
-            return Task.FromResult(McpToolResult.Failure(Fail(
-                $"read_skill: skill '{trimmed}' not found. Available: {AvailableNamesText()}.")));
+            string payload = content.ToString(Formatting.None);
+            return Task.FromResult(success ? McpToolResult.Text(payload) : McpToolResult.Failure(payload));
         }
 
         private string AvailableNamesText()

@@ -499,6 +499,16 @@ public class WeatherLlmTool : IAIFunctionLlmTool
 
 Use `IAIFunctionLlmTool` for one MEAI function and `IAIFunctionsLlmTool` when one logical tool exposes several functions. CoreAI no longer discovers `CreateAIFunction()` by reflection; custom tool classes must implement one of these explicit contracts or use `DelegateLlmTool`.
 
+> **How a call is recognized (7.35.0+): by CHANNEL, never by the shape of the text.** On an endpoint with a
+> native tool channel CoreAI takes calls only from the provider's `FunctionCallContent`; the assistant's prose
+> is never parsed for calls, held back, or repaired into one. That is what lets an agent *explain* JSON — a
+> tutor writing `{"name":"...","arguments":{...}}` as an example is showing it, not calling it, and no shape
+> check can tell those two apart. Prose is interpreted only where a call cannot arrive any other way (no
+> native channel, or declared tools that bound nothing), or when a host explicitly sets
+> `LlmCompletionRequest.AllowTextShapedToolCallsOnNativeEndpoint` for an endpoint that advertises a native
+> channel and then answers with JSON in the text. Details:
+> **[STREAMING_ARCHITECTURE.md](./STREAMING_ARCHITECTURE.md)**.
+
 > **Authoring tools: parameter descriptions (read this).** On the native tool-calling path the JSON Schema is
 > generated from the C# **delegate signature**, so a parameter's description reaches the model **only** if the
 > delegate parameter carries `[System.ComponentModel.Description("...")]`. The `ParametersSchema` string is

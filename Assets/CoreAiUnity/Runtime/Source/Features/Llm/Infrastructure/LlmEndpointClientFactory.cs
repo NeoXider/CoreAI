@@ -44,12 +44,32 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IGameLogger _logger;
         private readonly IAgentMemoryStore _memoryStore;
         private readonly ILlmEndpointReadinessProbe _readinessProbe;
+#if COREAI_LLM
+        private readonly ILlmToolChannelProbe _toolChannelProbe;
+#endif
 
         public LlmEndpointClientFactory(
             ICoreAISettings settings,
             IGameLogger logger,
             IAgentMemoryStore memoryStore = null,
             ILlmEndpointReadinessProbe readinessProbe = null)
+#if COREAI_LLM
+            : this(settings, logger, memoryStore, readinessProbe, null)
+        {
+        }
+
+        /// <param name="toolChannelProbe">
+        /// Проба канала инструментов для HTTP и локального llama.cpp под LLMUnity; <c>null</c> — штатный
+        /// <see cref="UnityWebRequestToolChannelProbe"/>. Тесты подставляют двойник, чтобы проверить
+        /// решение фабрики без сервера.
+        /// </param>
+        public LlmEndpointClientFactory(
+            ICoreAISettings settings,
+            IGameLogger logger,
+            IAgentMemoryStore memoryStore,
+            ILlmEndpointReadinessProbe readinessProbe,
+            ILlmToolChannelProbe toolChannelProbe)
+#endif
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _unitySettings = settings as CoreAISettingsAsset;
@@ -61,6 +81,7 @@ namespace CoreAI.Infrastructure.Llm
             _readinessProbe = readinessProbe;
 #else
             _readinessProbe = readinessProbe ?? new UnityWebRequestOpenAiReadinessProbe();
+            _toolChannelProbe = toolChannelProbe ?? new UnityWebRequestToolChannelProbe();
 #endif
         }
 
@@ -82,7 +103,7 @@ namespace CoreAI.Infrastructure.Llm
                         sessionApiKey,
                         LlmEndpointReadinessMode.ModelsThenCompletions,
                         cancellationToken);
-                    return BuildHttp(descriptor, sessionApiKey);
+                    return await BuildHttpAsync(descriptor, sessionApiKey, cancellationToken);
 #endif
                 case LlmEndpointKind.Offline:
                     return new LlmEndpointClientActivation
@@ -100,14 +121,71 @@ namespace CoreAI.Infrastructure.Llm
         }
 
 #if COREAI_LLM
-        private LlmEndpointClientActivation BuildHttp(LlmEndpointDescriptor descriptor, string sessionApiKey)
+        private async Task<LlmEndpointClientActivation> BuildHttpAsync(
+            LlmEndpointDescriptor descriptor, string sessionApiKey, CancellationToken cancellationToken)
         {
             OpenAiHttpOptions options = BuildHttpOptions(descriptor, sessionApiKey, _settings);
+            LlmToolChannelDecision toolChannel = await DecideToolChannelAsync(
+                descriptor.ToolChannel, _toolChannelProbe,
+                new LlmToolChannelProbeRequest
+                {
+                    BaseUrl = options.ApiBaseUrl,
+                    ApiKey = sessionApiKey ?? "",
+                    Model = options.Model
+                }, cancellationToken);
+            string diagnostic = LlmToolChannelLog.Format(descriptor.EndpointId, descriptor.DisplayName, toolChannel);
+            if (toolChannel.Source == LlmToolChannelDecisionSource.ProbeInconclusive)
+            {
+                _logger.LogWarning(GameLogFeature.Llm, diagnostic);
+            }
+            else
+            {
+                _logger.LogInfo(GameLogFeature.Llm, diagnostic);
+            }
             return new LlmEndpointClientActivation
             {
-                Client = new OpenAiChatLlmClient(options, _settings, _logger, _memoryStore),
+                Client = new OpenAiChatLlmClient(options,
+                    _settings,
+                    _logger,
+                    supportsNativeToolCalling: toolChannel.Native,
+                    memoryStore: _memoryStore),
                 Mode = LlmExecutionMode.ClientOwnedApi
             };
+        }
+
+        /// <summary>
+        /// Решение о канале HTTP-эндпойнта после готовности сервера. Явная настройка — без запроса; <c>Auto</c> —
+        /// одна проба с объявленным инструментом. Проба НЕ ломает активацию: исключение транспорта
+        /// превращается в неубедительный исход и консервативный текстовый канал; только отмена уходит наверх.
+        /// </summary>
+        internal static async Task<LlmToolChannelDecision> DecideToolChannelAsync(
+            LlmToolChannel setting,
+            ILlmToolChannelProbe probe,
+            LlmToolChannelProbeRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!LlmToolChannelResolution.RequiresProbe(setting))
+            {
+                return LlmToolChannelResolution.Resolve(setting, null);
+            }
+
+            LlmToolChannelProbeResult result;
+            try
+            {
+                result = await probe.ProbeAsync(request, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result = LlmToolChannelProbePolicy.Classify(0, "", ex.GetType().Name + ": " + ex.Message);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return LlmToolChannelResolution.Resolve(setting, result);
         }
 
         internal static OpenAiHttpOptions BuildHttpOptions(
@@ -313,9 +391,42 @@ namespace CoreAI.Infrastructure.Llm
                     throw;
                 }
 
+                // WHY: канал инструментов у llama.cpp ЕСТЬ — нативные tool_calls на его OpenAI-маршруте,
+                // если сервер запущен с jinja-шаблоном; без jinja сервер отвергает `tools` ошибкой
+                // «tools param requires --jinja flag». Компонент LLM у LLMUnity стартует сервер как
+                // StartServer(host, port, apiKey) — аргументов не передать, — поэтому ответ зависит от
+                // сборки LlamaLib, а не от нас: v2.0.5 из комплекта LLMUnity 3.0.3 включает jinja по
+                // умолчанию (проверено живым прогоном 2026-09-06). Раньше здесь стояла константа `false`
+                // с комментарием «у llama.cpp нет канала» — и локальный эндпойнт молча получал разбор
+                // прозы вместо нативного канала. Теперь канал объявляет конфигурация, а при Auto его
+                // устанавливает проба; результат и причина пишутся в лог ниже.
+                LlmToolChannelDecision toolChannel = await DecideToolChannelAsync(
+                    descriptor.ToolChannel,
+                    _toolChannelProbe,
+                    new LlmToolChannelProbeRequest
+                    {
+                        BaseUrl = http.ApiBaseUrl,
+                        ApiKey = sessionApiKey ?? "",
+                        Model = modelName
+                    },
+                    cancellationToken);
+                string toolChannelLine = LlmUnityActivationLog.ToolChannel(logContext, toolChannel);
+                if (toolChannel.Source == LlmToolChannelDecisionSource.ProbeInconclusive)
+                {
+                    _logger.LogWarning(GameLogFeature.Llm, toolChannelLine);
+                }
+                else
+                {
+                    _logger.LogInfo(GameLogFeature.Llm, toolChannelLine);
+                }
+
                 return new LlmEndpointClientActivation
                 {
-                    Client = new OpenAiChatLlmClient(http, _settings, _logger, _memoryStore),
+                    Client = new OpenAiChatLlmClient(http,
+                        _settings,
+                        _logger,
+                        supportsNativeToolCalling: toolChannel.Native,
+                        memoryStore: _memoryStore),
                     Mode = LlmExecutionMode.LocalModel,
                     ReleaseOwnedHostAsync = releaseOwnedHostAsync
                 };
@@ -633,6 +744,15 @@ namespace CoreAI.Infrastructure.Llm
         {
             return Format("http_readiness", "failed", context, durationMs, error);
         }
+
+#if COREAI_LLM
+        /// <summary>Выбранный канал инструментов и причина выбора — той же строкой, что и остальные фазы.</summary>
+        public static string ToolChannel(LlmUnityActivationLogContext context, LlmToolChannelDecision decision)
+        {
+            return Format("tool_channel", decision.ChannelName, context, null, null) +
+                   " reason=\"" + Safe(decision.Reason) + "\"";
+        }
+#endif
 
         private static string Format(
             string phase,

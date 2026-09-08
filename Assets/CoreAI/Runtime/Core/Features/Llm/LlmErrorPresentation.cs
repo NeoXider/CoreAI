@@ -1,40 +1,75 @@
 using System;
+using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Turns an LLM failure into two different strings: one for the PLAYER and one for the LOG.
+    /// Превращает сбой LLM в две разные строки: одну для ИГРОКА, другую для ЛОГА.
     ///
-    /// WHY: chat UIs used to paste <c>exception.Message</c> straight into the transcript, so a player
-    /// saw <c>HTTP error 403: {"error":{"message":"..."}}</c> — technical, often truncated, and useless
-    /// to them — while the log got the same short string and lost the provider body. This type splits
-    /// the two audiences:
+    /// ПОЧЕМУ: чат-UI когда-то вставлял <c>exception.Message</c> прямо в ленту, и игрок видел
+    /// <c>HTTP error 403: {"error":{"message":"..."}}</c> — технично, часто обрезано и бесполезно, —
+    /// а лог получал ту же короткую строку и терял тело ответа провайдера. Этот тип разводит аудитории:
     /// <list type="bullet">
-    /// <item><see cref="ToUserMessage(Exception, string)"/> — one readable sentence. A server-authored
-    ///   message wins (a gateway that already says "the teacher is unavailable, try again in a minute"
-    ///   knows the product better than this library); otherwise a per-<see cref="LlmErrorCode"/>
-    ///   phrase is used.</item>
-    /// <item><see cref="ToDiagnosticText"/> — everything worth keeping: error code, HTTP status,
-    ///   retry hint and the raw provider body.</item>
+    /// <item><see cref="ToUserMessage(Exception, string)"/> — одно читаемое предложение. Побеждает фраза,
+    ///   которую НАШ бэкенд написал для игрока (шлюз, уже сказавший «учитель недоступен, попробуй через
+    ///   минуту», знает продукт лучше библиотеки); иначе — фраза по <see cref="LlmErrorCode"/>.</item>
+    /// <item><see cref="ToDiagnosticText"/> — всё, что стоит сохранить: код ошибки, HTTP-статус,
+    ///   подсказка о повторе и сырое тело ответа провайдера.</item>
     /// </list>
-    /// Portable core: no Unity types, so the same mapping is available to any host or headless test.
+    /// <para>
+    /// <b>Авторство проверяется, а не предполагается.</b> Текст показывается игроку только когда тело
+    /// ошибки несёт канонический конверт бэкенда — строковые поля верхнего уровня <c>error_code</c>,
+    /// <c>request_id</c> и <c>message</c> (зеркало <c>error.message</c> принимается как носитель текста).
+    /// Сырой провайдер (OpenAI, Anthropic, Groq, OpenRouter, HTML-страница прокси) такой конверт не
+    /// эмитит, поэтому его <c>error.message</c> — на языке провайдера, с именами моделей, id организаций
+    /// и ссылками на биллинг — никогда не принимается за фразу для игрока. Голое
+    /// <c>HTTP error 503: …</c> из сообщения исключения — транспортный текст, он тоже не показывается.
+    /// Даже сообщение из конверта проходит фильтр шума (<see cref="IsPresentableToPlayer"/>): трасса
+    /// стека или traceback, просочившиеся в сообщение бэкенда, в ленту не попадают.
+    /// </para>
+    /// Портативное ядро: без типов Unity, одно и то же отображение доступно любому хосту и headless-тесту.
     /// </summary>
     public static class LlmErrorPresentation
     {
-        /// <summary>Fallback shown when nothing more specific is known.</summary>
+        /// <summary>Запасная фраза, когда ничего конкретнее не известно.</summary>
         public const string DefaultUserMessage =
             "The assistant is unavailable right now. Please try again in a moment.";
 
-        /// <summary>Longest server-authored message that is shown to the player as-is.</summary>
+        /// <summary>Самое длинное сообщение бэкенда, которое показывается игроку как есть.</summary>
         public const int MaxUserMessageLength = 400;
 
-        /// <summary>One readable sentence for the chat bubble. Never returns null or empty.</summary>
+        // ПОЧЕМУ: настоящая диагностика приходит в нескольких форматах, и ни один из них не «\n at »
+        // с одним пробелом:
+        //  - фреймы .NET — «\r\n   at Namespace.Type.Method(...)», ТРИ пробела после перевода строки;
+        //  - фреймы JavaScript — «\n    at fn (file.js:12:3)»;
+        //  - Python-traceback — «Traceback (most recent call last):» и «File "x.py", line 3»;
+        //  - сама строка исключения — «ValueError: …», «TypeError: Failed to fetch»,
+        //    «System.Net.Http.HttpRequestException: …».
+        // Любой из этих признаков означает, что текст написан для инженера, а не для игрока.
+        private static readonly Regex StackFramePattern = new(
+            @"(?:^|[\r\n])[ \t]*at[ \t]+\S",
+            RegexOptions.CultureInvariant);
+
+        private static readonly Regex PythonTracebackPattern = new(
+            @"Traceback \(most recent call last\)|File ""[^""]*"", line \d+",
+            RegexOptions.CultureInvariant);
+
+        private static readonly Regex ExceptionLinePattern = new(
+            @"(?:^|[\s(\[])[A-Za-z_][\w.]*(?:Exception|Error)\s*:",
+            RegexOptions.CultureInvariant);
+
+        /// <summary>Одно читаемое предложение для пузыря чата. Никогда не возвращает null или пустоту.</summary>
         public static string ToUserMessage(Exception exception, string fallback = null)
         {
             if (exception is LlmClientException llmException)
             {
                 return ToUserMessage(llmException, fallback);
+            }
+
+            if (exception is LlmOperationTimeoutException)
+            {
+                return ForErrorCode(LlmErrorCode.Timeout);
             }
 
             if (exception is OperationCanceledException)
@@ -45,7 +80,7 @@ namespace CoreAI.Ai
             return Coalesce(fallback, DefaultUserMessage);
         }
 
-        /// <summary>One readable sentence for the chat bubble, from a typed LLM failure.</summary>
+        /// <summary>Одно читаемое предложение для пузыря чата из типизированного сбоя LLM.</summary>
         public static string ToUserMessage(LlmClientException exception, string fallback = null)
         {
             if (exception == null)
@@ -53,21 +88,16 @@ namespace CoreAI.Ai
                 return Coalesce(fallback, DefaultUserMessage);
             }
 
-            // WHY: a 401 body can echo the submitted key/token back (providers do this), so its text
-            // never reaches the transcript — the player gets the "sign in again" phrase instead.
-            // Same rule as the redaction in the HTTP adapters; see MeaiOpenAiChatClient.BuildHttpException.
+            // ПОЧЕМУ: тело 401 может вернуть отправленный ключ/токен обратно (провайдеры так делают),
+            // поэтому его текст в ленту не попадает — игрок получает фразу «войдите заново».
+            // То же правило, что и редактирование в HTTP-адаптерах; см. MeaiOpenAiChatClient.BuildHttpException.
             if (IsAuthFailure(exception))
             {
                 return Coalesce(fallback, ForErrorCode(LlmErrorCode.AuthExpired));
             }
 
-            // A gateway/provider message aimed at the player wins over any built-in phrase.
-            string authored = ExtractProviderMessage(exception.ProviderErrorBody);
-            if (string.IsNullOrWhiteSpace(authored))
-            {
-                authored = StripHttpErrorPrefix(exception.Message);
-            }
-
+            // Победить встроенную фразу может только предложение, которое наш бэкенд написал для игрока.
+            string authored = ExtractBackendAuthoredMessage(exception.ProviderErrorBody);
             if (IsPresentableToPlayer(authored))
             {
                 return authored.Trim();
@@ -76,7 +106,7 @@ namespace CoreAI.Ai
             return Coalesce(fallback, ForErrorCode(exception.ErrorCode, exception.RetryAfterSeconds));
         }
 
-        /// <summary>Built-in phrase for a failure category; used when nobody authored a better one.</summary>
+        /// <summary>Встроенная фраза для категории сбоя; используется, когда никто не написал лучше.</summary>
         public static string ForErrorCode(LlmErrorCode errorCode, int? retryAfterSeconds = null)
         {
             string retryHint = retryAfterSeconds.HasValue && retryAfterSeconds.Value > 0
@@ -95,6 +125,8 @@ namespace CoreAI.Ai
                     return "The session has expired. Please sign in again.";
                 case LlmErrorCode.QuotaExceeded:
                     return "The assistant quota for this account is used up.";
+                case LlmErrorCode.ClientLimitExceeded:
+                    return "This session has reached its local assistant limit: too many requests, or a message that is too long.";
                 case LlmErrorCode.PaymentRequired:
                     return "The assistant account has run out of credit. Please tell the maintainer.";
                 case LlmErrorCode.PermanentProviderError:
@@ -115,8 +147,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Everything worth writing to the log: category, HTTP status, retry hint and the raw provider
-        /// body. Callers should log this ALONGSIDE the exception itself (which carries the stack trace).
+        /// Всё, что стоит записать в лог: категория, HTTP-статус, подсказка о повторе и сырое тело
+        /// ответа провайдера. Логировать ВМЕСТЕ с самим исключением (у него трасса стека).
         /// </summary>
         public static string ToDiagnosticText(Exception exception)
         {
@@ -129,8 +161,8 @@ namespace CoreAI.Ai
             string retry = llmException.RetryAfterSeconds.HasValue
                 ? $" retryAfter={llmException.RetryAfterSeconds.Value}s"
                 : "";
-            // Same redaction rule as the HTTP adapters: an auth-failure body can contain the key
-            // that was just sent, and logs travel further than the process.
+            // То же правило редактирования, что в HTTP-адаптерах: тело auth-ошибки может содержать
+            // только что отправленный ключ, а логи уезжают дальше процесса.
             string body;
             if (string.IsNullOrWhiteSpace(llmException.ProviderErrorBody))
             {
@@ -145,11 +177,19 @@ namespace CoreAI.Ai
                 body = $" body={llmException.ProviderErrorBody}";
             }
 
-            return $"code={llmException.ErrorCode}{status}{retry} message={llmException.Message}{body}";
+            string message = IsAuthFailure(llmException) ? "[redacted auth error message]" : llmException.Message;
+            return $"code={llmException.ErrorCode}{status}{retry} message={message}{body}";
         }
 
-        /// <summary>Reads <c>error.message</c> (OpenAI-compatible shape) out of a raw provider body.</summary>
-        public static string ExtractProviderMessage(string providerErrorBody)
+        /// <summary>
+        /// Предложение, которое наш бэкенд написал для игрока, либо "" — когда тело не является
+        /// каноническим конвертом бэкенда. Конверт узнаётся по строковым полям верхнего уровня
+        /// <c>error_code</c>, <c>request_id</c> и <c>message</c> (OpenAI-подобное зеркало
+        /// <c>error.message</c> тоже принимается как носитель текста). Голое
+        /// <c>{"error":{"message":…}}</c> возвращает любой провайдер и об авторстве не говорит ничего —
+        /// для него результат "".
+        /// </summary>
+        public static string ExtractBackendAuthoredMessage(string providerErrorBody)
         {
             if (string.IsNullOrWhiteSpace(providerErrorBody))
             {
@@ -159,25 +199,30 @@ namespace CoreAI.Ai
             try
             {
                 JObject parsed = JObject.Parse(providerErrorBody);
-                string message = parsed["error"]?["message"]?.ToString();
-                if (string.IsNullOrWhiteSpace(message))
+                if (!IsNonEmptyString(parsed["error_code"]) || !IsNonEmptyString(parsed["request_id"]))
                 {
-                    message = parsed["message"]?.ToString() ?? parsed["detail"]?.ToString();
+                    return "";
                 }
 
-                return string.IsNullOrWhiteSpace(message) ? "" : message.Trim();
+                JToken message = parsed["message"];
+                if (!IsNonEmptyString(message))
+                {
+                    message = parsed["error"]?["message"];
+                }
+
+                return IsNonEmptyString(message) ? message.ToString().Trim() : "";
             }
             catch (Exception)
             {
-                // Not JSON (HTML error page, proxy text, truncated body) — the caller falls back to
-                // the exception message, so a parse failure must never surface as a second error.
+                // Не JSON (HTML-страница ошибки, текст прокси, обрезанное тело): для игрока никто
+                // ничего не писал, а сбой разбора не должен всплыть второй ошибкой.
                 return "";
             }
         }
 
         /// <summary>
-        /// Drops the <c>HTTP error 403: </c> prefix that HTTP adapters put in front of the provider text,
-        /// so a message authored for the player is not shown with transport noise in front of it.
+        /// Снимает префикс <c>HTTP error 403: </c>, который HTTP-адаптеры ставят перед текстом
+        /// провайдера. Диагностический помощник: остаток — текст провайдера, сам по себе он не для игрока.
         /// </summary>
         public static string StripHttpErrorPrefix(string message)
         {
@@ -199,10 +244,11 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Is this string something a player should read? JSON dumps, stack traces and novel-length
-        /// bodies are diagnostics, not UI text — those fall back to the built-in phrase.
+        /// Можно ли это показать игроку? JSON-дампы, трассы стека, traceback'и, строки исключений и
+        /// тела размером с повесть — диагностика, а не текст UI; для них берётся встроенная фраза.
+        /// Публичный, чтобы хосты с собственным рендером ошибок применяли тот же фильтр.
         /// </summary>
-        private static bool IsPresentableToPlayer(string message)
+        public static bool IsPresentableToPlayer(string message)
         {
             if (string.IsNullOrWhiteSpace(message) || message.Length > MaxUserMessageLength)
             {
@@ -216,14 +262,25 @@ namespace CoreAI.Ai
                 return false;
             }
 
-            return !trimmed.Contains("\n at ", StringComparison.Ordinal)
-                   && !trimmed.Contains("Exception:", StringComparison.Ordinal);
+            return !StackFramePattern.IsMatch(trimmed)
+                   && !PythonTracebackPattern.IsMatch(trimmed)
+                   && !ExceptionLinePattern.IsMatch(trimmed);
         }
 
-        /// <summary>401-class failure: its body is treated as secret-bearing everywhere.</summary>
+        /// <summary>
+        /// Сбой класса 401: его тело везде считается носителем секрета. Достаточно ЛЮБОГО из двух
+        /// признаков — адаптер может классифицировать 401 как <see cref="LlmErrorCode.AuthExpired"/>
+        /// без статуса или передать статус под другим кодом.
+        /// </summary>
         private static bool IsAuthFailure(LlmClientException exception)
         {
             return exception.HttpStatus == 401 || exception.ErrorCode == LlmErrorCode.AuthExpired;
+        }
+
+        private static bool IsNonEmptyString(JToken token)
+        {
+            return token != null && token.Type == JTokenType.String &&
+                   !string.IsNullOrWhiteSpace(token.ToString());
         }
 
         private static string Coalesce(string preferred, string fallback)

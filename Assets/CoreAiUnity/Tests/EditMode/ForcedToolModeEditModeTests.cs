@@ -311,9 +311,11 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("Pass arguments as structured tool arguments", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("After a tool succeeds", llm.LastRequest.SystemPrompt);
             StringAssert.DoesNotContain("Available tools:", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("Role tool definitions:", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("schema:", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("itemName", llm.LastRequest.SystemPrompt);
+            // On a native endpoint the definitions travel in the provider's tool list; a second,
+            // hand-written copy in the prefix diverged from it and was paid for on every request.
+            StringAssert.DoesNotContain("Role tool definitions:", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("schema:", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("itemName", llm.LastRequest.SystemPrompt);
             StringAssert.DoesNotContain("include a parseable JSON object", llm.LastRequest.SystemPrompt);
             StringAssert.DoesNotContain("Example memory tool call", llm.LastRequest.SystemPrompt);
             string availability = RequestToolAvailability(llm.LastRequest);

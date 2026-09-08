@@ -177,7 +177,13 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     LlmStreamChunk chunk = enumerator.Current;
-                    if (!string.IsNullOrEmpty(chunk.Error) && IsRetryableError(chunk.ErrorCode))
+                    // WHY: Ошибочный чанк, несущий ExecutedToolCalls, — это ход, в котором инструмент уже
+                    // сработал; запуск на secondary исполнил бы его второй раз. Проверка идёт до кода
+                    // ошибки, а не после: иначе она держится на том, что производитель чанка оставил
+                    // ErrorCode = None, то есть на чужом упущении, а не на контракте.
+                    if (!string.IsNullOrEmpty(chunk.Error) &&
+                        IsRetryableError(chunk.ErrorCode) &&
+                        !HasExecutedToolCalls(chunk))
                     {
                         _logger.Warn(
                             $"[Fallback] Primary streaming error chunk ({chunk.ErrorCode}), falling back to secondary.",
@@ -243,7 +249,17 @@ namespace CoreAI.Infrastructure.Llm
         {
             return !string.IsNullOrEmpty(chunk.Text) ||
                    !string.IsNullOrEmpty(chunk.Error) ||
-                   (chunk.ExecutedToolCalls != null && chunk.ExecutedToolCalls.Count > 0);
+                   HasExecutedToolCalls(chunk);
+        }
+
+        /// <summary>
+        /// Потоковый аналог <see cref="HasExecutedToolCalls(LlmCompletionResult)"/>, но строже: любой трейс
+        /// считается исполнением. У чанка нет отдельного результата, по которому можно было бы отделить
+        /// отклонённый вызов от сработавшего, поэтому здесь безопаснее не переигрывать вовсе.
+        /// </summary>
+        private static bool HasExecutedToolCalls(LlmStreamChunk chunk)
+        {
+            return chunk.ExecutedToolCalls != null && chunk.ExecutedToolCalls.Count > 0;
         }
 
         /// <summary>

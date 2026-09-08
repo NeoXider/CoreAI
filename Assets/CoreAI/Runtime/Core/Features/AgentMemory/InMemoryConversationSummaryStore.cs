@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CoreAI.Ai
 {
@@ -7,7 +9,7 @@ namespace CoreAI.Ai
     /// Process-wide summary store for <see cref="DeterministicConversationContextManager"/>.
     /// Keeps accumulated <c>## Conversation Summary</c> text per role in memory until cleared or the process exits.
     /// </summary>
-    public sealed class InMemoryConversationSummaryStore : IConversationSummaryStore
+    public sealed class InMemoryConversationSummaryStore : IConversationSummaryStore, IAsyncConversationSummaryStore
     {
         private readonly object _lock = new();
 
@@ -27,6 +29,13 @@ namespace CoreAI.Ai
             {
                 return _byRole.TryGetValue(key, out string s) ? s : "";
             }
+        }
+
+        /// <inheritdoc />
+        public Task<string> LoadSummaryAsync(string roleId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(LoadSummary(roleId));
         }
 
         /// <inheritdoc />
@@ -52,6 +61,14 @@ namespace CoreAI.Ai
         }
 
         /// <inheritdoc />
+        public Task SaveSummaryAsync(string roleId, string summary, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SaveSummary(roleId, summary);
+            return Task.CompletedTask;
+        }
+
+        /// <inheritdoc />
         public void ClearSummary(string roleId)
         {
             if (string.IsNullOrWhiteSpace(roleId))
@@ -64,6 +81,14 @@ namespace CoreAI.Ai
             {
                 _byRole.Remove(key);
             }
+        }
+
+        /// <inheritdoc />
+        public Task ClearSummaryAsync(string roleId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ClearSummary(roleId);
+            return Task.CompletedTask;
         }
     }
 }

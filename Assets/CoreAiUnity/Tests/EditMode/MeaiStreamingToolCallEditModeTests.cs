@@ -54,7 +54,7 @@ namespace CoreAI.Tests.EditMode
                 new[] { "Before {\"name\":\"memory\",\"arguments\":{\"action\":\"write\"" },
                 new[] { "Retry complete." });
             RecordingLogger logger = new();
-            MeaiLlmClient client = new(inner, logger, new StubSettings(), null);
+            MeaiLlmClient client = new(inner, logger, new StubSettings(), supportsNativeToolCalling: false, memoryStore: null);
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
@@ -86,7 +86,7 @@ namespace CoreAI.Tests.EditMode
             StreamingScripted inner = new(
                 new[] { "Before {\"name\":\"memory\",\"arguments\":{\"action\":\"write\"" },
                 new[] { "Retry complete." });
-            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), null);
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: false, memoryStore: null);
 
             List<LlmStreamChunk> visible = new();
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
@@ -122,7 +122,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteStreamingAsync_SingleIteration_NeverFlagsNewMessage()
         {
             StreamingScripted inner = new(new[] { "Привет, ", "как дела?" });
-            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), null);
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
@@ -146,7 +146,7 @@ namespace CoreAI.Tests.EditMode
                 "<think>{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"x\"}}</think>";
             StreamingScripted inner = new(new[] { hiddenTool, "Done." });
             RecordingLogger logger = new();
-            MeaiLlmClient client = new(inner, logger, new StubSettings(), null);
+            MeaiLlmClient client = new(inner, logger, new StubSettings(), supportsNativeToolCalling: false, memoryStore: null);
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
@@ -173,7 +173,7 @@ namespace CoreAI.Tests.EditMode
             FlagTool tool = new("world_tool");
             NativeToolCallScripted inner = new(() => tool.Executed);
             RecordingLogger logger = new();
-            MeaiLlmClient client = new(inner, logger, new StubSettings(), null);
+            MeaiLlmClient client = new(inner, logger, new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
@@ -196,6 +196,242 @@ namespace CoreAI.Tests.EditMode
             Assert.That(string.Concat(chunks.Select(c => c.Text)), Does.Contain("Done."));
         }
 
+        private const string ToolCallShapedExample = "{\"name\":\"world_tool\",\"arguments\":{}}";
+
+        /// <summary>
+        /// The defect this guards: a teacher explaining JSON writes an object shaped exactly like a tool
+        /// call — the everyday job of a programming tutor, not an anomaly — and the engine used to read the
+        /// model's PROSE for calls no matter which channel the endpoint offered. The example got executed
+        /// instead of explained. Where a native tool channel exists, calls arrive on it, and text is text.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_NativeChannel_JsonExampleInProse_IsShownNotExecuted()
+        {
+            FlagTool tool = new("world_tool");
+            StreamingScripted inner = new(new[]
+            {
+                "Вызов инструмента выглядит так: ", ToolCallShapedExample, " — просто пример."
+            });
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
+
+            System.Text.StringBuilder visible = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "объясни",
+                               Tools = new List<ILlmTool> { tool }
+                           }, CancellationToken.None))
+            {
+                visible.Append(chunk.Text ?? "");
+            }
+
+            Assert.IsFalse(tool.Executed,
+                "An example of a call written in prose must never run on an endpoint with a native channel.");
+            Assert.AreEqual(
+                "Вызов инструмента выглядит так: " + ToolCallShapedExample + " — просто пример.",
+                visible.ToString(),
+                "The learner must read the example exactly as the teacher wrote it.");
+        }
+
+        /// <summary>
+        /// The mirror of the case above, and the regression that nearly shipped beside it: with no native
+        /// channel a text-shaped call is the ONLY way the model can call a tool. A local llama.cpp /
+        /// LLMUnity server speaks the same OpenAI HTTP dialect as a remote endpoint, so if its client were
+        /// created as "native" the gate would disable every one of its tools SILENTLY — no error, the call
+        /// simply never happens. That is why the channel is declared where the endpoint is built
+        /// (`supportsNativeToolCalling: false` for LLMUnity) and why this case is asserted.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_FallbackChannel_JsonInProse_StillCallsTheTool()
+        {
+            FlagTool tool = new("world_tool");
+            StreamingScripted inner = new(
+                new[] { "Вызываю: ", ToolCallShapedExample },
+                new[] { "Готово." });
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: false, memoryStore: null);
+
+            await foreach (LlmStreamChunk _ in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "сделай",
+                               Tools = new List<ILlmTool> { tool }
+                           }, CancellationToken.None))
+            {
+            }
+
+            Assert.IsTrue(tool.Executed,
+                "Without a native channel a text-shaped call is a real call and must still execute.");
+        }
+
+        /// <summary>
+        /// The escape hatch for an endpoint that advertises a native channel and then answers with JSON in
+        /// the text. It is opt-in per request precisely because the safe default cannot be the one that
+        /// executes examples.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_NativeChannel_WithExplicitOptIn_ReadsProseAgain()
+        {
+            FlagTool tool = new("world_tool");
+            StreamingScripted inner = new(
+                new[] { "Вызываю: ", ToolCallShapedExample },
+                new[] { "Готово." });
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
+
+            await foreach (LlmStreamChunk _ in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "сделай",
+                               Tools = new List<ILlmTool> { tool },
+                               AllowTextShapedToolCallsOnNativeEndpoint = true
+                           }, CancellationToken.None))
+            {
+            }
+
+            Assert.IsTrue(tool.Executed,
+                "The opt-in exists for endpoints that lie about their tool channel; it must actually work.");
+        }
+
+        /// <summary>
+        /// The same defect on the non-streaming path, which runs its own agentic loop
+        /// (<c>SmartToolCallingChatClient</c>) with its own copy of the text extraction.
+        /// </summary>
+        [Test]
+        public async Task CompleteAsync_NativeChannel_JsonExampleInProse_IsShownNotExecuted()
+        {
+            FlagTool tool = new("world_tool");
+            SingleAnswerChatClient inner = new(
+                "Вызов выглядит так: " + ToolCallShapedExample + " — это пример.");
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
+
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Role",
+                SystemPrompt = "sys",
+                UserPayload = "объясни",
+                Tools = new List<ILlmTool> { tool }
+            }, CancellationToken.None);
+
+            Assert.IsFalse(tool.Executed, "The non-streaming loop must judge by channel too.");
+            StringAssert.Contains(ToolCallShapedExample, result.Content,
+                "The example must survive into the answer instead of being taken for a call.");
+        }
+
+        /// <summary>Answers one fixed assistant text and never emits a tool call of its own.</summary>
+        private sealed class SingleAnswerChatClient : MEAI.IChatClient
+        {
+            private readonly string _text;
+
+            public SingleAnswerChatClient(string text)
+            {
+                _text = text;
+            }
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new MEAI.ChatResponse(
+                    new MEAI.ChatMessage(MEAI.ChatRole.Assistant, _text)));
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                await Task.Yield();
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, _text);
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        /// <summary>
+        /// On an endpoint with a native tool channel the text must flow as it is generated. The hold that
+        /// waits for a possible text-shaped tool call starts at the first still-open <c>{</c> — and a
+        /// teacher of Python types <c>{</c> constantly (a dict, a set, an f-string), so on the main path it
+        /// froze prose mid-sentence and then delivered it in a lump. Nothing is held here, and the client
+        /// does not announce buffering it is not doing.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_NativeToolCalling_StreamsProseWithBracesAsItArrives()
+        {
+            StreamingScripted inner = new(new[] { "Пиши так: ", "{\"ключ\": ", "значение" });
+            MeaiLlmClient client = new(inner,
+                new RecordingLogger(),
+                new StubSettings(),
+                supportsNativeToolCalling: true,
+                memoryStore: null);
+
+            List<LlmStreamChunk> visible = new();
+            bool announcedBuffering = false;
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { new TestTool("memory") }
+                           }, CancellationToken.None))
+            {
+                announcedBuffering |= chunk.BufferedStreamingNoToolBinding;
+                if (!string.IsNullOrEmpty(chunk.Text))
+                {
+                    visible.Add(chunk);
+                }
+            }
+
+            Assert.IsFalse(announcedBuffering,
+                "Buffering must not be announced on a path that does not buffer.");
+            Assert.GreaterOrEqual(visible.Count, 3,
+                "Each provider delta must reach the reader on its own, including the one opening a brace.");
+            Assert.AreEqual("Пиши так: {\"ключ\": значение", string.Concat(visible.Select(c => c.Text)));
+        }
+
+        /// <summary>
+        /// The same script on the fallback path: with no native tool channel a text-shaped call is how the
+        /// model calls tools at all, so half a JSON object must not reach the reader. The hold stays here —
+        /// and only here.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_WithoutNativeToolCalling_HoldsTheUnfinishedBrace()
+        {
+            StreamingScripted inner = new(new[] { "Пиши так: ", "{\"ключ\": ", "значение" });
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: false, memoryStore: null);
+
+            List<LlmStreamChunk> visible = new();
+            bool announcedBuffering = false;
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { new TestTool("memory") }
+                           }, CancellationToken.None))
+            {
+                announcedBuffering |= chunk.BufferedStreamingNoToolBinding;
+                if (!string.IsNullOrEmpty(chunk.Text))
+                {
+                    visible.Add(chunk);
+                }
+            }
+
+            Assert.IsTrue(announcedBuffering, "The fallback path still tells the consumer it holds text.");
+            Assert.AreEqual("Пиши так: ", visible[0].Text,
+                "Prose before the brace still streams; the hold starts at the brace, not before it.");
+            Assert.AreEqual("Пиши так: {\"ключ\": значение", string.Concat(visible.Select(c => c.Text)),
+                "Held text is released, never lost.");
+        }
+
         [Test]
         public async Task CompleteStreamingAsync_StreamThrowsAfterExecutedToolCall_YieldsTerminalErrorChunkWithTraces()
         {
@@ -205,7 +441,7 @@ namespace CoreAI.Tests.EditMode
                 ThrowAfterToolCall = new InvalidOperationException("connection reset")
             };
             RecordingLogger logger = new();
-            MeaiLlmClient client = new(inner, logger, new StubSettings(), null);
+            MeaiLlmClient client = new(inner, logger, new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             // Draining without a try/catch is part of the assertion: the partially-applied
             // turn must surface as a terminal chunk, never as an escaping transport exception.
@@ -241,7 +477,7 @@ namespace CoreAI.Tests.EditMode
                 SuppressFirstTail = true,
                 ThrowOnSecondStreamBeforeContent = true
             };
-            MeaiLlmClient meai = new(inner, new RecordingLogger(), new StubSettings(), null);
+            MeaiLlmClient meai = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
             RetryingStreamingLlmClientDecorator client = new(meai, 1);
 
             List<LlmStreamChunk> chunks = new();
@@ -263,37 +499,6 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task CompleteStreamingAsync_NativeToolWithBufferedEcho_StripsEmbeddedToolJson()
-        {
-            FlagTool tool = new("world_tool");
-            NativeToolCallScripted inner = new(() => tool.Executed)
-            {
-                SuppressFirstTail = true,
-                FirstVisibleText =
-                    "Working {\"name\":\"world_tool\",\"arguments\":{\"value\":1}}"
-            };
-            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), null);
-
-            List<LlmStreamChunk> chunks = new();
-            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
-                           {
-                               AgentRoleId = "Role",
-                               SystemPrompt = "sys",
-                               UserPayload = "go",
-                               Tools = new List<ILlmTool> { tool },
-                               BufferFullStreamingIterationWhenToolsDeclared = true
-                           }, CancellationToken.None))
-            {
-                chunks.Add(chunk);
-            }
-
-            string visible = string.Concat(chunks.Select(c => c.Text));
-            Assert.That(visible, Does.Contain("Working"));
-            Assert.That(visible, Does.Not.Contain("\"name\""));
-            Assert.That(visible, Does.Not.Contain("\"arguments\""));
-        }
-
-        [Test]
         public async Task CompleteStreamingAsync_RoundtripCapSummary_SumsUsageOnTerminalChunk()
         {
             FlagTool tool = new("world_tool");
@@ -302,7 +507,7 @@ namespace CoreAI.Tests.EditMode
                 SuppressFirstTail = true,
                 EmitUsage = true
             };
-            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), null);
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
@@ -329,7 +534,7 @@ namespace CoreAI.Tests.EditMode
             FlagTool tool = new("world_tool");
             NativeToolCallScripted inner = new(() => tool.Executed) { ThrowImmediately = true };
             RecordingLogger logger = new();
-            MeaiLlmClient client = new(inner, logger, new StubSettings(), null);
+            MeaiLlmClient client = new(inner, logger, new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             // async Task + try/catch instead of Assert.ThrowsAsync: ThrowsAsync blocks the Unity
             // main thread while the awaited chain (Runtime code without ConfigureAwait(false))
@@ -371,7 +576,7 @@ namespace CoreAI.Tests.EditMode
                 ThrowAfterToolCall = new OperationCanceledException()
             };
             RecordingLogger logger = new();
-            MeaiLlmClient client = new(inner, logger, new StubSettings(), null);
+            MeaiLlmClient client = new(inner, logger, new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             // async Task + try/catch instead of Assert.CatchAsync (which would block the Unity main
             // thread - EditMode sync-over-async deadlock); the catch accepts derived cancellation
@@ -412,7 +617,7 @@ namespace CoreAI.Tests.EditMode
             OverlappingToolPair pair = new();
             TwoNativeToolCallsScripted inner = new();
             RecordingLogger logger = new();
-            MeaiLlmClient client = new(inner, logger, new StubSettings { MaxParallelToolCalls = 4 }, null);
+            MeaiLlmClient client = new(inner, logger, new StubSettings { MaxParallelToolCalls = 4 }, supportsNativeToolCalling: true, memoryStore: null);
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
@@ -460,6 +665,125 @@ namespace CoreAI.Tests.EditMode
                 "<think>{\"name\":\"memory\",\"arguments\":{\"action\":\"read\"}}</think>"));
         }
 
+        /// <summary>
+        /// Native path: a tool declaring <c>EndsTurn</c> that SUCCEEDED closes the streamed turn — the
+        /// stream must not be reopened for a roundtrip in which the model writes its reaction to an answer
+        /// the student has not given yet. The prose said before the call stays visible, and the terminal
+        /// chunk carries the traces and usage fields exactly like every other clean end of the loop.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_TurnEndingToolSucceeded_ClosesTurnWithoutAnotherRoundtrip()
+        {
+            FlagTool tool = new("world_tool") { EndsTurn = true };
+            NativeToolCallScripted inner = new(() => tool.Executed)
+            {
+                SuppressFirstTail = true,
+                EmitUsage = true,
+                FirstVisibleText = "Проверь себя:"
+            };
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { tool }
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(1, inner.StreamCalls,
+                "The tool result must NOT be sent back: the second roundtrip may never start.");
+            string visible = string.Concat(chunks.Select(c => c.Text));
+            StringAssert.Contains("Проверь себя", visible,
+                "Prose said before the turn-ending call must reach the student.");
+            StringAssert.DoesNotContain("Done.", visible,
+                "Nothing from the roundtrip that must not happen may appear.");
+
+            LlmStreamChunk last = chunks.Last();
+            Assert.IsTrue(last.IsDone);
+            Assert.IsTrue(string.IsNullOrEmpty(last.Error), $"Unexpected error: {last.Error}");
+            Assert.IsTrue(last.ExecutedToolCalls.Any(t => t.Name == "world_tool" && t.Success),
+                "The executed call's trace must ride the terminal chunk (the tool-only completion line " +
+                "upstream is synthesized from it).");
+            Assert.AreEqual(2, last.PromptTokens,
+                "The terminal chunk must carry usage like every other end of the loop, or the turn reads " +
+                "as zero-token to the accounting.");
+            Assert.AreEqual(3, last.CompletionTokens);
+            Assert.AreEqual(5, last.TotalTokens);
+        }
+
+        /// <summary>
+        /// Text-extraction path (local models emit tool calls as JSON in the assistant text): the same
+        /// turn-ending rule holds there, otherwise the defect simply moves to the other branch.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_TurnEndingToolFromText_ClosesTurnAndKeepsProse()
+        {
+            StreamingScripted inner = new(
+                new[] { "Проверь себя: ", "{\"name\":\"quiz_tool\",\"arguments\":{\"question\":\"2+2\"}}" },
+                new[] { "Верно!" });
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: false, memoryStore: null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool>
+                               {
+                                   new TurnEndingTextTool("quiz_tool",
+                                       "{\"success\":true,\"status\":\"card_shown_waiting_for_student\"}")
+                               }
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            string visible = string.Concat(chunks.Select(c => c.Text));
+            StringAssert.Contains("Проверь себя", visible);
+            StringAssert.DoesNotContain("Верно", visible,
+                "The turn ended on the card; the model gets no roundtrip to grade an unanswered question.");
+            Assert.IsTrue(chunks.Last().ExecutedToolCalls.Any(t => t.Name == "quiz_tool" && t.Success));
+        }
+
+        /// <summary>
+        /// A FAILED turn-ending tool must keep the ordinary loop: the error result is the only thing the
+        /// model can recover from, and a student left in front of a card that was never shown is worse
+        /// than one extra roundtrip.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_TurnEndingToolFailed_KeepsTheRecoveryRoundtrip()
+        {
+            StreamingScripted inner = new(
+                new[] { "Проверь себя: ", "{\"name\":\"quiz_tool\",\"arguments\":{\"question\":\"2+2\"}}" },
+                new[] { "Карточка не открылась, разберём вслух." });
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool>
+                               {
+                                   new TurnEndingTextTool("quiz_tool",
+                                       "{\"Success\":false,\"Error\":\"no card prefab\"}")
+                               }
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            StringAssert.Contains("разберём вслух", string.Concat(chunks.Select(c => c.Text)),
+                "A failed turn-ending tool must still get its recovery roundtrip.");
+        }
+
         private static MEAI.AIFunction MakeAIFunction(string name)
         {
             Func<CancellationToken, Task<string>> func =
@@ -486,6 +810,34 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Tool that hands control to a human: its AIFunction returns the configured result payload and
+        /// the tool declares that a successful call ENDS the model's turn.
+        /// </summary>
+        private sealed class TurnEndingTextTool : ILlmTool, IAIFunctionLlmTool
+        {
+            private readonly string _resultJson;
+
+            public TurnEndingTextTool(string name, string resultJson)
+            {
+                Name = name;
+                _resultJson = resultJson;
+            }
+
+            public string Name { get; }
+            public string Description => "shows a card and waits for the student";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => true;
+            public bool EndsTurn => true;
+
+            public MEAI.AIFunction CreateAIFunction()
+            {
+                Func<CancellationToken, Task<string>> func = _ => Task.FromResult(_resultJson);
+                return MEAI.AIFunctionFactory.Create(func,
+                    new MEAI.AIFunctionFactoryOptions { Name = Name, Description = Description });
+            }
+        }
+
         /// <summary>Tool whose AIFunction flips a flag when it actually executes.</summary>
         private sealed class FlagTool : ILlmTool, IAIFunctionLlmTool
         {
@@ -500,6 +852,9 @@ namespace CoreAI.Tests.EditMode
             public string Description => "flag tool";
             public string ParametersSchema => "{}";
             public bool AllowDuplicates => true;
+
+            /// <summary>Set per test: most cases keep the default (a tool that does not end the turn).</summary>
+            public bool EndsTurn { get; set; }
 
             public MEAI.AIFunction CreateAIFunction()
             {

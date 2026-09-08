@@ -45,6 +45,51 @@ namespace CoreAI.Ai
 
     internal static class SkillSetToolResolver
     {
+        internal static IReadOnlyCollection<string> IntersectAllowlist(IReadOnlyCollection<string> current,
+            IReadOnlyCollection<string> requested)
+        {
+            if (current == null)
+            {
+                return requested == null ? null : new List<string>(requested).AsReadOnly();
+            }
+            if (requested == null)
+            {
+                return new List<string>(current).AsReadOnly();
+            }
+            HashSet<string> allowed = new(current, StringComparer.OrdinalIgnoreCase);
+            List<string> result = new();
+            foreach (string name in requested)
+            {
+                if (name != null && allowed.Contains(name.Trim()))
+                {
+                    result.Add(name.Trim());
+                }
+            }
+            return result.AsReadOnly();
+        }
+
+        internal static void ValidateCatalog(IReadOnlyList<SkillSet> skills)
+        {
+            HashSet<string> skillNames = new(StringComparer.OrdinalIgnoreCase);
+            foreach (SkillSet skill in skills)
+            {
+                if (skill != null && !skillNames.Add(skill.Name))
+                {
+                    throw new ArgumentException($"Duplicate skill name '{skill.Name}'.", nameof(skills));
+                }
+            }
+            Dictionary<string, ILlmTool> bindings = new(StringComparer.OrdinalIgnoreCase);
+            foreach (SkillToolDescriptor descriptor in BuildDescriptors(skills))
+            {
+                if (bindings.TryGetValue(descriptor.Name, out ILlmTool existing) &&
+                    !ReferenceEquals(existing, descriptor.SourceTool))
+                {
+                    throw new ArgumentException($"Skill tool name '{descriptor.Name}' has conflicting bindings.", nameof(skills));
+                }
+                bindings[descriptor.Name] = descriptor.SourceTool;
+            }
+        }
+
         public static IReadOnlyList<SkillToolDescriptor> BuildDescriptors(IReadOnlyList<SkillSet> skills)
         {
             List<SkillToolDescriptor> descriptors = new();
@@ -129,7 +174,9 @@ namespace CoreAI.Ai
             JObject args = JObject.Parse(json);
             foreach (KeyValuePair<string, JToken> prop in args)
             {
-                normalized[prop.Key] = NormalizeToken(prop.Value);
+                // WHY: shared chokepoint (LlmToolArgumentNormalizer) — same rule as the
+                // native policy and the text-extracted path.
+                normalized[prop.Key] = LlmToolArgumentNormalizer.NormalizeValue(prop.Value);
             }
 
             return new AIFunctionArguments(normalized);
@@ -346,21 +393,6 @@ namespace CoreAI.Ai
             {
                 return fallback ?? "{}";
             }
-        }
-
-        private static object NormalizeToken(JToken token)
-        {
-            if (token == null || token.Type == JTokenType.Null || token.Type == JTokenType.Undefined)
-            {
-                return null;
-            }
-
-            if (token.Type == JTokenType.Object || token.Type == JTokenType.Array)
-            {
-                return token.ToString(Formatting.None);
-            }
-
-            return token is JValue value ? value.Value : token.ToObject<object>();
         }
 
         private static string SerializeJsonElement(JsonElement element)

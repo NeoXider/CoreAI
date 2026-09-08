@@ -187,6 +187,33 @@ physics, real timing, or anything requiring `isPlaying`.
 
 ---
 
+## B3. WebGL: save queue and IndexedDB acknowledgement
+
+The JavaScript boundary check runs without Unity:
+
+```sh
+node Assets/CoreAiUnity/Tests/Node~/persist_fs_jslib_test.js
+```
+
+The test loads the real `CoreAiPersistFs.jslib`; only `FS.syncfs`, the scheduler,
+clocks, and the Emscripten pointer call are stubbed. It checks distinct callback pointers, acknowledgement
+ordering, errors, cancellation in every state, and the memory cap. This is a bridge-contract
+check, **not proof of a write into a real browser's IndexedDB**.
+
+`CoreAiWebGlPersistence.Sync()` reports only request acceptance; `false` means the request
+was refused queueing or a flush could not start. `SyncAsync()` is required to confirm persistence.
+A physical flush error is published once, including requests with no pending callback.
+
+One flush runs at a time and one next-flush intent is stored. At most 64 requests await
+acknowledgement: `PendingRequestCount` also counts callbacks
+already picked by the scheduler but not yet started. Cancellation frees their slots and
+suppresses the late callback while keeping the flush itself and the intent to write data.
+`PendingFlushCount` shows 0, 1, or 2 required flushes.
+
+One scheduler task invokes at most 8 callbacks and checks the 2 ms budget between them.
+A callback itself is never interrupted; acknowledgements it enqueues are handled by the next task.
+Without an async scheduler the request is rejected; there is no synchronous recursive walk.
+
 # Part C — PlayMode
 
 PlayMode assemblies live under `Assets/CoreAiUnity/Tests/PlayMode/` and replace the legacy

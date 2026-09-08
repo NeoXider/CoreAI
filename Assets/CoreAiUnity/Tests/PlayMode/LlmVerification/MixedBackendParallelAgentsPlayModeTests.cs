@@ -75,7 +75,7 @@ namespace CoreAI.Tests.PlayMode
             _httpSettings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             _httpSettings.ConfigureClientOwnedApi(http.BaseUrl, http.ApiKey, http.Model, timeoutSeconds: 120);
             InMemoryStore httpStore = new();
-            ILlmClient httpClient = MeaiLlmClient.CreateHttp(_httpSettings, logger, httpStore);
+            ILlmClient httpClient = MeaiLlmClient.CreateHttp(_httpSettings, logger, supportsNativeToolCalling: true, memoryStore: httpStore);
             AiOrchestrator httpAgent = BuildOrchestrator(httpClient, httpStore, _httpSettings);
 
             // --- Fire BOTH agent turns without awaiting, so they overlap on the wire. ---

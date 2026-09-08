@@ -46,7 +46,7 @@ namespace CoreAI.Mcp.Tests
                 string.Join(",", Enumerable.Range(0, 20)
                     .Select(i => $"\"param_{i:00}\":{{\"type\":\"string\"," +
                                   $"\"description\":\"Parameter number {i} with a long-winded explanation of " +
-                                  "its purpose, valid values, defaults, and interactions with other parameters.\"}}")) +
+                                  "its purpose, valid values, defaults, and interactions with other parameters.\"}")) +
                 "}}";
 
             public Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)

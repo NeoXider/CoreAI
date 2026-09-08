@@ -176,7 +176,8 @@ namespace CoreAI.Infrastructure.Llm
                 MaxTokens = source.MaxTokens,
                 ReasoningMode = source.ReasoningMode,
                 ThinkingBudgetTokens = source.ThinkingBudgetTokens,
-                ExtraBodyJson = source.ExtraBodyJson ?? ""
+                ExtraBodyJson = source.ExtraBodyJson ?? "",
+                ToolChannel = source.ToolChannel
             };
         }
 

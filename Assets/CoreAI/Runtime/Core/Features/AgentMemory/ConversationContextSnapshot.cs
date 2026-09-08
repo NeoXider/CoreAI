@@ -5,6 +5,7 @@ namespace CoreAI.Ai
     /// </summary>
     public sealed class ConversationContextSnapshot
     {
+        private readonly object _commitGate = new();
         /// <summary>Summary of older messages that were compacted out of the live chat window.</summary>
         public string Summary { get; set; } = "";
 
@@ -18,9 +19,13 @@ namespace CoreAI.Ai
 
         internal void Commit()
         {
-            System.Action commit = CommitSummary;
-            CommitSummary = null;
-            commit?.Invoke();
+            lock (_commitGate)
+            {
+                // WHY: A failed durable write remains retryable; concurrent consumers cannot publish
+                // the same summary twice after one of them has committed it successfully.
+                CommitSummary?.Invoke();
+                CommitSummary = null;
+            }
         }
     }
 }

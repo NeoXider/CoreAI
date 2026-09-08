@@ -1,4 +1,4 @@
-﻿#if COREAI_LLM
+#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,13 +9,12 @@ using CoreAI.Ai;
 using CoreAI.Logging;
 using MEAI = Microsoft.Extensions.AI;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Custom tool-calling loop: error counter resets on success, increments on failure.
-    /// Delegates duplicate detection, error tracking and notification to <see cref="ToolExecutionPolicy"/>.
+    /// MEAI native function loop with CoreAI policy hooks; a host-context fallback supports threadless WebGL.
+    /// Duplicate detection, error tracking and notification belong to <see cref="ToolExecutionPolicy"/>.
     /// </summary>
     public sealed class SmartToolCallingChatClient : MEAI.IChatClient
     {
@@ -31,19 +30,31 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IToolCallEventPublisher _eventPublisher;
         private readonly IToolExecutionNotifier _notifier;
         private readonly int? _maxRoundtripsOverride;
+        private readonly bool _allowTextShapedToolCalls;
 
         /// <param name="maxConsecutiveErrors">How many failures in a row are allowed before aborting.</param>
         /// <param name="maxRoundtripsOverride">
         /// Per-request override for the tool-call roundtrip cap. <c>null</c> = inherit
         /// <see cref="ICoreAISettings.MaxToolCallRoundtrips"/>; <c>0</c> = UNLIMITED; positive = that cap.
         /// </param>
+        /// <param name="allowTextShapedToolCalls">
+        /// Whether the assistant's PROSE may be read as tool calls. Defaults to <c>false</c>, and that
+        /// default is the point: interpreting prose means acting on what the model SAID instead of on the
+        /// channel it said it through, and a tutor explaining JSON writes objects shaped exactly like a
+        /// call — the framework would execute the example instead of showing it. The caller decides by
+        /// CHANNEL: <c>MeaiLlmClient</c> passes <c>true</c> only when the endpoint has no native tool
+        /// channel or the request explicitly enables compatibility parsing on a native endpoint.
+        /// A request with ToolMode=None never interprets prose as executable calls.
+        /// </param>
         public SmartToolCallingChatClient(MEAI.IChatClient innerClient, ILog logger, ICoreAISettings settings,
             bool allowDuplicateToolCalls, IReadOnlyList<ILlmTool> tools, string roleId, int maxConsecutiveErrors = 3,
             string traceId = "",
             IToolCallEventPublisher eventPublisher = null, IToolExecutionNotifier notifier = null,
             int? maxRoundtripsOverride = null,
-            string actorId = "")
+            string actorId = "",
+            bool allowTextShapedToolCalls = false)
         {
+            _allowTextShapedToolCalls = allowTextShapedToolCalls;
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? NullLog.Instance;
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -75,7 +86,333 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         public MEAI.UsageDetails LastRoundtripUsage { get; private set; }
 
-        public async Task<MEAI.ChatResponse> GetResponseAsync(
+        /// <summary>Whether a successful tool intentionally completed this request without another model turn.</summary>
+        public bool LastTurnEndedByTool { get; private set; }
+
+        public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+            MEAI.ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            if (options?.ToolMode is MEAI.NoneChatToolMode)
+            {
+                return GetToolsDisabledResponseAsync(chatMessages, options, cancellationToken);
+            }
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // WHY: MEAI 10.9's function processor resumes with ConfigureAwait(false). Keep the proven
+            // host-context loop on threadless WebGL until asynchronous browser execution is verified.
+            return GetWebGlResponseAsync(chatMessages, options, cancellationToken);
+#else
+            return GetMeaiResponseAsync(chatMessages, options, cancellationToken);
+#endif
+        }
+
+        private async Task<MEAI.ChatResponse> GetToolsDisabledResponseAsync(
+            IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions options, CancellationToken cancellationToken)
+        {
+            LastRoundtripUsage = null;
+            LastTurnEndedByTool = false;
+            LastExecutedToolCalls = Array.Empty<LlmToolCallTrace>();
+            MEAI.ChatOptions providerOptions = options.Clone();
+            providerOptions.Tools = null;
+            // WHY: Even an approval response in history cannot authorize execution in a disabled request.
+            MEAI.ChatResponse response = await _innerClient.GetResponseAsync(messages, providerOptions, cancellationToken);
+            LastRoundtripUsage = CopyUsage(response.Usage);
+            TruncateResponseText(response, _settings.MaxResponseChars);
+            return response;
+        }
+
+        private async Task<MEAI.ChatResponse> GetMeaiResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+            MEAI.ChatOptions options, CancellationToken cancellationToken)
+        {
+            List<MEAI.ChatMessage> original = chatMessages.ToList();
+            ToolExecutionPolicy policy = new(_logger, _settings, _originalTools, _allowDuplicateToolCalls,
+                _roleId, _maxConsecutiveErrors, _traceId, _eventPublisher, _notifier, _actorId);
+            LastRoundtripUsage = null;
+            LastTurnEndedByTool = false;
+            LastExecutedToolCalls = Array.Empty<LlmToolCallTrace>();
+            NativePolicyClient boundary = new(this, policy);
+            MEAI.FunctionInvokingChatClient client = new(boundary)
+            {
+                AllowConcurrentInvocation = false,
+                MaximumIterationsPerRequest = int.MaxValue,
+                MaximumConsecutiveErrorsPerRequest = int.MaxValue,
+                AdditionalTools = boundary.FailureBindings,
+                FunctionInvoker = boundary.InvokeAsync
+            };
+            try
+            {
+                MEAI.ChatResponse response = await client.GetResponseAsync(original, options, cancellationToken);
+                if (policy.IsMaxErrorsReached && !policy.TurnEndingToolSucceeded)
+                {
+                    List<MEAI.ChatMessage> history = new(original);
+                    history.AddRange(response.Messages);
+                    MEAI.ChatResponse summary = await TryRunFinalNoToolsSummaryAsync(history, options, cancellationToken);
+                    if (summary != null)
+                    {
+                        MEAI.UsageDetails total = LlmUsageAccumulator.Accumulate(response.Usage, summary.Usage);
+                        if (summary.Usage != null)
+                        {
+                            LastRoundtripUsage = CopyUsage(summary.Usage);
+                        }
+                        response = summary;
+                        response.Usage = total;
+                    }
+                    else
+                    {
+                        MEAI.UsageDetails total = response.Usage;
+                        response = policy.BuildMaxErrorsResponse();
+                        response.Usage = total;
+                    }
+                }
+                else
+                {
+                    // WHY: MEAI returns the whole tool transcript; only the terminal assistant turn
+                    // belongs in this completion, otherwise earlier prose and tool output repeat in UI.
+                    List<MEAI.ChatMessage> visibleMessages = boundary.LastAssistantMessages;
+                    HashSet<MEAI.AIContent> visibleContents = new(visibleMessages.SelectMany(message => message.Contents));
+                    List<MEAI.AIContent> approvals = response.Messages.SelectMany(message => message.Contents)
+                        .OfType<MEAI.ToolApprovalRequestContent>()
+                        .Where(approval => !visibleContents.Contains(approval)).Cast<MEAI.AIContent>().ToList();
+                    if (approvals.Count > 0)
+                    {
+                        // WHY: MEAI manufactures approval requests after the provider boundary returns.
+                        // Preserve those typed controls without replaying prior assistant prose or tool results.
+                        visibleMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, approvals));
+                    }
+                    response.Messages = visibleMessages;
+                }
+
+                TruncateResponseText(response, _settings.MaxResponseChars);
+                if (policy.TurnEndingToolSucceeded)
+                {
+                    response.FinishReason = MEAI.ChatFinishReason.Stop;
+                }
+                return response;
+            }
+            finally
+            {
+                await boundary.CompleteApprovalsAsync(cancellationToken);
+                LastExecutedToolCalls = policy.ExecutedTraces.ToArray();
+                LastTurnEndedByTool = policy.TurnEndingToolSucceeded;
+            }
+        }
+
+        private static MEAI.UsageDetails CopyUsage(MEAI.UsageDetails usage)
+        {
+            if (usage == null) return null;
+            MEAI.UsageDetails copy = new();
+            copy.Add(usage);
+            return copy;
+        }
+
+        /// <summary>CoreAI policy hooks around MEAI's native history, invocation and usage loop.</summary>
+        private sealed class NativePolicyClient : MEAI.DelegatingChatClient
+        {
+            private readonly SmartToolCallingChatClient _owner;
+            private readonly ToolExecutionPolicy _policy;
+            private List<MEAI.FunctionCallContent> _calls = new();
+            private MEAI.ChatOptions _callOptions;
+            private ToolExecutionPolicy.BatchToolCallResult _batch;
+            private bool _batchReady;
+            private bool _anySuccess;
+            private int _requests;
+            private int _missingRequired;
+            private int _emptyAfterSuccess;
+            private readonly List<MEAI.ChatMessage> _failedFeedback = new();
+            private bool _previousAllFailed;
+            private bool _removeFailedFeedback;
+            private ToolExecutionPolicy.StreamedTurn _approvalTurn;
+            public List<MEAI.AITool> FailureBindings { get; } = new();
+            public List<MEAI.ChatMessage> LastAssistantMessages { get; private set; } = new();
+
+            public NativePolicyClient(SmartToolCallingChatClient owner, ToolExecutionPolicy policy)
+                : base(owner._innerClient)
+            {
+                _owner = owner;
+                _policy = policy;
+            }
+
+            public async ValueTask<object> InvokeAsync(MEAI.FunctionInvocationContext context,
+                CancellationToken cancellationToken)
+            {
+                if (_requests == 0)
+                {
+                    // WHY: MEAI invokes previously approved calls before its first provider request.
+                    // Only callbacks validated by MEAI enter this path; raw approval history is never executed here.
+                    _approvalTurn ??= _policy.BeginStreamedTurn();
+                    ToolExecutionPolicy.ToolCallResult? immediate = await _policy.ExecuteStreamedAsync(
+                        _approvalTurn, context.CallContent, context.Options, cancellationToken);
+                    if (!immediate.HasValue)
+                    {
+                        await Task.WhenAll(_approvalTurn.InFlight);
+                        if (!_approvalTurn.Slots[_approvalTurn.Slots.Count - 1].TryGet(
+                                out ToolExecutionPolicy.ToolCallResult completed))
+                        {
+                            throw new InvalidOperationException("The approved tool did not publish its result.");
+                        }
+                        immediate = completed;
+                    }
+                    if (context.FunctionCallIndex == context.FunctionCount - 1)
+                    {
+                        await CompleteApprovalsAsync(cancellationToken);
+                        context.Terminate = _policy.TurnEndingToolSucceeded || _policy.IsMaxErrorsReached;
+                    }
+                    return immediate.Value.Result;
+                }
+                if (!_batchReady)
+                {
+                    _batch = await _policy.ExecuteBatchAsync(_calls, _callOptions, cancellationToken);
+                    _batchReady = true;
+                    _anySuccess |= !_batch.AllFailed && !_batch.AllDuplicates;
+                    _previousAllFailed = _batch.AllFailed;
+                    _removeFailedFeedback = !_batch.AnyFailed && !_batch.AllDuplicates;
+                }
+
+                // WHY: Finish the MEAI result pairing for this batch before terminating its loop.
+                context.Terminate = context.FunctionCallIndex == context.FunctionCount - 1 &&
+                                    (_policy.TurnEndingToolSucceeded || _policy.IsMaxErrorsReached);
+                return _batch.Results[context.FunctionCallIndex];
+            }
+
+            public async Task CompleteApprovalsAsync(CancellationToken cancellationToken)
+            {
+                if (_approvalTurn == null) return;
+                ToolExecutionPolicy.StreamedTurn turn = _approvalTurn;
+                _approvalTurn = null;
+                ToolExecutionPolicy.BatchToolCallResult approved =
+                    await _policy.CompleteStreamedTurnAsync(turn, cancellationToken);
+                _anySuccess |= !approved.AllFailed && !approved.AllDuplicates;
+                // WHY: Approval results may precede trailing user messages; they are not the last
+                // assistant/tool pair used by the normal transient-error pruning optimization.
+                _previousAllFailed = false;
+                _removeFailedFeedback = false;
+            }
+
+            public override async Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                await CompleteApprovalsAsync(cancellationToken);
+                List<MEAI.ChatMessage> messages = chatMessages as List<MEAI.ChatMessage> ?? chatMessages.ToList();
+                if (_previousAllFailed && messages.Count >= 2)
+                {
+                    _failedFeedback.Add(messages[messages.Count - 2]);
+                    _failedFeedback.Add(messages[messages.Count - 1]);
+                }
+                if (_removeFailedFeedback)
+                {
+                    ToolCallHistoryTrimmer.RemoveResolvedErrorFeedback(messages, _failedFeedback);
+                }
+                _previousAllFailed = false;
+                _removeFailedFeedback = false;
+                if (_owner._settings.MaxToolCallHistoryMessages > 0)
+                {
+                    _owner.TrimToolCallHistory(messages, _owner._settings.MaxToolCallHistoryMessages);
+                }
+
+                MEAI.UsageDetails retryUsage = null;
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    _requests++;
+                    int limit = _owner._maxRoundtripsOverride ?? _owner._settings.MaxToolCallRoundtrips;
+                    bool finalSummary = limit > 0 && _requests > limit;
+                    MEAI.ChatOptions requestOptions = options;
+                    if (finalSummary)
+                    {
+                        requestOptions = options?.Clone() ?? new MEAI.ChatOptions();
+                        requestOptions.Tools = null;
+                        requestOptions.ToolMode = MEAI.ChatToolMode.None;
+                        messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
+                            "Tool budget exhausted. Do not call any more tools. Summarize in plain text " +
+                            "what you accomplished and what remains to be done."));
+                    }
+                    MEAI.ChatResponse response;
+                    try
+                    {
+                        response = await base.GetResponseAsync(messages, requestOptions, cancellationToken);
+                    }
+                    catch (Exception ex) when (finalSummary && ex is not OperationCanceledException)
+                    {
+                        _owner._logger.Warn($"[SmartToolCall] Final summary failed: {ex.Message}", LogTag.Llm);
+                        response = new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                            $"Agent stopped: exceeded maximum of {limit} tool-call roundtrips."));
+                    }
+                    if (response.Usage != null)
+                    {
+                        _owner.LastRoundtripUsage = CopyUsage(response.Usage);
+                    }
+                    retryUsage = LlmUsageAccumulator.Accumulate(retryUsage, response.Usage);
+                    string text = ConcatenateAssistantTextContents(response);
+                    HashSet<string> serverHandled = response.Messages.SelectMany(message => message.Contents)
+                        .OfType<MEAI.FunctionResultContent>().Select(result => result.CallId).ToHashSet(StringComparer.Ordinal);
+                    bool hasNativeCalls = FlattenAssistantContents(response).OfType<MEAI.FunctionCallContent>().Any();
+                    _calls = FlattenAssistantContents(response).OfType<MEAI.FunctionCallContent>()
+                        .Where(call => !call.InformationalOnly && !serverHandled.Contains(call.CallId) &&
+                            requestOptions?.Tools?.FirstOrDefault(tool => tool.Name == call.Name)
+                                ?.GetService(typeof(MEAI.ApprovalRequiredAIFunction)) == null).ToList();
+                    if (_owner._allowTextShapedToolCalls && _calls.Count == 0 && !finalSummary &&
+                        (requestOptions?.Tools?.Count ?? 0) > 0 &&
+                        TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> extracted,
+                            out string cleaned, _owner._logger, _owner._originalTools.Select(tool => tool.Name).ToArray()))
+                    {
+                        _calls = extracted;
+                        List<MEAI.AIContent> contents = extracted.Cast<MEAI.AIContent>().ToList();
+                        if (!string.IsNullOrWhiteSpace(cleaned)) contents.Add(new MEAI.TextContent(cleaned));
+                        response.Messages = new List<MEAI.ChatMessage> { new(MEAI.ChatRole.Assistant, contents) };
+                        text = cleaned;
+                    }
+                    if (finalSummary)
+                    {
+                        if (string.IsNullOrWhiteSpace(text))
+                        {
+                            text = $"Agent stopped: exceeded maximum of {limit} tool-call roundtrips.";
+                        }
+                        response.Messages = new List<MEAI.ChatMessage> { new(MEAI.ChatRole.Assistant, text) };
+                        _calls.Clear();
+                    }
+                    else if (_calls.Count == 0 && !hasNativeCalls && TryGetRequiredToolName(requestOptions?.ToolMode, out string required) &&
+                             (requestOptions?.Tools?.Count ?? 0) > 0)
+                    {
+                        if (++_missingRequired <= _owner._maxConsecutiveErrors)
+                        {
+                            messages.AddRange(response.Messages);
+                            messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, BuildMissingRequiredToolInstruction(required)));
+                            continue;
+                        }
+                        response = BuildMissingRequiredToolResponse(required);
+                    }
+                    else if (_calls.Count == 0 && !hasNativeCalls && string.IsNullOrWhiteSpace(text) && _anySuccess &&
+                             _emptyAfterSuccess++ < Math.Max(1, _owner._maxConsecutiveErrors))
+                    {
+                        messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
+                            "Your last response had no text and no tool call. If the task is not finished, " +
+                            "continue with the next tool call now. If it is finished, reply with a short summary."));
+                        continue;
+                    }
+                    FailureBindings.Clear();
+                    foreach (MEAI.FunctionCallContent call in _calls)
+                    {
+                        if (requestOptions?.Tools?.OfType<MEAI.AIFunction>().Any(f => f.Name == call.Name) != true &&
+                            !FailureBindings.Any(f => f.Name == call.Name))
+                        {
+                            // WHY: MEAI normally bypasses FunctionInvoker for unknown names. This local
+                            // dispatch marker routes the error through policy without granting any tool authority.
+                            FailureBindings.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() => "Error: unbound tool"),
+                                new MEAI.AIFunctionFactoryOptions { Name = call.Name }));
+                        }
+                    }
+                    _callOptions = requestOptions;
+                    _batchReady = false;
+                    LastAssistantMessages = response.Messages.Where(message => message.Role == MEAI.ChatRole.Assistant)
+                        .Select(message => new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                            message.Contents.Where(content => content is not MEAI.FunctionCallContent).ToList())
+                        { MessageId = message.MessageId }).ToList();
+                    response.Usage = retryUsage;
+                    return response;
+                }
+            }
+        }
+
+        private async Task<MEAI.ChatResponse> GetWebGlResponseAsync(
             IEnumerable<MEAI.ChatMessage> chatMessages,
             MEAI.ChatOptions? options = null,
             CancellationToken cancellationToken = default)
@@ -105,6 +442,7 @@ namespace CoreAI.Infrastructure.Llm
                 _allowDuplicateToolCalls, _roleId, _maxConsecutiveErrors, _traceId,
                 _eventPublisher, _notifier, _actorId);
             LastRoundtripUsage = null;
+            LastTurnEndedByTool = false;
 
             try
             {
@@ -200,12 +538,14 @@ namespace CoreAI.Infrastructure.Llm
                     List<MEAI.FunctionCallContent> textCalls = new();
                     string cleanedAssistantText = null;
                     bool hasTextExtraction = false;
-                    if (nativeCalls.Count == 0 && (iterationOptions?.Tools?.Count ?? 0) > 0)
+                    if (_allowTextShapedToolCalls &&
+                        nativeCalls.Count == 0 &&
+                        (iterationOptions?.Tools?.Count ?? 0) > 0)
                     {
                         string assistantText = ConcatenateAssistantTextContents(response);
                         if (!string.IsNullOrEmpty(assistantText) &&
                             TryExtractToolCallsFromText(assistantText, out textCalls, out cleanedAssistantText,
-                                _logger))
+                                _logger, _originalTools.Select(tool => tool.Name).ToArray()))
                         {
                             hasTextExtraction = true;
                             if (_settings.LogMeaiToolCallingSteps)
@@ -314,7 +654,9 @@ namespace CoreAI.Infrastructure.Llm
                             .ConfigureAwait(false);
 #endif
                     executedToolCallInRequest = true;
-                    if (!batch.AllFailed)
+                    // Ход из одних no-op'ов эха — не успех: ничего не исполнялось, и «подтолкнуть»
+                    // модель после пустого ответа на его основании нельзя.
+                    if (!batch.AllFailed && !batch.AllDuplicates)
                     {
                         anyToolCallSucceeded = true;
                     }
@@ -322,7 +664,9 @@ namespace CoreAI.Infrastructure.Llm
                     if (policy.IsMaxErrorsReached)
                     {
                         // Same graceful ending as the roundtrip cap: one tools-disabled turn so the
-                        // model can explain what happened instead of a canned JSON error string.
+                        // model can explain what happened. If that turn yields no text, the fallback
+                        // below is still plain prose for the user (BuildMaxErrorsResponse), never a
+                        // raw service JSON shown as the assistant's reply.
                         // Append the final failed exchange first so the summary turn can see it
                         // (this branch returns before the regular assistant/tool append below).
                         List<MEAI.AIContent> failedAssistantContents = toolCalls.Cast<MEAI.AIContent>().ToList();
@@ -352,6 +696,40 @@ namespace CoreAI.Infrastructure.Llm
                         return maxErrorsResponse;
                     }
 
+                    // A tool that declares ILlmTool.EndsTurn and SUCCEEDED closes the turn here: its
+                    // result ("card shown, waiting for the student") is not material the model can
+                    // continue from, and one more roundtrip makes it react to an answer nobody gave yet.
+                    // Whatever prose the model said BEFORE the call is carried out as the turn's text; a
+                    // turn with no prose at all stays empty on purpose, because the caller already
+                    // synthesizes a tool-only completion line from the traces.
+                    if (policy.TurnEndingToolSucceeded)
+                    {
+                        string endedText = hasTextExtraction
+                            ? cleanedAssistantText
+                            : ConcatenateAssistantTextContents(response);
+                        MEAI.ChatResponse endedResponse = new(new MEAI.ChatMessage(
+                            MEAI.ChatRole.Assistant, endedText ?? string.Empty))
+                        {
+                            FinishReason = MEAI.ChatFinishReason.Stop
+                        };
+                        int endedMaxResponseChars = _settings.MaxResponseChars;
+                        if (endedMaxResponseChars > 0)
+                        {
+                            TruncateResponseText(endedResponse, endedMaxResponseChars);
+                        }
+
+                        if (_settings.LogMeaiToolCallingSteps)
+                        {
+                            _logger.Info(
+                                $"[SmartToolCall] Iteration {iteration}: a turn-ending tool succeeded; " +
+                                "closing the turn without sending the tool result back to the model.",
+                                LogTag.Llm);
+                        }
+
+                        AttachCumulativeUsage(endedResponse, cumulativeUsage);
+                        return endedResponse;
+                    }
+
                     // Build assistant turn for the next round. For text-mode extraction, we replace the
                     // raw assistant text with the *cleaned* version so the model does not see its own
                     // JSON tool call duplicated as text.
@@ -373,8 +751,10 @@ namespace CoreAI.Infrastructure.Llm
                         pendingErrorFeedback.Add(assistantTurn);
                         pendingErrorFeedback.Add(toolTurn);
                     }
-                    else if (!batch.AnyFailed && pendingErrorFeedback.Count > 0)
+                    else if (!batch.AnyFailed && !batch.AllDuplicates && pendingErrorFeedback.Count > 0)
                     {
+                        // Только РЕАЛЬНЫЙ успех делает прежние ошибки устаревшими; эхо-ход ничего не
+                        // исполнял и не отвечает на них.
                         int removedFeedback =
                             ToolCallHistoryTrimmer.RemoveResolvedErrorFeedback(messages, pendingErrorFeedback);
                         if (removedFeedback > 0 && _settings.LogMeaiToolCallingSteps)
@@ -397,6 +777,7 @@ namespace CoreAI.Infrastructure.Llm
             finally
             {
                 LastExecutedToolCalls = policy.ExecutedTraces.ToList();
+                LastTurnEndedByTool = policy.TurnEndingToolSucceeded;
             }
         }
 
@@ -443,12 +824,13 @@ namespace CoreAI.Infrastructure.Llm
             string text,
             out List<MEAI.FunctionCallContent> toolCalls,
             out string cleanedText,
-            ILog logger = null)
+            ILog logger = null,
+            IReadOnlyCollection<string> knownToolNames = null)
         {
             toolCalls = new List<MEAI.FunctionCallContent>();
             cleanedText = text ?? string.Empty;
 
-            if (!LlmToolCallTextExtractor.TryExtract(text, out List<LlmToolCallTextExtractor.Match> matches,
+            if (!LlmToolCallTextExtractor.TryExtract(text, knownToolNames, out List<LlmToolCallTextExtractor.Match> matches,
                     out cleanedText))
             {
                 return false;
@@ -462,11 +844,9 @@ namespace CoreAI.Infrastructure.Llm
                         JsonConvert.DeserializeObject<Dictionary<string, object>>(m.ArgumentsJson)
                         ?? new Dictionary<string, object>();
 
-                    // MEAI's AIFunctionFactory cannot convert JObject/JArray to string parameters.
-                    // Normalize: serialize any nested JSON tokens to strings so the delegate
-                    // (e.g. call_skill_tool(string tool_name, string arguments_json)) receives
-                    // proper string values instead of raw Newtonsoft tokens.
-                    NormalizeJTokenValues(arguments);
+                    // WHY: shared chokepoint (LlmToolArgumentNormalizer) — the native policy
+                    // and the skill resolver apply the same rule; a local copy would drift.
+                    LlmToolArgumentNormalizer.NormalizeDictionaryValues(arguments);
 
                     string callId = $"stream_call_{m.Name}_{Guid.NewGuid():N}";
                     toolCalls.Add(new MEAI.FunctionCallContent(callId, m.Name, arguments));
@@ -486,33 +866,6 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Converts any <see cref="JObject"/>/<see cref="JArray"/> values in the dictionary to
-        /// their JSON string representation. MEAI's <c>AIFunctionFactory</c> cannot convert
-        /// Newtonsoft tokens directly, so this normalization
-        /// ensures text-mode extracted arguments work with delegates that expect string parameters.
-        /// </summary>
-        private static void NormalizeJTokenValues(Dictionary<string, object> arguments)
-        {
-            if (arguments == null)
-            {
-                return;
-            }
-
-            List<string> keys = new(arguments.Keys);
-            foreach (string key in keys)
-            {
-                if (arguments[key] is JObject jo)
-                {
-                    arguments[key] = jo.ToString(Formatting.None);
-                }
-                else if (arguments[key] is JArray ja)
-                {
-                    arguments[key] = ja.ToString(Formatting.None);
-                }
-            }
-        }
-
-        /// <summary>
         /// Concatenates every <see cref="MEAI.TextContent"/> in <paramref name="response"/> messages.
         /// Use when <see cref="MEAI.ChatResponse.Text"/> is empty but <see cref="MEAI.ChatMessage"/> items
         /// still carry text (some providers / MEAI versions).
@@ -527,7 +880,7 @@ namespace CoreAI.Infrastructure.Llm
             System.Text.StringBuilder sb = new();
             foreach (MEAI.ChatMessage m in response.Messages)
             {
-                if (m?.Contents == null)
+                if (m?.Contents == null || m.Role != MEAI.ChatRole.Assistant)
                 {
                     continue;
                 }
@@ -590,13 +943,9 @@ namespace CoreAI.Infrastructure.Llm
                 return null;
             }
 
-            return new MEAI.ChatOptions
-            {
-                Temperature = source.Temperature,
-                MaxOutputTokens = source.MaxOutputTokens,
-                Tools = source.Tools,
-                ToolMode = MEAI.ChatToolMode.Auto
-            };
+            MEAI.ChatOptions clone = source.Clone();
+            clone.ToolMode = MEAI.ChatToolMode.Auto;
+            return clone;
         }
 
         /// <summary>
@@ -682,7 +1031,7 @@ namespace CoreAI.Infrastructure.Llm
                 return _innerClient;
             }
 
-            return null;
+            return _innerClient.GetService(serviceType, serviceKey);
         }
 
         public void Dispose()
@@ -743,12 +1092,9 @@ namespace CoreAI.Infrastructure.Llm
 
                 // Tools deliberately omitted (not just ToolMode=None): the model physically cannot
                 // emit another native tool call, so this extra turn can never loop.
-                MEAI.ChatOptions summaryOptions = new()
-                {
-                    Temperature = options?.Temperature,
-                    MaxOutputTokens = options?.MaxOutputTokens,
-                    ToolMode = MEAI.ChatToolMode.None
-                };
+                MEAI.ChatOptions summaryOptions = options?.Clone() ?? new MEAI.ChatOptions();
+                summaryOptions.Tools = null;
+                summaryOptions.ToolMode = MEAI.ChatToolMode.None;
 
 #if UNITY_WEBGL && !UNITY_EDITOR
                 MEAI.ChatResponse summary = await _innerClient
@@ -759,6 +1105,10 @@ namespace CoreAI.Infrastructure.Llm
                     .ConfigureAwait(false);
 #endif
 
+                if (summary?.Usage != null)
+                {
+                    LastRoundtripUsage = CopyUsage(summary.Usage);
+                }
                 string text = summary?.Text;
                 if (string.IsNullOrEmpty(text))
                 {
@@ -782,3 +1132,16 @@ namespace CoreAI.Infrastructure.Llm
     }
 }
 #endif
+
+namespace CoreAI.Ai
+{
+    /// <summary>One endpoint policy for interpreting or removing tool calls written in assistant prose.</summary>
+    public static class LlmToolChannelPolicy
+    {
+        public static bool InterpretsProse(bool supportsNativeToolCalling, bool? explicitNativeFallback,
+            LlmToolChoiceMode toolMode = LlmToolChoiceMode.Auto)
+        {
+            return toolMode != LlmToolChoiceMode.None && (!supportsNativeToolCalling || explicitNativeFallback == true);
+        }
+    }
+}

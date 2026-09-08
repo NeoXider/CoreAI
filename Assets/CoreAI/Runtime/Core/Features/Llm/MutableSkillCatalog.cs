@@ -51,6 +51,16 @@ namespace CoreAI.Ai
 
             lock (_lock)
             {
+                List<SkillSet> candidate = new(_skills);
+                if (_indexByName.TryGetValue(skill.Name, out int replaceIndex))
+                {
+                    candidate[replaceIndex] = skill;
+                }
+                else
+                {
+                    candidate.Add(skill);
+                }
+                SkillSetToolResolver.ValidateCatalog(candidate);
                 if (_indexByName.TryGetValue(skill.Name, out int existing))
                 {
                     _skills[existing] = skill;

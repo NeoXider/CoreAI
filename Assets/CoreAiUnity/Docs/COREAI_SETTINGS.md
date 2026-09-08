@@ -48,21 +48,21 @@ ServerManagedAuthorization.SetProvider(() => "Bearer " + authTokenStore.CurrentJ
 
 `ServerManagedLlmClient` reads this provider for every HTTP and streaming request in `ServerManagedApi`, including routed `LlmRoutingManifest` profiles.
 
-Для динамической атрибуции (урок, эксперимент, cohort) зарегистрируйте
-`IRequestHeaderProvider` без пересоздания LLM-клиента:
+For dynamic attribution (lesson, experiment, cohort), register an
+`IRequestHeaderProvider` without recreating the LLM client:
 
 ```csharp
 ServerManagedAuthorization.SetRequestHeaderProvider(lessonHeaderProvider);
-// На logout/смене product context и в TearDown интеграционных тестов:
+// On logout/product-context switch and in integration-test TearDown:
 ServerManagedAuthorization.ClearRequestHeaderProvider();
 ```
 
-Provider вызывается один раз на invocation `CompleteAsync` / `CompleteStreamingAsync`; внутренний HTTP/auth-retry,
-внешние sync retry после retryable result/exception и streaming pre-commit retry получают тот же snapshot.
-Следующий invocation получает актуальное значение, даже если host повторно
-использует тот же объект `LlmCompletionRequest`. `Authorization`, `Content-Type`,
-`Idempotency-Key` и `X-Request-Id` через custom provider подменить нельзя. Backend обязан
-валидировать client-supplied lesson/cohort перед атрибуцией usage. Полный контракт —
+The provider is called once per `CompleteAsync` / `CompleteStreamingAsync` invocation; the internal HTTP/auth retry,
+external sync retries after a retryable result/exception, and the streaming pre-commit retry receive the same snapshot.
+The next invocation picks up the current value, even if the host reuses
+the same `LlmCompletionRequest` object. `Authorization`, `Content-Type`,
+`Idempotency-Key`, and `X-Request-Id` cannot be overridden via a custom provider. The backend must
+validate the client-supplied lesson/cohort before attributing usage. Full contract —
 [SERVER_MANAGED_PROTOCOL.md](../../CoreAI/Docs/SERVER_MANAGED_PROTOCOL.md).
 
 CoreAI maps backend responses such as `401`, `409 quota_exceeded`, `429`, and `5xx` into typed `LlmErrorCode` values so UI can show auth, quota, rate-limit, and backend-unavailable states without parsing provider strings. To render one of those failures, use `LlmErrorPresentation.ToUserMessage(exception)` (player-facing sentence — prefers a message your backend authored for the player) and `LlmErrorPresentation.ToDiagnosticText(exception)` (log line) instead of printing `exception.Message`.

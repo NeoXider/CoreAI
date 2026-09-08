@@ -9,6 +9,7 @@ using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using MEAI = Microsoft.Extensions.AI;
 using NUnit.Framework;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
@@ -17,6 +18,159 @@ namespace CoreAI.Tests.EditMode
     public sealed class MeaiLlmClientEditModeTests
     {
         [Test]
+        public async Task NoneToolMode_NeverExecutesOrBuildsBindingsAcrossChannels(
+            [Values(false, true)] bool streaming, [Values(false, true)] bool native,
+            [Values(false, true)] bool explicitFallback, [Values(false, true)] bool unsolicitedNativeCall)
+        {
+            int invocations = 0;
+            string prose = "Example: {\"name\":\"save\",\"arguments\":{}}";
+            DelegateLlmTool tool = new("save", "save", (Func<string>)(() =>
+            {
+                invocations++;
+                return "saved";
+            }));
+            ThrowingBindingTool invalid = new();
+            CapturingChatClient inner = new() { ResponseText = prose,
+                FunctionCallName = unsolicitedNativeCall ? tool.Name : null };
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(),
+                supportsNativeToolCalling: native);
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher", UserPayload = "Explain this JSON",
+                Tools = new ILlmTool[] { tool, invalid }, ForcedToolMode = LlmToolChoiceMode.None,
+                AllowTextShapedToolCallsOnNativeEndpoint = explicitFallback
+            };
+            List<string> text = new();
+            if (streaming)
+            {
+                await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+                {
+                    text.Add(chunk.Text ?? "");
+                    Assert.IsTrue(chunk.ExecutedToolCalls == null || chunk.ExecutedToolCalls.Count == 0);
+                }
+            }
+            else
+            {
+                LlmCompletionResult result = await client.CompleteAsync(request);
+                Assert.IsTrue(result.Ok, result.Error);
+                text.Add(result.Content);
+                Assert.IsTrue(result.ExecutedToolCalls == null || result.ExecutedToolCalls.Count == 0);
+            }
+            Assert.AreEqual(0, invocations);
+            Assert.AreEqual(0, invalid.BindingAttempts, "Disabled tools must not construct unused factories.");
+            Assert.AreEqual(1, inner.Calls);
+            Assert.AreEqual(prose, string.Concat(text));
+        }
+
+        [Test]
+        public async Task NoneToolMode_EmptyStreamingReplyDoesNotStartRescueTurn()
+        {
+            CapturingChatClient inner = new() { ResponseText = "", FunctionCallName = "save" };
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(),
+                supportsNativeToolCalling: true);
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                { UserPayload = "hi", ForcedToolMode = LlmToolChoiceMode.None })) { }
+            Assert.AreEqual(1, inner.Calls);
+        }
+
+        private sealed class ThrowingBindingTool : ILlmTool, IAIFunctionLlmTool
+        {
+            public string Name => "invalid";
+            public string Description => "Unused factory must remain unused.";
+            public bool AllowDuplicates => false;
+            public string ParametersSchema => "{}";
+            public int BindingAttempts { get; private set; }
+            public MEAI.AIFunction CreateAIFunction()
+            {
+                BindingAttempts++;
+                throw new InvalidOperationException("Unused binding was constructed.");
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task NativeEndpoint_UnboundOptionalTool_PreservesEducationalJson(bool streaming)
+        {
+            string lesson = "Example: {\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"lesson\"}}";
+            CapturingChatClient inner = new() { ResponseText = lesson };
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(),
+                supportsNativeToolCalling: true);
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher", UserPayload = "Explain this JSON",
+                Tools = new ILlmTool[] { new MemoryLlmTool() }
+            };
+
+            string visible;
+            IReadOnlyList<LlmToolCallTrace> traces;
+            if (streaming)
+            {
+                List<string> chunks = new();
+                LlmStreamChunk terminal = null;
+                await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+                {
+                    chunks.Add(chunk.Text ?? "");
+                    if (chunk.IsDone) terminal = chunk;
+                }
+                Assert.IsNotNull(terminal);
+                Assert.IsTrue(string.IsNullOrEmpty(terminal.Error));
+                visible = string.Concat(chunks);
+                traces = terminal.ExecutedToolCalls;
+            }
+            else
+            {
+                LlmCompletionResult result = await client.CompleteAsync(request);
+                Assert.IsTrue(result.Ok, result.Error);
+                visible = result.Content;
+                traces = result.ExecutedToolCalls;
+            }
+
+            Assert.AreEqual(lesson, visible);
+            Assert.IsTrue(traces == null || traces.Count == 0, "Teaching JSON must not become a tool invocation.");
+            Assert.AreEqual(1, inner.Calls, "Missing optional bindings must not trigger a prose tool loop.");
+        }
+
+        [TestCase(false, LlmToolChoiceMode.RequireAny, false)]
+        [TestCase(true, LlmToolChoiceMode.RequireAny, false)]
+        [TestCase(false, LlmToolChoiceMode.RequireSpecific, true)]
+        [TestCase(true, LlmToolChoiceMode.RequireSpecific, true)]
+        public async Task RequiredToolWithoutBinding_FailsBeforeProvider(
+            bool streaming, LlmToolChoiceMode mode, bool anotherToolBound)
+        {
+            CapturingChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(),
+                supportsNativeToolCalling: true);
+            List<ILlmTool> tools = new() { new LegacyDuckTypedFunctionTool("unbound") };
+            if (anotherToolBound) tools.Add(new ExplicitFunctionTool("available"));
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher", UserPayload = "Run required tool", Tools = tools,
+                ForcedToolMode = mode, RequiredToolName = "unbound"
+            };
+
+            LlmErrorCode errorCode = LlmErrorCode.None;
+            if (streaming)
+            {
+                await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+                {
+                    Assert.IsTrue(chunk.IsDone);
+                    Assert.IsFalse(string.IsNullOrEmpty(chunk.Error));
+                    errorCode = chunk.ErrorCode;
+                }
+            }
+            else
+            {
+                LlmCompletionResult result = await client.CompleteAsync(request);
+                Assert.IsFalse(result.Ok);
+                Assert.IsFalse(string.IsNullOrEmpty(result.Error));
+                errorCode = result.ErrorCode;
+            }
+
+            Assert.AreEqual(LlmErrorCode.InvalidRequest, errorCode);
+            Assert.AreEqual(0, inner.Calls, "A required unavailable tool is a local configuration failure.");
+        }
+
+        [Test]
         public void CreateHttp_WithOpenAiSettings_ShouldNotThrow()
         {
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
@@ -24,10 +178,172 @@ namespace CoreAI.Tests.EditMode
 
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
             MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings,
-                ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger);
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                logger,
+                supportsNativeToolCalling: true);
 
             Assert.IsNotNull(client);
             UnityEngine.Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public async Task CreateHttp_CoreSettingsProviderParameters_ReachRequestBody()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            string body = null;
+            settings.ConfigureHttpApi("http://127.0.0.1:9/v1", "", "model");
+            settings.SetProviderBodyParameter("top_k", new Newtonsoft.Json.Linq.JValue(37));
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () =>
+                new System.Net.Http.HttpClient(new RequestCaptureHandler(value => body = value));
+            try
+            {
+                MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, GameLoggerUnscopedFallback.Instance, supportsNativeToolCalling: true);
+                LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest { UserPayload = "hi" });
+                Assert.IsTrue(result.Ok, result.Error);
+                Assert.AreEqual(37, (int)Newtonsoft.Json.Linq.JObject.Parse(body)["top_k"]);
+            }
+            finally
+            {
+                MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task TextChannel_WithProviderOverrides_ExecutesToolWithoutNativeWireFields(bool streaming)
+        {
+            TextChannelHttpHandler handler = new();
+            OpenAiHttpOptions settings = new()
+            {
+                ApiBaseUrl = "http://127.0.0.1:9/v1", Model = "test",
+                ExtraBodyJson = "{\"tools\":[{\"type\":\"function\"}],\"tool_choice\":\"required\",\"parallel_tool_calls\":true}"
+            };
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new System.Net.Http.HttpClient(handler);
+            try
+            {
+                int executions = 0;
+                DelegateLlmTool tool = new("save", "Save progress", (Func<string>)(() => { executions++; return "saved"; }));
+                MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, new CoreAISettingsOptions(),
+                    GameLoggerUnscopedFallback.Instance, supportsNativeToolCalling: false);
+                LlmCompletionRequest request = new() { UserPayload = "save", Tools = new List<ILlmTool> { tool } };
+                if (streaming)
+                {
+                    LlmStreamChunk terminal = null;
+                    await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request)) terminal = chunk;
+                    Assert.IsNotNull(terminal);
+                    Assert.IsTrue(terminal.IsDone);
+                    Assert.IsTrue(string.IsNullOrEmpty(terminal.Error), terminal.Error);
+                    Assert.IsTrue(terminal.ExecutedToolCalls.Any(call => call.Name == "save" && call.Success));
+                }
+                else
+                {
+                    LlmCompletionResult result = await client.CompleteAsync(request);
+                    Assert.IsTrue(result.Ok, result.Error);
+                    Assert.IsTrue(result.ExecutedToolCalls.Any(call => call.Name == "save" && call.Success));
+                }
+                Assert.AreEqual(1, executions);
+                Assert.AreEqual(2, handler.Bodies.Count, "The tool result must reach the follow-up completion.");
+                foreach (Newtonsoft.Json.Linq.JObject body in handler.Bodies)
+                {
+                    Assert.IsNull(body["tools"]);
+                    Assert.IsNull(body["tool_choice"]);
+                    Assert.IsNull(body["parallel_tool_calls"]);
+                }
+            }
+            finally { MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null; }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task TextChannel_ArbitraryChatClient_ReceivesNoNativeOptionsButLocalToolStillRuns(bool streaming)
+        {
+            TextChannelChatClient provider = new();
+            int executions = 0;
+            DelegateLlmTool tool = new("save", "Save progress", (Func<string>)(() => { executions++; return "saved"; }));
+            MeaiLlmClient client = new(provider, GameLoggerUnscopedFallback.Instance,
+                new CoreAISettingsOptions(), supportsNativeToolCalling: false);
+            LlmCompletionRequest request = new() { UserPayload = "save", Tools = new List<ILlmTool> { tool } };
+            if (streaming)
+            {
+                await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+                    Assert.IsTrue(string.IsNullOrEmpty(chunk.Error), chunk.Error);
+            }
+            else
+            {
+                LlmCompletionResult result = await client.CompleteAsync(request);
+                Assert.IsTrue(result.Ok, result.Error);
+            }
+            Assert.AreEqual(1, executions);
+            Assert.AreEqual(2, provider.Options.Count);
+            foreach (MEAI.ChatOptions options in provider.Options)
+            {
+                Assert.IsNull(options.Tools);
+                Assert.IsNull(options.ToolMode);
+                Assert.IsNull(options.AllowMultipleToolCalls);
+            }
+        }
+
+        private sealed class TextChannelChatClient : MEAI.IChatClient
+        {
+            public List<MEAI.ChatOptions> Options { get; } = new();
+            private string Next(MEAI.ChatOptions options)
+            {
+                Options.Add(options);
+                return Options.Count == 1 ? "{\"name\":\"save\",\"arguments\":{}}" : "done";
+            }
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> messages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            { return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, Next(options)))); }
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                await Task.CompletedTask;
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, Next(options));
+            }
+            public object GetService(Type serviceType, object serviceKey = null) => null;
+            public void Dispose() { }
+        }
+
+        private sealed class TextChannelHttpHandler : System.Net.Http.HttpMessageHandler
+        {
+            public List<Newtonsoft.Json.Linq.JObject> Bodies { get; } = new();
+            protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(
+                System.Net.Http.HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                Newtonsoft.Json.Linq.JObject body = Newtonsoft.Json.Linq.JObject.Parse(await request.Content.ReadAsStringAsync());
+                Bodies.Add(body);
+                string content = Bodies.Count == 1 ? "{\"name\":\"save\",\"arguments\":{}}" : "done";
+                bool streaming = body["stream"]?.Value<bool>() == true;
+                Newtonsoft.Json.Linq.JObject message = new() { ["role"] = "assistant", ["content"] = content };
+                Newtonsoft.Json.Linq.JObject choice = new()
+                {
+                    [streaming ? "delta" : "message"] = message, ["finish_reason"] = "stop"
+                };
+                string json = new Newtonsoft.Json.Linq.JObject { ["choices"] = new Newtonsoft.Json.Linq.JArray(choice) }.ToString();
+                return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new System.Net.Http.StringContent(streaming ? "data: " + json.Replace("\r", "").Replace("\n", "") +
+                        "\n\ndata: [DONE]\n\n" : json, System.Text.Encoding.UTF8, streaming ? "text/event-stream" : "application/json")
+                };
+            }
+        }
+
+        private sealed class RequestCaptureHandler : System.Net.Http.HttpMessageHandler
+        {
+            private readonly Action<string> _capture;
+            public RequestCaptureHandler(Action<string> capture) { _capture = capture; }
+            protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(
+                System.Net.Http.HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                _capture(await request.Content.ReadAsStringAsync());
+                return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new System.Net.Http.StringContent(
+                        "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"}}]}")
+                };
+            }
         }
 
         [Test]
@@ -36,7 +352,7 @@ namespace CoreAI.Tests.EditMode
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             settings.ConfigureHttpApi("http://localhost:1234/v1", "", "test-model");
 
-            OpenAiChatLlmClient client = new(settings);
+            OpenAiChatLlmClient client = new(settings, supportsNativeToolCalling: true);
 
             Assert.IsNotNull(client);
             UnityEngine.Object.DestroyImmediate(settings);
@@ -45,11 +361,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void CompleteAsync_ProviderCancellation_PropagatesOperationCanceledException()
         {
-            MeaiLlmClient client = new(
-                new CancellingChatClient(),
+            MeaiLlmClient client = new(new CancellingChatClient(),
                 GameLoggerUnscopedFallback.Instance,
                 new StubCoreSettings(),
-                null);
+                supportsNativeToolCalling: true,
+                memoryStore: null);
             CancellationTokenSource cancellation = new CancellationTokenSource();
             cancellation.Cancel();
 
@@ -74,7 +390,10 @@ namespace CoreAI.Tests.EditMode
             TestMemoryStore memoryStore = new();
 
             MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings,
-                ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger, memoryStore);
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                logger,
+                supportsNativeToolCalling: true,
+                memoryStore: memoryStore);
 
             List<ILlmTool> tools = new() { new MemoryLlmTool() };
             client.SetTools(tools);
@@ -86,7 +405,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_BindsExplicitAIFunctionToolContract()
         {
             CapturingChatClient inner = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -105,7 +424,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_RequireSpecific_MapsToRequiredModeAndNarrowsTools()
         {
             CapturingChatClient inner = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -138,7 +457,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_NativeTools_AreCanonicalOrdinalByName()
         {
             CapturingChatClient inner = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -162,7 +481,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_DoesNotBindLegacyDuckTypedCreateAIFunctionTool()
         {
             CapturingChatClient inner = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -182,7 +501,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_ReusesIdempotencyKey_OnSameRequestInstance()
         {
             HelloOnceChatClient inner = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
             LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Role",
@@ -202,7 +521,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_KeepsCallerProvidedIdempotencyKey()
         {
             HelloOnceChatClient inner = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
             const string preset = "deadbeefcafebabe1122334455667788";
             LlmCompletionRequest request = new()
             {
@@ -220,7 +539,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_NormalizesTailSystemMessages_ForProviderCompatibility()
         {
             CapturingChatClient inner = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -250,7 +569,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteStreamingAsync_NormalizesTailSystemMessages_ForProviderCompatibility()
         {
             CapturingChatClient inner = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             await foreach (LlmStreamChunk _ in client.CompleteStreamingAsync(new LlmCompletionRequest
                            {
@@ -358,7 +677,7 @@ namespace CoreAI.Tests.EditMode
                 112,
                 80,
                 20);
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -375,6 +694,173 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(20, result.CacheWriteTokens);
         }
 
+        [TestCase(0L)]
+        [TestCase(17L)]
+        public async Task CompleteAsync_TypedCacheReadWinsWithoutCountingProviderAliasAgain(long typedRead)
+        {
+            MEAI.ChatResponse response = ScriptedUsageChatClient.TextResponse("answer", 100);
+            response.Usage.CachedInputTokenCount = typedRead;
+            response.Usage.AdditionalCounts = new MEAI.AdditionalPropertiesDictionary<long>
+            {
+                ["prompt_tokens_details.cached_tokens"] = 17,
+                ["cache_creation_input_tokens"] = 9
+            };
+            MeaiLlmClient client = new(new ScriptedUsageChatClient(response),
+                GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(),
+                supportsNativeToolCalling: true,
+                memoryStore: null);
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest { UserPayload = "hi" });
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual(typedRead, result.CacheReadTokens);
+            Assert.AreEqual(9, result.CacheWriteTokens);
+        }
+
+        [Test]
+        public async Task CompleteAsync_MultipleMessages_OnlyFinalAssistantTextIsVisible()
+        {
+            MEAI.ChatResponse response = new(new List<MEAI.ChatMessage>
+            {
+                new(MEAI.ChatRole.Assistant, "intermediate plan"),
+                new(MEAI.ChatRole.Tool, "internal tool result"),
+                new(MEAI.ChatRole.Assistant, "final answer")
+            });
+            MeaiLlmClient client = new(new ScriptedUsageChatClient(response),
+                GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(),
+                supportsNativeToolCalling: true,
+                memoryStore: null);
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest { UserPayload = "hi" });
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual("final answer", result.Content);
+        }
+
+        [Test]
+        public async Task CompleteAsync_SuccessfulTurnEndingTool_DoesNotRequireVisibleText()
+        {
+            MEAI.ChatResponse response = new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                new List<MEAI.AIContent> { new MEAI.FunctionCallContent("finish-1", "finish", new Dictionary<string, object>()) }));
+            MeaiLlmClient client = new(new ScriptedUsageChatClient(response),
+                GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(),
+                supportsNativeToolCalling: true,
+                memoryStore: null);
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
+            {
+                UserPayload = "finish",
+                Tools = new List<ILlmTool> { new ExplicitFunctionTool("finish", endsTurn: true) }
+            });
+            Assert.IsTrue(result.Ok, result.Error);
+            Assert.IsEmpty(result.Content);
+            Assert.AreEqual(1, result.ExecutedToolCalls.Count);
+            Assert.IsTrue(result.ExecutedToolCalls[0].Success);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task OverlappingRequests_KeepToolNotificationsInTheirOwnRole(bool streaming)
+        {
+            TaskCompletionSource<bool> firstBindingEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            using ManualResetEventSlim releaseFirstBinding = new(false);
+            System.Collections.Concurrent.ConcurrentDictionary<string, string> notifiedRoles = new();
+            CoreAi.ToolExecutedHandler handler = (role, tool, arguments, result) => notifiedRoles[tool] = role;
+            CoreAi.OnToolExecuted += handler;
+            MeaiLlmClient client = new(new RoleToolChatClient(),
+                GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(),
+                supportsNativeToolCalling: true,
+                memoryStore: null);
+            LlmCompletionRequest firstRequest = new()
+            {
+                AgentRoleId = "first-role", UserPayload = "finish",
+                Tools = new List<ILlmTool> { new BindingBarrierTool(firstBindingEntered, releaseFirstBinding) }
+            };
+            LlmCompletionRequest secondRequest = new()
+            {
+                AgentRoleId = "second-role", UserPayload = "finish",
+                Tools = new List<ILlmTool> { new ExplicitFunctionTool("second_tool", endsTurn: true) }
+            };
+
+            async Task CompleteRequestAsync(LlmCompletionRequest request)
+            {
+                if (streaming)
+                {
+                    await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+                    {
+                        Assert.IsTrue(string.IsNullOrEmpty(chunk.Error), chunk.Error);
+                    }
+                }
+                else
+                {
+                    LlmCompletionResult result = await client.CompleteAsync(request);
+                    Assert.IsTrue(result.Ok, result.Error);
+                }
+            }
+
+            Task first = Task.Run(() => CompleteRequestAsync(firstRequest));
+            try
+            {
+                Assert.AreSame(firstBindingEntered.Task, await Task.WhenAny(firstBindingEntered.Task, Task.Delay(10000)),
+                    "The first request must pause at its binding boundary before starting the second.");
+                await CompleteRequestAsync(secondRequest);
+                releaseFirstBinding.Set();
+                await first;
+                Assert.AreEqual("first-role", notifiedRoles["first_tool"]);
+                Assert.AreEqual("second-role", notifiedRoles["second_tool"]);
+            }
+            finally
+            {
+                releaseFirstBinding.Set();
+                try { await first; }
+                finally { CoreAi.OnToolExecuted -= handler; }
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task CompleteStreamingAsync_TeachingJsonIsPreservedWhenUnknownOrQuoted(bool quoted)
+        {
+            string example = "{\"name\":\"" + (quoted ? "available_tool" : "unknown_tool") + "\",\"arguments\":{}}";
+            string prefix = quoted ? "Example: `" : "Example: ";
+            string suffix = quoted ? "` end" : " end";
+            StreamingScriptedChatClient inner = new(new[] { prefix, example, suffix });
+            MeaiLlmClient client = new(inner,
+                GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(),
+                supportsNativeToolCalling: false,
+                memoryStore: null);
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+            {
+                UserPayload = "explain",
+                Tools = new List<ILlmTool> { new ExplicitFunctionTool("available_tool") }
+            })) chunks.Add(chunk);
+
+            Assert.AreEqual(prefix + example + suffix, string.Concat(chunks.Select(chunk => chunk.Text)));
+            Assert.IsFalse(chunks.SelectMany(chunk => chunk.ExecutedToolCalls ?? Array.Empty<LlmToolCallTrace>()).Any());
+            Assert.AreEqual(1, inner.StreamCalls);
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_MessageIdsSeparateVisibleMessagesAndHideInternalRoles()
+        {
+            IdentityStreamingChatClient inner = new();
+            MeaiLlmClient client = new(inner,
+                GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(),
+                supportsNativeToolCalling: true,
+                memoryStore: null);
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest { UserPayload = "hi" }))
+            {
+                if (!string.IsNullOrEmpty(chunk.Text)) chunks.Add(chunk);
+            }
+
+            Assert.AreEqual("first second", string.Concat(chunks.Select(chunk => chunk.Text)));
+            Assert.AreEqual(1, chunks.Count(chunk => chunk.StartsNewMessage));
+            Assert.AreEqual("second", chunks.Single(chunk => chunk.StartsNewMessage).Text);
+        }
+
         [Test]
         public async Task CompleteAsync_EmptyTerminalResponseAfterToolUse_PreservesLastRoundtripPromptTokens()
         {
@@ -385,7 +871,7 @@ namespace CoreAI.Tests.EditMode
                 ScriptedUsageChatClient.TextResponse("", null),
                 ScriptedUsageChatClient.TextResponse("", null),
                 ScriptedUsageChatClient.TextResponse("", null));
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: false, memoryStore: null);
 
             LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -405,7 +891,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteStreamingAsync_NoTools_YieldsOneChunkPerInnerUpdateBeforeTerminal()
         {
             StreamingScriptedChatClient inner = new(new[] { "a", "bb", "ccc" });
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
             LlmCompletionRequest request = new()
             {
                 AgentRoleId = "PlainChat",
@@ -430,7 +916,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_ReasoningContent_RemainsSeparateFromAnswer()
         {
             ReasoningChatClient inner = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
 
             LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -450,7 +936,7 @@ namespace CoreAI.Tests.EditMode
             // WHY: В RedoSchool потоковый consumer сохранял рассуждения как заметку; публичный Text
             // должен собираться только из content, а reasoning остаётся отдельной диагностикой.
             ReasoningChatClient inner = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
             LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
@@ -468,13 +954,14 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("draft reasoning", string.Concat(chunks.Select(chunk => chunk.ReasoningText ?? "")));
         }
 
-        [Test]
-        public async Task CompleteStreamingAsync_SingleLargeInnerDelta_FansOutToMultipleTextChunks()
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task CompleteStreamingAsync_SingleLargeInnerDelta_PreservesText(bool native)
         {
             const int len = 150;
             string blob = new('z', len);
             StreamingScriptedChatClient inner = new(new[] { blob });
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: native, memoryStore: null);
             LlmCompletionRequest request = new()
             {
                 AgentRoleId = "PlainChat",
@@ -492,9 +979,6 @@ namespace CoreAI.Tests.EditMode
                 }
             }
 
-            Assert.GreaterOrEqual(texts.Count, 4,
-                "One 150-char SSE-style blob should fan out into multiple UI chunks.");
-            Assert.AreEqual(len, string.Concat(texts).Length);
             Assert.AreEqual(blob, string.Concat(texts));
         }
 
@@ -510,7 +994,7 @@ namespace CoreAI.Tests.EditMode
 
             StatefulMemoryStore memoryStore = new();
             StubCoreSettings settings = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, memoryStore);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, supportsNativeToolCalling: false, memoryStore: memoryStore);
 
             LlmCompletionRequest request = new()
             {
@@ -555,7 +1039,7 @@ namespace CoreAI.Tests.EditMode
 
             StatefulMemoryStore memoryStore = new();
             StubCoreSettings settings = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, memoryStore);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, supportsNativeToolCalling: false, memoryStore: memoryStore);
 
             LlmCompletionRequest request = new()
             {
@@ -580,11 +1064,11 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_ToolExecutedThenProviderThrows_ReturnsFailureWithExecutedToolCalls()
         {
             ToolThenThrowChatClient inner = new();
-            MeaiLlmClient client = new(
-                inner,
+            MeaiLlmClient client = new(inner,
                 GameLoggerUnscopedFallback.Instance,
                 new StubCoreSettings(),
-                new StatefulMemoryStore());
+                supportsNativeToolCalling: false,
+                memoryStore: new StatefulMemoryStore());
 
             LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -611,7 +1095,7 @@ namespace CoreAI.Tests.EditMode
 
             StatefulMemoryStore memoryStore = new();
             StubCoreSettings settings = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, memoryStore);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, supportsNativeToolCalling: false, memoryStore: memoryStore);
 
             LlmCompletionRequest request = new()
             {
@@ -648,7 +1132,7 @@ namespace CoreAI.Tests.EditMode
                 {
                     "Saved", "! ", "{\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"foo\"}}"
                 });
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: false, memoryStore: null);
             LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
@@ -676,7 +1160,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task CompleteStreamingAsync_TooManyToolIterations_ReturnsTerminalError()
         {
-            string toolJson = "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"loop\"}}";
+            string toolJson = "{\"name\":\"unavailable\",\"arguments\":{}}";
             StreamingScriptedChatClient inner = new(
                 new[] { toolJson },
                 new[] { toolJson },
@@ -685,16 +1169,20 @@ namespace CoreAI.Tests.EditMode
                 new[] { toolJson },
                 new[] { toolJson });
 
-            StatefulMemoryStore memoryStore = new();
             StubCoreSettings settings = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, memoryStore);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, supportsNativeToolCalling: false);
 
             LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt = "You are test agent.",
                 UserPayload = "Create quiz",
-                Tools = new List<ILlmTool> { new MemoryLlmTool() }
+                Tools = new List<ILlmTool>
+                {
+                    new DelegateLlmTool("unavailable", "Unavailable resource",
+                        (Func<string>)(() => "{\"Success\":false,\"Error\":\"Resource unavailable\"}"))
+                },
+                MaxToolCallRoundtrips = 2
             };
 
             LlmStreamChunk last = null;
@@ -705,12 +1193,11 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsNotNull(last);
             Assert.IsTrue(last.IsDone);
-            // ToolExecutionPolicy detects duplicate tool calls and increments consecutive errors,
-            // so the error comes from the policy's max-errors guard rather than the loop counter.
-            Assert.IsTrue(
-                last.Error.Contains("max consecutive tool errors") ||
-                last.Error.Contains("tool loop exceeded"),
-                $"Unexpected error: {last.Error}");
+            Assert.IsFalse(string.IsNullOrWhiteSpace(last.Error), "An exhausted budget with no usable summary must report an error.");
+            Assert.AreEqual(request.MaxToolCallRoundtrips.Value + 1, inner.StreamCalls,
+                "Only the configured tool rounds and one tools-disabled summary may reach the provider.");
+            Assert.AreNotEqual(LlmErrorCode.None, last.ErrorCode);
+            Assert.IsTrue(last.ExecutedToolCalls.Any(call => call.Name == "unavailable" && !call.Success));
         }
 
         [Test]
@@ -727,7 +1214,7 @@ namespace CoreAI.Tests.EditMode
 
             StatefulMemoryStore memoryStore = new();
             StubCoreSettings settings = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, memoryStore);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, supportsNativeToolCalling: false, memoryStore: memoryStore);
 
             LlmCompletionRequest request = new()
             {
@@ -849,12 +1336,14 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class ExplicitFunctionTool : ILlmTool, IAIFunctionLlmTool
         {
-            public ExplicitFunctionTool(string name)
+            public ExplicitFunctionTool(string name, bool endsTurn = false)
             {
                 Name = name;
+                EndsTurn = endsTurn;
             }
 
             public string Name { get; }
+            public bool EndsTurn { get; }
             public string Description => "Explicit MEAI function test tool.";
             public string ParametersSchema => "{}";
             public bool AllowDuplicates => false;
@@ -920,11 +1409,11 @@ namespace CoreAI.Tests.EditMode
             LlmCompletionRequest request)
         {
             CapturingChatClient inner = new();
-            MeaiLlmClient client = new(
-                inner,
+            MeaiLlmClient client = new(inner,
                 GameLoggerUnscopedFallback.Instance,
                 new StubCoreSettings(),
-                null);
+                supportsNativeToolCalling: true,
+                memoryStore: null);
 
             LlmCompletionResult result = await client.CompleteAsync(request, CancellationToken.None);
             return (inner.LastMessages, result.Content);
@@ -934,11 +1423,11 @@ namespace CoreAI.Tests.EditMode
             LlmCompletionRequest request)
         {
             CapturingChatClient inner = new();
-            MeaiLlmClient client = new(
-                inner,
+            MeaiLlmClient client = new(inner,
                 GameLoggerUnscopedFallback.Instance,
                 new StubCoreSettings(),
-                null);
+                supportsNativeToolCalling: true,
+                memoryStore: null);
             List<string> textChunks = new();
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, CancellationToken.None))
             {
@@ -958,15 +1447,22 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class CapturingChatClient : MEAI.IChatClient
         {
+            public string ResponseText { get; set; } = "ok";
+            public string FunctionCallName { get; set; }
+            public int Calls { get; private set; }
             public MEAI.ChatOptions LastOptions { get; private set; }
             public List<MEAI.ChatMessage> LastMessages { get; private set; }
 
             public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
                 MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
             {
+                Calls++;
                 LastOptions = options;
                 LastMessages = chatMessages.ToList();
-                return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "ok")));
+                MEAI.ChatMessage message = new(MEAI.ChatRole.Assistant, ResponseText);
+                if (FunctionCallName != null) message.Contents.Add(new MEAI.FunctionCallContent(
+                    "unsolicited", FunctionCallName, new Dictionary<string, object>()));
+                return Task.FromResult(new MEAI.ChatResponse(message));
             }
 
             public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
@@ -975,9 +1471,13 @@ namespace CoreAI.Tests.EditMode
                 [System.Runtime.CompilerServices.EnumeratorCancellation]
                 CancellationToken cancellationToken = default)
             {
+                Calls++;
                 LastOptions = options;
                 LastMessages = chatMessages.ToList();
-                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "ok");
+                MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, ResponseText);
+                if (FunctionCallName != null) update.Contents.Add(new MEAI.FunctionCallContent(
+                    "unsolicited", FunctionCallName, new Dictionary<string, object>()));
+                yield return update;
                 await Task.Yield();
             }
 
@@ -1285,6 +1785,72 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class BindingBarrierTool : ILlmTool, IAIFunctionLlmTool
+        {
+            private readonly TaskCompletionSource<bool> _entered;
+            private readonly ManualResetEventSlim _release;
+            public BindingBarrierTool(TaskCompletionSource<bool> entered, ManualResetEventSlim release)
+            {
+                _entered = entered;
+                _release = release;
+            }
+            public string Name => "first_tool";
+            public string Description => "Completes the first request.";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+            public bool EndsTurn => true;
+            public MEAI.AIFunction CreateAIFunction()
+            {
+                _entered.TrySetResult(true);
+                if (!_release.Wait(TimeSpan.FromSeconds(15))) throw new TimeoutException("Binding barrier was not released.");
+                return MEAI.AIFunctionFactory.Create((Func<string>)(() => "ok"), Name);
+            }
+        }
+
+        private sealed class RoleToolChatClient : MEAI.IChatClient
+        {
+            private static MEAI.FunctionCallContent Call(MEAI.ChatOptions options)
+            {
+                string name = options.Tools.OfType<MEAI.AIFunction>().First().Name;
+                return new MEAI.FunctionCallContent(name + "-call", name, new Dictionary<string, object>());
+            }
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> messages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default) =>
+                Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                    new List<MEAI.AIContent> { Call(options) })));
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "")
+                { Contents = new List<MEAI.AIContent> { Call(options) } };
+                await Task.CompletedTask;
+            }
+            public object GetService(Type serviceType, object serviceKey = null) => null;
+            public void Dispose() { }
+        }
+
+        private sealed class IdentityStreamingChatClient : MEAI.IChatClient
+        {
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> messages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default) =>
+                throw new NotSupportedException();
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.System, "hidden system") { MessageId = "system" };
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "first ") { MessageId = "a" };
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Tool, "hidden tool") { MessageId = "tool" };
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "second") { MessageId = "b" };
+                await Task.CompletedTask;
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null) => null;
+            public void Dispose() { }
+        }
+
         private sealed class StreamingScriptedChatClient : MEAI.IChatClient
         {
             private readonly Queue<string[]> _streamScripts;
@@ -1480,57 +2046,6 @@ namespace CoreAI.Tests.EditMode
             List<MeaiLlmClient.JsonSpan> spans = MeaiLlmClient.FindToolCallJsonSpans(text);
 
             Assert.AreEqual(2, spans.Count);
-        }
-
-        [Test]
-        public void GetExclusiveEndForSafeUnboundRawStreaming_StopsBeforeCompleteToolJson()
-        {
-            string text = "Saved! {\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"foo\"}} tail";
-            int brace = text.IndexOf('{');
-            Assert.AreEqual(brace, MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming(text));
-        }
-
-        [Test]
-        public void GetExclusiveEndForSafeUnboundRawStreaming_IncompleteBraceAtEofHoldsFromOpen()
-        {
-            string text = "Saved! {";
-            int brace = text.IndexOf('{');
-            Assert.AreEqual(brace, MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming(text));
-        }
-
-        [Test]
-        public void GetExclusiveEndForSafeUnboundRawStreaming_NonToolClosedObjectEmitsFullLength()
-        {
-            string text = "Use { \"a\": 1 } ok";
-            Assert.AreEqual(text.Length, MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming(text));
-        }
-
-        [Test]
-        public void GetCleanedTextSuffixAfterHybridPrefix_SkipsPrefixAlreadyStreamedToConsumer()
-        {
-            string visible = "Hello ";
-            string cleaned = "Hello world";
-            int hybridEnd = visible.Length;
-            string? suffix = MeaiLlmClient.GetCleanedTextSuffixAfterHybridPrefix(cleaned, visible, hybridEnd);
-            Assert.IsNotNull(suffix);
-            Assert.AreEqual("world", suffix);
-        }
-
-        [Test]
-        public void GetCleanedTextSuffixAfterHybridPrefix_ReturnsNullWhenNothingWasStreamed()
-        {
-            Assert.IsNull(MeaiLlmClient.GetCleanedTextSuffixAfterHybridPrefix("only cleaned", "visible", 0));
-        }
-
-        [Test]
-        public void GetCleanedTextSuffixAfterHybridPrefix_UsesTrimmedRawPrefixWhenCleanedOmitsTrailingSpaces()
-        {
-            string visible = "OK  ";
-            string cleaned = "OK done";
-            int hybridEnd = visible.Length;
-            string? suffix = MeaiLlmClient.GetCleanedTextSuffixAfterHybridPrefix(cleaned, visible, hybridEnd);
-            Assert.IsNotNull(suffix);
-            Assert.AreEqual(" done", suffix);
         }
 
         [Test]

@@ -329,24 +329,24 @@ texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
 
 ## OpenAI-compatible reasoning isolation (2026-08-27) — 7.0.7 prepared
 
-- [x] `message.content` остаётся единственным источником видимого нестримового ответа;
-      `reasoning_content`/`reasoning`/`reasoningContent` сохраняются только как диагностика.
-- [x] SSE reasoning-дельты не повышаются до финального видимого текста; consumer получает их только в
-      `LlmStreamChunk.ReasoningText`, а готовый ответ собирает из `LlmStreamChunk.Text`.
-- [x] Включённый reasoning mode меняет только provider request controls и не меняет разделение ответа.
-- [x] 4 детерминированных PlayMode-теста `ReasoningIsolationPlayModeTests` проходят fake transport →
-      реальные provider/LLM/orchestrator/chat слои и проверяют UI consumer, diagnostics, ChatHistory и
-      command publication без модели, API-ключа и сети.
-- [x] XML API и пакетные `AGENT_BUILDER.md`, `DEVELOPER_GUIDE.md`, `STREAMING_ARCHITECTURE.md` фиксируют:
-      reasoning — только краткоживущая диагностика, не MemoryTool/ChatHistory/заметка/команда/автозапись.
-- [x] Шесть пакетов, десять внутренних dependency pins и `McpServerInfo.Version` синхронизированы на 7.0.7.
-- [x] File-only gates: `CoreAI.Core.csproj`, `CoreAI.Source.csproj`, `CoreAI.Tests.csproj` и
-      `CoreAI.Tests.PlayMode.FastNoLlm.csproj` (включая новый fixture) собраны с 0 errors; package/MCP
-      lockstep и `git diff --check` прошли.
-- [x] **Verification gate (следующая сессия Editor):** прогнать fixtures — закрыт: перекрыт полными зелёными прогонами EditMode 3256/3247/0/9 (`artifacts/testresults/g9.xml`) и браузерным гейтом 2026-09-02 (сверено 2026-09-04)
-      `MeaiOpenAiChatClientSseEditModeTests`, `MeaiOpenAiChatClientHttpEditModeTests` и
-      `MeaiLlmClientEditModeTests`, затем PlayMode fixture `ReasoningIsolationPlayModeTests` из assembly
-      `CoreAI.Tests.PlayMode.FastNoLlm`. В этой задаче Unity и запуск тестов прямо запрещены.
+- [x] `message.content` remains the single source of the visible non-streamed response;
+      `reasoning_content`/`reasoning`/`reasoningContent` are kept as diagnostics only.
+- [x] SSE reasoning deltas are never promoted to the final visible text; the consumer receives them only in
+      `LlmStreamChunk.ReasoningText`, and assembles the finished answer from `LlmStreamChunk.Text`.
+- [x] An enabled reasoning mode changes only provider request controls and does not change the response split.
+- [x] 4 deterministic PlayMode tests `ReasoningIsolationPlayModeTests` run fake transport →
+      real provider/LLM/orchestrator/chat layers and check the UI consumer, diagnostics, ChatHistory, and
+      command publication with no model, API key, or network.
+- [x] The XML API and the package `AGENT_BUILDER.md`, `DEVELOPER_GUIDE.md`, `STREAMING_ARCHITECTURE.md` pin down:
+      reasoning is only short-lived diagnostics, never a MemoryTool/ChatHistory/note/command/auto-record.
+- [x] Six packages, ten internal dependency pins, and `McpServerInfo.Version` are synced to 7.0.7.
+- [x] File-only gates: `CoreAI.Core.csproj`, `CoreAI.Source.csproj`, `CoreAI.Tests.csproj` and
+      `CoreAI.Tests.PlayMode.FastNoLlm.csproj` (including the new fixture) build with 0 errors; package/MCP
+      lockstep and `git diff --check` pass.
+- [x] **Verification gate (next Editor session):** run fixtures — closed: covered by the full green EditMode runs 3256/3247/0/9 (`artifacts/testresults/g9.xml`) and the 2026-09-02 browser gate (verified 2026-09-04)
+      `MeaiOpenAiChatClientSseEditModeTests`, `MeaiOpenAiChatClientHttpEditModeTests` and
+      `MeaiLlmClientEditModeTests`, then the PlayMode fixture `ReasoningIsolationPlayModeTests` from assembly
+      `CoreAI.Tests.PlayMode.FastNoLlm`. In this task Unity and running tests are directly forbidden.
 
 ## AgentBuilder per-request system prompt declaration (2026-08-26) — 7.0.6 prepared
 
@@ -356,7 +356,7 @@ texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
       a new regression pins the per-request declaration branch.
 - [x] `CoreAI.Core.csproj` and `CoreAI.Tests.csproj` compile with 0 errors; package/MCP lockstep and
       `git diff --check` pass.
-- [x] **Verification gate (next editor session):** run the focused `AgentBuilderEditModeTests` fixture. — закрыт: перекрыт теми же полными зелёными прогонами EditMode (сверено 2026-09-04)
+- [x] **Verification gate (next editor session):** run the focused `AgentBuilderEditModeTests` fixture. — closed: covered by the same full green EditMode runs (verified 2026-09-04)
       Unity Editor was not opened by requirement for this fix wave.
 
 ## Independent log-prefix controls (2026-08-12) — 7.0.3
@@ -377,20 +377,20 @@ texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
 
 ## Unity 6.6 UI Toolkit UXML wave (2026-08-12) — 7.0.1
 
-- [x] `CoreAiChatMessageBubbleElement` переведён с удалённых в Unity 6.6 `UxmlFactory` / `UxmlTraits` на
-      `[UxmlElement]` + `partial` + `[UxmlAttribute]`. UXML-имена атрибутов (`is-user`, `message-text`,
-      `avatar-sprite`), полное имя типа в `CoreAiChatMessageBubble.uxml`, значения по умолчанию и открытый
-      конструктор без параметров сохранены. Аудит остального репозитория legacy UITK API не нашёл.
-- [x] Unity 6.0–6.6 Input System защищён двойным gate: `ENABLE_INPUT_SYSTEM` включает backend только при
-      пакетном `COREAI_HAS_INPUT_SYSTEM`; Unity 6.7+ использует встроенный модуль по version define. Это
-      сохраняет компиляцию старых проектов с New/Both в Player Settings, но без UPM-пакета, и не возвращает
-      тихое отключение ввода на 6.7. License-free package-graph gate фиксирует все три asmdef и восемь `#if`.
-- [x] **Verification gate (следующая сессия редактора)**: прогнать `CoreAiChatMessageBubbleElementEditModeTests` — закрыт: 7.0.1 выпущен, последующие полные прогоны зелёные (сверено 2026-09-04)
-      (включая новый пин UXML-контракта) и полный EditMode-набор. Статическая проверка на установленном
-      Unity 6000.3.14f1 пройдена: UI Toolkit generator создал `UxmlSerializedData`, а Input backend собран
-      отдельно с пакетом и без него. Полный `dotnet build CoreAI.Source.csproj` пока блокируют устаревшие
-      Unity-сгенерированные project inputs (`AiAttachment` и удалённый `CoreAiBackendPanel.cs`); Unity в этой
-      проверке не запускался по прямому ограничению задачи.
+- [x] `CoreAiChatMessageBubbleElement` migrated from the `UxmlFactory` / `UxmlTraits` removed in Unity 6.6 to
+      `[UxmlElement]` + `partial` + `[UxmlAttribute]`. UXML attribute names (`is-user`, `message-text`,
+      `avatar-sprite`), the fully qualified type name in `CoreAiChatMessageBubble.uxml`, defaults, and the public
+      parameterless constructor are preserved. An audit of the rest of the repo found no legacy UITK API.
+- [x] The Unity 6.0–6.6 Input System is guarded by a double gate: `ENABLE_INPUT_SYSTEM` enables the backend only with the
+      package `COREAI_HAS_INPUT_SYSTEM`; Unity 6.7+ uses the built-in module via version define. This
+      keeps old projects with New/Both in Player Settings compiling, but without the UPM package, and does not bring back
+      silent input loss on 6.7. The license-free package-graph gate pins all three asmdefs and eight `#if`s.
+- [x] **Verification gate (next editor session)**: run `CoreAiChatMessageBubbleElementEditModeTests` — closed: 7.0.1 released, later full runs green (verified 2026-09-04)
+      (including the new UXML-contract pin) and the full EditMode set. Static verification on the installed
+      Unity 6000.3.14f1 passed: the UI Toolkit generator produced `UxmlSerializedData`, and the Input backend builds
+      both with and without the package. A full `dotnet build CoreAI.Source.csproj` is still blocked by stale
+      Unity-generated project inputs (`AiAttachment` and the deleted `CoreAiBackendPanel.cs`); Unity was not
+      launched in this check per a direct task constraint.
 
 ## Post-7.0.0 audit fix wave (2026-08-09) — unreleased
 
@@ -714,22 +714,22 @@ Open:
       world-command name fields). `WaitForChild` resolves an existing child here; its yield is MVP2.
 - [x] 3. Core datatypes *(rung: MVP1)* — LANDED 6.3.0. `Vector3`, `CFrame`, `Color3`, `UDim2`,
       `Enum.*` with golden fixtures against documented Roblox values.
-- [x] 4. Task scheduler *(rung: MVP2)* — `task.wait/spawn/defer/delay`, legacy `wait`, on the existing coroutine — закрыт: `ModScheduler` + `LuaCsRbxSchedulerAdapter` отгружены и подключены в 7.1.0 (сверено 2026-09-04)
+- [x] 4. Task scheduler *(rung: MVP2)* — `task.wait/spawn/defer/delay`, legacy `wait`, on the existing coroutine — closed: `ModScheduler` + `LuaCsRbxSchedulerAdapter` shipped and wired in 7.1.0 (verified 2026-09-04)
       substrate; `RunService.Heartbeat/PostSimulation`; connection objects with `:Disconnect()`.
-- [x] 5. `game:GetService` *(rung: MVP2)* — whitelist registry; unimplemented services = loud stubs. — закрыт: `ServiceCatalog.cs` (Assets/CoreAIMods/Runtime/RbxApi/Instances) — вайтлист + громкие заглушки `RbxStubService` (сверено 2026-09-04)
+- [x] 5. `game:GetService` *(rung: MVP2)* — whitelist registry; unimplemented services = loud stubs. — closed: `ServiceCatalog.cs` (Assets/CoreAIMods/Runtime/RbxApi/Instances) — allowlist + loud `RbxStubService` stubs (verified 2026-09-04)
 - [x] 6. Luau preprocessor *(rung: MVP5 — `LoadMod` wiring)* — LANDED as the targeted mini-rewriter
       (`Assets/CoreAIMods/Runtime/LuauDownlevel/`: `LuauLexer`/`LuauRewriteParser`/`LuauDownleveler`,
       standalone, 93 EditMode tests; Q1 resolved — Loretta reconsidered only if construct coverage
       proves insufficient). Remaining work is the MVP5 wiring into `LoadMod` with source maps.
 - [ ] 7. Mod system UX *(rung: MVP5)* — `Mods/<ModName>/` with `mod.json` manifest, script contexts mapped to
       folders, enable/disable without deletion, hot reload, C# management API.
-- [x] 8. Lua log service *(rung: MVP5, deliverable 7)* — per-mod ring buffers + `get_mod_logs` AI tool (core shipped; wire into the — закрыт: сервис зарегистрирован в `CoreAiModsInstaller`, инструмент подключён, `LuaCsModRuntime` пишет в буферы (сверено 2026-09-04)
+- [x] 8. Lua log service *(rung: MVP5, deliverable 7)* — per-mod ring buffers + `get_mod_logs` AI tool (core shipped; wire into the — closed: the service is registered in `CoreAiModsInstaller`, the tool is wired up, `LuaCsModRuntime` writes into the buffers (verified 2026-09-04)
       mod runtime's print/warn/error capture, DI composition, and the Programmer tool set).
-- [x] 9. Editor syntax highlighting *(rung: MVP7)* — importer + highlighted inspector/editor window (shipped in — закрыт: `LuaScriptedImporter`, `LuauScriptedImporter`, `LuaScriptViewerWindow` существуют (сверено 2026-09-04)
+- [x] 9. Editor syntax highlighting *(rung: MVP7)* — importer + highlighted inspector/editor window (shipped in — closed: `LuaScriptedImporter`, `LuauScriptedImporter`, `LuaScriptViewerWindow` exist (verified 2026-09-04)
       `[Unreleased]`; keep in sync with Luau constructs from item 6).
-- [x] 10. Networking API stubs *(rung: MVP2)* — `RemoteEvent`/`RemoteFunction`/`ReplicatedStorage` in local-loopback — закрыт: `Networking/INetworkBridge.cs`, `NullNetworkBridge.cs`, `RbxRemotes.cs` существуют (сверено 2026-09-04)
+- [x] 10. Networking API stubs *(rung: MVP2)* — `RemoteEvent`/`RemoteFunction`/`ReplicatedStorage` in local-loopback — closed: `Networking/INetworkBridge.cs`, `NullNetworkBridge.cs`, `RbxRemotes.cs` exist (verified 2026-09-04)
       via `INetworkBridge`; `NullNetworkBridge` default.
-- [x] 11. Test corpus *(rung: MVP2)* — ~20 real-world Roblox tutorial-grade scripts as fixtures (preprocessor + API — закрыт: 40 фикстур в `Assets/CoreAIMods/Tests/EditMode/RbxApi/CompatibilityCorpus/Fixtures/` + `LuauDownlevelerRbxCorpusEditModeTests` (сверено 2026-09-04)
+- [x] 11. Test corpus *(rung: MVP2)* — ~20 real-world Roblox tutorial-grade scripts as fixtures (preprocessor + API — closed: 40 fixtures in `Assets/CoreAIMods/Tests/EditMode/RbxApi/CompatibilityCorpus/Fixtures/` + `LuauDownlevelerRbxCorpusEditModeTests` (verified 2026-09-04)
       smoke: "paste → runs").
 
 ## [A7] Post-remediation audit residue (2026-07-17) — accepted-risk items from the a2a2311e audits
@@ -739,7 +739,7 @@ Open:
 > LlmClientException code preservation, bounded host drain, snapshots under the lock, abandoned-stream
 > terminal publish, two test hardenings, routing docs). Remaining accepted-risk items:
 
-- [x] **Route pinning across one request's construction.** Tool capability and context window are — закрыт: `ILlmClientRegistry.cs:8` `LlmRoleRouteSnapshot`, `:79` `ResolveRouteForRole` (сверено 2026-09-04)
+- [x] **Route pinning across one request's construction.** Tool capability and context window are — closed: `ILlmClientRegistry.cs:8` `LlmRoleRouteSnapshot`, `:79` `ResolveRouteForRole` (verified 2026-09-04)
       resolved at prompt-build time, the client at send time; a role reassignment landing inside that
       millisecond window can build one request with the old endpoint's budget/tool contract and send it
       to the new endpoint (self-heals next request). Proper fix: resolve one `LlmRoleRouteSnapshot` per
@@ -931,7 +931,7 @@ Open:
       are rejected before side effects, and partial retries execute only failed slots.
 - [ ] Cross-request idempotency: add executor-level stable idempotency keys. Current replay state is
       request-local and `ToolExecutionPolicy.Reset()` intentionally clears it.
-- [x] Full-tier Lua queries: move recursive `unity_list_objects` / `unity_find_all` / — закрыт: общий `WorldQuerySceneWalker.cs` (RbxApi/Binding), используется `WorldInstanceAdapter` и `LuaCsWorldQueryBindings` (сверено 2026-09-04)
+- [x] Full-tier Lua queries: move recursive `unity_list_objects` / `unity_find_all` / — closed: shared `WorldQuerySceneWalker.cs` (RbxApi/Binding), used by `WorldInstanceAdapter` and `LuaCsWorldQueryBindings` (verified 2026-09-04)
       `unity_find_by_tag` / `unity_find_by_component` implementations onto the shared budgeted walker.
 - [~] **WebGL build: `LlamaLib.GetPlatform()` throws on Emscripten/WASM.** LLMUnity's native
       llama.cpp wrapper uses `RuntimeInformation.IsOSPlatform` which does not recognise WebGL/Emscripten
@@ -1097,7 +1097,7 @@ Open:
       (b) key facts survive (probe the model that the summary retained specific details).
 - [ ] Integration test: context-overflow retry loop actually shrinks the prompt and eventually succeeds
       (the `0.75^n` clamp converges) — currently only the shrink factor is unit-tested.
-- [x] Default-config guard: cap the rolled summary by tokens (today `ConversationRolledSummaryMaxTokens=0` = uncapped). — закрыт: `ICoreAISettings.cs:34` `DefaultConversationRolledSummaryMaxTokens = 2048`, проброшен в `AiOrchestrator` (сверено 2026-09-04)
+- [x] Default-config guard: cap the rolled summary by tokens (today `ConversationRolledSummaryMaxTokens=0` = uncapped). — closed: `ICoreAISettings.cs:34` `DefaultConversationRolledSummaryMaxTokens = 2048`, plumbed into `AiOrchestrator` (verified 2026-09-04)
 
 ### [R6] Advanced resilience (basic fallback already shipped & tested)
 
@@ -1201,7 +1201,7 @@ Open:
       headroom inside the limiter.
 - [ ] `AgentMemoryPolicy.ConfigureChatHistory` lacks the null/whitespace roleId guard the other entry
       points have (pre-existing; null throws from Dictionary.TryGetValue).
-- [x] **5.7.0 editor verification gate (next Unity editor session)**: run the FULL EditMode suite — закрыт: перекрыт полными прогонами 7.x (`editmode8.xml`, `g9.xml`, `g11.xml`) (сверено 2026-09-04)
+- [x] **5.7.0 editor verification gate (next Unity editor session)**: run the FULL EditMode suite — closed: covered by the full 7.x runs (`editmode8.xml`, `g9.xml`, `g11.xml`) (verified 2026-09-04)
       (1658 discovered; the CLI NUnit workaround can't execute ECall-dependent fixtures —
       `Application.persistentDataPath`, `EditorPrefs`, `Debug.Log`, UI Toolkit) + PlayMode FastNoLlm
       (incl. the new WorldStateManager pending-parent tests) + one live G1 scenario on the configured

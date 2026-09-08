@@ -15,6 +15,7 @@ namespace CoreAI.Infrastructure.Llm
             LlmEndpointReadinessRequest request,
             CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (request == null)
             {
                 throw new ArgumentNullException(nameof(request));
@@ -73,17 +74,9 @@ namespace CoreAI.Infrastructure.Llm
                 webRequest.SetRequestHeader("Authorization", "Bearer " + request.ApiKey.Trim());
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             UnityWebRequestAsyncOperation operation = webRequest.SendWebRequest();
-            while (!operation.isDone)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    webRequest.Abort();
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-
-                await Task.Yield();
-            }
+            await UnityWebRequestOpenAiTransport.AwaitCompletionAsync(operation, webRequest, cancellationToken);
 
             cancellationToken.ThrowIfCancellationRequested();
             int status = webRequest.responseCode > 0 ? (int)webRequest.responseCode : 0;

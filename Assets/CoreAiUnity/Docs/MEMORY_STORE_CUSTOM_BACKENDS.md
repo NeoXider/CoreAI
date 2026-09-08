@@ -182,3 +182,22 @@ If you use [`CoreAiChatPanel`](../Runtime/Source/Features/Chat/README_CHAT.md) w
 | Cloud + optional local composite | Yes | Large (with caps) | Medium–high |
 
 **Yes:** both session (**ChatHistory**) and **MemoryTool** can be backed by PlayerPrefs or cloud — implement `IAgentMemoryStore` (or wrap the default store) and register it in place of `FileAgentMemoryStore`.
+
+---
+
+## Conversation summary stores (phase 1: storage boundary)
+
+Compact dialogue summaries (`## Conversation Summary`) live separately from memory via the contract [`IConversationSummaryStore`](../../CoreAI/Runtime/Core/Features/AgentMemory/IConversationSummaryStore.cs) and its portable async companion `IAsyncConversationSummaryStore` (Load/Save/Clear with `CancellationToken`). The sync API is kept for compatibility, but failed save/clear now throws instead of returning a silent success.
+
+Built-in implementations:
+
+- `FileConversationSummaryStore` — JSON `<stem>.json` under the host directory, atomic writes via a unique temp file, file gates shared per process and target path (`FileAgentMemoryStore.MutationLocks` pattern, never evicted). File format and naming unchanged.
+- `ScopedConversationSummaryStoreDecorator` — the same scope boundary as memory/transcripts; scope is computed synchronously before any await.
+- `InMemoryConversationSummaryStore`, `NullConversationSummaryStore` — implement async directly.
+- `BlockingSyncSummaryStoreAsyncAdapter` — explicit opt-in bridge for third-party sync backends (runs inline, blocks the calling thread on disk I/O).
+
+Durability hooks (WebGL): the `FileConversationSummaryStore` constructor takes the legacy `Func<bool> afterWrite` (for the sync path, `CoreAiWebGlPersistence.Sync`) plus the added `Func<CancellationToken, Task<bool>> afterWriteAsync` (for the async path, the future `SyncAsync`). The hook runs after a committed mutation, outside the file gates, on the caller's original context, with `CancellationToken.None`; `false` throws an honest `IOException` (the VFS write happened, durability is unconfirmed). The hook must bound its own completion time — the store sets no separate timeout (in production `SyncAsync` owns it with a bounded 30s). The sync path fail-fasts with `InvalidOperationException` when the file is busy instead of blocking the main thread.
+
+Strict async reads: a corrupt/unreadable file propagates the exception and does not overwrite data; a missing file means an empty string (sync reads keep the legacy `""` fallback).
+
+Current-phase limits: manager/orchestrator/DI integration is not done (root — separately); identity-hashing and scope migration are out of scope — scope-key and file formats did not change; no rollback after commit — caller cancellation before I/O prevents the mutation, after commit the host acknowledgement reports the outcome.

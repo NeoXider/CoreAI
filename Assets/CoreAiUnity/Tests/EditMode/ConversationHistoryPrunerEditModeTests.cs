@@ -51,8 +51,13 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("user", pruned[2].Role);
         }
 
+        /// <summary>
+        /// Дефект: прежняя норма считала перекрытием совпадение одного имени инструмента. Два вызова
+        /// одного инструмента с РАЗНЫМИ результатами — это два разных вызова (аргументов в durable-блоке
+        /// нет, доказать «тот же вызов» нечем), и ребёнок терял первый из них.
+        /// </summary>
         [Test]
-        public void Prune_DropsOlderToolResult_WhenNewerResultForSameToolExists()
+        public void Prune_KeepsOlderToolResult_WhenSameToolReturnedADifferentResult()
         {
             ChatMessage[] history =
             {
@@ -67,13 +72,74 @@ namespace CoreAI.Tests.EditMode
 
             ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
 
+            Assert.AreSame(history, pruned,
+                "Same tool name with a different recorded result is a different call; nothing is superseded.");
+        }
+
+        /// <summary>
+        /// Перекрытие, которое можно доказать по данным: тот же инструмент и дословно та же записанная
+        /// выдача в более новом блоке. Старшая копия не несёт ничего нового и уходит.
+        /// </summary>
+        [Test]
+        public void Prune_DropsOlderToolResult_WhenNewerBlockRepeatsTheSameToolAndResult()
+        {
+            ChatMessage[] history =
+            {
+                Msg("user", "opening"),
+                Msg("tool", "## Tool Results\n- spawn_quiz: ok {\"success\":true}"),
+                Msg("assistant", "noted"),
+                Msg("tool", "## Tool Results\n- call_skill_tool: ok moved"),
+                Msg("user", "continue"),
+                Msg("tool", "## Tool Results\n- spawn_quiz: ok {\"success\":true}"),
+                Msg("assistant", "done")
+            };
+
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
+
             Assert.AreEqual(6, pruned.Length);
             Assert.AreEqual("opening", pruned[0].Content);
             Assert.AreEqual("noted", pruned[1].Content);
             Assert.AreEqual("## Tool Results\n- call_skill_tool: ok moved", pruned[2].Content);
             Assert.AreEqual("continue", pruned[3].Content);
-            Assert.AreEqual("## Tool Results\n- spawn_quiz: ok fresh", pruned[4].Content);
+            Assert.AreEqual("## Tool Results\n- spawn_quiz: ok {\"success\":true}", pruned[4].Content);
             Assert.AreEqual("done", pruned[5].Content);
+        }
+
+        /// <summary>
+        /// Страж на скиллы. У учителя RedoSchool каждый скилл идёт через один внешний инструмент
+        /// <c>call_skill_tool</c>, и по старой норме «следующий слайд» выбрасывал из промпта вывод
+        /// код-станции — тот самый, про который ребёнок сейчас спрашивает «а почему вывелось 5?».
+        /// Разные внутренние вызовы одной обёртки должны выживать все.
+        /// </summary>
+        [Test]
+        public void Prune_SkillRouter_NextSlideDoesNotDiscardCodeStationOutput()
+        {
+            const string runCode =
+                "## Tool Results\n- call_skill_tool: ok {\"success\":true,\"tool\":\"run_code\",\"stdout\":\"5\\n\"}";
+            const string slide3 =
+                "## Tool Results\n- call_skill_tool: ok {\"success\":true,\"tool\":\"next_slide\",\"slide\":3}";
+            const string slide4 =
+                "## Tool Results\n- call_skill_tool: ok {\"success\":true,\"tool\":\"next_slide\",\"slide\":4}";
+            ChatMessage[] history =
+            {
+                Msg("user", "запусти мой код"),
+                Msg("tool", runCode),
+                Msg("assistant", "Вывод: 5"),
+                Msg("user", "дальше"),
+                Msg("tool", slide3),
+                Msg("assistant", "Слайд 3"),
+                Msg("user", "дальше"),
+                Msg("tool", slide4),
+                Msg("assistant", "Слайд 4"),
+                Msg("user", "а почему вывелось 5?")
+            };
+
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
+
+            Assert.AreSame(history, pruned,
+                "Three different skill calls behind one router name are three different calls; none is superseded.");
+            Assert.IsTrue(System.Array.Exists(pruned, m => m.Content == runCode),
+                "The code-station output the learner is asking about must still be in the prompt.");
         }
 
         [Test]
@@ -109,7 +175,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void DeterministicManager_PrunesOldToolResultsBeforePartition()
+        public void DeterministicManager_NoCompaction_PrunesWholeEmittedHistoryWithoutTouchingSummary()
         {
             InMemoryConversationSummaryStore store = new();
             DeterministicConversationContextManager manager =
@@ -245,30 +311,50 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// The genuine supersede path still works when the entry is a real top-level "- name: status" bullet,
-        /// even for the Full policy with a following indented Detail block.
+        /// Под политикой Full выдача инструмента лежит в отступном блоке Detail и входит в идентичность
+        /// записи: та же выдача в новом блоке — старший блок избыточен.
         /// </summary>
         [Test]
-        public void Prune_StillSupersedes_RealTopLevelEntry_WithFullDetail()
+        public void Prune_StillSupersedes_RealTopLevelEntry_WithIdenticalFullDetail()
         {
+            const string block = "## Tool Results\n- spawn_quiz: ok\n  Detail:\n  {\"success\":true}";
             ChatMessage[] history =
             {
                 Msg("user", "opening"),
-                Msg("tool", "## Tool Results\n- spawn_quiz: ok old\n  Detail:\n  old detail"),
+                Msg("tool", block),
                 Msg("assistant", "noted"),
-                Msg("tool", "## Tool Results\n- spawn_quiz: ok fresh\n  Detail:\n  fresh detail"),
+                Msg("tool", block),
                 Msg("user", "continue")
             };
 
             ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
 
-            // Older spawn_quiz block IS dropped (same real tool, newer wins).
             Assert.AreEqual(4, pruned.Length);
             Assert.AreEqual("opening", pruned[0].Content);
             Assert.AreEqual("noted", pruned[1].Content);
-            Assert.AreEqual("## Tool Results\n- spawn_quiz: ok fresh\n  Detail:\n  fresh detail",
-                pruned[2].Content);
+            Assert.AreEqual(block, pruned[2].Content);
             Assert.AreEqual("continue", pruned[3].Content);
+        }
+
+        /// <summary>
+        /// Под Full две выдачи одного инструмента различаются только внутри Detail — и этого достаточно,
+        /// чтобы считать их разными вызовами: старшая выдача остаётся.
+        /// </summary>
+        [Test]
+        public void Prune_KeepsOlderFullPolicyBlock_WhenOnlyTheDetailDiffers()
+        {
+            ChatMessage[] history =
+            {
+                Msg("user", "opening"),
+                Msg("tool", "## Tool Results\n- spawn_quiz: ok\n  Detail:\n  old detail"),
+                Msg("assistant", "noted"),
+                Msg("tool", "## Tool Results\n- spawn_quiz: ok\n  Detail:\n  fresh detail"),
+                Msg("user", "continue")
+            };
+
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
+
+            Assert.AreSame(history, pruned);
         }
 
         private static ChatMessage Msg(string role, string content)

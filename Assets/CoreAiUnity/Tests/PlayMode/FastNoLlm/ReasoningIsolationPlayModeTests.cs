@@ -163,10 +163,10 @@ namespace CoreAI.Tests.PlayMode
             TestSettings settings = new(enableStreaming);
             FakeOpenAiTransport transport = new(responseJson, sse);
             MEAI.IChatClient providerClient = new MeaiOpenAiChatClient(settings, transport);
-            MeaiLlmClient meaiClient = new(
-                providerClient,
+            MeaiLlmClient meaiClient = new(providerClient,
                 GameLoggerUnscopedFallback.Instance,
-                settings);
+                settings,
+                supportsNativeToolCalling: true);
             CapturingLlmClient capturingClient = new(meaiClient);
             CapturingMemoryStore memoryStore = new();
             CapturingCommandSink commandSink = new();

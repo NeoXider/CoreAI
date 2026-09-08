@@ -375,14 +375,14 @@ reuse for everyone else.
 ServerManagedAuthorization.SetProvider(() => "Bearer " + authTokenStore.CurrentJwt);
 ```
 
-Для динамической атрибуции usage без пересоздания клиента зарегистрируйте
-`IRequestHeaderProvider` через `ServerManagedAuthorization.SetRequestHeaderProvider(...)`. `ServerManagedLlmClient`
-снимает заголовки один раз на invocation `CompleteAsync` / `CompleteStreamingAsync`, поэтому внутренний HTTP/auth-retry,
-внешний sync retry после retryable result/exception и streaming pre-commit retry не могут сменить lesson/cohort
-в середине logical request. Следующий invocation берёт новое значение, даже
-если host повторно использует тот же объект `LlmCompletionRequest`. Custom hook не может подменить
-`Authorization`, `Content-Type`, `Idempotency-Key` и
-`X-Request-Id`; backend всё равно обязан валидировать client-supplied значение. См.
+For dynamic usage attribution without recreating the client, register an
+`IRequestHeaderProvider` via `ServerManagedAuthorization.SetRequestHeaderProvider(...)`. `ServerManagedLlmClient`
+snapshots headers once per `CompleteAsync` / `CompleteStreamingAsync` invocation, so the internal HTTP/auth retry,
+external sync retries after a retryable result/exception, and the streaming pre-commit retry cannot change lesson/cohort
+in the middle of a logical request. The next invocation picks up a fresh value, even
+if the host reuses the same `LlmCompletionRequest` object. A custom hook cannot override
+`Authorization`, `Content-Type`, `Idempotency-Key`, and
+`X-Request-Id`; the backend must still validate the client-supplied value. See
 [SERVER_MANAGED_PROTOCOL.md](../../CoreAI/Docs/SERVER_MANAGED_PROTOCOL.md).
 
 Provider failures use `LlmErrorCode` on `LlmCompletionResult`, `LlmStreamChunk`, and `LlmRequestCompleted`, so callers can handle `QuotaExceeded`, `AuthExpired`, `RateLimited`, `BackendUnavailable`, and other stable categories without parsing error text.
@@ -418,7 +418,7 @@ Symbol **`COREAI_LUA`** (manual positive opt-in, since v7.0.0): compiles the Lua
 
 **Observability:** **`GameLogFeature.Llm`** (LLM requests); **`GameLogFeature.Metrics`** (orchestrator metrics; part of **`AllBuiltIn`** / **`All`** since the logging fix — "all categories" really means all). Assets serialized before that fix are widened to the new **`AllBuiltIn`** once, keyed on the asset's version field, so a deliberate partial selection is never overwritten again. Filtering by **`traceId`** links **`LLM ▶/◀`** and **`ApplyAiGameCommand`**.
 
-For streaming with tool-calling, `MeaiLlmClient.CompleteStreamingAsync` uses one cycle per MEAI step. Since **v1.7.3**, when tools are **declared** (`Tools` non-empty) and **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`** is not **`true`**, the client uses a **hybrid JSON hold** (same idea as for unbound streaming): only the prefix that cannot be part of an incomplete text-shaped tool JSON is streamed live; the rest is held until extraction runs, so tool JSON does not leak into the chat. Native **`delta.tool_calls`** (Path 2) and text-shaped JSON (Path 1) both reconcile any held prefix with the cleaned assistant string and emit a **suffix** as **`LlmStreamChunk.Text`** when needed. Set **`BufferFullStreamingIterationWhenToolsDeclared = true`** only if a backend fragments deltas in a way that breaks hybrid hold.
+For streaming with tool-calling, `MeaiLlmClient.CompleteStreamingAsync` uses one cycle per MEAI step. When — and only when — the client actually interprets prose as tool calls (`interpretProseAsToolCalls`: no native tool channel, or tools declared with nothing bound, or the explicit `AllowTextShapedToolCallsOnNativeEndpoint` opt-in), it applies a **hybrid JSON hold**: only the prefix that cannot be part of an incomplete text-shaped tool JSON is streamed live; the rest is held until extraction runs, so tool JSON does not leak into the chat. Native **`delta.tool_calls`** (Path 2) and text-shaped JSON (Path 1) both reconcile any held prefix with the cleaned assistant string and emit a **suffix** as **`LlmStreamChunk.Text`** when needed. There is no full-iteration buffering switch — **`BufferFullStreamingIterationWhenToolsDeclared`** was removed in **7.35.0** (never set by any caller).
 By default, per-role streaming override is enabled for roles with tools (`AgentMode.ToolsAndChat` and `AgentMode.ToolsOnly`); for `AgentMode.ChatOnly` the standard fallback from settings remains.
 `CoreAIGameEntryPoint` in the Unity layer is idempotent: repeated `Start()` does not reinitialize global `CoreAIAgent` and logs a warning on `LogTag.Composition`, guarding against accidental double composition of the scene container.
 
@@ -522,7 +522,7 @@ This is **separate** CoreAI file storage under `Application.persistentDataPath` 
 
 - **After restarting the game**, when the container starts the store reads JSON again: **current** text (`current`) and **revision history** are restored; orchestrator/Lua use the loaded state.
 - **Android / iOS / Desktop** — normal writes to the app directory; data persists across sessions until the user uninstalls the app or clears “app data”.
-- **WebGL** — в режиме `AgentMemoryPersistenceMode.Persistent` `persistentDataPath` maps to browser storage (IndexedDB / IDBFS): agent memory and chat JSON use **`FileAgentMemoryStore`** under **`CoreAILifetimeScope`** on the **player** too (**v1.6.19+**), with **`CoreAi_PersistFsSync`** after writes so data survives reload when **`Application.Quit`** does not run. Since **v1.7.2**, **`CoreAiPersistFs.jslib`** queues **`FS.syncfs`** so only one sync runs at a time (avoids concurrent sync warnings and related stalls). Conversation **summaries** for compaction stay **in-memory** on WebGL. `SessionOnly` keeps memory, chat, transcript and summary in memory and does not call file persistence. Users can clear site data; quota limits may apply — see [Unity documentation](https://docs.unity3d.com/) for your version under WebGL.
+- **WebGL** — in `AgentMemoryPersistenceMode.Persistent` mode `persistentDataPath` maps to browser storage (IndexedDB / IDBFS): agent memory and chat JSON use **`FileAgentMemoryStore`** under **`CoreAILifetimeScope`** on the **player** too (**v1.6.19+**), with **`CoreAi_PersistFsSync`** after writes so data survives reload when **`Application.Quit`** does not run. Since **v1.7.2**, **`CoreAiPersistFs.jslib`** queues **`FS.syncfs`** so only one sync runs at a time (avoids concurrent sync warnings and related stalls). Conversation **summaries** for compaction stay **in-memory** on WebGL. `SessionOnly` keeps memory, chat, transcript and summary in memory and does not call file persistence. Users can clear site data; quota limits may apply — see [Unity documentation](https://docs.unity3d.com/) for your version under WebGL.
 - **Sync with cloud / a single game save** needs a separate integration (copy files, custom provider, or mirroring after `RecordSuccessfulExecution`).
 
 ---
@@ -663,9 +663,9 @@ public bool AbandonCurrentTurn();                            // Unreleased — h
 
 Reset chat history (short-term context) and/or long-term agent memory (MemoryTool):
 
-`clearChatHistory: true` очищает flat/structured turns и scoped compacted conversation summary. Поэтому старый
-summary не может снова попасть в следующий prompt после визуальной очистки чата. Это одинаково для
-`Persistent` и `SessionOnly` persistence policy.
+`clearChatHistory: true` clears flat/structured turns and the scoped compacted conversation summary. An old
+summary therefore cannot leak back into the next prompt after a visual chat clear. This holds equally for
+`Persistent` and `SessionOnly` persistence policies.
 
 ```csharp
 // Fully clear agent context (message history and memory)
@@ -814,4 +814,4 @@ Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOP
 
 **UPM sync:** the number in the README header and in **QUICK_START** should match the current **`package.json`**, or package consumers see a stale version.
 
-**Version of this guide:** 7.35.0 (2026-09-06) — six-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.
+**Version of this guide:** 7.36.0 (2026-09-08) — six-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.

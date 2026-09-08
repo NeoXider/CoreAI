@@ -190,5 +190,3 @@ Items here are intentionally not active TODO checkboxes.
   license" friction that filters out exactly the solo devs who would evangelize the project.
 - **Ship one real jam-scale game** on CoreAI local-first and write the postmortem — the single highest
   trust-per-effort artifact (one shipped case study beats any feature list). Needs an owner.
-- **Content-safety auto-wiring**: the `IContentFilter` module + wordlist filter ship and are tested; wiring
-  it into the pipeline by default (not just available) is the follow-up that unblocks education/console.

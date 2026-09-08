@@ -84,9 +84,20 @@ switch (tool)
 }
 ```
 
-### 3.1 IL2CPP / WebGL — `CreateAIFunction` visibility
+### 3.1 IL2CPP / WebGL — typed binding
 
-`MeaiLlmClient` resolves `CreateAIFunction()` via reflection on each `ILlmTool` instance. IL2CPP can strip methods from **game** assemblies that are not preserved. For custom tools shipped outside **`CoreAI.Core`** / **`CoreAI.Source`**, mark `CreateAIFunction` with **`[UnityEngine.Scripting.Preserve]`** or add a project **`link.xml`** entry for your tool types. The CoreAI package **`link.xml`** preserves CoreAI assemblies only.
+`MeaiLlmClient` obtains functions via `IAIFunctionLlmTool.CreateAIFunction()` or
+`IAIFunctionsLlmTool.CreateAIFunctions()`. Name-based method lookup via reflection is not used.
+For a custom tool, implement the matching public interface; a single method with
+a matching name is not enough. Declarative built-in memory tools bind separately
+to the current role's store. An optional missing binding leaves a warning;
+`RequireAny` / `RequireSpecific` with a missing required function fail with `InvalidRequest`
+before contacting the provider.
+
+`ForcedToolMode=None` forbids local execution: tool factories are not invoked, and incoming
+approval plus unsolicited `FunctionCallContent` do not start the body or an extra model turn.
+JSON in plain text is preserved even in the Text channel and with Native-with-Text compatibility enabled.
+`ToolExecutionPolicy` itself also rejects such a call, returning an unsuccessful result with the original `CallId`.
 
 ### 3.2 WebGL — publishing an awaiting tool body
 
@@ -162,60 +173,62 @@ models the same explicit behavioral guidance that production integrations expect
 ### Unity layer (CoreAiUnity)
 
 | File | Purpose |
-|------|-----------|
-| `MeaiLlmClient.cs` | **Unified MEAI client** for all backends |
-| `MeaiLlmUnityClient.cs` | Factory: LLMAgent → LlmUnityMeaiChatClient → MeaiLlmClient |
-| `OpenAiChatLlmClient.cs` | Factory: HTTP → MeaiOpenAiChatClient → MeaiLlmClient |
-| `LlmUnityMeaiChatClient.cs` | `MEAI.IChatClient` for LLMAgent |
-| `MeaiOpenAiChatClient.cs` | `MEAI.IChatClient` for HTTP API |
-| `CoreAISettingsAsset.cs` | Unified settings (API, LLMUnity, retry, timeout) |
+|------|------------|
+| `MeaiLlmClient.cs` | Shared `ILlmClient` adapter: tool binding, regular response and streaming |
+| `LlmEndpointClientFactory.cs` | HTTP/LLMUnity activation after readiness and `Auto`/`Native`/`Text` channel selection |
+| `OpenAiChatLlmClient.cs` | Synchronous HTTP composition with a mandatory explicit channel |
+| `CoreAISettingsAsset.cs` | Unity host settings |
 
----
+`MeaiOpenAiChatClient.cs` lives in **CoreAI.Core**, not in the Unity layer. It implements
+`Microsoft.Extensions.AI.IChatClient` on top of `IOpenAiHttpTransport`; the core can be used outside Unity.
+LLMUnity starts a local llama.cpp endpoint, which the factory reaches with the same HTTP client.
 
-## 🚀 Usage
+## Creating a client and invoking tools
 
-### Creating a client
+For runtime selection, use the factory. `descriptor` sets the address, model and `ToolChannel`;
+`Auto` performs one probe after readiness, while explicit `Native`/`Text` skip capability probing.
 
 ```csharp
-// HTTP API
-var client = new OpenAiChatLlmClient(settings, logger, memoryStore);
-
-// LLMUnity
-var client = new MeaiLlmUnityClient(unityAgent, logger, memoryStore);
-
-// Both use MeaiLlmClient → FunctionInvokingChatClient
+LlmEndpointClientFactory factory = new(coreSettings, logger, memoryStore);
+LlmEndpointClientActivation activation = await factory.ActivateAsync(
+    descriptor, sessionApiKey, cancellationToken);
+ILlmClient client = activation.Client;
 ```
 
-### Tool calling
+If the capability is already known from host configuration or probing, synchronous composition requires
+passing it explicitly. It does not probe the server itself:
 
 ```csharp
-// Orchestrator passes tools in the request
-var result = await client.CompleteAsync(new LlmCompletionRequest
+OpenAiChatLlmClient client = new(httpSettings, coreSettings, logger,
+    supportsNativeToolCalling: decision.Native, memoryStore: memoryStore);
+
+LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
 {
     AgentRoleId = "Creator",
     SystemPrompt = "...",
     UserPayload = "Craft an Iron Sword",
-    Tools = policy.GetToolsForRole("Creator")  // ILlmTool[]
-});
-
-// MEAI automatically:
-// 1. Converts ILlmTool → AIFunction
-// 2. Sends tools to the model
-// 3. Model returns tool_calls
-// 4. FunctionInvokingChatClient runs AIFunction
-// 5. Result → model → final answer
+    Tools = policy.GetToolsForRole("Creator")
+}, cancellationToken);
 ```
 
----
+CoreAI binds `ILlmTool` to `AIFunction` via typed interfaces. In a regular non-streaming
+response on .NET/desktop, the native loop is driven by MEAI `FunctionInvokingChatClient` 10.9, while the shared
+`ToolExecutionPolicy` applies host rules: timeouts, retries, mutation serialization, and `EndsTurn`.
+MEAI also keeps its native approval roundtrip.
 
-## 🎯 Benefits of MEAI
+The streaming path preserves early execution of completed calls: after the first
+`FunctionCallContent`, MEAI 10.9 buffers the continuation until the end of the stream, so the shared
+CoreAI policy with its own streaming adapter is used here. A narrow non-streaming fallback remains for WebGL;
+replacing it with the MEAI loop requires separate in-browser verification of continuation behavior.
+These are composition limits, not different formats or separate tool implementations.
 
-| Before MEAI | After MEAI |
-|---------|-----------|
-| Manual parsing of tool calls from text | ✅ Automatic pipeline |
-| Different code for LLMUnity and HTTP | ✅ Single `MeaiLlmClient` |
-| Manual retry | ✅ MEAI handles the loop |
-| Fallback hacks | ✅ Standard Microsoft approach |
+Text parsing is allowed only on a `Text` endpoint or with an explicit
+`AllowTextShapedToolCallsOnNativeEndpoint = true` in the request. In this mode, only declared names are recognized and removed
+from the visible response. On `Native`, plain JSON stays as illustrative text,
+even if an individual tool failed to bind. An optional unavailable tool yields
+diagnostics; `RequireAny` without executable tools and `RequireSpecific` without the named binding
+fail with `InvalidRequest` before contacting the model. In `Text`, local `AIFunction` instances are kept,
+but the outgoing HTTP contains no `tools`, `tool_choice`, `parallel_tool_calls`, including `ExtraBodyJson`.
 
 ---
 

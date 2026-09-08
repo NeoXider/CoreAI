@@ -18,6 +18,172 @@ namespace CoreAI.Tests.EditMode
     public sealed class CircuitBreakerLlmClientDecoratorEditModeTests
     {
         [Test]
+        public async Task CallerCancelledResult_ReleasesProbeWithoutClaimingBackendRecovery()
+        {
+            GatedLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+            Task<LlmCompletionResult> trip = breaker.CompleteAsync(Req());
+            inner.Pending.Dequeue().SetResult(Fail(LlmErrorCode.Timeout));
+            await trip;
+            clock.Advance(1000);
+            using CancellationTokenSource caller = new();
+            Task<LlmCompletionResult> probe = breaker.CompleteAsync(Req(), caller.Token);
+            caller.Cancel();
+            inner.Pending.Dequeue().SetResult(Fail(LlmErrorCode.Cancelled));
+            await probe;
+            Assert.AreEqual("HalfOpen", breaker.StateName);
+            Task<LlmCompletionResult> retry = breaker.CompleteAsync(Req());
+            Assert.AreEqual(3, inner.CallCount);
+            inner.Pending.Dequeue().SetResult(Success());
+            await retry;
+        }
+
+        [Test]
+        public async Task CallerCancelledStreamResult_ReleasesProbeWithoutClaimingBackendRecovery()
+        {
+            ProgrammableLlmClient inner = new();
+            inner.NextResults.Enqueue(Fail(LlmErrorCode.Timeout));
+            inner.NextStreams.Enqueue(new[] { ErrChunk(LlmErrorCode.Cancelled) });
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+            await breaker.CompleteAsync(Req());
+            clock.Advance(1000);
+            using CancellationTokenSource caller = new();
+            IAsyncEnumerator<LlmStreamChunk> iterator = breaker.CompleteStreamingAsync(Req(), caller.Token).GetAsyncEnumerator();
+            Assert.IsTrue(await iterator.MoveNextAsync());
+            caller.Cancel();
+            await iterator.DisposeAsync();
+            Assert.AreEqual("HalfOpen", breaker.StateName);
+            Assert.IsTrue((await breaker.CompleteAsync(Req())).Ok);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task LibraryTimeout_IsBackendFailureEvenThoughItInheritsCancellation(bool streaming)
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+            if (streaming)
+            {
+                inner.NextStreamExceptions.Enqueue(new LlmOperationTimeoutException());
+                List<LlmStreamChunk> chunks = await Drain(breaker.CompleteStreamingAsync(Req()));
+                Assert.AreEqual(LlmErrorCode.Timeout, chunks[0].ErrorCode);
+            }
+            else
+            {
+                inner.NextExceptions.Enqueue(new LlmOperationTimeoutException());
+                await CaptureExceptionAsync<LlmOperationTimeoutException>(() => breaker.CompleteAsync(Req()));
+            }
+            Assert.AreEqual("Open", breaker.StateName);
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, (await breaker.CompleteAsync(Req())).ErrorCode);
+        }
+
+        [Test]
+        public async Task Streaming_ErrorWithoutTypedCode_TripsBreaker()
+        {
+            ProgrammableLlmClient inner = new();
+            inner.NextStreams.Enqueue(new[] { new LlmStreamChunk { IsDone = true, Error = "backend failed" } });
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, () => 0);
+            await Drain(breaker.CompleteStreamingAsync(Req()));
+            Assert.AreEqual("Open", breaker.StateName);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task OlderCompletion_CannotCloseOrReleaseAnotherHalfOpenProbe(bool cancelOld)
+        {
+            GatedLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+            using CancellationTokenSource oldCaller = new();
+            Task<LlmCompletionResult> old = breaker.CompleteAsync(Req(), oldCaller.Token);
+            TaskCompletionSource<LlmCompletionResult> oldResult = inner.Pending.Dequeue();
+            Task<LlmCompletionResult> trip = breaker.CompleteAsync(Req());
+            inner.Pending.Dequeue().SetResult(Fail(LlmErrorCode.Timeout));
+            await trip;
+            clock.Advance(1000);
+            Task<LlmCompletionResult> probe = breaker.CompleteAsync(Req());
+            TaskCompletionSource<LlmCompletionResult> probeResult = inner.Pending.Dequeue();
+
+            if (cancelOld)
+            {
+                oldCaller.Cancel();
+                oldResult.SetCanceled();
+                try { await old; } catch (OperationCanceledException) { }
+            }
+            else
+            {
+                oldResult.SetResult(Success());
+                await old;
+            }
+            Assert.AreEqual("HalfOpen", breaker.StateName);
+            Task<LlmCompletionResult> rejected = breaker.CompleteAsync(Req());
+            if (inner.Pending.Count > 0)
+            {
+                // Make an incorrectly admitted call finish too, so the regression fails instead of hanging.
+                inner.Pending.Dequeue().SetResult(Success());
+            }
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, (await rejected).ErrorCode);
+            Assert.AreEqual(3, inner.CallCount);
+            probeResult.SetResult(Success());
+            Assert.IsTrue((await probe).Ok);
+        }
+
+        [Test]
+        public async Task OlderFailure_CannotReopenRecoveredCircuit()
+        {
+            GatedLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+            Task<LlmCompletionResult> old = breaker.CompleteAsync(Req());
+            TaskCompletionSource<LlmCompletionResult> oldResult = inner.Pending.Dequeue();
+            Task<LlmCompletionResult> trip = breaker.CompleteAsync(Req());
+            inner.Pending.Dequeue().SetResult(Fail(LlmErrorCode.Timeout));
+            await trip;
+            clock.Advance(1000);
+            Task<LlmCompletionResult> probe = breaker.CompleteAsync(Req());
+            inner.Pending.Dequeue().SetResult(Success());
+            await probe;
+            oldResult.SetResult(Fail(LlmErrorCode.Timeout));
+            await old;
+            Assert.AreEqual("Closed", breaker.StateName);
+        }
+
+        [Test]
+        public async Task AbandonedProbe_DisposeThrows_DoesNotStrandHalfOpenSlot()
+        {
+            DisposeFaultLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+            await breaker.CompleteAsync(Req());
+            clock.Advance(1000);
+            IAsyncEnumerator<LlmStreamChunk> iterator = breaker.CompleteStreamingAsync(Req()).GetAsyncEnumerator();
+            Assert.IsTrue(await iterator.MoveNextAsync());
+            await CaptureExceptionAsync<InvalidOperationException>(async () => await iterator.DisposeAsync());
+            Assert.IsTrue((await breaker.CompleteAsync(Req())).Ok);
+            Assert.AreEqual("Closed", breaker.StateName);
+        }
+
+        private sealed class DisposeFaultLlmClient : ILlmClient, IAsyncEnumerable<LlmStreamChunk>, IAsyncEnumerator<LlmStreamChunk>
+        {
+            private bool _first = true;
+            public LlmStreamChunk Current => new() { Text = "partial" };
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                bool first = _first;
+                _first = false;
+                return Task.FromResult(first ? Fail(LlmErrorCode.Timeout) : Success());
+            }
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default) => this;
+            public IAsyncEnumerator<LlmStreamChunk> GetAsyncEnumerator(CancellationToken cancellationToken = default) => this;
+            public ValueTask<bool> MoveNextAsync() => new(true);
+            public ValueTask DisposeAsync() => new(Task.FromException(new InvalidOperationException("dispose failed")));
+        }
+
+        [Test]
         public async Task TripsOpen_AfterThresholdConsecutiveTransientFailures_ThenShortCircuits()
         {
             ProgrammableLlmClient inner = new();
@@ -203,7 +369,9 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("Open", breaker.StateName);
 
             clock.Advance(1000);
-            Task<LlmCompletionResult> probe = breaker.CompleteAsync(Req());
+            using CancellationTokenSource caller = new();
+            Task<LlmCompletionResult> probe = breaker.CompleteAsync(Req(), caller.Token);
+            caller.Cancel();
             inner.Pending.Dequeue().SetCanceled();
             try
             {
@@ -311,11 +479,174 @@ namespace CoreAI.Tests.EditMode
                 "A terminal error chunk seen before abandonment is a real failure and must trip a threshold of 1.");
         }
 
+        // ---- Сбои по вине вызывающего, пришедшие ИСКЛЮЧЕНИЕМ (док обещал: никогда не размыкают) ----
+
+        [Test]
+        public async Task ThrownAuthFailures_DoNotTripBreaker_AndPropagateUnchanged()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 3, 1000, clock.NowMs);
+
+            for (int i = 0; i < 3; i++)
+            {
+                inner.NextExceptions.Enqueue(new LlmClientException("HTTP error 401: expired", LlmErrorCode.AuthExpired, 401));
+                LlmClientException thrown = await CaptureExceptionAsync<LlmClientException>(() => breaker.CompleteAsync(Req()));
+                Assert.AreEqual(LlmErrorCode.AuthExpired, thrown.ErrorCode, "Классификация адаптера должна пережить предохранитель.");
+                Assert.AreEqual(401, thrown.HttpStatus, "HTTP-статус должен дойти до вызывающего.");
+            }
+
+            Assert.AreEqual("Closed", breaker.StateName,
+                "Три 401 подряд — проблема вызывающего, не здоровья бэкенда: предохранитель обязан остаться замкнутым.");
+            Assert.AreEqual(3, inner.CallCount);
+        }
+
+        [Test]
+        public async Task ThrownPaymentRequired_KeepsItsCodeAndStatus_ForOuterDecorators()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+
+            inner.NextExceptions.Enqueue(new LlmClientException("HTTP error 402: out of credit", LlmErrorCode.PaymentRequired, 402));
+            LlmClientException thrown = await CaptureExceptionAsync<LlmClientException>(() => breaker.CompleteAsync(Req()));
+
+            Assert.AreEqual(LlmErrorCode.PaymentRequired, thrown.ErrorCode,
+                "402 нельзя перебрасывать как ProviderError: внешние retry/fallback сочтут его транзиентным и будут повторять.");
+            Assert.AreEqual(402, thrown.HttpStatus);
+            Assert.AreEqual("Closed", breaker.StateName, "Требуется оплата — не сбой бэкенда, порог 1 не должен сработать.");
+        }
+
+        [Test]
+        public async Task ThrownTransientTypedFailure_CountsTowardTripping()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 2, 1000, clock.NowMs);
+
+            inner.NextExceptions.Enqueue(new LlmClientException("503", LlmErrorCode.BackendUnavailable, 503));
+            inner.NextExceptions.Enqueue(new LlmClientException("timeout", LlmErrorCode.Timeout));
+            await CaptureExceptionAsync<LlmClientException>(() => breaker.CompleteAsync(Req()));
+            await CaptureExceptionAsync<LlmClientException>(() => breaker.CompleteAsync(Req()));
+
+            Assert.AreEqual("Open", breaker.StateName, "Транзиентные сбои исключением считаются так же, как результатом.");
+        }
+
+        [Test]
+        public async Task ThrownUntypedFailure_CountsAsTransient_AndPropagatesTheOriginalException()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+
+            inner.NextExceptions.Enqueue(new InvalidOperationException("socket reset"));
+            InvalidOperationException thrown =
+                await CaptureExceptionAsync<InvalidOperationException>(() => breaker.CompleteAsync(Req()));
+
+            Assert.AreEqual("socket reset", thrown.Message, "Исходное исключение не должно подменяться обёрткой.");
+            Assert.AreEqual("Open", breaker.StateName);
+        }
+
+        [Test]
+        public async Task HalfOpenProbe_ThrowingCallerCausedFailure_ClosesBreaker_BackendIsReachable()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+
+            inner.NextResults.Enqueue(Fail(LlmErrorCode.BackendUnavailable));
+            await breaker.CompleteAsync(Req());
+            Assert.AreEqual("Open", breaker.StateName);
+
+            clock.Advance(1000);
+            inner.NextExceptions.Enqueue(new LlmClientException("HTTP error 400: bad request", LlmErrorCode.InvalidRequest, 400));
+            await CaptureExceptionAsync<LlmClientException>(() => breaker.CompleteAsync(Req()));
+
+            Assert.AreEqual("Closed", breaker.StateName,
+                "Пробный запрос дошёл до бэкенда и получил ответ по вине вызывающего: бэкенд достижим, предохранитель замыкается.");
+        }
+
+        // ---- Поток ----
+
+        [Test]
+        public async Task Streaming_EmptyStream_IsAFailure_NotASuccess()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 2, 1000, clock.NowMs);
+
+            inner.NextStreams.Enqueue(Array.Empty<LlmStreamChunk>());
+            inner.NextStreams.Enqueue(Array.Empty<LlmStreamChunk>());
+            await Drain(breaker.CompleteStreamingAsync(Req()));
+            await Drain(breaker.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual("Open", breaker.StateName,
+                "Поток без единого чанка — бэкенд не ответил ничего; раньше это записывалось УСПЕХОМ.");
+        }
+
+        [Test]
+        public async Task Streaming_EmptyStream_DoesNotResetTheFailureStreak()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 2, 1000, clock.NowMs);
+
+            inner.NextResults.Enqueue(Fail(LlmErrorCode.Timeout));
+            await breaker.CompleteAsync(Req());
+            inner.NextStreams.Enqueue(Array.Empty<LlmStreamChunk>());
+            await Drain(breaker.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual("Open", breaker.StateName, "Пустой поток после таймаута — второй сбой подряд, не сброс серии.");
+        }
+
+        [Test]
+        public async Task Streaming_ThrownTypedFailure_KeepsCodeAndStatusInTerminalChunk_AndDoesNotTripOnCallerFault()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+
+            inner.NextStreamExceptions.Enqueue(new LlmClientException("HTTP error 402: out of credit", LlmErrorCode.PaymentRequired, 402));
+            List<LlmStreamChunk> chunks = await Drain(breaker.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(1, chunks.Count);
+            Assert.IsTrue(chunks[0].IsDone);
+            Assert.AreEqual(LlmErrorCode.PaymentRequired, chunks[0].ErrorCode);
+            Assert.AreEqual(402, chunks[0].HttpStatus);
+            Assert.AreEqual("Closed", breaker.StateName, "402 в потоке — не сбой бэкенда.");
+        }
+
+        [Test]
+        public async Task Streaming_ThrownTransientFailure_TripsBreaker()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+
+            inner.NextStreamExceptions.Enqueue(new LlmClientException("503", LlmErrorCode.BackendUnavailable, 503));
+            List<LlmStreamChunk> chunks = await Drain(breaker.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, chunks[0].ErrorCode);
+            Assert.AreEqual(503, chunks[0].HttpStatus);
+            Assert.AreEqual("Open", breaker.StateName);
+        }
+
         // ---- helpers ----
 
         private static LlmCompletionRequest Req()
         {
             return new LlmCompletionRequest { AgentRoleId = "Test", UserPayload = "hi" };
+        }
+
+        private static async Task<TException> CaptureExceptionAsync<TException>(Func<Task> action)
+            where TException : Exception
+        {
+            // WHY: Unity must keep pumping continuations while a test awaits an expected failure.
+            // NUnit's synchronous ThrowsAsync helper cannot pump UnitySynchronizationContext.
+            try { await action(); }
+            catch (TException exception) { return exception; }
+            Assert.Fail("Expected exception was not thrown.");
+            return null;
         }
 
         private static LlmCompletionResult Success()
@@ -392,17 +723,24 @@ namespace CoreAI.Tests.EditMode
         {
             public readonly Queue<LlmCompletionResult> NextResults = new();
             public readonly Queue<LlmStreamChunk[]> NextStreams = new();
+            public readonly Queue<Exception> NextExceptions = new();
+            public readonly Queue<Exception> NextStreamExceptions = new();
             public int CallCount;
             public int StreamCallCount;
 
-            public Task<LlmCompletionResult> CompleteAsync(
+            public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request, CancellationToken cancellationToken = default)
             {
                 CallCount++;
-                LlmCompletionResult r = NextResults.Count > 0
+                await Task.Yield();
+                if (NextExceptions.Count > 0)
+                {
+                    throw NextExceptions.Dequeue();
+                }
+
+                return NextResults.Count > 0
                     ? NextResults.Dequeue()
                     : new LlmCompletionResult { Ok = true };
-                return Task.FromResult(r);
             }
 
             public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
@@ -411,6 +749,12 @@ namespace CoreAI.Tests.EditMode
                 CancellationToken cancellationToken = default)
             {
                 StreamCallCount++;
+                await Task.Yield();
+                if (NextStreamExceptions.Count > 0)
+                {
+                    throw NextStreamExceptions.Dequeue();
+                }
+
                 LlmStreamChunk[] chunks = NextStreams.Count > 0
                     ? NextStreams.Dequeue()
                     : new[] { new LlmStreamChunk { Text = "ok", IsDone = true } };

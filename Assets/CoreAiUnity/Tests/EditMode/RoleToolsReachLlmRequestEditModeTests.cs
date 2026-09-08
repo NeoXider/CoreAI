@@ -88,7 +88,7 @@ namespace CoreAI.Tests.EditMode
         public async Task UnbindableMemoryTool_DoesNotRemoveTheOtherToolsFromTheRequest()
         {
             CapturingChatClient inner = new();
-            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
             List<ILlmTool> tools = new()
             {
                 new MemoryLlmTool(),

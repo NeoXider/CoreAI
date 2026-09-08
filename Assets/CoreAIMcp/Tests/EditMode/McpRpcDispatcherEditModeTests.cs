@@ -39,7 +39,7 @@ namespace CoreAI.Mcp.Tests
         }
 
         [Test]
-        public async Task Initialize_EchoesProtocolVersion_AndReturnsCapabilitiesAndSession()
+        public async Task Initialize_ReturnsSupportedProtocolVersion_CapabilitiesAndSession()
         {
             McpRpcDispatcher dispatcher = NewDispatcher();
             JObject request = Request(McpMethods.Initialize, 1,
@@ -50,13 +50,13 @@ namespace CoreAI.Mcp.Tests
             Assert.IsFalse(result.IsNotification);
             Assert.IsNotNull(result.IssuedSessionId, "initialize must issue a session id.");
             JObject res = (JObject)result.Response["result"];
-            Assert.AreEqual("2025-03-26", res["protocolVersion"]!.ToString(), "must echo the client's version.");
+            Assert.AreEqual(McpServerInfo.DefaultProtocolVersion, res["protocolVersion"]!.ToString());
             Assert.IsNotNull(res["capabilities"]!["tools"], "capabilities.tools must be present.");
             Assert.AreEqual(McpServerInfo.Name, res["serverInfo"]!["name"]!.ToString());
         }
 
         [Test]
-        public async Task Initialize_UnknownProtocolVersion_DoesNotCrash_AndEchoesIt()
+        public async Task Initialize_UnknownProtocolVersion_ReturnsSupportedVersion()
         {
             McpRpcDispatcher dispatcher = NewDispatcher();
             JObject request = Request(McpMethods.Initialize, 7,
@@ -65,7 +65,7 @@ namespace CoreAI.Mcp.Tests
             McpDispatchResult result = await dispatcher.DispatchAsync(request, CancellationToken.None);
 
             Assert.IsNull(result.Response["error"], "an unknown version must not become an error.");
-            Assert.AreEqual("9999-99-99-experimental",
+            Assert.AreEqual(McpServerInfo.DefaultProtocolVersion,
                 result.Response["result"]!["protocolVersion"]!.ToString());
         }
 
@@ -164,6 +164,81 @@ namespace CoreAI.Mcp.Tests
             StringAssert.Contains("timed out", result.Response["error"]!["message"]!.ToString());
             StringAssert.Contains("paused", result.Response["error"]!["message"]!.ToString(),
                 "the error must name the cause so the caller can fix it.");
+        }
+
+        [TestCase("[]")]
+        [TestCase("1")]
+        [TestCase("null")]
+        public async Task ToolsCall_NonObjectArguments_AreRejectedBeforeInvocation(string arguments)
+        {
+            FakeMcpTool tool = new("run");
+            McpDispatchResult result = await NewDispatcher(tool).DispatchAsync(Request(McpMethods.ToolsCall, 1,
+                new JObject { ["name"] = "run", ["arguments"] = JToken.Parse(arguments) }), CancellationToken.None);
+            Assert.AreEqual(JsonRpcErrorCodes.InvalidParams, (int)result.Response["error"]["code"]);
+            Assert.AreEqual(0, tool.InvocationCount);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task CancelledCall_DoesNotInvokeBody(bool cancelWhileQueued)
+        {
+            FakeMcpTool tool = new("run");
+            ControlledDispatcher queue = new();
+            McpRpcDispatcher dispatcher = new(new McpToolRegistry(new[] { tool }), new McpSessionStore(), queue);
+            using CancellationTokenSource cancelled = new();
+            if (!cancelWhileQueued) cancelled.Cancel();
+            Task<McpDispatchResult> pending = dispatcher.DispatchAsync(Request(McpMethods.ToolsCall, 1,
+                new JObject { ["name"] = "run" }), cancelled.Token);
+            cancelled.Cancel();
+            queue.Resume();
+            McpDispatchResult result = await pending;
+            Assert.IsNotNull(result.Response["error"]);
+            Assert.AreEqual(0, tool.InvocationCount);
+        }
+
+        [TestCase("remove", false)]
+        [TestCase("replace", false)]
+        [TestCase("remove-add", false)]
+        [TestCase("replace", true)]
+        public async Task QueuedCall_RejectsRemovedOrReplacedBinding(string change, bool throughBroker)
+        {
+            FakeMcpTool oldTool = new("run");
+            FakeMcpTool nextTool = new("run");
+            McpToolRegistry registry = new(new[] { oldTool }, null, true);
+            ControlledDispatcher queue = new();
+            McpRpcDispatcher dispatcher = new(registry, new McpSessionStore(), queue);
+            JObject parameters = new() { ["name"] = "run" };
+            if (throughBroker)
+                parameters = new JObject { ["name"] = CoreAiToolsBrokerMcpTool.ToolName,
+                    ["arguments"] = new JObject { ["action"] = "call", ["tool"] = "run" } };
+            Task<McpDispatchResult> pending = dispatcher.DispatchAsync(Request(McpMethods.ToolsCall, 1, parameters), CancellationToken.None);
+            if (change.StartsWith("remove", StringComparison.Ordinal)) registry.Remove("run");
+            if (change != "remove") registry.AddOrReplace(nextTool);
+            queue.Resume();
+            McpDispatchResult result = await pending;
+            Assert.AreEqual(JsonRpcErrorCodes.InvalidParams, (int)result.Response["error"]["code"]);
+            Assert.AreEqual(0, oldTool.InvocationCount);
+            Assert.AreEqual(0, nextTool.InvocationCount);
+        }
+
+        [Test]
+        public async Task BrokerSelfCall_IsRejectedWithoutRecursion()
+        {
+            McpToolRegistry registry = new(null, null, true);
+            McpToolResult result = await registry.Find(CoreAiToolsBrokerMcpTool.ToolName).InvokeAsync(
+                new JObject { ["action"] = "call", ["tool"] = CoreAiToolsBrokerMcpTool.ToolName }, CancellationToken.None);
+            Assert.IsTrue(result.IsError);
+        }
+
+        private sealed class ControlledDispatcher : IMainThreadDispatcher
+        {
+            private readonly TaskCompletionSource<bool> _resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public void Resume() => _resume.TrySetResult(true);
+            public async Task<T> RunOnMainThreadAsync<T>(Func<Task<T>> work)
+            {
+                await _resume.Task;
+                return await work();
+            }
         }
 
         /// <summary>Test double for a player loop that never drains the queue (paused game / disabled host).</summary>

@@ -153,6 +153,65 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Сценарий по вызовам: бросить 429, затем отдавать 429 результатом (Ok=false) заданное число раз,
+        /// затем ответить успехом. Так сбой меняет ФОРМУ (исключение → результат), не меняя причины.
+        /// </summary>
+        private sealed class ThrowThenReturnRateLimitMock : ILlmClient
+        {
+            private readonly int _returnedFailures;
+            public int CompleteCallCount;
+
+            public ThrowThenReturnRateLimitMock(int returnedFailures)
+            {
+                _returnedFailures = returnedFailures;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                CompleteCallCount++;
+                if (CompleteCallCount == 1)
+                {
+                    throw new LlmClientException("HTTP 429", LlmErrorCode.RateLimited, 429, 1);
+                }
+
+                if (CompleteCallCount <= 1 + _returnedFailures)
+                {
+                    return Task.FromResult(new LlmCompletionResult
+                    {
+                        Ok = false,
+                        Error = "HTTP 429",
+                        ErrorCode = LlmErrorCode.RateLimited,
+                        HttpStatus = 429,
+                        RetryAfterSeconds = 1
+                    });
+                }
+
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "recovered" });
+            }
+        }
+
+        private sealed class ThrowingSequenceMock : ILlmClient
+        {
+            private readonly Exception[] _failures;
+            public int CompleteCallCount;
+
+            public ThrowingSequenceMock(params Exception[] failures)
+            {
+                _failures = failures;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                int index = CompleteCallCount++;
+                throw _failures[Math.Min(index, _failures.Length - 1)];
+            }
+        }
+
         private sealed class SnapshotAwareRetryClient : ILlmClient, ILlmRequestHeaderScope
         {
             private readonly bool _throwFirst;
@@ -323,6 +382,113 @@ namespace CoreAI.Tests.EditMode
             string joined = string.Join("\n", spy.Lines);
             StringAssert.Contains("LLM ~", joined);
             StringAssert.Contains("failed completion", joined);
+        }
+
+        /// <summary>
+        /// Дефект: бюджет ретраев выдавался дважды — циклу по исключению и циклу по результату. Адаптер,
+        /// бросивший 429, а затем вернувший 429 результатом, получал 2N+1 вызовов; ученик всё это время
+        /// смотрел на индикатор набора. Бюджет один на запрос: 1 + N вызовов, затем честный отказ.
+        /// </summary>
+        [TestCase(1)]
+        [TestCase(2)]
+        public async Task RetryBudget_IsSharedBetweenThrownAndReturnedFailures(int maxRetries)
+        {
+            ThrowThenReturnRateLimitMock inner = new(returnedFailures: maxRetries * 2);
+            RecordingDelayMarshaler marshaler = new();
+            LoggingLlmClientDecorator dec = new(inner, new SpyLogger(), 0f, maxRetries, true, true, marshaler);
+
+            LlmCompletionResult result = await dec.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                UserPayload = "x"
+            });
+
+            Assert.AreEqual(1 + maxRetries, inner.CompleteCallCount,
+                "One request has one retry budget regardless of whether the failure was thrown or returned.");
+            Assert.AreEqual(maxRetries, marshaler.DelayCallCount);
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.RateLimited, result.ErrorCode);
+        }
+
+        /// <summary>
+        /// Дефект: на ветке исключений код ошибки вклеивался в строку, но не в поле ErrorCode. Один и тот
+        /// же 429 доезжал до потребителя как RateLimited или как None в зависимости от того, бросил адаптер
+        /// исключение или вернул результат; при None ребёнок вместо плашки «учитель недоступен» видел сырой
+        /// английский текст ошибки в пузыре.
+        /// </summary>
+        [Test]
+        public async Task ThrownRetryableFailure_ExhaustedRetries_KeepsTypedErrorCode()
+        {
+            ThrowingSequenceMock inner = new(
+                new LlmClientException("HTTP 429", LlmErrorCode.RateLimited, 429, 3, "{\"error\":\"slow down\"}"));
+            LoggingLlmClientDecorator dec = new(inner, new SpyLogger(), 0f, 1, true, true, new RecordingDelayMarshaler());
+
+            LlmCompletionResult result = await dec.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                UserPayload = "x"
+            });
+
+            Assert.AreEqual(2, inner.CompleteCallCount);
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.RateLimited, result.ErrorCode);
+            Assert.AreEqual(429, result.HttpStatus);
+            Assert.AreEqual(3, result.RetryAfterSeconds);
+            Assert.AreEqual("{\"error\":\"slow down\"}", result.ProviderErrorBody);
+        }
+
+        [Test]
+        public async Task ThrownNonRetryableFailureDuringRetry_KeepsTypedErrorCode()
+        {
+            ThrowingSequenceMock inner = new(
+                new LlmClientException("HTTP 429", LlmErrorCode.RateLimited, 429, 1),
+                new LlmClientException("HTTP 400: bad request", LlmErrorCode.InvalidRequest, 400));
+            LoggingLlmClientDecorator dec = new(inner, new SpyLogger(), 0f, 3, true, true, new RecordingDelayMarshaler());
+
+            LlmCompletionResult result = await dec.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                UserPayload = "x"
+            });
+
+            Assert.AreEqual(2, inner.CompleteCallCount, "A permanent refusal must stop the retry loop.");
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.InvalidRequest, result.ErrorCode);
+            Assert.AreEqual(400, result.HttpStatus);
+        }
+
+        [Test]
+        public async Task ThrownUntypedFailureDuringRetry_IsNotReportedAsNone()
+        {
+            ThrowingSequenceMock inner = new(
+                new LlmClientException("HTTP 503", LlmErrorCode.BackendUnavailable, 503),
+                new InvalidOperationException("adapter blew up"));
+            LoggingLlmClientDecorator dec = new(inner, new SpyLogger(), 0f, 3, true, true, new RecordingDelayMarshaler());
+
+            LlmCompletionResult result = await dec.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                UserPayload = "x"
+            });
+
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.ProviderError, result.ErrorCode);
+        }
+
+        [Test]
+        public async Task NullResult_IsTypedAsEmptyResponse()
+        {
+            MockLlm inner = new(0, null);
+            LoggingLlmClientDecorator dec = new(inner, new SpyLogger(), 0f);
+
+            LlmCompletionResult result = await dec.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                UserPayload = "x"
+            });
+
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.EmptyResponse, result.ErrorCode);
         }
 
         [Test]

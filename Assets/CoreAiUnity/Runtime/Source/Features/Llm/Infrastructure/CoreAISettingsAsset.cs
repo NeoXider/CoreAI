@@ -263,6 +263,15 @@ namespace CoreAI.Infrastructure.Llm
         [Range(1024, 65535)]
         private int llmUnityServerPort = 13333;
 
+        [Tooltip(
+            "Tool-call channel of the LLMUnity built-in server. Auto = native: the bundled LlamaLib v2.0.5 " +
+            "server accepts `tools` and returns `tool_calls` (its llama.cpp runs jinja templates by default). " +
+            "Text = the server rejects `tools` (llama.cpp without --jinja), so CoreAI reads tool calls from " +
+            "the model's prose. The legacy backend builds the client before the server exists, so it cannot " +
+            "probe; runtime endpoints (LlmEndpointDescriptor.ToolChannel) probe the server on activation.")]
+        [SerializeField]
+        private LlmToolChannel llmUnityToolChannel = LlmToolChannel.Auto;
+
         [Header("Shared agent defaults")]
         [Tooltip(
             "Universal system prefix prepended before every agent-specific system prompt.")]
@@ -790,6 +799,14 @@ namespace CoreAI.Infrastructure.Llm
         /// (native tool-calling path). Clamped to a valid ephemeral-safe range; default 13333.
         /// </summary>
         public int LlmUnityServerPort => llmUnityServerPort is < 1024 or > 65535 ? 13333 : llmUnityServerPort;
+
+        /// <summary>
+        /// Канал вызовов инструментов у встроенного сервера LLMUnity для legacy-пути (клиент строится до
+        /// старта сервера, пробы там нет). <see cref="LlmToolChannel.Auto"/> = нативный: так ведёт себя
+        /// LlamaLib v2.0.5 из комплекта LLMUnity 3.0.3. <see cref="LlmToolChannel.Text"/> — для сборки,
+        /// отвергающей <c>tools</c> (llama.cpp без <c>--jinja</c>).
+        /// </summary>
+        public LlmToolChannel LlmUnityToolChannel => llmUnityToolChannel;
 
         /// <summary>Universal system preamble.</summary>
         public string UniversalSystemPromptPrefix => universalSystemPromptPrefix ?? "";

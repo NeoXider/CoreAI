@@ -104,8 +104,11 @@ namespace CoreAI.Tests.PlayMode
                 "{\"name\":\"MEMORY\",\"arguments\":{\"action\":\"write\",\"content\":\"Wrong casing repaired by TryRepairToolName\"}}");
 
             StatefulMemoryStore memoryStore = new();
-            MeaiLlmClient client = new(hybrid, GameLoggerUnscopedFallback.Instance,
-                new StubSettings(), memoryStore);
+            MeaiLlmClient client = new(hybrid,
+                GameLoggerUnscopedFallback.Instance,
+                new StubSettings(),
+                supportsNativeToolCalling: false,
+                memoryStore: memoryStore);
 
             LlmCompletionRequest request = new()
             {
@@ -155,8 +158,11 @@ namespace CoreAI.Tests.PlayMode
                 "{\"name\":\"nonexistent_tool\",\"arguments\":{\"data\":\"important info\"}}");
 
             StatefulMemoryStore memoryStore = new();
-            MeaiLlmClient client = new(hybrid, GameLoggerUnscopedFallback.Instance,
-                new StubSettings(), memoryStore);
+            MeaiLlmClient client = new(hybrid,
+                GameLoggerUnscopedFallback.Instance,
+                new StubSettings(),
+                supportsNativeToolCalling: false,
+                memoryStore: memoryStore);
 
             LlmCompletionRequest request = new()
             {
@@ -215,8 +221,11 @@ namespace CoreAI.Tests.PlayMode
                 "Working on it... {\"name\":\"Memory\",\"arguments\":{\"action\":\"write\",\"content\":\"Mixed case repair test\"}}");
 
             StatefulMemoryStore memoryStore = new();
-            MeaiLlmClient client = new(hybrid, GameLoggerUnscopedFallback.Instance,
-                new StubSettings(), memoryStore);
+            MeaiLlmClient client = new(hybrid,
+                GameLoggerUnscopedFallback.Instance,
+                new StubSettings(),
+                supportsNativeToolCalling: false,
+                memoryStore: memoryStore);
 
             LlmCompletionRequest request = new()
             {

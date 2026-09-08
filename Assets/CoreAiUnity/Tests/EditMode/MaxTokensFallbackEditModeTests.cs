@@ -25,10 +25,10 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_NoPerRequestValue_FallsBackToSettingsMaxTokens()
         {
             CapturingChatClient capturing = new();
-            MeaiLlmClient client = new(
-                capturing,
+            MeaiLlmClient client = new(capturing,
                 GameLoggerUnscopedFallback.Instance,
-                new StubSettings { MaxTokensValue = 1234 });
+                new StubSettings { MaxTokensValue = 1234 },
+                supportsNativeToolCalling: true);
 
             await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -45,10 +45,10 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_PerRequestValueWinsOverSettings()
         {
             CapturingChatClient capturing = new();
-            MeaiLlmClient client = new(
-                capturing,
+            MeaiLlmClient client = new(capturing,
                 GameLoggerUnscopedFallback.Instance,
-                new StubSettings { MaxTokensValue = 1234 });
+                new StubSettings { MaxTokensValue = 1234 },
+                supportsNativeToolCalling: true);
 
             await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -66,10 +66,10 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_PerRequestZero_MeansExplicitlyUnlimited()
         {
             CapturingChatClient capturing = new();
-            MeaiLlmClient client = new(
-                capturing,
+            MeaiLlmClient client = new(capturing,
                 GameLoggerUnscopedFallback.Instance,
-                new StubSettings { MaxTokensValue = 1234 });
+                new StubSettings { MaxTokensValue = 1234 },
+                supportsNativeToolCalling: true);
 
             await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -88,10 +88,10 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_SettingsZero_LeavesProviderDefault()
         {
             CapturingChatClient capturing = new();
-            MeaiLlmClient client = new(
-                capturing,
+            MeaiLlmClient client = new(capturing,
                 GameLoggerUnscopedFallback.Instance,
-                new StubSettings { MaxTokensValue = 0 });
+                new StubSettings { MaxTokensValue = 0 },
+                supportsNativeToolCalling: true);
 
             await client.CompleteAsync(new LlmCompletionRequest
             {
@@ -108,10 +108,10 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteStreamingAsync_FallsBackToSettingsMaxTokens()
         {
             CapturingChatClient capturing = new();
-            MeaiLlmClient client = new(
-                capturing,
+            MeaiLlmClient client = new(capturing,
                 GameLoggerUnscopedFallback.Instance,
-                new StubSettings { MaxTokensValue = 777 });
+                new StubSettings { MaxTokensValue = 777 },
+                supportsNativeToolCalling: true);
 
             int chunks = 0;
             await foreach (LlmStreamChunk _ in client.CompleteStreamingAsync(new LlmCompletionRequest
