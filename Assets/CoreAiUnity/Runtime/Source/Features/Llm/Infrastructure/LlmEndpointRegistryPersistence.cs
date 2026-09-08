@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -36,7 +37,10 @@ namespace CoreAI.Infrastructure.Llm
         void Save(LlmEndpointRegistryState state);
     }
 
-    /// <summary>JSON endpoint registry store rooted under CoreAI persistent data.</summary>
+    /// <summary>
+    /// JSON endpoint registry store rooted under CoreAI persistent data. Instances sharing a canonical
+    /// path serialize reads and atomic writes; the last successful save replaces the complete snapshot.
+    /// </summary>
     public sealed class FileLlmEndpointRegistryStore : ILlmEndpointRegistryStore
     {
         private static readonly JsonSerializerSettings JsonSettings = new()
@@ -44,16 +48,19 @@ namespace CoreAI.Infrastructure.Llm
             Formatting = Formatting.Indented,
             NullValueHandling = NullValueHandling.Ignore
         };
+        private static readonly ConcurrentDictionary<string, object> PathLocks = new(
+            Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
         private readonly string _path;
-        private readonly object _gate = new();
+        private readonly object _gate;
 
         public FileLlmEndpointRegistryStore(string path = null)
         {
-            _path = string.IsNullOrWhiteSpace(path)
+            _path = Path.GetFullPath(string.IsNullOrWhiteSpace(path)
                 ? Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
                     "llm-endpoints.json")
-                : path;
+                : path);
+            _gate = PathLocks.GetOrAdd(_path, _ => new object());
         }
 
         public LlmEndpointRegistryState Load()
@@ -93,13 +100,11 @@ namespace CoreAI.Infrastructure.Llm
                     Directory.CreateDirectory(directory);
                 }
 
-                string temp = _path + ".tmp";
-                File.WriteAllText(temp, JsonConvert.SerializeObject(safe, JsonSettings));
+                string temp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
 
                 try
                 {
-                    // WHY: delete-then-move leaves a window where a crash loses every endpoint, profile
-                    // and role assignment; File.Replace swaps the file in one step.
+                    File.WriteAllText(temp, JsonConvert.SerializeObject(safe, JsonSettings));
                     if (File.Exists(_path))
                     {
                         File.Replace(temp, _path, null);
@@ -109,7 +114,7 @@ namespace CoreAI.Infrastructure.Llm
                         File.Move(temp, _path);
                     }
                 }
-                catch
+                finally
                 {
                     if (File.Exists(temp))
                     {
@@ -121,8 +126,6 @@ namespace CoreAI.Infrastructure.Llm
                         {
                         }
                     }
-
-                    throw;
                 }
 
                 CoreAiWebGlPersistence.Sync();

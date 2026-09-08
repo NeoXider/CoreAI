@@ -76,7 +76,7 @@ namespace CoreAI.Tests.EditMode
         public async Task EmptyStream_IsTreatedAsTransient_AndRetried()
         {
             StubStreamingClient inner = new();
-            inner.NextStreams.Enqueue(Array.Empty<LlmStreamChunk>()); // ends with no content
+            inner.NextStreams.Enqueue(Array.Empty<LlmStreamChunk>());
             inner.NextStreams.Enqueue(new[] { Text("recovered"), Done() });
 
             RetryingStreamingLlmClientDecorator sut = new(inner, 1, null);
@@ -91,7 +91,6 @@ namespace CoreAI.Tests.EditMode
         public async Task CommittedContent_IsNeverRetried_EvenIfLaterError()
         {
             StubStreamingClient inner = new();
-            // A single stream that commits text and THEN emits a (would-be retryable) error.
             inner.NextStreams.Enqueue(new[] { Text("partial"), ErrChunk(LlmErrorCode.BackendUnavailable) });
 
             RetryingStreamingLlmClientDecorator sut = new(inner, 3, null);
@@ -104,11 +103,6 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(HasError(chunks), "The post-commit error must propagate unchanged.");
         }
 
-        /// <summary>
-        /// Дефект: ошибочный чанк нёс ExecutedToolCalls И ретраебельный код — декоратор проверял код раньше,
-        /// чем «инструмент уже исполнялся», и открывал поток заново. Для ученика это второй spawn_quiz и
-        /// вторая запись в память за один вопрос.
-        /// </summary>
         [Test]
         public async Task ErrorChunkAfterToolExecution_IsNeverRetried_EvenWithRetryableCode()
         {
@@ -191,6 +185,68 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void PreCancelledRequest_DoesNotOpenProvider()
+        {
+            StubStreamingClient inner = new();
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3);
+            using CancellationTokenSource cancellation = new();
+            cancellation.Cancel();
+
+            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+                await Drain(sut.CompleteStreamingAsync(Req(), cancellation.Token)));
+
+            Assert.AreEqual(0, inner.StreamCallCount);
+            Assert.AreEqual(0, sut.RetryCount);
+        }
+
+        [Test]
+        public void CancellationDuringTransientFailure_DoesNotReopenProvider()
+        {
+            using CancellationTokenSource cancellation = new();
+            StubStreamingClient inner = new();
+            inner.BeforeYield = cancellation.Cancel;
+            inner.NextStreams.Enqueue(new[] { ErrChunk(LlmErrorCode.BackendUnavailable) });
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3);
+
+            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+                await Drain(sut.CompleteStreamingAsync(Req(), cancellation.Token)));
+
+            Assert.AreEqual(1, inner.StreamCallCount);
+            Assert.AreEqual(0, sut.RetryCount);
+        }
+
+        [Test]
+        public async Task SynchronousStreamOpenFailure_IsRetriedBeforeContent()
+        {
+            OpeningFailureClient inner = new();
+            RetryingStreamingLlmClientDecorator sut = new(inner, 1);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual("ok", Concat(chunks));
+            Assert.AreEqual(2, inner.OpenCount);
+            Assert.AreEqual(1, sut.RetryCount);
+        }
+
+        [Test]
+        public async Task SynchronousPermanentOpenFailure_PreservesClassificationWithoutRetry()
+        {
+            OpeningFailureClient inner = new()
+            {
+                OpeningException = new LlmClientException("Authentication expired.", LlmErrorCode.AuthExpired, 401)
+            };
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(1, chunks.Count);
+            Assert.AreEqual(LlmErrorCode.AuthExpired, chunks[0].ErrorCode);
+            Assert.AreEqual(401, chunks[0].HttpStatus);
+            Assert.AreEqual(1, inner.OpenCount);
+            Assert.AreEqual(0, sut.RetryCount);
+        }
+
+        [Test]
         public async Task NonStreamingPath_DelegatesWithoutRetry()
         {
             StubStreamingClient inner = new();
@@ -205,7 +261,6 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, inner.CompleteCallCount);
         }
 
-        // ---- helpers ----
 
         private static LlmCompletionRequest Req()
         {
@@ -287,6 +342,7 @@ namespace CoreAI.Tests.EditMode
             public LlmCompletionResult NextResult = new() { Ok = true };
             public int StreamCallCount;
             public int CompleteCallCount;
+            public Action BeforeYield;
 
             public Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request, CancellationToken cancellationToken = default)
@@ -309,8 +365,34 @@ namespace CoreAI.Tests.EditMode
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     await Task.Yield();
+                    BeforeYield?.Invoke();
                     yield return c;
                 }
+            }
+        }
+
+        private sealed class OpeningFailureClient : ILlmClient
+        {
+            public int OpenCount;
+            public Exception OpeningException = new InvalidOperationException("Temporary stream initialization failure.");
+            private readonly StubStreamingClient _inner = new();
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                return _inner.CompleteAsync(request, cancellationToken);
+            }
+
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                OpenCount++;
+                if (OpenCount == 1)
+                {
+                    throw OpeningException;
+                }
+
+                return _inner.CompleteStreamingAsync(request, cancellationToken);
             }
         }
 

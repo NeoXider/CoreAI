@@ -6,6 +6,7 @@ using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Logging;
+using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
@@ -471,6 +472,294 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void JoiningActor_GetsACharacterWithAHumanoidAndARootPart()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("char-a");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            harness.Stack.Runtime.LoadMod(actor, "char-shape", @"
+                local Players = game:GetService('Players')
+                local me = Players:GetPlayers()[1]
+                local character = me.Character
+                store_set('has_character', tostring(character ~= nil))
+                store_set('name_matches', tostring(character.Name == me.Name))
+                store_set('parent_is_workspace', tostring(character.Parent == workspace))
+                local humanoid = character:FindFirstChild('Humanoid')
+                local root = character:FindFirstChild('HumanoidRootPart')
+                store_set('has_humanoid', tostring(humanoid ~= nil))
+                store_set('root_is_part', tostring(root ~= nil and root:IsA('BasePart')))
+                store_set('root_part_wired', tostring(humanoid.RootPart == root))
+                store_set('resolves_back',
+                    tostring(Players:GetPlayerFromCharacter(character) == me))");
+
+            Assert.AreEqual("true", harness.Store.Get("char-shape", "has_character"));
+            Assert.AreEqual("true", harness.Store.Get("char-shape", "name_matches"));
+            Assert.AreEqual("true", harness.Store.Get("char-shape", "parent_is_workspace"));
+            Assert.AreEqual("true", harness.Store.Get("char-shape", "has_humanoid"));
+            Assert.AreEqual("true", harness.Store.Get("char-shape", "root_is_part"),
+                "Humanoid.RootPart must be a BasePart named HumanoidRootPart, not the Model.");
+            Assert.AreEqual("true", harness.Store.Get("char-shape", "root_part_wired"));
+            Assert.AreEqual("true", harness.Store.Get("char-shape", "resolves_back"));
+            Assert.IsNotNull(player.Character);
+        }
+
+        [Test]
+        public void LoadCharacterAsync_ReplacesTheOldOneInTheMirrorsOrderAndYields()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("char-b");
+            harness.Bindings.ConnectActor(actor);
+
+            // WHY an accumulated string: counters would prove each event happened, which is true in
+            // any order. The ORDER is the contract - CharacterRemoving for the outgoing character
+            // BEFORE CharacterAdded for its replacement - and the "after" tag proves the call
+            // yielded, because a non-yielding LoadCharacterAsync would return before the deferred
+            // handlers ran and put "after" first.
+            harness.Stack.Runtime.LoadMod(actor, "char-order", @"
+                local Players = game:GetService('Players')
+                local me = Players:GetPlayers()[1]
+                local first = me.Character
+                local order = ''
+                local function note(tag)
+                    return function()
+                        order = order .. tag
+                        store_set('order', order)
+                    end
+                end
+                me.CharacterRemoving:Connect(note('R'))
+                me.CharacterAdded:Connect(note('A'))
+                task.spawn(function()
+                    local second = me:LoadCharacterAsync()
+                    order = order .. 'after'
+                    store_set('order', order)
+                    store_set('replaced', tostring(second ~= first))
+                    store_set('is_current', tostring(me.Character == second))
+                end)");
+
+            for (int frame = 0; frame < 4; frame++)
+            {
+                harness.Bindings.PumpFrame(1f / 60f);
+                harness.Bindings.Scheduler.Advance(1d / 60d);
+            }
+
+            Assert.AreEqual("RAafter", harness.Store.Get("char-order", "order"),
+                "CharacterRemoving fires for the outgoing character, then CharacterAdded for the "
+                + "new one, and only then does the yielding call resume.");
+            Assert.AreEqual("true", harness.Store.Get("char-order", "replaced"));
+            Assert.AreEqual("true", harness.Store.Get("char-order", "is_current"));
+        }
+
+        [Test]
+        public void Negative_CharacterAutoLoadsOff_LeavesTheJoinerWithoutOne()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            harness.Bindings.Players.CharacterAutoLoads = false;
+            ActorContext actor = harness.Actor("char-c");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            Assert.IsNull(player.Character,
+                "CharacterAutoLoads = false means nothing spawns until LoadCharacterAsync is called.");
+
+            harness.Stack.Runtime.LoadMod(actor, "char-manual", @"
+                local me = game:GetService('Players'):GetPlayers()[1]
+                store_set('before', tostring(me.Character == nil))
+                task.spawn(function()
+                    me:LoadCharacterAsync()
+                    store_set('after', tostring(me.Character ~= nil))
+                end)");
+
+            for (int frame = 0; frame < 4; frame++)
+            {
+                harness.Bindings.PumpFrame(1f / 60f);
+                harness.Bindings.Scheduler.Advance(1d / 60d);
+            }
+
+            Assert.AreEqual("true", harness.Store.Get("char-manual", "before"));
+            Assert.AreEqual("true", harness.Store.Get("char-manual", "after"));
+        }
+
+        [Test]
+        public void DistanceFromCharacter_IsInStuds_AndZeroWithoutACharacter()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("char-d");
+            harness.Bindings.ConnectActor(actor);
+
+            harness.Stack.Runtime.LoadMod(actor, "char-distance", @"
+                local me = game:GetService('Players'):GetPlayers()[1]
+                me.Character.HumanoidRootPart.Position = Vector3.new(0, 0, 0)
+                store_set('three', tostring(me:DistanceFromCharacter(Vector3.new(3, 0, 0))))
+                store_set('five', tostring(me:DistanceFromCharacter(Vector3.new(0, 4, 3))))");
+
+            Assert.AreEqual("3", harness.Store.Get("char-distance", "three"),
+                "The distance is in studs, the same unit the position was written in.");
+            Assert.AreEqual("5", harness.Store.Get("char-distance", "five"));
+
+            using ProductionHarness bare = new ProductionHarness();
+            bare.Bindings.Players.CharacterAutoLoads = false;
+            ActorContext bareActor = bare.Actor("char-e");
+            bare.Bindings.ConnectActor(bareActor);
+            bare.Stack.Runtime.LoadMod(bareActor, "char-none", @"
+                local me = game:GetService('Players'):GetPlayers()[1]
+                store_set('zero', tostring(me:DistanceFromCharacter(Vector3.new(9, 9, 9))))");
+
+            Assert.AreEqual("0", bare.Store.Get("char-none", "zero"),
+                "The mirror returns 0 for a player with no character, not an error.");
+        }
+
+        [Test]
+        public void LoadCharacter_LogsItsDeprecationOncePerMod_NotOncePerProcess()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("char-f");
+            harness.Bindings.ConnectActor(actor);
+
+            const string source = @"
+                local me = game:GetService('Players'):GetPlayers()[1]
+                task.spawn(function()
+                    me:LoadCharacter()
+                    me:LoadCharacter()
+                end)";
+            harness.Stack.Runtime.LoadMod(actor, "deprecated-one", source);
+            harness.Stack.Runtime.LoadMod(actor, "deprecated-two", source);
+
+            for (int frame = 0; frame < 8; frame++)
+            {
+                harness.Bindings.PumpFrame(1f / 60f);
+                harness.Bindings.Scheduler.Advance(1d / 60d);
+            }
+
+            // WHY two mods and four calls: one mod calling twice cannot tell once-per-mod from
+            // once-per-process, and a static flag would pass that weaker test. Two mods must
+            // produce exactly two notes.
+            int notes = 0;
+            foreach (string line in harness.LogLines)
+            {
+                if (line.Contains("LoadCharacter() is deprecated"))
+                {
+                    notes++;
+                }
+            }
+
+            Assert.AreEqual(2, notes,
+                "One deprecation note per mod: two mods, four calls, two notes.");
+        }
+
+        [Test]
+        public void Negative_DisconnectTakesTheCharacterWithIt()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("char-g");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            RbxInstance character = player.Character;
+            Assert.IsNotNull(character);
+
+            harness.Bindings.DisconnectActor(actor);
+
+            Assert.IsTrue(character.IsDestroyed,
+                "A character left standing after its player disconnects is a body nobody drives.");
+            Assert.IsFalse(harness.Registry.TryGet(character.Id, out _));
+        }
+
+        [Test]
+        public void CharacterMotor_AttachesAfterParenting_AndRunsAtPreSimulation()
+        {
+            GameObject body = new GameObject("Character motor test");
+            try
+            {
+                Rigidbody rigidbody = body.AddComponent<Rigidbody>();
+                rigidbody.useGravity = false;
+                using ProductionHarness harness = new ProductionHarness();
+                harness.Bindings.AttachCharacterMotorFactory(humanoid =>
+                    humanoid.RootPart == null ? null : new UnityRbxCharacterMotor(rigidbody));
+                RbxPlayer player = harness.Bindings.ConnectActor(harness.Actor("motor"));
+                RbxHumanoid humanoid = (RbxHumanoid)player.Character.FindFirstChild("Humanoid");
+                Assert.AreSame(player.Character.FindFirstChild("HumanoidRootPart"), humanoid.RootPart);
+
+                humanoid.MoveTo(new RbxVector3(20d, 0d, 0d));
+                harness.Bindings.PumpPreSimulation(1f / 60f);
+                Assert.Greater(rigidbody.linearVelocity.magnitude, 0f);
+
+                player.Character.Destroy();
+                Assert.DoesNotThrow(() => harness.Bindings.PumpPreSimulation(1f / 60f));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(body);
+            }
+        }
+
+        [Test]
+        public void CharacterRemoving_DeferredCallbackCanReadOutgoingName()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("removing-name");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            string name = player.Character.Name;
+            harness.Stack.Runtime.LoadMod(actor, "removing-name", @"
+                local me = game:GetService('Players'):GetPlayers()[1]
+                me.CharacterRemoving:Connect(function(character)
+                    store_set('removed_name', character.Name)
+                end)
+                task.spawn(function() me:LoadCharacterAsync() end)");
+            for (int frame = 0; frame < 4; frame++)
+            {
+                harness.Bindings.Scheduler.Advance(1d / 60d);
+            }
+            Assert.AreEqual(name, harness.Store.Get("removing-name", "removed_name"));
+        }
+
+        [Test]
+        public void DisconnectActor_DisconnectsCharacterSignals()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("signal-cleanup");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            RbxScriptConnection added = player.CharacterAdded.Connect((Action<object[]>)(_ => { }));
+            RbxScriptConnection removing = player.CharacterRemoving.Connect((Action<object[]>)(_ => { }));
+            harness.Bindings.DisconnectActor(actor);
+            Assert.IsFalse(added.Connected);
+            Assert.IsFalse(removing.Connected);
+        }
+
+        [Test]
+        public void LoadCharacter_RejectsForeignRegistryWithoutDestroyingCurrentCharacter()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            using ProductionHarness foreign = new ProductionHarness();
+            RbxPlayer player = harness.Bindings.ConnectActor(harness.Actor("invalid-registry"));
+            RbxInstance original = player.Character;
+            Assert.Throws<ArgumentException>(() => RbxCharacterFactory.Load(
+                foreign.Registry, foreign.Registry.WorldRoot, player));
+            Assert.AreSame(original, player.Character);
+            Assert.IsFalse(original.IsDestroyed);
+        }
+
+        [Test]
+        public void LoadCharacter_RejectsReplacingAnotherActorsCharacter()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext owner = harness.Actor("owner");
+            harness.Bindings.ConnectActor(owner);
+            RbxPlayer other = harness.Bindings.ConnectActor(harness.Actor("other"));
+            RbxInstance protectedCharacter = other.Character;
+            harness.Stack.Runtime.LoadMod(owner, "foreign-character", @"
+                local players = game:GetService('Players'):GetPlayers()
+                players[1].Character = players[2].Character
+                task.spawn(function()
+                    local ok = pcall(function() players[1]:LoadCharacterAsync() end)
+                    store_set('allowed', tostring(ok))
+                end)");
+            for (int frame = 0; frame < 4; frame++)
+            {
+                harness.Bindings.Scheduler.Advance(1d / 60d);
+            }
+            Assert.AreEqual("false", harness.Store.Get("foreign-character", "allowed"));
+            Assert.IsFalse(protectedCharacter.IsDestroyed);
+        }
+
+        [Test]
         public void Negative_UnshippedMembers_StayLoudStubs()
         {
             using ProductionHarness harness = new ProductionHarness();
@@ -487,9 +776,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     Players_PlayerMembershipChanged = function() return Players.PlayerMembershipChanged end,
                     Player_Team = function() return me.Team end,
                     Player_GetMouse = function() return me.GetMouse end,
-                    Player_LoadCharacterAsync = function() return me.LoadCharacterAsync end,
-                    Player_DistanceFromCharacter = function() return me.DistanceFromCharacter end,
-                    Player_CharacterAdded = function() return me.CharacterAdded end,
                     Player_Chatted = function() return me.Chatted end,
                     Player_StarterGear = function() return me.StarterGear end,
                 }
@@ -513,8 +799,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             {
                 "Players_BanAsync", "Players_GetFriendsAsync", "Players_Chat",
                 "Players_PlayerMembershipChanged", "Player_Team", "Player_GetMouse",
-                "Player_LoadCharacterAsync", "Player_DistanceFromCharacter",
-                "Player_CharacterAdded", "Player_Chatted", "Player_StarterGear",
+                "Player_Chatted", "Player_StarterGear",
             };
             foreach (string key in stubKeys)
             {

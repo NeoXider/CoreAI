@@ -29,6 +29,20 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>Name changed on a materialized instance — sync the backing object's name.</summary>
         void OnNameChanged(InstanceRecord record);
+
+        /// <summary>
+        /// Copies whatever backing state belongs to <paramref name="sourceId"/> onto
+        /// <paramref name="destinationId"/> (e.g. BasePart spatial/appearance state kept outside
+        /// the registry). Called by <see cref="RbxInstance"/>'s clone path so a completed Clone()
+        /// never depends on the caller separately walking that external state. No-op for hosts
+        /// that keep no such state.
+        /// WHY here and not a registry-level copy: the state this copies (BasePart Size/CFrame/
+        /// Color/Anchored/...) lives in an IPartPropertySink implemented alongside the Unity
+        /// backing binder, in an assembly that references Instances — not the reverse. Declaring
+        /// the copy on the binder seam (already owned by the registry) lets the engine-free side
+        /// trigger the copy without ever seeing the sink's type.
+        /// </summary>
+        void CopyBackingState(InstanceId sourceId, InstanceId destinationId);
     }
 
     /// <summary>Null object for hosts that bind nothing (headless tests, storage-only trees).</summary>
@@ -53,6 +67,10 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         public void OnNameChanged(InstanceRecord record)
+        {
+        }
+
+        public void CopyBackingState(InstanceId sourceId, InstanceId destinationId)
         {
         }
     }

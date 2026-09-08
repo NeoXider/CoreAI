@@ -418,6 +418,23 @@ namespace CoreAI.Mods.Rbx.Binding
         }
 
         /// <summary>
+        /// Implements the clone-completion seam (IInstanceBackingBinder.CopyBackingState) with the
+        /// state this class also holds as IPartPropertySink: copies the source part's stored
+        /// PartProperties onto the destination id, then re-applies them if the destination is
+        /// already a materialized part. A no-op source (no part state stored, e.g. non-BasePart
+        /// instances) copies nothing.
+        /// </summary>
+        public void CopyBackingState(InstanceId sourceId, InstanceId destinationId)
+        {
+            if (!TryGetPartProperties(sourceId, out PartProperties properties))
+            {
+                return;
+            }
+
+            SetPartProperties(destinationId, in properties);
+        }
+
+        /// <summary>
         /// Repaints every variant-wearing part when the instance that moved, was renamed, was
         /// destroyed or entered the world is a MaterialVariant.
         /// WHY: parts hold a variant by NAME and the provider only re-reads a variant when something

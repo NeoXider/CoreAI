@@ -393,6 +393,15 @@ namespace CoreAI.Mods.Rbx.Instances
             return CloneSubtree(true, ownerModId, originTag);
         }
 
+        // WHY: BasePart spatial/appearance state (Size, CFrame, Color, Anchored, ...) lives outside
+        // this class in an IPartPropertySink implemented alongside the Unity backing binder — an
+        // assembly that references Instances, not the reverse, so RbxInstance cannot see that type
+        // without inverting the engine-free split. Registry.Binder.CopyBackingState is the seam
+        // that lets this method trigger the copy anyway: it is declared on IInstanceBackingBinder,
+        // which Instances already owns, and implemented on the Unity side where the sink lives.
+        // Called per node during the recursion below, so it only ever runs for nodes that made it
+        // into the copy — the Archivable == false skip a few lines down already keeps source and
+        // copy aligned; no separate parallel walk is needed.
         private RbxInstance CloneSubtree(bool overrideOwnership, string ownerModId, string originTag)
         {
             InstanceRecord sourceRecord = Registry.GetRecord(Id);
@@ -403,32 +412,41 @@ namespace CoreAI.Mods.Rbx.Instances
             string resolvedOriginTag = overrideOwnership ? originTag : sourceRecord.OriginTag;
             RbxInstance copy = Registry.Create(
                 ClassName, resolvedOwnerModId, resolvedOriginTag, authority);
-            copy._name = _name;
-            copy._archivable = _archivable;
-            CopyCustomStateTo(copy);
-            foreach (KeyValuePair<string, object> attribute in _attributes)
+            try
             {
-                copy._attributes[attribute.Key] = attribute.Value;
-            }
-
-            foreach (string tag in Registry.Tags.GetTags(Id))
-            {
-                Registry.Tags.AddTag(copy.Id, tag);
-            }
-
-            foreach (RbxInstance child in _children)
-            {
-                if (!child._archivable)
+                copy._name = _name;
+                copy._archivable = _archivable;
+                CopyCustomStateTo(copy);
+                Registry.Binder.CopyBackingState(Id, copy.Id);
+                foreach (KeyValuePair<string, object> attribute in _attributes)
                 {
-                    continue;
+                    copy._attributes[attribute.Key] = attribute.Value;
                 }
-
-                RbxInstance childCopy = child.CloneSubtree(
-                    overrideOwnership, ownerModId, originTag);
-                childCopy.SetParent(copy);
+    
+                foreach (string tag in Registry.Tags.GetTags(Id))
+                {
+                    Registry.Tags.AddTag(copy.Id, tag);
+                }
+    
+                foreach (RbxInstance child in _children)
+                {
+                    if (!child._archivable)
+                    {
+                        continue;
+                    }
+    
+                    RbxInstance childCopy = child.CloneSubtree(
+                        overrideOwnership, ownerModId, originTag);
+                    childCopy.SetParent(copy);
+                }
+    
+                return copy;
             }
-
-            return copy;
+            catch
+            {
+                copy.Destroy();
+                throw;
+            }
         }
 
         /// <summary>

@@ -252,6 +252,69 @@ namespace CoreAI.Mcp.Tests
             }
         }
 
+        [TestCase("jsonrpc", "null")]
+        [TestCase("jsonrpc", "2.0")]
+        [TestCase("jsonrpc", "\"1.0\"")]
+        [TestCase("method", "42")]
+        [TestCase("method", "{}")]
+        [TestCase("id", "true")]
+        [TestCase("id", "{}")]
+        [TestCase("id", "[]")]
+        [TestCase("params", "\"invalid\"")]
+        [TestCase("params", "null")]
+        public async Task InvalidEnvelope_DoesNotInvokeTool(string member, string value)
+        {
+            FakeMcpTool tool = new("run");
+            JObject request = Request(McpMethods.ToolsCall, 7, new JObject { ["name"] = "run" });
+            request[member] = JToken.Parse(value);
+
+            McpDispatchResult result = await NewDispatcher(tool).DispatchAsync(request, CancellationToken.None);
+
+            Assert.AreEqual(JsonRpcErrorCodes.InvalidRequest, (int)result.Response["error"]["code"]);
+            Assert.AreEqual(0, tool.InvocationCount);
+            if (member == "id") Assert.AreEqual(JTokenType.Null, result.Response["id"].Type);
+        }
+
+        [Test]
+        public async Task MissingVersion_DoesNotCreateSession()
+        {
+            McpSessionStore sessions = new();
+            McpRpcDispatcher dispatcher = new(new McpToolRegistry(null), sessions, new InlineMainThreadDispatcher());
+            JObject request = Request(McpMethods.Initialize, 7);
+            request.Remove("jsonrpc");
+
+            McpDispatchResult result = await dispatcher.DispatchAsync(request, CancellationToken.None);
+
+            Assert.AreEqual(JsonRpcErrorCodes.InvalidRequest, (int)result.Response["error"]["code"]);
+            Assert.AreEqual(0, sessions.Count);
+            Assert.IsNull(result.IssuedSessionId);
+        }
+
+        [Test]
+        public async Task NumericToolName_DoesNotInvokeStringNamedTool()
+        {
+            FakeMcpTool tool = new("123");
+            McpDispatchResult result = await NewDispatcher(tool).DispatchAsync(
+                Request(McpMethods.ToolsCall, 7, new JObject { ["name"] = 123 }), CancellationToken.None);
+
+            Assert.AreEqual(JsonRpcErrorCodes.InvalidParams, (int)result.Response["error"]["code"]);
+            Assert.AreEqual(0, tool.InvocationCount);
+        }
+
+        [TestCase("null")]
+        [TestCase("\"request-7\"")]
+        [TestCase("7")]
+        public async Task ValidScalarId_IsPreserved(string idJson)
+        {
+            JToken id = JToken.Parse(idJson);
+            McpDispatchResult result = await NewDispatcher().DispatchAsync(
+                Request(McpMethods.Ping, id), CancellationToken.None);
+
+            Assert.IsFalse(result.IsNotification);
+            Assert.IsNull(result.Response["error"]);
+            Assert.IsTrue(JToken.DeepEquals(id, result.Response["id"]));
+        }
+
         [Test]
         public void MalformedJson_MapsToParseError()
         {

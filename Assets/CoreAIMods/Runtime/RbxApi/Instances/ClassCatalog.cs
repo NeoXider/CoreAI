@@ -651,22 +651,7 @@ namespace CoreAI.Mods.Rbx.Instances
                     "character appearance loading ships with the character pipeline in MVP8"),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "StarterGear",
-                    "per-player StarterGear lands with character contents (MVP10/MVP14); use Backpack meanwhile"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "LoadCharacterAsync", "MVP8",
-                    "the character pipeline assigns Character; read player.Character meanwhile"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "LoadCharacter", "MVP8",
-                    "deprecated alias of LoadCharacterAsync; the character pipeline lands it"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "DistanceFromCharacter", "MVP8",
-                    "distance needs the spawned character Head; the character pipeline lands it"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
-                    "CharacterAdded", "MVP8",
-                    "character spawn signals fire from the character pipeline, not this slice"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
-                    "CharacterRemoving", "MVP8",
-                    "character spawn signals fire from the character pipeline, not this slice"));
+                    "per-player StarterGear lands with character contents (MVP10/MVP14); use Backpack meanwhile"));
             // WHY these stay loud: each needs a character rig CoreAI does not model (seats,
             // ragdoll, swimming, climbing, accessories, animation). A silent no-op would let a
             // script believe it sat a player down; the loud stub names the rung instead.

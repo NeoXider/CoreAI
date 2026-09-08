@@ -265,6 +265,10 @@ namespace CoreAI.Mods.Rbx.Instances
             _motor = motor ?? NullRbxCharacterMotor.Instance;
             RootPart = rootPart;
             _motor.SetWalkSpeed(_walkSpeed);
+            if (_walkTarget.HasValue)
+            {
+                _motor.MoveTo(_walkTarget);
+            }
             if (_scheduler != null)
             {
                 _scheduler.PhaseReached += OnPhaseReached;

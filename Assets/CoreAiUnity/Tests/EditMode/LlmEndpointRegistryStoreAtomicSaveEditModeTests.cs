@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
@@ -48,7 +49,7 @@ namespace CoreAI.Tests.EditMode
             store.Save(StateWith("second"));
 
             Assert.AreEqual("second", store.Load().Endpoints.Single().EndpointId);
-            Assert.IsFalse(File.Exists(_path + ".tmp"), "The temp file must not survive a successful save.");
+            Assert.IsEmpty(Directory.GetFiles(_directory, "*.tmp"), "The temp file must not survive a successful save.");
         }
 
         [Test]
@@ -57,8 +58,6 @@ namespace CoreAI.Tests.EditMode
             FileLlmEndpointRegistryStore store = new(_path);
             store.Save(StateWith("first"));
 
-            // Holding the destination open with no sharing makes the swap fail the way a crashed or
-            // locked write would; the previously persisted file must survive it intact.
             using (new FileStream(_path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
                 Assert.Catch(() => store.Save(StateWith("second")));
@@ -66,7 +65,24 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsTrue(File.Exists(_path), "A failed save must not delete the existing registry file.");
             Assert.AreEqual("first", store.Load().Endpoints.Single().EndpointId);
-            Assert.IsFalse(File.Exists(_path + ".tmp"), "A failed save must clean up its temp file.");
+            Assert.IsEmpty(Directory.GetFiles(_directory, "*.tmp"), "A failed save must clean up its temp file.");
+        }
+
+        [Test]
+        public void Save_ConcurrentInstancesUsingEquivalentPaths_CommitCompleteSnapshots()
+        {
+            FileLlmEndpointRegistryStore first = new(_path);
+            FileLlmEndpointRegistryStore second = new(Path.Combine(_directory, ".", "llm-endpoints.json"));
+
+            Assert.DoesNotThrow(() => Parallel.For(0, 64, index =>
+            {
+                FileLlmEndpointRegistryStore writer = index % 2 == 0 ? first : second;
+                writer.Save(StateWith("endpoint-" + index));
+                Assert.That(writer.Load().Endpoints.Single().EndpointId, Does.StartWith("endpoint-"));
+            }));
+
+            Assert.AreEqual(1, new FileLlmEndpointRegistryStore(_path).Load().Endpoints.Count);
+            Assert.IsEmpty(Directory.GetFiles(_directory, "*.tmp"));
         }
 
         private static LlmEndpointRegistryState StateWith(string endpointId)

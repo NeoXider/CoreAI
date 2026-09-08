@@ -8,6 +8,28 @@ on:
   workflow_dispatch:
 
 jobs:
+  portable-core:
+    name: Portable Core tests and coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Run engine-free regression tests
+        run: >-
+          dotnet test tools/portable/Tests/CoreAI.Portable.Tests.csproj -c Release
+          --collect:"XPlat Code Coverage"
+          --settings tools/portable/Tests/coverage.runsettings
+          --results-directory artifacts/portable-tests
+          --logger "trx;LogFileName=portable-core.trx"
+      - name: Upload test results and coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-core-test-results
+          path: artifacts/portable-tests
+
   # F-22 package isolation (fork-safe, no Unity license): prove every shipped package.json is a
   # self-consistent UPM graph - all six packages versioned in lockstep and every internal
   # com.neoxider.* dependency pin matches the pinned package's actual version. Catches a half-done

@@ -2500,6 +2500,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             public void OnNameChanged(InstanceRecord record)
             {
             }
+
+            public void CopyBackingState(InstanceId sourceId, InstanceId destinationId)
+            {
+            }
         }
     }
 }

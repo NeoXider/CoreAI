@@ -41,13 +41,20 @@ namespace CoreAI.Mods.Rbx.Binding
         }
 
         /// <inheritdoc />
-        public RbxVector3 Position => RbxSpace.FromUnity(_body.position);
+        public RbxVector3 Position => _body == null ? RbxVector3.Zero : RbxSpace.FromUnity(_body.position);
+
+        internal bool IsAvailable => _body != null;
 
         /// <inheritdoc />
         public RbxVector3 MoveDirection
         {
             get
             {
+                if (_body == null)
+                {
+                    return RbxVector3.Zero;
+                }
+
                 Vector3 planar = new(_body.linearVelocity.x, 0f, _body.linearVelocity.z);
                 return planar.sqrMagnitude <= 1e-6f
                     ? RbxVector3.Zero
@@ -57,7 +64,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <inheritdoc />
         public bool IsGrounded =>
-            Physics.Raycast(_body.position, Vector3.down, _groundProbeOrigin + GroundProbeMetres);
+            _body != null && Physics.Raycast(_body.position, Vector3.down, _groundProbeOrigin + GroundProbeMetres);
 
         /// <inheritdoc />
         public void SetWalkSpeed(double studsPerSecond)
@@ -68,7 +75,7 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <inheritdoc />
         public void Jump(double jumpPower, double jumpHeight, bool useJumpPower)
         {
-            if (!IsGrounded)
+            if (_body == null || _body.isKinematic || !IsGrounded)
             {
                 return;
             }
@@ -90,7 +97,7 @@ namespace CoreAI.Mods.Rbx.Binding
         public void MoveTo(RbxVector3? targetStuds)
         {
             _targetMetres = targetStuds.HasValue ? RbxSpace.ToUnity(targetStuds.Value) : null;
-            if (!_targetMetres.HasValue)
+            if (_body != null && !_body.isKinematic && !_targetMetres.HasValue)
             {
                 Vector3 stopped = _body.linearVelocity;
                 stopped.x = 0f;
@@ -102,7 +109,7 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <summary>Advances the walk by one fixed step. Call from the fixed-step pump.</summary>
         public void Step()
         {
-            if (!_targetMetres.HasValue)
+            if (_body == null || _body.isKinematic || !_targetMetres.HasValue)
             {
                 return;
             }

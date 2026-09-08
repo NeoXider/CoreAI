@@ -62,6 +62,8 @@ namespace CoreAI.Ai.LuaCs
             local remoteFunctionResumeValues = task._remoteFunctionResumeValues
             local warnInfiniteYield = task._warnInfiniteYield
             local realtime = task._realtime
+            local buildCharacter = task._buildCharacter
+            local noteLoadCharacterDeprecation = task._noteLoadCharacterDeprecation
             task._resumeValue = nil
             task._scheduleSignalWait = nil
             task._signalResumeValues = nil
@@ -70,6 +72,8 @@ namespace CoreAI.Ai.LuaCs
             task._remoteFunctionResumeValues = nil
             task._warnInfiniteYield = nil
             task._realtime = nil
+            task._buildCharacter = nil
+            task._noteLoadCharacterDeprecation = nil
             task.wait = function(duration)
                 scheduleTaskWait(duration)
                 coroutine.yield()
@@ -108,6 +112,20 @@ namespace CoreAI.Ai.LuaCs
                 coroutine.yield()
                 local values = signalResumeValues()
                 return values.timedOut, values.elapsed, table.unpack(values, 1, values.n)
+            end
+            -- WHY LoadCharacterAsync yields at all: the mirror makes it a yielding call that
+            -- returns once the character is loaded, and CoreAI's signals are deferred, so a
+            -- non-yielding version would return BEFORE the CharacterAdded handlers ran. One
+            -- task.wait() puts the caller's resumption after the signal drain, which is exactly
+            -- Roblox's observable order.
+            task._loadCharacterBridge = function(player)
+                local character = buildCharacter(player)
+                task.wait()
+                return character
+            end
+            task._loadCharacterDeprecatedBridge = function(player)
+                noteLoadCharacterDeprecation()
+                return task._loadCharacterBridge(player)
             end
             task._waitForChildBridge = function(instance, childName, timeout)
                 local child = instance:FindFirstChild(childName)

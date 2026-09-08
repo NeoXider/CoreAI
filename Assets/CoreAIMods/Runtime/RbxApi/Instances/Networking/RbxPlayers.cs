@@ -23,11 +23,55 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         public string DisplayName { get; set; }
 
         /// <summary>
-        /// Mirror <c>Player.Character</c>: the Model driven for this player, or nil before the
-        /// character pipeline (a later MVP8 slice) assigns one. Lua may read and assign it; the
-        /// CharacterAdded/CharacterRemoving signals stay loud stubs until that slice fires them.
+        /// Mirror <c>Player.Character</c>: the Model driven for this player, or nil until a
+        /// character is loaded. Assigning it directly does NOT fire the signals — only
+        /// <c>LoadCharacterAsync</c> does, exactly as in Roblox.
         /// </summary>
         public RbxInstance Character { get; internal set; }
+
+        /// <summary>Mirror <c>Player.CharacterAdded(character)</c>.</summary>
+        public RbxScriptSignal CharacterAdded => GetOrCreateSignal("CharacterAdded");
+
+        /// <summary>Mirror <c>Player.CharacterRemoving(character)</c>.</summary>
+        public RbxScriptSignal CharacterRemoving => GetOrCreateSignal("CharacterRemoving");
+
+        /// <summary>
+        /// Mirror <c>Player:DistanceFromCharacter(point)</c>: studs from the character's root part
+        /// to the point, and <c>0</c> when the player has no character.
+        /// </summary>
+        /// <remarks>
+        /// WHY zero and not an error for a characterless player: the mirror documents the method as
+        /// returning 0 in that case, and a proximity check written against Roblox would otherwise
+        /// have to guard every call.
+        /// </remarks>
+        public double DistanceFromCharacter(RbxVector3 point)
+        {
+            RbxInstance root = ResolveRootPart();
+            if (root == null || PartPositionReader == null)
+            {
+                return 0d;
+            }
+
+            RbxVector3 position = PartPositionReader(root);
+            return (position - point).Magnitude;
+        }
+
+        /// <summary>
+        /// Reads a part's position in studs. Set by the composition, because BasePart spatial state
+        /// lives in an external sink that this engine-free assembly cannot reference.
+        /// </summary>
+        internal Func<RbxInstance, RbxVector3> PartPositionReader { get; set; }
+
+        private RbxInstance ResolveRootPart()
+        {
+            if (Character == null || Character.IsDestroyed)
+            {
+                return null;
+            }
+
+            RbxInstance root = Character.FindFirstChild(RbxCharacterFactory.RootPartName);
+            return root != null && root.IsA("BasePart") ? root : null;
+        }
 
         internal void Initialize(string actorId, long userId, string username, string displayName)
         {
@@ -79,6 +123,17 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         public IRbxPlayerProfileProvider ProfileProvider { get; set; } =
             SyntheticPlayerProfileProvider.Instance;
 
+        /// <summary>
+        /// Scheduler the per-player CharacterAdded/CharacterRemoving signals are bound to. Set by
+        /// the composition alongside the service-level PlayerAdded/PlayerRemoving binding.
+        /// </summary>
+        /// <remarks>
+        /// WHY the service holds it: those two signals are created per Player, so there is no single
+        /// place a host could bind them after the fact — a player that joined before the host got
+        /// around to it would refuse every Connect with "has no scheduler".
+        /// </remarks>
+        internal Scheduling.ModScheduler Scheduler { get; set; }
+
         /// <summary>Mirror default for <c>Players.RespawnTime</c>: 5 seconds.</summary>
         public const double DefaultRespawnTime = 5d;
 
@@ -103,6 +158,12 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// that nothing in CoreAI honours; 1 is the true capacity until a host sets its own.
         /// </remarks>
         public int MaxPlayers { get; set; } = 1;
+
+        /// <summary>
+        /// Reads a part's position in studs, handed to every Player this service creates so
+        /// <c>DistanceFromCharacter</c> can answer. Null in a world with no part sink.
+        /// </summary>
+        internal Func<RbxInstance, Datatypes.RbxVector3> PartPositionReader { get; set; }
 
         /// <summary>Returns the real Player registered for an actor, creating it once if needed.</summary>
         public RbxPlayer EnsureActor(InstanceRegistry registry, string actorId)
@@ -152,12 +213,29 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
 
                 player.Initialize(actor, userId, username, displayName);
                 player.Parent = this;
+                if (Scheduler != null)
+                {
+                    player.CharacterAdded.BindScheduler(Scheduler);
+                    player.CharacterRemoving.BindScheduler(Scheduler);
+                }
+
+                player.PartPositionReader = PartPositionReader;
                 CreatePlayerContainer(registry, player, actor, "Backpack");
                 CreatePlayerContainer(registry, player, actor, "PlayerGui");
                 CreatePlayerContainer(registry, player, actor, "PlayerScripts");
                 _byActor.Add(actor, player);
                 _players.Add(player);
                 PlayerAdded.Fire(player);
+
+                // WHY after PlayerAdded and not before: the mirror's join order is the player first,
+                // then its character, and a PlayerAdded handler that reads Player.Character expects
+                // nil on a world where CharacterAutoLoads is off. Firing them the other way round
+                // would make that read depend on a setting the handler cannot see.
+                if (CharacterAutoLoads && registry.WorldRoot != null)
+                {
+                    RbxCharacterFactory.Load(registry, registry.WorldRoot, player);
+                }
+
                 return player;
             }
             catch
@@ -270,6 +348,11 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             PlayerRemoving.FireForDestruction(player, player, reason);
             _byActor.Remove(actor);
             _players.Remove(player);
+
+            // WHY the character goes with the player: it lives under Workspace, not under the
+            // Player, so destroying the Player alone would leave a body standing in the world with
+            // nobody driving it — the "ghost character" every multiplayer game gets wrong once.
+            RbxCharacterFactory.Unload(player);
             player.Destroy();
             return true;
         }

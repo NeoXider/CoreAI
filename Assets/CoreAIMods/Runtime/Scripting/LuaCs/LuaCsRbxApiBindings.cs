@@ -100,6 +100,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly LuaCsTweenPropertyHost _tweenPropertyHost;
         private readonly RbxWorldPhysics _worldPhysics;
         private Func<RbxHumanoid, IRbxCharacterMotor> _characterMotorFactory;
+        private readonly Dictionary<RbxHumanoid, IRbxCharacterMotor> _characterMotors = new();
         private readonly IClickPickSource _pickSource;
         private readonly ModConnectionRegistry _connections;
         private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
@@ -307,6 +308,7 @@ namespace CoreAI.Ai.LuaCs
             // has no scheduler silently never times out a MoveTo and never changes state, and the
             // script that created it has no way to notice.
             _registry.Registered += OnInstanceRegisteredForCharacter;
+            _registry.SceneMembershipChanged += OnCharacterSceneMembershipChanged;
 
             if (_userInputService != null)
             {
@@ -317,13 +319,22 @@ namespace CoreAI.Ai.LuaCs
 
             if (_runService != null)
             {
+                // WHY every one, including the modern names: a signal with no scheduler refuses a
+                // C# Connect outright, and a host listening for PreRender is as legitimate as a mod
+                // doing it. Binding only the three legacy signals made the modern four Lua-only.
                 _runService.Heartbeat.BindScheduler(_scheduler);
                 _runService.Stepped.BindScheduler(_scheduler);
                 _runService.RenderStepped.BindScheduler(_scheduler);
+                _runService.PreAnimation.BindScheduler(_scheduler);
+                _runService.PreSimulation.BindScheduler(_scheduler);
+                _runService.PostSimulation.BindScheduler(_scheduler);
+                _runService.PreRender.BindScheduler(_scheduler);
             }
 
             _players.PlayerAdded.BindScheduler(_scheduler);
             _players.PlayerRemoving.BindScheduler(_scheduler);
+            _players.Scheduler = _scheduler;
+            _players.PartPositionReader = ReadPartPositionStuds;
             _networkRequestSignal = new RbxScriptSignal("NetworkBridge.RequestReceived");
             _networkRequestSignal.BindScheduler(_scheduler);
             _networkRequestConnection = _networkRequestSignal.Connect(
@@ -405,10 +416,98 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        /// <summary>
+        /// Builds (or rebuilds) the character for the Player passed from Lua, and returns it.
+        /// </summary>
+        /// <remarks>
+        /// WHY this is a C# hook behind a Lua bridge rather than a plain bound method: the mirror's
+        /// LoadCharacterAsync yields, and yielding is a Lua-side coroutine.yield the C# method
+        /// cannot perform. The bridge builds here, then waits one scheduler slot so the deferred
+        /// CharacterAdded handlers run before the caller resumes — the same shape WaitForChild uses.
+        /// </remarks>
+        private LuaValue BuildCharacterForLoad(LuaCsRbxModContext context,
+            LuaFunctionExecutionContext ctx)
+        {
+            if (!TryGetInstance(Arg(ctx, 0), out LuaCsRbxInstanceProxy proxy)
+                || !(proxy.Instance is RbxPlayer player))
+            {
+                throw RbxError.BadArgument(
+                    "Player:LoadCharacterAsync expects a Player",
+                    "call it on a Player, e.g. Players.LocalPlayer:LoadCharacterAsync()");
+            }
+
+            // WHY authorized like a destroy: loading replaces the player's whole character subtree,
+            // so it is exactly as destructive as Player:Kick's teardown and authorizes the same way.
+            context.RequireDestroyTree(player, "load character");
+            if (player.Character != null && !player.Character.IsDestroyed)
+            {
+                context.RequireDestroyTree(player.Character, "replace character");
+            }
+            RbxInstance worldRoot = _registry.WorldRoot
+                ?? throw RbxError.BadArgument(
+                    "Player:LoadCharacterAsync needs a world root",
+                    "attach the Rbx world before loading a character");
+            RbxInstance character = RbxCharacterFactory.Load(_registry, worldRoot, player);
+            return context.WrapInstance(character);
+        }
+
+        /// <summary>Reads a part's position in studs out of the part sink, for DistanceFromCharacter.</summary>
+        private RbxVector3 ReadPartPositionStuds(RbxInstance part)
+        {
+            return part != null && _partSink.TryGetPartProperties(part.Id, out PartProperties p)
+                ? p.Position
+                : RbxVector3.Zero;
+        }
+
         private void AttachCharacterMotor(RbxHumanoid humanoid)
         {
+            humanoid.AttachHost(_scheduler, null, ResolveRootPart(humanoid));
             IRbxCharacterMotor motor = _characterMotorFactory?.Invoke(humanoid);
-            humanoid.AttachHost(_scheduler, motor, humanoid.Parent);
+            humanoid.AttachHost(_scheduler, motor, ResolveRootPart(humanoid));
+            _characterMotors[humanoid] = motor;
+        }
+
+        private void OnCharacterSceneMembershipChanged(RbxInstance instance, bool entered)
+        {
+            RefreshCharacterMotors();
+        }
+
+        private void RefreshCharacterMotors()
+        {
+            List<RbxHumanoid> humanoids = new(_characterMotors.Keys);
+            foreach (RbxHumanoid humanoid in humanoids)
+            {
+                if (!humanoid.IsDestroyed &&
+                    (!ReferenceEquals(humanoid.RootPart, ResolveRootPart(humanoid)) ||
+                     _characterMotors[humanoid] == null && _characterMotorFactory != null ||
+                     _characterMotors[humanoid] is UnityRbxCharacterMotor unityMotor && !unityMotor.IsAvailable))
+                {
+                    AttachCharacterMotor(humanoid);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Resolves the mirror's <c>Humanoid.RootPart</c>: the sibling BasePart named
+        /// <c>HumanoidRootPart</c>, or null when the character has none.
+        /// </summary>
+        /// <remarks>
+        /// WHY not the Humanoid's parent, which is what this used to pass: the parent is the
+        /// character MODEL, and Roblox's RootPart is a BasePart a script positions and reads
+        /// velocity from. Handing back a Model made every RootPart read a wrong answer of the wrong
+        /// class, silently.
+        /// </remarks>
+        private static RbxInstance ResolveRootPart(RbxHumanoid humanoid)
+        {
+            RbxInstance character = humanoid.Parent;
+            if (character == null || character.IsDestroyed)
+            {
+                return null;
+            }
+
+            RbxInstance root = character.FindFirstChild(
+                Mods.Rbx.Instances.Networking.RbxCharacterFactory.RootPartName);
+            return root != null && root.IsA("BasePart") ? root : null;
         }
 
         /// <summary>Property IO behind the tween driver (same assembly as the bindings).</summary>
@@ -665,6 +764,13 @@ namespace CoreAI.Ai.LuaCs
             _networkBridge.EventReceived -= DeliverNetworkEvent;
             _networkBridge.RequestReceived -= QueueNetworkRequest;
             _registry.Unregistered -= OnInstanceUnregistered;
+            _registry.Registered -= OnInstanceRegisteredForCharacter;
+            _registry.SceneMembershipChanged -= OnCharacterSceneMembershipChanged;
+            foreach (RbxHumanoid humanoid in _characterMotors.Keys)
+            {
+                humanoid.DetachHost();
+            }
+            _characterMotors.Clear();
             if (_debris != null)
             {
                 _debris.DetachHost();
@@ -1075,6 +1181,11 @@ namespace CoreAI.Ai.LuaCs
 
             _serverRemoteCallbacks.Remove(record.Id);
             _clientRemoteCallbacks.Remove(record.Id);
+            if (record.Instance is RbxHumanoid humanoid)
+            {
+                humanoid.DetachHost();
+                _characterMotors.Remove(humanoid);
+            }
         }
 
         private void DeliverNetworkRequest(object[] arguments)
@@ -1267,6 +1378,17 @@ namespace CoreAI.Ai.LuaCs
         public void PumpPreSimulation(float dt)
         {
             _registry.ProcessPreSimulation();
+            RefreshCharacterMotors();
+            if (dt > 0f)
+            {
+                foreach (IRbxCharacterMotor motor in _characterMotors.Values)
+                {
+                    if (motor is UnityRbxCharacterMotor unityMotor)
+                    {
+                        unityMotor.Step();
+                    }
+                }
+            }
             if (_runService == null || _runService.IsDestroyed)
             {
                 return;
@@ -1792,6 +1914,13 @@ namespace CoreAI.Ai.LuaCs
                 WarnInfiniteYield(context, ctx));
             t["_realtime"] = Fn("task._realtime", _ =>
                 LuaCsValueMarshaller.Unbox(UnityEngine.Time.realtimeSinceStartupAsDouble));
+            t["_buildCharacter"] = Fn("task._buildCharacter", ctx =>
+                BuildCharacterForLoad(context, ctx));
+            t["_noteLoadCharacterDeprecation"] = Fn("task._noteLoadCharacterDeprecation", _ =>
+            {
+                context.NoteLoadCharacterDeprecation(_log);
+                return LuaValue.Nil;
+            });
             t["spawn"] = Fn("task.spawn", ctx => WrapTaskThread(
                 TrackScheduledThread(context,
                     _scheduler.Spawn(

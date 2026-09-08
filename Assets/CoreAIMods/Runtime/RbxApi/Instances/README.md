@@ -20,6 +20,21 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
 
 ## Recorded deviations / notes
 
+- `Players.CharacterAutoLoads` creates a minimal runtime character on join: a `Model` with a
+  `Humanoid` and `HumanoidRootPart`. `Player:LoadCharacterAsync()` replaces it and yields;
+  `LoadCharacter()` is a deprecated alias. Replacement checks ownership of the outgoing
+  character as well as the player. Disconnect removes the character and its signal subscriptions.
+- Character signals are deferred. `CharacterRemoving` permits the outgoing model's tombstone
+  identity reads (for example `Name`); it does not preserve the destroyed descendant tree.
+- The Unity composition attaches motors after the root part exists and drives them before
+  simulation. Anchored roots remain anchored. Hosts can supply an `IRbxCharacterMotor` factory;
+  headless worlds retain character health and state without requiring Unity physics.
+- This character slice does not implement avatar rigs, animation, appearance loading, automatic
+  death/respawn scheduling, or a production multiplayer transport. `RespawnTime` remains a stored
+  setting until automatic respawn scheduling is implemented.
+- `Clone()` copies external part state through the backing binder and removes partially created
+  copies if that binder fails. Lua clones receive the calling actor's ownership recursively.
+
 - Signals are live: `RunService.Heartbeat`, `UserInputService` input events and `ClickDetector`
   clicks all deliver through `RbxScriptSignal`.
 - DEV-7 at Domain level: tombstone reads (`Name`, `ClassName`, `Parent`, `IsDestroyed`) stay

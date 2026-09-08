@@ -52,5 +52,10 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             _events.Add("rename:" + record.Id.Value);
         }
+
+        /// <summary>No-op: this fake tracks materialization only, no external property state.</summary>
+        public void CopyBackingState(InstanceId sourceId, InstanceId destinationId)
+        {
+        }
     }
 }

@@ -99,15 +99,16 @@ namespace CoreAI.Infrastructure.Llm
             [EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             using IDisposable requestHeaders = LlmRequestHeaderScopes.Begin(_inner, request);
             for (int attempt = 0;; attempt++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 bool committed = false;
                 bool retryablePreCommitFailure = false;
                 LlmStreamChunk terminalErrorChunk = null;
 
-                IAsyncEnumerator<LlmStreamChunk> enumerator =
-                    _inner.CompleteStreamingAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
+                IAsyncEnumerator<LlmStreamChunk> enumerator = null;
                 try
                 {
                     while (!committed)
@@ -118,6 +119,8 @@ namespace CoreAI.Infrastructure.Llm
 
                         try
                         {
+                            enumerator ??= _inner.CompleteStreamingAsync(request, cancellationToken)
+                                .GetAsyncEnumerator(cancellationToken);
                             hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
                             current = hasNext ? enumerator.Current : null;
                         }
@@ -163,11 +166,6 @@ namespace CoreAI.Infrastructure.Llm
 
                         if (!string.IsNullOrEmpty(current.Error))
                         {
-                            // WHY: Проверка «уже исполнено» идёт ПЕРЕД проверкой кода. Раньше порядок был
-                            // обратный, и защита от повторного запуска инструмента держалась только на том,
-                            // что производитель чанков оставлял ErrorCode = None (не в белом списке). Стоило
-                            // честно поставить Timeout/BackendUnavailable на чанк с ExecutedToolCalls — и
-                            // spawn_quiz исполнялся бы второй раз, а память писалась бы дважды.
                             if (IsRetryableError(current.ErrorCode) && !IsCommittingChunk(current))
                             {
                                 retryablePreCommitFailure = true;
@@ -215,9 +213,13 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 finally
                 {
-                    await enumerator.DisposeAsync().ConfigureAwait(false);
+                    if (enumerator != null)
+                    {
+                        await enumerator.DisposeAsync().ConfigureAwait(false);
+                    }
                 }
 
+                cancellationToken.ThrowIfCancellationRequested();
                 if (!retryablePreCommitFailure)
                 {
                     yield break;

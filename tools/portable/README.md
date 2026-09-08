@@ -17,6 +17,10 @@ The DLL lands in `tools/portable/bin/Release/netstandard2.1/CoreAI.Core.dll`. Th
 
 Dependencies are pinned in [CoreAI.Core.csproj](CoreAI.Core.csproj): Microsoft.Extensions.AI **10.9.0**, Newtonsoft.Json **13.0.3**, System.Text.Json **10.0.11**, plus their transitive dependencies. MEAI contracts are part of the public API.
 
+## Regression tests
+
+The [portable NUnit suite](Tests/README.md) runs existing engine-free tests against this DLL and collects line/branch coverage without Unity. Run `dotnet test tools/portable/Tests/CoreAI.Portable.Tests.csproj -c Release` from the checkout. Unity host and device tests remain separate.
+
 ## Referencing it from an app
 
 When working from source, prefer a `ProjectReference`:

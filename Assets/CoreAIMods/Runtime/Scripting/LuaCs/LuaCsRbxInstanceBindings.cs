@@ -134,6 +134,29 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Deprecation note for Instance.new(className, parent) fires once per mod.</summary>
         public bool HasLoggedInstanceNewParentDeprecation { get; set; }
 
+        /// <summary>True once this mod has been told LoadCharacter is deprecated.</summary>
+        public bool HasLoggedLoadCharacterDeprecation { get; set; }
+
+        /// <summary>
+        /// Logs the LoadCharacter deprecation note once per mod, never once per process.
+        /// </summary>
+        /// <remarks>
+        /// WHY per mod: the note is advice to the author of THIS mod, and a process-wide flag would
+        /// tell the first mod loaded and silently withhold it from every later one.
+        /// </remarks>
+        public void NoteLoadCharacterDeprecation(System.Action<string> log)
+        {
+            if (HasLoggedLoadCharacterDeprecation)
+            {
+                return;
+            }
+
+            HasLoggedLoadCharacterDeprecation = true;
+            log?.Invoke(
+                "[RbxApi] Player:LoadCharacter() is deprecated by Roblox; call " +
+                "LoadCharacterAsync() instead. (Logged once per mod.)");
+        }
+
         /// <summary>DEV-5 task.synchronize/desynchronize no-op note fires once per mod.</summary>
         public bool HasLoggedParallelNoOp { get; set; }
 
@@ -477,6 +500,17 @@ namespace CoreAI.Ai.LuaCs
 
                         break;
                     case "WaitForChild": return ReadWaitForChildBridge(ctx);
+                    // WHY guarded on the class here rather than in a Player-only table: these are
+                    // the only two YIELDING Player members, and yielding members resolve through
+                    // the task bridge, which lives on this path. Without the guard
+                    // `part:LoadCharacterAsync()` would resolve on any instance instead of being
+                    // the unknown member it is.
+                    case "LoadCharacterAsync" when self is RbxPlayer:
+                        return ReadTaskBridge(ctx, "_loadCharacterBridge",
+                            "Player.LoadCharacterAsync");
+                    case "LoadCharacter" when self is RbxPlayer:
+                        return ReadTaskBridge(ctx, "_loadCharacterDeprecatedBridge",
+                            "Player.LoadCharacter");
                 }
 
                 if (TryReadNetworkMember(context, self, key, ctx,
@@ -668,20 +702,34 @@ namespace CoreAI.Ai.LuaCs
 
         private static LuaValue ReadWaitForChildBridge(LuaFunctionExecutionContext ctx)
         {
+            return ReadTaskBridge(ctx, "_waitForChildBridge", "Instance.WaitForChild");
+        }
+
+        /// <summary>
+        /// Returns the named yielding bridge out of the mod's <c>task</c> table.
+        /// </summary>
+        /// <remarks>
+        /// WHY yielding members resolve to a Lua function rather than being bound as C# methods:
+        /// yielding is <c>coroutine.yield</c>, which only Lua can perform. The bridge is a Lua
+        /// closure over C# hooks, so the member both does its work in C# and suspends properly.
+        /// </remarks>
+        private static LuaValue ReadTaskBridge(LuaFunctionExecutionContext ctx, string bridgeName,
+            string memberName)
+        {
             LuaValue taskValue = ctx.State.Environment["task"];
             if (taskValue.Type != LuaValueType.Table)
             {
                 throw RbxError.BadArgument(
-                    "Instance.WaitForChild requires the task scheduler bridge",
-                    "run WaitForChild from a loaded mod scheduler thread");
+                    memberName + " requires the task scheduler bridge",
+                    "call it from a loaded mod scheduler thread");
             }
 
-            LuaValue bridge = taskValue.Read<LuaTable>()["_waitForChildBridge"];
+            LuaValue bridge = taskValue.Read<LuaTable>()[bridgeName];
             if (bridge.Type != LuaValueType.Function)
             {
                 throw RbxError.BadArgument(
-                    "Instance.WaitForChild bridge is unavailable",
-                    "run WaitForChild after the mod scheduler initializes");
+                    memberName + " bridge is unavailable",
+                    "call it after the mod scheduler initializes");
             }
 
             return bridge;
@@ -791,6 +839,12 @@ namespace CoreAI.Ai.LuaCs
                         return true;
                     case "Character":
                         value = context.WrapInstance(player.Character);
+                        return true;
+                    case "CharacterAdded":
+                        value = LuaCsRbxDatatypeBindings.Wrap(player.CharacterAdded, context);
+                        return true;
+                    case "CharacterRemoving":
+                        value = LuaCsRbxDatatypeBindings.Wrap(player.CharacterRemoving, context);
                         return true;
                 }
             }
@@ -1440,6 +1494,13 @@ namespace CoreAI.Ai.LuaCs
                 context.RequireDestroyTree(player, "kick");
                 context.Bindings.KickPlayerWithCreatorKick(player);
                 return LuaValue.Nil;
+            }, "Player");
+
+            Method("DistanceFromCharacter", (ctx, self) =>
+            {
+                RbxVector3 point = ReadVector3Value(
+                    Arg(ctx, 1), "Player:DistanceFromCharacter point");
+                return ((RbxPlayer)self).DistanceFromCharacter(point);
             }, "Player");
 
             Method("TakeDamage", (ctx, self) =>

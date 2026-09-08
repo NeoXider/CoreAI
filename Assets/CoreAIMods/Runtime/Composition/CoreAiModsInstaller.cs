@@ -6,6 +6,7 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
+using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
@@ -204,6 +205,17 @@ namespace CoreAI.Composition
                         observability: observability,
                         networkBridge: networkBridge,
                         log: msg => rbxLog.Warn("[CoreAI.RbxApi] " + msg, Logging.LogTag.World));
+                }
+
+                if (rbxHost != null)
+                {
+                    // WHY wired here and nowhere else: this is the only place that holds both the
+                    // Rbx API and the binder that owns the backing GameObjects, and without it every
+                    // Humanoid in a real scene silently got the null motor — Position stuck at
+                    // zero, so MoveTo reported arrival instantly and WalkSpeed moved nothing.
+                    InstanceGameObjectBinder binder = rbxHost.Binder;
+                    rbxApi.AttachCharacterMotorFactory(humanoid =>
+                        CreateCharacterMotor(binder, humanoid));
                 }
 
                 IInGameLlmChatServiceFactory chatFactory =
@@ -607,6 +619,38 @@ namespace CoreAI.Composition
                     // Lua tools are an additive convenience, not a requirement.
                 }
             });
+        }
+
+        /// <summary>
+        /// Builds the Unity motor for a Humanoid, or null when its character has no backing body.
+        /// </summary>
+        /// <remarks>
+        /// WHY null rather than a throw: a Humanoid can legitimately exist before its
+        /// HumanoidRootPart has materialized, and a world with no scene binding (headless tests,
+        /// storage-only trees) has no bodies at all. The Humanoid then keeps its health and state
+        /// and simply does not move, which is the documented null-motor behaviour.
+        /// </remarks>
+        private static IRbxCharacterMotor CreateCharacterMotor(
+            InstanceGameObjectBinder binder, RbxHumanoid humanoid)
+        {
+            RbxInstance root = humanoid?.RootPart;
+            if (binder == null || root == null || root.IsDestroyed)
+            {
+                return null;
+            }
+
+            if (!binder.TryGetBoundObject(root.Id, out GameObject body) || body == null)
+            {
+                return null;
+            }
+
+            Rigidbody rigidbody = body.GetComponent<Rigidbody>();
+            if (rigidbody == null)
+            {
+                return null;
+            }
+
+            return new UnityRbxCharacterMotor(rigidbody);
         }
 
         private static LuaCsModStack CreateSessionStack(

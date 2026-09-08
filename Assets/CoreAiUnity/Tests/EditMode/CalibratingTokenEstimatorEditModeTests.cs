@@ -191,3 +191,106 @@ namespace CoreAI.Tests.EditMode
         }
     }
 }
+
+namespace CoreAI.Tests.EditMode
+{
+    public sealed class FileTokenCalibrationStoreEditModeTests
+    {
+        private string _directory;
+        private string _path;
+
+        [SetUp]
+        public void SetUp()
+        {
+            _directory = Path.Combine(Path.GetTempPath(), "CoreAiCalibration_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(_directory);
+            _path = Path.Combine(_directory, "scales.json");
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+        }
+
+        [Test]
+        public void SaveScale_IndependentStores_PreserveCommittedModelValues()
+        {
+            CoreAI.Infrastructure.Llm.FileTokenCalibrationStore first = new(_path);
+            CoreAI.Infrastructure.Llm.FileTokenCalibrationStore second = new(Path.Combine(_directory, ".", "scales.json"));
+            Assert.IsFalse(second.TryLoadScale("second", out _));
+
+            first.SaveScale("first", 1.25d);
+            second.SaveScale("second", 1.5d);
+
+            Assert.IsTrue(first.TryLoadScale("second", out double secondScale));
+            Assert.AreEqual(1.5d, secondScale);
+            Assert.IsTrue(second.TryLoadScale("first", out double firstScale));
+            Assert.AreEqual(1.25d, firstScale);
+        }
+
+        [TestCase("not json")]
+        [TestCase("null")]
+        public void SaveScale_UnreadableDocument_PreservesBytesAndDoesNotPublish(string contents)
+        {
+            File.WriteAllText(_path, contents);
+            CoreAI.Infrastructure.Llm.FileTokenCalibrationStore store = new(_path);
+
+            store.SaveScale("model", 1.5d);
+
+            Assert.AreEqual(contents, File.ReadAllText(_path));
+            Assert.IsFalse(store.TryLoadScale("model", out double scale));
+            Assert.AreEqual(1d, scale);
+        }
+
+        [TestCase("Infinity")]
+        [TestCase("-Infinity")]
+        [TestCase("NaN")]
+        [TestCase("0")]
+        [TestCase("-1")]
+        public void TryLoadScale_InvalidPersistedNumber_ReturnsUncalibratedFallback(string value)
+        {
+            File.WriteAllText(_path, "{\"model\":" + value + "}");
+            CoreAI.Infrastructure.Llm.FileTokenCalibrationStore store = new(_path);
+
+            Assert.IsFalse(store.TryLoadScale("model", out double scale));
+            Assert.AreEqual(1d, scale);
+        }
+
+        [Test]
+        public void SaveScale_FailedWrite_DoesNotPublishAndCanRetryAfterRecovery()
+        {
+            string parentFile = Path.Combine(_directory, "parent");
+            File.WriteAllText(parentFile, "blocks the directory");
+            CoreAI.Infrastructure.Llm.FileTokenCalibrationStore store = new(Path.Combine(parentFile, "scales.json"));
+
+            store.SaveScale("model", 1.5d);
+            Assert.IsFalse(store.TryLoadScale("model", out double failedScale));
+            Assert.AreEqual(1d, failedScale);
+
+            File.Delete(parentFile);
+            store.SaveScale("model", 1.25d);
+            Assert.IsTrue(store.TryLoadScale("model", out double recoveredScale));
+            Assert.AreEqual(1.25d, recoveredScale);
+            Assert.IsEmpty(Directory.GetFiles(_directory, "*.tmp", SearchOption.AllDirectories));
+        }
+
+        [Test]
+        public void SaveScale_ConcurrentStores_PreserveEveryDistinctModel()
+        {
+            System.Threading.Tasks.Parallel.For(0, 24, index =>
+            {
+                CoreAI.Infrastructure.Llm.FileTokenCalibrationStore writer = new(_path);
+                writer.SaveScale("model-" + index, 1d + index / 100d);
+            });
+
+            CoreAI.Infrastructure.Llm.FileTokenCalibrationStore reader = new(_path);
+            for (int index = 0; index < 24; index++)
+            {
+                Assert.IsTrue(reader.TryLoadScale("model-" + index, out double scale));
+                Assert.AreEqual(1d + index / 100d, scale);
+            }
+            Assert.IsEmpty(Directory.GetFiles(_directory, "*.tmp"));
+        }
+    }
+}

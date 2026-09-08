@@ -72,7 +72,19 @@ namespace CoreAI.Mcp.Server
         public async Task<McpDispatchResult> DispatchAsync(JObject request, CancellationToken cancellationToken)
         {
             JToken id = request?["id"];
-            string method = request?["method"]?.ToString();
+            JToken version = request?["jsonrpc"];
+            JToken methodToken = request?["method"];
+            JToken parameters = request?["params"];
+            bool validId = id == null || id.Type == JTokenType.Null || id.Type == JTokenType.String ||
+                           id.Type == JTokenType.Integer || id.Type == JTokenType.Float;
+            if (version?.Type != JTokenType.String || (string)version != JsonRpc.Version ||
+                methodToken?.Type != JTokenType.String || !validId ||
+                (parameters != null && parameters.Type != JTokenType.Object && parameters.Type != JTokenType.Array))
+            {
+                return McpDispatchResult.Reply(JsonRpc.Error(validId ? id : null, JsonRpcErrorCodes.InvalidRequest,
+                    "Invalid Request: expected a JSON-RPC 2.0 request with a string method, structured params, and a scalar id."));
+            }
+            string method = (string)methodToken;
 
             if (string.IsNullOrEmpty(method))
             {
@@ -137,7 +149,8 @@ namespace CoreAI.Mcp.Server
             CancellationToken cancellationToken)
         {
             JObject parameters = request?["params"] as JObject;
-            string name = parameters?["name"]?.ToString();
+            JToken nameToken = parameters?["name"];
+            string name = nameToken?.Type == JTokenType.String ? (string)nameToken : null;
             if (string.IsNullOrEmpty(name))
             {
                 return McpDispatchResult.Reply(JsonRpc.Error(id, JsonRpcErrorCodes.InvalidParams,

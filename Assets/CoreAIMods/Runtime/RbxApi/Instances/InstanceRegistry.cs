@@ -135,6 +135,11 @@ namespace CoreAI.Mods.Rbx.Instances
 
         public InstanceIdAllocator Allocator { get; }
 
+        /// <summary>The backing-object seam this registry drives (D5) — exposed so
+        /// <see cref="RbxInstance"/>'s clone path can ask it to copy external per-instance state
+        /// (e.g. BasePart spatial/appearance) without the engine-free side knowing what that state is.</summary>
+        internal IInstanceBackingBinder Binder => _binder;
+
         /// <summary>Persisted world ACL schema; null means legacy compatibility mode.</summary>
         public int? WorldAclVersion { get; private set; }
 

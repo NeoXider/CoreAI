@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using CoreAI.Ai;
@@ -10,7 +11,10 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// File-backed token calibration scale store under CoreAI persistent data.
+    /// File-backed token calibration scales. Stores sharing a canonical path serialize their read/modify/write
+    /// operations and reload committed values before mutation. Failed or unreadable records are preserved;
+    /// reads fall back to an uncalibrated scale, and failed writes are logged without publishing new values.
+    /// Successful writes queue WebGL persistence; the queue does not acknowledge browser durability.
     /// </summary>
     public sealed class FileTokenCalibrationStore : ITokenCalibrationStore
     {
@@ -18,33 +22,35 @@ namespace CoreAI.Infrastructure.Llm
         {
             Formatting = Formatting.Indented
         };
+        private static readonly ConcurrentDictionary<string, object> PathLocks = new(
+            Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
         private readonly string _path;
         private readonly ILog _log;
-        private readonly object _lock = new();
-        private Dictionary<string, double> _cache;
+        private readonly object _lock;
 
         /// <summary>Creates a token calibration store under persistent data unless a path is supplied.</summary>
         public FileTokenCalibrationStore(string filePath = null, ILog log = null)
         {
-            _path = !string.IsNullOrWhiteSpace(filePath)
+            _path = Path.GetFullPath(!string.IsNullOrWhiteSpace(filePath)
                 ? filePath.Trim()
                 : Path.Combine(
                     Application.persistentDataPath,
                     CoreAiPersistentPaths.RootFolderName,
                     "TokenCalibration",
-                    "scales.json");
+                    "scales.json"));
+            _lock = PathLocks.GetOrAdd(_path, _ => new object());
             _log = log;
         }
 
-        /// <inheritdoc />
+        /// <summary>Loads a finite positive scale, or returns false and an uncalibrated scale.</summary>
         public bool TryLoadScale(string modelKey, out double scale)
         {
             string key = NormalizeKey(modelKey);
             lock (_lock)
             {
                 Dictionary<string, double> data = LoadLocked();
-                if (data.TryGetValue(key, out scale) && scale > 0d)
+                if (data != null && data.TryGetValue(key, out scale) && IsValidScale(scale))
                 {
                     return true;
                 }
@@ -54,10 +60,10 @@ namespace CoreAI.Infrastructure.Llm
             return false;
         }
 
-        /// <inheritdoc />
+        /// <summary>Atomically updates one model while preserving other committed calibration values.</summary>
         public void SaveScale(string modelKey, double scale)
         {
-            if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0d)
+            if (!IsValidScale(scale))
             {
                 return;
             }
@@ -66,6 +72,10 @@ namespace CoreAI.Infrastructure.Llm
             lock (_lock)
             {
                 Dictionary<string, double> data = LoadLocked();
+                if (data == null)
+                {
+                    return;
+                }
                 data[key] = scale;
                 SaveLocked(data);
             }
@@ -73,78 +83,69 @@ namespace CoreAI.Infrastructure.Llm
 
         private Dictionary<string, double> LoadLocked()
         {
-            if (_cache != null)
-            {
-                return _cache;
-            }
-
             try
             {
-                if (!File.Exists(_path))
-                {
-                    _cache = new Dictionary<string, double>(StringComparer.Ordinal);
-                    return _cache;
-                }
-
                 string json = File.ReadAllText(_path);
-                _cache = JsonConvert.DeserializeObject<Dictionary<string, double>>(json, JsonSettings)
-                         ?? new Dictionary<string, double>(StringComparer.Ordinal);
+                return JsonConvert.DeserializeObject<Dictionary<string, double>>(json, JsonSettings)
+                    ?? throw new InvalidDataException("Token calibration must contain a JSON object.");
+            }
+            catch (FileNotFoundException)
+            {
+                return new Dictionary<string, double>(StringComparer.Ordinal);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return new Dictionary<string, double>(StringComparer.Ordinal);
             }
             catch (Exception ex)
             {
-                _log?.Warn($"[FileTokenCalibrationStore] Load failed: {ex.Message}", LogTag.Llm);
-                _cache = new Dictionary<string, double>(StringComparer.Ordinal);
+                _log?.Warn($"[FileTokenCalibrationStore] Load failed; existing data is preserved: {ex.Message}", LogTag.Llm);
+                return null;
             }
-
-            return _cache;
         }
 
         private void SaveLocked(Dictionary<string, double> data)
         {
+            string temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                string dir = Path.GetDirectoryName(_path);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                string directory = Path.GetDirectoryName(_path);
+                if (!string.IsNullOrEmpty(directory))
                 {
-                    Directory.CreateDirectory(dir);
+                    Directory.CreateDirectory(directory);
                 }
 
-                string tmp = _path + ".tmp";
-                File.WriteAllText(tmp, JsonConvert.SerializeObject(data, JsonSettings));
-                try
+                File.WriteAllText(temporary, JsonConvert.SerializeObject(data, JsonSettings));
+                if (File.Exists(_path))
                 {
-                    if (File.Exists(_path))
-                    {
-                        File.Replace(tmp, _path, null);
-                    }
-                    else
-                    {
-                        File.Move(tmp, _path);
-                    }
+                    File.Replace(temporary, _path, null);
                 }
-                catch
+                else
                 {
-                    // Match the other file stores: clean up the temp file if the atomic swap fails so a
-                    // stray scales.json.tmp is not left behind, then surface the failure to the outer catch.
-                    if (File.Exists(tmp))
-                    {
-                        try
-                        {
-                            File.Delete(tmp);
-                        }
-                        catch
-                        {
-                            /* best-effort cleanup */
-                        }
-                    }
-
-                    throw;
+                    File.Move(temporary, _path);
                 }
+                CoreAiWebGlPersistence.Sync();
             }
             catch (Exception ex)
             {
                 _log?.Warn($"[FileTokenCalibrationStore] Save failed: {ex.Message}", LogTag.Llm);
             }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(temporary)) File.Delete(temporary);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Warn($"[FileTokenCalibrationStore] Temporary file cleanup failed: {ex.Message}", LogTag.Llm);
+                }
+            }
+        }
+
+        private static bool IsValidScale(double scale)
+        {
+            return !double.IsNaN(scale) && !double.IsInfinity(scale) && scale > 0d;
         }
 
         private static string NormalizeKey(string modelKey)
