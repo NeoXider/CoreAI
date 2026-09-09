@@ -46,7 +46,7 @@ so `IsA` works the way it does in Roblox.
 Services reachable via `game:GetService`: `RunService`, `UserInputService`, `Players`,
 `CollectionService`, `TweenService`, `SoundService`, `Lighting`, `Debris`, `HttpService`,
 `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `ContextActionService`,
-`PathfindingService`, `MarketplaceService`, `DataStoreService`, `MaterialService`, and CoreAI's own `AIService`.
+`PathfindingService`, `MarketplaceService`, `DataStoreService`, `MaterialService`, `ScriptContext`, and CoreAI's own `AIService`.
 
 ### Part properties
 
@@ -259,6 +259,28 @@ Four mods ship inside the Mods package at
 | `sample_clicker` | disabled | `ClickDetector` 3D click-picking, no UI at all |
 
 The three playable ones ship `active: false`; the player turns them on from the **Hub → Mods** tab.
+
+## Execution budget and `ScriptContext`
+
+Every resume of mod code — the main chunk, a signal handler, a `task.*` resume, a raw
+`coroutine.resume`, a one-off `execute_lua` chunk — runs under a per-resume budget with two halves:
+an instruction-step cap and a wall-clock cap. CoreAI's defaults are 10,000 steps and 500 ms
+(`LuaCsCoroutineHandle.DefaultBudgetPerResume` / `DefaultResumeTimeoutMs`). A handler that never
+yields (`while true do end`) is cut when either half runs out, and the failure is reported as a budget
+kill — `BUDGET_EXCEEDED`, with the bound and the author's line — not as a Lua error.
+
+The budget belongs to the game, not to CoreAI. Both halves are the **Lua coroutine resume budget**
+field on `CoreAiModsLifetimeScope` (`LuaCsCoroutineBudgetSettings`); a value `<= 0` falls back to the
+default rather than reading as "no limit". Every coroutine site in the composition resolves the same
+instance and every resume re-reads it, so a change reaches a signal runner that was created long
+before — on its next resume.
+
+`game:GetService("ScriptContext"):SetTimeout(seconds)` changes the wall-clock half at runtime, live,
+for every subsequent resume. Roblox marks the member `PluginSecurity`; CoreAI has no Studio, so the
+member is gated to the host actor instead: host-composed code may call it, an ordinary mod is refused
+with `NOT_AUTHORITY` (the same refusal as any other privileged member). A non-finite argument is
+`BAD_ARGUMENT`; a value that rounds to zero milliseconds or below falls back to the default. There is
+no readable `Timeout` property and no Lua-facing setter for the instruction half — Roblox has neither.
 
 ## RemoteFunction timeout compatibility deviation
 

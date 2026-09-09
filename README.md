@@ -77,7 +77,7 @@ Raw API calls get you text; CoreAI gives you the production layer around that te
 | [Three ways to call the LLM](#-three-ways-in-ui--coreai--agents) | Chat UI · `CoreAi` · agents / orchestrator |
 | [What CoreAI can do](#-what-coreai-can-do) | Agents, tools, Lua, memory · long-chat budget & optional smart compaction (`v1.5+`) |
 | [Integration examples & ideas](#-integration-examples--ideas) | Practical game-design patterns using CoreAI tools & memory |
-| [Architecture](#%EF%B8%8F-architecture) | Six packages, install profiles, diagram |
+| [Architecture](#%EF%B8%8F-architecture) | Seven packages, install profiles, diagram |
 | [Quick Start](#-quick-start) | NuGet, UPM, scene |
 | [Documentation](#-documentation) | Map of docs |
 | [Framework Roadmap](Docs/ROADMAP.md) | Vision, tracks (Roblox-like Lua API, multiplayer co-creation, worlds), release plan |
@@ -252,7 +252,7 @@ while time_now() - start_time < 2.0 do
     coroutine.yield()
 end
 ```
-Automatically maps APIs like `time_delta()`, `time_scale()`, and hooks securely via an internal `InstructionLimitDebugger` budget that yields processing back to Unity so you can run heavy computations without freezing the main thread.
+Automatically maps APIs like `time_delta()` and `time_scale()`, and every resume runs under a per-resume instruction-step and wall-clock budget that cuts a runaway loop instead of freezing the main thread. The budget is the game's to set — both halves live on `CoreAiModsLifetimeScope`, and host code can move the wall-clock half live through `ScriptContext:SetTimeout` — so a heavy simulation can loosen it and untrusted mods can be held tighter.
 
 ---
 
@@ -440,7 +440,7 @@ How can you use CoreAI in your game? Here are some "Brainrot-free" ideas:
 
 ## 🏛️ Architecture
 
-The repository ships as **six UPM packages**. Only the first two are required; Mods, Hub, Benchmark, and the MCP server are optional and installed independently:
+The repository ships as **seven UPM packages**. Only the first two are required; Mods, Hub, Benchmark, the MCP server, and the Mirror transport are optional and installed independently:
 
 | Package | What's inside | Depends on |
 |---------|--------------|--------------|
@@ -450,6 +450,7 @@ The repository ships as **six UPM packages**. Only the first two are required; M
 | **[com.neoxider.coreaihub](Assets/CoreAIHub)** | Optional UI Toolkit Hub window — tabbed pages (Chat, Settings, Statistics, Mods) with reusable grouped **sub-tabs** (e.g. Mods + Logs) | `coreai` + `coreaiunity` |
 | **[com.neoxider.coreaibenchmark](Assets/CoreAIBenchmark)** | Dev/test-only LLM game-creation benchmark harness | `coreai` + `coreaiunity` + `coreaimods` |
 | **[com.neoxider.coreaimcp](Assets/CoreAIMcp)** | Optional in-game **MCP server** — an external agent (Claude Code, any MCP client) drives the *running* game (`execute_lua`, `manage_mods`, and `world_command`/`screenshot` when present) over localhost HTTP; opt-in, loopback-only | `coreaiunity` + `coreaimods` |
+| **[com.neoxider.coreaimirror](Assets/CoreAIMirror)** | Optional networked-world transport — `MirrorNetworkBridge : INetworkBridge` behind the `MIRROR` define, plus the Mirror authenticator and session host; Mirror itself is installed separately (see [INSTALL.md](INSTALL.md)) | `coreai` + `coreaimods` |
 
 Mods and Hub are independent optional installs — neither requires the other. When **both** are present, Mods' Hub integration assembly (`CoreAI.Mods.Hub`) auto-enables via the `COREAI_HAS_HUB` version define, adding a Mods page to the Hub window; without Hub installed, that assembly compiles out and Mods works standalone (`execute_lua`/`manage_mods` tools, no Hub UI).
 
@@ -725,6 +726,8 @@ Unity → Window → General → Test Runner
                  │   wrong casing repair, unknown tool self-correction, mixed-case
                  └── StreamingToolCallingPlayModeTests — cancel, state parity
 ```
+
+Verified on the 7.39.0 tree: the full EditMode suite is **4,424 tests, 0 failures, 9 skips**; PlayMode over the fixtures that release touched is **17 tests, 0 failures, 1 platform skip**.
 
 Run EditMode first in CI; PlayMode is optional and needs a backend (env vars for HTTP — see [LLMUNITY_SETUP_AND_MODELS](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)). Real-model memory recall may **Ignore** (not fail) if the local OpenAI-compatible server returns **HTTP 5xx** — see [TROUBLESHOOTING](Assets/CoreAiUnity/Docs/TROUBLESHOOTING.md).
 

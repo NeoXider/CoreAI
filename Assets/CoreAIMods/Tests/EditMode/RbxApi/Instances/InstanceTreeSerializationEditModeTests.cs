@@ -1,5 +1,6 @@
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Instances
@@ -31,6 +32,41 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             stored.Name = "Config";
             stored.Parent = game.GetService("ReplicatedStorage");
             return registry;
+        }
+
+        [Test]
+        public void AnUnadmittedPlayer_RoundTripsWithNoIdentityPayload_WhileAnAdmittedOneKeepsIts()
+        {
+            // WHY both halves in one test: the rule is a pair. Identity exists only once the Players
+            // service admits a connection, so a bare Instance.new("Player") has none to carry and must
+            // still round-trip as the plain node it is — the tree serializer is the general save/load
+            // path, not only the replication capture. A player that WAS admitted must come back whole,
+            // otherwise omitting the payload would quietly become a way to lose identity.
+            InstanceRegistry registry = new();
+            DataModelBootstrap.CreateGame(registry);
+
+            RbxInstance bare = registry.Create("Player");
+            bare.Name = "Unadmitted";
+            InstanceTreeSnapshot bareSnapshot = InstanceTreeSerializer.Capture(bare);
+            Assert.IsNull(bareSnapshot.Instances[0].Player,
+                "an un-admitted Player has no identity to capture");
+
+            InstanceRegistry bareTarget = new(binder: new InMemoryInstanceBackingBinder());
+            RbxPlayer restoredBare = (RbxPlayer)InstanceTreeSerializer.Restore(bareSnapshot, bareTarget);
+            Assert.AreEqual("Unadmitted", restoredBare.Name);
+            Assert.AreEqual(0L, restoredBare.UserId, "nothing may be invented for it on the way back");
+
+            RbxPlayer admitted = (RbxPlayer)registry.Create("Player");
+            admitted.Initialize("actor-7", 4242L, "Admitted", "Admitted The Brave");
+            InstanceTreeSnapshot admittedSnapshot = InstanceTreeSerializer.Capture(admitted);
+            Assert.IsNotNull(admittedSnapshot.Instances[0].Player);
+
+            InstanceRegistry admittedTarget = new(binder: new InMemoryInstanceBackingBinder());
+            RbxPlayer restored =
+                (RbxPlayer)InstanceTreeSerializer.Restore(admittedSnapshot, admittedTarget);
+            Assert.AreEqual("actor-7", restored.NetworkActorId);
+            Assert.AreEqual(4242L, restored.UserId);
+            Assert.AreEqual("Admitted The Brave", restored.DisplayName);
         }
 
         [Test]

@@ -76,8 +76,8 @@ compared to `MaxContextTokens`); it is **not** measured in characters.
 **Planned:** calibrate the chars→tokens ratio from the real `usage.prompt_tokens` the provider already returns
 (§1–§2), keeping the heuristic as a pre-flight fallback only. There is no local tokenizer on WebGL/IL2CPP, so
 post-hoc calibration from `usage` is the realistic accuracy path. Tracked in
-[`CONTEXT_MANAGEMENT_ROADMAP.md`](../../CoreAiUnity/Docs/CONTEXT_MANAGEMENT_ROADMAP.md) → *Token accounting from
-the API* and root `TODO.md` → *Context management overhaul*.
+[`CONTEXT_MANAGEMENT_ROADMAP.md`](../../../dev-docs/CONTEXT_MANAGEMENT_ROADMAP.md) → *Token accounting from
+the API* and root `TODO.md` → `[R5] Summarization & context-overflow`.
 
 ---
 

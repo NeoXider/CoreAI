@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Instances.Networking;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
@@ -80,6 +81,25 @@ namespace CoreAI.Mods.Rbx.Instances
                     "split the world or reduce the live instance count before capture");
             }
 
+            output.Add(BuildNode(instance, parentId));
+        }
+
+        /// <summary>
+        /// Captures one live node on its own, with <see cref="InstanceSnapshot.ParentId"/> set to its
+        /// current parent; the replication reader's unit of state.
+        /// </summary>
+        public static InstanceSnapshot CaptureNode(RbxInstance instance)
+        {
+            if (instance == null)
+            {
+                throw RbxError.BadArgument("cannot capture a nil instance", "pass a live instance");
+            }
+
+            return BuildNode(instance, instance.Parent?.Id.Value ?? 0UL);
+        }
+
+        private static InstanceSnapshot BuildNode(RbxInstance instance, ulong parentId)
+        {
             if (!instance.Id.IsServerAssigned)
             {
                 throw RbxError.BadArgument(
@@ -160,6 +180,24 @@ namespace CoreAI.Mods.Rbx.Instances
                 };
             }
 
+            // WHY only an ADMITTED player carries identity: a bare Instance.new("Player") that the
+            // Players service never admitted has none to carry — no actor, no UserId — and the tree
+            // serializer is the general save/load path, not only the replication capture. Emitting an
+            // empty payload would make every such node fail validation; omitting it keeps the node
+            // round-tripping as the plain instance it is, while a payload that IS present stays
+            // strictly checked and the replication applier still refuses a spawn without one.
+            if (instance is RbxPlayer player
+                && !string.IsNullOrWhiteSpace(player.NetworkActorId))
+            {
+                node.Player = new PlayerSnapshot
+                {
+                    ActorId = player.NetworkActorId,
+                    UserId = player.UserId,
+                    DisplayName = player.DisplayName ?? string.Empty,
+                    CharacterId = player.Character?.Id.Value ?? 0UL
+                };
+            }
+
             foreach (string tag in instance.GetTags())
             {
                 node.Tags.Add(tag);
@@ -171,7 +209,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 node.Attributes.Add(ToAttributeSnapshot(attribute.Key, attribute.Value));
             }
 
-            output.Add(node);
+            return node;
         }
 
         /// <summary>Encodes a live value payload; ObjectValue stores the target id (0 = nil).</summary>
@@ -334,25 +372,12 @@ namespace CoreAI.Mods.Rbx.Instances
 
                 if (node.ClickDetector != null)
                 {
-                    RbxClickDetector clickDetector = (RbxClickDetector)instance;
-                    clickDetector.MaxActivationDistance = double.Parse(
-                        node.ClickDetector.MaxActivationDistance, CultureInfo.InvariantCulture);
+                    RestoreClickDetector((RbxClickDetector)instance, node.ClickDetector);
                 }
 
                 if (node.MaterialVariant != null)
                 {
-                    RbxMaterialVariant materialVariant = (RbxMaterialVariant)instance;
-                    materialVariant.BaseMaterial = new RbxMaterialId(
-                        node.MaterialVariant.BaseMaterial,
-                        node.MaterialVariant.BaseMaterialValue);
-                    materialVariant.ColorMap = node.MaterialVariant.ColorMap ?? string.Empty;
-                    materialVariant.NormalMap = node.MaterialVariant.NormalMap ?? string.Empty;
-                    materialVariant.RoughnessMap =
-                        node.MaterialVariant.RoughnessMap ?? string.Empty;
-                    materialVariant.MetalnessMap =
-                        node.MaterialVariant.MetalnessMap ?? string.Empty;
-                    materialVariant.StudsPerTile = float.Parse(
-                        node.MaterialVariant.StudsPerTile, CultureInfo.InvariantCulture);
+                    RestoreMaterialVariant((RbxMaterialVariant)instance, node.MaterialVariant);
                 }
 
                 if (node.Value != null)
@@ -364,6 +389,11 @@ namespace CoreAI.Mods.Rbx.Instances
                 {
                     RestoreHumanoid((RbxHumanoid)instance, node.Humanoid);
                 }
+
+                if (node.Player != null)
+                {
+                    RestorePlayer((RbxPlayer)instance, node, restored);
+                }
             }
 
             foreach (InstanceSnapshot node in snapshot.Instances)
@@ -372,6 +402,30 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             return root;
+        }
+
+        /// <summary>
+        /// Gives a restored Player the identity its node carried, so capture→restore→capture
+        /// stays byte-identical for it as for every other class.
+        /// </summary>
+        /// <remarks>
+        /// WHY a character outside the snapshot restores as nil rather than failing validation
+        /// like an ObjectValue target: the character lives under Workspace, not under the
+        /// Player, so a capture rooted at Players legitimately names one it does not contain.
+        /// WHY the Players service does not list the restored Player: its collections are
+        /// connection state, and a restored Player has no connection behind it; the transport
+        /// admits actors, and a replica adopts what the server admitted.
+        /// </remarks>
+        private static void RestorePlayer(RbxPlayer player, InstanceSnapshot node,
+            IReadOnlyDictionary<ulong, RbxInstance> restored)
+        {
+            PlayerSnapshot identity = node.Player;
+            player.Initialize(identity.ActorId, identity.UserId, node.Name, identity.DisplayName);
+            if (identity.CharacterId != 0UL
+                && restored.TryGetValue(identity.CharacterId, out RbxInstance character))
+            {
+                player.Character = character;
+            }
         }
 
         /// <summary>Applies an already-validated value payload without firing Changed.</summary>
@@ -426,7 +480,7 @@ namespace CoreAI.Mods.Rbx.Instances
         /// restored before Health so the live clamp-to-MaxHealth path never engages on a valid
         /// snapshot; Health reaching zero re-derives IsDead exactly as a live death would.
         /// </summary>
-        private static void RestoreHumanoid(RbxHumanoid humanoid, HumanoidSnapshot snapshot)
+        internal static void RestoreHumanoid(RbxHumanoid humanoid, HumanoidSnapshot snapshot)
         {
             humanoid.MaxHealth = double.Parse(snapshot.MaxHealth, CultureInfo.InvariantCulture);
             humanoid.Health = double.Parse(snapshot.Health, CultureInfo.InvariantCulture);
@@ -435,6 +489,28 @@ namespace CoreAI.Mods.Rbx.Instances
             humanoid.JumpHeight = double.Parse(snapshot.JumpHeight, CultureInfo.InvariantCulture);
             humanoid.UseJumpPower = snapshot.UseJumpPower;
             humanoid.DisplayName = snapshot.DisplayName ?? string.Empty;
+        }
+
+        /// <summary>Applies a ClickDetector payload through the public setter.</summary>
+        internal static void RestoreClickDetector(RbxClickDetector clickDetector,
+            ClickDetectorSnapshot snapshot)
+        {
+            clickDetector.MaxActivationDistance = double.Parse(
+                snapshot.MaxActivationDistance, CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>Applies a MaterialVariant payload through the public setters.</summary>
+        internal static void RestoreMaterialVariant(RbxMaterialVariant materialVariant,
+            MaterialVariantSnapshot snapshot)
+        {
+            materialVariant.BaseMaterial = new RbxMaterialId(
+                snapshot.BaseMaterial, snapshot.BaseMaterialValue);
+            materialVariant.ColorMap = snapshot.ColorMap ?? string.Empty;
+            materialVariant.NormalMap = snapshot.NormalMap ?? string.Empty;
+            materialVariant.RoughnessMap = snapshot.RoughnessMap ?? string.Empty;
+            materialVariant.MetalnessMap = snapshot.MetalnessMap ?? string.Empty;
+            materialVariant.StudsPerTile = float.Parse(
+                snapshot.StudsPerTile, CultureInfo.InvariantCulture);
         }
 
         /// <summary>Validates the entire tree before the destination registry is mutated.</summary>
@@ -739,6 +815,50 @@ namespace CoreAI.Mods.Rbx.Instances
             {
                 ValidateHumanoidPayload(node);
             }
+
+            // WHY a Player node may carry NO payload while a non-Player may never carry one: identity
+            // exists only once the Players service admits a connection, so an un-admitted Player is a
+            // legitimate tree node with nothing to describe. Absence is allowed here and refused where
+            // it actually matters — ReplicationApplier treats a Player spawn without identity as a
+            // protocol violation rather than admitting a hollow player.
+            bool isPlayer = string.Equals(node.ClassName, "Player", StringComparison.Ordinal);
+            if (node.Player != null && !isPlayer)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot class '" + node.ClassName + "' has mismatched Player state",
+                    "remove Player state from this class");
+            }
+
+            if (node.Player != null)
+            {
+                ValidatePlayerPayload(node);
+            }
+        }
+
+        /// <summary>Strict per-field check of an already shape-matched Player payload.</summary>
+        private static void ValidatePlayerPayload(InstanceSnapshot node)
+        {
+            PlayerSnapshot identity = node.Player;
+            if (string.IsNullOrWhiteSpace(identity.ActorId))
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Player " + node.Id + " has an empty actor id",
+                    "capture only Players the Players service admitted");
+            }
+
+            if (identity.UserId <= 0L)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Player " + node.Id + " has non-positive UserId " + identity.UserId,
+                    "capture only Players the Players service admitted");
+            }
+
+            if (identity.DisplayName == null)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Player " + node.Id + " has a nil DisplayName",
+                    "serialize an empty string when DisplayName is intentionally empty");
+            }
         }
 
         private static void ValidateHierarchy(
@@ -1007,7 +1127,7 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        private static object FromAttributeSnapshot(AttributeSnapshot attribute)
+        internal static object FromAttributeSnapshot(AttributeSnapshot attribute)
         {
             switch (attribute.Kind)
             {
@@ -1083,7 +1203,7 @@ namespace CoreAI.Mods.Rbx.Instances
             return value.ToString("R", CultureInfo.InvariantCulture);
         }
 
-        private static float[] Parse(string serialized, int expected)
+        internal static float[] Parse(string serialized, int expected)
         {
             string[] parts = (serialized ?? string.Empty).Split(',');
             if (parts.Length != expected)
@@ -1108,7 +1228,7 @@ namespace CoreAI.Mods.Rbx.Instances
             return result;
         }
 
-        private static RbxCFrame ParseCFrame(string serialized)
+        internal static RbxCFrame ParseCFrame(string serialized)
         {
             float[] values = Parse(serialized, 12);
             return new RbxCFrame(

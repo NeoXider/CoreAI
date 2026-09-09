@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Replication;
 using NUnit.Framework;
@@ -91,18 +92,21 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
         [Test]
         public void DirtySet_CollapsesRepeatedChangesToOneDeltaPerInstance()
         {
-            // A script that writes five properties in one frame must produce one delta, not five
-            // packets carrying four stale views of the same instance.
+            // A script that writes three properties in one frame must produce one delta, not three
+            // packets carrying two stale views of the same instance.
             RbxInstance part = PartUnder(_registry.WorldRoot, "Door");
+            _dirty.Clear();
 
-            _dirty.MarkDirty(part.Id, 1L);
-            _dirty.MarkDirty(part.Id, 2L);
-            _dirty.MarkDirty(part.Id, 3L);
+            part.Name = "Gate";
+            part.Archivable = false;
+            part.SetAttribute("Locked", true);
 
             Assert.AreEqual(1, _dirty.PendingCount);
             IReadOnlyList<ReplicationDelta> deltas = _dirty.DeltasFor("actor-a");
             Assert.AreEqual(1, deltas.Count);
-            Assert.AreEqual(3L, deltas[0].Revision, "the newest revision is the one that matters");
+            _registry.TryGetRecord(part.Id, out InstanceRecord record);
+            Assert.AreEqual(record.Revision, deltas[0].Revision, "the newest revision is the one that matters");
+            CollectionAssert.AreEquivalent(new[] { "Name", "Archivable", "Attribute:Locked" }, deltas[0].Members);
         }
 
         [Test]
@@ -111,14 +115,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
             // A client told "it changed" and never told "it is gone" keeps drawing something that
             // does not exist.
             RbxInstance part = PartUnder(_registry.WorldRoot, "Door");
+            _dirty.Clear();
 
-            _dirty.MarkDirty(part.Id, 5L);
-            _dirty.MarkRemoved(part.Id, 6L);
+            part.Name = "Changed";
+            part.Destroy();
             _dirty.MarkDirty(part.Id, 7L);
 
             IReadOnlyList<ReplicationDelta> deltas = _dirty.DeltasFor("actor-a");
-            Assert.AreEqual(1, deltas.Count);
-            Assert.IsTrue(deltas[0].Removed, "a removal must not be overwritten by a later change");
+            ReplicationDelta partDelta = deltas.Single(delta => delta.InstanceId == part.Id);
+            Assert.IsTrue(partDelta.Removed, "a removal must not be overwritten by a later change");
         }
 
         [Test]
@@ -128,8 +133,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
             // either leak to the narrower client or starve the wider one.
             RbxInstance visible = PartUnder(_registry.WorldRoot, "Door");
             RbxInstance hidden = PartUnder(_game.GetService("ServerStorage"), "Secret");
-            _dirty.MarkDirty(visible.Id, 1L);
-            _dirty.MarkDirty(hidden.Id, 1L);
+            _dirty.Clear();
+            visible.Name = "Gate";
+            hidden.Name = "Vault";
 
             IReadOnlyList<ReplicationDelta> deltas = _dirty.DeltasFor("actor-a");
 

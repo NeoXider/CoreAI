@@ -55,7 +55,7 @@ world state, mods, memories, (soon) UI — is versioned, persisted, revertible, 
 
 ## 2. Package map
 
-Six UPM packages, released in lockstep (all currently 7.38.0):
+Six UPM packages, released in lockstep (all currently 7.39.0):
 
 | Package | What it is |
 |---|---|
@@ -116,15 +116,19 @@ Track C.
 Mirror (via NeoxiderTools `Neo.Network`); topology order is Null loopback (solo) → host mode
 (listen server) → dedicated server. WebGL is solo or pure client only — it never hosts.
 
-**Current state.** Designed-first: CoreAI has zero multiplayer code today. `INetworkBridge` is
-topology-agnostic from the first interface draft; `RemoteEvent`/`RemoteFunction`/
-`ReplicatedStorage` arrive as local-loopback stubs in the mod-API ladder well before Mirror,
-and `InstanceRegistry` reserves the Mirror `netId` field from day one.
+**Current state.** Designed-first, and the first layers now exist. `INetworkBridge` is
+topology-agnostic; `NullNetworkBridge` is the solo loopback; the optional
+`com.neoxider.coreaimirror` package carries `MirrorNetworkBridge` behind the `MIRROR` define, with
+no claim yet that bytes cross a real socket (`TODO.md`). `RemoteEvent`/`UnreliableRemoteEvent`/
+`RemoteFunction` are creatable and loopback-delivered, `InstanceRegistry` binds instance ids to
+`netId`s, and the engine-free replication core under MVP12 — member-level change reporting, a
+dirty set, per-recipient Spawn/Patch/Remove planning and a replica-side applier — is built and
+tested registry-to-registry; nothing in production constructs it yet.
 
-**Next milestones.** Loopback networking stubs (with Track A), then MVP11 (Mirror bridge core,
-host mode), MVP12 (replication + `ClientWritePolicy` enforcement through the authority-resolver
-seam), MVP13 (dedicated headless server). Mod-facing APIs do not change when the loopback is
-replaced.
+**Next milestones.** MVP11 (Mirror bridge core, host mode, the join snapshot over the wire), MVP12
+(replication on top of the phase-0 core + `ClientWritePolicy` enforcement through the
+authority-resolver seam), MVP13 (dedicated headless server). Mod-facing APIs do not change when
+the loopback is replaced.
 
 Backlog (live co-creation support):
 

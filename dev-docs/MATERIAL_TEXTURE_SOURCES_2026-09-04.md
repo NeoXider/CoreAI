@@ -1,8 +1,9 @@
 # Material texture sources — verified 2026-09-04
 
 Supersedes `MATERIAL_TEXTURE_LINKS_2026-09-03.md`. Sixteen of the thirty-six sets were
-replaced on 2026-09-04 after every material was photographed on its own and inspected; see
-`MATERIAL_DEFECT_AUDIT_2026-09-04.md` for what each replacement fixed. (A seventeenth swap,
+replaced on 2026-09-04 after every material was photographed on its own and inspected; see git
+history (`dev-docs/MATERIAL_DEFECT_AUDIT_2026-09-04.md`, deleted after landing per the audit-report
+policy) for what each replacement fixed. (A seventeenth swap,
 Metal `Metal063` → `Metal022`, was tried and reverted — the candidate turned out to be rusted,
 which is `CorrodedMetal`, not `Metal`.)
 

@@ -544,25 +544,13 @@ namespace CoreAI.Mcp.Server
                 return;
             }
 
-            // WHY: this loop is open-ended - a client can hold the connection for hours. HandleContextAsync
-            // NOTE: this did NOT fix NotificationCapacity_IsBounded_AndPostContinuesWorking, which still
-            // times out under the Unity editor and whose cause is not yet understood. It stands on its
-            // own merits - a stream held open for hours has no business occupying a pooled worker - and
-            // AbandonedNotificationStream_DoesNotBlockLaterRequests_OrCleanShutdown covers what it does
-            // guarantee. Do not read it as a closed investigation.
-            // dispatches every request (POST included) through the shared ThreadPool via Task.Run; awaiting
-            // an unbounded loop inline on that pooled worker ties it up for the stream's whole lifetime.
-            // TaskCreationOptions.LongRunning hints the scheduler to give the loop its own dedicated thread
-            // instead of a pooled slot, so an open (or merely slow-draining) stream can never compete with -
-            // or starve - ordinary short-lived request handling behind it. The thread is not leaked: it
-            // observes the same linked cancellation as every other request (Stop() cancels the server-wide
-            // token), and this method still awaits it to completion, so HandleContextAsync's request-slot
-            // release and Stop()'s Completion tracking are unaffected.
-            await Task.Factory.StartNew(
-                    () => RunNotificationLoopAsync(context, sessionId, stream, cancellationToken),
-                    CancellationToken.None, TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
-                    TaskScheduler.Default)
-                .Unwrap().ConfigureAwait(false);
+            // WHY awaited inline and NOT wrapped in a LongRunning task: this loop is open-ended, so a
+            // dedicated thread looks right at a glance, but RunNotificationLoopAsync awaits inside the
+            // loop and therefore holds no pooled worker between iterations - the wrapper cost a real
+            // thread and bought only the few microseconds before the first await. The earlier version
+            // of this comment credited it with unblocking a POST stuck behind an open stream; that was
+            // measured to be a client-side connection budget instead, so nothing here depends on it.
+            await RunNotificationLoopAsync(context, sessionId, stream, cancellationToken).ConfigureAwait(false);
         }
 
         private async Task RunNotificationLoopAsync(HttpListenerContext context, string sessionId,

@@ -306,6 +306,33 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(co.IsFinished);
         }
 
+        [Test]
+        [Timeout(15000)]
+        public void Engine_Coroutine_RunawayResume_SurfacesBudgetTextAndTypedTrip()
+        {
+            // WHY: Lua-CSharp's protected coroutine resume hands back [false, ErrorObject] and never
+            // the exception's Message, so a guard exception built over a CLR inner exception used to
+            // arrive here as the literal "nil". This pins the VM boundary itself: the text names the
+            // bound and the author line, and the handle records the trip as a kind so no consumer has
+            // to parse that wording.
+            LuaCsScriptEngine engine = NewEngine();
+            IScriptState state = engine.CreateState();
+            object[] fn = engine.RunChunk(state, "return function()\n  while true do end\nend");
+
+            IScriptCoroutine co = engine.CreateCoroutine(state, fn[0],
+                new ExecutionBudget(timeoutMs: 5_000, maxSteps: 1_000));
+            ScriptResumeResult result = co.Resume();
+
+            Assert.IsFalse(result.Ok, "a resume that never yields must be cut, not succeed");
+            StringAssert.Contains("EXCEEDED_RESUME_STEP_BUDGET (1000)", result.Error,
+                "the error text must name the bound that was hit — error was: " + result.Error);
+            StringAssert.Contains("at line 2", result.Error,
+                "the trip must name the author line the loop was cut on — error was: " + result.Error);
+            Assert.AreEqual(LuaCsGuardTripKind.Steps, ((LuaCsScriptCoroutine)co).Handle.LastTrip,
+                "the handle must record which budget cut the resume, independent of the message text");
+            Assert.IsTrue(co.IsFinished);
+        }
+
         private static object Find(List<KeyValuePair<object, object>> pairs, object key)
         {
             foreach (KeyValuePair<object, object> pair in pairs)

@@ -235,10 +235,10 @@ Then **Window → General → Test Runner → PlayMode** → run **CoreAI.PlayMo
 ## 8. Programmer and Lua (runtime execution)
 
 - The orchestrator publishes **`AiEnvelope`** with **`JsonPayload`** = raw LLM response plus **`SourceRoleId`**, **`SourceTaskHint`**, **`LuaRepairGeneration`**, **`TraceId`** (correlation id for logs and Lua repair).
-- **`LuaAiEnvelopeProcessor`** (Core) + **`AiGameCommandRouter`**: Lua is taken from the envelope (fenced `lua` block or JSON **ExecuteLua**) and run in **`SecureLuaEnvironment`** with **`report`**, **`add`** (see `LoggingLuaRuntimeBindings`).
-- Limits: `LuaExecutionGuard` applies a best-effort wall-clock and “step” limit (via `InstructionLimitDebugger`) so infinite Lua loops cannot hang forever.
+- **`LuaCsAiEnvelopeProcessor`** (Mods) + **`AiGameCommandRouter`**: Lua is taken from the envelope (fenced `lua` block or JSON **ExecuteLua**) and run in **`LuaCsSecureEnvironment`** under the mod runtime's bindings.
+- Limits: `LuaCsExecutionGuard` applies wall-clock, step and allocation limits so infinite Lua loops cannot hang forever; the per-resume coroutine budget is the game's to set (`LuaCsCoroutineBudgetSettings` on `CoreAiModsLifetimeScope`).
 - Success / failure publish **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`**. On failure with **Programmer**, the orchestrator is invoked again with **`lua_error`** / **`fix_this_lua`** in the user payload (up to **4** repair generations).
-- **EditMode:** `LuaAiEnvelopeProcessorEditModeTests`, `AiLuaPayloadParserEditModeTests`, `ProgrammerLuaPipelineEditModeTests`.
+- **EditMode:** `AiLuaPayloadParserEditModeTests`; **PlayMode (live provider):** `ProgrammerLuaModsLivePlayModeTests`.
 - Sample game: **`CoreAiLuaHotkey`** on the object with **`ExampleRogueliteEntry`** — **F9** queues a Programmer task.
 
 **This file’s version:** aligned with the core (April 2026): TraceId, timeout, `GameLogFeature.Llm`, arena sample (Creator waves).

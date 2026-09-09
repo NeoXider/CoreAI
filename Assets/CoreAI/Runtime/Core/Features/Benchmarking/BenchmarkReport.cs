@@ -147,7 +147,7 @@ namespace CoreAI.Benchmarking
         /// This is LOWER than the decode-only tok/s a runtime like LM Studio reports, because LM Studio
         /// excludes prompt prefill — and CoreAI's agentic prompts are large (often ~14x the output), so
         /// prefill dominates. True decode-only timing needs TTFT, which is only measurable on the streaming
-        /// path (see Docs/TOKENS_PER_SEC_FIX_PLAN.md). Falls back to the session-wide rate if per-call timing
+        /// path (see dev-docs/TOKENS_PER_SEC_FIX_PLAN.md). Falls back to the session-wide rate if per-call timing
         /// is absent.
         /// </summary>
         public double GenerationTokensPerSecond =>

@@ -220,9 +220,9 @@ Do NOT use any other functions.
 **Cause:** Lua contains an infinite loop or a very heavy operation.
 
 **Fix:**
-- `LuaExecutionGuard` aborts via wall-clock and step limits
-- Ensure the guard is enabled (default: on)
-- Tune limits if needed
+- `LuaCsExecutionGuard` aborts via wall-clock, step and allocation limits
+- The per-resume budget every coroutine arms is set on `CoreAiModsLifetimeScope` (**Lua coroutine resume budget**); `<= 0` restores CoreAI's defaults
+- Host code can move the wall-clock half live with `ScriptContext:SetTimeout(seconds)`
 
 ---
 

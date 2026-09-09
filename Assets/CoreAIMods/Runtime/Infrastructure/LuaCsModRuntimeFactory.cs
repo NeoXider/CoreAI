@@ -131,6 +131,16 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Optional production sink for aggregated Lua runtime counters.</summary>
         public IRbxRuntimeObservabilitySink Observability;
 
+        /// <summary>
+        /// Composition-configurable default per-resume coroutine budget (instruction-step cap and
+        /// wall-clock cap) — see <see cref="CoreAI.Sandbox.LuaCs.LuaCsCoroutineBudgetSettings"/>. Null
+        /// builds a settings object holding CoreAI's documented defaults. Pass the SAME instance
+        /// <see cref="RbxApi"/> already exposes as <c>RbxApi.CoroutineResumeBudget</c> so both surfaces
+        /// (and the <c>ScriptContext:SetTimeout</c> Lua binding, which mutates that instance) agree on
+        /// one live budget rather than tracking independent copies.
+        /// </summary>
+        public CoreAI.Sandbox.LuaCs.LuaCsCoroutineBudgetSettings CoroutineResumeBudget;
+
         /// <summary>Confirmed pre-mutation backup gate shared by runtime mutation tools.</summary>
         public IConfirmedWorldMutationGate WorldMutationGate;
 
@@ -301,7 +311,9 @@ namespace CoreAI.Ai.LuaCs
             // WHY: The factory is the composition root: it wires the Lua-CSharp engine as THE single
             // IScriptEngine of the stack, so nothing above the Scripting/ adapter layer creates a VM
             // state directly and a future engine swap happens here alone.
-            LuaCsScriptEngine engine = new(observability: options.Observability);
+            LuaCsScriptEngine engine = new(
+                observability: options.Observability,
+                coroutineResumeBudget: options.CoroutineResumeBudget);
 
             // WHY: Register the built-in surface first, then any host/per-scene additions, through the SAME
             // seam, so an injected demo API (forge_define/...) reaches every loaded mod alongside the core APIs.
@@ -355,7 +367,8 @@ namespace CoreAI.Ai.LuaCs
                     bindings, options.OneOffCapabilities, options.AdditionalGameplayBindings),
                 options.ExecutionObserver ?? new NullLuaExecutionObserver(),
                 options.Observability,
-                options.WorldMutationGate);
+                options.WorldMutationGate,
+                engine.CoroutineResumeBudget);
             executor.LocalActorResolver = options.LocalActorResolver;
 
             return new LuaCsModStack(runtime, executor, bindings);

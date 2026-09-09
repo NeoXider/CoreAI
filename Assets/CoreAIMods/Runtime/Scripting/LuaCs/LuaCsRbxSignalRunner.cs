@@ -41,7 +41,8 @@ namespace CoreAI.Ai.LuaCs
         private bool _hasPending;
         private bool _iterationCompleted;
 
-        internal LuaCsRbxSignalRunner(LuaState ownerState, LuaValue bodyFactory)
+        internal LuaCsRbxSignalRunner(LuaState ownerState, LuaValue bodyFactory,
+            LuaCsCoroutineBudgetSettings resumeBudget = null)
         {
             _ownerState = ownerState ?? throw new ArgumentNullException(nameof(ownerState));
             LuaFunction run = new("signal_runner.run", RunPendingAsync);
@@ -56,7 +57,15 @@ namespace CoreAI.Ai.LuaCs
                     "keep LuaCsRbxSignalRunner.BodyFactorySource returning the runner closure");
             }
 
-            _handle = new LuaCsCoroutineHandle(ownerState, made[0].Read<LuaFunction>());
+            // WHY never null and WHY live: this runner is pooled and serves every future fire of the
+            // owning mod's signal handlers (Heartbeat, RunService.*, custom signals), so its budget must
+            // be the composition's configurable default and must stay live so a later
+            // ScriptContext:SetTimeout reaches every future resume, not just a freshly built runner.
+            LuaCsCoroutineBudgetSettings liveBudget = resumeBudget ?? new LuaCsCoroutineBudgetSettings();
+            _handle = new LuaCsCoroutineHandle(ownerState, made[0].Read<LuaFunction>(),
+                budgetPerResume: liveBudget.BudgetPerResume,
+                resumeTimeoutMs: liveBudget.ResumeTimeoutMs,
+                liveResumeBudget: liveBudget);
             _coroutine = new LuaCsScriptCoroutine(_handle);
             // WHY: the envelope takes a Func; one delegate per runner instead of one per fire.
             ResumeDelegate = Resume;

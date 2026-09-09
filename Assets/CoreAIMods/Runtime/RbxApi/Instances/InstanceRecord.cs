@@ -109,6 +109,13 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>True while the backing binder holds a materialized backing object (D5).</summary>
         public bool IsMaterialized { get; internal set; }
 
+        /// <summary>
+        /// True on a replica once a local write touched this record outside a replication apply
+        /// scope: the client's copy may no longer match the server's, and only a fresh spawn of the
+        /// node restores the guarantee. Never set on an authoritative registry.
+        /// </summary>
+        public bool IsLocallyDiverged { get; internal set; }
+
         internal InstanceRecord(InstanceId id, RbxInstance instance, string ownerModId, string originTag,
             string ownerActorId, InstanceAccessScope accessScope, bool isRuntimeInfrastructure)
         {

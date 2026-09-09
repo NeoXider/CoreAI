@@ -185,5 +185,6 @@ its own change rather than this one.
   worlds using the same name in sequence share one material.
 - `SurfaceAppearance` — Roblox's per-part texture override — is the remaining half of "swap textures
   on one specific part" and is not implemented.
-- The lazy-texture-loading TODO from `MATERIAL_DEFECT_AUDIT_2026-09-04.md` applies to variant maps
-  too: they are loaded on first use, which is already lazy, but the base catalog is not.
+- The lazy-texture-loading TODO (root `TODO.md` — material catalog memory + import defects) applies
+  to variant maps too: they are loaded on first use, which is already lazy, but the base catalog is
+  not.

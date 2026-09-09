@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Instances.Replication;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
@@ -68,7 +69,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
                 _name = nextName;
                 Registry?.OnNameChanged(this);
-                Registry?.AdvanceRevision(Id);
+                Registry?.AdvanceRevision(Id, ReplicationMembers.Name);
                 FireSignal("GetPropertyChangedSignal(Name)");
             }
         }
@@ -90,7 +91,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 }
 
                 _archivable = value;
-                Registry?.AdvanceRevision(Id);
+                Registry?.AdvanceRevision(Id, ReplicationMembers.Archivable);
                 FireSignal("GetPropertyChangedSignal(Archivable)");
             }
         }
@@ -151,9 +152,9 @@ namespace CoreAI.Mods.Rbx.Instances
             _parent = newParent;
             newParent?._children.Add(this);
 
-            Registry?.AdvanceRevision(Id);
-            oldParent?.Registry?.AdvanceRevision(oldParent.Id);
-            newParent?.Registry?.AdvanceRevision(newParent.Id);
+            Registry?.AdvanceRevision(Id, ReplicationMembers.Parent);
+            oldParent?.Registry?.AdvanceRevision(oldParent.Id, ReplicationMembers.Children);
+            newParent?.Registry?.AdvanceRevision(newParent.Id, ReplicationMembers.Children);
 
             Registry?.OnParentChanged(this, wasInScene);
             oldParent?.FireSignal("ChildRemoved", this);
@@ -524,7 +525,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 _attributes[attribute] = normalized;
             }
 
-            Registry?.AdvanceRevision(Id);
+            Registry?.AdvanceRevision(Id, ReplicationMembers.Attribute(attribute));
             FireSignal("AttributeChanged", attribute);
             FireSignal("GetAttributeChangedSignal(" + attribute + ")");
         }
@@ -545,7 +546,7 @@ namespace CoreAI.Mods.Rbx.Instances
             Registry.Tags.AddTag(Id, tag);
             if (!alreadyTagged)
             {
-                Registry.AdvanceRevision(Id);
+                Registry.AdvanceRevision(Id, ReplicationMembers.Tag(tag));
                 Registry.OnTagAdded(this, tag, !tagInUse);
             }
         }
@@ -557,7 +558,7 @@ namespace CoreAI.Mods.Rbx.Instances
             Registry.Tags.RemoveTag(Id, tag);
             if (wasTagged)
             {
-                Registry.AdvanceRevision(Id);
+                Registry.AdvanceRevision(Id, ReplicationMembers.Tag(tag));
                 Registry.OnTagRemoved(this, tag, !Registry.Tags.IsTagInUse(tag));
             }
         }
@@ -741,7 +742,7 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             _primaryPart = primaryPart;
-            Registry?.AdvanceRevision(Id);
+            Registry?.AdvanceRevision(Id, ReplicationMembers.PrimaryPart);
             FireSignal("GetPropertyChangedSignal(PrimaryPart)");
         }
 
@@ -755,7 +756,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
             _storedWorldPivot = worldPivot;
             _hasStoredWorldPivot = true;
-            Registry?.AdvanceRevision(Id);
+            Registry?.AdvanceRevision(Id, ReplicationMembers.WorldPivot);
             FireSignal("GetPropertyChangedSignal(WorldPivot)");
         }
 

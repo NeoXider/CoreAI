@@ -1,5 +1,68 @@
 # Changelog
 
+## [7.39.0] - 2026-09-10
+
+### Added
+
+- **The Lua execution budget is the game's to set, and to change while the game runs.** The
+  per-resume instruction and wall-clock caps were CoreAI constants: a game could not raise them for
+  a heavy simulation or lower them for untrusted mods. `LuaCsCoroutineBudgetSettings` is now a
+  serialized field on `CoreAiModsLifetimeScope`, resolved by every coroutine site, and every resume
+  re-reads it instead of freezing it at construction — so a change reaches a pooled signal runner
+  that was created long before, on its very next resume. The mirror's own
+  `ScriptContext:SetTimeout(seconds)` moves the wall-clock half live, gated to the host actor the
+  way Roblox gates it to plugins. Non-positive values fall back to CoreAI's defaults rather than
+  reading as "no limit", because a per-instruction hook has no sane interpretation of a zero budget.
+- **Replication has a core, and it is engine-free.** Nothing in production ever fed the dirty set:
+  its only caller was a gateway production never constructs, so the join snapshot and the delta
+  publish were both waiting on the same missing wiring. The registry is now the source itself —
+  every setter reports the member it changed, a `RevisionAdvanced` event is raised once the mutation
+  gate is released, a per-recipient `ReplicationStream` turns the dirty set into an ordered
+  Spawn/Patch/Remove plan, and a `ReplicationApplier` applies it to a second registry marked as a
+  replica. `GuardedReplicationFilter` is a floor a game's own filter cannot open: the server
+  containers, `Camera` and `PlayerScripts` stay invisible to everyone, another player's `Backpack`
+  and `PlayerGui` stay invisible to anyone but their owner, and a filter that throws hides rather
+  than leaks. Every rule was taken from the mirror's own class tags, and a test walks what the
+  bootstrap actually creates and fails if any of it replicates against those tags, so the next
+  service added to the tree cannot leak in silence. This is the layer under MVP11/MVP12, not those features themselves — a late joiner with no
+  join snapshot still asks for a resync rather than guessing, and that boundary is pinned by a test.
+
+### Fixed
+
+- **A mod could escape a tightened budget through a child coroutine.** The guard armed around a raw
+  `coroutine.resume` used its own fixed constants and never read the live settings, so moving a
+  runaway loop into a child coroutine outlived a budget the host had just cut — the parent's hook
+  cannot intervene until the nested resume returns. The raw-coroutine bound is now derived from the
+  live settings rather than declared independently of them, so it keeps its deliberately larger
+  headroom and still scales down with the host's number.
+- **Two more Lua surfaces ignored the configured budget entirely.** The one-off `execute_lua`
+  executor and the AI envelope processor each build their own engine over the shared sandbox, and
+  each defaulted its budget — a private object nothing could reach. A host that tightened the budget
+  constrained every loaded mod while admin- and AI-issued chunks kept running on the untouched
+  default. Both now receive the same live object the runtime reads.
+- **A player could steal another player's respawn.** `Character` is writable from Lua with no
+  ownership check, which is correct — a script writing to a property it owns needs no authorization.
+  But the death handler resolved the owner of a dying character through that field, matching the
+  first player whose `Character` pointed at it. An actor that joined earlier could point its own
+  `Character` at someone else's and collect their respawn, while the player who actually died was
+  never rebuilt. Lifecycle decisions now resolve ownership through the reference the character
+  factory itself set; the Lua-visible lookup keeps Roblox's semantics unchanged.
+- **A runaway mod was reported as a bad-argument error, not a budget kill.** This one predates the
+  branch and was never a regression: the coroutine guard threw with a constructor that carries an
+  inner exception, and Lua-CSharp's protected resume reads the error OBJECT, which that constructor
+  never sets. The value reaching the scheduler was nil, so the classifier fell through to
+  `BAD_ARGUMENT` and the fix hint told the author to fix a Lua error that did not exist. No committed
+  test asserted the text on the coroutine path, which is why it survived this long. Budget trips are
+  now classified by a typed trip kind rather than by matching a substring in a message, and the
+  message itself carries the bound and the author's line again.
+
+### Notes
+
+- The dedicated-thread wrapper around the MCP notification loop is gone. It was added to fix a POST
+  that timed out behind an open stream; that cause was later measured to be a client-side connection
+  budget instead, and the loop it wrapped awaits inside itself, so it never held a pooled worker
+  between iterations. It cost a real thread for the few microseconds before the first await.
+
 ## [7.38.0] - 2026-09-09
 
 ### Added

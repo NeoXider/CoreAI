@@ -149,9 +149,19 @@ namespace CoreAI.Ai.LuaCs
     public sealed class LuaCsGameToolExecutor : LuaTool.ILuaExecutor, LuaTool.IMutationExecutor
     {
         /// <summary>Stable autosave trigger for one-shot Lua execution.</summary>
+        /// <summary>
+        /// The live per-resume coroutine budget this surface arms — the SAME object the persistent mod
+        /// runtime reads when both are composed together, so a host's <c>ScriptContext:SetTimeout</c>
+        /// constrains one-off <c>execute_lua</c> chunks exactly as it constrains loaded mods.
+        /// </summary>
+        public CoreAI.Sandbox.LuaCs.LuaCsCoroutineBudgetSettings CoroutineResumeBudget =>
+            _engine.CoroutineResumeBudget;
+
         public const string ExecuteLuaBackupTrigger = "execute_lua";
 
-        private readonly IScriptEngine _engine;
+        // WHY the concrete type and not IScriptEngine: this surface builds the engine itself and must
+        // expose the live coroutine budget it armed, which is not part of the VM-agnostic interface.
+        private readonly LuaCsScriptEngine _engine;
         private readonly ILuaCsGameRuntimeBindings _bindings;
         private readonly ILuaExecutionObserver _observer;
         private readonly IConfirmedWorldMutationGate _worldMutationGate;
@@ -205,14 +215,20 @@ namespace CoreAI.Ai.LuaCs
             ILuaCsGameRuntimeBindings bindings,
             ILuaExecutionObserver observer,
             IRbxRuntimeObservabilitySink observability,
-            IConfirmedWorldMutationGate worldMutationGate)
+            IConfirmedWorldMutationGate worldMutationGate,
+            CoreAI.Sandbox.LuaCs.LuaCsCoroutineBudgetSettings coroutineResumeBudget = null)
         {
             if (sandbox == null)
             {
                 throw new ArgumentNullException(nameof(sandbox));
             }
 
-            _engine = new LuaCsScriptEngine(sandbox, observability);
+            // WHY the budget is passed in rather than defaulted here: this surface builds its OWN engine
+            // over the sandbox the mod runtime already uses, so defaulting would give it a private
+            // settings object and a host's ScriptContext:SetTimeout would silently miss every one-off
+            // execute_lua chunk while constraining persistent mods.
+            _engine = new LuaCsScriptEngine(sandbox, observability,
+                coroutineResumeBudget: coroutineResumeBudget);
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
             _observer = observer ?? throw new ArgumentNullException(nameof(observer));
             _worldMutationGate = worldMutationGate;

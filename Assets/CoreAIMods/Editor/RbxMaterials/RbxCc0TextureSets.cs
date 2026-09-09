@@ -31,9 +31,10 @@ namespace CoreAI.Editor.RbxMaterials
         internal const string PolyHavenPrefix = "polyhaven/";
 
         // WHY: every id here was fetched and its 2K maps unpacked onto disk before being written
-        // down, and every material was then photographed on its own and inspected — see
-        // dev-docs/MATERIAL_DEFECT_AUDIT_2026-09-04.md. Sixteen entries are replacements for sets
-        // whose albedo and normal were both too flat to show any surface at all.
+        // down, and every material was then photographed on its own and inspected — see git history
+        // (dev-docs/MATERIAL_DEFECT_AUDIT_2026-09-04.md, deleted after landing per the audit-report
+        // policy). Sixteen entries are replacements for sets whose albedo and normal were both too
+        // flat to show any surface at all.
         private static readonly ReadOnlyCollection<RbxCc0TextureSet> SetsList =
             Array.AsReadOnly(new[]
             {

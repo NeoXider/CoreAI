@@ -33,8 +33,9 @@ namespace CoreAI.Ai.Hub
         private bool _subscribed;
         private bool _editorOpen;
 
-        // TODO: OPT#7: ListMods() re-parses every mod's @coreai header, so it is cached and only reloaded on
-        // Refresh / ModsChanged / a mutating action — typing in the search box just re-filters the cache.
+        // WHY: ListMods() re-parses every mod's @coreai header, so results are cached here and only
+        // reloaded on Refresh / ModsChanged / a mutating action — typing in the search box just
+        // re-filters the cache instead of re-parsing.
         private IReadOnlyList<HubModRecord> _modsCache;
         private string _modsLoadError;
         private IVisualElementScheduledItem _searchDebounce;
