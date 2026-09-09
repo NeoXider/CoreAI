@@ -41,8 +41,12 @@ namespace CoreAI.Mods.Rbx.Instances
         /// backing binder, in an assembly that references Instances — not the reverse. Declaring
         /// the copy on the binder seam (already owned by the registry) lets the engine-free side
         /// trigger the copy without ever seeing the sink's type.
+        /// WHY a default body: added after the interface shipped, so a host outside this repo with
+        /// its own implementation must keep compiling without one.
         /// </summary>
-        void CopyBackingState(InstanceId sourceId, InstanceId destinationId);
+        void CopyBackingState(InstanceId sourceId, InstanceId destinationId)
+        {
+        }
     }
 
     /// <summary>Null object for hosts that bind nothing (headless tests, storage-only trees).</summary>

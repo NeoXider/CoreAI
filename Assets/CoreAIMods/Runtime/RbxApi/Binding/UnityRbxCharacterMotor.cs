@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Spatial;
@@ -27,23 +27,58 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <summary>How far below the capsule counts as standing on something, in metres.</summary>
         private const float GroundProbeMetres = 0.12f;
 
+        /// <summary>
+        /// Fallback world acceleration for a motor built with no live gravity source, in metres/s².
+        /// </summary>
+        /// <remarks>
+        /// WHY <see cref="RbxWorldPhysics.DefaultGravity"/> and not <c>Physics.gravity</c>: bound
+        /// bodies never use the engine's own gravity (their <c>Rigidbody.useGravity</c> is off; see
+        /// <see cref="UnityRbxPhysicsPort"/>), so falling back to it would still answer with a number
+        /// the world's own acceleration has no connection to.
+        /// </remarks>
+        private static float DefaultWorldGravityMetresPerSecondSquared() =>
+            RbxSpace.AccelerationToUnity((float)RbxWorldPhysics.DefaultGravity);
+
         private readonly Rigidbody _body;
         private readonly float _groundProbeOrigin;
+        private readonly Func<float> _worldGravityMetresPerSecondSquared;
         private float _walkSpeedMetres = RbxSpace.LengthToUnity((float)RbxHumanoid.DefaultWalkSpeed);
         private Vector3? _targetMetres;
 
         /// <summary>Drives an existing Rigidbody as a character.</summary>
-        public UnityRbxCharacterMotor(Rigidbody body, float capsuleHalfHeightMetres = 0.5f)
+        /// <param name="body">The Rigidbody this motor moves.</param>
+        /// <param name="capsuleHalfHeightMetres">Half-height used by the ground probe.</param>
+        /// <param name="worldGravityMetresPerSecondSquared">
+        /// Reads the acceleration actually applied to <paramref name="body"/> by the world (see
+        /// <see cref="UnityRbxPhysicsPort.GravityMetresPerSecondSquared"/>), so a height-based jump
+        /// tracks live changes to <c>Workspace.Gravity</c> instead of the engine's own
+        /// <c>Physics.gravity</c>, which these bodies do not use. Defaults to the mirror's documented
+        /// gravity when the caller has no live source to hand it.
+        /// </param>
+        public UnityRbxCharacterMotor(
+            Rigidbody body,
+            float capsuleHalfHeightMetres = 0.5f,
+            Func<float> worldGravityMetresPerSecondSquared = null)
         {
             _body = body != null ? body : throw new ArgumentNullException(nameof(body));
             _groundProbeOrigin = capsuleHalfHeightMetres;
+            _worldGravityMetresPerSecondSquared =
+                worldGravityMetresPerSecondSquared ?? DefaultWorldGravityMetresPerSecondSquared;
             _body.freezeRotation = true;
         }
 
         /// <inheritdoc />
         public RbxVector3 Position => _body == null ? RbxVector3.Zero : RbxSpace.FromUnity(_body.position);
 
-        /// <summary>Whether the Unity body still exists and can be driven by this motor.</summary>
+        /// <summary>
+        /// False once the Rigidbody this motor drives has been destroyed by Unity.
+        /// </summary>
+        /// <remarks>
+        /// WHY public rather than internal: the composition that decides when to rebuild a motor
+        /// lives in <c>CoreAI.Mods</c>, a different assembly, so an internal member is invisible
+        /// exactly where the question is asked. A destroyed body is a normal end of life — a
+        /// character was despawned — not an error, so the answer is a property, not a throw.
+        /// </remarks>
         public bool IsAvailable => _body != null;
 
         /// <inheritdoc />
@@ -83,10 +118,15 @@ namespace CoreAI.Mods.Rbx.Binding
 
             // WHY two formulas: the mirror treats JumpPower as an upward impulse and JumpHeight as
             // the height actually reached, so the second has to be solved against current gravity
-            // (v = sqrt(2·g·h)) rather than used as a velocity.
+            // (v = sqrt(2·g·h)) rather than used as a velocity. WHY the injected source and not
+            // Physics.gravity: this body has gravity disabled and falls under whatever
+            // Workspace.Gravity the physics port is applying (DEV-6) — the engine's own global plays
+            // no part in how far it falls, so solving against it would answer a question about a
+            // different, unrelated acceleration.
+            float gravity = _worldGravityMetresPerSecondSquared();
             float upward = useJumpPower
                 ? RbxSpace.LengthToUnity((float)jumpPower)
-                : Mathf.Sqrt(2f * Mathf.Abs(Physics.gravity.y == 0f ? 9.81f : Physics.gravity.y)
+                : Mathf.Sqrt(2f * Mathf.Abs(gravity == 0f ? DefaultWorldGravityMetresPerSecondSquared() : gravity)
                              * RbxSpace.LengthToUnity((float)jumpHeight));
 
             Vector3 velocity = _body.linearVelocity;
@@ -106,6 +146,14 @@ namespace CoreAI.Mods.Rbx.Binding
                 _body.linearVelocity = stopped;
             }
         }
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// WHY the step length is ignored: this motor drives velocity rather than integrating a
+        /// position, so the physics step itself does the integrating. The parameter exists for
+        /// host motors that do integrate.
+        /// </remarks>
+        public void Step(double deltaSeconds) => Step();
 
         /// <summary>Advances the walk by one fixed step. Call from the fixed-step pump.</summary>
         public void Step()

@@ -31,9 +31,9 @@ hooks_every, store_set, coreai_world_*, etc. (read_skill('Lua Modding') covers t
 covers only the Rbx surface.
 
 Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part properties
-6. Physics (Raycast, Gravity, Touched)  7. Humanoid  8. Value objects
-9. Input (UserInputService)  10. Camera  11. Attributes & tags  12. Errors  13. Not implemented
-14. Examples
+6. Physics (Raycast, Gravity, Touched)  7. Humanoid  8. Players & Characters  9. Value objects
+10. Input (UserInputService)  11. Camera  12. Attributes & tags  13. Errors  14. Not implemented
+15. Examples
 
 ## 1. Space & rules
 
@@ -255,7 +255,39 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
   is a loud stub (`h.Sit = true` raises NOT_IMPLEMENTED).
 - `MoveDirection` (read-only Vector3) mirrors the character controller's current motion.
 
-## 8. Value objects
+## 8. Players & Characters
+
+- `game:GetService(""Players"")` — `:GetPlayers()` -> array of connected Players; `:GetPlayerByUserId(id)`
+  and `:GetPlayerFromCharacter(model)` -> Player or nil (never error on a miss). `.PlayerAdded(player)`
+  and `.PlayerRemoving(player, reason)` fire on connect/disconnect. `Players.LocalPlayer` is nil on the
+  server (there is no client/server split to script against here — it stays nil).
+- `Players.CharacterAutoLoads` (bool, default true) — when true, a joining actor gets a character
+  automatically. Set it from HOST composition, not from a script: a joining actor can already be
+  connected (and its character already queued to spawn) before any mod chunk has run, so a script
+  cannot reliably race the join to flip this in time.
+- `Players.RespawnTime` (number, studs-per-second-free — plain seconds, default 5) — how long after
+  a character's `Humanoid.Died` fires before a fresh one autoloads, when `CharacterAutoLoads` is
+  still true when the timer elapses.
+- `player.Character` — the Model driven for this player, or nil until loaded. Assigning it directly
+  does NOT fire the signals below; only `LoadCharacterAsync` does.
+- `player.CharacterAdded(character)` / `player.CharacterRemoving(character)` fire on load/replace.
+  Replacing an existing character fires `CharacterRemoving` for the outgoing one BEFORE
+  `CharacterAdded` for its replacement.
+- `player:LoadCharacterAsync()` — builds (or rebuilds) the character: a Model named after the player,
+  parented to `workspace`, holding a `Humanoid` and a `HumanoidRootPart` (`humanoid.RootPart` resolves
+  to it). YIELDS until the deferred CharacterAdded/CharacterRemoving handlers have run, so code after
+  the call sees the finished character and its signals already delivered. `player:LoadCharacter()` is
+  a deprecated non-yielding alias (logs once per mod) with the same effect.
+- `player:DistanceFromCharacter(point)` -> studs from the character's root part to `point`, or `0`
+  when the player has no character (never errors on a characterless player).
+    local Players = game:GetService(""Players"")
+    Players.PlayerAdded:Connect(function(player)
+      player.CharacterAdded:Connect(function(character)
+        character.Humanoid.Died:Connect(function() print(player.Name .. "" died"") end)
+      end)
+    end)
+
+## 9. Value objects
 
 - `IntValue`, `NumberValue`, `StringValue`, `BoolValue`, `ObjectValue`, `Vector3Value`,
   `CFrameValue`, `Color3Value` — all `Instance.new`-creatable; every one `IsA(""ValueBase"")`, the
@@ -277,7 +309,7 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
     coins.Parent = stats
     stats.Parent = player
 
-## 9. Input (UserInputService)
+## 10. Input (UserInputService)
 
 Roblox-1:1 keyboard/mouse. Get it with `game:GetService(""UserInputService"")`, or use the global
 `UserInputService` (same instance). Reading input is Read-tier — no WorldEdit needed.
@@ -292,7 +324,7 @@ Roblox-1:1 keyboard/mouse. Get it with `game:GetService(""UserInputService"")`, 
 - `MouseBehavior` (read+write, Enum.MouseBehavior: Default/LockCenter/LockCurrentPosition) is
   stored today; hardware cursor lock lands later.
 
-## 10. Camera
+## 11. Camera
 
 `workspace.CurrentCamera` is the Camera instance. Members: `CFrame` (read+write — the camera
 pose in studs, over the engine camera rig), `CameraType` (Enum.CameraType, read+write),
@@ -324,14 +356,14 @@ Anchor gameplay parts (`part.Anchored = true`) unless you WANT physics: an unanc
 under gravity and a dense stack shoves itself apart. Drive the whole game from one
 `RunService.Heartbeat:Connect(function(dt) ... end)` and scale motion by `dt`.
 
-## 11. Attributes & tags
+## 12. Attributes & tags
 
 - `inst:SetAttribute(name, value)` / `inst:GetAttribute(name)` / `inst:GetAttributes()`.
   Value must be string, boolean, number, Vector3, Vector2, Color3, or UDim — anything else is
   rejected with BAD_ARGUMENT. SetAttribute needs WorldEdit.
 - `inst:AddTag(t)` / `RemoveTag(t)` / `HasTag(t)` / `GetTags()`. Add/Remove need WorldEdit.
 
-## 12. Errors
+## 13. Errors
 
 Every failure is a Lua error whose message is `CODE: message | fix: suggestion` (no
 `[mod:...]` prefix). Catch with `pcall`. Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE,
@@ -342,7 +374,7 @@ destroyed — a scene load, a domain reload during play, or leaving play mode �
 part in that world with it. Nothing you spawn can materialize until the mods are reloaded against
 the current world, so report it instead of retrying the spawn.
 
-## 13. Not implemented (raise NOT_IMPLEMENTED — do not use)
+## 14. Not implemented (raise NOT_IMPLEMENTED — do not use)
 
 - `Instance.fromExisting` (use `Clone`).
 - Part `Shape`, `Material`, `Orientation` and `Rotation` ALL work now — see section 5. So does
@@ -351,7 +383,7 @@ the current world, so report it instead of retrying the spawn.
   `-=/*=//=/%=/^=/..=`), `continue`, `` `str{}` `` interpolation, if-then-else expressions, and
   type annotations/casts all work. Plain Lua 5.2 is unaffected.
 
-## 14. Examples
+## 15. Examples
 
 Build a colored tower of parts:
 ```lua

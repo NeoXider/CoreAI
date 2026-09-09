@@ -92,14 +92,15 @@ namespace CoreAI.Infrastructure.AiMemory
     /// to give; <see cref="FlushAsync"/> is kept as the explicit "is my data covered?" query.
     /// </para>
     /// <para>
-    /// <b>No <c>ConfigureAwait(false)</c> in this file — ever.</b> WebGL has no thread pool, so an
-    /// awaited continuation that dropped the Unity synchronization context is posted to a scheduler
-    /// that never runs and the async method silently never resumes. The <c>CAIU001</c> analyzer flags
-    /// every reintroduction. Historical note, so the next reader does not repeat the diagnosis: 17
-    /// occurrences were removed here on 2026-09-09 while chasing a <c>memory action=write</c> that hung
-    /// until the 30 s tool timeout, and a rebuilt player proved that was NOT the cause — the cause was
-    /// the durability confirmation itself, an <c>FS.syncfs</c> callback Unity 6.3 never delivers. The
-    /// rule stays because the hazard it prevents is real, not because it fixed that bug.
+    /// <b><c>ConfigureAwait(false)</c> is REQUIRED on the gate awaits in this file</b> (see the WHY on
+    /// <see cref="_gate"/>) and forbidden everywhere else in it. That is not an exception carved out of
+    /// the project-wide rule for convenience: it is the one place the rule's premise does not hold, and
+    /// the deadlock the flag prevents reproduces in the editor, not only in a browser.
+    /// Historical note, so the next reader does not repeat the diagnosis: these occurrences were removed
+    /// on 2026-09-09 while chasing a <c>memory action=write</c> that hung until the 30 s tool timeout.
+    /// A rebuilt player proved they were NOT the cause — the cause was the durability confirmation
+    /// itself, an <c>FS.syncfs</c> callback Unity 6.3 never delivers — so removing them bought nothing
+    /// and cost the deadlock guard. They are back, and the guard's allowlist carries the reason.
     /// </para>
     /// </summary>
     public sealed class FileAgentMemoryStore : IAgentMemoryStore, IAgentMemoryLoadDiagnostics,
@@ -240,6 +241,24 @@ namespace CoreAI.Infrastructure.AiMemory
         /// private *Core helpers assume the gate is already held. Под этим замком нельзя ждать ничего,
         /// что по-настоящему уступает поток: на WebGL синхронные методы берут его блокирующим
         /// <c>Wait()</c>, и ожидание браузерного колбэка под замком остановило бы единственный поток.
+        /// <para>
+        /// WHY every <c>await</c> that acquires or releases <see cref="_gate"/> or a mutation gate (see
+        /// <see cref="GetMutationGate"/>) uses <c>.ConfigureAwait(false)</c>: without it, a continuation
+        /// that resumes off the calling thread (real <c>Task.Run</c> in <see cref="RunOffThread(Action)"/>
+        /// off WebGL) is posted back to whatever <see cref="SynchronizationContext"/> was captured when
+        /// the async method was entered. If that call came from Unity's main thread, the posted
+        /// continuation — which is what releases <see cref="_gate"/> / the mutation gate — sits in the
+        /// main-thread queue. A synchronous <c>Save</c>/<c>TryLoad</c>/<c>GetTranscriptEntries</c> call
+        /// on that same main thread blocks on the same gate via <c>Wait()</c> and never returns to pump
+        /// that queue: permanent deadlock, no exception. This is NOT the WebGL-pool hazard
+        /// <c>WebGlUnsafeAsyncPrimitivesEditModeTests</c> normally bans <c>ConfigureAwait(false)</c> for
+        /// (see its allowlist entry for this file): on WebGL, <see cref="RunOffThread(Action)"/> runs the
+        /// action inline and returns an already-completed task, and the gate-acquire → work → gate-release
+        /// chain never yields before both gates are released (nothing else runs on WebGL's single
+        /// cooperative thread to contend for them mid-chain), so every await in that chain is already
+        /// complete when awaited there — <c>ConfigureAwait(false)</c> never causes a continuation to be
+        /// scheduled at all, let alone onto a thread pool WebGL doesn't have.
+        /// </para>
         /// </summary>
         private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -360,7 +379,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <exception cref="AgentMemoryLoadException">Документ есть, но прочитать его не удалось.</exception>
         public async Task<AgentMemoryState> TryLoadAsync(string roleId)
         {
-            await _gate.WaitAsync();
+            await _gate.WaitAsync().ConfigureAwait(false);
             try
             {
                 return await RunOffThread(() =>
@@ -372,7 +391,7 @@ namespace CoreAI.Infrastructure.AiMemory
                     }
 
                     return state;
-                });
+                }).ConfigureAwait(false);
             }
             finally
             {
@@ -467,13 +486,13 @@ namespace CoreAI.Infrastructure.AiMemory
         public async Task SaveAsync(string roleId, AgentMemoryState state, CancellationToken cancellationToken = default)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken);
+            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                await _gate.WaitAsync(cancellationToken);
+                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    await RunOffThread(() => SaveCore(roleId, state, false));
+                    await RunOffThread(() => SaveCore(roleId, state, false)).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -509,10 +528,10 @@ namespace CoreAI.Infrastructure.AiMemory
 
             TResult result;
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken);
+            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                await _gate.WaitAsync(cancellationToken);
+                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
                     result = await RunOffThread(() =>
@@ -530,7 +549,7 @@ namespace CoreAI.Infrastructure.AiMemory
                         TResult mutated = mutator(state);
                         SaveCore(roleId, state, false);
                         return mutated;
-                    });
+                    }).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -615,13 +634,13 @@ namespace CoreAI.Infrastructure.AiMemory
         public async Task ClearAsync(string roleId, CancellationToken cancellationToken = default)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken);
+            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                await _gate.WaitAsync(cancellationToken);
+                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    await RunOffThread(() => ClearCore(roleId, false));
+                    await RunOffThread(() => ClearCore(roleId, false)).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -697,13 +716,13 @@ namespace CoreAI.Infrastructure.AiMemory
         public async Task ClearChatHistoryAsync(string roleId, CancellationToken cancellationToken = default)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken);
+            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                await _gate.WaitAsync(cancellationToken);
+                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    await RunOffThread(() => ClearChatHistoryCore(roleId, false));
+                    await RunOffThread(() => ClearChatHistoryCore(roleId, false)).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -877,13 +896,14 @@ namespace CoreAI.Infrastructure.AiMemory
             SynchronizationContext callbackContext = SynchronizationContext.Current;
             AgentHistoryTrimmedEventArgs? trimmed;
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken);
+            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                await _gate.WaitAsync(cancellationToken);
+                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    trimmed = await RunOffThread(() => AppendLineCore(roleId, line, persistToDisk, false, false));
+                    trimmed = await RunOffThread(() => AppendLineCore(roleId, line, persistToDisk, false, false))
+                        .ConfigureAwait(false);
                 }
                 finally
                 {
@@ -1159,7 +1179,10 @@ namespace CoreAI.Infrastructure.AiMemory
                 return Task.CompletedTask;
             }
 
-            TaskCompletionSource<bool> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            // WHY: no RunContinuationsAsynchronously — it forces the continuation onto the thread pool,
+            // which does not exist in WebGL and hangs forever. Inlining is safe here: TrySetResult runs
+            // inside the Post callback above, after both gates are already released (see the WHY above).
+            TaskCompletionSource<bool> completion = new();
             callbackContext.Post(_ =>
             {
                 try

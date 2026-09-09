@@ -110,10 +110,11 @@ time**, so a paused world never times a walk out.
 
 Movement is done by a motor behind `IRbxCharacterMotor`: CoreAI ships `UnityRbxCharacterMotor`, and
 a host that prefers its own controller implements the interface without changing anything a script
-sees. **The motor is not yet wired into the default composition**, so a Humanoid in a scene CoreAI
-built for you gets the null motor and does not move — `MoveTo` then reports arrival immediately,
-because the null motor's position never changes. Attach one through
-`LuaCsRbxApiBindings.AttachCharacterMotorFactory` until the character slice lands. `Enum.HumanoidStateType` ships its full Roblox item set, but the state machine only enters
+sees — see `Docs/CoreAIMods/CHARACTER_MOTOR_BRIDGE.md`. Composition wires the motor for you when
+the scene has an `RbxWorldHost`: every Humanoid whose root part has a body gets a real motor. A
+Humanoid with no body — a headless world, storage-only trees, a root part not yet materialized —
+keeps the null motor and does not move, and `MoveTo` then reports arrival immediately because the
+null motor's position never changes. `Enum.HumanoidStateType` ships its full Roblox item set, but the state machine only enters
 `Running`, `Jumping`, `Freefall`, `Landed` and `Dead`; `ChangeState` accepts only `Jumping` and says
 so loudly otherwise. Seats, ragdoll, swimming, climbing, accessories and animation raise the loud
 stub — they need a character rig CoreAI does not model.
@@ -370,3 +371,4 @@ through DI or reflection.
 - [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md) — capability tiers and what each one opens
 - [WORLD_PACKAGE.md](../../../Docs/CoreAIMods/WORLD_PACKAGE.md) — the `.world` package format, validation limits, autosave durability, and session replacement
 - [PROCEDURAL_MATERIALS.md](../../CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md) · [TEXTURE_MATERIALS.md](../../CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md) — the `Enum.Material` render catalogs
+- [CHARACTER_MOTOR_BRIDGE.md](../../../Docs/CoreAIMods/CHARACTER_MOTOR_BRIDGE.md) — driving `Humanoid` with your own character controller via `IRbxCharacterMotor`/`IRbxCharacterMotorProvider`

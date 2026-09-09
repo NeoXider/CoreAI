@@ -3,6 +3,7 @@ using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
@@ -133,6 +134,40 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.AreEqual(1f, firstCopy.Size.X);
             Assert.IsTrue(_binder.TryGetPartProperties(copiedSecond.Id, out PartProperties secondCopy));
             Assert.AreEqual(3f, secondCopy.Size.X);
+        }
+
+        /// <summary>MVP1 finding 3 was closed against FakePartStateBinder above, not against the
+        /// binder Unity actually ships — this exercises InstanceGameObjectBinder.CopyBackingState
+        /// directly, on a part materialized into the world before it is cloned.</summary>
+        [Test]
+        public void R6_5_ClonesBasePartBackingState_ThroughRealBinder()
+        {
+            GameObject root = new("RealBinderCloneTestRoot");
+            InstanceGameObjectBinder binder = new(root.transform);
+            InstanceRegistry registry = new(null, binder);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            try
+            {
+                RbxInstance part = registry.Create("Part");
+                part.Parent = registry.WorldRoot;
+                binder.SetShape(part.Id, RbxPartShape.Ball);
+                binder.SetSize(part.Id, new RbxVector3(9f, 8f, 7f));
+                binder.SetColor(part.Id, RbxColor3.FromRGB(10f, 20f, 30f));
+                binder.SetAnchored(part.Id, true);
+
+                RbxInstance copy = part.Clone();
+
+                Assert.IsTrue(binder.TryGetPartProperties(copy.Id, out PartProperties copied));
+                Assert.AreEqual(new RbxVector3(9f, 8f, 7f), copied.Size);
+                Assert.AreEqual(RbxColor3.FromRGB(10f, 20f, 30f), copied.Color);
+                Assert.AreEqual(RbxPartShape.Ball, copied.Shape);
+                Assert.IsTrue(copied.Anchored);
+            }
+            finally
+            {
+                game.Destroy();
+                UnityEngine.Object.DestroyImmediate(root);
+            }
         }
 
         private static PartProperties MakeProperties(float sizeX)

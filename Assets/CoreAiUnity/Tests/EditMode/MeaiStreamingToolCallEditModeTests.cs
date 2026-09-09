@@ -16,6 +16,27 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class MeaiStreamingToolCallEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY this fixture detaches: it asserts through Assert.ThrowsAsync/CatchAsync, which BLOCK
+        /// the calling thread until the awaited delegate finishes — being inside an async test does
+        /// not change that. Under Unity's SynchronizationContext the delegate's continuation is
+        /// posted back to that same blocked thread, and the editor deadlocks with no results file.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         [Test]
         public void ResolveStreamingMaxToolRoundtrips_UsesRequestOverrideAndPreservesZero()
         {
@@ -45,6 +66,54 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("incomplete-json-object", reason);
             Assert.IsTrue(call.Arguments.ContainsKey(ToolCallArgumentMarkers.ParseErrorKey));
             Assert.IsTrue(call.Arguments.ContainsKey(ToolCallArgumentMarkers.RawArgumentsKey));
+        }
+
+        /// <summary>
+        /// F13 probe: a teacher's unfinished JSON EXAMPLE (a scalar-valued key, not a tool-call shape) must
+        /// never be misread as a truncated call and swallowed at turn end — it has to survive as visible
+        /// assistant text.
+        /// </summary>
+        [Test]
+        public void MalformedTextToolCall_TeacherJsonLiteral_StaysVisibleText()
+        {
+            string text = "Example JSON: {\"key\": value";
+
+            bool found = MeaiLlmClient.TryBuildMalformedTextToolCall(
+                text,
+                new List<ILlmTool> { new TestTool("memory") },
+                new List<MEAI.AIFunction> { MakeAIFunction("memory") },
+                out _,
+                out _,
+                out _);
+
+            Assert.IsFalse(found,
+                "A scalar-valued key with no name/arguments shape must not be treated as a truncated tool call.");
+        }
+
+        /// <summary>
+        /// F13 probe: some providers wrap the call one level deeper
+        /// (<c>{"function":{"name":...,"arguments":...}}</c>), and truncation can cut the stream off before
+        /// the inner "name" key is visible at all — the outer key's value already opening a container
+        /// (<c>{"function": {</c>) must still be held instead of leaking that prefix as raw JSON.
+        /// </summary>
+        [Test]
+        public void MalformedTextToolCall_NestedFunctionWrapperPrefix_IsHeldBeforeNameAppears()
+        {
+            string text = "Before {\"function\": {";
+
+            bool found = MeaiLlmClient.TryBuildMalformedTextToolCall(
+                text,
+                new List<ILlmTool> { new TestTool("memory") },
+                new List<MEAI.AIFunction> { MakeAIFunction("memory") },
+                out MEAI.FunctionCallContent call,
+                out string cleaned,
+                out string reason);
+
+            Assert.IsTrue(found,
+                "A nested-object-valued key must be held: it can still grow into a wrapped tool call.");
+            Assert.IsNotNull(call);
+            Assert.AreEqual("Before", cleaned);
+            Assert.AreEqual("incomplete-json-object", reason);
         }
 
         [Test]
@@ -762,7 +831,10 @@ namespace CoreAI.Tests.EditMode
             StreamingScripted inner = new(
                 new[] { "Проверь себя: ", "{\"name\":\"quiz_tool\",\"arguments\":{\"question\":\"2+2\"}}" },
                 new[] { "Карточка не открылась, разберём вслух." });
-            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
+            // Запасной канал объявлен явно: этот скрипт отдаёт вызов ПРОЗОЙ (см. сестринский
+            // CompleteStreamingAsync_TurnEndingToolFromText_ClosesTurnAndKeepsProse), а на нативном канале
+            // проза не разбирается вовсе — тест проверял бы только то, что сырой JSON утекает в текст.
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: false, memoryStore: null);
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest

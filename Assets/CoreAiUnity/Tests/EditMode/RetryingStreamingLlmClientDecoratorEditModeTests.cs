@@ -18,6 +18,28 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class RetryingStreamingLlmClientDecoratorEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY: <see cref="PreCancelledRequest_DoesNotOpenProvider"/> and
+        /// <see cref="CancellationDuringTransientFailure_DoesNotReopenProvider"/> below are synchronous
+        /// [Test]s that block on Assert.CatchAsync; detaching the context sends the awaited delegate's
+        /// continuation to the thread pool instead of back onto this same blocked thread, which would
+        /// deadlock.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         [Test]
         public async Task PreCommitTransientError_RetriesAndSucceeds()
         {
@@ -193,7 +215,11 @@ namespace CoreAI.Tests.EditMode
             using CancellationTokenSource cancellation = new();
             cancellation.Cancel();
 
-            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            // WHY CatchAsync and not ThrowsAsync: ThrowsAsync demands the EXACT type, and a cancelled
+            // await legitimately surfaces TaskCanceledException, which derives from
+            // OperationCanceledException. What this test is about is that the call was cancelled,
+            // not which of the two the runtime happened to pick.
+            Assert.CatchAsync<OperationCanceledException>(async () =>
                 await Drain(sut.CompleteStreamingAsync(Req(), cancellation.Token)));
 
             Assert.AreEqual(0, inner.StreamCallCount);
@@ -209,7 +235,7 @@ namespace CoreAI.Tests.EditMode
             inner.NextStreams.Enqueue(new[] { ErrChunk(LlmErrorCode.BackendUnavailable) });
             RetryingStreamingLlmClientDecorator sut = new(inner, 3);
 
-            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            Assert.CatchAsync<OperationCanceledException>(async () =>
                 await Drain(sut.CompleteStreamingAsync(Req(), cancellation.Token)));
 
             Assert.AreEqual(1, inner.StreamCallCount);

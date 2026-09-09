@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Ai;
@@ -472,11 +472,52 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void CharacterSpawn_IsDeferredOneSchedulerAdvance_NotSynchronousWithConnect()
+        {
+            // WHY this is the F7 gate: EnsureActor used to spawn the character inline, so it was
+            // already in Workspace before a script had any chance to see the join happen, let alone
+            // flip CharacterAutoLoads in time. Deferring to the scheduler's next drain is what makes
+            // the race below winnable.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("defer-a");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            Assert.IsNull(player.Character,
+                "the auto-spawn must not land synchronously inside EnsureActor/ConnectActor.");
+
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+
+            Assert.IsNotNull(player.Character,
+                "CharacterAutoLoads is true by default; the deferred spawn must still land on the " +
+                "next scheduler drain.");
+        }
+
+        [Test]
+        public void Negative_CharacterAutoLoads_SetFalseBeforeTheDeferredSpawnLands_SkipsIt()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("defer-b");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            // WHY this is the exact F7 race: a script that flips CharacterAutoLoads off runs
+            // synchronously after the actor is already connected (mod-context creation and network
+            // dispatch both connect actors before any mod chunk has a chance to run), and must still
+            // win against the deferred auto-spawn queued by that connect.
+            harness.Bindings.Players.CharacterAutoLoads = false;
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+
+            Assert.IsNull(player.Character,
+                "flipping CharacterAutoLoads off before the deferred spawn's scheduler slot must " +
+                "cancel it — the flag is read at fire time, not at connect time.");
+        }
+
+        [Test]
         public void JoiningActor_GetsACharacterWithAHumanoidAndARootPart()
         {
             using ProductionHarness harness = new ProductionHarness();
             ActorContext actor = harness.Actor("char-a");
             RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
 
             harness.Stack.Runtime.LoadMod(actor, "char-shape", @"
                 local Players = game:GetService('Players')
@@ -510,6 +551,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             using ProductionHarness harness = new ProductionHarness();
             ActorContext actor = harness.Actor("char-b");
             harness.Bindings.ConnectActor(actor);
+            // WHY advanced once here: the join's own auto-spawn is now deferred (F7), and this test
+            // needs that FIRST character to already exist so LoadCharacterAsync's replacement can be
+            // observed (CharacterRemoving for it, then CharacterAdded for the new one).
+            harness.Bindings.Scheduler.Advance(1d / 60d);
 
             // WHY an accumulated string: counters would prove each event happened, which is true in
             // any order. The ORDER is the contract - CharacterRemoving for the outgoing character
@@ -539,8 +584,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             for (int frame = 0; frame < 4; frame++)
             {
-                // WHY Advance only: every scheduler phase boundary already routes to its
-                // matching pump, so an extra PumpFrame would fire each signal twice.
+                harness.Bindings.PumpFrame(1f / 60f);
                 harness.Bindings.Scheduler.Advance(1d / 60d);
             }
 
@@ -572,8 +616,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             for (int frame = 0; frame < 4; frame++)
             {
-                // WHY Advance only: every scheduler phase boundary already routes to its
-                // matching pump, so an extra PumpFrame would fire each signal twice.
+                harness.Bindings.PumpFrame(1f / 60f);
                 harness.Bindings.Scheduler.Advance(1d / 60d);
             }
 
@@ -587,6 +630,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             using ProductionHarness harness = new ProductionHarness();
             ActorContext actor = harness.Actor("char-d");
             harness.Bindings.ConnectActor(actor);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
 
             harness.Stack.Runtime.LoadMod(actor, "char-distance", @"
                 local me = game:GetService('Players'):GetPlayers()[1]
@@ -628,8 +672,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             for (int frame = 0; frame < 8; frame++)
             {
-                // WHY Advance only: every scheduler phase boundary already routes to its
-                // matching pump, so an extra PumpFrame would fire each signal twice.
+                harness.Bindings.PumpFrame(1f / 60f);
                 harness.Bindings.Scheduler.Advance(1d / 60d);
             }
 
@@ -655,6 +698,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             using ProductionHarness harness = new ProductionHarness();
             ActorContext actor = harness.Actor("char-g");
             RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
             RbxInstance character = player.Character;
             Assert.IsNotNull(character);
 
@@ -666,8 +710,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
-        public void CharacterMotor_AttachesAfterParenting_AndRunsAtPreSimulation()
+        public void CharacterMotor_AttachesAfterParenting_AndRunsOnlyAtTheFixedStepPump()
         {
+            // WHY "only": F10 — the motor must NOT move on PumpPreSimulation (the render-frame
+            // pump); it must move only through StepCharacterMotors, which the host calls from
+            // FixedUpdate. Velocity-driven walking applied a variable number of times per simulated
+            // step would move a character at a rate that depends on frame rate.
             GameObject body = new GameObject("Character motor test");
             try
             {
@@ -677,28 +725,68 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 harness.Bindings.AttachCharacterMotorFactory(humanoid =>
                     humanoid.RootPart == null ? null : new UnityRbxCharacterMotor(rigidbody));
                 RbxPlayer player = harness.Bindings.ConnectActor(harness.Actor("motor"));
+                harness.Bindings.Scheduler.Advance(1d / 60d);
                 RbxHumanoid humanoid = (RbxHumanoid)player.Character.FindFirstChild("Humanoid");
                 Assert.AreSame(player.Character.FindFirstChild("HumanoidRootPart"), humanoid.RootPart);
 
-                List<string> order = new();
-                harness.Bindings.RunService.PreSimulation.Connect(
-                    (Action<object[]>)(_ => order.Add("PreSimulation")));
-                harness.Bindings.RunService.Stepped.Connect(
-                    (Action<object[]>)(_ => order.Add("Stepped")));
-
                 humanoid.MoveTo(new RbxVector3(20f, 0f, 0f));
-                // WHY Advance only: this is the production frame path. A direct
-                // PumpPreSimulation call would pass while the wiring under test stays dead.
-                harness.Bindings.Scheduler.Advance(1d / 60d);
+                harness.Bindings.PumpPreSimulation(1f / 60f);
+                Assert.AreEqual(0f, rigidbody.linearVelocity.magnitude,
+                    "the character motor must not step on the render frame (PumpPreSimulation).");
+
+                harness.Bindings.StepCharacterMotors(1f / 60f);
                 Assert.Greater(rigidbody.linearVelocity.magnitude, 0f,
-                    "One scheduler Advance must step the motor toward the MoveTo target.");
-                Assert.AreEqual(2, order.Count,
-                    "PreSimulation and its legacy alias Stepped must each fire exactly once.");
-                Assert.AreEqual("PreSimulation", order[0]);
-                Assert.AreEqual("Stepped", order[1]);
+                    "StepCharacterMotors is the fixed-step pump; it must actually move the character.");
 
                 player.Character.Destroy();
-                Assert.DoesNotThrow(() => harness.Bindings.Scheduler.Advance(1d / 60d));
+                Assert.DoesNotThrow(() => harness.Bindings.PumpPreSimulation(1f / 60f));
+                Assert.DoesNotThrow(() => harness.Bindings.StepCharacterMotors(1f / 60f));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(body);
+            }
+        }
+
+        [Test]
+        public void CharacterMotor_StopsWhenTheHumanoidDiesMidMove()
+        {
+            // WHY: Humanoid.SetHealth clears the Humanoid's OWN walk target on death, but the
+            // motor holds a separate target of its own that nothing else ever cleared — kill a
+            // character mid-MoveTo and the corpse kept walking to the destination, forever when
+            // CharacterAutoLoads is off. StepCharacterMotors must notice the death and stop
+            // driving that motor from then on.
+            GameObject body = new GameObject("Dead character motor test");
+            try
+            {
+                Rigidbody rigidbody = body.AddComponent<Rigidbody>();
+                rigidbody.useGravity = false;
+                using ProductionHarness harness = new ProductionHarness();
+                harness.Bindings.AttachCharacterMotorFactory(humanoid =>
+                    humanoid.RootPart == null ? null : new UnityRbxCharacterMotor(rigidbody));
+                RbxPlayer player = harness.Bindings.ConnectActor(harness.Actor("dead-motor"));
+                harness.Bindings.Scheduler.Advance(1d / 60d);
+                RbxHumanoid humanoid = (RbxHumanoid)player.Character.FindFirstChild("Humanoid");
+
+                humanoid.MoveTo(new RbxVector3(20f, 0f, 0f));
+                harness.Bindings.StepCharacterMotors(1f / 60f);
+                Assert.Greater(rigidbody.linearVelocity.magnitude, 0f,
+                    "sanity: the walk must actually be under way before the kill");
+
+                humanoid.Health = 0d;
+                Assert.IsTrue(humanoid.IsDead);
+
+                // Several more fixed steps — the old bug kept re-chasing the original destination
+                // on every one of these, since nothing had cleared the motor's own target.
+                for (int step = 0; step < 5; step++)
+                {
+                    harness.Bindings.StepCharacterMotors(1f / 60f);
+                }
+
+                Assert.AreEqual(0f, rigidbody.linearVelocity.x, 1e-6f,
+                    "a dead character's motor must stop walking toward its old destination");
+                Assert.AreEqual(0f, rigidbody.linearVelocity.z, 1e-6f,
+                    "a dead character's motor must stop walking toward its old destination");
             }
             finally
             {
@@ -712,6 +800,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             using ProductionHarness harness = new ProductionHarness();
             ActorContext actor = harness.Actor("removing-name");
             RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
             string name = player.Character.Name;
             harness.Stack.Runtime.LoadMod(actor, "removing-name", @"
                 local me = game:GetService('Players'):GetPlayers()[1]
@@ -724,6 +813,142 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 harness.Bindings.Scheduler.Advance(1d / 60d);
             }
             Assert.AreEqual(name, harness.Store.Get("removing-name", "removed_name"));
+        }
+
+        [Test]
+        public void HumanoidDied_RespawnsAfterRespawnTime_WhenCharacterAutoLoadsStaysTrue()
+        {
+            // WHY this is the F8 gate: RespawnTime used to have no consumer anywhere in Runtime —
+            // a Humanoid could die and nothing ever reloaded the character, no matter what the flag
+            // said.
+            using ProductionHarness harness = new ProductionHarness();
+            harness.Bindings.Players.RespawnTime = 0.1d;
+            ActorContext actor = harness.Actor("respawn-a");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            RbxInstance firstCharacter = player.Character;
+            Assert.IsNotNull(firstCharacter);
+            RbxHumanoid humanoid = (RbxHumanoid)firstCharacter.FindFirstChild("Humanoid");
+
+            humanoid.TakeDamage(humanoid.MaxHealth + 1d);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            Assert.IsTrue(humanoid.IsDead);
+
+            // WHY still the same (dead) character here: RespawnTime has not elapsed yet — the
+            // respawn must wait the full delay, not fire immediately on Died.
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            Assert.AreSame(firstCharacter, player.Character);
+
+            for (int frame = 0; frame < 10 && ReferenceEquals(player.Character, firstCharacter);
+                 frame++)
+            {
+                harness.Bindings.Scheduler.Advance(1d / 60d);
+            }
+
+            Assert.AreNotSame(firstCharacter, player.Character,
+                "RespawnTime elapsed with CharacterAutoLoads still true; a fresh character must load.");
+            Assert.IsTrue(firstCharacter.IsDestroyed);
+        }
+
+        [Test]
+        public void Negative_HumanoidDied_CharacterAutoLoadsFalse_NeverRespawns()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            harness.Bindings.Players.RespawnTime = 0.05d;
+            ActorContext actor = harness.Actor("respawn-b");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            RbxInstance firstCharacter = player.Character;
+            RbxHumanoid humanoid = (RbxHumanoid)firstCharacter.FindFirstChild("Humanoid");
+
+            humanoid.TakeDamage(humanoid.MaxHealth + 1d);
+            // WHY advanced once, THEN flipped: this drains the Died signal and schedules the
+            // respawn timer first, so setting the flag false afterward — before the timer elapses —
+            // exercises the re-check at fire time, not a check that merely runs before scheduling.
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            harness.Bindings.Players.CharacterAutoLoads = false;
+
+            for (int frame = 0; frame < 20; frame++)
+            {
+                harness.Bindings.Scheduler.Advance(1d / 60d);
+            }
+
+            Assert.AreSame(firstCharacter, player.Character,
+                "CharacterAutoLoads=false must cancel the respawn even though it was already queued.");
+            Assert.IsFalse(firstCharacter.IsDestroyed);
+        }
+
+        [Test]
+        public void Negative_HumanoidDiedRespawn_FailureCostsOnlyThatPlayerAndIsReportedNotThrown()
+        {
+            // WHY this is the death-respawn twin of the join-time gate above: the death-triggered
+            // respawn runs from the very same scheduler host-callback slot as the deferred join
+            // spawn — outside any mod's dispatch try/catch. Before this fix, only the join spawn
+            // was guarded; a failure inside RbxCharacterFactory.Load from a dead Humanoid's
+            // respawn timer propagated out of Advance and killed the whole scheduler frame for
+            // every mod, not just the player who died.
+            using ProductionHarness harness = new ProductionHarness();
+            List<string> diagnostics = new();
+            harness.Registry.Diagnostics = diagnostics.Add;
+            harness.Bindings.Players.RespawnTime = 0.05d;
+
+            string failingName = null;
+            int failingPlayerSpawnAttempts = 0;
+            harness.Bindings.Players.RootPartSpawnSeeder = (rootPart, size, position) =>
+            {
+                if (rootPart.Parent == null || failingName == null
+                    || !string.Equals(rootPart.Parent.Name, failingName, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                // WHY a counted second attempt, not every attempt: the first attempt is this
+                // player's ordinary join-time spawn, which must succeed so there is a live,
+                // killable Humanoid. Only the second attempt — the death-triggered respawn — is
+                // the one under test here.
+                failingPlayerSpawnAttempts++;
+                if (failingPlayerSpawnAttempts == 2)
+                {
+                    throw new InvalidOperationException("simulated respawn failure");
+                }
+            };
+
+            RbxPlayer failingPlayer = harness.Bindings.ConnectActor(harness.Actor("respawn-fail-a"));
+            failingName = failingPlayer.Name;
+            RbxPlayer healthyPlayer = harness.Bindings.ConnectActor(harness.Actor("respawn-fail-b"));
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+
+            RbxInstance failingFirstCharacter = failingPlayer.Character;
+            RbxInstance healthyFirstCharacter = healthyPlayer.Character;
+            Assert.IsNotNull(failingFirstCharacter);
+            Assert.IsNotNull(healthyFirstCharacter);
+            RbxHumanoid failingHumanoid =
+                (RbxHumanoid)failingFirstCharacter.FindFirstChild("Humanoid");
+            RbxHumanoid healthyHumanoid =
+                (RbxHumanoid)healthyFirstCharacter.FindFirstChild("Humanoid");
+
+            failingHumanoid.TakeDamage(failingHumanoid.MaxHealth + 1d);
+            healthyHumanoid.TakeDamage(healthyHumanoid.MaxHealth + 1d);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            Assert.IsTrue(failingHumanoid.IsDead);
+            Assert.IsTrue(healthyHumanoid.IsDead);
+
+            for (int frame = 0; frame < 20; frame++)
+            {
+                Assert.DoesNotThrow(() => harness.Bindings.Scheduler.Advance(1d / 60d),
+                    "a failed death-triggered respawn must not kill the scheduler frame for every " +
+                    "mod.");
+            }
+
+            Assert.AreSame(failingFirstCharacter, failingPlayer.Character,
+                "a failed death-triggered respawn must cost only this player its respawn.");
+            Assert.AreNotSame(healthyFirstCharacter, healthyPlayer.Character,
+                "one player's failed respawn must not prevent another player's respawn in the " +
+                "same frame.");
+            Assert.IsTrue(
+                diagnostics.Exists(line => line.Contains("simulated respawn failure")),
+                "the failure must be reported through the registry's diagnostics; log: "
+                + string.Join(" || ", diagnostics));
         }
 
         [Test]
@@ -740,11 +965,166 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void JoiningActor_RootPartSpawnSeederReceivesASaneSizeAndHeightAboveOrigin()
+        {
+            // WHY this is the F2b gate: an unseeded root part materializes from the part-property
+            // sink's plain Roblox default — a 4x1x2 box, unanchored, collidable, at the origin —
+            // so every join used to drop a falling box embedded in whatever sits at (0,0,0).
+            using ProductionHarness harness = new ProductionHarness();
+            RbxInstance seededRootPart = null;
+            RbxVector3 seededSize = default;
+            RbxVector3 seededPosition = default;
+            harness.Bindings.Players.RootPartSpawnSeeder = (rootPart, size, position) =>
+            {
+                seededRootPart = rootPart;
+                seededSize = size;
+                seededPosition = position;
+            };
+
+            ActorContext actor = harness.Actor("spawn-shape-a");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+
+            Assert.IsNotNull(seededRootPart,
+                "the deferred join-spawn must seed the root part's spawn state.");
+            Assert.AreSame(
+                player.Character.FindFirstChild(RbxCharacterFactory.RootPartName), seededRootPart);
+            Assert.AreEqual(RbxCharacterFactory.RootPartSize, seededSize);
+            Assert.AreEqual(RbxCharacterFactory.DefaultSpawnPosition, seededPosition);
+            Assert.AreNotEqual(new RbxVector3(4f, 1f, 2f), seededSize,
+                "the root part must not keep the generic Part default size (4x1x2).");
+            Assert.Greater(seededPosition.Y, 0f,
+                "the spawn position must be above the world origin, not embedded in whatever " +
+                "sits there.");
+        }
+
+        [Test]
+        public void JoiningActor_ProductionWiring_PushesTheSpawnTransformIntoThePartSink()
+        {
+            // WHY this exists next to the seeder test above: that one installs its own seeder and so
+            // passes even when nothing wires one in production, which is exactly the state this
+            // pipeline was in — the spawn shape was fixed only for tests and every real join still
+            // materialized the sink's plain 4x1x2 default at the origin.
+            using ProductionHarness harness = new ProductionHarness();
+            Assert.IsNotNull(harness.Bindings.Players.RootPartSpawnSeeder,
+                "the bindings must wire a root-part spawn seeder; the character factory cannot "
+                + "reach the part sink from the engine-free assembly.");
+
+            ActorContext actor = harness.Actor("spawn-wiring");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+
+            RbxInstance rootPart = player.Character.FindFirstChild(RbxCharacterFactory.RootPartName);
+            Assert.IsTrue(
+                harness.Bindings.PartSink.TryGetPartProperties(rootPart.Id, out PartProperties props));
+            Assert.AreEqual(RbxCharacterFactory.RootPartSize, props.Size);
+            Assert.AreEqual(RbxCharacterFactory.DefaultSpawnPosition, props.Position);
+        }
+
+        [Test]
+        public void Negative_DeferredAutoLoad_FailureCostsOnlyThatPlayerAndIsReportedNotThrown()
+        {
+            // WHY this is the F2a gate: the deferred join-spawn runs from the scheduler's host-
+            // callback slot, outside any mod's dispatch try/catch. Before this fix, a failure
+            // inside RbxCharacterFactory.Load (an instance cap, an ACL refusal) propagated out of
+            // Advance and killed the whole scheduler frame for every mod, not just the joiner.
+            using ProductionHarness harness = new ProductionHarness();
+            List<string> diagnostics = new();
+            harness.Registry.Diagnostics = diagnostics.Add;
+
+            string failingName = null;
+            harness.Bindings.Players.RootPartSpawnSeeder = (rootPart, size, position) =>
+            {
+                if (rootPart.Parent != null
+                    && string.Equals(rootPart.Parent.Name, failingName, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("simulated spawn failure");
+                }
+            };
+
+            RbxPlayer failingPlayer = harness.Bindings.ConnectActor(harness.Actor("spawn-fail-a"));
+            failingName = failingPlayer.Name;
+            RbxPlayer healthyPlayer = harness.Bindings.ConnectActor(harness.Actor("spawn-fail-b"));
+
+            Assert.DoesNotThrow(() => harness.Bindings.Scheduler.Advance(1d / 60d),
+                "a failed deferred spawn must not kill the scheduler frame for every mod.");
+
+            Assert.IsNull(failingPlayer.Character,
+                "a failed deferred spawn must cost only this player its character.");
+            Assert.IsNotNull(healthyPlayer.Character,
+                "one player's failed spawn must not prevent another player's spawn in the same " +
+                "frame.");
+            Assert.IsTrue(
+                diagnostics.Exists(line => line.Contains("simulated spawn failure")),
+                "the failure must be reported through the registry's diagnostics; log: "
+                + string.Join(" || ", diagnostics));
+        }
+
+        [Test]
+        public void Negative_RespawnParentAssignmentFailure_LeavesPlayerCharacterNullNotDetached()
+        {
+            // WHY this pins the reorder: the Parent setter materializes the subtree synchronously
+            // (the backing binder's OnEnteredWorld runs inside it), so it can still refuse after
+            // the outgoing character is already gone — a locked parent, a destroyed instance, or
+            // (as simulated here) a binder that throws while materializing. Before the reorder,
+            // Load assigned player.Character before parenting, so a throw here left Character
+            // pointing at a detached Model that never entered the world and never fired
+            // CharacterAdded — a leak the caller's own failure log wrongly called "stays nil".
+            InMemoryInstanceBackingBinder innerBinder = new();
+            RespawnFailingBackingBinder failingBinder = new(innerBinder);
+            using ProductionHarness harness = new ProductionHarness(failingBinder);
+
+            RbxPlayer player = harness.Bindings.ConnectActor(harness.Actor("respawn-parent-fail"));
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            RbxInstance firstCharacter = player.Character;
+            Assert.IsNotNull(firstCharacter);
+
+            // WHY armed only now: the join-time spawn above must succeed so there is an outgoing
+            // character to unload; only the replacement built by the LoadCharacterAsync call below
+            // should fail to parent.
+            failingBinder.FailOnNextModelEntryNamed = player.Name;
+
+            bool characterAddedFired = false;
+            player.CharacterAdded.Connect((Action<object[]>)(_ => characterAddedFired = true));
+
+            Assert.Throws<InvalidOperationException>(() =>
+                RbxCharacterFactory.Load(harness.Registry, harness.Registry.WorldRoot, player));
+
+            Assert.IsNull(player.Character,
+                "a Parent-assignment failure must leave Character null, matching reality, instead " +
+                "of pointing at a detached Model that never entered the world.");
+            Assert.IsFalse(characterAddedFired,
+                "CharacterAdded must not fire for a character that never genuinely entered the " +
+                "world.");
+            Assert.IsTrue(firstCharacter.IsDestroyed,
+                "the outgoing character is still unloaded even though the replacement failed to " +
+                "parent.");
+
+            IReadOnlyList<RbxInstance> liveInstances = harness.Registry.GetLiveInstances();
+            bool leakedCharacterModel = false;
+            for (int index = 0; index < liveInstances.Count; index++)
+            {
+                RbxInstance candidate = liveInstances[index];
+                if (string.Equals(candidate.ClassName, "Model", StringComparison.Ordinal)
+                    && string.Equals(candidate.Name, player.Name, StringComparison.Ordinal))
+                {
+                    leakedCharacterModel = true;
+                    break;
+                }
+            }
+
+            Assert.IsFalse(leakedCharacterModel,
+                "a failed parent assignment must not leak a detached Model the registry still " +
+                "tracks.");
+        }
+
+        [Test]
         public void LoadCharacter_RejectsForeignRegistryWithoutDestroyingCurrentCharacter()
         {
             using ProductionHarness harness = new ProductionHarness();
             using ProductionHarness foreign = new ProductionHarness();
             RbxPlayer player = harness.Bindings.ConnectActor(harness.Actor("invalid-registry"));
+            harness.Bindings.Scheduler.Advance(1d / 60d);
             RbxInstance original = player.Character;
             Assert.Throws<ArgumentException>(() => RbxCharacterFactory.Load(
                 foreign.Registry, foreign.Registry.WorldRoot, player));
@@ -759,6 +1139,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             ActorContext owner = harness.Actor("owner");
             harness.Bindings.ConnectActor(owner);
             RbxPlayer other = harness.Bindings.ConnectActor(harness.Actor("other"));
+            harness.Bindings.Scheduler.Advance(1d / 60d);
             RbxInstance protectedCharacter = other.Character;
             harness.Stack.Runtime.LoadMod(owner, "foreign-character", @"
                 local players = game:GetService('Players'):GetPlayers()
@@ -773,6 +1154,113 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
             Assert.AreEqual("false", harness.Store.Get("foreign-character", "allowed"));
             Assert.IsFalse(protectedCharacter.IsDestroyed);
+        }
+
+        [Test]
+        public void Negative_DisconnectAfterHijackingAnotherPlayersCharacterReference_LeavesTheirsIntact()
+        {
+            // WHY this is the hostile-audit Finding-A gate: the test above proves
+            // LoadCharacterAsync refuses to replace a character it does not own, but that
+            // authorization guards the LOAD path only. Character itself carries no such check on
+            // plain assignment (no signal, no check — the mirror's own contract), so the hijack
+            // read below must still succeed. What must NOT succeed is a disconnect afterwards
+            // destroying the character actor A pointed itself at but never owned.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actorA = harness.Actor("hijack-disconnect-a");
+            ActorContext actorB = harness.Actor("hijack-disconnect-b");
+            RbxPlayer playerA = harness.Bindings.ConnectActor(actorA);
+            RbxPlayer playerB = harness.Bindings.ConnectActor(actorB);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            RbxInstance charactersA = playerA.Character;
+            RbxInstance charactersB = playerB.Character;
+            Assert.IsNotNull(charactersA);
+            Assert.IsNotNull(charactersB);
+
+            harness.Stack.Runtime.LoadMod(actorA, "hijack-disconnect-setup", @"
+                local players = game:GetService('Players'):GetPlayers()
+                players[1].Character = players[2].Character",
+                persistToStore: false);
+            Assert.AreSame(charactersB, playerA.Character,
+                "the hijack read itself must succeed — Character assignment carries no ownership " +
+                "check.");
+
+            harness.Bindings.DisconnectActor(actorA);
+
+            Assert.IsFalse(charactersB.IsDestroyed,
+                "actor A pointing its own Player.Character at B's character must not let A's " +
+                "disconnect destroy a character A was never authorized to touch.");
+            Assert.AreSame(charactersB, playerB.Character,
+                "B's own Character reference must be untouched by A's disconnect.");
+            Assert.IsTrue(charactersA.IsDestroyed,
+                "A's disconnect must still tear down the character A's OWN lifecycle actually " +
+                "built.");
+        }
+
+        [Test]
+        public void Negative_SelfKickAfterHijackingAnotherPlayersCharacterReference_LeavesTheirsIntact()
+        {
+            // WHY this is the Kick twin of the disconnect test above: Kick and disconnect both
+            // reach RbxCharacterFactory.Unload through RbxPlayers.RemoveActor with no
+            // authorization check of their own — Unload has to be the thing that refuses to aim at
+            // a foreign character, not a gate at either call site.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actorA = harness.Actor("hijack-kick-a");
+            ActorContext actorB = harness.Actor("hijack-kick-b");
+            harness.Bindings.ConnectActor(actorA);
+            RbxPlayer playerB = harness.Bindings.ConnectActor(actorB);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            RbxInstance charactersB = playerB.Character;
+            Assert.IsNotNull(charactersB);
+
+            harness.Stack.Runtime.LoadMod(actorA, "hijack-kick-setup", @"
+                local players = game:GetService('Players'):GetPlayers()
+                players[1].Character = players[2].Character
+                players[1]:Kick()",
+                persistToStore: false);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.IsFalse(charactersB.IsDestroyed,
+                "self-kicking after pointing Character at another player's character must not " +
+                "destroy a character this actor was never authorized to touch.");
+            Assert.AreSame(charactersB, playerB.Character);
+        }
+
+        [Test]
+        public void SynchronousWorldEntryObserver_ResolvesTheOwningPlayer()
+        {
+            // WHY this is the hostile-audit Finding-B gate: Parent assignment materializes the
+            // character subtree synchronously and fires InstanceRegistry.SceneMembershipChanged
+            // (the same event LuaCsRbxApiBindings' own character-motor refresh listens to) from
+            // inside that call, before RbxCharacterFactory.Load returns. A host reacting to the
+            // character entering the world from that synchronous callback must already be able to
+            // resolve Players:GetPlayerFromCharacter — which requires Player.Character to be
+            // published BEFORE Parent is assigned, not after.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("sync-observer-a");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            bool observedEntry = false;
+            RbxPlayer resolvedDuringEntry = null;
+            harness.Registry.SceneMembershipChanged += (instance, entered) =>
+            {
+                if (!entered || observedEntry
+                    || !string.Equals(instance.ClassName, "Model", StringComparison.Ordinal)
+                    || !string.Equals(instance.Name, player.Name, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                observedEntry = true;
+                resolvedDuringEntry = harness.Bindings.Players.GetPlayerFromCharacter(instance);
+            };
+
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+
+            Assert.IsTrue(observedEntry, "the character model must synchronously enter the scene.");
+            Assert.AreSame(player, resolvedDuringEntry,
+                "a synchronous observer of the character entering the world must already be able " +
+                "to resolve the owning player — Character has to be published before Parent is " +
+                "assigned.");
         }
 
         [Test]
@@ -846,14 +1334,69 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
         }
 
+        /// <summary>
+        /// Test double for the Finding-B parent-assignment-failure gate: delegates to a plain
+        /// <see cref="InMemoryInstanceBackingBinder"/> but throws out of the second
+        /// <c>OnEnteredWorld</c> call for a "Model" named <see cref="FailOnSecondModelEntryNamed"/>
+        /// — the second Model-named-like-this entry is a respawn's replacement character, not the
+        /// join-time original, matching where <see cref="RbxCharacterFactory.Load"/> actually
+        /// materializes the subtree (the Parent setter, synchronously).
+        /// </summary>
+        private sealed class RespawnFailingBackingBinder : IInstanceBackingBinder
+        {
+            private readonly IInstanceBackingBinder _inner;
+
+            public RespawnFailingBackingBinder(IInstanceBackingBinder inner)
+            {
+                _inner = inner;
+            }
+
+            /// <summary>
+            /// Name of the character Model whose NEXT entry into the world must fail. Armed after the
+            /// join-time spawn has already succeeded, and disarmed as it fires, so exactly one
+            /// materialization is refused.
+            /// </summary>
+            public string FailOnNextModelEntryNamed { get; set; }
+
+            public void OnEnteredWorld(InstanceRecord record)
+            {
+                if (FailOnNextModelEntryNamed != null
+                    && string.Equals(record.Instance.ClassName, "Model", StringComparison.Ordinal)
+                    && string.Equals(record.Instance.Name, FailOnNextModelEntryNamed,
+                        StringComparison.Ordinal))
+                {
+                    FailOnNextModelEntryNamed = null;
+                    throw new InvalidOperationException(
+                        "simulated parent materialization failure");
+                }
+
+                _inner.OnEnteredWorld(record);
+            }
+
+            public void OnLeftWorld(InstanceRecord record) => _inner.OnLeftWorld(record);
+
+            public void OnDestroyed(InstanceRecord record) => _inner.OnDestroyed(record);
+
+            public void OnReparented(InstanceRecord record) => _inner.OnReparented(record);
+
+            public void OnNameChanged(InstanceRecord record) => _inner.OnNameChanged(record);
+
+            public void CopyBackingState(InstanceId sourceId, InstanceId destinationId) =>
+                _inner.CopyBackingState(sourceId, destinationId);
+        }
+
         private sealed class ProductionHarness : IDisposable
         {
-            public ProductionHarness()
+            // WHY an optional seam rather than a second harness type: every existing caller wants
+            // the plain in-memory binder, and only the Finding-B parent-assignment-failure test
+            // needs one that can refuse mid-materialization — a default keeps this call site
+            // unchanged everywhere else.
+            public ProductionHarness(IInstanceBackingBinder binder = null)
             {
                 LogLines = new List<string>();
                 Binder = new InMemoryInstanceBackingBinder();
                 Registry = new InstanceRegistry(
-                    binder: Binder,
+                    binder: binder ?? Binder,
                     worldAclVersion: InstanceRegistry.CurrentWorldAclVersion,
                     worldId: "players-world");
                 RbxDataModel game = DataModelBootstrap.CreateGame(Registry);

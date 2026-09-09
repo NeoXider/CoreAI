@@ -245,6 +245,12 @@ namespace CoreAI.Mods.WorldPackages
 
         RbxWorldSettings Settings { get; }
 
+        /// <summary>The port backing the currently published world; null where the host has no
+        /// physics backend (e.g. headless). Reflects the post-publish port once a commit
+        /// finishes, so a caller reading it after <see cref="IRbxWorldSessionCandidate.Commit"/>
+        /// observes the port the newly published world actually owns.</summary>
+        IRbxPhysicsPort PhysicsPort { get; }
+
         IRbxWorldSessionCandidate Stage(RbxWorldPackagePayload payload);
     }
 
@@ -544,6 +550,8 @@ namespace CoreAI.Mods.WorldPackages
         public IClickPickSource PickSource => _host.PickSource;
 
         public RbxWorldSettings Settings => CloneSettings(_settings);
+
+        public IRbxPhysicsPort PhysicsPort => _host.PhysicsPort;
 
         public IRbxWorldSessionCandidate Stage(RbxWorldPackagePayload payload)
         {
@@ -940,6 +948,11 @@ namespace CoreAI.Mods.WorldPackages
         public IClickPickSource PickSource => null;
 
         public RbxWorldSettings Settings => CloneSettings(_settings);
+
+        // WHY null: this host has no engine physics backend to bind, unlike the scene adapter over
+        // RbxWorldHost. A staged/published raycast here answers through NullRbxPhysicsPort the same
+        // way it always has; there is no port reference for a caller to re-attach to.
+        public IRbxPhysicsPort PhysicsPort => null;
 
         public IRbxWorldSessionCandidate Stage(RbxWorldPackagePayload payload)
         {
@@ -1458,6 +1471,22 @@ namespace CoreAI.Mods.WorldPackages
                     outgoing = _current;
                     previousSlots = outgoing.Stack.GameplayBindings.LogicSlots;
                     candidate.Commit();
+
+                    // WHY attach here, after Commit, and not at Stage time: candidate.Commit() is
+                    // what runs the host's PublishReplacement, which disposes the outgoing physics
+                    // port and constructs a fresh one bound to the newly published binder. Attaching
+                    // the staged WorldPhysics to the port that existed at Stage time wires it to a
+                    // port that Commit is about to dispose (Dispose only clears contact callbacks —
+                    // it never throws, so a disposed port answers every Raycast with a miss and never
+                    // fires Touched/TouchEnded, silently) and, before that dispose, keeps relaying
+                    // contacts tagged with instance ids from the OUTGOING world. Reading the host's
+                    // PhysicsPort only now yields the port PublishReplacement just built for the
+                    // incoming world.
+                    if (_host.PhysicsPort != null && stagedRbxApi.WorldPhysics != null)
+                    {
+                        stagedRbxApi.WorldPhysics.AttachPort(_host.PhysicsPort);
+                    }
+
                     _current = incoming;
                     published = true;
                 }

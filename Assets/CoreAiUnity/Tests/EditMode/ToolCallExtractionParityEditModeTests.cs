@@ -84,9 +84,13 @@ namespace CoreAI.Tests.EditMode
             });
 
             CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            // "memory" is declared to the role (so the text-extractor's known-tool-name registry
+            // recognizes the JSON as a real call, not a hallucinated/example name) but deliberately
+            // has no AIFunction below — extraction will succeed, but execution will report
+            // "Tool 'memory' not found".
             SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
                 true,
-                new List<ILlmTool>(), "X", 3, allowTextShapedToolCalls: true);
+                new List<ILlmTool> { new TestTool("memory") }, "X", 3, allowTextShapedToolCalls: true);
 
             // Tools list non-empty so the text-extraction path activates, but the AIFunction
             // for "memory" is *not* in the dictionary — extraction will succeed, but execution

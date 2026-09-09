@@ -355,9 +355,27 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 store_set('json', json)
                 store_set('roundtrip_ok', tostring(back.text == s))");
 
-            // WHY: Newtonsoft's default string escaping does not \u-escape non-ASCII characters, so the
-            // raw UTF-8 bytes (café, 中文, the emoji U+1F600) appear literally in the JSON text.
-            StringAssert.Contains("café 中文 😀", store.Get("m", "json"));
+            // WHY the expected text is rebuilt from bytes instead of written as a literal: a Lua
+            // string is a BYTE string, and the mod above builds this one out of raw UTF-8 bytes
+            // (\195\169 is one e-acute). Crossing back into C# gives one char per byte, so
+            // comparing it against a UTF-16 literal compares two different things and fails on
+            // text that is in fact intact. Decoding the same bytes as Latin-1 produces exactly the
+            // view the boundary yields.
+            string json = store.Get("m", "json");
+            // Encoding.Latin1 is absent from this profile, so the byte-per-char view is built here.
+            byte[] utf8 = System.Text.Encoding.UTF8.GetBytes("caf\u00E9 \u4E2D\u6587 \uD83D\uDE00");
+            char[] byteView = new char[utf8.Length];
+            for (int index = 0; index < utf8.Length; index++)
+            {
+                byteView[index] = (char)utf8[index];
+            }
+
+            StringAssert.Contains(new string(byteView), json);
+
+            // WHY these two together: the first says the encoder passed the bytes through instead
+            // of escaping them as \uXXXX (the mirror's behaviour), the second says nothing was lost
+            // or re-encoded on the way back — the only guarantee a mod author can build on.
+            StringAssert.DoesNotContain("\\u", json);
             Assert.AreEqual("true", store.Get("m", "roundtrip_ok"));
         }
 

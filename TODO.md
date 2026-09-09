@@ -86,10 +86,26 @@ Fixed on 2026-09-06 in response to the audit:
 
 ### Left on MVP2.5 (named, not hidden)
 
-- [ ] **The character pipeline and the character motor** (MVP8 gates P8.2/P8.6). `LoadCharacterAsync`,
-      `CharacterAdded`/`CharacterRemoving` and `DistanceFromCharacter` are stubs the suite pins as
-      stubs, and `UnityRbxCharacterMotor` has no production caller — every Humanoid in a real scene
-      gets `NullRbxCharacterMotor`, so it moves nothing and `MoveTo` succeeds instantly.
+- [ ] **The character pipeline and the character motor** (MVP8 gates P8.2/P8.6) — landed, still not
+      closed: a second and now a third review round on this same landing keep finding real
+      defects in it. **Correction:** this line was previously checked off as fully implemented,
+      including a claim that `DistanceFromCharacter` reads the live root position. It does not —
+      see the third-round entry below. What IS true: `RbxCharacterFactory` builds a Model +
+      HumanoidRootPart + Humanoid and parents it into the world on join; `LoadCharacterAsync`
+      genuinely yields, `CharacterAdded`/`CharacterRemoving` fire in order, and
+      `UnityRbxCharacterMotor` is stepped from production composition. A joining player now puts a
+      Model into Workspace — see `Assets/CoreAI/CHANGELOG.md` [Unreleased].
+      **A follow-up review of the same landing found four more defects; all four are now also
+      fixed:** the join-time spawn is deferred past the triggering dispatch instead of running
+      inline mid-join, so a script has a real chance to flip `CharacterAutoLoads` first
+      (`Players.EnsureActor`, `Scheduler.ScheduleHostCallback`); a dead character respawns after
+      `RespawnTime` seconds via a `Humanoid.Died` handler that re-checks `CharacterAutoLoads` at
+      fire time; the motor now steps from `LuaModRuntimeTickDriver.FixedUpdate`, not the render
+      pump; and `BuiltInRbxApiSkillText` gained a `Players & Characters` section. See
+      `Assets/CoreAI/CHANGELOG.md` [Unreleased] for detail.
+      **A third and final review round (2026-09-09, two independent reviewers) found and fixed
+      four more defects on this same landing, and leaves four open — see "Third review round"
+      below and `dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` §6 for the complete list.**
 - [ ] **The MVP8 acceptance manifest.** Gate P8.5 cites frozen ids "listed in the MVP8 manifest";
       no such file exists.
 - [ ] **The join snapshot** (MVP11): an admitted client still receives no filtered `ExportSnapshot`,
@@ -100,8 +116,91 @@ Fixed on 2026-09-06 in response to the audit:
 - [ ] **A two-process over-the-wire run** (N11.3–N11.6). Mirror's host mode did not deliver
       client→server inside the batch-mode test runner, so the bridge's rules are gated against its
       receive paths directly and **no claim is made that bytes cross a real socket**.
-- [ ] **MVP2 criterion 14** (budget kill within a frame slice) and **criterion 12** (one JSON
-      encoder) — see the audit; both need a decision, not just a test.
+- [ ] **MVP2 criterion 14** (budget kill within a frame slice) — see the audit; needs a decision,
+      not just a test. (Criterion 12, one JSON encoder, is decided: `HttpService` and the remote
+      codec stay two independent encoders, pinned by `RbxJsonContractEditModeTests` — see
+      `Assets/CoreAI/CHANGELOG.md` [Unreleased] and the audit.)
+
+### Third review round — 2026-09-09 (branch `fix`, two independent reviewers)
+
+Full detail and file-level evidence: `dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` §6. Not run yet:
+PlayMode against this tree. The last full EditMode run over the whole tree reported 4303 tests
+with 5 failures, all addressed by the fixes below.
+
+Fixed:
+
+- [x] The whole EditMode run hung with no results file — a synchronous test blocked the main
+      thread on `Task.Result` while its continuation was posted to the very thread it was
+      blocking (same shape as the earlier F12 deadlock). Fixed with a fixture-local
+      `SynchronizationContext` detach; the deadlock guard test now also catches a blocking
+      `.Result`/unbounded `.Wait()` on a local `Task`, not only `ThrowsAsync`/`CatchAsync`.
+- [x] Loading a world at runtime silently broke `workspace:Raycast` and `Touched`/`TouchEnded`
+      for good: the incoming Rbx API stayed wired to the physics port `Commit` was about to
+      dispose, instead of the one it had just published. The session controller now attaches the
+      post-publish port right after `Commit`.
+- [x] A joining player spawned an unanchored 4x1x2 collidable box at the world origin instead of
+      a HumanoidRootPart-sized body above it — the root part is now seeded (size + spawn height)
+      through a seeder wired into production composition, not only a test harness.
+- [x] Neither the deferred join spawn nor the death-triggered respawn had an error boundary; a
+      failure in either used to end the scheduler frame for every mod. Both are now contained and
+      reported through the registry diagnostics.
+- [x] `TimeoutLlmClientDecorator` relied on a WebGL-forbidden `TaskCompletionSource` option and
+      could leave a caller hanging if its own cleanup threw. Rewritten to run detached against an
+      explicit `TaskCompletionSource`, completed only after every resource is disposed (each
+      dispose independently guarded), with a bounded ~20 ms grace window for a cooperative inner
+      operation to finish unwinding before its result is discarded as a timeout.
+- [x] A tool argument that cannot bind is now rejected structurally before the tool body runs
+      (`ToolExecutionPolicy.TryBindArgumentsStructurally`), carrying the same schema-retry hint the
+      downstream MEAI-side rejection used to carry.
+- [x] `FileConversationSummaryStore` now logs a write failure caused by the save directory itself
+      failing to create — previously the one storage error that reached the caller silently.
+- [x] `QueuedAiOrchestrator`'s reconnect test was pinning the cross-tenant memory merge round 1
+      removed as a data leak; it now pins what replaced it (a named actor's durable key is
+      `(actor, tenant, user, session, topic, role)`), with a new assertion that a different tenant
+      sharing the same actor id still reads no history.
+
+Closed after that list was written, in the same session:
+
+- [x] One actor could destroy another actor's character. The lifecycle now owns its own
+      `LoadedCharacter` reference and tears that down; `Player.Character` stays readable and
+      re-assignable but can no longer aim destruction. Two tests hijack a foreign character and
+      then disconnect and self-kick.
+- [x] `DistanceFromCharacter` reads the live transform through `GetLivePositionStuds`, falling back
+      to the stored value only for a part with no backing object.
+- [x] A dead character's motor stops: the fixed step skips a dead humanoid and clears the motor's
+      own walk target.
+- [x] Height-based jumping reads the host's current physics port every time, so both a world loaded
+      at runtime and a script writing `Workspace.Gravity` reach the jump solver.
+- [x] A nested pair of `TimeoutLlmClientDecorator`s keeps the inner timeout's type, with a companion
+      test proving a genuine caller cancellation is not reclassified as a timeout.
+
+Still open, recorded honestly:
+
+- [ ] `Assets/CoreAIMcp`: with one notification stream open at capacity, the next ordinary POST
+      times out (`NotificationCapacity_IsBounded_AndPostContinuesWorking`). The test arrived with
+      the branch commit and has never passed; reproduced on an idle machine running that fixture
+      alone.
+- [ ] A full-assembly PlayMode sweep aborts in batch mode with "Playmode tests were aborted because
+      the player was stopped" after the built-in-roles harness. Earlier PlayMode evidence in this
+      repo comes from small filtered runs, so it is unproven whether a whole-assembly sweep ever
+      worked here.
+- [ ] `ProjectSettings/ProjectSettings.asset` and `CoreAI.slnx` carry Mirror-injected local
+      artefacts (from the optional, gitignored `Assets/Mirror` package being present locally) that
+      must not be committed.
+
+### Character motor contract — known limits, not defects of the bridge seam
+
+Both apply equally to CoreAI's own motor, so they are `Humanoid` contract gaps rather than something
+the host-provider seam introduced. Recorded so a bridge author is not surprised by them.
+
+- [ ] `Running(speed)` reports the CONFIGURED `Humanoid.WalkSpeed`, not the character's measured
+      speed, and fires only on entering the Running state rather than whenever speed changes. A
+      controller accelerating from a standstill still reports the full walk speed, so animation and
+      footstep scripts driven off this signal get the wrong number. A motor has no way to report a
+      measured speed through `IRbxCharacterMotor` today.
+- [ ] `Jump` returns nothing, so a controller that refuses a jump — no clearance, mid-animation —
+      cannot say so, and the state machine enters Jumping anyway. Any airborne sample then reads as
+      Freefall, including while ascending.
 
 **Modularity proved by removal, not by argument**: with `Assets/Mirror` taken out of the project the
 tree compiles with **0 errors**, `CoreAI.Net.Mirror.dll` is not built at all, and EditMode runs

@@ -1,4 +1,4 @@
-#if COREAI_LLM
+﻿#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -644,6 +644,33 @@ namespace CoreAI.Infrastructure.Llm
                     args = new MEAI.AIFunctionArguments(normalized);
                 }
 
+                // WHY: proves a binding failure STRUCTURALLY, before InvokeResolvedAsync is ever called, so
+                // only THIS failure may be tagged "arg-conversion" (see TryBindArgumentsStructurally below).
+                // Runs only for the raw AIFunction path (resolved.Invocation == null): a resolved delegated
+                // invocation already validated its own arguments in TryResolveInvocation.
+                if (resolved.Invocation == null &&
+                    !TryBindArgumentsStructurally(aiFunc, normalized, out string bindingError))
+                {
+                    sw.Stop();
+                    // WHY the schema hint is appended here too: the model's only way out of a rejected
+                    // call is to retry with arguments that fit, and the MEAI-side rejection this
+                    // preflight now pre-empts always carried that hint. Dropping it would make the
+                    // stronger check the less useful one.
+                    string schemaHint = BuildSchemaRetryHint(fc.Name);
+                    string bindError = "Error: " + bindingError
+                        + (string.IsNullOrEmpty(schemaHint) ? "" : " " + schemaHint);
+                    _logger.Warn($"[ToolPolicy] {fc.Name} rejected: {bindingError}", LogTag.Llm);
+                    _eventPublisher.PublishFailed(info, bindError, sw.Elapsed.TotalMilliseconds);
+                    AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds,
+                        "arg-conversion", bindError));
+                    LogCallLine(fc, false, sw.Elapsed.TotalMilliseconds, bindError);
+                    return new ToolCallResult
+                    {
+                        Result = new MEAI.FunctionResultContent(fc.CallId, bindError),
+                        Succeeded = false
+                    };
+                }
+
                 // WHY: MEAI owns argument binding. Exceptions crossing its invocation boundary
                 // are conservatively treated as possibly invoked, so a retry cannot repeat a mutation.
                 ILlmAsyncMarshaler marshaler =
@@ -797,7 +824,8 @@ namespace CoreAI.Infrastructure.Llm
             catch (Exception ex)
             {
                 // Подсказка со схемой добавляется по ФОРМЕ исключения — это только текст для модели,
-                // чтобы она перевыпустила аргументы, а не гадала по непрозрачному сообщению.
+                // чтобы она перевыпустила аргументы, а не гадала по непрозрачному сообщению. Не влияет на
+                // источник трассы ниже — см. LooksLikeArgumentConversionError.
                 string errorMessage = ex.Message;
                 if (LooksLikeArgumentConversionError(ex))
                 {
@@ -810,8 +838,13 @@ namespace CoreAI.Infrastructure.Llm
 
                 _logger.Error($"[ToolPolicy] {fc.Name} threw: {errorMessage}", LogTag.Llm);
                 _eventPublisher.PublishFailed(BuildInfo(fc), errorMessage, 0d);
-                // WHY: MEAI owns binding and execution; this boundary cannot prove the body was
-                // never entered. Conservatively prevent request retries after a possible side effect.
+                // WHY: a genuine argument-binding failure is caught STRUCTURALLY, before InvokeResolvedAsync
+                // is ever reached (see TryBindArgumentsStructurally). Tool bodies convert their own
+                // exceptions to error results; first-party tools and DelegateLlmTool enforce this. So any
+                // exception that still reaches THIS catch has already crossed into (or past) the tool body,
+                // and is ALWAYS conservatively tagged "native" to block retries after a possible side
+                // effect — this boundary can never prove the body was not entered, no matter the exception's
+                // type or message.
                 AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "native", errorMessage));
                 LogCallLine(fc, false, 0d, $"threw: {errorMessage}");
                 return new ToolCallResult
@@ -828,6 +861,85 @@ namespace CoreAI.Infrastructure.Llm
             return resolved.Invocation != null
                 ? await resolved.Invocation.InvokeAsync(cancellationToken)
                 : await function.InvokeAsync(arguments, cancellationToken);
+        }
+
+        /// <summary>
+        /// Proves an argument-binding failure STRUCTURALLY: round-trips each declared parameter's raw
+        /// value through the SAME <see cref="System.Text.Json.JsonSerializerOptions"/> MEAI itself binds
+        /// with (<see cref="MEAI.AIFunction.JsonSerializerOptions"/>), reflecting the target CLR type from
+        /// <see cref="MEAI.AIFunction.UnderlyingMethod"/> — entirely BEFORE <c>function.InvokeAsync</c> is
+        /// called, so a failure here can never have entered the tool body.
+        /// <para>
+        /// WHY not classify by the invocation exception's type/message instead: a tool body can legitimately
+        /// throw <see cref="ArgumentException"/> (or any exception whose text happens to contain "convert")
+        /// AFTER already mutating state, and that is indistinguishable from a true binding failure once it
+        /// has already crossed the invocation boundary. Running the SAME coercion the binder performs,
+        /// standalone, first, is the only way to prove "never entered the body" instead of guessing it.
+        /// </para>
+        /// <para>
+        /// Only possible when <see cref="MEAI.AIFunction.UnderlyingMethod"/> is non-null (reflection-based
+        /// functions, e.g. via <see cref="MEAI.AIFunctionFactory"/>). A hand-written <see cref="MEAI.AIFunction"/>
+        /// subclass with no underlying method cannot be proven this way; it is invoked normally and left to
+        /// the conservative "native" default in <see cref="ExecuteResolvedAsync"/> for whatever it throws.
+        /// </para>
+        /// <para>
+        /// WHY the <see cref="Type.IsInstanceOfType"/> shortcut: MEAI's own binder accepts a value already
+        /// assignable to the parameter type without going through JSON at all (e.g. a boxed <c>string</c>
+        /// for a <c>string</c> parameter, or ANY value for an <c>object</c> parameter). Forcing every value
+        /// through <c>SerializeToElement</c>/<c>Deserialize</c> regardless rejected shapes MEAI itself would
+        /// have accepted — this preflight must never be stricter than the binder it is proving.
+        /// </para>
+        /// <para>
+        /// WHY skip entirely when <see cref="MEAI.AIFunction.JsonSerializerOptions"/> is null: inventing a
+        /// default <see cref="System.Text.Json.JsonSerializerOptions"/> diverges from whatever options MEAI
+        /// actually binds with, and on IL2CPP with reflection metadata trimmed a fresh
+        /// <c>JsonSerializerOptions</c> throws <see cref="NotSupportedException"/> for every argument —
+        /// which would reject every tool call as "arg-conversion" before MEAI ever got a chance to run.
+        /// Absent real options this preflight cannot prove anything; the conservative answer is to let
+        /// MEAI decide, exactly as the code did before this preflight existed.
+        /// </para>
+        /// </summary>
+        private static bool TryBindArgumentsStructurally(MEAI.AIFunction function,
+            IDictionary<string, object> normalized, out string bindingError)
+        {
+            bindingError = null;
+            System.Reflection.MethodInfo method = function?.UnderlyingMethod;
+            System.Text.Json.JsonSerializerOptions options = function?.JsonSerializerOptions;
+            if (method == null || options == null || normalized == null || normalized.Count == 0)
+            {
+                return true;
+            }
+
+            foreach (System.Reflection.ParameterInfo parameter in method.GetParameters())
+            {
+                string name = parameter.Name;
+                if (string.IsNullOrEmpty(name) || parameter.ParameterType == typeof(CancellationToken) ||
+                    !normalized.TryGetValue(name, out object raw) || raw == null)
+                {
+                    continue;
+                }
+
+                if (parameter.ParameterType.IsInstanceOfType(raw))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    System.Text.Json.JsonElement element =
+                        System.Text.Json.JsonSerializer.SerializeToElement(raw, raw.GetType(), options);
+                    System.Text.Json.JsonSerializer.Deserialize(element, parameter.ParameterType, options);
+                }
+                catch (Exception ex) when (ex is System.Text.Json.JsonException || ex is FormatException ||
+                                            ex is InvalidCastException || ex is NotSupportedException)
+                {
+                    bindingError =
+                        $"Argument '{name}' does not match the expected type for tool '{function.Name}': {ex.Message}";
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>

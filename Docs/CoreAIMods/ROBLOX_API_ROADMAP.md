@@ -155,8 +155,11 @@ Derived rules:
   Roblox proportions), and spawning game prefabs via our InsertService-analog keeps authored
   size. (3) The meter-authored character controller stays metric; the Humanoid adapter converts
   numbers (`WalkSpeed` studs/s → m/s, `JumpPower`, …); part mass/density scales by volume
-  (×0.28³). (4) Switching the scale config (0.28 ↔ 1:1) must require touching **zero assets** —
-  only the `RobloxSpace` constant (tested: §5.1.8).
+  (×0.28³). That adapter is now a supported extension point rather than a plan: a host registers an
+  `IRbxCharacterMotorProvider` and drives Rbx characters with its own controller, with CoreAI's own
+  motor answering for whatever the provider declines — see
+  [CHARACTER_MOTOR_BRIDGE.md](CHARACTER_MOTOR_BRIDGE.md). (4) Switching the scale config (0.28 ↔ 1:1)
+  must require touching **zero assets** — only the `RobloxSpace` constant (tested: §5.1.8).
 - **Host integration profile**: embedding CoreAI mods into an **existing meter-scale Unity
   game** is a first-class scenario. A per-project host profile (ScriptableObject: `RobloxSpace`
   scale [default 0.28], capability defaults, which host services/objects are bound, the
@@ -288,6 +291,7 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-10 | `GetAsync`/`UpdateAsync` return a `DataStoreKeyInfo` second value (S1.4/S1.7 — S1.4 is `GetAsync`'s `(value, DataStoreKeyInfo)` tuple; S1.7 is `UpdateAsync`'s transform contract) | second return is `nil` in MVP9 — documented reduced fidelity | version/metadata model not emulated locally; loud stubs cover the explicit version APIs |
 | DEV-11 | `GetAsync` results are cached for 4 s (S1.5) | cache **not emulated** — every `GetAsync` reads the store | the local store is fast; emulating the cache would only add staleness surprises |
 | DEV-12 | command-bar/one-shot execution is Studio-only | `execute_lua` one-shots are a first-class **runtime** feature (full API env, same sandbox/budgets; §2 one-shot decision) | Realtime principle — the game is authored while it runs |
+| DEV-13 | a Lua string is a byte string; non-ASCII text built from UTF-8 byte sequences (e.g. `'\195\169'` for "é") is one Unicode codepoint by Luau's own character-counting (`utf8.len`), even though `#s` counts the 2 raw bytes | crossing the C#/Lua boundary maps each byte to one `System.Char` (UTF-16 code unit) — a non-ASCII codepoint spanning 2+ UTF-8 bytes becomes that many C# chars, not one; pinned by `RoundTrip_UnicodeStrings_SurviveEncodeDecodeUnescaped` (`RbxJsonContractEditModeTests`) | the VM boundary marshals bytes, not codepoints; a mod author, or C# code reading a Lua string (logs, `GetAttribute`, `JSONEncode` output), must not assume `String.Length`/indexing on a crossed string matches Luau's `utf8.len`/perceived character count for non-ASCII text |
 
 ---
 
@@ -1277,6 +1281,15 @@ records its C# marker; scheduled stubs normally use `// TODO: MVP<n> — ...`.
 The concurrent end state moves `Workspace.SignalBehavior` out of the catalog's planned row: reads
 return Deferred, while writes are deliberately unsupported per D4.
 
+`WorldRoot:Raycast`/`Touched`/`TouchEnded` shipped in MVP8 slice 8.5 but stayed silently broken
+across a **runtime** world reload until a third audit round (2026-09-09) traced it: the Rbx API
+handed to a newly loaded world stayed wired to the physics port the load was about to dispose,
+instead of the one it had just published, so every raycast against the second (and any later)
+world missed and no contact signal fired again — with nothing in the log. Fixed by attaching the
+post-publish port after the world commits rather than while it is still staging
+(`RbxWorldRuntimeSessionController.LoadConfirmedAsync`); see
+`dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` §6.
+
 #### 5.1.7 Risks and mitigations
 
 | Risk | Mitigation |
@@ -1671,8 +1684,16 @@ even raw VM tracebacks resolve to the owning mod. Until then errors surface with
     `DataStoreService`/MVP9 when TweenService shipped in 7.19.0, and the tests moved with it;
     `GetService("Bogus")` → `Bogus is not a valid Service name`.
 12. `HttpService:JSONEncode/JSONDecode` round-trips the contract fixtures (arrays, dicts,
-    nested, empty table, null, unicode); DataStore/remote marshallers are asserted to be the
-    same component (reference equality of the serializer instance in tests).
+    nested, empty table, null, unicode). **The "same component" half of this criterion was wrong
+    and is retired**: `LuaCsRbxJson` (HttpService) and `LuaCsRbxNetworkCodec` (remotes) are two
+    encoders answering two different questions, and measurement (2026-09-08) found three real
+    divergences — the remote codec wraps every table in a `$rbx` envelope and carries an argument
+    LIST at the root, it *rejects* mixed numeric/string keys and sparse arrays where the HTTP
+    encoder silently follows Roblox and drops or null-pads them, and whole numbers format as `12`
+    over HTTP versus `12.0` on the wire (`NaN`/`Infinity` likewise bare versus quoted). String
+    escaping agrees exactly. Forcing them together would change observable behaviour on both
+    paths, so what is asserted instead is the divergence itself, fixture by fixture, in
+    `RbxJsonContractEditModeTests` — a test that goes red the day either side drifts.
 13. RemoteEvent loopback: `FireServer` from a test script tagged `client` (harness context tag,
     §5.2.4) reaches `OnServerEvent` next drain, args intact through the JSON byte round-trip;
     the first `OnServerEvent` argument is asserted to be the **synthetic local player proxy**

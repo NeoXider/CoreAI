@@ -12,6 +12,7 @@ using UnityEngine;
 using VContainer;
 using VContainer.Unity;
 using Object = UnityEngine.Object;
+using System.Threading;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -23,6 +24,28 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class LlmPipelineInstallerEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY this fixture detaches: three synchronous [Test]s here block on GetAwaiter().GetResult().
+        /// Under Unity's SynchronizationContext the awaited continuation is posted back to the thread
+        /// that block is holding and the run hangs. Detaching is safe for this fixture specifically
+        /// because its tests are synchronous — they touch Unity objects on the calling thread, never
+        /// from a continuation that a detached context would move to the pool.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         private sealed class StubMemoryStore : IAgentMemoryStore
         {
             public bool TryLoad(string roleId, out AgentMemoryState state)

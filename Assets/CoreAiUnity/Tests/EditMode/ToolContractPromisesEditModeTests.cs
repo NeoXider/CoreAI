@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -183,9 +183,14 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(0, sideEffects, "The body must not run when the arguments cannot bind");
             Assert.IsFalse(result.Succeeded);
-            Assert.AreEqual("native", policy.ExecutedTraces[0].Source);
-            Assert.IsTrue(LoggingLlmClientDecorator.TraceIndicatesInvocation(policy.ExecutedTraces[0]),
-                "MEAI owns binding; failure across that boundary cannot safely prove the body was never entered.");
+            // WHY this now expects the structural preflight and not MEAI's own rejection: the arguments
+            // are checked against the method's parameter types BEFORE the invocation boundary, so this
+            // failure genuinely proves the body was never entered — which a failure thrown across MEAI's
+            // boundary never could. The weaker "native"/possibly-invoked shape is still what a failure
+            // INSIDE MEAI produces; it is pinned by the tests around this one.
+            Assert.AreEqual("arg-conversion", policy.ExecutedTraces[0].Source);
+            Assert.IsFalse(LoggingLlmClientDecorator.TraceIndicatesInvocation(policy.ExecutedTraces[0]),
+                "A structural rejection happens before invocation, so a retry cannot repeat a mutation.");
             string text = result.Result.Result.ToString();
             StringAssert.Contains("count", text);
             StringAssert.Contains("matching this schema", text);

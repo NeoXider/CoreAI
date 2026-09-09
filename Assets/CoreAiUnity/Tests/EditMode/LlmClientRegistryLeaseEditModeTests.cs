@@ -71,10 +71,19 @@ namespace CoreAI.Tests.EditMode
         }
 
         private CoreAISettingsAsset _settings;
+        private SynchronizationContext _previousSynchronizationContext;
 
+        /// <summary>
+        /// WHY: <see cref="AddOrUpdateEndpointAsync_AfterDispose_ThrowsObjectDisposedException"/> below is
+        /// a synchronous [Test] that blocks on Assert.ThrowsAsync; detaching the context sends the awaited
+        /// delegate's continuation to the thread pool instead of back onto this same blocked thread, which
+        /// would deadlock.
+        /// </summary>
         [SetUp]
         public void SetUp()
         {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
             _settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
         }
 
@@ -82,6 +91,7 @@ namespace CoreAI.Tests.EditMode
         public void TearDown()
         {
             UnityEngine.Object.DestroyImmediate(_settings);
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
         }
 
         [Test]

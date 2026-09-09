@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Lua;
 using UnityEngine;
@@ -45,6 +45,13 @@ namespace CoreAI.Composition
         [SerializeField]
         private Mods.Rbx.Binding.RbxWorldHost robloxWorldHost;
 
+        [Tooltip("Optional character motor provider. When set, every Humanoid that gets a body "
+            + "asks it first, so the game can drive Rbx characters with its own controller; "
+            + "CoreAI's own motor answers for whatever the provider declines. See "
+            + "Docs/CoreAIMods/CHARACTER_MOTOR_BRIDGE.md.")]
+        [SerializeField]
+        private Mods.Rbx.Binding.RbxCharacterMotorProviderBehaviour characterMotorProvider;
+
         [Header("Mod store")]
         [Tooltip("Optional namespace for this composition's persisted mods. Empty = the shared default " +
                  "store (main game). Set a distinct id per demo/scene so mods saved by one composition " +
@@ -70,6 +77,15 @@ namespace CoreAI.Composition
                 // no static singleton) - the host's world/binder become the Rbx API backing so Lua
                 // parts materialize as GameObjects instead of the headless in-memory default.
                 builder.RegisterInstance(robloxWorldHost);
+            }
+
+            if (characterMotorProvider != null)
+            {
+                // WHY registered as the interface: composition asks for
+                // IRbxCharacterMotorProvider, and a host with no scene state registers its own
+                // implementation the same way without deriving from the behaviour.
+                builder.RegisterInstance<Mods.Rbx.Binding.IRbxCharacterMotorProvider>(
+                    characterMotorProvider);
             }
 
             IEnumerable<string> scenes = allowedLuaScenes is { Length: > 0 } ? allowedLuaScenes : null;

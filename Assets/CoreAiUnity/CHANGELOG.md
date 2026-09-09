@@ -4,7 +4,45 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
-## [7.37.0] - 2026-09-09
+## [7.39.0] - 2026-09-10
+
+### Fixed
+
+- **The EditMode run stopped hanging on `ClientLimitedLlmClientDecoratorEditModeTests`.** The fixture
+  blocks on `Task.Result` to prove the concurrency cap holds while a request is still in flight, and
+  the decorator deliberately keeps its continuations on the captured context (WebGL has no thread pool
+  to post them to). On Unity's SynchronizationContext those two facts meet: the continuation is posted
+  to the very thread the block is holding, and the editor sits idle forever with no results file.
+  Found by running the assembly one fixture at a time under a hard time limit — it was the only one of
+  eighteen that never came back.
+- **The gate awaits in `FileAgentMemoryStore` got their `ConfigureAwait(false)` back.** Removing them
+  on 2026-09-09 was a wrong call made while chasing a different bug: without the flag the continuation
+  that RELEASES the gate is marshalled to the caller's context, while a synchronous
+  `Save`/`TryLoad`/`GetTranscriptEntries` on that same thread takes the same gate with a blocking
+  `Wait()`. That is the same deadlock as above and it reproduces in the editor, not only in a browser.
+
+## [7.38.0] - 2026-09-09
+
+### Fixed
+
+- **The whole EditMode run stopped hanging.** A synchronous test blocked on `Task.Result` while the
+  awaited continuation was posted to Unity's SynchronizationContext — the very thread the block was
+  holding — so the editor sat idle forever and no results file was ever written. The fixtures that
+  wait on a task from the calling thread now detach that context for the duration of the test, and
+  the guard test that was supposed to prevent this shape was widened: it only knew about
+  `Assert.ThrowsAsync`/`CatchAsync` and was blind to a blocking `Result`/`Wait()`. A bounded
+  `Wait(timeout)` stays allowed, because it cannot hang a run.
+- **A timeout assertion measured the assertion, not the subject.** `Assert.ThrowsAsync` runs the
+  await inside an async lambda, and the compiler puts an async method's task into the Canceled state
+  whenever its body throws an `OperationCanceledException`-derived exception — which
+  `LlmOperationTimeoutException` is. Those tests therefore reported `TaskCanceledException` no matter
+  what the decorator produced. They now read the finished task directly, the way a caller that
+  re-observes a completed request does.
+- **A write failure that could not create its directory reached the caller with nothing in the log.**
+  `FileConversationSummaryStore` logged every other storage failure; the directory case was outside
+  the try that logs.
+
+## [7.36.0] - 2026-09-09
 
 WebGL durability was rewritten around the engine's own persistence, because the channel CoreAI had been
 driving turned out to be dead. Verification state, stated plainly: the evidence below comes from a served

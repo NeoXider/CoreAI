@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -352,28 +352,44 @@ namespace CoreAI.Tests.EditMode
         {
             const string sentinel = "SENTINEL_STUDENT_PII_447188";
             string directory = CreateTemporaryDirectory();
-            string blockingPath = Path.Combine(directory, "not-a-directory");
-            File.WriteAllText(blockingPath, "block directory creation");
-            CapturingLog log = new();
-            FixedScopeProvider provider = new(new AgentMemoryScope("tenant", sentinel, "session", "topic"));
-
-            using (FileAgentMemoryStore memory = new(log, blockingPath))
+            try
             {
-                new ScopedAgentMemoryStoreDecorator(memory, provider)
-                    .Save("Teacher", new AgentMemoryState { Memory = "value" });
-            }
+                string blockingPath = Path.Combine(directory, "not-a-directory");
+                File.WriteAllText(blockingPath, "block directory creation");
+                CapturingLog log = new();
+                FixedScopeProvider provider = new(new AgentMemoryScope("tenant", sentinel, "session", "topic"));
 
-            using (FileConversationSummaryStore summaries = new(blockingPath, log))
+                using (FileAgentMemoryStore memory = new(log, blockingPath))
+                {
+                    new ScopedAgentMemoryStoreDecorator(memory, provider)
+                        .Save("Teacher", new AgentMemoryState { Memory = "value" });
+                }
+
+                using (FileConversationSummaryStore summaries = new(blockingPath, log))
+                {
+                    // WHY a throw is expected here and not from the memory store: the summary store's
+                    // contract is log-then-rethrow, so its caller decides whether a lost summary is
+                    // fatal. What this test is about is the LOG — that it names a failure and carries
+                    // neither the learner's id nor the derived scope key.
+                    Assert.Catch<Exception>(() =>
+                        new ScopedConversationSummaryStoreDecorator(summaries, provider)
+                            .SaveSummary("Teacher", "summary"));
+                }
+
+                string joined = string.Join("\n", log.Messages);
+                Assert.That(joined, Does.Contain("failed").IgnoreCase);
+                Assert.That(joined, Does.Not.Contain(sentinel));
+                Assert.That(joined, Does.Not.Contain("scope-v1-"));
+            }
+            finally
             {
-                new ScopedConversationSummaryStoreDecorator(summaries, provider)
-                    .SaveSummary("Teacher", "summary");
+                // WHY: without this, an assertion failure above skips cleanup and leaks the blocking
+                // file, so a machine with one aborted run dies in setup on every run after.
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, true);
+                }
             }
-
-            string joined = string.Join("\n", log.Messages);
-            Assert.That(joined, Does.Contain("failed").IgnoreCase);
-            Assert.That(joined, Does.Not.Contain(sentinel));
-            Assert.That(joined, Does.Not.Contain("scope-v1-"));
-            Directory.Delete(directory, true);
         }
 
         [Test]

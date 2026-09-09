@@ -29,6 +29,25 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// </summary>
         public RbxInstance Character { get; internal set; }
 
+        /// <summary>
+        /// The character <see cref="RbxCharacterFactory"/> actually built and owns for this
+        /// player — the only reference its teardown (<see cref="RbxCharacterFactory.Unload"/>)
+        /// destroys.
+        /// </summary>
+        /// <remarks>
+        /// WHY separate from <see cref="Character"/>: Character carries no ownership check on
+        /// assignment (see its own remarks — no signal, no check, exactly the mirror's contract),
+        /// so a script authorized only over its own Player can point Character at ANOTHER
+        /// player's character. If teardown destroyed whatever Character currently pointed at, that
+        /// reassignment would let the script aim destruction at a character it was never
+        /// authorized to touch (e.g. by kicking itself, or simply disconnecting — neither goes
+        /// through LoadCharacterAsync's authorization check, which guards only the load path).
+        /// Tracking what the lifecycle itself built for this player, and tearing down THAT, closes
+        /// the hole. Deliberate choice: assignment from Lua still changes what scripts read via
+        /// Character — it just can no longer redirect what gets destroyed.
+        /// </remarks>
+        internal RbxInstance LoadedCharacter { get; set; }
+
         /// <summary>Mirror <c>Player.CharacterAdded(character)</c>.</summary>
         public RbxScriptSignal CharacterAdded => GetOrCreateSignal("CharacterAdded");
 
@@ -61,6 +80,20 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// lives in an external sink that this engine-free assembly cannot reference.
         /// </summary>
         internal Func<RbxInstance, RbxVector3> PartPositionReader { get; set; }
+
+        /// <summary>
+        /// Seeds a newly built root part's size and spawn position into the same external sink,
+        /// for the same reason <see cref="PartPositionReader"/> is a delegate: BasePart spatial
+        /// state lives outside this engine-free assembly. Null skips seeding — a raw-registry
+        /// caller with no part sink has nothing to seed and the part keeps the sink's plain
+        /// default until something writes to it.
+        /// </summary>
+        /// <remarks>
+        /// WHY public and not internal like <see cref="PartPositionReader"/>: a test that wants to
+        /// pin the spawn transform needs to wire a fake sink from outside this assembly, and this
+        /// assembly grants InternalsVisibleTo only to the network transport, not the test assembly.
+        /// </remarks>
+        public Action<RbxInstance, RbxVector3, RbxVector3> RootPartSpawnSeeder { get; set; }
 
         private RbxInstance ResolveRootPart()
         {
@@ -138,14 +171,18 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         public const double DefaultRespawnTime = 5d;
 
         /// <summary>
-        /// Whether characters respawn on their own, per the mirror's default of true. Nothing
-        /// respawns yet — the character pipeline is a later slice — but the flag is real state a
-        /// script can set and read back, which is what a respawn-timer script does first.
+        /// Whether characters spawn (on join) and respawn (on death) on their own, per the
+        /// mirror's default of true. Read at the moment the deferred join-spawn and the
+        /// death-triggered respawn actually fire — see <see cref="EnsureActor"/>'s deferred spawn
+        /// and the Lua-CSharp bindings' Humanoid.Died wiring — not when the join or death
+        /// happened, so a script that flips this off still wins the race.
         /// </summary>
         public bool CharacterAutoLoads { get; set; } = true;
 
-        /// <summary>Seconds before a character respawns when <see cref="CharacterAutoLoads"/> is
-        /// true. Mirror default 5.0; negative values are refused by the write path.</summary>
+        /// <summary>Seconds after a character's Humanoid dies before it respawns, when
+        /// <see cref="CharacterAutoLoads"/> is (still) true when the timer elapses. Consumed by
+        /// the Lua-CSharp bindings' Humanoid.Died wiring. Mirror default 5.0; negative values are
+        /// refused by the write path.</summary>
         public double RespawnTime { get; set; } = DefaultRespawnTime;
 
         /// <summary>
@@ -164,6 +201,16 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// <c>DistanceFromCharacter</c> can answer. Null in a world with no part sink.
         /// </summary>
         internal Func<RbxInstance, Datatypes.RbxVector3> PartPositionReader { get; set; }
+
+        /// <summary>
+        /// Seeds a newly spawned character's root part (size, spawn position), handed to every
+        /// Player this service creates. See <see cref="RbxPlayer.RootPartSpawnSeeder"/>.
+        /// </summary>
+        public Action<RbxInstance, Datatypes.RbxVector3, Datatypes.RbxVector3> RootPartSpawnSeeder
+        {
+            get;
+            set;
+        }
 
         /// <summary>Returns the real Player registered for an actor, creating it once if needed.</summary>
         public RbxPlayer EnsureActor(InstanceRegistry registry, string actorId)
@@ -220,6 +267,7 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 }
 
                 player.PartPositionReader = PartPositionReader;
+                player.RootPartSpawnSeeder = RootPartSpawnSeeder;
                 CreatePlayerContainer(registry, player, actor, "Backpack");
                 CreatePlayerContainer(registry, player, actor, "PlayerGui");
                 CreatePlayerContainer(registry, player, actor, "PlayerScripts");
@@ -231,9 +279,58 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 // then its character, and a PlayerAdded handler that reads Player.Character expects
                 // nil on a world where CharacterAutoLoads is off. Firing them the other way round
                 // would make that read depend on a setting the handler cannot see.
-                if (CharacterAutoLoads && registry.WorldRoot != null)
+                //
+                // WHY deferred rather than spawned inline (F7): EnsureActor runs from mod-context
+                // creation and from inside network message dispatch, so an inline spawn could commit
+                // before a script had any chance to flip CharacterAutoLoads, and could land the
+                // spawn's registry mutations in the middle of a remote-dispatch try/catch. Routing it
+                // through the scheduler's host-callback slot re-reads CharacterAutoLoads (and checks
+                // the player still has no character — an explicit LoadCharacterAsync may have already
+                // beaten this to it) once the current dispatch has fully drained, on the next
+                // scheduler Advance. No Scheduler bound yet (raw-registry callers with no Lua-CSharp
+                // bindings) falls back to the old inline spawn — there is no drain to defer past.
+                if (Scheduler != null)
                 {
-                    RbxCharacterFactory.Load(registry, registry.WorldRoot, player);
+                    Scheduler.ScheduleHostCallback(0d, () =>
+                    {
+                        if (player.IsDestroyed || player.Character != null
+                            || !CharacterAutoLoads)
+                        {
+                            return;
+                        }
+
+                        if (registry.WorldRoot == null)
+                        {
+                            LogSkippedAutoLoad(registry, player);
+                            return;
+                        }
+
+                        // WHY caught here rather than left to propagate: this callback runs from
+                        // the scheduler's host-callback slot, outside any mod's dispatch try/catch
+                        // (ResumeDelayedThreads rethrows and neither Advance nor the tick driver
+                        // catches), so an unguarded failure here — an instance cap, an ACL refusal
+                        // on the world-root parent — would kill the whole scheduler frame for
+                        // every mod. A failed spawn should cost only this player its character.
+                        try
+                        {
+                            RbxCharacterFactory.Load(registry, registry.WorldRoot, player);
+                        }
+                        catch (Exception exception)
+                        {
+                            LogFailedAutoLoad(registry, player, exception);
+                        }
+                    });
+                }
+                else if (CharacterAutoLoads)
+                {
+                    if (registry.WorldRoot == null)
+                    {
+                        LogSkippedAutoLoad(registry, player);
+                    }
+                    else
+                    {
+                        RbxCharacterFactory.Load(registry, registry.WorldRoot, player);
+                    }
                 }
 
                 return player;
@@ -355,6 +452,33 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             RbxCharacterFactory.Unload(player);
             player.Destroy();
             return true;
+        }
+
+        private static void LogSkippedAutoLoad(InstanceRegistry registry, RbxPlayer player)
+        {
+            // WHY the registry seam carries this: the service is engine-free and holds no logger,
+            // while the host wires Diagnostics to the console.
+            Action<string> diagnostics = registry.Diagnostics;
+            if (diagnostics != null)
+            {
+                diagnostics("[CoreAI.RbxApi] Skipped the join-time character auto-load for '"
+                    + player.Name + "': CharacterAutoLoads is on but the registry has no world "
+                    + "root, so Character stays nil.");
+            }
+        }
+
+        private static void LogFailedAutoLoad(InstanceRegistry registry, RbxPlayer player,
+            Exception exception)
+        {
+            // WHY the registry seam carries this: same reasoning as LogSkippedAutoLoad — the
+            // service is engine-free and holds no logger.
+            Action<string> diagnostics = registry.Diagnostics;
+            if (diagnostics != null)
+            {
+                diagnostics("[CoreAI.RbxApi] The deferred join-time character auto-load for '"
+                    + player.Name + "' failed and was skipped, so Character stays nil: "
+                    + exception);
+            }
         }
 
         private static void CreatePlayerContainer(InstanceRegistry registry, RbxPlayer player,

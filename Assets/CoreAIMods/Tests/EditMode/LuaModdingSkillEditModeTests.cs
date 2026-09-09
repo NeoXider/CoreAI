@@ -132,7 +132,9 @@ namespace CoreAI.Tests.EditMode
                 "Humanoid", "TakeDamage", "MoveToFinished", "workspace:Raycast", "RaycastParams",
                 "15,000 studs", "workspace.Gravity", "196.2", "BasePart.Touched", "TouchEnded",
                 "IntValue", "NumberValue", "StringValue", "BoolValue", "ObjectValue",
-                "Vector3Value", "CFrameValue", "Color3Value", "leaderstats"
+                "Vector3Value", "CFrameValue", "Color3Value", "leaderstats",
+                "LoadCharacterAsync", "LoadCharacter", "CharacterAdded", "CharacterRemoving",
+                "DistanceFromCharacter", "CharacterAutoLoads", "RespawnTime"
             };
             foreach (string api in required)
             {
@@ -195,6 +197,47 @@ namespace CoreAI.Tests.EditMode
                 StringAssert.DoesNotContain($"`{serviceName}` (MVP", text,
                     $"'{serviceName}' now ships (a real ServiceCatalog registration, not a stub) " +
                     "but the skill still marks it with an (MVPnn) unimplemented rung");
+            }
+        }
+
+        /// <summary>
+        /// Ratchet, member-level (F11): the service-level ratchet above reads ServiceCatalog only,
+        /// so retiring a MEMBER-level stub from <see cref="ClassCatalog"/> (Player/Players'
+        /// character surface shipped in MVP8, replacing what used to be
+        /// <c>RegisterKnownUnimplementedMembers</c> entries) went unnoticed — the skill simply never
+        /// mentioned the five/six members that started working. This reads the shipped/stub truth
+        /// LIVE off a fresh <see cref="ClassCatalog.CreateMvp1"/>: a member that is NOT a known-
+        /// unimplemented entry has shipped and MUST be named in the skill text, or the next retired
+        /// stub goes unnoticed here exactly like the last one did.
+        /// </summary>
+        [Test]
+        public void RbxApiInstructions_DocumentsEveryShippedCharacterMember()
+        {
+            string text = BuiltInRbxApiSkillText.Instructions;
+            ClassCatalog catalog = ClassCatalog.CreateMvp1();
+
+            (string ClassName, string MemberName)[] shippedCharacterMembers =
+            {
+                ("Players", "CharacterAutoLoads"),
+                ("Players", "RespawnTime"),
+                ("Player", "LoadCharacterAsync"),
+                ("Player", "LoadCharacter"),
+                ("Player", "CharacterAdded"),
+                ("Player", "CharacterRemoving"),
+                ("Player", "DistanceFromCharacter"),
+            };
+
+            foreach ((string className, string memberName) in shippedCharacterMembers)
+            {
+                bool isKnownStub = catalog.TryGetKnownUnimplementedMember(
+                    className, memberName, RbxKnownUnimplementedMemberAccess.Read,
+                    out _, out _);
+                Assert.IsFalse(isKnownStub,
+                    $"'{className}.{memberName}' is still a ClassCatalog known-unimplemented " +
+                    "member; update this ratchet's expectations, not the skill.");
+                StringAssert.Contains(memberName, text,
+                    $"'{className}.{memberName}' ships (not a ClassCatalog stub) but the skill " +
+                    "text never mentions it.");
             }
         }
 

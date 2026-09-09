@@ -21,10 +21,18 @@ namespace CoreAI.Tests.EditMode
     {
         private string _root;
         private FileLuaModSourceStore _store;
+        private SynchronizationContext _previousSynchronizationContext;
 
+        /// <summary>
+        /// WHY: three synchronous [Test]s in this fixture (the ExactReplacement_Sync* cases) block on
+        /// Assert.ThrowsAsync/CatchAsync; detaching the context sends the awaited delegate's continuation
+        /// to the thread pool instead of back onto this same blocked thread, which would deadlock.
+        /// </summary>
         [SetUp]
         public void SetUp()
         {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
             _root = Path.Combine(Path.GetTempPath(), "CoreAITestLuaModSourceStore_" + Path.GetRandomFileName());
             Directory.CreateDirectory(_root);
             _store = new FileLuaModSourceStore(_root);
@@ -34,6 +42,7 @@ namespace CoreAI.Tests.EditMode
         public void TearDown()
         {
             _store = null;
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
 
             try
             {

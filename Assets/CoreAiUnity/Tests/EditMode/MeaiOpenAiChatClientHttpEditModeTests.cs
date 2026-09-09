@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
@@ -17,9 +18,19 @@ namespace CoreAI.Tests.EditMode
     /// <summary>EditMode HTTP transport for <see cref="MeaiOpenAiChatClient"/> via <see cref="MeaiOpenAiChatClientEditorTestHooks"/> (no real network).</summary>
     public sealed class MeaiOpenAiChatClientHttpEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY: <see cref="GetResponseAsync_ClientOwnedApiWithoutModel_FailsWithAnExplicitConfigurationError"/>
+        /// below is a synchronous [Test] that blocks on Assert.ThrowsAsync; detaching the context sends the
+        /// awaited delegate's continuation to the thread pool instead of back onto this same blocked
+        /// thread, which would deadlock.
+        /// </summary>
         [SetUp]
         public void SetUp()
         {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
             MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
         }
 
@@ -27,6 +38,7 @@ namespace CoreAI.Tests.EditMode
         public void TearDown()
         {
             MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
         }
 
         [Test]

@@ -107,6 +107,10 @@ namespace CoreAI.Infrastructure.Llm
                     File.WriteAllText(temp, JsonConvert.SerializeObject(safe, JsonSettings));
                     if (File.Exists(_path))
                     {
+                        // WHY File.Replace and not delete-then-move: File.Replace swaps the temp
+                        // file into place atomically. Deleting _path first and then moving temp
+                        // over it is two separate filesystem operations — if the process dies
+                        // between them, every endpoint in the registry is lost.
                         File.Replace(temp, _path, null);
                     }
                     else

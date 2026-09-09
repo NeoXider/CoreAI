@@ -23,6 +23,27 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class CoreAiFacadeEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY this fixture detaches: it asserts through Assert.ThrowsAsync/CatchAsync, which BLOCK
+        /// the calling thread until the awaited delegate finishes — being inside an async test does
+        /// not change that. Under Unity's SynchronizationContext the delegate's continuation is
+        /// posted back to that same blocked thread, and the editor deadlocks with no results file.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         [SetUp]
         public void ResetFacade()
         {
@@ -204,13 +225,72 @@ namespace CoreAI.Tests.EditMode
                 });
 
                 ActorContext expectedActor = actorIdentityProvider.GetActorContext(RoleId);
-                string expectedDurableKey = AgentMemoryScopeKey.Resolve(expectedActor, RoleId);
-                Assert.IsTrue(backingStore.HasSeen(expectedDurableKey),
+                // WHY: AgentMemoryScopeKey.Resolve(ActorContext, roleId) does not replicate the
+                // host-scope-provider fallback the real in-turn path uses, so it cannot predict this
+                // key independently - assert the property it stands for directly instead: one single
+                // key was used, and it is actor-derived, not the bare RoleId legacy key.
+                Assert.AreEqual(1, backingStore.SeenKeys.Length,
+                    "Both requests of the same actor/session must resolve to one durable memory key.");
+                string firstActorKey = backingStore.SeenKeys[0];
+                StringAssert.IsMatch("^actor-v1-[0-9a-f]{64}$", firstActorKey,
                     "The scoped production memory store must receive the ActorId-derived durable key.");
                 Assert.AreEqual(expectedActor.ActorId, firstRequest.ActorContext?.ActorId);
                 Assert.AreEqual(expectedActor.SessionId, firstRequest.ActorContext?.SessionId);
                 Assert.AreEqual(expectedActor.ActorId, secondRequest.ActorContext?.ActorId);
                 Assert.AreEqual(expectedActor.SessionId, secondRequest.ActorContext?.SessionId);
+
+                // WHY (F14): a key matching "^actor-v1-[0-9a-f]{64}$" alone proves nothing - any SHA-256 of
+                // anything satisfies it. Run a second, different actor through the SAME long-lived
+                // memoryStore/backingStore and assert its key differs from the first actor's: this is the
+                // value assertion that would have caught F1 (an ActorId-agnostic pin merging two actors'
+                // memory onto one key).
+                LocalActorIdentityProvider otherActorIdentityProvider = new(
+                    "facade-actor-2",
+                    "facade-session-2",
+                    "",
+                    ActorGrantSet.None,
+                    AgentMemoryScope.Empty);
+                SequentialLlmClient otherLlmClient = new();
+                CoreAISettingsAsset otherSettings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+                otherSettings.ConfigureOffline();
+                try
+                {
+                    ContainerBuilder otherBuilder = new();
+                    otherBuilder.RegisterInstance<IActorIdentityProvider>(otherActorIdentityProvider);
+                    otherBuilder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
+                    otherBuilder.RegisterCore();
+                    otherBuilder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(otherSettings);
+                    otherBuilder.RegisterAgentPrompts(null);
+                    otherBuilder.RegisterInstance<ILlmClient>(otherLlmClient);
+                    otherBuilder.RegisterInstance<IAiOrchestrationMetrics>(new NullAiOrchestrationMetrics());
+                    otherBuilder.RegisterInstance(new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+                    otherBuilder.RegisterInstance<IAuthorityHost>(new SoloAuthorityHost());
+                    otherBuilder.RegisterInstance<IAgentMemoryScopeProvider>(legacyScopeProvider);
+                    otherBuilder.RegisterInstance<IAgentMemoryStore>(memoryStore);
+                    otherBuilder.RegisterCorePortable(
+                        suppressDefaultConversationSummaryStore: false,
+                        suppressDefaultAgentMemoryStore: true);
+
+                    using IObjectResolver otherContainer = otherBuilder.Build();
+                    CoreAi.SetResolver(() => otherContainer.Resolve<IAiOrchestrationService>());
+
+                    AiTaskRequest otherActorRequest = new()
+                    {
+                        RoleId = RoleId,
+                        Hint = "other-actor"
+                    };
+                    Assert.AreEqual("reply-1", await CoreAi.OrchestrateAsync(otherActorRequest));
+                }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(otherSettings);
+                }
+
+                Assert.AreEqual(2, backingStore.SeenKeys.Length,
+                    "A different actor must resolve to its own durable memory key.");
+                Assert.IsFalse(
+                    string.Equals(backingStore.SeenKeys[0], backingStore.SeenKeys[1], StringComparison.Ordinal),
+                    "Two different actors must never collide on the same durable memory key.");
             }
             finally
             {
@@ -223,10 +303,19 @@ namespace CoreAI.Tests.EditMode
         public async Task OrchestrateAsync_ProductionComposition_ReconnectResumesOneDurableMemoryWithoutFork()
         {
             const string RoleId = "ReconnectMemoryRegression";
+            // WHY: a genuine reconnect resumes the SAME lesson - the host looks tenant/user/topic up from
+            // durable per-actor state, it does not re-roll them per socket. Only the low-level connection
+            // id (ActorContext.SessionId, "used only for cancellation" - not part of AgentMemoryScope, so
+            // not part of the durable key) changes between connections. Fixing this at the source (a stable
+            // AgentMemoryScope across reconnects) is what keeps the actor on one durable key - no
+            // process-wide pin in ScopedAgentMemoryStoreDecorator required, and no such pin can distinguish
+            // this from a genuine tenant/topic change (see AgentMemoryActorScopeKeyEditModeTests'
+            // OneLongLivedDecorator tests for the fork case).
+            AgentMemoryScope stableLessonScope = new AgentMemoryScope("school-tenant", "learner-1", "lesson-7", "unit-3");
             ReconnectingIdentityProvider identityProvider = new ReconnectingIdentityProvider(
                 "durable-reconnect-actor",
                 "session-before",
-                new AgentMemoryScope("legacy-a", "user-a", "connection-a", "topic-a"));
+                stableLessonScope);
             RecordingMemoryStore backingStore = new RecordingMemoryStore();
             FixedMemoryScopeProvider legacyScopeProvider = new FixedMemoryScopeProvider();
             ScopedAgentMemoryStoreDecorator memoryStore = new ScopedAgentMemoryStoreDecorator(
@@ -262,9 +351,7 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual("reply-1", await CoreAi.OrchestrateAsync(firstRequest));
                 ActorContext firstActor = firstRequest.ActorContext.Value;
 
-                identityProvider.Reconnect(
-                    "session-after",
-                    new AgentMemoryScope("legacy-b", "user-b", "connection-b", "topic-b"));
+                identityProvider.Reconnect("session-after", stableLessonScope);
 
                 AiTaskRequest secondRequest = new AiTaskRequest
                 {
@@ -276,10 +363,18 @@ namespace CoreAI.Tests.EditMode
 
                 Assert.AreEqual(firstActor.ActorId, secondActor.ActorId);
                 Assert.AreNotEqual(firstActor.SessionId, secondActor.SessionId);
-                string durableKey = AgentMemoryScopeKey.Resolve(firstActor, RoleId);
-                Assert.AreEqual(durableKey, AgentMemoryScopeKey.Resolve(secondActor, RoleId));
-                CollectionAssert.AreEquivalent(new[] { durableKey }, backingStore.SeenKeys,
-                    "The production store must never fork a durable actor into a session-keyed memory.");
+                Assert.AreEqual(firstActor.MemoryScope.TenantId, secondActor.MemoryScope.TenantId);
+                Assert.AreEqual(firstActor.MemoryScope.UserId, secondActor.MemoryScope.UserId);
+                Assert.AreEqual(firstActor.MemoryScope.TopicId, secondActor.MemoryScope.TopicId);
+                // WHY: the low-level connection SessionId differs (a genuine reconnect), but the durable
+                // key must come out identical because it is derived from ActorId + AgentMemoryScope only -
+                // never from ActorContext.SessionId. Proves the real production behavior directly: exactly
+                // one durable key was ever written to, with no pin anywhere in the memory decorator.
+                Assert.AreEqual(1, backingStore.SeenKeys.Length,
+                    "A reconnect that resumes the same AgentMemoryScope must never fork a durable actor " +
+                    "into a second memory key.");
+                string durableKey = backingStore.SeenKeys[0];
+                StringAssert.IsMatch("^actor-v1-[0-9a-f]{64}$", durableKey);
 
                 ChatMessage[] history = backingStore.GetChatHistory(durableKey);
                 Assert.AreEqual(4, history.Length);
@@ -360,11 +455,6 @@ namespace CoreAI.Tests.EditMode
             private readonly InMemoryAgentMemoryStore _inner = new InMemoryAgentMemoryStore();
 
             public string[] SeenKeys => new List<string>(_seenKeys.Keys).ToArray();
-
-            public bool HasSeen(string roleId)
-            {
-                return _seenKeys.ContainsKey(roleId);
-            }
 
             public bool TryLoad(string roleId, out AgentMemoryState state)
             {

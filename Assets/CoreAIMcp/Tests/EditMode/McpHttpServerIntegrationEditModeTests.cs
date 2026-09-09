@@ -184,6 +184,29 @@ namespace CoreAI.Mcp.Tests
             Assert.AreEqual(HttpStatusCode.OK, post.StatusCode);
         }
 
+        [Test]
+        public async Task AbandonedNotificationStream_DoesNotBlockLaterRequests_OrCleanShutdown()
+        {
+            // WHY: a client that opens the notification stream and never reads it (crashed, killed, or a
+            // client that only cares about the headers) must not wedge the transport - the open connection
+            // itself, not "did anyone drain it", is what must never block ordinary request handling.
+            _server.MaxNotificationStreams = 1;
+            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(10) };
+            using HttpResponseMessage init = await PostAsync(client, InitializeBody(), "application/json");
+            HttpResponseMessage stream = await OpenNotificationsAsync(client,
+                init.Headers.GetValues(McpServerInfo.SessionHeader).Single());
+            Assert.AreEqual(HttpStatusCode.OK, stream.StatusCode);
+            stream.Dispose();
+
+            using HttpResponseMessage post = await PostAsync(client, InitializeBody(), "application/json");
+            Assert.AreEqual(HttpStatusCode.OK, post.StatusCode);
+
+            _server.Stop();
+            Assert.AreSame(_server.Completion, await Task.WhenAny(_server.Completion, Task.Delay(3000)),
+                "Stop must release an abandoned notification stream's dedicated thread without hanging.");
+            await _server.Completion;
+        }
+
         private Task<HttpResponseMessage> OpenNotificationsAsync(HttpClient client, string session)
         {
             HttpRequestMessage request = new(HttpMethod.Get, Url);

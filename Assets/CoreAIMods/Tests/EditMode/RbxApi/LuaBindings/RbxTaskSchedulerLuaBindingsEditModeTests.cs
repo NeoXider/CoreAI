@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Globalization;
 using System.Threading;
 using CoreAI.Ai;
@@ -846,6 +847,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 RbxApi = bindings,
                 MaxSchedulerThreadsPerActor = 1
             });
+            // WHY characters are off here: this gate is about signal ADMISSION, and a joining actor
+            // now gets a character Model parented into Workspace (Players.CharacterAutoLoads, the
+            // mirror's default). That is one more ChildAdded than this world is about, and it would
+            // make the error count below depend on world traffic the test never asked for.
+            bindings.Players.CharacterAutoLoads = false;
+
             ActorContext saturatedActor = new LocalActorIdentityProvider("signal-saturated-actor")
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
             ActorContext healthyActor = new LocalActorIdentityProvider("signal-healthy-actor")
@@ -867,7 +874,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual("yes", store.Get("signal-healthy", "delivered"));
             IReadOnlyList<LuaModHandlerError> errors =
                 stack.Runtime.GetRecentHandlerErrors("signal-saturated");
-            Assert.AreEqual(1, errors.Count);
+            // WHY the message carries the errors: a bare count tells you the number is wrong and
+            // nothing about which extra error appeared, which is the only thing that names a cause.
+            Assert.AreEqual(1, errors.Count,
+                "saturated actor errors: "
+                + string.Join(" || ", errors.Select(error => error.Error)));
             StringAssert.Contains("THREAD_CAP", errors[0].Error);
             Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("signal-healthy"));
         }

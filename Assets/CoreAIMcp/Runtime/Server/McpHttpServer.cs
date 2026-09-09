@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
@@ -543,6 +543,31 @@ namespace CoreAI.Mcp.Server
                 await DenyAsync(context, 409, "Notification stream already open or stream capacity reached.", cancellationToken).ConfigureAwait(false);
                 return;
             }
+
+            // WHY: this loop is open-ended - a client can hold the connection for hours. HandleContextAsync
+            // NOTE: this did NOT fix NotificationCapacity_IsBounded_AndPostContinuesWorking, which still
+            // times out under the Unity editor and whose cause is not yet understood. It stands on its
+            // own merits - a stream held open for hours has no business occupying a pooled worker - and
+            // AbandonedNotificationStream_DoesNotBlockLaterRequests_OrCleanShutdown covers what it does
+            // guarantee. Do not read it as a closed investigation.
+            // dispatches every request (POST included) through the shared ThreadPool via Task.Run; awaiting
+            // an unbounded loop inline on that pooled worker ties it up for the stream's whole lifetime.
+            // TaskCreationOptions.LongRunning hints the scheduler to give the loop its own dedicated thread
+            // instead of a pooled slot, so an open (or merely slow-draining) stream can never compete with -
+            // or starve - ordinary short-lived request handling behind it. The thread is not leaked: it
+            // observes the same linked cancellation as every other request (Stop() cancels the server-wide
+            // token), and this method still awaits it to completion, so HandleContextAsync's request-slot
+            // release and Stop()'s Completion tracking are unaffected.
+            await Task.Factory.StartNew(
+                    () => RunNotificationLoopAsync(context, sessionId, stream, cancellationToken),
+                    CancellationToken.None, TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+                    TaskScheduler.Default)
+                .Unwrap().ConfigureAwait(false);
+        }
+
+        private async Task RunNotificationLoopAsync(HttpListenerContext context, string sessionId,
+            NotificationStream stream, CancellationToken cancellationToken)
+        {
             using CancellationTokenSource lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stream.Token);
             cancellationToken = lifetime.Token;
             try

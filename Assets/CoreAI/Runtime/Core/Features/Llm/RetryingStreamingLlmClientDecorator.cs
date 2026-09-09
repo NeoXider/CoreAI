@@ -178,12 +178,17 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             terminalErrorChunk = current;
 
-                            // WHY: "Already executed" (IsCommittingChunk) is checked TOGETHER WITH
-                            // retryability, and it is what protects against double execution. Deciding on
-                            // the code alone would leave that protection resting on producers happening to
-                            // leave ErrorCode = None on a chunk that carries ExecutedToolCalls: label such
-                            // a chunk Timeout/BackendUnavailable honestly and spawn_quiz would run a second
-                            // time and memory would be written twice.
+                            // WHY the commit check is ANDed in after the error-code check, not dropped:
+                            // a retryable ErrorCode alone does not mean the chunk is safe to replay. If
+                            // this same chunk already carries executed tool calls or text
+                            // (IsCommittingChunk), those effects already happened — retrying here would
+                            // replay the stream and run the tool a second time. That is what protects
+                            // against double execution, so it must gate EVERY retryable code, even
+                            // though the error-code check is evaluated first: deciding on the code alone
+                            // would leave the protection resting on producers happening to leave
+                            // ErrorCode = None on a chunk that carries ExecutedToolCalls — label such a
+                            // chunk Timeout/BackendUnavailable honestly and spawn_quiz would run a
+                            // second time and memory would be written twice.
                             if (IsRetryableError(current.ErrorCode) && !IsCommittingChunk(current))
                             {
                                 retryablePreCommitFailure = true;

@@ -19,6 +19,27 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class CoreAiWebGlPersistenceEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY: <see cref="WaitForCompletion_CancellationDoesNotBecomeSuccess"/> below is a synchronous
+        /// [Test] that blocks on Assert.CatchAsync; detaching the context sends the awaited delegate's
+        /// continuation to the thread pool instead of back onto this same blocked thread, which would
+        /// deadlock.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         [Test]
         public void SyncAsync_AnswersImmediately_AndNeverParksOnACallback()
         {

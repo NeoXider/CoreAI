@@ -19,6 +19,26 @@ namespace CoreAI.Core.Tests.EditMode
     /// </summary>
     public sealed class OrchestrationResilienceEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY this fixture detaches: a test here waits on a Task from the calling thread. Under
+        /// Unity's SynchronizationContext that task's continuation is posted back to the very thread
+        /// the wait is blocking, and the whole EditMode run hangs with no results file.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         private const int RaceRounds = 200;
         private const int RaceBatch = 32;
 

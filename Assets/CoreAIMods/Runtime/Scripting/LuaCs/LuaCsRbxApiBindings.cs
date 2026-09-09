@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
 using System.Threading;
@@ -101,6 +101,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly RbxWorldPhysics _worldPhysics;
         private Func<RbxHumanoid, IRbxCharacterMotor> _characterMotorFactory;
         private readonly Dictionary<RbxHumanoid, IRbxCharacterMotor> _characterMotors = new();
+        private readonly List<RbxHumanoid> _motorRefreshScratch = new();
         private readonly IClickPickSource _pickSource;
         private readonly ModConnectionRegistry _connections;
         private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
@@ -155,6 +156,9 @@ namespace CoreAI.Ai.LuaCs
         /// <paramref name="clockSource"/> backs every Lua-visible clock; pass a game-owned
         /// source to redefine time, or omit it for the production system-clock default whose
         /// scaled game time delegates to the scheduler's clock.
+        /// <paramref name="defaultCharacterAutoLoads"/> seeds <c>Players.CharacterAutoLoads</c>
+        /// before any actor can join (F7): a script cannot reliably race the first join to flip
+        /// the flag, so a host that wants auto-spawn off from the start configures it here instead.
         /// </summary>
         public LuaCsRbxApiBindings(InstanceRegistry registry = null, RbxDataModel game = null,
             RbxEnumRegistry enums = null, Action<string> log = null, IPartPropertySink partSink = null,
@@ -162,7 +166,7 @@ namespace CoreAI.Ai.LuaCs
             ModConnectionRegistry connections = null, IClickPickSource pickSource = null,
             IRbxRuntimeObservabilitySink observability = null,
             INetworkBridge networkBridge = null, Func<DateTimeOffset> utcNowProvider = null,
-            IRbxClockSource clockSource = null)
+            IRbxClockSource clockSource = null, bool defaultCharacterAutoLoads = true)
         {
             _registry = registry ?? new InstanceRegistry();
             _connections = connections ?? new ModConnectionRegistry();
@@ -204,6 +208,11 @@ namespace CoreAI.Ai.LuaCs
                 throw new ArgumentException(
                     "the game tree has no Players service", nameof(game));
             }
+
+            // WHY set here, before Scheduler/PartPositionReader are wired below and long before any
+            // actor can join: this is the one point in composition guaranteed to run before
+            // EnsureActor could possibly fire (F7). A script cannot beat this.
+            _players.CharacterAutoLoads = defaultCharacterAutoLoads;
 
             _networkCodec = new LuaCsRbxNetworkCodec(_registry, _enums, _log);
             _partSink = partSink ?? new InMemoryPartPropertySink();
@@ -335,6 +344,7 @@ namespace CoreAI.Ai.LuaCs
             _players.PlayerRemoving.BindScheduler(_scheduler);
             _players.Scheduler = _scheduler;
             _players.PartPositionReader = ReadPartPositionStuds;
+            _players.RootPartSpawnSeeder = SeedCharacterRootPart;
             _networkRequestSignal = new RbxScriptSignal("NetworkBridge.RequestReceived");
             _networkRequestSignal.BindScheduler(_scheduler);
             _networkRequestConnection = _networkRequestSignal.Connect(
@@ -413,6 +423,74 @@ namespace CoreAI.Ai.LuaCs
             if (record.Instance is RbxHumanoid humanoid)
             {
                 AttachCharacterMotor(humanoid);
+                WireRespawnOnDeath(humanoid);
+            }
+        }
+
+        /// <summary>
+        /// Reloads a player's character <see cref="RbxPlayers.RespawnTime"/> seconds after its
+        /// Humanoid dies (F8) — the mirror's respawn-on-death behavior RespawnTime otherwise had no
+        /// consumer for. A no-op for a Humanoid that is not part of any player's Character.
+        /// </summary>
+        private void WireRespawnOnDeath(RbxHumanoid humanoid)
+        {
+            humanoid.Died.Connect((Action<object[]>)(_ =>
+            {
+                RbxInstance character = humanoid.Parent;
+                if (character == null || character.IsDestroyed)
+                {
+                    return;
+                }
+
+                RbxPlayer player = _players.GetPlayerFromCharacter(character);
+                if (player == null || !_players.CharacterAutoLoads)
+                {
+                    return;
+                }
+
+                double respawnSeconds = Math.Max(0d, _players.RespawnTime);
+                _scheduler.ScheduleHostCallback(respawnSeconds, () =>
+                {
+                    // WHY re-checked at fire time, not captured at Died: CharacterAutoLoads may have
+                    // changed since, the player may have disconnected, and the dead character may
+                    // already have been replaced by an explicit LoadCharacterAsync — any of those
+                    // means this timer's job is already done or no longer wanted.
+                    if (player.IsDestroyed || !_players.CharacterAutoLoads
+                        || !ReferenceEquals(player.Character, character)
+                        || _registry.WorldRoot == null)
+                    {
+                        return;
+                    }
+
+                    // WHY caught here rather than left to propagate: this callback runs from the
+                    // scheduler's host-callback slot, outside any mod's dispatch try/catch — the
+                    // same slot the join-time deferred spawn runs from, and an unguarded failure
+                    // here would just as surely kill the whole scheduler frame for every mod. A
+                    // failed respawn should cost only this player its character.
+                    try
+                    {
+                        RbxCharacterFactory.Load(_registry, _registry.WorldRoot, player);
+                    }
+                    catch (Exception exception)
+                    {
+                        LogFailedRespawn(player, exception);
+                    }
+                });
+            }));
+        }
+
+        /// <summary>
+        /// Reports a failed death-triggered respawn through the registry's diagnostics seam — the
+        /// same seam <see cref="RbxPlayers"/>'s join-time auto-load failure uses — so the player is
+        /// simply left without a character instead of the failure vanishing silently.
+        /// </summary>
+        private void LogFailedRespawn(RbxPlayer player, Exception exception)
+        {
+            Action<string> diagnostics = _registry.Diagnostics;
+            if (diagnostics != null)
+            {
+                diagnostics("[CoreAI.RbxApi] The death-triggered respawn for '" + player.Name
+                    + "' failed and was skipped, so Character stays nil: " + exception);
             }
         }
 
@@ -451,17 +529,49 @@ namespace CoreAI.Ai.LuaCs
             return context.WrapInstance(character);
         }
 
-        /// <summary>Reads a part's position in studs out of the part sink, for DistanceFromCharacter.</summary>
-        private RbxVector3 ReadPartPositionStuds(RbxInstance part)
+        /// <summary>Seeds a freshly built character root part's size and spawn position.</summary>
+        // WHY the spawn transform is pushed through the sink rather than set on the instance: a
+        // BasePart's spatial state lives in the part sink, not on RbxInstance, and the character
+        // factory builds its root part in the engine-free assembly that cannot reach the sink.
+        // Without this push the sink materializes the part from its own default — a 4x1x2 block at
+        // the world origin — so every joining player dropped an unanchored collidable box into
+        // whatever already stood there.
+        private void SeedCharacterRootPart(RbxInstance rootPart, RbxVector3 size, RbxVector3 position)
         {
-            return part != null && _partSink.TryGetPartProperties(part.Id, out PartProperties p)
-                ? p.Position
-                : RbxVector3.Zero;
+            if (rootPart == null || _partSink == null)
+            {
+                return;
+            }
+
+            _partSink.SetSize(rootPart.Id, size);
+            _partSink.SetPosition(rootPart.Id, position);
         }
 
+        /// <summary>Reads a part's live position in studs, for DistanceFromCharacter.</summary>
+        // WHY live and not the stored PartProperties: the character motor and the world's gravity
+        // move the backing Rigidbody directly and never write back into the part-property store, so
+        // reading the store gave every proximity check a position frozen at spawn (or at the last
+        // script write) no matter how far the part had actually walked or fallen since. The sink
+        // falls back to the stored/default value on its own for a part with no backing object yet.
+        private RbxVector3 ReadPartPositionStuds(RbxInstance part)
+        {
+            return part != null ? _partSink.GetLivePositionStuds(part.Id) : RbxVector3.Zero;
+        }
+
+        // WHY this class releases every motor it hands to a Humanoid, not whoever supplied it:
+        // this is the one place a motor is built (the bundled factory closure or a registered
+        // IRbxCharacterMotorProvider.TryCreate, both reached only from here) and the one place
+        // every replacement, unregistration and disposal path already runs through — the pipeline
+        // that creates a motor is the pipeline that retires it.
         private void AttachCharacterMotor(RbxHumanoid humanoid)
         {
+            _characterMotors.TryGetValue(humanoid, out IRbxCharacterMotor previousMotor);
             humanoid.AttachHost(_scheduler, null, ResolveRootPart(humanoid));
+            // WHY released here, once the Humanoid no longer forwards to it, and before the
+            // factory builds a replacement: a host motor may hold a registration keyed by this
+            // character (a controller-registry slot, a rig instance) that a fresh TryCreate for
+            // the same body would collide with if the old one had not already let go.
+            previousMotor?.Release();
             IRbxCharacterMotor motor = _characterMotorFactory?.Invoke(humanoid);
             humanoid.AttachHost(_scheduler, motor, ResolveRootPart(humanoid));
             _characterMotors[humanoid] = motor;
@@ -469,22 +579,120 @@ namespace CoreAI.Ai.LuaCs
 
         private void OnCharacterSceneMembershipChanged(RbxInstance instance, bool entered)
         {
-            RefreshCharacterMotors();
-        }
-
-        private void RefreshCharacterMotors()
-        {
-            List<RbxHumanoid> humanoids = new(_characterMotors.Keys);
-            foreach (RbxHumanoid humanoid in humanoids)
+            // WHY scoped to the changed subtree instead of a full refresh: this fires on every
+            // reparent anywhere in the world, so loading a 500-part model used to run 500 full
+            // sweeps — a list allocation plus a FindFirstChild name scan per tracked humanoid
+            // each time, and a factory retry for every motor-less humanoid forever. Both the
+            // entering and the leaving direction can flip the rebuild decision (a body appearing
+            // or disappearing), so entered filters nothing out.
+            _ = entered;
+            if (instance == null || _characterMotors.Count == 0)
             {
-                if (!humanoid.IsDestroyed &&
-                    (!ReferenceEquals(humanoid.RootPart, ResolveRootPart(humanoid)) ||
-                     _characterMotors[humanoid] == null && _characterMotorFactory != null ||
-                     _characterMotors[humanoid] is UnityRbxCharacterMotor unityMotor && !unityMotor.IsAvailable))
+                return;
+            }
+
+            _motorRefreshScratch.Clear();
+            foreach (RbxHumanoid humanoid in _characterMotors.Keys)
+            {
+                if (humanoid.IsDestroyed
+                    || !IsHumanoidAffectedByMembershipChange(humanoid, instance)
+                    || !MotorNeedsRebuild(humanoid))
+                {
+                    continue;
+                }
+
+                _motorRefreshScratch.Add(humanoid);
+            }
+
+            for (int index = 0; index < _motorRefreshScratch.Count; index++)
+            {
+                RbxHumanoid humanoid = _motorRefreshScratch[index];
+                if (!humanoid.IsDestroyed)
                 {
                     AttachCharacterMotor(humanoid);
                 }
             }
+
+            _motorRefreshScratch.Clear();
+        }
+
+        private void RefreshCharacterMotors()
+        {
+            if (_characterMotors.Count == 0)
+            {
+                return;
+            }
+
+            _motorRefreshScratch.Clear();
+            foreach (RbxHumanoid humanoid in _characterMotors.Keys)
+            {
+                if (!humanoid.IsDestroyed && MotorNeedsRebuild(humanoid))
+                {
+                    _motorRefreshScratch.Add(humanoid);
+                }
+            }
+
+            for (int index = 0; index < _motorRefreshScratch.Count; index++)
+            {
+                RbxHumanoid humanoid = _motorRefreshScratch[index];
+                if (!humanoid.IsDestroyed)
+                {
+                    AttachCharacterMotor(humanoid);
+                }
+            }
+
+            _motorRefreshScratch.Clear();
+        }
+
+        private static bool IsHumanoidAffectedByMembershipChange(
+            RbxHumanoid humanoid, RbxInstance instance)
+        {
+            if (ReferenceEquals(humanoid, instance) || humanoid.IsDescendantOf(instance))
+            {
+                return true;
+            }
+
+            RbxInstance character = humanoid.Parent;
+            if (character == null || character.IsDestroyed)
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(character, instance) || character.IsDescendantOf(instance))
+            {
+                return true;
+            }
+
+            if (ReferenceEquals(humanoid.RootPart, instance))
+            {
+                return true;
+            }
+
+            return instance.IsDescendantOf(character)
+                && instance.IsA("BasePart")
+                && string.Equals(
+                    instance.Name,
+                    Mods.Rbx.Instances.Networking.RbxCharacterFactory.RootPartName,
+                    StringComparison.Ordinal);
+        }
+
+        private bool MotorNeedsRebuild(RbxHumanoid humanoid)
+        {
+            if (!ReferenceEquals(humanoid.RootPart, ResolveRootPart(humanoid)))
+            {
+                return true;
+            }
+
+            IRbxCharacterMotor current = _characterMotors[humanoid];
+            if (current == null)
+            {
+                return _characterMotorFactory != null;
+            }
+
+            // WHY asked through the interface and not by concrete type: a host motor supplied
+            // through IRbxCharacterMotorProvider goes stale exactly the same way, and testing
+            // for CoreAI's own type left it holding a destroyed body with no rebuild.
+            return current is { IsAvailable: false };
         }
 
         /// <summary>
@@ -766,9 +974,10 @@ namespace CoreAI.Ai.LuaCs
             _registry.Unregistered -= OnInstanceUnregistered;
             _registry.Registered -= OnInstanceRegisteredForCharacter;
             _registry.SceneMembershipChanged -= OnCharacterSceneMembershipChanged;
-            foreach (RbxHumanoid humanoid in _characterMotors.Keys)
+            foreach (KeyValuePair<RbxHumanoid, IRbxCharacterMotor> pair in _characterMotors)
             {
-                humanoid.DetachHost();
+                pair.Key.DetachHost();
+                pair.Value?.Release();
             }
             _characterMotors.Clear();
             if (_debris != null)
@@ -1184,7 +1393,10 @@ namespace CoreAI.Ai.LuaCs
             if (record.Instance is RbxHumanoid humanoid)
             {
                 humanoid.DetachHost();
-                _characterMotors.Remove(humanoid);
+                if (_characterMotors.Remove(humanoid, out IRbxCharacterMotor motor))
+                {
+                    motor?.Release();
+                }
             }
         }
 
@@ -1379,16 +1591,6 @@ namespace CoreAI.Ai.LuaCs
         {
             _registry.ProcessPreSimulation();
             RefreshCharacterMotors();
-            if (dt > 0f)
-            {
-                foreach (IRbxCharacterMotor motor in _characterMotors.Values)
-                {
-                    if (motor is UnityRbxCharacterMotor unityMotor)
-                    {
-                        unityMotor.Step();
-                    }
-                }
-            }
             if (_runService == null || _runService.IsDestroyed)
             {
                 return;
@@ -1403,6 +1605,43 @@ namespace CoreAI.Ai.LuaCs
             if (_runService.Stepped.HasConnections)
             {
                 _runService.Stepped.Fire(_runServiceElapsed, dt);
+            }
+        }
+
+        /// <summary>
+        /// Advances every attached <see cref="UnityRbxCharacterMotor"/> by one fixed step (F10).
+        /// Call this from the host's fixed-step pump (Unity FixedUpdate), never from the render
+        /// frame — velocity-driven walking applied a variable number of times per simulated step
+        /// would move characters at a rate that depends on frame rate.
+        /// </summary>
+        // WHY the dead check lives here rather than in RbxHumanoid: Humanoid.SetHealth already
+        // clears the Humanoid's OWN walk target on death, but the motor keeps a separate target of
+        // its own that nothing else ever clears — a killed character kept walking to wherever it
+        // was headed, forever when CharacterAutoLoads is off. MoveTo(null) both stops the pump from
+        // driving the motor further AND zeroes its horizontal velocity, so the corpse stops exactly
+        // where it died instead of coasting on whatever velocity the last live step left it with.
+        // Repeating the call every step while dead is cheap and self-correcting; it needs no extra
+        // per-humanoid bookkeeping to run only once.
+        public void StepCharacterMotors(float dt)
+        {
+            if (dt <= 0f)
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<RbxHumanoid, IRbxCharacterMotor> pair in _characterMotors)
+            {
+                if (pair.Key.IsDead)
+                {
+                    pair.Value?.MoveTo(null);
+                    continue;
+                }
+
+                // WHY every motor is stepped and not only CoreAI's own: a host that supplies its
+                // own controller through IRbxCharacterMotorProvider gets the same fixed-step
+                // cadence. Testing the concrete type here left a host motor's MoveTo never
+                // advancing — the character stood still until the Humanoid's arrival timeout.
+                pair.Value?.Step(dt);
             }
         }
 

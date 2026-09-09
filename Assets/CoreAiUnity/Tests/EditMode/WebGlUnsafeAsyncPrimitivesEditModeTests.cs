@@ -337,6 +337,20 @@ namespace CoreAI.Tests.EditMode
                 Claim.RiskAcceptedNotEnforced,
                 RiskMarker + " same bridge, and the least protected of the four: the call sits in a " +
                 "constructor with CancellationToken.None and no hook budget armed around it")
+
+            [("Assets/CoreAiUnity/Runtime/Source/Features/AgentMemory/Infrastructure/FileAgentMemoryStore.cs",
+                Primitive.ConfigureAwaitFalse)] = new(
+                Claim.PinnedByTest,
+                "every occurrence is an await that acquires or releases _gate or a per-role mutation gate. " +
+                "Without the flag the continuation that RELEASES the gate is marshalled to the caller's " +
+                "SynchronizationContext, while a synchronous Save/TryLoad/GetTranscriptEntries on that same " +
+                "thread takes the same gate with a blocking Wait() - the thread never returns to pump the " +
+                "queue and the deadlock is permanent. That is not WebGL-specific: it reproduces in the " +
+                "editor, and it is what hung the EditMode run with no results file. The flag creates no " +
+                "browser hazard here because RunOffThread runs its action inline on WebGL and returns an " +
+                "already-completed task, so the awaits in the acquire-work-release chain are complete when " +
+                "awaited and schedule no continuation at all, let alone onto a pool WebGL does not have. " +
+                "Pinned by FileAgentMemoryStoreEditModeTests"),
         };
 
         [Test]
