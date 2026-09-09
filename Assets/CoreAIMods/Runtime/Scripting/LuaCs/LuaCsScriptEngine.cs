@@ -17,20 +17,34 @@ namespace CoreAI.Scripting.LuaCs
         private readonly LuaCsSecureEnvironment _environment;
         private readonly IRbxRuntimeObservabilitySink _observability;
         private readonly ILuaCsGuardObserver _guardObserver;
+        private readonly LuaCsCoroutineBudgetSettings _coroutineResumeBudget;
 
         public LuaCsScriptEngine(LuaCsSecureEnvironment environment = null,
             IRbxRuntimeObservabilitySink observability = null,
-            ILuaCsGuardObserver guardObserver = null)
+            ILuaCsGuardObserver guardObserver = null,
+            LuaCsCoroutineBudgetSettings coroutineResumeBudget = null)
         {
             _environment = environment ?? new LuaCsSecureEnvironment();
             _observability = observability != null && observability.IsEnabled
                 ? observability
                 : null;
             _guardObserver = guardObserver;
+            // WHY never null: CreateCoroutine's fallback below always has a settings object to read,
+            // so "nothing registered in composition" and "a settings object whose fields are the
+            // documented defaults" behave identically — see LuaCsCoroutineBudgetSettings.
+            _coroutineResumeBudget = coroutineResumeBudget ?? new LuaCsCoroutineBudgetSettings();
         }
 
         /// <summary>The wrapped secure environment (adapter-internal).</summary>
         internal LuaCsSecureEnvironment Environment => _environment;
+
+        /// <summary>
+        /// The live per-resume coroutine budget this engine arms, never null. A second surface that
+        /// builds its own engine over the SAME sandbox (the one-off <c>execute_lua</c> executor) hands
+        /// this object to its engine so a host's <c>ScriptContext:SetTimeout</c> reaches both surfaces
+        /// rather than only the persistent mod runtime.
+        /// </summary>
+        public LuaCsCoroutineBudgetSettings CoroutineResumeBudget => _coroutineResumeBudget;
 
         /// <inheritdoc />
         public string EngineName => "Lua-CSharp";
@@ -45,8 +59,12 @@ namespace CoreAI.Scripting.LuaCs
         public IScriptState CreateState(ScriptSandboxProfile profile = null)
         {
             // WHY: The profile carries no knobs yet; every state gets the full hardening pass
-            // (stripped globals, capped string/table builders, guarded coroutine library).
-            return new LuaCsScriptState(_environment.Create());
+            // (stripped globals, capped string/table builders, guarded coroutine library). Passing
+            // _coroutineResumeBudget (never null, and the SAME live object every other coroutine-handle
+            // site in this world reads) closes the raw coroutine.resume escape hatch: a later
+            // ScriptContext:SetTimeout now reaches a mod-created raw coroutine's resume guard too, not
+            // just the C#-managed LuaCsCoroutineHandle sites.
+            return new LuaCsScriptState(_environment.Create(liveResumeBudget: _coroutineResumeBudget));
         }
 
         /// <inheritdoc />
@@ -68,15 +86,27 @@ namespace CoreAI.Scripting.LuaCs
             IExecutionBudget resumeBudget = null)
         {
             LuaState owner = LuaCsScriptState.Unwrap(ownerState);
-            LuaCsCoroutineHandle handle = new(
-                owner,
-                LuaCsScriptExecutionGuard.UnwrapCallable(callable),
-                resumeBudget != null && resumeBudget.MaxSteps > 0
-                    ? (int)System.Math.Min(resumeBudget.MaxSteps, int.MaxValue)
-                    : LuaCsCoroutineHandle.DefaultBudgetPerResume,
-                resumeBudget != null && resumeBudget.TimeoutMs > 0
-                    ? resumeBudget.TimeoutMs
-                    : LuaCsCoroutineHandle.DefaultResumeTimeoutMs);
+            // WHY the branch: an explicit resumeBudget (e.g. a mod's HandlerMaxSteps/HandlerTimeoutMs)
+            // is a per-call override and stays frozen exactly as before. Absent one — the common case
+            // for task.spawn/defer/delay and every signal-handler thread that reaches this seam — the
+            // handle reads the composition's configurable default LIVE on every resume, so a later
+            // ScriptContext:SetTimeout affects it too. See LuaCsCoroutineBudgetSettings.
+            LuaCsCoroutineHandle handle = resumeBudget != null
+                ? new LuaCsCoroutineHandle(
+                    owner,
+                    LuaCsScriptExecutionGuard.UnwrapCallable(callable),
+                    resumeBudget.MaxSteps > 0
+                        ? (int)System.Math.Min(resumeBudget.MaxSteps, int.MaxValue)
+                        : LuaCsCoroutineHandle.DefaultBudgetPerResume,
+                    resumeBudget.TimeoutMs > 0
+                        ? resumeBudget.TimeoutMs
+                        : LuaCsCoroutineHandle.DefaultResumeTimeoutMs)
+                : new LuaCsCoroutineHandle(
+                    owner,
+                    LuaCsScriptExecutionGuard.UnwrapCallable(callable),
+                    _coroutineResumeBudget.BudgetPerResume,
+                    _coroutineResumeBudget.ResumeTimeoutMs,
+                    liveResumeBudget: _coroutineResumeBudget);
             return new LuaCsScriptCoroutine(handle);
         }
 

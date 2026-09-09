@@ -43,8 +43,21 @@ namespace CoreAI.Sandbox.LuaCs
         /// </summary>
         public const long MaxAllocatedBytesBudget = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
 
-        /// <summary>Creates a secured Lua-CSharp state and registers the allowed Lua APIs.</summary>
-        public LuaState Create(LuaCsApiRegistry registry = null)
+        /// <summary>
+        /// Creates a secured Lua-CSharp state and registers the allowed Lua APIs.
+        /// </summary>
+        /// <param name="registry">Optional API surface applied to the new state's environment.</param>
+        /// <param name="liveResumeBudget">
+        /// Optional shared, mutable per-resume budget (see <see cref="LuaCsCoroutineBudgetSettings"/>)
+        /// that the guard armed around a mod-created RAW <c>coroutine.resume</c> (see
+        /// <see cref="HardenCoroutineLibrary"/>) re-reads on every resume, deriving its step/time caps
+        /// from it — see <see cref="RawCoroutineResumeStepBudgetMultiplier"/>/
+        /// <see cref="RawCoroutineResumeTimeoutMultiplier"/> for why it derives rather than copies. Null
+        /// (the default) builds a settings object holding CoreAI's documented defaults, reproducing the
+        /// previous fixed 500,000-step / 1,000 ms allowance and never changing afterwards.
+        /// </param>
+        public LuaState Create(LuaCsApiRegistry registry = null,
+            LuaCsCoroutineBudgetSettings liveResumeBudget = null)
         {
             LuaState state = LuaState.Create();
             state.OpenBasicLibrary();
@@ -55,16 +68,42 @@ namespace CoreAI.Sandbox.LuaCs
             state.OpenBitwiseLibrary();
 
             StripRiskyGlobals(state);
-            HardenCoroutineLibrary(state);
+            HardenCoroutineLibrary(state, liveResumeBudget ?? new LuaCsCoroutineBudgetSettings());
             registry?.ApplyToEnvironment(state);
             return state;
         }
 
-        /// <summary>Per-resume instruction-step budget for a mod-created raw Lua coroutine.</summary>
-        public const long CoroutineResumeStepBudget = 500_000;
+        /// <summary>
+        /// Multiplier applied to the LIVE <see cref="LuaCsCoroutineBudgetSettings.BudgetPerResume"/> to
+        /// derive the instruction-step budget armed around a mod-created RAW coroutine's resume (native
+        /// <c>coroutine.create</c>/<c>coroutine.resume</c>, not the C#-managed
+        /// <c>CoreAI.Ai.LuaCs.LuaCsCoroutineHandle</c> a scheduler thread or signal handler uses). At
+        /// CoreAI's documented default (<c>LuaCsCoroutineHandle.DefaultBudgetPerResume</c> = 10,000) this
+        /// reproduces the previous fixed 500,000-step allowance exactly.
+        /// </summary>
+        /// <remarks>
+        /// WHY a multiplier and not equality with the managed per-resume budget: a raw coroutine is
+        /// typically a mod's own explicit state machine doing heavier one-shot work across FEWER resumes
+        /// than the frame-paced scheduler handles, so it keeps deliberately more headroom than the
+        /// per-resume default — collapsing it to exact equality would silently shrink every raw
+        /// coroutine's allowance 50x under default settings, a behavior change this fix does not need to
+        /// make. WHY tied to the live settings at all (this IS the fix): the raw-coroutine guard used to
+        /// arm fixed, untracked constants, so a mod could escape a budget the host had just tightened via
+        /// <c>ScriptContext:SetTimeout</c> by moving its runaway loop into a child coroutine — the
+        /// parent's hook cannot intervene until the nested resume returns control. Deriving from the live
+        /// settings keeps the extra headroom PROPORTIONATE instead of independent, so a host's tightened
+        /// budget meaningfully constrains raw coroutines too, scaling down right along with it.
+        /// </remarks>
+        public const int RawCoroutineResumeStepBudgetMultiplier = 50;
 
-        /// <summary>Per-resume wall-clock budget (ms) for a mod-created raw Lua coroutine.</summary>
-        public const int CoroutineResumeTimeoutMs = 1000;
+        /// <summary>
+        /// Multiplier applied to the LIVE <see cref="LuaCsCoroutineBudgetSettings.ResumeTimeoutMs"/> to
+        /// derive the wall-clock budget (ms) armed around a mod-created RAW coroutine's resume. At the
+        /// documented default (<c>LuaCsCoroutineHandle.DefaultResumeTimeoutMs</c> = 500 ms) this
+        /// reproduces the previous fixed 1,000 ms allowance exactly. See
+        /// <see cref="RawCoroutineResumeStepBudgetMultiplier"/> for the full reasoning.
+        /// </summary>
+        public const int RawCoroutineResumeTimeoutMultiplier = 2;
 
         // Sampling window for the coroutine hook, matching LuaCsExecutionGuard: each fire charges this
         // many instructions to the step budget, so the same ceiling holds, and it stays tight enough for
@@ -85,7 +124,7 @@ namespace CoreAI.Sandbox.LuaCs
         // function did not round-trip as callable, and a Lua redefinition needs a sync-over-async
         // Load/Execute that DEADLOCKS on a SynchronizationContext-bearing thread (editor domain reload).
         // Removing it is fail-safe: mods use the guarded create + resume pair instead.
-        private static void HardenCoroutineLibrary(LuaState state)
+        private static void HardenCoroutineLibrary(LuaState state, LuaCsCoroutineBudgetSettings liveResumeBudget)
         {
             LuaValue coroValue = state.Environment["coroutine"];
             if (coroValue.Type != LuaValueType.Table)
@@ -105,20 +144,26 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             // Arm a per-resume step/time/alloc guard hook on the coroutine's child LuaState — the native
-            // library never installs the execution-guard hook there.
+            // library never installs the execution-guard hook there. WHY liveResumeBudget is captured
+            // (not read once here): it is re-read on every resume inside ResumeWithPerResumeGuard so a
+            // later ScriptContext:SetTimeout reaches a raw coroutine created before the call too — see
+            // RawCoroutineResumeStepBudgetMultiplier.
             coro["resume"] = new LuaFunction("resume",
-                (ctx, ct) => GuardedCoroutineResume(ctx, ct, nativeResume));
+                (ctx, ct) => GuardedCoroutineResume(ctx, ct, nativeResume, liveResumeBudget));
         }
 
         private static System.Threading.Tasks.ValueTask<int> GuardedCoroutineResume(
-            LuaFunctionExecutionContext ctx, CancellationToken ct, LuaValue nativeResume)
+            LuaFunctionExecutionContext ctx, CancellationToken ct, LuaValue nativeResume,
+            LuaCsCoroutineBudgetSettings liveResumeBudget)
         {
-            LuaValue[] result = ResumeWithPerResumeGuard(ctx.State, nativeResume, ctx.Arguments.ToArray(), ct);
+            LuaValue[] result = ResumeWithPerResumeGuard(
+                ctx.State, nativeResume, ctx.Arguments.ToArray(), ct, liveResumeBudget);
             return new System.Threading.Tasks.ValueTask<int>(ctx.Return(result));
         }
 
         private static LuaValue[] ResumeWithPerResumeGuard(
-            LuaState callerState, LuaValue nativeResume, LuaValue[] resumeArgs, CancellationToken ct)
+            LuaState callerState, LuaValue nativeResume, LuaValue[] resumeArgs, CancellationToken ct,
+            LuaCsCoroutineBudgetSettings liveResumeBudget)
         {
             LuaState coroutineState = null;
             try
@@ -151,14 +196,20 @@ namespace CoreAI.Sandbox.LuaCs
             if (canResume)
             {
                 long steps = 0;
+                // WHY read live here, at the moment of the ACTUAL resume, not cached from an earlier
+                // Create() call: this is the fix for the coroutine.resume escape hatch — a raw coroutine
+                // created before a host tightened ScriptContext:SetTimeout must still be bound by the NEW
+                // value on its next resume, exactly like the C#-managed LuaCsCoroutineHandle already is.
+                long stepBudget = (long)liveResumeBudget.BudgetPerResume * RawCoroutineResumeStepBudgetMultiplier;
+                long timeoutMs = (long)liveResumeBudget.ResumeTimeoutMs * RawCoroutineResumeTimeoutMultiplier;
                 // WHY: raw timestamp + a precomputed ticks budget, not a Stopwatch instance — same
                 // allocation-avoidance reason as LuaCsExecutionGuard.GuardHook (see that type for detail).
                 long startTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
-                long timeoutTicks = (long)CoroutineResumeTimeoutMs * System.Diagnostics.Stopwatch.Frequency / 1000;
-                // WHY: The SAME allocation backstop the execution guard uses, on the coroutine's child
-                // state — step/time caps do not catch a doubling concat bomb, which is ordinary VM opcodes
-                // with no library call site to cap. Shared as one type (not a second hand-copied check)
-                // because the copy here kept its own broken rule after the guard's was fixed: see
+                long timeoutTicks = timeoutMs * System.Diagnostics.Stopwatch.Frequency / 1000;
+                // WHY: the SAME allocation backstop the execution guard uses, on the coroutine's child
+                // state - step/time caps do not catch a doubling concat bomb, which is ordinary VM opcodes
+                // with no library call site to cap. Shared as one type rather than a second hand-copied
+                // check, because the copy here kept its own broken rule after the guard's was fixed: see
                 // LuaCsAllocationBudget for why a sampled reading may only raise a suspicion.
                 LuaCsAllocationBudget allocation = default;
                 allocation.Reset(LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget);
@@ -166,24 +217,31 @@ namespace CoreAI.Sandbox.LuaCs
                 LuaFunction hook = new("coreai_coroutine_guard", (hctx, hct) =>
                 {
                     steps += CoroutineHookInstructionBatch;
-                    if (steps > CoroutineResumeStepBudget)
+                    // WHY CreateBudgetTrip: the native resume this hook cuts is protected, so the mod's
+                    // `ok, err = coroutine.resume(co)` receives the exception's ErrorObject — which the
+                    // (LuaState, Exception) overload leaves nil, turning every trip into `false, nil`.
+                    // See LuaCsCoroutineHandle.CreateBudgetTrip. The memory trip's dedicated CLR type was
+                    // never observable across that protected boundary, so only its marker text is kept.
+                    if (steps > stepBudget)
                     {
-                        throw new LuaRuntimeException(hctx.State,
-                            new InvalidOperationException(
-                                $"LuaCsSecureEnvironment: EXCEEDED_COROUTINE_STEP_BUDGET ({CoroutineResumeStepBudget})"));
+                        throw LuaCsCoroutineHandle.CreateBudgetTrip(hctx.State,
+                            $"LuaCsSecureEnvironment: EXCEEDED_COROUTINE_STEP_BUDGET ({stepBudget})");
                     }
 
                     if (System.Diagnostics.Stopwatch.GetTimestamp() - startTimestamp > timeoutTicks)
                     {
-                        throw new LuaRuntimeException(hctx.State,
-                            new TimeoutException($"Lua coroutine resume exceeded {CoroutineResumeTimeoutMs} ms."));
+                        throw LuaCsCoroutineHandle.CreateBudgetTrip(hctx.State,
+                            $"Lua coroutine resume exceeded {timeoutMs} ms.");
                     }
 
                     if (allocation.IsExceeded())
                     {
-                        throw new LuaRuntimeException(hctx.State,
-                            new LuaMemoryBudgetException(
-                                $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} ({allocation.BudgetBytes} bytes)"));
+                        // WHY CreateBudgetTrip and not a dedicated exception type: the native resume this
+                        // hook cuts is protected, so the mod's `ok, err = coroutine.resume(co)` receives the
+                        // exception's ErrorObject, which the (LuaState, Exception) overload leaves nil - the
+                        // trip arrived as `false, nil`. Only the marker text survives that boundary.
+                        throw LuaCsCoroutineHandle.CreateBudgetTrip(hctx.State,
+                            $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} ({allocation.BudgetBytes} bytes)");
                     }
 
                     return new System.Threading.Tasks.ValueTask<int>(hctx.Return());

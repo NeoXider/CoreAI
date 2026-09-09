@@ -1226,6 +1226,62 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void Negative_DeathRespawnAfterHijackingAnotherPlayersCharacterReference_RespawnsTheDyingPlayerNotTheHijacker()
+        {
+            // WHY this is the death-respawn twin of the two hijack tests above: those close the
+            // teardown path (disconnect/kick) by having Unload target LoadedCharacter instead of
+            // Character. The death-triggered respawn had the same hole on a different path — it
+            // resolved the dying character's owner with GetPlayerFromCharacter, which matches the
+            // Lua-writable Character the hijack tests above prove carries no ownership check. Actor
+            // A, who joins first and points its OWN Character at B's character, must not be
+            // resolved as the owner when B's humanoid dies: B must still respawn, and A must not
+            // receive a character it never earned by dying.
+            using ProductionHarness harness = new ProductionHarness();
+            harness.Bindings.Players.RespawnTime = 0.05d;
+            ActorContext actorA = harness.Actor("death-hijack-a");
+            ActorContext actorB = harness.Actor("death-hijack-b");
+            RbxPlayer playerA = harness.Bindings.ConnectActor(actorA);
+            RbxPlayer playerB = harness.Bindings.ConnectActor(actorB);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            RbxInstance characterA = playerA.Character;
+            RbxInstance characterB = playerB.Character;
+            Assert.IsNotNull(characterA);
+            Assert.IsNotNull(characterB);
+
+            harness.Stack.Runtime.LoadMod(actorA, "death-hijack-setup", @"
+                local players = game:GetService('Players'):GetPlayers()
+                players[1].Character = players[2].Character",
+                persistToStore: false);
+            Assert.AreSame(characterB, playerA.Character,
+                "the hijack read itself must succeed — Character assignment carries no ownership " +
+                "check.");
+
+            RbxHumanoid humanoidB = (RbxHumanoid)characterB.FindFirstChild("Humanoid");
+            humanoidB.TakeDamage(humanoidB.MaxHealth + 1d);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            Assert.IsTrue(humanoidB.IsDead);
+
+            for (int frame = 0; frame < 20 && ReferenceEquals(playerB.Character, characterB);
+                 frame++)
+            {
+                harness.Bindings.Scheduler.Advance(1d / 60d);
+            }
+
+            Assert.AreNotSame(characterB, playerB.Character,
+                "B's own dead Humanoid must still respawn B — actor A hijacking A's own Character " +
+                "reference must not cancel or redirect B's respawn.");
+            Assert.IsTrue(characterB.IsDestroyed,
+                "B's dead character must be torn down by B's own respawn, exactly as an unhijacked " +
+                "death would.");
+            Assert.IsFalse(characterA.IsDestroyed,
+                "A never died, so A's own character must not be destroyed by a respawn timer that " +
+                "was never A's to begin with.");
+            Assert.AreSame(characterB, playerA.Character,
+                "A must not receive a fresh character it never earned by dying — A's Character " +
+                "field stays exactly what A pointed it at.");
+        }
+
+        [Test]
         public void SynchronousWorldEntryObserver_ResolvesTheOwningPlayer()
         {
             // WHY this is the hostile-audit Finding-B gate: Parent assignment materializes the

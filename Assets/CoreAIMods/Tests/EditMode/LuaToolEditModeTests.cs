@@ -49,7 +49,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(parsed.Success);
             StringAssert.Contains("required", parsed.Error);
             Assert.AreEqual(0, executor.CallCount,
-                "Пустой code не должен попадать в executor");
+                "Empty code must never reach the executor");
         }
 
         [Test]
@@ -77,7 +77,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(parsed.Success);
             Assert.IsNotNull(parsed.Error);
             StringAssert.Contains("sandbox kaboom", parsed.Error,
-                "Сообщение исключения должно быть перенаправлено в LuaResult.Error");
+                "The exception message must be routed into LuaResult.Error");
         }
 
         [Test]
@@ -104,11 +104,11 @@ namespace CoreAI.Tests.EditMode
             }
             catch (OperationCanceledException)
             {
-                Assert.Pass("ExecuteAsync может выбрасывать OperationCanceledException — это допустимое поведение");
+                Assert.Pass("ExecuteAsync may throw OperationCanceledException - that is acceptable behaviour");
                 return;
             }
 
-            // Либо результат с ошибкой cancellation (если поймал catch)
+            // Otherwise a result carrying the cancellation error (if the catch above did not fire)
             LuaTool.LuaResult parsed = JsonConvert.DeserializeObject<LuaTool.LuaResult>(json);
             Assert.IsFalse(parsed.Success);
         }
@@ -233,7 +233,7 @@ namespace CoreAI.Tests.EditMode
                 new LuaTool(new FakeExecutor(new LuaTool.LuaResult()), new FakeSettings(), null));
         }
 
-        // ===================== LuaLlmTool (тонкая обёртка) =====================
+        // ===================== LuaLlmTool (thin wrapper) =====================
 
         [Test]
         public void LuaLlmTool_Metadata_IsConsistent()
@@ -262,7 +262,7 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("game.enemies", wrapper.Description,
                 "The generic execute_lua metadata should explicitly forbid common invented game globals.");
             StringAssert.Contains("\"code\"", wrapper.ParametersSchema,
-                "JSON schema должна описывать параметр code");
+                "The JSON schema must describe the code parameter");
             StringAssert.Contains("logic_define", wrapper.ParametersSchema,
                 "The code parameter schema should steer local models toward declared rule slots.");
             StringAssert.Contains("coreai_world_find", wrapper.ParametersSchema,

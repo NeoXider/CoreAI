@@ -20,7 +20,7 @@ The main `SKILL.md` document is returned in full. References are read on demand
 via `section`, or all at once via `all: true`:
 
 ```csharp
-SkillSet crafting = SkillSet.FromTextParts("Crafting", "Создание предметов",
+SkillSet crafting = SkillSet.FromTextParts("Crafting", "Item crafting",
     new[]
     {
         new KeyValuePair<string, string>("SKILL.md", mainText),

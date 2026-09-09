@@ -101,7 +101,6 @@ Package manifests:
 | [CLOUD_COST_BUDGETING.md](CLOUD_COST_BUDGETING.md) | Token anatomy of a turn, measuring real usage, spend caps, and a designer budget worksheet. |
 | [AUDIT_LOG.md](AUDIT_LOG.md) | Immutable append-only audit log for tool calls, LLM requests, world mutations. |
 | [DETERMINISM_AND_REPLAY.md](DETERMINISM_AND_REPLAY.md) | Effect-determinism contract, host-authoritative pattern, and the proposed audit-log replayer. |
-| [CONTEXT_MANAGEMENT_ROADMAP.md](CONTEXT_MANAGEMENT_ROADMAP.md) | Planned work on token budget, rolling summaries, and compaction. |
 | [AGENT_SESSION_INSPECTOR.md](AGENT_SESSION_INSPECTOR.md) | Inspecting a live agent session: turns, tool calls, memory reads. |
 | [BACKLOG.md](BACKLOG.md) | Future work that does not block the current MVP gate. |
 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Per-title guide index. |

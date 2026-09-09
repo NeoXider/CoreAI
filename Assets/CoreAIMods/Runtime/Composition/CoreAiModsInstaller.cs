@@ -170,6 +170,15 @@ namespace CoreAI.Composition
                     ?? NullRbxRuntimeObservabilitySink.Instance;
                 INetworkBridge networkBridge = c.ResolveOrDefault<INetworkBridge>()
                     ?? new NullNetworkBridge();
+                // WHY resolved once here and threaded everywhere below: a game overrides the coroutine
+                // resume budget the same way it overrides the character motor — an optional serialized
+                // field on CoreAiModsLifetimeScope registering into the container. The SAME instance must
+                // reach every coroutine-handle construction site in this world (the scheduler thread
+                // factory's signal-runner pool, its own IScriptEngine, and the mod-stack's engine) so a
+                // later ScriptContext:SetTimeout call — which mutates this one object — is visible from
+                // all of them, not just whichever site happened to resolve it first.
+                Sandbox.LuaCs.LuaCsCoroutineBudgetSettings coroutineResumeBudget =
+                    c.ResolveOrDefault<Sandbox.LuaCs.LuaCsCoroutineBudgetSettings>();
                 LuaCsRbxApiBindings rbxApi;
                 if (rbxHost != null)
                 {
@@ -187,7 +196,8 @@ namespace CoreAI.Composition
                         observability: observability,
                         networkBridge: networkBridge,
                         log: msg => rbxLog.Warn(
-                            "[CoreAI.RbxApi] " + msg, Logging.LogTag.World));
+                            "[CoreAI.RbxApi] " + msg, Logging.LogTag.World),
+                        coroutineResumeBudget: coroutineResumeBudget);
                 }
                 else
                 {
@@ -205,7 +215,8 @@ namespace CoreAI.Composition
                         game: game,
                         observability: observability,
                         networkBridge: networkBridge,
-                        log: msg => rbxLog.Warn("[CoreAI.RbxApi] " + msg, Logging.LogTag.World));
+                        log: msg => rbxLog.Warn("[CoreAI.RbxApi] " + msg, Logging.LogTag.World),
+                        coroutineResumeBudget: coroutineResumeBudget);
                 }
 
                 if (rbxHost != null)
@@ -250,6 +261,11 @@ namespace CoreAI.Composition
                     ExecutionObserver = c.ResolveOrDefault<ILuaExecutionObserver>(),
                     Observability = observability,
                     WorldMutationGate = c.Resolve<IConfirmedWorldMutationGate>(),
+                    // WHY rbxApi.CoroutineResumeBudget and not re-resolving from the container: rbxApi
+                    // above already settled on ONE instance (composition override or a fresh default);
+                    // reusing it keeps this stack's own IScriptEngine reading the exact same live object
+                    // instead of a second, independent default that ScriptContext:SetTimeout would miss.
+                    CoroutineResumeBudget = rbxApi.CoroutineResumeBudget,
                     // WHY: demos and host self-tests call the plain execute seam; in an ACL-versioned world
                     // that call still needs a server-generated envelope, issued for the trusted host actor.
                     LocalActorResolver = () =>
@@ -370,7 +386,12 @@ namespace CoreAI.Composition
                             log: message => (c.ResolveOrDefault<Logging.ILog>()
                                 ?? Logging.Log.Instance).Warn(
                                     "[CoreAI.RbxApi] " + message,
-                                    Logging.LogTag.World));
+                                    Logging.LogTag.World),
+                            // WHY the initial session's instance, not a fresh resolve: this composition
+                            // has ONE coroutine resume budget policy, live-mutable through
+                            // ScriptContext:SetTimeout; a world reload keeps it rather than quietly
+                            // reverting a host-configured wall-clock override back to the baseline.
+                            coroutineResumeBudget: initial.RbxApi.CoroutineResumeBudget);
                         IInGameLlmChatServiceFactory chatFactory =
                             c.ResolveOrDefault<IInGameLlmChatServiceFactory>();
                         if (chatFactory != null)
@@ -843,6 +864,11 @@ namespace CoreAI.Composition
                 OneOffCapabilities = oneOffCapabilities,
                 FrameYielder = PlayerLoopScriptFrameYielder.Instance,
                 RbxApi = rbxApi,
+                // WHY rbxApi.CoroutineResumeBudget and not a fresh resolve: this session's rbxApi already
+                // settled on one live budget instance (see the LuaCsRbxApiBindings constructions above);
+                // reusing it here keeps this stack's engine reading the exact same object
+                // ScriptContext:SetTimeout mutates.
+                CoroutineResumeBudget = rbxApi.CoroutineResumeBudget,
                 RegisterWorldEditBuildBindings = false
             });
             return stack;

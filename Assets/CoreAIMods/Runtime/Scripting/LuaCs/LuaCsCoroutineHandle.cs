@@ -52,6 +52,7 @@ namespace CoreAI.Sandbox.LuaCs
         private readonly int _budgetPerResume;
         private readonly int _resumeTimeoutMs;
         private readonly long _totalLifetimeSteps;
+        private readonly LuaCsCoroutineBudgetSettings _liveResumeBudget;
 
         private bool _killed;
         private long _consumedSteps;
@@ -69,13 +70,24 @@ namespace CoreAI.Sandbox.LuaCs
         /// <param name="resumeTimeoutMs">Wall-clock budget, in ms, for a single resume.</param>
         /// <param name="totalLifetimeSteps">Cap on instruction steps across the whole coroutine lifetime.</param>
         /// <param name="isProtectedMode">Whether Lua errors are returned as protected resume results.</param>
+        /// <param name="liveResumeBudget">
+        /// Optional shared, mutable budget re-read on every <see cref="Resume"/> instead of the frozen
+        /// <paramref name="budgetPerResume"/>/<paramref name="resumeTimeoutMs"/> values above. Pass this
+        /// for a handle whose budget is the composition's configurable default (see
+        /// <see cref="LuaCsCoroutineBudgetSettings"/>) so a later <c>ScriptContext:SetTimeout</c> call
+        /// changes THIS handle's next resume too, even for a long-lived pooled handle created before the
+        /// call. Null (the default) keeps a handle's budget frozen at construction, as before — the shape
+        /// every explicit per-call budget (e.g. a mod's main-chunk <c>HandlerMaxSteps</c>/
+        /// <c>HandlerTimeoutMs</c>) still uses.
+        /// </param>
         public LuaCsCoroutineHandle(
             LuaState ownerState,
             LuaFunction function,
             int budgetPerResume = DefaultBudgetPerResume,
             int resumeTimeoutMs = DefaultResumeTimeoutMs,
             long totalLifetimeSteps = DefaultTotalLifetimeSteps,
-            bool isProtectedMode = true)
+            bool isProtectedMode = true,
+            LuaCsCoroutineBudgetSettings liveResumeBudget = null)
         {
             if (ownerState == null)
             {
@@ -90,6 +102,7 @@ namespace CoreAI.Sandbox.LuaCs
             _budgetPerResume = budgetPerResume > 0 ? budgetPerResume : DefaultBudgetPerResume;
             _resumeTimeoutMs = resumeTimeoutMs > 0 ? resumeTimeoutMs : DefaultResumeTimeoutMs;
             _totalLifetimeSteps = totalLifetimeSteps > 0 ? totalLifetimeSteps : DefaultTotalLifetimeSteps;
+            _liveResumeBudget = liveResumeBudget;
 
             _coroutine = ownerState.CreateCoroutine(function, isProtectedMode);
             _callStack = new LuaStack(8);
@@ -104,10 +117,11 @@ namespace CoreAI.Sandbox.LuaCs
             int budgetPerResume = DefaultBudgetPerResume,
             int resumeTimeoutMs = DefaultResumeTimeoutMs,
             long totalLifetimeSteps = DefaultTotalLifetimeSteps,
-            bool isProtectedMode = true)
+            bool isProtectedMode = true,
+            LuaCsCoroutineBudgetSettings liveResumeBudget = null)
         {
             return new LuaCsCoroutineHandle(ownerState, function, budgetPerResume, resumeTimeoutMs,
-                totalLifetimeSteps, isProtectedMode);
+                totalLifetimeSteps, isProtectedMode, liveResumeBudget);
         }
 
         /// <summary>Current Lua-CSharp thread status (Suspended/Normal/Running/Dead), or Dead once killed.</summary>
@@ -154,6 +168,14 @@ namespace CoreAI.Sandbox.LuaCs
         public string LastErrorText => _lastOk ? string.Empty : _lastError.ToString();
 
         /// <summary>
+        /// Which per-resume budget cut the most recent resume, or <see cref="LuaCsGuardTripKind.None"/>
+        /// when it ended by yield, return, or a script error of its own. Recorded by the guard hook at
+        /// throw time — the typed counterpart of the budget text in <see cref="LastErrorText"/>, so a
+        /// consumer can classify a budget kill without matching message wording a script could forge.
+        /// </summary>
+        public LuaCsGuardTripKind LastTrip => _hook.Trip;
+
+        /// <summary>
         /// Advances the coroutine to its next <c>coroutine.yield</c> (or to completion), passing
         /// <paramref name="args"/> as the values <c>coroutine.yield</c>/the initial call receives.
         /// Returns the values the coroutine yielded or returned (the leading ok flag is stripped).
@@ -179,7 +201,14 @@ namespace CoreAI.Sandbox.LuaCs
             // object is built once per handle and re-armed here (like the guard's pooled GuardHook): a
             // fresh LuaFunction + closure + Stopwatch per resume was measured heap churn on every signal
             // handler and every task.wait loop resume.
-            _hook.Arm(_budgetPerResume, _resumeTimeoutMs);
+            //
+            // WHY read _liveResumeBudget here instead of caching it once: a shared
+            // LuaCsCoroutineBudgetSettings is exactly the object ScriptContext:SetTimeout mutates, and a
+            // long-lived pooled handle (a signal runner serving every Heartbeat fire) must pick up that
+            // change on its very next resume — not only on a freshly constructed handle.
+            int budgetPerResume = _liveResumeBudget?.BudgetPerResume ?? _budgetPerResume;
+            int resumeTimeoutMs = _liveResumeBudget?.ResumeTimeoutMs ?? _resumeTimeoutMs;
+            _hook.Arm(budgetPerResume, resumeTimeoutMs);
             _coroutine.SetHook(_hook.Function, string.Empty, 1);
 
             int count;
@@ -275,6 +304,47 @@ namespace CoreAI.Sandbox.LuaCs
             }
         }
 
+        /// <summary>
+        /// Builds the exception a per-resume guard hook throws to cut a runaway coroutine, carrying
+        /// <paramref name="message"/> plus a best-effort " at line N" suffix as the Lua ERROR OBJECT.
+        /// Shared with the raw <c>coroutine.resume</c> guard in <see cref="LuaCsSecureEnvironment"/>.
+        /// </summary>
+        /// <remarks>
+        /// WHY the error-object constructor and not <c>LuaRuntimeException(LuaState, Exception)</c>:
+        /// Lua-CSharp's protected coroutine resume reports a caught <see cref="LuaRuntimeException"/>
+        /// as <c>[false, ex.ErrorObject]</c> and never reads <c>ex.Message</c>, while the
+        /// <c>(LuaState, Exception)</c> overload leaves <c>ErrorObject</c> nil. A trip raised that way
+        /// therefore came back as the literal text "nil": the scheduler classified the runaway as a
+        /// BAD_ARGUMENT Lua bug, the fix hint said "fix the Lua error", and auto-repair was handed a
+        /// diagnosis that named no bound. An unprotected resume rethrows the same exception, whose
+        /// <c>Message</c> then embeds the error object, so the text survives on both paths.
+        /// </remarks>
+        internal static LuaRuntimeException CreateBudgetTrip(LuaState state, string message)
+        {
+            return new LuaRuntimeException(state, (LuaValue)(message + DescribeCurrentLine(state)));
+        }
+
+        /// <summary>
+        /// Best-effort " at line N" suffix naming the author line executing when a guard hook trips,
+        /// read the same way <c>LuaCsRbxValues.WithProductionContext</c> attributes an ordinary API-call
+        /// error (<c>state.GetTraceback().LastLine</c>). <c>GetTraceback</c> only snapshots the thread's
+        /// call-stack frames, so reading it from inside a per-instruction hook is safe. WHY still
+        /// best-effort: a traceback read that throws or reports no line must never suppress the
+        /// budget-exceeded error itself, so a failure here yields no suffix instead.
+        /// </summary>
+        private static string DescribeCurrentLine(LuaState state)
+        {
+            try
+            {
+                int line = state.GetTraceback().LastLine;
+                return line > 0 ? $" at line {line}" : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
         private void CaptureResults(int count)
         {
             if (count <= 0)
@@ -326,6 +396,7 @@ namespace CoreAI.Sandbox.LuaCs
             private int _timeoutMs;
             private long _startTimestamp;
             private long _timeoutTicks;
+            private LuaCsGuardTripKind _trip;
 
             public ResumeGuardHook()
             {
@@ -335,9 +406,13 @@ namespace CoreAI.Sandbox.LuaCs
             /// <summary>Instruction steps charged during the current resume.</summary>
             public long Steps => _steps;
 
+            /// <summary>Which budget tripped during the current resume, or <see cref="LuaCsGuardTripKind.None"/>.</summary>
+            public LuaCsGuardTripKind Trip => _trip;
+
             public void Arm(int budget, int timeoutMs)
             {
                 _steps = 0;
+                _trip = LuaCsGuardTripKind.None;
                 _budget = budget;
                 _timeoutMs = timeoutMs;
                 _startTimestamp = Stopwatch.GetTimestamp();
@@ -349,15 +424,15 @@ namespace CoreAI.Sandbox.LuaCs
                 _steps++;
                 if (_steps > _budget)
                 {
-                    throw new LuaRuntimeException(ctx.State,
-                        new InvalidOperationException(
-                            $"LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET ({_budget})"));
+                    _trip = LuaCsGuardTripKind.Steps;
+                    throw CreateBudgetTrip(ctx.State,
+                        $"LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET ({_budget})");
                 }
 
                 if (Stopwatch.GetTimestamp() - _startTimestamp > _timeoutTicks)
                 {
-                    throw new LuaRuntimeException(ctx.State,
-                        new TimeoutException($"Lua coroutine resume exceeded {_timeoutMs} ms."));
+                    _trip = LuaCsGuardTripKind.Timeout;
+                    throw CreateBudgetTrip(ctx.State, $"Lua coroutine resume exceeded {_timeoutMs} ms.");
                 }
 
                 return new ValueTask<int>(ctx.Return());

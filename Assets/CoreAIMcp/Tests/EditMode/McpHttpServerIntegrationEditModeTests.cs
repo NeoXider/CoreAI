@@ -177,9 +177,21 @@ namespace CoreAI.Mcp.Tests
             using HttpResponseMessage secondInit = await PostAsync(client, InitializeBody(), "application/json");
             using HttpResponseMessage first = await OpenNotificationsAsync(client,
                 firstInit.Headers.GetValues(McpServerInfo.SessionHeader).Single());
-            using HttpResponseMessage rejected = await OpenNotificationsAsync(client,
-                secondInit.Headers.GetValues(McpServerInfo.SessionHeader).Single());
-            Assert.AreEqual(HttpStatusCode.Conflict, rejected.StatusCode);
+            // WHY the refused stream is disposed before the POST instead of held to the end of the
+            // test: this client allows two connections per origin, and a response returned with
+            // ResponseHeadersRead holds its connection until it is disposed. Holding BOTH the open
+            // stream and the unread 409 left no connection for the POST, which then queued client-side
+            // until its own timeout — a client-side budget, measured, not a server that stopped
+            // answering. The property under test is unchanged: the first stream is still open and
+            // unread while the POST runs.
+            using (HttpResponseMessage rejected = await OpenNotificationsAsync(client,
+                secondInit.Headers.GetValues(McpServerInfo.SessionHeader).Single()))
+            {
+                Assert.AreEqual(HttpStatusCode.Conflict, rejected.StatusCode);
+            }
+
+            Assert.IsTrue(first.IsSuccessStatusCode,
+                "the admitted stream must still be open while the POST below runs.");
             using HttpResponseMessage post = await PostAsync(client, InitializeBody(), "application/json");
             Assert.AreEqual(HttpStatusCode.OK, post.StatusCode);
         }

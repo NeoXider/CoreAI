@@ -336,7 +336,7 @@ namespace CoreAI.Tests.EditMode
             [("Assets/CoreAIMods/Runtime/Scripting/LuaCs/LuaCsRbxSignalRunner.cs", Primitive.GetAwaiterGetResult)] = new(
                 Claim.RiskAcceptedNotEnforced,
                 RiskMarker + " same bridge, and the least protected of the four: the call sits in a " +
-                "constructor with CancellationToken.None and no hook budget armed around it")
+                "constructor with CancellationToken.None and no hook budget armed around it"),
 
             [("Assets/CoreAiUnity/Runtime/Source/Features/AgentMemory/Infrastructure/FileAgentMemoryStore.cs",
                 Primitive.ConfigureAwaitFalse)] = new(

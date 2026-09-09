@@ -31,12 +31,15 @@ All interpreter access in `Assets/CoreAIMods/Runtime` goes through engine-neutra
 | `LuaCsScriptExecutionGuard` | `IScriptExecutionGuard` over `LuaCsExecutionGuard` (per-instruction hook). |
 | `LuaCsScriptCoroutine` | `IScriptCoroutine` over `LuaCsCoroutineHandle`. |
 | `LuaCsSecureEnvironment`, `LuaCsExecutionGuard`, `LuaCsCoroutineHandle`, `LuaCsCoroutineRunner` | Concrete sandbox/hardening (moved from `Runtime/Sandbox`, namespaces unchanged). |
+| `LuaCsCoroutineBudgetSettings` | The per-resume budget (instruction steps + wall-clock) as one serialized, game-owned object: registered by `CoreAiModsLifetimeScope`, resolved by every coroutine construction site, re-read on every resume; `ScriptContext:SetTimeout` mutates its wall-clock half. |
 | `LuaCsFullUnityRuntimeBindings.Marshalling.cs` | VM-specific partial of the Full-tier reflection binder (Unity math/color table coercions). |
 
 ## Rules
 
-- Composition root: `LuaCsModRuntimeFactory` creates the one `LuaCsScriptEngine`; nothing else touches
-  `LuaState` directly.
+- Composition root: `LuaCsModRuntimeFactory` creates the runtime's `LuaCsScriptEngine`; the one-off tool
+  executor, the AI envelope processor and the Rbx scheduler adapter each build their own engine over the
+  same sandbox and receive the same `LuaCsCoroutineBudgetSettings` instance, so a budget change reaches
+  all of them. Nothing else touches `LuaState` directly.
 - Consumers (`LuaCsModRuntime`, `LuaCsLogicSlots`, `LuaCsGameToolExecutor`, `LuaCsAiEnvelopeProcessor`,
   all gameplay binders) depend only on `CoreAI.Scripting`; binder registration signatures take
   `IScriptFunctionRegistry`.

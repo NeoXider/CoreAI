@@ -407,6 +407,11 @@ namespace CoreAI.Mods.Rbx.Instances
             // WHY: MVP2 exposes local JSON/GUID/URL helpers and a fail-closed outbound policy seam;
             // the production transport still refuses loudly until the host installs a safe one.
             catalog.Register(new ClassDescriptor("HttpService", "Instance", false, false, true));
+            // WHY no behavior subclass, mirroring HttpService: ScriptContext:SetTimeout has no
+            // instance-tree state of its own — it reads/writes the composition's LuaCsCoroutineBudgetSettings,
+            // which lives at the Lua-CSharp binding layer (CoreAI.Ai.LuaCs), not here in the engine-free
+            // instance layer. properties: [] per the mirror — no Timeout is ever readable back.
+            catalog.Register(new ClassDescriptor("ScriptContext", "Instance", false, false, true));
             // WHY: ClickDetector is a normal creatable Instance (superclass Instance, NOT a service) —
             // a mod does Instance.new("ClickDetector") and parents it under a Part; the behavior class
             // carries the MouseClick signal the host pick pump fires when that part is clicked.

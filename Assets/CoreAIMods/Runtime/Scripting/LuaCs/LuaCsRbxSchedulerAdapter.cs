@@ -211,6 +211,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly IRbxRuntimeObservabilitySink _observability;
         private readonly Func<string, Func<ScriptResumeResult>, ScriptResumeResult>
             _resumeEnvelope;
+        private readonly LuaCsCoroutineBudgetSettings _coroutineResumeBudget;
         private LuaCsRbxScriptThread _currentThread;
 
         /// <summary>Signal runners built so far (diagnostic; tests prove reuse through it).</summary>
@@ -221,14 +222,28 @@ namespace CoreAI.Ai.LuaCs
 
         public LuaCsRbxScriptThreadFactory(IScriptEngine scriptEngine = null,
             IRbxRuntimeObservabilitySink observability = null,
-            Func<string, Func<ScriptResumeResult>, ScriptResumeResult> resumeEnvelope = null)
+            Func<string, Func<ScriptResumeResult>, ScriptResumeResult> resumeEnvelope = null,
+            LuaCsCoroutineBudgetSettings coroutineResumeBudget = null)
         {
             _observability = observability != null && observability.IsEnabled
                 ? observability
                 : null;
-            _scriptEngine = scriptEngine ?? new LuaCsScriptEngine(observability: _observability);
+            // WHY never null: every coroutine handle this factory builds (directly, or through its own
+            // IScriptEngine below) reads this object as its configurable default — see
+            // LuaCsCoroutineBudgetSettings and CoroutineResumeBudgetDefaults.
+            _coroutineResumeBudget = coroutineResumeBudget ?? new LuaCsCoroutineBudgetSettings();
+            _scriptEngine = scriptEngine ?? new LuaCsScriptEngine(
+                observability: _observability, coroutineResumeBudget: _coroutineResumeBudget);
             _resumeEnvelope = resumeEnvelope;
         }
+
+        /// <summary>
+        /// Live per-resume coroutine budget every construction site under this factory falls back to
+        /// when nothing more specific overrides it — the composition-configurable default from
+        /// <see cref="LuaCsCoroutineBudgetSettings"/>, never null. Read by
+        /// <see cref="LuaCsRbxScriptThread.CreateUnprotectedCoroutine"/> and by <see cref="RentSignalRunner"/>.
+        /// </summary>
+        internal LuaCsCoroutineBudgetSettings CoroutineResumeBudgetDefaults => _coroutineResumeBudget;
 
         /// <summary>The scheduler-owned thread currently executing a Lua host callback.</summary>
         public IRbxScriptThread CurrentThread => _currentThread;
@@ -314,7 +329,10 @@ namespace CoreAI.Ai.LuaCs
                 }
             }
 
-            LuaCsRbxSignalRunner runner = new(ownerState, pool.BodyFactory);
+            // WHY the live settings object, not a frozen snapshot: this runner is pooled and reused for
+            // every future fire of this mod's signal handlers, so a later ScriptContext:SetTimeout must
+            // reach it too — see LuaCsCoroutineHandle's liveResumeBudget parameter.
+            LuaCsRbxSignalRunner runner = new(ownerState, pool.BodyFactory, _coroutineResumeBudget);
             SignalRunnersCreated++;
             return new LuaCsRbxScriptThread(this, _scriptEngine, launch, ownerModId, runner);
         }
@@ -567,7 +585,7 @@ namespace CoreAI.Ai.LuaCs
 
                 _killed = true;
                 _runner?.Disarm();
-                LastFailure = ToRbxError(result.Error);
+                LastFailure = ToRbxError(result.Error, LastResumeTrippedBudget());
                 return RbxScriptThreadResumeResult.Failure(LastFailure);
             }
             catch (Exception ex)
@@ -581,7 +599,7 @@ namespace CoreAI.Ai.LuaCs
                     return RbxScriptThreadResumeResult.Success();
                 }
 
-                LastFailure = ToRbxError(ex.Message);
+                LastFailure = ToRbxError(ex.Message, LastResumeTrippedBudget());
                 return RbxScriptThreadResumeResult.Failure(LastFailure);
             }
             finally
@@ -672,30 +690,67 @@ namespace CoreAI.Ai.LuaCs
         private IScriptCoroutine CreateUnprotectedCoroutine()
         {
             LuaState ownerState = LuaCsScriptState.Unwrap(_launch.OwnerState);
-            int budgetPerResume = _launch.ResumeBudget != null
-                                  && _launch.ResumeBudget.MaxSteps > 0
-                ? (int)Math.Min(_launch.ResumeBudget.MaxSteps, int.MaxValue)
-                : LuaCsCoroutineHandle.DefaultBudgetPerResume;
-            int resumeTimeoutMs = _launch.ResumeBudget != null
-                                  && _launch.ResumeBudget.TimeoutMs > 0
-                ? _launch.ResumeBudget.TimeoutMs
-                : LuaCsCoroutineHandle.DefaultResumeTimeoutMs;
-            LuaCsCoroutineHandle handle = new(
-                ownerState,
-                LuaCsScriptExecutionGuard.UnwrapCallable(_launch.Callable),
-                budgetPerResume,
-                resumeTimeoutMs,
-                LuaCsCoroutineHandle.DefaultTotalLifetimeSteps,
-                false);
+            LuaCsCoroutineHandle handle;
+            if (_launch.ResumeBudget != null)
+            {
+                // WHY frozen, not live: an explicit resumeBudget is a per-call override (e.g. a mod's
+                // main-chunk HandlerMaxSteps/HandlerTimeoutMs) — a different, unrelated budget from the
+                // one ScriptContext:SetTimeout controls, so it must not react to that call.
+                int budgetPerResume = _launch.ResumeBudget.MaxSteps > 0
+                    ? (int)Math.Min(_launch.ResumeBudget.MaxSteps, int.MaxValue)
+                    : LuaCsCoroutineHandle.DefaultBudgetPerResume;
+                int resumeTimeoutMs = _launch.ResumeBudget.TimeoutMs > 0
+                    ? _launch.ResumeBudget.TimeoutMs
+                    : LuaCsCoroutineHandle.DefaultResumeTimeoutMs;
+                handle = new LuaCsCoroutineHandle(
+                    ownerState,
+                    LuaCsScriptExecutionGuard.UnwrapCallable(_launch.Callable),
+                    budgetPerResume,
+                    resumeTimeoutMs,
+                    LuaCsCoroutineHandle.DefaultTotalLifetimeSteps,
+                    false);
+            }
+            else
+            {
+                // WHY live: nothing explicit was requested, so this is the composition's configurable
+                // default — see LuaCsCoroutineBudgetSettings and CoroutineResumeBudgetDefaults.
+                LuaCsCoroutineBudgetSettings liveDefaults = _factory.CoroutineResumeBudgetDefaults;
+                handle = new LuaCsCoroutineHandle(
+                    ownerState,
+                    LuaCsScriptExecutionGuard.UnwrapCallable(_launch.Callable),
+                    liveDefaults.BudgetPerResume,
+                    liveDefaults.ResumeTimeoutMs,
+                    LuaCsCoroutineHandle.DefaultTotalLifetimeSteps,
+                    false,
+                    liveResumeBudget: liveDefaults);
+            }
+
             return new LuaCsScriptCoroutine(handle);
         }
 
-        private RbxError ToRbxError(string message)
+        /// <summary>
+        /// True when the thread's own coroutine handle cut its most recent resume on a per-resume
+        /// budget. WHY read the handle's typed trip instead of the error text alone: this is what
+        /// makes a runaway classify as <see cref="RbxErrorCode.BudgetExceeded"/> regardless of the
+        /// guard message's wording, and what a script's own <c>error("…EXCEEDED…")</c> cannot forge.
+        /// </summary>
+        private bool LastResumeTrippedBudget()
+        {
+            IScriptCoroutine coroutine = _coroutine ?? _runner?.Coroutine;
+            return coroutine is LuaCsScriptCoroutine luaCoroutine
+                   && luaCoroutine.Handle.LastTrip != LuaCsGuardTripKind.None;
+        }
+
+        private RbxError ToRbxError(string message, bool budgetTripped)
         {
             string error = string.IsNullOrWhiteSpace(message)
                 ? "scheduled Lua thread failed"
                 : message;
-            bool budgetExceeded = error.IndexOf("EXCEEDED_RESUME_STEP_BUDGET",
+            // WHY the text match stays as a fallback behind the typed trip: a budget raised outside
+            // this thread's own handle reaches here only as text — a memory trip of a guarded call
+            // nested inside the handler, for one — and must still read as a budget kill, not a Lua bug.
+            bool budgetExceeded = budgetTripped
+                                  || error.IndexOf("EXCEEDED_RESUME_STEP_BUDGET",
                                       StringComparison.Ordinal) >= 0
                                   || error.IndexOf("EXCEEDED_MEMORY_BUDGET",
                                       StringComparison.Ordinal) >= 0

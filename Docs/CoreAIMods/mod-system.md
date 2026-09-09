@@ -16,7 +16,7 @@ A powerful, optimized, convenient, future-proof mod core:
 - The world changes **dynamically at runtime** — AI writes/edits mods, player writes mods — without
   a rebuild.
 - **Categories** give a folder-like tree in the UI.
-- A single **CoreAI Hub** (uGUI Canvas, event-driven) replaces the scattered IMGUI debug panels and
+- A single **CoreAI Hub** (UI Toolkit, event-driven) replaces the scattered IMGUI debug panels and
   fixes the per-frame cost.
 
 ## 1. Mod identity & in-source manifest (the "passport")
@@ -219,13 +219,13 @@ Fixes:
    `OnGUI`. Remove all store enumeration and `ReadMetadata`/`Split` from the draw path.
 2. **Store-level:** `FileLuaScriptVersionStore` should keep an in-memory cache and reload from disk only
    when the file changed (mtime/dirty flag), instead of `ClearAll` + full read on every `ReadFromDisk`.
-3. **Structural:** the CoreAI Hub (uGUI, event-driven) removes per-frame IMGUI layout entirely.
+3. **Structural:** the CoreAI Hub (UI Toolkit, event-driven) removes per-frame IMGUI layout entirely.
 
 ## 7. Phasing / task graph
 
 - **Phase 1 — Mod Core:** §1 header parser, §2 manifest, §3 Resources source + seeder + wiring, §4.1
   LLM category, tests. Plus perf quick-fix (§6.1) and store cache (§6.2) in parallel.
-- **Phase 2 — CoreAI Hub:** §4.2 uGUI shell + tabs; Mods tab with Add/Paste/Copy/Update/tree; migrate
+- **Phase 2 — CoreAI Hub:** §4.2 UI Toolkit shell + tabs; Mods tab with Add/Paste/Copy/Update/tree; migrate
   Backend/Tokens/Chat.
 - **Phase 3 (PR2):** §3.1 StreamingAssets + Addressables sources; §5 world event contract; store cache
   finalization; retire IMGUI panels.
@@ -237,4 +237,4 @@ Fixes:
 - Default builds omit Lua; `COREAI_LUA` builds include the guarded Lua surfaces
   (the Lua-CSharp runtime ships bundled as `Lua.dll`/`Lua.Annotations.dll`, so there is no
   external package to omit).
-- All five `com.neoxider.coreai*` packages bump in lockstep at release time.
+- All seven `com.neoxider.coreai*` packages bump in lockstep at release time.

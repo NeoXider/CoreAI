@@ -57,6 +57,7 @@ namespace CoreAI.Mods.Rbx.Instances
         public MaterialVariantSnapshot MaterialVariant;
         public ValueSnapshot Value;
         public HumanoidSnapshot Humanoid;
+        public PlayerSnapshot Player;
         public List<string> Tags = new();
         public List<AttributeSnapshot> Attributes = new();
     }
@@ -111,6 +112,28 @@ namespace CoreAI.Mods.Rbx.Instances
         public string JumpHeight;
         public bool UseJumpPower;
         public string DisplayName;
+    }
+
+    /// <summary>
+    /// The identity a Player carries with its node, read off the mirror: <c>Player.UserId</c> and
+    /// <c>Player.DisplayName</c> replicate (Player.yaml tags neither NotReplicated),
+    /// <c>Player.Character</c> is an instance reference (0 means nil), and the username is the
+    /// node's own <see cref="InstanceSnapshot.Name"/>.
+    /// </summary>
+    /// <remarks>
+    /// WHY <see cref="ActorId"/> travels although the mirror has no such property (OURS): the
+    /// mirror's <c>Players.LocalPlayer</c> is NotReplicated, so a client must tell its own Player
+    /// from the others by the identity its connection carries, and that is the actor id. It is
+    /// already on every node as the owner actor; naming it here makes the Player whole on its own.
+    /// WHY AccountAge, FollowUserId and Team are absent: Player.yaml tags each NotReplicated.
+    /// </remarks>
+    [Serializable]
+    public sealed class PlayerSnapshot
+    {
+        public string ActorId;
+        public long UserId;
+        public string DisplayName;
+        public ulong CharacterId;
     }
 
     /// <summary>Durable ValueBase payload. Scalars and datatypes encode into

@@ -7,6 +7,19 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
     /// <summary>Minimum runtime-created Player identity required by remote callbacks.</summary>
     public sealed class RbxPlayer : RbxInstance
     {
+        /// <summary>
+        /// The member names <see cref="Character"/> and <see cref="DisplayName"/> report to the
+        /// registry, so a change to either after the spawn reaches a replica as a patch.
+        /// </summary>
+        // TODO: move CharacterMember and DisplayNameMember into ReplicationMembers next to
+        // PrimaryPart, so every member name a plan can carry lives in one list.
+        public const string CharacterMember = "Character";
+
+        public const string DisplayNameMember = "DisplayName";
+
+        private string _displayName;
+        private RbxInstance _character;
+
         internal RbxPlayer(ClassDescriptor descriptor)
             : base(descriptor)
         {
@@ -20,14 +33,75 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// Mirror <c>Player.DisplayName</c> (writable; mirror tags carry no ReadOnly). Defaults to
         /// the username — the mirror states no fallback, so this default is OURS.
         /// </summary>
-        public string DisplayName { get; set; }
+        public string DisplayName
+        {
+            get => _displayName;
+            set
+            {
+                if (string.Equals(_displayName, value, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _displayName = value;
+                AdvanceMemberRevision(DisplayNameMember);
+            }
+        }
 
         /// <summary>
         /// Mirror <c>Player.Character</c>: the Model driven for this player, or nil until a
         /// character is loaded. Assigning it directly does NOT fire the signals — only
         /// <c>LoadCharacterAsync</c> does, exactly as in Roblox.
         /// </summary>
-        public RbxInstance Character { get; internal set; }
+        public RbxInstance Character
+        {
+            get => _character;
+            internal set
+            {
+                if (ReferenceEquals(_character, value))
+                {
+                    return;
+                }
+
+                _character = value;
+                AdvanceMemberRevision(CharacterMember);
+            }
+        }
+
+        /// <summary>
+        /// Sets <see cref="Character"/> to what the server replicated and fires what a Roblox
+        /// client sees: <c>CharacterRemoving</c> for the character being left, with it readable
+        /// even when it is already destroyed, then <c>CharacterAdded</c> for the one arriving.
+        /// </summary>
+        internal void ApplyReplicatedCharacter(RbxInstance character)
+        {
+            RbxInstance outgoing = _character;
+            if (ReferenceEquals(outgoing, character))
+            {
+                return;
+            }
+
+            if (outgoing != null)
+            {
+                CharacterRemoving.FireForDestruction(outgoing, outgoing);
+            }
+
+            Character = character;
+            if (character != null)
+            {
+                CharacterAdded.Fire(character);
+            }
+        }
+
+        private void AdvanceMemberRevision(string member)
+        {
+            // WHY a tombstone reports nothing: the character factory clears Character while a
+            // player is torn down, and a destroyed instance has no record left to advance.
+            if (!IsDestroyed)
+            {
+                Registry?.AdvanceRevision(Id, member);
+            }
+        }
 
         /// <summary>
         /// The character <see cref="RbxCharacterFactory"/> actually built and owns for this
@@ -89,9 +163,9 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// default until something writes to it.
         /// </summary>
         /// <remarks>
-        /// WHY public and not internal like <see cref="PartPositionReader"/>: a test that wants to
-        /// pin the spawn transform needs to wire a fake sink from outside this assembly, and this
-        /// assembly grants InternalsVisibleTo only to the network transport, not the test assembly.
+        /// WHY public and not internal like <see cref="PartPositionReader"/>: the composition that
+        /// owns the part sink lives outside this assembly and wires the seeder from there, and a
+        /// test that pins the spawn transform wires a fake one through the same seam.
         /// </remarks>
         public Action<RbxInstance, RbxVector3, RbxVector3> RootPartSpawnSeeder { get; set; }
 
@@ -344,6 +418,84 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             }
         }
 
+        /// <summary>
+        /// Admits a Player the server replicated, so the lookups and <see cref="PlayerAdded"/> see
+        /// it exactly as they see one <see cref="EnsureActor"/> admitted. The replica's half of the
+        /// service: nothing is created and no character is loaded here — the server did both, and
+        /// what it built arrives as instances of its own.
+        /// </summary>
+        /// <remarks>
+        /// WHY only a replica may call this: an authoritative service admits actors through
+        /// <see cref="EnsureActor"/>, where the identity is decided; admitting a Player it did not
+        /// initialize would let a caller mint an identity the transport never vouched for.
+        /// </remarks>
+        internal void AdoptReplicated(RbxPlayer player)
+        {
+            if (player == null)
+            {
+                throw new ArgumentNullException(nameof(player));
+            }
+
+            if (Registry == null || Registry.Authority != RegistryAuthority.Replica)
+            {
+                throw new InvalidOperationException(
+                    "Only a replica's Players service adopts replicated players; an authoritative "
+                    + "service admits actors through EnsureActor.");
+            }
+
+            if (player.NetworkActorId == null || player.IsDestroyed)
+            {
+                throw new InvalidOperationException(
+                    "A replicated Player must be initialized and alive before Players admits it.");
+            }
+
+            if (_byActor.TryGetValue(player.NetworkActorId, out RbxPlayer existing))
+            {
+                if (ReferenceEquals(existing, player))
+                {
+                    return;
+                }
+
+                throw new InvalidOperationException(
+                    "Players already serves actor '" + player.NetworkActorId + "' with id "
+                    + existing.Id.Value + " and cannot admit a second Player (id "
+                    + player.Id.Value + ") for it.");
+            }
+
+            if (Scheduler != null)
+            {
+                player.CharacterAdded.BindScheduler(Scheduler);
+                player.CharacterRemoving.BindScheduler(Scheduler);
+            }
+
+            player.PartPositionReader = PartPositionReader;
+            player.RootPartSpawnSeeder = RootPartSpawnSeeder;
+            _byActor.Add(player.NetworkActorId, player);
+            _players.Add(player);
+            PlayerAdded.Fire(player);
+        }
+
+        /// <summary>
+        /// Forgets a replicated Player the server is removing: <see cref="PlayerRemoving"/> fires
+        /// while the instance is still whole and the collections drop it. Nothing is destroyed
+        /// here — the removal that called this destroys the Player, and the character's own
+        /// removal follows from the server. False when the service was not serving this player.
+        /// </summary>
+        internal bool ReleaseReplicated(RbxPlayer player)
+        {
+            if (player == null || player.NetworkActorId == null
+                || !_byActor.TryGetValue(player.NetworkActorId, out RbxPlayer existing)
+                || !ReferenceEquals(existing, player))
+            {
+                return false;
+            }
+
+            PlayerRemoving.FireForDestruction(player, player, null);
+            _byActor.Remove(player.NetworkActorId);
+            _players.Remove(player);
+            return true;
+        }
+
         public RbxPlayer GetLocalPlayer(string actorId)
         {
             string actor = RequireActorId(actorId);
@@ -378,6 +530,14 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// instance, or nil (nil argument and non-character models match nothing, as in the
         /// mirror's equivalent loop).
         /// </summary>
+        /// <remarks>
+        /// WHY this stays matched against the Lua-writable <see cref="RbxPlayer.Character"/> and is
+        /// not folded into <see cref="GetPlayerFromLoadedCharacter"/>: this is the mirror's public
+        /// API, and a script legitimately reads whatever Character currently holds — including a
+        /// value it (or another script) just assigned directly, with no LoadCharacterAsync in
+        /// between. Trusted lifecycle decisions use the other lookup instead; this one keeps Roblox
+        /// parity.
+        /// </remarks>
         public RbxPlayer GetPlayerFromCharacter(RbxInstance character)
         {
             if (character == null)
@@ -389,6 +549,42 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             {
                 RbxPlayer player = _players[index];
                 if (ReferenceEquals(player.Character, character))
+                {
+                    return player;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// The Player whose lifecycle actually built and owns <paramref name="character"/> (see
+        /// <see cref="RbxPlayer.LoadedCharacter"/>), or nil when no connected player's owned
+        /// character is this instance.
+        /// </summary>
+        /// <remarks>
+        /// WHY this exists alongside <see cref="GetPlayerFromCharacter"/> instead of replacing it:
+        /// that lookup matches the Lua-writable <see cref="RbxPlayer.Character"/>, which carries no
+        /// ownership check on assignment (see LoadedCharacter's remarks) — a script can point its
+        /// OWN Character at a foreign character with full authorization, since writing to a
+        /// property it owns needs none. A lifecycle decision that resolves "who owns this dying
+        /// character" from Character would let that alias redirect the outcome (e.g. a
+        /// death-triggered respawn) at a player who never died. Matching LoadedCharacter instead
+        /// always finds the one player the factory actually built this exact Model for, regardless
+        /// of what any player's Character currently reads. Not Lua-exposed — only trusted internal
+        /// callers (the death-triggered respawn wiring) use it.
+        /// </remarks>
+        public RbxPlayer GetPlayerFromLoadedCharacter(RbxInstance character)
+        {
+            if (character == null)
+            {
+                return null;
+            }
+
+            for (int index = 0; index < _players.Count; index++)
+            {
+                RbxPlayer player = _players[index];
+                if (ReferenceEquals(player.LoadedCharacter, character))
                 {
                     return player;
                 }

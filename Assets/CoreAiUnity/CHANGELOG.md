@@ -4,6 +4,19 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.40.0] - 2026-09-10
+
+### Changed
+
+- **All prose in the shipped packages is English, and a guard now says so.** The rule had lived in
+  `AGENTS.md` from the start with no check, and ended with an escape hatch ("migrate legacy text
+  gradually, never as a standalone wave"). That hatch is why 99 source files still carried Russian
+  comments - including the load-bearing WHYs on the memory store and the streaming client, which are
+  exactly the ones a consumer needs to read. `EnglishOnlyProseEditModeTests` scans every package and
+  names the file and line. Non-Latin text that is QUOTED - a test's input data, or a verbatim sample
+  of observed model output cited as evidence - stays, listed with a written reason; the excuse is
+  mechanical and per line, so an ordinary Russian comment in those files still fails.
+
 ## [7.39.0] - 2026-09-10
 
 ### Fixed

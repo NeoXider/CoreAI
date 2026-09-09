@@ -49,6 +49,11 @@ The first member access on an unimplemented service raises `NOT_IMPLEMENTED` and
 rung. See the exact current service table and author-facing examples in
 [`mod-authoring.md`](mod-authoring.md#roblox-services-and-deferred-placeholders).
 
+`ScriptContext` resolves as a tree-backed service. Its one member, `SetTimeout(seconds)`, moves the
+wall-clock half of the per-resume execution budget live and is host-gated: an ordinary mod is refused
+with `NOT_AUTHORITY` (the mirror marks the member `PluginSecurity`; CoreAI maps that tier to the host
+actor — roadmap deviation DEV-14). The skill text does not describe it yet.
+
 For the full picture of what has landed and what is planned, see
 [`ROBLOX_API_ROADMAP.md`](ROBLOX_API_ROADMAP.md).
 

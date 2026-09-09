@@ -206,7 +206,7 @@ Relative paths preserve directories: `examples/api.md` and `references/api.md` a
 Absolute paths, `..`, and duplicate names after normalization are rejected when the skill is created.
 
 ```csharp
-SkillSet skill = SkillSet.FromFiles("Crafting", "Создание предметов", skillRoot,
+SkillSet skill = SkillSet.FromFiles("Crafting", "Item crafting", skillRoot,
     new[] { "SKILL.md", "references/api.md", "examples/api.md" }, craftTool);
 ```
 
@@ -572,8 +572,9 @@ await orch.RunTaskAsync(new AiTaskRequest
 });
 
 // Or via a manual LLM client (for tests / custom pipeline):
-// supportsNativeToolCalling берётся из явной настройки или пробы выбранного endpoint.
-// Для LLMUnity нельзя без проверки подставлять true.
+// supportsNativeToolCalling comes from an explicit setting or from probing the chosen endpoint.
+// Never assume true for LLMUnity without checking: whether the native tool_calls channel is open
+// depends on the llama.cpp build behind it, and assuming it when it is closed loses every call.
 MeaiLlmClient client = MeaiLlmClient.CreateHttp(coreAiSettings, logger,
     supportsNativeToolCalling: supportsNativeToolCalling, memoryStore: memoryStore);
 LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest

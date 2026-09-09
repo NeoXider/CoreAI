@@ -58,10 +58,14 @@ Once it ran to the end it immediately earned its keep: it caught that `OnlineAut
 scene built in the same session — carried no `CoreAILifetimeScope` at all. The builder now creates
 the standard composition like every other demo, and the scene was regenerated.
 
-## MVP2.5 rungs — status 2026-09-06
+## MVP2.5 rungs — status 2026-09-10
 
 Verified on the settled tree (Unity 6000.3.14f1 batchmode): full EditMode
-**3694 total / 3685 passed / 0 failed / 9 skipped** (`artifacts/testresults/verify4.xml`).
+**4424 total / 4415 passed / 0 failed / 9 skipped** (`artifacts/testresults/final2.xml`), and
+PlayMode over the fixtures this wave touched — physics/character, the MCP server's residency, the
+Lua world module and the main-thread marshaler — **17 / 16 passed / 0 failed / 1 platform skip**
+(`artifacts/testresults/playmode1.xml`), with no abort in the editor log. The earlier figure on this
+line was 3694/3685 on 2026-09-06.
 
 **MVP2.5 is NOT closed.** A three-rung closure audit (`dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md`)
 found that MVP8 — previously recorded here as "complete" — has gates whose positive column the code
@@ -106,20 +110,88 @@ Fixed on 2026-09-06 in response to the audit:
       **A third and final review round (2026-09-09, two independent reviewers) found and fixed
       four more defects on this same landing, and leaves four open — see "Third review round"
       below and `dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` §6 for the complete list.**
-- [ ] **The MVP8 acceptance manifest.** Gate P8.5 cites frozen ids "listed in the MVP8 manifest";
-      no such file exists.
-- [ ] **The join snapshot** (MVP11): an admitted client still receives no filtered `ExportSnapshot`,
-      so client Lua cannot resolve `ReplicatedStorage.RemoteX` by reference.
-- [ ] **Wiring the gateway to the wire** (MVP12): `SendIntent`/`IntentReceived` on the bridge, the
-      dirty set published as deltas each step, and the client applying them. Every rule is built and
-      gated; this is the plumbing between them.
+- [x] **The MVP8 acceptance manifest.** Gate P8.5 cites frozen ids "listed in the MVP8 manifest" —
+      `dev-docs/MVP8_ACCEPTANCE_MANIFEST.md` exists, frozen 2026-09-06 against `main` (commit
+      `09469f77`): 20 Tier-A fixtures, cross-checked by `FrozenTierBCatalog_MatchesItsFilesAndIds` and
+      `FrozenCatalog_HasTwentyUniqueFixturesAndCompleteClassificationMetadata`. Verified present
+      2026-09-09.
+- [ ] **The join snapshot** (MVP11): an admitted client still receives no filtered `ExportSnapshot`
+      over the wire. Phase 0 landed the layer under it on 2026-09-10 — `ReplicationStream.PlanWorld`
+      seeds a recipient with every visible instance, and client Lua resolves
+      `ReplicatedStorage.RemoteX` by reference in `ReplicatedWorldConvergenceEditModeTests` — but
+      that runs registry-to-registry, not socket-to-socket. A stream created over a non-empty
+      registry it has never observed now REFUSES to plan rather than silently sending an empty
+      world.
+- [ ] **Wiring the gateway to the wire** (MVP12): `SendIntent`/`IntentReceived` on the bridge. The
+      dirty set and the client-side apply are no longer missing — as of 2026-09-10 the registry
+      itself feeds `ReplicationDirtySet` through `RevisionAdvanced`, `ReplicationStream` plans
+      ordered Spawn/Patch/Remove per recipient, and `ReplicationApplier` applies a plan to a replica
+      registry with duplicate/gap/violation handling. What remains is the transport: these carry
+      captured snapshots beside a sequence number, not bytes on a socket.
+- [ ] **Two named Phase 0 limits of the replication core** (found by the 2026-09-10 audit, left open
+      on purpose rather than half-built). First, a replicated `Player` arrives as a plain instance:
+      the snapshot carries no player payload, so the replica's copy has no `UserId`, no identity, no
+      `Character`, and does not appear in `Players:GetPlayers()`. Client Lua that looks a player up
+      through the service will not find one. Second, a deferred reference resolves only inside the
+      batch that carried it: an `ObjectValue` pointing at something the recipient cannot see becomes
+      nil and the wanted id is forgotten, so moving that target into view later spawns the target but
+      never repairs the reference. Both belong to the join-snapshot and transport work above; neither
+      can affect anyone today, because nothing in production constructs the replication types.
+      **Both were implemented on 2026-09-10**: a Player now travels with its identity and is admitted
+      into the service on the replica, and an unresolved reference is remembered and settled when its
+      target arrives. What is still open is the composition around them — `GetLocalPlayer` on a
+      client mints a Player through `EnsureNetworkActor`, so a script that asks before the seed
+      arrives makes the replicated Player for that actor a protocol violation. The client composition
+      must stop minting Players on a replica; there is nothing to break today because the replica
+      path is not wired.
+
 - [ ] **A two-process over-the-wire run** (N11.3–N11.6). Mirror's host mode did not deliver
       client→server inside the batch-mode test runner, so the bridge's rules are gated against its
       receive paths directly and **no claim is made that bytes cross a real socket**.
-- [ ] **MVP2 criterion 14** (budget kill within a frame slice) — see the audit; needs a decision,
-      not just a test. (Criterion 12, one JSON encoder, is decided: `HttpService` and the remote
+- [x] **MVP2 criterion 14** (budget kill within a frame slice) — decided and implemented on
+      2026-09-10. The decision: the per-resume budget is the GAME's, not CoreAI's. Both halves are a
+      serialized `LuaCsCoroutineBudgetSettings` on `CoreAiModsLifetimeScope`, every coroutine site
+      resolves the same instance, and every resume re-reads it, so a change reaches a pooled signal
+      runner built long before. The mirror's `ScriptContext:SetTimeout(seconds)` moves the wall-clock
+      half live, gated to the host actor; the instruction half stays composition-only because Roblox
+      has no scriptable equivalent. Two escapes were closed with it: a raw `coroutine.resume` armed
+      its own fixed constants, and the one-off `execute_lua` and AI-envelope surfaces each held a
+      private default. Pinned by `RbxHeartbeatBudgetKillEditModeTests` and
+      `RbxScriptContextEditModeTests`, including a runaway cut on an ALREADY-warmed handle. (Criterion 12, one JSON encoder, is decided: `HttpService` and the remote
       codec stay two independent encoders, pinned by `RbxJsonContractEditModeTests` — see
       `Assets/CoreAI/CHANGELOG.md` [Unreleased] and the audit.)
+- [ ] **MVP11/MVP12 scalability debt** (2026-09-02 online-readiness architecture audit, re-verified
+      against today's tree 2026-09-09 — most of that audit's security findings are now stale and are
+      NOT repeated here, see below). Still open and unchanged: dispatch is O(actors)+O(pending) under
+      one lock (`QueuedAiOrchestrator.SelectNextActorIdLocked`/`FindNextTaskIndexLocked`/
+      `FindNextStreamIndexLocked`, `Assets/CoreAI/Runtime/Core/Features/Orchestration/QueuedAiOrchestrator.cs:314,350,363`);
+      the scheduler's per-actor thread quota is an O(live-threads) scan on every `task.spawn`, bounded
+      only by the global `EmergencyMaxThreads = 4096` (`Assets/CoreAIMods/Runtime/RbxApi/Instances/Scheduling/ModScheduler.cs:30,1374`);
+      the mod-load quota is the same O(loaded-mods) shape bounded by the global `EmergencyMaxMods = 256`
+      (`Assets/CoreAIMods/Runtime/LuaExecution/LuaCsModRuntime.cs:79`); `InstanceRegistry.ProcessPreSimulation`
+      visits every registered instance every frame regardless of dirtiness
+      (`Assets/CoreAIMods/Runtime/RbxApi/Instances/InstanceRegistry.cs:478-483`); `FireAllClients` fans
+      out synchronously with no batching or per-tick coalescing
+      (`Assets/CoreAIMods/Runtime/Scripting/LuaCs/LuaCsRbxApiBindings.cs:1187`);
+      `PublishSubscriptionSnapshotLocked` rebuilds a fresh dictionary on every subscribe
+      (`Assets/CoreAIMods/Runtime/LuaExecution/LuaCsModRuntime.cs:1146` + 5 more call sites); and one
+      process-wide `_mutationGate` serializes every mutation and is held across the whole user operation
+      (`InstanceRegistry.cs:88,216,229,288,469`). Already fixed since the audit and NOT open any more:
+      the global chat-admission ceiling (see the Scale characterization item above,
+      `AiOrchestrationQueueOptions.ForActorCount`, 7.15.0); the world ACL, now `public` in the
+      engine-free `WorldAclAuthorizer` (`Assets/CoreAIMods/Runtime/RbxApi/Instances/WorldAcl.cs:54`)
+      instead of `internal` to `CoreAI.Mods`; the disconnect seam, which now prunes per-actor remote
+      signals (`RbxRemotes.RemoveActor`, `Assets/CoreAIMods/Runtime/RbxApi/Instances/Networking/RbxRemotes.cs:96`)
+      and calls `UnregisterActor` from real production callers
+      (`Assets/CoreAIMirror/Runtime/CoreAiMirrorSessionHost.cs:138`, `LuaCsRbxApiBindings.cs:932`);
+      remote payloads, now capped at `LuaCsRbxNetworkCodec.MaxPayloadBytes = 65536` bytes and refused
+      with `PAYLOAD_TOO_LARGE` before decode (`Assets/CoreAIMods/Runtime/Scripting/LuaCs/LuaCsRbxNetworkCodec.cs:98,113-130`);
+      and the enveloped `execute_lua` protocol, which no longer exposes `operation_id`/
+      `target_instance_id`/`expected_revision` as caller-supplied parameters on either the in-game or
+      MCP surface (`Assets/CoreAIMods/Runtime/LuaExecution/LuaTool.cs`,
+      `Assets/CoreAIMcp/Runtime/Tools/ExecuteLuaMcpTool.cs:78-91`). Source audit
+      (`dev-docs/ARCH_AUDIT_ONLINE_2026-09-02.md`) deleted after this digest per the audit-report
+      policy; full original findings are in git history.
 
 ### Third review round — 2026-09-09 (branch `fix`, two independent reviewers)
 
@@ -214,8 +286,8 @@ Verified on the merged tree (commit `5c62c43d`, Unity 6000.3.14f1 batchmode, XML
 (`g9.xml`); full PlayMode with the live `ling-3.0-tiny` model **114 total / 110 passed / 0 failed / 4 skipped**
 (`pm4.xml`); Node jslib tests 6/6 and SSE 12/12; ScaleHarness quick smoke green after the rung-zero
 envelope fix. Independent QA rounds (world package, materials, WebGL, demos, docs, architecture,
-texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
-`dev-docs/ARCH_AUDIT_ONLINE_2026-09-02.md`, `dev-docs/DOCS_AUDIT_2026-09-02.md`.
+texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`; the architecture and docs
+audit reports were absorbed into this file and deleted per the audit-report policy (2026-09-09).
 
 - [x] W3.1–W3.4 world package: codec, one serializer, clean mod restart, backup safety — implemented,
       EditMode green, QA blocker (bare `Instance.new('Part')` locking every gated tool) fixed with a
@@ -249,6 +321,19 @@ texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
       pink, no NaN; three ids corrected after the pass (`Slate=Rock022`, `Rock=Rock028`, `Salt` back to
       procedural). Fab/Megascans: local use only (`dev-docs/SHADER_SOURCES_RESEARCH_2026-09-02.md`).
       OPEN: the same 46-slot evidence and a visual pass in the WebGL player (G11).
+- [ ] **Material catalog memory + import defects** (2026-09-04 material defect audit and local-texture
+      QA pass, both deleted after this digest). `RbxTextureMaterialProvider.EnsureSharedCache`
+      (`Assets/CoreAIMods/Runtime/RbxApi/Unity/RbxTextureMaterialProvider.cs:431-509`) eagerly builds
+      one shared `Material` for **every** catalog entry the first time any Rbx part is created — the
+      catalog holds direct `Texture2D` references, so this pulls in all 36 materials' textures
+      (~99 MB resident) even when a scene uses one. Cost should be proportional to what a scene
+      touches: store asset paths in the catalog and load a texture on first use of that material.
+      Worth doing before WebGL is taken seriously. Separately,
+      `Assets/CoreAIMods/Editor/RbxMaterials/RbxLocalTextureCatalogImport.cs:108` hardcodes
+      `IsSmoothnessMap = false` instead of copying `surface.IsSmoothnessMap` the way
+      `RbxMegascansCatalogImporter.cs:317-318` does; latent today (no local Sets folder has a
+      smoothness/gloss map) but a future one would get `InvertRoughness` wrong at runtime
+      (`RbxTextureMaterialProvider.cs:325`) with no warning. Both confirmed still present, 2026-09-09.
 - [x] **Rung zero (MVP2 entry gates, from the architecture audit) — landed (`PROGRESS.rungzero.md`,
       24 focused tests green off-device):** ACL in the engine-free registry, server-generated
       envelopes on every production Lua entry (execute_lua plain/MCP, mod chunks, scheduler resumes,
@@ -274,16 +359,33 @@ texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
       same confirmation pool (task `hub6`, UI tests need the Editor run).
 - [x] **Scale characterization 20/50/100/200 actors** measured through production composition with a
       frozen workload (`tools/ScaleHarness`, `dev-docs/SCALE_CHARACTERIZATION.md`, host CoreCLR, not
-      the player): frame-only budget holds 100 actors in 4 ms and 200 in 16 ms; the chat gate fails
-      from 100 actors (admission cap `MaxPending`/`MaxConcurrent` — an actor-count-scaled ceiling was
-      attempted and reverted after it broke the `MaxPending_*` refusal tests; still OPEN) and the heap
-      budget fails already at 20 (~4.5 KB/actor/frame allocations — OPEN, `alloc-fix`). No capacity claim until both pass and the
-      staircase is repeated in a Standalone player.
+      the player): frame-only budget holds 100 actors in 4 ms and 200 in 16 ms. The chat admission cap
+      and the heap budget, both previously recorded OPEN here, shipped fixed in **7.15.0** (`ae160cc2`):
+      the heap gate was measuring the garbage collector, not the program (`GC.GetTotalMemory` noise 3x
+      to 47x the threshold, sign not even stable), replaced with a retained-heap-delta +
+      allocation-bytes-per-actor-per-frame pair (spread 0.13 MB / 0.00 bytes across repeats); the chat
+      admission ceiling is now sized to the actor count via `AiOrchestrationQueueOptions.ForActorCount(n)`
+      instead of the fixed `MaxPending=64`/`MaxConcurrent=4` defaults. With both fixes, 200 actors pass
+      the 16 ms frame budget, the memory gate and the chat gate (`dev-docs/CAPACITY_UNBLOCKED_2026-09-05.md`,
+      "largest measured passing N: 200"). The 4 ms budget still fails at 200 (median 7.37 ms — a
+      240 Hz-equivalent target, not 60 Hz). No capacity claim until the staircase is repeated in a
+      Standalone player against a real provider.
 - [ ] Demo scene-level fixes needing the Editor: orphan `ChatPromptButtonsController` in
       LiveMechanicsModsChatDemo / MiniRpgModsDemo / ModdableUnitsDemo (enable the chat example menu
-      or remove), `DemoHubPagesBinder.EnableExamplePrompts()` no-op in WaveAutoBattlerModsDemo.
-- [ ] IMGUI migration backlog: 13 files remain on the `ImguiBanRatchetEditModeTests` allowlist (10
-      demo controllers, 3 diagnostics overlays); the ratchet only shrinks.
+      or remove), `DemoHubPagesBinder.EnableExamplePrompts()` no-op in WaveAutoBattlerModsDemo, and two
+      empty `Prompt:` fields in `Assets/CoreAI.Demos/ModdableUnits/ModdableUnitsDemo.unity` (verified
+      2026-09-09, still present) where the copy `"Start a battle"`/`"Endless waves"` is expected — the
+      third `Prompt:` field is populated. (A separate claim from the same 2026-09-04 demo-scene audit,
+      that `CoreAiHubDemo.unity`/`MiniRpgModsDemo.unity` carry dangling script GUIDs `4ef82c39…`/
+      `66c209b3…`, does NOT hold: both resolve to `PlayerController3DAnimatorDriver`/
+      `PlayerController3DPhysics` via the declared `com.neoxider.tools` git dependency in
+      `Packages/manifest.json` and `Packages/packages-lock.json`, cached at
+      `Library/PackageCache/com.neoxider.tools@.../Scripts/Tools/Move/` — not actually broken.)
+- [ ] IMGUI migration backlog: 3 files remain on the `ImguiBanRatchetEditModeTests` allowlist — all
+      runtime diagnostics overlays (`AiDashboardPresenter.cs`, `CoreAiTokenBudgetOverlay.cs`,
+      `OrchestrationDashboard.cs` under `CoreAiUnity/Runtime/Source/Features/...`); every demo
+      controller moved off IMGUI onto the shared `CoreAiDemoPanel` in 7.34.0 (`54fa272f`). The ratchet
+      only shrinks.
 - [ ] Incrementally encode/decode JSON/ZIP on WebGL. The current player path yields chunked file I/O
       and fails fast beyond a 4 MiB / 4,096-instance / bounded-collection budget.
 - [ ] Stream or quota JSON token materialization before semantic tree validation to cap hostile
@@ -303,12 +405,27 @@ texture catalog) are recorded in `PROGRESS.qa-*.md`, `PROGRESS.texqa.md`,
       runs at ~1 frame/s (no `requestAnimationFrame`), after five minutes Chrome stalls it; timings in
       the record are dilated and a 30 s tool timeout can trip inside the autosave. Add a visibility /
       frame-rate check to the G11 protocol before any timed row.
-- [ ] **Weak tests flagged by the independent final QA (`dev-docs/FINAL_QA_2026-09-02.md`).**
+- [ ] **Weak tests flagged by the independent final QA (2026-09-02 pass, `dev-docs/FINAL_QA_2026-09-02.md`,
+      deleted after this digest per the audit-report policy).**
       `Lint_BinderOutput_IsExactlyRobloxSpaceOutput` computes actual and expected through the same
       `RbxSpace` helper (a symmetric sign/scale bug passes; only the chirality goldens catch it);
       `Lua_InstanceNew_DeprecatedParentArgument_WorksAndLogsOnce` invokes twice inside one load, so a
       once-per-load implementation would also pass (needs a reload twin); `AssetRule_At1To1_*` proves
       the second scale per shape only. Rewrite each with an independent oracle or a negative twin.
+- [ ] **Four more vacuous tests from the same 2026-09-02 final QA pass, beyond the three above:**
+      `D3_MeterAuthoredHostObjectReadsAsStuds` (`1.8`/`0.28`,
+      `RbxSpaceGoldenFixtureEditModeTests.cs`) does bare arithmetic without wrapping a host object, so
+      it would pass even with no lazy-wrap layer; `CatalogOverrideWinsPerMaterial`
+      (`RbxMaterialTextureCatalogEditModeTests.cs`) drives `RbxMaterialTextureCatalog` directly instead
+      of the production `InstanceGameObjectBinder` path, so it would pass even if the binder still
+      resolved the packaged texture; `CatalogShaders_NeverRaiseAnUnclampedBaseToAPower`
+      (`RbxMaterialCatalogQaEditModeTests.cs`) is a static shader-source text scan with no runtime
+      shader instantiation, so a runtime `pow(negative, …)` NaN would not flip it; and
+      `ManyLuaParts_ReuseOneTexturedHandleWithoutNativeMaterialAllocation`
+      (`RbxTextureMaterialsAcceptanceEditModeTests.cs`) asserts handle-name reuse only, so it would
+      pass even if every Part still re-created its own material under an equal name. All four test
+      methods confirmed still present, unchanged, 2026-09-09. Rewrite each with an independent oracle
+      or a negative twin.
 - [ ] **Final QA verdict (2026-09-02):** MVP2 G10 (chat throughput with a real provider, admission cap
       `MaxPending=64`), the heap-slope budget and the host-restore envelope stay open; every other
       G1–G12 / P1–P5 / W3.1–W3.5 row is PASS on `g11.xml` + the browser record. See the reconciliation
@@ -1102,7 +1219,7 @@ Open:
 > Tracks the seed foundation list above as work lands. Items are worked by multiple agents
 > in parallel on separate files; update this list per item, don't rewrite others' lines.
 
-- [~] **#8 Lua log service — core done, runtime wiring pending.** Standalone `ILuaLogService` in
+- [x] **#8 Lua log service — closed.** Standalone `ILuaLogService` in
       `Assets/CoreAIMods/Runtime/Logging/`: `LuaLogEntry`/`LuaLogLevel`/`LuaLogQuery` model,
       `LuaLogService` (per-mod + global ring buffers, thread-safe, optional error mirror to
       `IGameLogger`), `LuaLogFormatter.ToPromptText` (AI-facing compact text with truncation),
@@ -1110,12 +1227,11 @@ Open:
       `persistentDataPath/CoreAI/Logs`, `CoreAiWebGlPersistence.Sync()` on write). EditMode tests cover
       ring-buffer eviction/caps, the query filter matrix, sequence monotonicity, `EntryAppended`,
       formatter truncation, and a concurrent append/query smoke test. `CoreAI.Mods`/`CoreAI.Mods.Tests`
-      `dotnet build` both green. Not yet wired: nothing calls `ILuaLogService.Append` from the mod
-      runtime's `print`/`warn`/`error`/runtime-error paths, nothing registers `ILuaLogService` in
-      `CoreAiModsInstaller`/`CoreAiModsLifetimeScope`, and `GetModLogsLlmTool` is not attached to the
-      Programmer tool set (`// TODO:` left in the tool's XML doc). Follow-up: wire Append calls into
-      `LuaCsModRuntime`'s existing report/error capture paths, register the service + tool, remove the
-      TODO.
+      `dotnet build` both green. Wired: `CoreAiModsInstaller` registers `ILuaLogService`
+      (`CoreAiModsInstaller.cs:151`) and threads it into `LuaCsModStackOptions` (`:248,828`) so the mod
+      runtime's print/warn/error/runtime-error paths append to it, and `GetModLogsLlmTool` is on the
+      Programmer tool set (`:625`) with no `// TODO:` left in the file. Verified 2026-09-09 — agrees
+      with the closed entry in the foundation list above.
 - [x] **#9 Editor Lua/Luau syntax highlighting.** `.luau` `ScriptedImporter` (`.lua` already had one in
       `CoreAiUnity/Editor`) → `TextAsset`; custom `TextAsset` inspector highlights `.lua`/`.luau`/
       `.lua.txt`, falls back to a plain view for other text assets; standalone `CoreAI/Lua Script

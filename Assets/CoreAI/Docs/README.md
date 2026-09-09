@@ -18,6 +18,7 @@ Russian files are kept only when the filename is explicitly marked `_RU`.
 | Route requests across local, HTTP, or Unity hosts | [LLM_ROUTING.md](LLM_ROUTING.md) |
 | Expose AI-authored Lua safely | [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) |
 | Create world objects from a mod | [RBX_API.md](RBX_API.md) |
+| Write and load your first Lua mod | [FIRST_MOD.md](FIRST_MOD.md) |
 | Game Lua API, mods, Full mode | [LUA_GAME_API.md](LUA_GAME_API.md) |
 | Lua do's and don'ts | [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) |
 | Keep tool logic free of Unity APIs | [ENGINE_AGNOSTIC_TOOLS.md](ENGINE_AGNOSTIC_TOOLS.md) |
@@ -30,8 +31,10 @@ Russian files are kept only when the filename is explicitly marked `_RU`.
 | [ENGINE_AGNOSTIC_TOOLS.md](ENGINE_AGNOSTIC_TOOLS.md) | Tools and prompts without Unity APIs |
 | [LESSON_ORCHESTRATION.md](LESSON_ORCHESTRATION.md) | Lesson/practice hooks: runtime context, tool policy, tests |
 | [LLM_ROUTING.md](LLM_ROUTING.md) | Execution modes, portable routing contracts, usage sinks, timeouts |
+| [LLM_TOOLS.md](LLM_TOOLS.md) | Built-in vs host-wired `ILlmTool` implementations and how a host adds the latter |
 | [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, removed APIs, execution limits, binding rules, and escape-test checklist |
-| [RBX_API.md](RBX_API.md) | Roblox-style API a mod builds with: `Instance.new`, datatypes, services, `BasePart.Material` / `MaterialVariant` / `Part.Color`, saving and loading a world, samples |
+| [RBX_API.md](RBX_API.md) | Roblox-style API a mod builds with: `Instance.new`, datatypes, services, `BasePart.Material` / `MaterialVariant` / `Part.Color`, the execution budget and `ScriptContext`, saving and loading a world, samples |
+| [FIRST_MOD.md](FIRST_MOD.md) | Your first Lua mod in 5 minutes: writing, loading, persisting, and sharing it |
 | [LUA_GAME_API.md](LUA_GAME_API.md) | Game Lua API reference: capabilities, mods, world, Full, LLM tools |
 | [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) | Best practices and anti-patterns for Lua in games |
 | [LUA_NATIVE_APIS.md](LUA_NATIVE_APIS.md) | Lua native APIs vs CoreAI wrappers |

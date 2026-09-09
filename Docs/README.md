@@ -21,7 +21,7 @@ wrong folder.
 | Example game | [Assets/_exampleGame/README.md](../Assets/_exampleGame/README.md) | You need the RogueliteArena sample, scene setup, progression, or AI wave planning notes. |
 | NeoxiderTools | [Assets/NeoxiderTools/Docs/README.md](../Assets/NeoxiderTools/Docs/README.md) | You need shared utility/toolkit documentation used by this Unity project. |
 
-The full five-package dependency graph and install profiles (Base / +Mods / +Hub / Full) live in
+The full seven-package dependency graph and install profiles (Base / +Mods / +Hub / Full) live in
 [INSTALL.md](../INSTALL.md).
 
 ## Common Reading Paths
@@ -48,6 +48,18 @@ The Lua surface a mod builds worlds with, and the artifacts it produces:
 | [Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md](../Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md) | Catalog-driven texture materials: six packaged CC0 sets, project-local override catalog for any of the 45 items (ambientCG downloader, Quixel Bridge / Fab importer), projection and tint rules. |
 | [CoreAIMods/RBX_API_SKILL.md](CoreAIMods/RBX_API_SKILL.md) | How the agent-facing `Rbx API` skill text is produced and kept in sync. |
 | [CoreAIMods/ROBLOX_API_ROADMAP.md](CoreAIMods/ROBLOX_API_ROADMAP.md) | The definitive MVP0–MVP17 ladder and every locked API decision. |
+| [CoreAIMods/mod-authoring.md](CoreAIMods/mod-authoring.md) | Writing a CoreAI Lua mod: the `@coreai` header, the always-available mod API, capability tiers, Roblox-style signals and services, the per-resume execution budget, bundled mods. |
+| [CoreAIMods/CHARACTER_MOTOR_BRIDGE.md](CoreAIMods/CHARACTER_MOTOR_BRIDGE.md) | Driving Rbx characters with the game's own character controller: `IRbxCharacterMotor` / `IRbxCharacterMotorProvider` and the rules a bridge must keep. |
+| [CoreAIMods/SCRIPT_ENGINE_SEAM.md](CoreAIMods/SCRIPT_ENGINE_SEAM.md) | The engine-neutral scripting contracts and the Lua-CSharp adapter layer behind them. |
+| [CoreAIMods/mod-system.md](CoreAIMods/mod-system.md) | Mod system design spec: the manifest header, bundled sources and the seeder, the Hub Mods tab, the quarantine policy. |
+| [01](CoreAIMods/RobloxReference/01_SCRIPTS_AND_SCHEDULER.md) · [02](CoreAIMods/RobloxReference/02_MULTIPLAYER_REPLICATION.md) · [03](CoreAIMods/RobloxReference/03_SERVICES_AND_DATA.md) | The normative Roblox behaviour rulebooks the roadmap cites: scripts and scheduler, multiplayer and replication, services and data. |
+
+## Agents
+
+| Document | Purpose |
+|---|---|
+| [CoreAI/AGENT_ROLES_AND_TOOLS.md](CoreAI/AGENT_ROLES_AND_TOOLS.md) | The built-in agent roles, the tools each one has wired by default, and what that lets it do; every claim cited to source. |
+| [CoreAI/agent-vision.md](CoreAI/agent-vision.md) | Agent vision: capturing what a camera renders for the LLM, and the rule that the player's camera is never hijacked. |
 
 ## Product And Planning
 
@@ -58,6 +70,7 @@ The Lua surface a mod builds worlds with, and the artifacts it produces:
 | [TODO/MultiAgent_Orchestration_v2.0.md](../TODO/MultiAgent_Orchestration_v2.0.md) | Multi-agent orchestration plan. |
 | [BENCHMARK_LEADERBOARD.md](BENCHMARK_LEADERBOARD.md) | Public community leaderboard for the Game-Creation Benchmark: ranked results, suite versioning, and the score-submission workflow. |
 | [CoreAIMods/MOD_SHARING.md](CoreAIMods/MOD_SHARING.md) | Shareable mod bundle format, Hub export/import flow, import safety, and the proposed community mod gallery process. |
+| [ARCHITECTURE_RULES.md](ARCHITECTURE_RULES.md) | Normative architecture rules for the Roblox-API track and every new CoreAI module. |
 
 ## Private planning material
 

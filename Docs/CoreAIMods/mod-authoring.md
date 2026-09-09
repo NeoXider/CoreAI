@@ -86,7 +86,7 @@ order is not part of the CoreAI or Roblox authoring contract.
 In the standard runtime, `game:GetService()` resolves these tree-backed services: `Workspace`,
 `Lighting`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `Players`,
 `HttpService`, `UserInputService`, `MaterialService`, `Debris`, `CollectionService`, `TweenService`,
-and `RunService`. A tree-backed service can still have
+`RunService`, and `ScriptContext`. A tree-backed service can still have
 service-specific members that have not landed; resolution alone does not promise that every Roblox
 member exists.
 
@@ -122,6 +122,9 @@ DataStoreService:GetDataStore("Saves")
 
 An unknown, unregistered name still fails immediately at `GetService()` with `UNKNOWN_SERVICE`.
 
+`ScriptContext` has one member, `SetTimeout(seconds)`, and it is host-gated — see
+[Sandbox & limits](#sandbox--limits).
+
 ## Coroutines (work across frames, WebGL-safe)
 `coroutine.create/resume/yield/status` are available. A coroutine lets a mod spread a sequence over time
 without blocking — it yields, the host advances the frame, and you resume it next tick. Under Lua-CSharp this
@@ -138,10 +141,22 @@ authoritative channel) over direct mutation — it stays deterministic and multi
 
 ## Sandbox & limits
 - No `io`/`os`/`debug`; `load`/`loadstring`/`dofile`/`loadfile` are removed.
-- An **instruction budget** (via Lua-CSharp `SetHook`) cuts a runaway handler (`while true do end`) on ALL
-  platforms incl. WebGL — a buggy mod cannot hang a frame.
-- Caps: per-handler steps/time, timer min interval `0.05 s`, exports/mod, dispatch per tick (no events dropped;
-  serviced on later ticks), quarantine after consecutive failures (mod stays loaded; reload resumes it).
+- Every resume of your code — the main chunk, a signal handler, a `task.*` resume, a one-off `execute_lua`
+  chunk — runs under a **per-resume budget** with two halves: an instruction-step cap and a wall-clock cap
+  (CoreAI's defaults: 10,000 steps / 500 ms; a mod's own `coroutine.resume` gets a larger bound derived from
+  the same setting). It is enforced through Lua-CSharp's per-instruction hook, so a runaway handler
+  (`while true do end`) is cut on ALL platforms incl. WebGL — a buggy mod cannot hang a frame — and the
+  failure reaches you as a budget kill, `BUDGET_EXCEEDED`, naming the bound and your line, not as a Lua
+  error to "fix".
+- **The budget is the game's, not CoreAI's.** The host sets both halves on `CoreAiModsLifetimeScope`
+  (**Lua coroutine resume budget**; `<= 0` falls back to the defaults) and every resume re-reads them, so a
+  game may tighten the budget for untrusted mods or loosen it for a heavy simulation while mods are already
+  running. `game:GetService("ScriptContext"):SetTimeout(seconds)` moves the wall-clock half live for every
+  subsequent resume — but only from host-composed code: an ordinary mod calling it is refused with
+  `NOT_AUTHORITY`, the way Roblox limits the member to plugins. The instruction half has no Lua-facing
+  setter, because Roblox has none.
+- Caps: timer min interval `0.05 s`, exports/mod, dispatch per tick (no events dropped; serviced on later
+  ticks), quarantine after consecutive failures (mod stays loaded; reload resumes it).
 
 ## Lua version note
 Lua-CSharp targets **Lua 5.2** semantics with **double-only numbers** — there is no integer/float

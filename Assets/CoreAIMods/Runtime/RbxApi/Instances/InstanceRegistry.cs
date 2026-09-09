@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using CoreAI.Mods.Rbx.Instances.Replication;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
@@ -7,6 +9,16 @@ namespace CoreAI.Mods.Rbx.Instances
     public interface IWorldInstanceAdapter
     {
         bool TryWrap(InstanceRegistry registry, string worldName, out RbxInstance instance);
+    }
+
+    /// <summary>
+    /// Which side of the replication boundary a registry sits on: the server that owns the truth,
+    /// or a client copy that only ever receives it.
+    /// </summary>
+    public enum RegistryAuthority
+    {
+        Authoritative,
+        Replica
     }
 
     /// <summary>
@@ -71,6 +83,22 @@ namespace CoreAI.Mods.Rbx.Instances
             public object Result { get; }
         }
 
+        private readonly struct PendingRevisionAdvance
+        {
+            public PendingRevisionAdvance(InstanceId id, long revision, string member)
+            {
+                Id = id;
+                Revision = revision;
+                Member = member;
+            }
+
+            public InstanceId Id { get; }
+
+            public long Revision { get; }
+
+            public string Member { get; }
+        }
+
         public const int CurrentWorldAclVersion = 1;
 
         /// <summary>Maximum completed mutation results retained for each durable actor.</summary>
@@ -93,11 +121,15 @@ namespace CoreAI.Mods.Rbx.Instances
         private RbxInstance _worldRoot;
         private RbxInstance _sceneRoot;
         private MutationEnvelopeScope _mutationEnvelopeScope;
+        private ReplicationApplyScope _replicationApplyScope;
+        private readonly List<PendingRevisionAdvance> _pendingRevisionAdvances = new();
+        private int _mutationGateDepth;
 
         public InstanceRegistry(ClassCatalog catalog = null, IInstanceBackingBinder binder = null,
             InstanceIdAllocator allocator = null, int? worldAclVersion = null, string worldId = "",
             IWorldInstanceAdapter worldInstanceAdapter = null,
-            int mutationReplayCapacityPerActor = DefaultMutationReplayCapacityPerActor)
+            int mutationReplayCapacityPerActor = DefaultMutationReplayCapacityPerActor,
+            RegistryAuthority authority = RegistryAuthority.Authoritative)
         {
             if (worldAclVersion.HasValue && worldAclVersion.Value != CurrentWorldAclVersion)
             {
@@ -120,16 +152,58 @@ namespace CoreAI.Mods.Rbx.Instances
             _mutationReplayCapacityPerActor = mutationReplayCapacityPerActor;
             WorldAclVersion = worldAclVersion;
             WorldId = worldId?.Trim() ?? "";
+            Authority = authority;
         }
 
         /// <summary>
         /// Optional sink for composition faults this registry detects but must not throw on. Engine-free
-        /// by design (a delegate, not a Unity logger); the Unity host wires it to the console.
+        /// by design (a delegate, not a Unity logger); the Unity host wires it to the console. A sink
+        /// that throws is contained too: the report is dropped and <see cref="DiagnosticsFaults"/> counts
+        /// it, so nothing reported through here ever escapes into the operation that reported it.
         /// WHY: these failures are otherwise SILENT — an instance tree that diverges from the registry
         /// backing it yields no exception and no GameObject, which is indistinguishable from "the script
         /// did nothing".
         /// </summary>
         public Action<string> Diagnostics { get; set; }
+
+        /// <summary>How many reports <see cref="Diagnostics"/> itself failed to take.</summary>
+        public int DiagnosticsFaults => Volatile.Read(ref _diagnosticsFaults);
+
+        private int _diagnosticsFaults;
+
+        /// <summary>
+        /// Reports through <see cref="Diagnostics"/> without letting the sink's own failure out.
+        /// </summary>
+        /// <remarks>
+        /// WHY the sink's throw is dropped rather than rethrown: every caller sits inside a containment
+        /// promise — a subscriber's bug stays its own, a filter's bug means "not visible", a composition
+        /// fault is reported and the script still completes — and the sink is the last engine-free
+        /// place such a fault can go. A sink that throws would defeat each of those promises one level
+        /// down; the count is what remains to tell a host its own logger is broken.
+        /// </remarks>
+        internal void ReportDiagnostic(string message)
+        {
+            Action<string> sink = Diagnostics;
+            if (sink == null)
+            {
+                return;
+            }
+
+            try
+            {
+                sink(message);
+            }
+            catch (Exception)
+            {
+                Interlocked.Increment(ref _diagnosticsFaults);
+            }
+        }
+
+        /// <summary>Whether this registry owns the truth or receives it.</summary>
+        public RegistryAuthority Authority { get; }
+
+        /// <summary>True while a replica is inside <see cref="BeginReplicationApply"/>.</summary>
+        public bool IsApplyingReplication => _replicationApplyScope != null;
 
         public ClassCatalog Catalog { get; }
 
@@ -238,6 +312,30 @@ namespace CoreAI.Mods.Rbx.Instances
         public event Action<InstanceRecord> Unregistered;
 
         /// <summary>
+        /// One instance's revision moved forward: the instance, its new revision, and the member that
+        /// changed (see <see cref="ReplicationMembers"/>) — null when the whole node changed or the
+        /// caller did not say. Raised only on an authoritative registry, after the mutation gate is
+        /// released. A subscriber that throws is reported through <see cref="Diagnostics"/>; the other
+        /// subscribers and the events parked behind it are still delivered, whatever the sink does.
+        /// </summary>
+        /// <remarks>
+        /// WHY this event alone is parked until the gate is released: it is the replication publish
+        /// point — the subscriber is the replication dirty set today and whatever a host hangs on it
+        /// tomorrow — so it must name the revision an operation committed rather than one midway
+        /// through it, and a subscriber must be free to take the gate itself
+        /// (<see cref="RetainedMutationOperationCount"/>, <see cref="MarkDetached"/>) without meeting
+        /// it held by the raising thread.
+        /// <see cref="Registered"/>, <see cref="Unregistered"/>, <see cref="TagAdded"/> and
+        /// <see cref="TagRemoved"/> are NOT parked: they are bookkeeping signals whose subscribers
+        /// (physics contacts, Debris, TweenService, CollectionService, the Lua bindings) must see the
+        /// record in the same statement that changed it, so inside <see cref="ApplyMutation{T}"/> they
+        /// fire under the gate, and a subscriber to them must not take it. The one place the two orders
+        /// cross — Destroy fires Unregistered inline and the Parent revision after the gate — is safe
+        /// because the dirty set never downgrades a removal to a change.
+        /// </remarks>
+        public event Action<InstanceId, long, string> RevisionAdvanced;
+
+        /// <summary>
         /// Tag transition on one instance: the instance, the tag, and whether this add made the
         /// tag used anywhere for the first time. CollectionService layers TagAdded and the
         /// per-tag added signals here; raised only when the tag was newly applied.
@@ -285,49 +383,71 @@ namespace CoreAI.Mods.Rbx.Instances
                 throw new ArgumentNullException(nameof(operation));
             }
 
-            lock (_mutationGate)
+            try
             {
-                if (IsDetached)
+                lock (_mutationGate)
                 {
-                    throw RbxError.WorldDetached(
-                        "actor '" + envelope.ActorId + "' operation '"
-                        + envelope.OperationId + "'");
-                }
-
-                MutationOperationKey key = new(envelope.ActorId, envelope.OperationId);
-                if (_mutationOperations.TryGetValue(
-                        key, out MutationOperationRecord completed))
-                {
-                    EnsureReplayMatches(envelope, completed);
-                    if (completed.ResultType != typeof(T))
+                    _mutationGateDepth++;
+                    try
                     {
-                        throw MutationDenied(envelope,
-                            "the operation id was already completed with a different result type");
+                        return ApplyMutationLocked(envelope, operation);
                     }
-
-                    return completed.Result == null ? default : (T)completed.Result;
+                    finally
+                    {
+                        _mutationGateDepth--;
+                    }
                 }
-
-                if (!_byId.TryGetValue(
-                        envelope.TargetInstanceId, out InstanceRecord targetRecord))
-                {
-                    throw MutationDenied(envelope,
-                        "the target has no live instance record");
-                }
-
-                if (targetRecord.Revision != envelope.ExpectedRevision)
-                {
-                    throw MutationDenied(envelope,
-                        "stale expected revision " + envelope.ExpectedRevision
-                        + "; current revision is " + targetRecord.Revision);
-                }
-
-                T result = operation();
-                _mutationOperations.Add(
-                    key, new MutationOperationRecord(envelope, typeof(T), result));
-                RetainMutationOperation(envelope.ActorId, key);
-                return result;
             }
+            finally
+            {
+                // WHY here as well as in AdvanceRevision: the operation ran under the gate, so every
+                // revision event it produced was parked; by now the gate is released.
+                FlushRevisionAdvances();
+            }
+        }
+
+        private T ApplyMutationLocked<T>(MutationEnvelope envelope, Func<T> operation)
+        {
+            if (IsDetached)
+            {
+                throw RbxError.WorldDetached(
+                    "actor '" + envelope.ActorId + "' operation '"
+                    + envelope.OperationId + "'");
+            }
+
+            MutationOperationKey key = new(envelope.ActorId, envelope.OperationId);
+            if (_mutationOperations.TryGetValue(
+                    key, out MutationOperationRecord completed))
+            {
+                EnsureReplayMatches(envelope, completed);
+                if (completed.ResultType != typeof(T))
+                {
+                    throw MutationDenied(envelope,
+                        "the operation id was already completed with a different result type");
+                }
+
+                return completed.Result == null ? default : (T)completed.Result;
+            }
+
+            if (!_byId.TryGetValue(
+                    envelope.TargetInstanceId, out InstanceRecord targetRecord))
+            {
+                throw MutationDenied(envelope,
+                    "the target has no live instance record");
+            }
+
+            if (targetRecord.Revision != envelope.ExpectedRevision)
+            {
+                throw MutationDenied(envelope,
+                    "stale expected revision " + envelope.ExpectedRevision
+                    + "; current revision is " + targetRecord.Revision);
+            }
+
+            T result = operation();
+            _mutationOperations.Add(
+                key, new MutationOperationRecord(envelope, typeof(T), result));
+            RetainMutationOperation(envelope.ActorId, key);
+            return result;
         }
 
         /// <summary>Runs one production entry batch under a server-generated ambient envelope.</summary>
@@ -463,14 +583,158 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        /// <summary>Advances and returns the revision for a successful instance mutation.</summary>
-        public long AdvanceRevision(InstanceId id)
+        /// <summary>
+        /// Advances and returns the revision for a successful instance mutation. <paramref name="member"/>
+        /// names the property, attribute or tag that changed (see <see cref="ReplicationMembers"/>);
+        /// null means the whole node. On a <see cref="RegistryAuthority.Replica"/> the revision is the
+        /// server's: a call inside a replication apply scope is the server's own write and changes
+        /// nothing here, a call outside it is a local write that marks the record diverged.
+        /// </summary>
+        public long AdvanceRevision(InstanceId id, string member = null)
         {
+            long revision;
             lock (_mutationGate)
             {
-                InstanceRecord record = RequireRecord(id);
-                record.Revision = checked(record.Revision + 1L);
-                return record.Revision;
+                _mutationGateDepth++;
+                try
+                {
+                    InstanceRecord record = RequireRecord(id);
+                    if (Authority == RegistryAuthority.Replica)
+                    {
+                        // WHY the replica never counts: its revisions are the server's, stamped from
+                        // what arrives. A local increment would race the server's number and make every
+                        // later patch look stale or early; the divergence flag records what happened.
+                        if (_replicationApplyScope == null)
+                        {
+                            record.IsLocallyDiverged = true;
+                        }
+
+                        return record.Revision;
+                    }
+
+                    record.Revision = checked(record.Revision + 1L);
+                    revision = record.Revision;
+                    if (RevisionAdvanced != null)
+                    {
+                        _pendingRevisionAdvances.Add(new PendingRevisionAdvance(id, revision, member));
+                    }
+                }
+                finally
+                {
+                    _mutationGateDepth--;
+                }
+            }
+
+            FlushRevisionAdvances();
+            return revision;
+        }
+
+        /// <summary>
+        /// Raises the parked <see cref="RevisionAdvanced"/> events once no frame of this thread holds
+        /// the mutation gate. A subscriber that throws is reported through <see cref="Diagnostics"/>;
+        /// the other subscribers and the events behind it are still delivered, whatever the sink does.
+        /// </summary>
+        private void FlushRevisionAdvances()
+        {
+            PendingRevisionAdvance[] batch;
+            lock (_mutationGate)
+            {
+                if (_mutationGateDepth > 0 || _pendingRevisionAdvances.Count == 0)
+                {
+                    return;
+                }
+
+                batch = _pendingRevisionAdvances.ToArray();
+                _pendingRevisionAdvances.Clear();
+            }
+
+            Action<InstanceId, long, string> handler = RevisionAdvanced;
+            if (handler == null)
+            {
+                return;
+            }
+
+            // WHY each subscriber is invoked on its own: a multicast invoke stops at the first throw,
+            // so one broken host hook would starve every subscriber registered after it.
+            Delegate[] subscribers = handler.GetInvocationList();
+            for (int index = 0; index < batch.Length; index++)
+            {
+                PendingRevisionAdvance pending = batch[index];
+                for (int subscriberIndex = 0; subscriberIndex < subscribers.Length; subscriberIndex++)
+                {
+                    Action<InstanceId, long, string> subscriber =
+                        (Action<InstanceId, long, string>)subscribers[subscriberIndex];
+                    try
+                    {
+                        subscriber(pending.Id, pending.Revision, pending.Member);
+                    }
+                    catch (Exception exception)
+                    {
+                        // WHY contained here: this runs from the finally of ApplyMutation, where an
+                        // escaping exception would replace the operation's own result or error and
+                        // drop every event parked behind it — a subscriber's bug must stay its own.
+                        ReportDiagnostic("[CoreAI.RbxApi] RevisionAdvanced subscriber "
+                                         + DescribeSubscriber(subscriber) + " threw for instance id "
+                                         + pending.Id.Value + " member '" + (pending.Member ?? "<node>")
+                                         + "' at revision " + pending.Revision
+                                         + "; the remaining subscribers and events are still delivered: "
+                                         + exception);
+                    }
+                }
+            }
+        }
+
+        private static string DescribeSubscriber(Delegate subscriber)
+        {
+            return (subscriber.Method.DeclaringType?.FullName ?? "?") + "." + subscriber.Method.Name;
+        }
+
+        /// <summary>
+        /// Opens the window in which this replica applies what the server sent; disposed in strict
+        /// LIFO order.
+        /// </summary>
+        public ReplicationApplyScope BeginReplicationApply()
+        {
+            if (Authority != RegistryAuthority.Replica)
+            {
+                throw new InvalidOperationException(
+                    "Only a replica registry applies replication; this registry is authoritative.");
+            }
+
+            ReplicationApplyScope scope = new(this, _replicationApplyScope);
+            _replicationApplyScope = scope;
+            return scope;
+        }
+
+        internal void EndReplicationApplyScope(ReplicationApplyScope scope)
+        {
+            if (!ReferenceEquals(_replicationApplyScope, scope))
+            {
+                throw new InvalidOperationException(
+                    "Replication apply scopes must be disposed in LIFO order.");
+            }
+
+            _replicationApplyScope = scope.Previous;
+        }
+
+        /// <summary>Stamps the revision the server reported for an instance this replica holds.</summary>
+        internal void SetReplicatedRevision(InstanceId id, long revision)
+        {
+            if (Authority != RegistryAuthority.Replica || _replicationApplyScope == null)
+            {
+                throw new InvalidOperationException(
+                    "A replicated revision is set only on a replica, inside a replication apply scope.");
+            }
+
+            if (revision < 0L)
+            {
+                throw new ArgumentOutOfRangeException(nameof(revision), revision,
+                    "A replicated revision cannot be negative.");
+            }
+
+            lock (_mutationGate)
+            {
+                RequireRecord(id).Revision = revision;
             }
         }
 
@@ -521,7 +785,7 @@ namespace CoreAI.Mods.Rbx.Instances
             InstanceAccessScope? accessScope = null, bool isRuntimeInfrastructure = false)
         {
             ClassDescriptor descriptor = ResolveConcrete(className);
-            return RegisterNew(Instantiate(descriptor), Allocator.Next(authority), ownerModId, originTag,
+            return RegisterNew(Instantiate(descriptor), Allocator.Next(ResolveIdAuthority(authority)), ownerModId, originTag,
                 ownerActorId, accessScope, isRuntimeInfrastructure);
         }
 
@@ -548,7 +812,7 @@ namespace CoreAI.Mods.Rbx.Instances
                     "pass a creatable class name like \"Part\", \"Folder\", or \"Model\"");
             }
 
-            return RegisterNew(Instantiate(descriptor), Allocator.Next(authority), ownerModId, originTag,
+            return RegisterNew(Instantiate(descriptor), Allocator.Next(ResolveIdAuthority(authority)), ownerModId, originTag,
                 ownerActorId, accessScope, false);
         }
 
@@ -601,6 +865,14 @@ namespace CoreAI.Mods.Rbx.Instances
             return descriptor.Factory != null
                 ? descriptor.Factory(descriptor)
                 : new RbxInstance(descriptor);
+        }
+
+        // WHY a replica cannot mint server ids whatever the caller asked for: the top bit is what
+        // InstanceIdWireContract checks, so a client-created instance carrying a server-space id would
+        // pass the wire and collide with a real server id on arrival.
+        private InstanceIdAuthority ResolveIdAuthority(InstanceIdAuthority requested)
+        {
+            return Authority == RegistryAuthority.Replica ? InstanceIdAuthority.Local : requested;
         }
 
         private RbxInstance RegisterNew(RbxInstance instance, InstanceId id, string ownerModId,
@@ -1066,7 +1338,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 // never materialize — the world the script writes to and the registry backing the binder
                 // are two different objects (a composition fault). Reporting it here is the only way it
                 // becomes visible: the script still completes and the only symptom is a missing object.
-                Diagnostics?.Invoke(
+                ReportDiagnostic(
                     $"[CoreAI.RbxApi] '{instance.Name}' (class={instance.ClassName}) entered a tree this " +
                     "registry does not own, so it will never materialize. The Rbx world used by scripts " +
                     "and the registry wired to the binder are different instances — check that " +

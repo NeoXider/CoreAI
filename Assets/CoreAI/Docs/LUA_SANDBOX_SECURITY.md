@@ -118,10 +118,21 @@ When the limiter is saturated, the envelope fails with `Lua rate limit exceeded`
   `LuaCsGameToolExecutor` still run the chunk synchronously, because `InstanceRegistry.ApplyMutation`
   runs its operation under a monitor and under an ambient `MutationEnvelopeScope` held in a registry
   field — yielding there needs an execution-scoped envelope and an async mutation protocol first.
+- **The per-resume budget is the game's.** Every guarded coroutine resume arms an instruction-step
+  cap and a wall-clock cap read from one `LuaCsCoroutineBudgetSettings` — CoreAI's defaults are
+  `LuaCsCoroutineHandle.DefaultBudgetPerResume` (10,000 steps) and `DefaultResumeTimeoutMs`
+  (500 ms) — which the host sets as a serialized field on `CoreAiModsLifetimeScope`. Non-positive
+  values fall back to the defaults instead of disabling the guard. Every coroutine site resolves the
+  same instance and every resume re-reads it, so a change reaches handles built long before; the
+  one-off `execute_lua` executor and the AI envelope processor read it too, so a tightened budget
+  constrains admin- and AI-issued chunks as much as loaded mods. `ScriptContext:SetTimeout(seconds)`
+  moves the wall-clock half live and is gated to the unrestricted host actor (`NOT_AUTHORITY` for an
+  ordinary mod); the instruction half has no Lua-facing setter. A trip is classified by a typed trip
+  kind and reported as `BUDGET_EXCEEDED` with the bound and the author's line.
 - Coroutine abuse has a total-lifetime budget through `LuaCoroutineHandle`.
   `LuaCoroutineHandle.DefaultTotalLifetimeSteps` is `1_000_000` across all resumes
   for one handle, and the handle is forcibly killed when exceeded.
-- `LuaAiEnvelopeProcessor` normalizes and truncates results:
+- `LuaCsAiEnvelopeProcessor` normalizes and truncates results:
   result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** before entering the payload/repair path.
 - `LuaCsApiRegistry` wraps host callbacks and converts host validation exceptions into `LuaRuntimeException`, so Lua callers see script errors instead of raw CLR exception types.
 - `coreai_world_load_scene` supports an optional scene whitelist check. (This is one of the classic
@@ -166,7 +177,7 @@ with explicit validation and tests.
 
 Every script path should have bounded execution:
 
-- Instruction step budget for CPU-bound loops.
+- Instruction step budget for CPU-bound loops (per resume, game-configurable — see the hardening list above).
 - Timeout/cancellation token for host-driven async flows.
 - Coroutine lifecycle ownership, including cleanup on scene unload and game reset.
 - Per-agent or per-session rate limits when scripts can be generated repeatedly.

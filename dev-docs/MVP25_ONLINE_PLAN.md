@@ -132,6 +132,12 @@ transport ids, batch dirty state, and reuse MVP3 for late join. All inbound clie
 cross one server-side authentication, rate, ACL, revision, and mutation boundary. The current
 Lua-binding-only ACL is insufficient.
 
+> **Status 2026-09-10 (phase 0).** The engine-free core under this rung — member-level
+> `RevisionAdvanced`, `ReplicationDirtySet`, per-recipient `ReplicationStream`, `ReplicationApplier`,
+> `GuardedReplicationFilter` — is built and tested registry-to-registry; nothing in production
+> constructs it and no bytes cross a socket. See [REPLICATION_PHASE0.md](REPLICATION_PHASE0.md);
+> the open rows stay in `TODO.md`.
+
 | Gate | Must succeed | Negative twin / concrete failure |
 |---|---|---|
 | R12.1 filtering | A server-created whitelisted tree reaches the intended client with identical stable ids and supported properties. | Filtering is never disabled: filtered containers/properties remain absent while the authoritative filter excludes them, and later deltas must not bypass that filter. Wrong-recipient or filtered data appearing fails. |

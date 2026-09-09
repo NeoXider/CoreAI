@@ -160,13 +160,23 @@ namespace CoreAI.Ai.LuaCs
         /// before any actor can join (F7): a script cannot reliably race the first join to flip
         /// the flag, so a host that wants auto-spawn off from the start configures it here instead.
         /// </summary>
+        /// <param name="coroutineResumeBudget">
+        /// Optional composition override for the per-resume budget every guarded coroutine arms by
+        /// default (instruction-step cap and wall-clock cap) — see
+        /// <see cref="CoreAI.Sandbox.LuaCs.LuaCsCoroutineBudgetSettings"/>. Null builds a settings
+        /// object holding CoreAI's documented defaults. The instance this bindings ends up with,
+        /// whichever it is, is exposed as <see cref="CoroutineResumeBudget"/> — the SAME object every
+        /// scheduler-built coroutine handle in this world reads live, and the object
+        /// <c>ScriptContext:SetTimeout</c> mutates.
+        /// </param>
         public LuaCsRbxApiBindings(InstanceRegistry registry = null, RbxDataModel game = null,
             RbxEnumRegistry enums = null, Action<string> log = null, IPartPropertySink partSink = null,
             IRbxCameraRig cameraRig = null, IInputSource inputSource = null,
             ModConnectionRegistry connections = null, IClickPickSource pickSource = null,
             IRbxRuntimeObservabilitySink observability = null,
             INetworkBridge networkBridge = null, Func<DateTimeOffset> utcNowProvider = null,
-            IRbxClockSource clockSource = null, bool defaultCharacterAutoLoads = true)
+            IRbxClockSource clockSource = null, bool defaultCharacterAutoLoads = true,
+            LuaCsCoroutineBudgetSettings coroutineResumeBudget = null)
         {
             _registry = registry ?? new InstanceRegistry();
             _connections = connections ?? new ModConnectionRegistry();
@@ -174,9 +184,11 @@ namespace CoreAI.Ai.LuaCs
                 observability != null && observability.IsEnabled
                 ? observability
                 : null;
+            CoroutineResumeBudget = coroutineResumeBudget ?? new LuaCsCoroutineBudgetSettings();
             _schedulerThreadFactory = new LuaCsRbxScriptThreadFactory(
                 observability: resolvedObservability,
-                resumeEnvelope: ResumeSchedulerThread);
+                resumeEnvelope: ResumeSchedulerThread,
+                coroutineResumeBudget: CoroutineResumeBudget);
             _scheduler = new ModScheduler(
                 _schedulerThreadFactory, new RbxAccumulatingTimeSource());
             // WHY: every Lua-visible clock reads through one injectable source, so a game with
@@ -442,7 +454,14 @@ namespace CoreAI.Ai.LuaCs
                     return;
                 }
 
-                RbxPlayer player = _players.GetPlayerFromCharacter(character);
+                // WHY resolved through GetPlayerFromLoadedCharacter and not GetPlayerFromCharacter:
+                // Character is Lua-writable with no ownership check on assignment (a script can
+                // point its OWN Character at a foreign character just by writing to a property it
+                // owns). Matching against it here would let that alias steal another player's
+                // death-triggered respawn — the owner of a dying character must be resolved through
+                // the reference the lifecycle itself set, not through an alias any connected actor
+                // can point anywhere.
+                RbxPlayer player = _players.GetPlayerFromLoadedCharacter(character);
                 if (player == null || !_players.CharacterAutoLoads)
                 {
                     return;
@@ -454,9 +473,13 @@ namespace CoreAI.Ai.LuaCs
                     // WHY re-checked at fire time, not captured at Died: CharacterAutoLoads may have
                     // changed since, the player may have disconnected, and the dead character may
                     // already have been replaced by an explicit LoadCharacterAsync — any of those
-                    // means this timer's job is already done or no longer wanted.
+                    // means this timer's job is already done or no longer wanted. WHY re-resolved
+                    // through GetPlayerFromLoadedCharacter again instead of comparing player.Character:
+                    // the same alias risk applies at fire time — some other actor's script could have
+                    // pointed its own Character at this dead character in the meantime, and that must
+                    // not affect whether THIS player's respawn proceeds.
                     if (player.IsDestroyed || !_players.CharacterAutoLoads
-                        || !ReferenceEquals(player.Character, character)
+                        || !ReferenceEquals(_players.GetPlayerFromLoadedCharacter(character), player)
                         || _registry.WorldRoot == null)
                     {
                         return;
@@ -759,6 +782,15 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>The scheduler thread factory (tests read its runner-reuse counters).</summary>
         internal LuaCsRbxScriptThreadFactory SchedulerThreadFactory => _schedulerThreadFactory;
+
+        /// <summary>
+        /// Live per-resume coroutine budget (instruction-step cap + wall-clock cap) every coroutine
+        /// handle in this world reads by default — never null. This is the composition-supplied
+        /// <see cref="CoreAI.Sandbox.LuaCs.LuaCsCoroutineBudgetSettings"/> (or a default-valued one when
+        /// none was supplied) and the exact object <c>ScriptContext:SetTimeout</c> mutates, so the change
+        /// reaches every already-pooled signal runner's next resume too.
+        /// </summary>
+        public LuaCsCoroutineBudgetSettings CoroutineResumeBudget { get; }
 
         /// <summary>Injectable source behind every Lua-visible clock. Null at composition
         /// means the production system-clock default; a game passes its own source to redefine

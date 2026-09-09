@@ -34,6 +34,7 @@ namespace CoreAI.Mods.Rbx.Instances
             CreateService(registry, game, "Debris");
             CreateService(registry, game, "CollectionService");
             CreateService(registry, game, "TweenService");
+            CreateService(registry, game, "ScriptContext");
             return game;
         }
 
@@ -103,6 +104,14 @@ namespace CoreAI.Mods.Rbx.Instances
             if (game.FindFirstChildOfClass("TweenService") == null)
             {
                 CreateService(registry, game, "TweenService");
+            }
+
+            // WHY: snapshots taken before the ScriptContext slice have no
+            // ScriptContext; restoring them must still yield a resolvable
+            // game:GetService("ScriptContext").
+            if (game.FindFirstChildOfClass("ScriptContext") == null)
+            {
+                CreateService(registry, game, "ScriptContext");
             }
         }
 

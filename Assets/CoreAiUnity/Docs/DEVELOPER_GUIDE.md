@@ -102,8 +102,8 @@ The template is meant to **work sensibly by default**, while still allowing targ
 
 - **DI + MessagePipe + log:** `CoreAILifetimeScope` registers `IGameLogger`, `ApplyAiGameCommand` broker, `IAiGameCommandSink`.
 - **Orchestration:** default `IAiOrchestrationService` is `QueuedAiOrchestrator` around `AiOrchestrator`.
-- **Lua pipeline:** `AiGameCommandRouter` marshals handling to the main thread and runs `LuaAiEnvelopeProcessor`.
-- **Lua limits:** `LuaExecutionGuard` caps wall-clock and “steps” (best-effort).
+- **Lua pipeline:** `AiGameCommandRouter` marshals handling to the main thread and runs `LuaCsAiEnvelopeProcessor`.
+- **Lua limits:** `LuaCsExecutionGuard` caps wall-clock, steps and total allocation per guarded call; the per-resume coroutine budget it arms is the game's (`LuaCsCoroutineBudgetSettings` on `CoreAiModsLifetimeScope`) — see [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md).
 - **Prompts:** system/user chain from manifest → Resources → built-in fallback.
 - **Programmer versions (Lua + data overlays):** in the Unity layer they are persisted to disk by default (File* store).
 - **World Commands:** Lua API `coreai_world_*` publishes world commands to the bus; execution runs on the main thread (see [WORLD_COMMANDS.md](WORLD_COMMANDS.md)).
@@ -533,8 +533,8 @@ external subscribers can follow the agent work.
 ## 6. Lua for the Programmer agent
 
 - Parsing: **`AiLuaPayloadParser`** (markdown → JSON **`ExecuteLua`**).
-- Execution: **`SecureLuaEnvironment`**, **`LuaExecutionGuard`**, **`LuaApiRegistry`**.
-- Limits: `LuaExecutionGuard` applies best-effort **wall-clock** and **step** caps (see `InstructionLimitDebugger`) so infinite Lua loops cannot hang forever.
+- Execution: **`LuaCsSecureEnvironment`**, **`LuaCsExecutionGuard`**, **`LuaCsApiRegistry`**.
+- Limits: `LuaCsExecutionGuard` applies **wall-clock**, **step** and **allocation** caps so infinite Lua loops cannot hang forever; the per-resume budget every coroutine arms is set by the game on `CoreAiModsLifetimeScope` (`LuaCsCoroutineBudgetSettings`, see [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md)).
 - Default game calls in the template: **`LoggingLuaRuntimeBindings`** — **`report(string)`**, **`add(a,b)`**.
 - Extension: register your **`IGameLuaRuntimeBindings`** in **`CoreAILifetimeScope`** (instead of or on top of the default — per project policy; avoid duplicating the interface in the container without an explicit replacement).
 - World control (runtime): the built-in **World Commands** feature adds Lua API `coreai_world_*` and executes commands on the Unity main thread via MessagePipe. See **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**.
@@ -842,4 +842,4 @@ Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOP
 
 **UPM sync:** the number in the README header and in **QUICK_START** should match the current **`package.json`**, or package consumers see a stale version.
 
-**Version of this guide:** 7.39.0 (2026-09-09) — six-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.
+**Version of this guide:** 7.40.0 (2026-09-10) — six-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.

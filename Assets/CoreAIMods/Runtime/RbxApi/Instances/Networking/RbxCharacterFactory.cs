@@ -10,12 +10,12 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
     /// <remarks>
     /// WHY a factory rather than a method on <see cref="RbxPlayers"/>: loading a character needs the
     /// registry and the world root, which the Players service does not hold, and the same build has
-    /// to run from three places вЂ” a join with <c>CharacterAutoLoads</c>, an explicit
+    /// to run from three places - a join with <c>CharacterAutoLoads</c>, an explicit
     /// <c>LoadCharacterAsync</c>, and a host that spawns a character itself.
     /// <para>
     /// WHY the character carries no appearance, accessories or animation: those need a rig CoreAI
     /// does not model, and every one of them is a loud stub on the Humanoid. What ships is what a
-    /// script can actually use вЂ” a Humanoid to damage and move, and a root part to position.
+    /// script can actually use - a Humanoid to damage and move, and a root part to position.
     /// </para>
     /// </remarks>
     public static class RbxCharacterFactory

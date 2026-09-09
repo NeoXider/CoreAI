@@ -9,6 +9,12 @@ Where the brief, the roadmap, or the mirror disagree with the repository, §0 sa
 This document does not re-argue the rung order (MVP3 → MVP8 → MVP11 → MVP12, one rung per release),
 the entry gates P1–P5, or the measurement discipline of §6 of the online plan.
 
+> **Status 2026-09-10.** The engine-free replication pieces this plan names under MVP12 landed as
+> phase 0, in a slightly different shape from the file list below: `ReplicationDelta` lives in
+> `ReplicationDirtySet.cs`, `IReplicationFilter` in `ReplicationFilter.cs`, the stream and the
+> applier are engine-free in `Replication/`, and there is no `ReplicationPublisher` yet. Nothing in
+> production constructs them. Read [REPLICATION_PHASE0.md](REPLICATION_PHASE0.md) for what exists.
+
 ---
 
 ## 0. Verified state and corrections to the brief

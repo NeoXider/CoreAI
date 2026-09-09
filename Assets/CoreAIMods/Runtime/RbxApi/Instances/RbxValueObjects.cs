@@ -1,5 +1,6 @@
 using System;
 using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Instances.Replication;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
@@ -27,7 +28,7 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Fires <see cref="Changed"/> and the property signal after a real change.</summary>
         protected void FireValueChanged(object newValue)
         {
-            Registry?.AdvanceRevision(Id);
+            Registry?.AdvanceRevision(Id, ReplicationMembers.Value);
             FireSignal("Changed", newValue);
             FireSignal("GetPropertyChangedSignal(Value)");
         }

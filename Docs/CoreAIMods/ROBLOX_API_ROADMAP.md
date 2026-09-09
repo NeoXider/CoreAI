@@ -292,6 +292,7 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-11 | `GetAsync` results are cached for 4 s (S1.5) | cache **not emulated** — every `GetAsync` reads the store | the local store is fast; emulating the cache would only add staleness surprises |
 | DEV-12 | command-bar/one-shot execution is Studio-only | `execute_lua` one-shots are a first-class **runtime** feature (full API env, same sandbox/budgets; §2 one-shot decision) | Realtime principle — the game is authored while it runs |
 | DEV-13 | a Lua string is a byte string; non-ASCII text built from UTF-8 byte sequences (e.g. `'\195\169'` for "é") is one Unicode codepoint by Luau's own character-counting (`utf8.len`), even though `#s` counts the 2 raw bytes | crossing the C#/Lua boundary maps each byte to one `System.Char` (UTF-16 code unit) — a non-ASCII codepoint spanning 2+ UTF-8 bytes becomes that many C# chars, not one; pinned by `RoundTrip_UnicodeStrings_SurviveEncodeDecodeUnescaped` (`RbxJsonContractEditModeTests`) | the VM boundary marshals bytes, not codepoints; a mod author, or C# code reading a Lua string (logs, `GetAttribute`, `JSONEncode` output), must not assume `String.Length`/indexing on a crossed string matches Luau's `utf8.len`/perceived character count for non-ASCII text |
+| DEV-14 | members carrying `security: PluginSecurity` are unreachable from a running game — they exist for Studio and plugins, and the shipped experience never sees them (e.g. `ScriptContext:SetTimeout`, which limits how long a script may run without yielding) | the same members are reachable at RUNTIME, gated to the elevated actor tier (`ActorContext.Grants.IsUnrestricted`); an ordinary mod is refused exactly as it is for any other privileged member | CoreAI has no Studio: authoring and playing are ONE application, so "Studio-only" has no place to live. Mapping these to "unavailable" would delete a control the creator legitimately needs while the game runs; mapping them to "anyone" would let a mod raise its own execution budget. The elevated tier is the only honest reading, and it is the same tier that already gates the rest of the privileged surface. Sibling of DEV-12, which made the same call for one-shot execution |
 
 ---
 
@@ -828,6 +829,11 @@ Ordering changes vs. the seed roadmap, with justification:
 
 ### MVP11 — Mirror bridge core (host mode)
 
+- **Current state (2026-09-10)**: `com.neoxider.coreaimirror` ships `MirrorNetworkBridge :
+  INetworkBridge` behind the `MIRROR` define, `CoreAiMirrorAuthenticator` and
+  `CoreAiMirrorSessionHost`; the bridge's rules are gated against its receive paths directly and no
+  claim is made that bytes cross a real socket. The join snapshot over the wire is still open —
+  `TODO.md`, "MVP2.5 rungs".
 - **Goal**: real multiplayer transport under the *unchanged* mod-facing API, in the **host mode**
   topology first (desktop listen server — fastest dev loop, mirrors Roblox Studio play-testing).
   Wire behavior per M-rules (`02_MULTIPLAYER_REPLICATION.md`, incl. serialization/limits
@@ -867,6 +873,14 @@ Ordering changes vs. the seed roadmap, with justification:
 
 ### MVP12 — Replication
 
+- **Current state (2026-09-10, phase 0)**: the engine-free core under this rung is built and tested
+  registry-to-registry — every registry setter reports the member it changed (`RevisionAdvanced`),
+  `ReplicationDirtySet` accumulates it, `ReplicationStream` plans ordered Spawn/Patch/Remove per
+  recipient through `GuardedReplicationFilter` (the floor a game filter cannot open, transcribed
+  from the mirror's class tags), and `ReplicationApplier` applies a plan to a replica registry with
+  duplicate/gap/violation handling. Nothing in production constructs these types and no bytes cross
+  a socket; a replicated `Player` and cross-batch references are named open limits — `TODO.md`,
+  "MVP2.5 rungs".
 - **Goal**: instance trees and properties replicate; the identity promise (§3.3) is cashed in.
   Semantics per M-rules (authority, ownership, replication order).
 - **Deliverables**: server-side `Instance.new` under `workspace`/`ReplicatedStorage` replicates
@@ -1485,7 +1499,11 @@ Notes:
   Disconnect-vs-Destroy pending-handler asymmetry is exactly R5.7.
 - **Budgets (DEV-3)**: each resumed thread / drained handler runs under `IExecutionBudget`
   (`LuaCsExecutionGuard` semantics: instruction + wall-clock caps per slice, defaults from
-  `LuaCsCoroutineHandle`: 10k steps / 500 ms hard cap, tuned down per phase). Breach kills that
+  `LuaCsCoroutineHandle`: 10k steps / 500 ms, tuned down per phase; since 7.39.0 both halves are
+  the GAME's — one serialized `LuaCsCoroutineBudgetSettings` on `CoreAiModsLifetimeScope`, resolved
+  by every coroutine site and re-read on every resume, with `ScriptContext:SetTimeout(seconds)`
+  moving the wall-clock half live for the host actor per DEV-14 and the instruction half staying
+  composition-only because Roblox has no scriptable equivalent). Breach kills that
   thread only, logs `BUDGET_EXCEEDED` with the mod/site, and increments the mod's consecutive-
   error count (existing `ModHandlerErrored` flow → **quarantine** policy, §2). Budget
   wall-clocks are always **unscaled** real time — `timeScale = 0` must not grant infinite

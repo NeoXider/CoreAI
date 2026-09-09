@@ -187,6 +187,29 @@ namespace CoreAI.Ai.LuaCs
                 OwnerModId);
         }
 
+        /// <summary>
+        /// Demands the composition-issued unrestricted (host) grant for a Lua-callable member whose
+        /// Roblox security class (e.g. <c>PluginSecurity</c>) has no ordinary-script equivalent — e.g.
+        /// <c>ScriptContext:SetTimeout</c>. Mirrors <see cref="RequireNetworkSide"/>'s refusal shape
+        /// (same <see cref="RbxErrorCode.NotAuthority"/> code, same "actor '&lt;id&gt;' cannot use
+        /// &lt;member&gt; because ..." message/fix/mod-attribution shape) with <see cref="IsHost"/> —
+        /// <c>ActorContext.Grants.IsUnrestricted</c> — as the gate instead of server/client.
+        /// </summary>
+        public void RequireUnrestricted(string member)
+        {
+            if (IsHost)
+            {
+                return;
+            }
+
+            throw new RbxError(
+                RbxErrorCode.NotAuthority,
+                "actor '" + ActorContext.ActorId + "' cannot use " + member
+                + " because " + member + " requires the composition's unrestricted host authority",
+                "call " + member + " only from host-composed code",
+                OwnerModId);
+        }
+
         /// <summary>Sink storing BasePart spatial/appearance state in Roblox space (shared world).</summary>
         public IPartPropertySink PartSink => Bindings.PartSink;
 
@@ -1227,6 +1250,31 @@ namespace CoreAI.Ai.LuaCs
                     context.ActorContext.WorldId));
                 return LuaValue.Nil;
             }, "Debris");
+
+            // WHY host-gated: ScriptContext.yaml pins security: PluginSecurity and properties: [] —
+            // an ordinary mod may not call this (matched via RequireUnrestricted, the same
+            // RbxErrorCode.NotAuthority refusal shape as RequireNetworkSide) and there is no readable
+            // Timeout property to invent. Only the wall-clock half changes: Roblox has no scriptable
+            // instruction-budget equivalent, so that half stays composition-only — see
+            // LuaCsCoroutineBudgetSettings.
+            Method("SetTimeout", (ctx, self) =>
+            {
+                context.RequireUnrestricted("ScriptContext:SetTimeout");
+                double seconds = ReadDouble(ctx, 1, "ScriptContext:SetTimeout");
+                if (double.IsNaN(seconds) || double.IsInfinity(seconds))
+                {
+                    throw RbxError.BadArgument(
+                        "ScriptContext:SetTimeout expects a finite number of seconds at argument 1",
+                        "pass a positive number of seconds, e.g. ScriptContext:SetTimeout(10)");
+                }
+
+                // WHY milliseconds, rounded: LuaCsCoroutineHandle's wall-clock budget is stored in
+                // whole milliseconds; a non-positive result falls back to the documented default
+                // rather than disabling the guard (LuaCsCoroutineBudgetSettings.ResumeTimeoutMs).
+                context.Bindings.CoroutineResumeBudget.SetResumeTimeoutMs(
+                    (int)Math.Round(seconds * 1000d, MidpointRounding.AwayFromZero));
+                return LuaValue.Nil;
+            }, "ScriptContext");
 
             // WHY: Create/Play/Pause/Cancel stay out of IsMutatingMethod like AddItem —
             // Create authorizes at call time inside RbxTweenService, Play re-checks there, and

@@ -44,14 +44,17 @@ namespace CoreAI.Ai.LuaCs
             ILuaExecutionObserver observer,
             ILuaScriptVersionStore luaScriptVersions,
             ICoreAISettings settings = null,
-            LuaGenerationRateLimiter rateLimiter = null)
+            LuaGenerationRateLimiter rateLimiter = null,
+            CoreAI.Sandbox.LuaCs.LuaCsCoroutineBudgetSettings coroutineResumeBudget = null)
         {
             if (sandbox == null)
             {
                 throw new ArgumentNullException(nameof(sandbox));
             }
 
-            _engine = new LuaCsScriptEngine(sandbox);
+            // WHY: same reason as the one-off executor — a private default settings object here would
+            // put AI-issued Lua outside the budget the host configured for everything else.
+            _engine = new LuaCsScriptEngine(sandbox, coroutineResumeBudget: coroutineResumeBudget);
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
             _sink = sink ?? throw new ArgumentNullException(nameof(sink));
             _resolveOrchestrator = resolveOrchestrator ?? throw new ArgumentNullException(nameof(resolveOrchestrator));

@@ -52,6 +52,16 @@ namespace CoreAI.Composition
         [SerializeField]
         private Mods.Rbx.Binding.RbxCharacterMotorProviderBehaviour characterMotorProvider;
 
+        [Header("Lua coroutine resume budget")]
+        [Tooltip("Per-resume budget every guarded Lua coroutine arms by default (instruction-step cap "
+            + "and wall-clock cap) — the same mechanism a runaway 'while true do end' handler is cut "
+            + "by. Values <= 0 fall back to CoreAI's documented defaults "
+            + "(LuaCsCoroutineHandle.DefaultBudgetPerResume / DefaultResumeTimeoutMs). The wall-clock "
+            + "half can also be changed live at runtime by a mod's ScriptContext:SetTimeout(seconds), "
+            + "which requires the composition-issued unrestricted (host) grant.")]
+        [SerializeField]
+        private Sandbox.LuaCs.LuaCsCoroutineBudgetSettings coroutineResumeBudget = new();
+
         [Header("Mod store")]
         [Tooltip("Optional namespace for this composition's persisted mods. Empty = the shared default " +
                  "store (main game). Set a distinct id per demo/scene so mods saved by one composition " +
@@ -87,6 +97,13 @@ namespace CoreAI.Composition
                 builder.RegisterInstance<Mods.Rbx.Binding.IRbxCharacterMotorProvider>(
                     characterMotorProvider);
             }
+
+            // WHY always registered, never conditionally: unlike the motor provider this field is
+            // never null (a fresh LuaCsCoroutineBudgetSettings already resolves to CoreAI's documented
+            // defaults), and registering the SAME serialized instance is what lets
+            // ScriptContext:SetTimeout mutate one object that every coroutine-handle construction site
+            // in this composition reads live — see CoreAiModsInstaller and LuaCsCoroutineBudgetSettings.
+            builder.RegisterInstance(coroutineResumeBudget ?? new Sandbox.LuaCs.LuaCsCoroutineBudgetSettings());
 
             IEnumerable<string> scenes = allowedLuaScenes is { Length: > 0 } ? allowedLuaScenes : null;
             builder.RegisterCoreAiMods(
