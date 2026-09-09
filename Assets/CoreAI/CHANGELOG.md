@@ -1,6 +1,76 @@
 # Changelog
 
-## [Unreleased]
+## [7.37.0] - 2026-09-09
+
+### Added
+
+- **The character pipeline is no longer a stub: joining a player now puts a Model into
+  Workspace.** `RbxCharacterFactory` builds the mirror's minimum character shape — a Model
+  holding a HumanoidRootPart and a Humanoid, parented into the world — and `LoadCharacterAsync`
+  genuinely yields to the scheduler instead of resolving inline, so a script awaiting it observes
+  the same ordering Roblox does. `CharacterAdded` fires for the new character and
+  `CharacterRemoving` for the outgoing one before it is destroyed, in that order, so a handler
+  reading `Player.Character` never sees a stale reference. `DistanceFromCharacter` reads the live
+  root part position instead of raising `NOT_IMPLEMENTED`. This is a world-visible side effect
+  worth stating plainly: any script, demo or save that inspects `Workspace` after a join now finds
+  a character Model where before there was none.
+- **`Players.CharacterAutoLoads`** now actually gates the join-time spawn described above (it
+  previously existed only as inert state a script could set and read back, with nothing
+  consuming it).
+- **The join-time character spawn is deferred past the triggering dispatch, and a respawn no
+  longer parents its replacement while the dead body is still in the tree.** `Players.EnsureActor`'s
+  auto-load used to spawn a character inline, mid-dispatch — before a script had any chance to flip
+  `CharacterAutoLoads`, and inside whatever remote-dispatch `try`/`catch` was already on the stack.
+  It now schedules the spawn as a zero-delay host callback that re-reads `CharacterAutoLoads` and
+  re-checks `Player.Character` is still nil once the current dispatch has fully drained — an
+  explicit `LoadCharacterAsync` may already have beaten it there. A caller with no `Scheduler`
+  bound (raw-registry tests) keeps the old inline spawn, since there is nothing to defer past.
+  Separately, `RbxCharacterFactory.Load` now unloads the outgoing character first and assigns
+  `player.Character` only once the new model is genuinely parented into the world, so a respawn
+  never leaves both models in the world at once for a synchronous registry listener to observe,
+  and a refused parent leaves the player with no character rather than with a detached model no
+  script can reach.
+- **A dead character respawns after `Players.RespawnTime` seconds, when `CharacterAutoLoads` is
+  still on.** `RespawnTime` previously had no consumer at all. The Lua-CSharp bindings now wire
+  every character's `Humanoid.Died` to a scheduled reload; `CharacterAutoLoads`, whether the player
+  is still connected, and whether `Player.Character` still points at the dead body are all
+  re-checked when the timer fires, not captured at the moment of death, so a script flipping
+  `CharacterAutoLoads` off or an explicit `LoadCharacterAsync` that already replaced the corpse
+  correctly cancels the respawn.
+- **The character motor now steps on the fixed-step pump, not the render frame.**
+  `UnityRbxCharacterMotor.Step()` used to run from `PumpPreSimulation`, driven by render-frame `dt`,
+  so a velocity-driven walk applied a variable number of times per simulated physics step moved
+  characters at a rate that depended on frame rate. `LuaCsRbxApiBindings.StepCharacterMotors` is now
+  pumped from `LuaModRuntimeTickDriver.FixedUpdate`, alongside the physics-step opening and gravity,
+  unconditionally — a character motor is driven by the fixed step even in a world whose physics port
+  is the null one.
+- **The agent skill document gained a `Players & Characters` section.** `BuiltInRbxApiSkillText`
+  said nothing about `Players`, `player.Character`, `LoadCharacterAsync`,
+  `CharacterAdded`/`CharacterRemoving`, `DistanceFromCharacter` or `RespawnTime` — an agent authoring
+  mods had no way to learn about the character API landing in this same release. New §8 documents
+  all of it, including that `CharacterAutoLoads` must be set from host composition rather than a
+  script, since a joining actor's character can already be queued to spawn before any mod chunk has
+  run.
+
+- **A loaded world keeps its physics.** Loading a world at runtime replaces the world host's physics
+  port, but the incoming Rbx API was handed the OLD port while the replacement was still being
+  staged — the very port `Commit` then disposes. Gravity and character motors hid the damage,
+  because the tick driver already resolved those from the live session every step; everything that
+  goes through the port itself did not. In any world loaded after the first, `workspace:Raycast`
+  always missed and `Touched`/`TouchEnded` never fired, with nothing in the log. The session
+  controller now attaches the post-publish port to the incoming API right after `Commit`, and a test
+  drives a stage-then-commit cycle and asserts a raycast reaches the new port.
+- **A joining player no longer drops an unanchored box on the world origin.** The character's root
+  part was materialized from the part sink's plain default — 4x1x2 studs, collidable, at (0,0,0) —
+  so every join spawned a falling block inside whatever already stood there. The root part is now
+  seeded with the mirror's HumanoidRootPart size and a spawn height above the origin, pushed through
+  the part sink by the bindings layer (the character factory lives in the engine-free assembly and
+  cannot reach the sink itself).
+- **A failed spawn or respawn costs one player its character, not the whole frame.** Both the
+  deferred join-time spawn and the death-triggered respawn run from the scheduler's host-callback
+  slot, outside any mod's dispatch `try`/`catch`. An instance cap or a refused parent there used to
+  propagate out of `Advance` and end the frame for every mod in the world; both are now contained
+  and reported through the registry's diagnostics.
 
 ### Changed
 
@@ -8,6 +78,85 @@
   The three copies of the Newtonsoft-to-CLR rule (native `ToolExecutionPolicy`, text-extracted
   `SmartToolCallingChatClient`, `SkillSetToolResolver`) are unified; behavior is pinned by
   `LlmToolArgumentNormalizerEditModeTests` (9 tests).
+- **`RbxInstance.Clone()` completes BasePart spatial/appearance state**, closing the gap recorded
+  in the closure audit (MVP1 finding 3): the C# `Clone()` path used to skip Size/CFrame/Color/
+  Anchored and the rest, because that state lives outside the engine-free assembly in the Unity
+  binder, which `Instances` cannot reference directly. A new seam,
+  `IInstanceBackingBinder.CopyBackingState`, is declared on the interface `Instances` already owns
+  and implemented on the Unity side (`InstanceGameObjectBinder`), so `CloneSubtree` can ask for the
+  copy without ever seeing the sink's type. A clone made from C# now matches what the Lua binding's
+  `CopyPartSinkState` already produced. The interface member ships with a default (no-op) body,
+  added after the interface had already shipped, so a host implementation outside this repository
+  keeps compiling without picking it up.
+- **The four modern `RunService` events are bound for C# listeners, not only Lua.**
+  `PreAnimation`/`PreSimulation`/`PostSimulation`/`PreRender` shipped in 7.35.0 already worked from
+  mod scripts, but only `Heartbeat`/`Stepped`/`RenderStepped` were wired to the scheduler at the C#
+  binding layer — a signal with no scheduler bound refuses a direct C# `Connect` outright, so a host
+  listening for the modern names had no way to. All seven signals are bound the same way now.
+- **`HttpService` and the remote-replication codec are confirmed to be two independent JSON
+  encoders, by design, not by omission.** The closure audit (MVP2 finding 2) found the claim that
+  they were "the same component" was structurally false — `HttpService` uses `LuaCsRbxJson`,
+  remotes use `LuaCsRbxNetworkCodec` — and asked for a decision rather than a test that papers over
+  it. The decision: keep them separate, and pin the boundary with a contract test
+  (`RbxJsonContractEditModeTests`, 654 lines) so a future change to either encoder's round-trip
+  behavior is caught instead of silently diverging further.
+- **A failed tool-argument binding is now proven structurally, before the tool body ever runs.**
+  `ToolExecutionPolicy.TryBindArgumentsStructurally` round-trips each declared parameter's raw value
+  through the same `JsonSerializerOptions` MEAI itself binds with, reflecting the target CLR type off
+  `AIFunction.UnderlyingMethod` — entirely before `InvokeAsync` is called. Previously an
+  argument-conversion failure was only guessed at by pattern-matching the invocation exception's
+  message (`LooksLikeArgumentConversionError`), which cannot tell a true binding failure apart from a
+  tool body that legitimately throws `ArgumentException` after already mutating state; every
+  exception that still reaches the catch block downstream is now unconditionally traced as `native`
+  (blocking retries after a possible side effect), because a binding failure can no longer be one of
+  them.
+- **`TimeoutLlmClientDecorator` no longer relies on `TaskCompletionSource`'s
+  `RunContinuationsAsynchronously` option, and its timeout is now reliably observable as a `Faulted`
+  task.** WebGL has no thread pool, so a continuation deferred there under
+  `RunContinuationsAsynchronously` is posted nowhere and never resumes — a silent permanent hang.
+  `CompleteAsync` is also no longer `async` all the way through: the compiler puts an async method's
+  own task into the `Canceled` state (not `Faulted`) when its body throws
+  `LlmOperationTimeoutException`, and a caller that re-observes an already-completed `Canceled` task
+  (rather than awaiting it live) is not guaranteed the exact exception type back on every runtime. It
+  now runs detached against an explicit `TaskCompletionSource`, whose `TrySetException` always
+  produces a `Faulted` task that replays the exact exception. A bounded ~20 ms real-time grace window
+  also now gives a cooperative inner operation a genuine chance to finish its own cancellation unwind
+  before its result is discarded as a bare timeout, instead of a single scheduler hop whose ordering
+  against the same cancellation token is not a documented .NET guarantee.
+
+### Tests
+
+- **Criterion 6's scaled-time half is covered.** `RbxScaledTimeEditModeTests` sets a non-unity
+  `timeScale` and asserts the scheduler's clocks actually scale with it — previously no test
+  anywhere did this, and the roadmap now records that `os.clock()` is monotonic wall time, not CPU
+  time, as a deliberate deviation rather than an oversight.
+- **U1–U7 stance conformance now has an observable pass condition.** `Mvp2StanceConformanceEditModeTests`
+  cites each stance by name; before this, criterion 15 had nothing a reviewer could point at.
+- **The conversion-lint text heuristic was widened, closing both escapes the closure audit
+  named.** `Mvp1ConversionLintEditModeTests` now also catches `float s = RbxSpace.MetersPerStud; x
+  * s;` — a variable aliasing the constant a few statements before the arithmetic, tracked by brace
+  depth rather than by line — and the scale-arithmetic check (not the raw-literal one, which stays
+  Runtime-only on purpose: a bare `0.28` has unrelated legitimate meanings outside it) now also
+  scans `Assets/CoreAI.Demos` and `Assets/CoreAiUnity`, both of which reference `RbxSpace` but were
+  previously unscanned.
+
+### Notes
+
+- **Two process defects reached this branch and were caught, not just code defects.** The commit
+  that landed the above did not compile as committed — a `double` literal was passed where a
+  constructor expected a `float` — and a separate EditMode fixture deadlocked the whole editor: a
+  synchronous test blocked the main thread while awaiting a continuation that only the main thread
+  could ever run, so nothing ever resumed it. Both are recorded here because the failure mode is
+  the process, not the individual line: a single 41-file, ~2900-insertion commit mixing the
+  character pipeline with unrelated hardening (`McpRpcDispatcher` JSON-RPC validation, a
+  `FileTokenCalibrationStore` rewrite, cross-instance path locking, a new portable test project and
+  a CI job) is exactly the shape of change where a compile break or a main-thread deadlock hides
+  until the next full run.
+- A follow-up review round on this same commit found further defects in the character pipeline
+  (join-time spawn ordering, `RespawnTime` having no consumer, the motor stepping on the wrong pump,
+  and a skill-text gap for agents); all four are fixed — see the Added/Changed entries above. The
+  same round found a broader main-thread-deadlock guard gap in the EditMode test assembly, tracked
+  and being closed separately, outside this entry.
 
 ## [7.35.0] - 2026-09-06
 

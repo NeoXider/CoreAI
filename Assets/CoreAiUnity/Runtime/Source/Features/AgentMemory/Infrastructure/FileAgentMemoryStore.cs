@@ -229,6 +229,24 @@ namespace CoreAI.Infrastructure.AiMemory
         /// private *Core helpers assume the gate is already held. Под этим замком нельзя ждать ничего,
         /// что по-настоящему уступает поток: на WebGL синхронные методы берут его блокирующим
         /// <c>Wait()</c>, и ожидание браузерного колбэка под замком остановило бы единственный поток.
+        /// <para>
+        /// WHY every <c>await</c> that acquires or releases <see cref="_gate"/> or a mutation gate (see
+        /// <see cref="GetMutationGate"/>) uses <c>.ConfigureAwait(false)</c>: without it, a continuation
+        /// that resumes off the calling thread (real <c>Task.Run</c> in <see cref="RunOffThread(Action)"/>
+        /// off WebGL) is posted back to whatever <see cref="SynchronizationContext"/> was captured when
+        /// the async method was entered. If that call came from Unity's main thread, the posted
+        /// continuation — which is what releases <see cref="_gate"/> / the mutation gate — sits in the
+        /// main-thread queue. A synchronous <c>Save</c>/<c>TryLoad</c>/<c>GetTranscriptEntries</c> call
+        /// on that same main thread blocks on the same gate via <c>Wait()</c> and never returns to pump
+        /// that queue: permanent deadlock, no exception. This is NOT the WebGL-pool hazard
+        /// <c>WebGlUnsafeAsyncPrimitivesEditModeTests</c> normally bans <c>ConfigureAwait(false)</c> for
+        /// (see its allowlist entry for this file): on WebGL, <see cref="RunOffThread(Action)"/> runs the
+        /// action inline and returns an already-completed task, and the gate-acquire → work → gate-release
+        /// chain never yields before both gates are released (nothing else runs on WebGL's single
+        /// cooperative thread to contend for them mid-chain), so every await in that chain is already
+        /// complete when awaited there — <c>ConfigureAwait(false)</c> never causes a continuation to be
+        /// scheduled at all, let alone onto a thread pool WebGL doesn't have.
+        /// </para>
         /// </summary>
         private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -1149,7 +1167,10 @@ namespace CoreAI.Infrastructure.AiMemory
                 return Task.CompletedTask;
             }
 
-            TaskCompletionSource<bool> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            // WHY: no RunContinuationsAsynchronously — it forces the continuation onto the thread pool,
+            // which does not exist in WebGL and hangs forever. Inlining is safe here: TrySetResult runs
+            // inside the Post callback above, after both gates are already released (see the WHY above).
+            TaskCompletionSource<bool> completion = new();
             callbackContext.Post(_ =>
             {
                 try

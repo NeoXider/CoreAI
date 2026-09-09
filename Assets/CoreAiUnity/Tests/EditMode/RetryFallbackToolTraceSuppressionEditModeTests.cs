@@ -179,6 +179,113 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, policy.ExecutedTraces.Count);
             Assert.AreEqual("arg-conversion", policy.ExecutedTraces[0].Source);
         }
+
+        private enum StubColor
+        {
+            Red,
+            Green,
+            Blue
+        }
+
+        /// <summary>
+        /// Shapes the structural arg preflight (<c>TryBindArgumentsStructurally</c>) must accept because
+        /// MEAI's own binder accepts them. Each case names the tool, the argument MEAI would bind
+        /// successfully, and an assertion on the value the delegate actually received.
+        /// </summary>
+        private static IEnumerable<TestCaseData> ArgConversionParityCases()
+        {
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                string received = null;
+                Action<string> body = s => received = s;
+                DelegateLlmTool tool = new("echo_string", "Echo a string.", body);
+                await AssertAcceptedAsync(tool, "s", "hello");
+                Assert.AreEqual("hello", received);
+            })).SetName("ArgConversionParity_ValueAlreadyOfParameterType");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                int received = -1;
+                Action<int> body = i => received = i;
+                DelegateLlmTool tool = new("echo_int", "Echo an int.", body);
+                await AssertAcceptedAsync(tool, "i", 42L);
+                Assert.AreEqual(42, received);
+            })).SetName("ArgConversionParity_LongToInt");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                float received = -1f;
+                Action<float> body = f => received = f;
+                DelegateLlmTool tool = new("echo_float", "Echo a float.", body);
+                await AssertAcceptedAsync(tool, "f", 3.5d);
+                Assert.AreEqual(3.5f, received);
+            })).SetName("ArgConversionParity_DoubleToFloat");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                string received = null;
+                Action<string> body = s => received = s;
+                DelegateLlmTool tool = new("echo_json_string", "Echo a string.", body);
+                System.Text.Json.JsonElement element =
+                    System.Text.Json.JsonDocument.Parse("\"hi\"").RootElement;
+                await AssertAcceptedAsync(tool, "s", element);
+                Assert.AreEqual("hi", received);
+            })).SetName("ArgConversionParity_JsonStringElementToString");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                StubColor received = StubColor.Red;
+                Action<StubColor> body = c => received = c;
+                DelegateLlmTool tool = new("echo_enum", "Echo an enum.", body);
+                await AssertAcceptedAsync(tool, "c", "Green");
+                Assert.AreEqual(StubColor.Green, received);
+            })).SetName("ArgConversionParity_EnumFromName");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                object received = null;
+                Action<object> body = o => received = o;
+                DelegateLlmTool tool = new("echo_object", "Echo an object.", body);
+                System.Text.Json.JsonElement element =
+                    System.Text.Json.JsonDocument.Parse("{\"x\":1}").RootElement;
+                await AssertAcceptedAsync(tool, "o", element);
+                Assert.IsNotNull(received);
+            })).SetName("ArgConversionParity_JsonElementToObject");
+        }
+
+        /// <summary>
+        /// Fails the calling test if <c>TryBindArgumentsStructurally</c> rejects a shape MEAI itself
+        /// would have bound (surfaced as an "arg-conversion" trace instead of an executed "native" one).
+        /// </summary>
+        private static async Task AssertAcceptedAsync(DelegateLlmTool tool, string argName, object rawValue)
+        {
+            ToolExecutionPolicy policy = new(
+                NullLog.Instance,
+                new StubSettings(),
+                new ILlmTool[] { tool },
+                false,
+                "Tester");
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool.CreateAIFunction() } };
+            MEAI.FunctionCallContent call = new(
+                "call_" + tool.Name,
+                tool.Name,
+                new Dictionary<string, object> { [argName] = rawValue });
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(call, options, CancellationToken.None);
+
+            Assert.IsTrue(result.Succeeded,
+                $"MEAI would accept this value for tool '{tool.Name}'; the structural preflight must not " +
+                $"reject it. Got: {result.Result.Result}");
+            Assert.AreEqual(1, policy.ExecutedTraces.Count);
+            Assert.AreEqual("native", policy.ExecutedTraces[0].Source);
+        }
+
+        [TestCaseSource(nameof(ArgConversionParityCases))]
+        public async Task ArgConversionParity(Func<Task> scenario)
+        {
+            await scenario();
+        }
 #endif
 
         [Test]

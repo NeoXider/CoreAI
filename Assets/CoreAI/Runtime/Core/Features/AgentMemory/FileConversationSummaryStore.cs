@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Threading;
@@ -352,11 +352,14 @@ namespace CoreAI.Ai
 
         private void WriteSummaryCore(string path, string summary)
         {
-            EnsureDir();
             PersistedDto dto = new() { Summary = summary };
             string json = JsonConvert.SerializeObject(dto, JsonSettings);
             try
             {
+                // WHY the directory is created inside this try: failing to create it IS a write
+                // failure, and outside the try it was the one storage error that reached the caller
+                // with nothing in the log — the same failure through the file itself was logged.
+                EnsureDir();
                 AtomicWriteAllText(path, json);
             }
             catch (Exception ex)

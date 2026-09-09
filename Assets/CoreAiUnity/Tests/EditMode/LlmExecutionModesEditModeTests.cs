@@ -34,7 +34,10 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(first.Ok);
             Assert.IsFalse(second.Ok);
             StringAssert.Contains("request limit", second.Error);
-            Assert.AreEqual(LlmErrorCode.QuotaExceeded, second.ErrorCode);
+            // ClientLimitExceeded, not QuotaExceeded: this is a LOCAL client-side cap, the backend was
+            // never asked, so it must not be presented to the player as an exhausted account quota. See
+            // ClientLimitedLlmClientDecorator's class doc and ClientLimitedLlmClientDecoratorEditModeTests.
+            Assert.AreEqual(LlmErrorCode.ClientLimitExceeded, second.ErrorCode);
             Assert.AreEqual(1, inner.Calls);
         }
 
@@ -48,7 +51,8 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsFalse(result.Ok);
             StringAssert.Contains("prompt character limit", result.Error);
-            Assert.AreEqual(LlmErrorCode.QuotaExceeded, result.ErrorCode);
+            // ClientLimitExceeded, not QuotaExceeded: same local-cap distinction as the request-limit case.
+            Assert.AreEqual(LlmErrorCode.ClientLimitExceeded, result.ErrorCode);
             Assert.AreEqual(0, inner.Calls);
         }
 

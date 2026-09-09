@@ -24,6 +24,27 @@ namespace CoreAI.Tests.EditMode
     {
         private const string RoleId = "skill_availability_role";
 
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY: <see cref="ResolvedInvocation_PreCancelled_DoesNotEnterToolBody"/> below is a synchronous
+        /// [Test] that blocks on Assert.CatchAsync; detaching the context sends the awaited delegate's
+        /// continuation to the thread pool instead of back onto this same blocked thread, which would
+        /// deadlock.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         private static DelegateLlmTool CountingTool(string name, Action onCall)
         {
             return new DelegateLlmTool(name, "Test tool: " + name, onCall);
@@ -281,7 +302,11 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(((IResolvedLlmToolCallProvider)caller).TryResolveInvocation(
                 new Dictionary<string, object> { ["tool_name"] = "mutate", ["arguments_json"] = "{}" },
                 out ResolvedLlmToolInvocation invocation, out string error), error);
-            Assert.ThrowsAsync<OperationCanceledException>(async () => await invocation.InvokeAsync(new CancellationToken(true)));
+            // WHY CatchAsync and not ThrowsAsync: ThrowsAsync demands the EXACT type, and a cancelled
+            // await legitimately surfaces TaskCanceledException, which derives from
+            // OperationCanceledException. This test is about the call being cancelled, not which of
+            // the two the runtime happened to pick.
+            Assert.CatchAsync<OperationCanceledException>(async () => await invocation.InvokeAsync(new CancellationToken(true)));
             Assert.AreEqual(0, calls);
         }
 

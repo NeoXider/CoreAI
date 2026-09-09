@@ -78,16 +78,11 @@ namespace CoreAI.Ai
                 AgentMemoryScope effectiveScope = IsEmptyScope(captured)
                     ? ScopeFromProvider(scopeProvider, roleId)
                     : captured;
+
                 return ResolveActorId(actorId, effectiveScope, roleId);
             }
 
             return ResolveFromProvider(scopeProvider, roleId);
-        }
-
-        internal static string Resolve(ActorContext actorContext, string roleId)
-        {
-            actorContext.AssertTrusted();
-            return ResolveActorId(actorContext.ActorId, actorContext.MemoryScope, NormalizeRoleId(roleId));
         }
 
         private static AgentMemoryScope ScopeFromProvider(IAgentMemoryScopeProvider scopeProvider, string roleId)

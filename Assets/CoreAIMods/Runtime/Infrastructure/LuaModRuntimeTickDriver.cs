@@ -25,6 +25,8 @@ namespace CoreAI.Infrastructure.Lua
         private RbxWorldRuntimeSessionController _sessionController;
         private System.Action _beginPhysicsStep;
         private System.Action _applyGravity;
+        private System.Action<float> _stepCharacterMotors;
+        private System.Func<System.Action> _liveApplyGravity;
 
         /// <summary>Attaches the runtime and phase-specific host pumps to the scheduler.</summary>
         public void Initialize(ILuaModRuntime runtime, ActorContext actorContext, ModScheduler scheduler = null,
@@ -58,6 +60,33 @@ namespace CoreAI.Infrastructure.Lua
         {
             _beginPhysicsStep = beginPhysicsStep;
             _applyGravity = applyGravity;
+        }
+
+        /// <summary>
+        /// Attaches the character-motor fixed-step pump (F10): <c>LuaCsRbxApiBindings.
+        /// StepCharacterMotors</c>, called from <see cref="FixedUpdate"/> alongside the physics-step
+        /// opening and gravity, never from the render-frame pump. Null leaves character motors
+        /// unstepped, same as an unattached physics pump.
+        /// </summary>
+        /// <summary>
+        /// Attaches the resolver for the LIVE physics port, so the fixed step follows a world
+        /// replacement instead of pumping the world that was just disposed.
+        /// </summary>
+        /// <remarks>
+        /// WHY a resolver and not the port itself: loading a world builds a new Rbx API and a new
+        /// physics port and disposes the old ones. A delegate captured at composition time keeps
+        /// pumping the dead pair — gravity iterates bodies of a torn-down binder, raycasts miss
+        /// everything, and every Humanoid runs on the null motor — all silently, because the
+        /// render-frame pumps DO follow the session and only the fixed step is left behind.
+        /// </remarks>
+        public void AttachLiveGravityPump(System.Func<System.Action> liveApplyGravity)
+        {
+            _liveApplyGravity = liveApplyGravity;
+        }
+
+        public void AttachCharacterMotorStep(System.Action<float> stepCharacterMotors)
+        {
+            _stepCharacterMotors = stepCharacterMotors;
         }
 
         /// <summary>Attaches the production session controller so every frame targets the active world.</summary>
@@ -97,8 +126,26 @@ namespace CoreAI.Infrastructure.Lua
         /// </remarks>
         private void FixedUpdate()
         {
-            _beginPhysicsStep?.Invoke();
-            _applyGravity?.Invoke();
+            // WHY the session is asked every step instead of using the delegates captured at
+            // composition: loading a world replaces the Rbx API and the physics port and disposes
+            // the old ones, and only the render-frame pumps follow that swap. Captured fixed-step
+            // delegates kept driving the dead world — gravity on a torn-down binder, raycasts that
+            // always miss, every Humanoid back on the null motor — with nothing in the log. The
+            // captured delegates remain the fallback for a host that runs no session controller.
+            global::CoreAI.Ai.LuaCs.LuaCsRbxApiBindings live = _sessionController?.CurrentRbxApi;
+            if (live != null)
+            {
+                live.WorldPhysics?.BeginPhysicsStep();
+                live.StepCharacterMotors(Time.fixedDeltaTime);
+            }
+            else
+            {
+                _beginPhysicsStep?.Invoke();
+                _stepCharacterMotors?.Invoke(Time.fixedDeltaTime);
+            }
+
+            System.Action gravity = _liveApplyGravity?.Invoke() ?? _applyGravity;
+            gravity?.Invoke();
         }
 
         private void OnDestroy()

@@ -614,6 +614,25 @@ namespace CoreAI.Mods.Rbx.Binding
                 : PartProperties.CreateDefault();
         }
 
+        /// <summary>
+        /// Reads the materialized part's own transform (converted through RbxSpace, D2) instead of
+        /// the stored PartProperties — WHY: a character motor or gravity moves the Rigidbody
+        /// directly and never writes back into <see cref="_partProperties"/>, so the stored value
+        /// would answer with wherever the part last was when a script (or the initial spawn seed)
+        /// set it, however long ago. A part with no bound GameObject yet — never materialized, or
+        /// not a part at all — falls back to the stored/default value; it has no live transform.
+        /// </summary>
+        public RbxVector3 GetLivePositionStuds(InstanceId id)
+        {
+            if (_bindings.TryGetValue(id, out BindingEntry entry) && entry.IsPart
+                && entry.GameObject != null)
+            {
+                return RbxSpace.FromUnity(entry.GameObject.transform.position);
+            }
+
+            return GetPartPropertiesOrDefault(id).Position;
+        }
+
         // WHY: a script that moves/recolors a part each frame is the hottest API path, so each
         // setter re-applies ONLY the aspect it touched instead of re-running the whole
         // materialization (shape scan + component lookups + a MaterialPropertyBlock alloc) on

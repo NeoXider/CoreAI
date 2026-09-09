@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Ai;
@@ -67,7 +67,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             InstanceId id = part.Id;
             int destroyingCount = 0;
             harness.ConnectDestroying(part, () => destroyingCount++);
-            int binderBefore = harness.Binder.Materialized.Count;
+            Assert.IsTrue(harness.Binder.IsMaterialized(id));
             int mutationsBefore = harness.Registry.RetainedMutationOperationCount;
 
             harness.Bindings.Scheduler.Advance(0.25);
@@ -76,7 +76,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.IsNull(part.Parent);
             Assert.AreEqual(1, destroyingCount);
             Assert.IsFalse(harness.Registry.TryGet(id, out _));
-            Assert.AreEqual(binderBefore - 1, harness.Binder.Materialized.Count);
+            // WHY the binder is asked about THIS id instead of about its total count: an actor
+            // joining this harness auto-loads a character, and that Model materializes during the
+            // same two Advances the debris deadline needs — a total-count assertion measures that
+            // unrelated world traffic, not whether the debris item released its backing object.
+            Assert.IsFalse(harness.Binder.IsMaterialized(id));
             Assert.Greater(harness.Registry.RetainedMutationOperationCount, mutationsBefore);
         }
 

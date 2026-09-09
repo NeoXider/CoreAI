@@ -1,10 +1,12 @@
 using System.Collections.Generic;
+using System.Reflection;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Sandbox.LuaCs;
+using CoreAI.Tests.EditMode.RbxApi.LuaBindings;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
@@ -130,6 +132,39 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 OneOffCapabilities = LuaCapabilities.All,
                 RbxApi = roblox
             });
+        }
+
+        /// <summary>
+        /// U1, U2 and U4's pass condition above is prose only: the class comment NAMES the tests
+        /// that cover them but nothing here re-runs or even compiles against them, so renaming or
+        /// deleting <c>Lua_WorkspaceSignalBehavior_ReadsDeferred</c>,
+        /// <c>Lua_FrameOrder_FollowsTheMirrorsPhaseOrder</c> or
+        /// <c>Internal_DispatchOrderIsDeterministic_NotAnApiGuarantee</c> elsewhere would break
+        /// nothing here. This pins their existence by reflection, the same ratchet pattern used to
+        /// guard skill text elsewhere: it goes red the moment any of the three is renamed or
+        /// removed, even though it does not re-verify what they assert.
+        /// </summary>
+        [Test]
+        public void U1_U2_U4_NamedConformanceTests_StillExistOnTheirClasses()
+        {
+            Assert.IsNotNull(
+                typeof(RbxApiLuaBindingsEditModeTests).GetMethod(
+                    "Lua_WorkspaceSignalBehavior_ReadsDeferred",
+                    BindingFlags.Instance | BindingFlags.Public),
+                "U1's cited test, Lua_WorkspaceSignalBehavior_ReadsDeferred, must still exist on " +
+                "RbxApiLuaBindingsEditModeTests.");
+            Assert.IsNotNull(
+                typeof(RbxRunServiceModernEventsEditModeTests).GetMethod(
+                    "Lua_FrameOrder_FollowsTheMirrorsPhaseOrder",
+                    BindingFlags.Instance | BindingFlags.Public),
+                "U2's cited test, Lua_FrameOrder_FollowsTheMirrorsPhaseOrder, must still exist on " +
+                "RbxRunServiceModernEventsEditModeTests.");
+            Assert.IsNotNull(
+                typeof(RbxTaskSchedulerLuaBindingsEditModeTests).GetMethod(
+                    "Internal_DispatchOrderIsDeterministic_NotAnApiGuarantee",
+                    BindingFlags.Instance | BindingFlags.Public),
+                "U4's cited test, Internal_DispatchOrderIsDeterministic_NotAnApiGuarantee, must " +
+                "still exist on RbxTaskSchedulerLuaBindingsEditModeTests.");
         }
 
         [Test]

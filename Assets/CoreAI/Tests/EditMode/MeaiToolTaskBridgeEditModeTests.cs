@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -20,6 +20,10 @@ namespace CoreAI.Core.Tests.EditMode
         public void SetUp()
         {
             _previous = SynchronizationContext.Current;
+            // WHY the context is cleared and not merely remembered: the tests below install the exact
+            // context each one is about, and one of them blocks on Assert.ThrowsAsync — inheriting the
+            // editor's context there is the F12 deadlock shape.
+            SynchronizationContext.SetSynchronizationContext(null);
         }
 
         [TearDown]

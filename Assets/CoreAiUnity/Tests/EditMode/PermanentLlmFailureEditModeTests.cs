@@ -216,12 +216,17 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotEmpty(builtIn);
             Assert.IsFalse(builtIn.StartsWith("{", StringComparison.Ordinal));
 
+            // WHY error_code/request_id: ExtractBackendAuthoredMessage only trusts a message as
+            // gateway-authored inside the canonical envelope (error_code + request_id + message).
+            // A bare {"error":{"message":...}} is what any raw provider can emit too, so it proves no
+            // authorship and is rejected by design.
             LlmClientException authored = new(
                 "HTTP error 402: nope",
                 LlmErrorCode.PaymentRequired,
                 402,
                 null,
-                "{\"error\":{\"message\":\"The teacher is unavailable right now - tell your instructor.\"}}");
+                "{\"error_code\":\"payment_required\",\"request_id\":\"req_123\"," +
+                "\"message\":\"The teacher is unavailable right now - tell your instructor.\"}");
 
             Assert.AreEqual(
                 "The teacher is unavailable right now - tell your instructor.",

@@ -112,6 +112,56 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void NamedActor_OneLongLivedDecorator_TenantChangeStillForksMemory()
+        {
+            // WHY: production registers ScopedAgentMemoryStoreDecorator as a process-wide Singleton, so a
+            // regression that pins the first scope seen per ActorId only shows up when ONE decorator
+            // instance serves multiple calls - the tests above build a fresh decorator per call and cannot
+            // see it. Two tenants sharing an ActorId (a connection counter, say) must never share memory.
+            IAgentMemoryScopeProvider host = new DefaultAgentMemoryScopeProvider();
+            KeyCapturingStore store = new();
+            ScopedAgentMemoryStoreDecorator decorator = new(store, host);
+
+            using (AgentMemoryActorScope.Enter(NamedActor("player-1", new AgentMemoryScope("tenant-a", "", "", ""))))
+            {
+                decorator.Save("Teacher", new AgentMemoryState());
+            }
+
+            using (AgentMemoryActorScope.Enter(NamedActor("player-1", new AgentMemoryScope("tenant-b", "", "", ""))))
+            {
+                decorator.Save("Teacher", new AgentMemoryState());
+            }
+
+            Assert.AreEqual(2, store.SavedKeys.Count,
+                "A single long-lived decorator must not merge two tenants that happen to share an ActorId.");
+            Assert.AreNotEqual(store.SavedKeys[0], store.SavedKeys[1]);
+        }
+
+        [Test]
+        public void NamedActor_OneLongLivedDecorator_TopicChangeStillForksMemory()
+        {
+            IAgentMemoryScopeProvider host = new DefaultAgentMemoryScopeProvider();
+            KeyCapturingStore store = new();
+            ScopedAgentMemoryStoreDecorator decorator = new(store, host);
+
+            using (AgentMemoryActorScope.Enter(
+                       NamedActor("player-42", new AgentMemoryScope("school", "u1", "", "lesson-1"))))
+            {
+                decorator.Save("Teacher", new AgentMemoryState());
+            }
+
+            using (AgentMemoryActorScope.Enter(
+                       NamedActor("player-42", new AgentMemoryScope("school", "u1", "", "lesson-2"))))
+            {
+                decorator.Save("Teacher", new AgentMemoryState());
+            }
+
+            Assert.AreEqual(2, store.SavedKeys.Count,
+                "A single long-lived decorator must not merge two topics of the same actor into one lesson.");
+            Assert.AreNotEqual(store.SavedKeys[0], store.SavedKeys[1]);
+        }
+
+        [Test]
         public void NamedActor_WithoutOwnScope_TakesTheHostDeclaredScope()
         {
             ActorContext actor = NamedActor("player-7", AgentMemoryScope.Empty);

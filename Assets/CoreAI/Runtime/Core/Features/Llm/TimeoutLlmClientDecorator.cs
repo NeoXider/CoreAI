@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -51,8 +51,14 @@ namespace CoreAI.Infrastructure.Llm
         // is allocated for individual chunks.
         private sealed class CancellationSignal : IDisposable
         {
-            private readonly TaskCompletionSource<bool> _source =
-                new(TaskCreationOptions.RunContinuationsAsynchronously);
+            // WHY no RunContinuationsAsynchronously: that flag defers the continuation to the thread
+            // pool, which WebGL does not have — the conversion lint refuses it in WebGL-reachable code.
+            // So TrySetResult below resumes the waiter INLINE, inside the IdleDeadline timer's call to
+            // CancellationTokenSource.Cancel(). That is contained on purpose: the unwind that follows
+            // only records an outcome in locals, and every Dispose — including the one for this very
+            // token source — happens in RunCompleteWithDeadlineAsync's finally, after the inline
+            // resumption has already returned.
+            private readonly TaskCompletionSource<bool> _source = new();
             private readonly CancellationTokenRegistration _registration;
 
             public CancellationSignal(CancellationToken token)
@@ -64,26 +70,50 @@ namespace CoreAI.Infrastructure.Llm
             public void Dispose() => _registration.Dispose();
         }
 
+        // Bounded real-time grace window given to a cooperative operation to finish its own unwind
+        // after the deadline fires, before its (possibly partial) result is discarded as a bare
+        // timeout. Kept short: it only needs to cover the operation's own cancellation handling, not
+        // add a second de-facto deadline.
+        private const int GraceWindowMilliseconds = 20;
+
         private static async Task<T> AwaitOperationAsync<T>(Task<T> operation, CancellationSignal signal,
-            CancellationToken token)
+            CancellationToken token, ILlmAsyncMarshaler asyncMarshaler)
         {
             if (!operation.IsCompleted)
             {
-                await Task.WhenAny(operation, signal.Task).ConfigureAwait(false);
+                await Task.WhenAny(operation, signal.Task);
+                if (!operation.IsCompleted)
+                {
+                    // WHY a single bounded wait, not a per-iteration Task.Yield spin loop: a cooperative
+                    // inner operation observes the SAME cancellation that just woke `signal` and may
+                    // still be mid-unwind. Which of the two token callbacks the runtime invokes first is
+                    // an implementation detail (not a documented contract) — .NET commonly invokes them
+                    // in reverse registration order, but that is not guaranteed — so a single scheduler
+                    // hop is not guaranteed to be enough. A bounded Task.Delay gives it the same genuine
+                    // real-time window to finish before its data is discarded, while still giving up
+                    // promptly for a backend that never reacts at all — without the cost of a spin loop:
+                    // under Unity's PlayerLoop-driven SynchronizationContext, each Task.Yield()
+                    // continuation is posted to the NEXT frame, so looping per-check over this window
+                    // could cost a whole frame (or more, at low FPS) per iteration.
+                    await Task.WhenAny(
+                        operation,
+                        asyncMarshaler.DelayAsync(GraceWindowMilliseconds, CancellationToken.None));
+                }
+
                 if (!operation.IsCompleted)
                 {
                     throw new OperationCanceledException(token);
                 }
             }
 
-            return await operation.ConfigureAwait(false);
+            return await operation;
         }
 
         private static async Task ObserveOperationAsync(Task operation)
         {
             try
             {
-                await operation.ConfigureAwait(false);
+                await operation;
             }
             catch (Exception)
             {
@@ -94,10 +124,10 @@ namespace CoreAI.Infrastructure.Llm
 
         private static async Task DisposeAfterOperationAsync(Task operation, IAsyncEnumerator<LlmStreamChunk> enumerator)
         {
-            await ObserveOperationAsync(operation).ConfigureAwait(false);
+            await ObserveOperationAsync(operation);
             try
             {
-                await enumerator.DisposeAsync().ConfigureAwait(false);
+                await enumerator.DisposeAsync();
             }
             catch (Exception)
             {
@@ -128,6 +158,7 @@ namespace CoreAI.Infrastructure.Llm
             private long _progressCount;
             private int _disposed;
             private int _finishedParties;
+            private int _elapsed;
 
             public IdleDeadline(
                 ILlmAsyncMarshaler asyncMarshaler,
@@ -147,6 +178,11 @@ namespace CoreAI.Infrastructure.Llm
                 _ = WatchAsync();
             }
 
+            /// <summary>Whether the idle window ran out, as opposed to the request finishing or the
+            /// caller cancelling. Asked instead of the token source's own state, which a disposed
+            /// source can refuse to answer.</summary>
+            public bool Elapsed => Volatile.Read(ref _elapsed) == 1;
+
             /// <summary>Отметить прогресс. Без аллокаций и исключений — вызывается на каждый чанк.</summary>
             public void Touch()
             {
@@ -163,8 +199,7 @@ namespace CoreAI.Infrastructure.Llm
                     while (true)
                     {
                         long seen = Volatile.Read(ref _progressCount);
-                        await _asyncMarshaler.DelayAsync(ToMilliseconds(remainingTicks), _stopToken)
-                            .ConfigureAwait(false);
+                        await _asyncMarshaler.DelayAsync(ToMilliseconds(remainingTicks), _stopToken);
                         if (_stopToken.IsCancellationRequested)
                         {
                             elapsed = false;
@@ -219,6 +254,11 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     return;
                 }
+
+                // WHY the flag is set BEFORE Cancel(): without RunContinuationsAsynchronously the
+                // waiter resumes inline inside that call, and it asks this flag which cancellation
+                // it is unwinding for.
+                Volatile.Write(ref _elapsed, 1);
 
                 try
                 {
@@ -314,48 +354,139 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <inheritdoc />
-        public async Task<LlmCompletionResult> CompleteAsync(
+        // WHY not `async Task<T>` all the way through: the compiler puts an async method's own Task into
+        // the Canceled state (not Faulted) when its body throws an OperationCanceledException-derived
+        // exception — including LlmOperationTimeoutException. A caller that re-observes an already-completed
+        // Canceled task, rather than awaiting it live (e.g. after racing it via Task.WhenAny, as
+        // Assert.ThrowsAsync does following an earlier await), is not guaranteed the exact exception
+        // instance/type back on every runtime — the deadline can surface as a bare TaskCanceledException,
+        // losing the fact that it was specifically a TIMEOUT. TaskCompletionSource.TrySetException has no
+        // such special case: it always produces a Faulted task that reliably replays the exact exception.
+        public Task<LlmCompletionResult> CompleteAsync(
             LlmCompletionRequest request,
             CancellationToken cancellationToken = default)
         {
             float timeoutSeconds = _timeoutSecondsProvider();
             if (timeoutSeconds <= 0f)
             {
-                return await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                return _inner.CompleteAsync(request, cancellationToken);
             }
 
-            using CancellationTokenSource timeoutCts =
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            using CancellationSignal signal = new(timeoutCts.Token);
-            using IdleDeadline deadline = new(_asyncMarshaler, timeoutCts, timeoutSeconds, _onDeadlineTimerFault);
+            // WHY the outcome is held in locals and published AFTER the finally instead of using a
+            // TaskCompletionSource created with RunContinuationsAsynchronously: that flag needs a thread
+            // pool, which WebGL does not have (the conversion lint refuses it in WebGL-reachable code).
+            // Publishing last gives the same guarantee for free — the caller's continuation, inline or
+            // not, cannot start before deadline/signal/timeoutCts are disposed, so a next request can
+            // never overlap the previous request's live IdleDeadline timer.
+            TaskCompletionSource<LlmCompletionResult> tcs = new();
+            _ = RunCompleteWithDeadlineAsync(request, timeoutSeconds, cancellationToken, tcs);
+            return tcs.Task;
+        }
 
-            Task<LlmCompletionResult> operation = null;
+        /// <summary>
+        /// Whether OUR linked source is the one that fired. Asked in the catch body, never in an
+        /// exception filter: on a disposed source this property throws on some runtimes, and a filter
+        /// that throws is silently treated as "does not match" — the library timeout then fell
+        /// through to the generic cancel branch and the caller got a bare TaskCanceledException.
+        /// </summary>
+        private static bool WasCancelled(CancellationTokenSource source)
+        {
             try
             {
+                return source is { IsCancellationRequested: true };
+            }
+            catch (ObjectDisposedException)
+            {
+                return false;
+            }
+        }
+
+        private async Task RunCompleteWithDeadlineAsync(
+            LlmCompletionRequest request,
+            float timeoutSeconds,
+            CancellationToken cancellationToken,
+            TaskCompletionSource<LlmCompletionResult> tcs)
+        {
+            // WHY resource creation is INSIDE the try, not in `using` declarations above it: this method
+            // runs detached (`_ = RunCompleteWithDeadlineAsync(...)`), so any exception that escapes it
+            // becomes an unobserved task exception and `tcs` is never completed — the caller awaiting
+            // `tcs.Task` hangs forever. Every path out of this method, including a throw from
+            // CreateLinkedTokenSource/CancellationSignal/IdleDeadline construction, or from disposing
+            // them afterward in `finally` below, must complete `tcs`.
+            CancellationTokenSource timeoutCts = null;
+            CancellationSignal signal = null;
+            IdleDeadline deadline = null;
+            Task<LlmCompletionResult> operation = null;
+            LlmCompletionResult completed = null;
+            Exception failure = null;
+            bool cancelled = false;
+            CancellationToken cancelledWith = default;
+            try
+            {
+                timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                signal = new CancellationSignal(timeoutCts.Token);
+                deadline = new IdleDeadline(_asyncMarshaler, timeoutCts, timeoutSeconds, _onDeadlineTimerFault);
+
                 operation = _inner.CompleteAsync(request, timeoutCts.Token);
                 LlmCompletionResult result =
-                    await AwaitOperationAsync(operation, signal, timeoutCts.Token).ConfigureAwait(false);
+                    await AwaitOperationAsync(operation, signal, timeoutCts.Token, _asyncMarshaler);
                 // ПОЧЕМУ: часть внутренних клиентов переводит отменённый связанный токен в результат
                 // Cancelled. Этот декоратор — САМЫЙ ВНЕШНИЙ слой (retry/fallback внутри уже видели результат
                 // Cancelled, и повторять на сработавшем токене всё равно бесполезно); переписывается только
                 // видимая вызывающему типизация, чтобы таймаут библиотеки не выглядел как отмена пользователя.
                 if (result != null && !result.Ok && result.ErrorCode == LlmErrorCode.Cancelled &&
-                    timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                    deadline.Elapsed && !cancellationToken.IsCancellationRequested)
                 {
                     result.ErrorCode = LlmErrorCode.Timeout;
                 }
 
-                return result;
+                completed = result;
             }
-            // Настоящая остановка вызывающим: пропускается без изменений, чтобы обработка отмены отработала.
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            // WHY one catch that classifies in its body instead of three `when` filters on token state:
+            // an exception filter that touches timeoutCts throws ObjectDisposedException on runtimes
+            // where a disposed CancellationTokenSource refuses IsCancellationRequested, and a filter that
+            // throws is silently treated as "does not match" — the library timeout then fell through to
+            // the generic cancel branch and the caller saw a bare TaskCanceledException instead of
+            // LlmOperationTimeoutException. The deadline's own flag answers the same question without
+            // touching a token at all.
+            catch (OperationCanceledException exception)
             {
-                throw;
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    // Настоящая остановка вызывающим: статус остаётся Canceled, как и раньше.
+                    cancelled = true;
+                    cancelledWith = cancellationToken;
+                }
+                else if (deadline is { Elapsed: true } || WasCancelled(timeoutCts))
+                {
+                    // Таймер сработал при живом токене вызывающего: это таймаут библиотеки — Faulted,
+                    // чтобы тип исключения переживал повторное наблюдение независимо от рантайма.
+                    failure = new LlmOperationTimeoutException();
+                }
+                else if (exception is LlmOperationTimeoutException)
+                {
+                    // WHY this branch exists: these decorators nest, and LlmOperationTimeoutException
+                    // IS an OperationCanceledException. An inner decorator with a shorter deadline
+                    // surfaces exactly that exception here, through _inner.CompleteAsync, while THIS
+                    // decorator's own deadline has not elapsed and the caller's token has not fired
+                    // either — the two checks above both say no. Without this branch that exception
+                    // falls into the generic "inner cancelled for its own reasons" case below and
+                    // TrySetCanceled discards it, so the caller sees a bare cancellation instead of
+                    // the timeout this file exists to preserve. Faulted, like the branch above, so the
+                    // exact type survives re-observation.
+                    failure = exception;
+                }
+                else
+                {
+                    // Neither the caller's token nor ours fired: the inner client cancelled for its own
+                    // reasons. Still a cancellation, not a failure.
+                    cancelled = true;
+                    cancelledWith = exception.CancellationToken;
+                }
             }
-            // Связанный таймер сработал при живом токене вызывающего: это таймаут библиотеки.
-            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+            catch (Exception exception)
             {
-                throw new LlmOperationTimeoutException();
+                failure = exception;
             }
             finally
             {
@@ -363,6 +494,61 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     _ = ObserveOperationAsync(operation);
                 }
+
+                // WHY each dispose is wrapped in its own try/catch instead of left to throw through:
+                // this method runs detached (`_ = RunCompleteWithDeadlineAsync(...)`), so an exception
+                // escaping `finally` would never reach the completion calls below — it becomes an
+                // unobserved task exception and `tcs` is never completed, hanging the caller forever.
+                // (A live host-delay callback throwing out of `IdleDeadline.Dispose()`'s `_stop.Cancel()`
+                // is exactly this shape.) Each dispose is attempted independently so one throwing does
+                // not skip the other two; the first exception seen wins, matching how this file already
+                // swallows secondary failures elsewhere (e.g. inside IdleDeadline itself).
+                try
+                {
+                    deadline?.Dispose();
+                }
+                catch (Exception disposalException)
+                {
+                    failure ??= disposalException;
+                }
+
+                try
+                {
+                    signal?.Dispose();
+                }
+                catch (Exception disposalException)
+                {
+                    failure ??= disposalException;
+                }
+
+                try
+                {
+                    timeoutCts?.Dispose();
+                }
+                catch (Exception disposalException)
+                {
+                    failure ??= disposalException;
+                }
+            }
+
+            // WHY completion happens here, after the try/finally above, instead of as soon as an outcome
+            // is known: the caller's continuation on `tcs.Task` — inline or not — must not be able to run
+            // before deadline/signal/timeoutCts are disposed, or a next request could overlap this
+            // request's still-live IdleDeadline timer. That ordering holds on every path above, including
+            // the ones where disposal itself throws, because the throwing dispose is caught above (not
+            // left to skip straight past the other two disposals and this completion) before any of the
+            // three TrySet* calls below run.
+            if (failure != null)
+            {
+                tcs.TrySetException(failure);
+            }
+            else if (cancelled)
+            {
+                tcs.TrySetCanceled(cancelledWith);
+            }
+            else
+            {
+                tcs.TrySetResult(completed);
             }
         }
 
@@ -377,8 +563,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 await foreach (LlmStreamChunk chunk in _inner
                                    .CompleteStreamingAsync(request, cancellationToken)
-                                   .WithCancellation(cancellationToken)
-                                   .ConfigureAwait(false))
+                                   .WithCancellation(cancellationToken))
                 {
                     yield return chunk;
                 }
@@ -405,7 +590,8 @@ namespace CoreAI.Infrastructure.Llm
                     try
                     {
                         pendingMove = enumerator.MoveNextAsync().AsTask();
-                        hasNext = await AwaitOperationAsync(pendingMove, signal, timeoutCts.Token).ConfigureAwait(false);
+                        hasNext = await AwaitOperationAsync(
+                            pendingMove, signal, timeoutCts.Token, _asyncMarshaler);
                         current = hasNext ? enumerator.Current : null;
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -480,11 +666,11 @@ namespace CoreAI.Infrastructure.Llm
                     Task disposal = enumerator.DisposeAsync().AsTask();
                     if (!disposal.IsCompleted)
                     {
-                        await Task.WhenAny(disposal, signal.Task).ConfigureAwait(false);
+                        await Task.WhenAny(disposal, signal.Task);
                     }
                     if (disposal.IsCompleted)
                     {
-                        await disposal.ConfigureAwait(false);
+                        await disposal;
                     }
                     else
                     {

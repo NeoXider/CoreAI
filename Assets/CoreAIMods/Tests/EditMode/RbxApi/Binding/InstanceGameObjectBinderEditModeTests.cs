@@ -447,6 +447,47 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             Assert.AreEqual(0.56f, partGo.transform.localScale.x, Epsilon);
         }
 
+        // ---- Live position read-back (reverse sync) ------------------------------------------
+
+        [Test]
+        public void GetLivePositionStuds_FollowsTheBackingTransform_WithNoLuaPositionAssignment()
+        {
+            // WHY this matters: a character motor or gravity moves the backing Rigidbody's
+            // transform directly, the same way this test does, and never goes through
+            // SetPosition/SetCFrame. GetLivePositionStuds must still see where the part actually
+            // is, not the value frozen in the property store at spawn.
+            RbxInstance part = CreatePartInWorld();
+            GameObject partGo = BoundObject(part);
+
+            partGo.transform.position = new Vector3(2.8f, 0.56f, 1.4f);
+
+            RbxVector3 live = _binder.GetLivePositionStuds(part.Id);
+            Assert.AreEqual(10f, live.X, Epsilon);
+            Assert.AreEqual(2f, live.Y, Epsilon);
+            Assert.AreEqual(-5f, live.Z, Epsilon);
+
+            PartProperties stored = _binder.GetPartPropertiesOrDefault(part.Id);
+            Assert.AreEqual(0f, stored.Position.X, Epsilon,
+                "the stored value must stay stale — nothing wrote through SetPosition/SetCFrame");
+        }
+
+        [Test]
+        public void GetLivePositionStuds_FallsBackToStoredValue_ForAnUnmaterializedPart()
+        {
+            // An unmaterialized part (never parented into the world) has no live transform to
+            // read, so the fallback must answer with whatever was pushed through the one-way sink.
+            RbxInstance part = _registry.Create("Part");
+            Assert.IsFalse(_binder.TryGetBoundObject(part.Id, out _),
+                "precondition: this part must have no backing object yet");
+
+            _binder.SetPosition(part.Id, new RbxVector3(7f, 8f, 9f));
+
+            RbxVector3 live = _binder.GetLivePositionStuds(part.Id);
+            Assert.AreEqual(7f, live.X, Epsilon);
+            Assert.AreEqual(8f, live.Y, Epsilon);
+            Assert.AreEqual(9f, live.Z, Epsilon);
+        }
+
         [Test]
         public void PartDefaults_MatchRobloxPart()
         {

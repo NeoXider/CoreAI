@@ -97,7 +97,10 @@ namespace CoreAI.Infrastructure.Llm
             bool succeeded = false;
             try
             {
-                LlmCompletionResult result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                // WHY no ConfigureAwait(false): WebGL has no thread pool, so a continuation marked
+                // non-inlinable under Unity's SynchronizationContext is posted nowhere and never resumes —
+                // a silent permanent hang, not an exception. Staying on the captured context is safe here.
+                LlmCompletionResult result = await _inner.CompleteAsync(request, cancellationToken);
                 succeeded = result != null && result.Ok;
                 return result;
             }

@@ -12,6 +12,27 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class ConversationContextCompactionEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY this fixture detaches: it asserts through Assert.ThrowsAsync/CatchAsync, which BLOCK
+        /// the calling thread until the awaited delegate finishes — being inside an async test does
+        /// not change that. Under Unity's SynchronizationContext the delegate's continuation is
+        /// posted back to that same blocked thread, and the editor deadlocks with no results file.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         private sealed class FlatTokenEstimator : ITokenEstimator
         {
             private readonly int _perMessage;

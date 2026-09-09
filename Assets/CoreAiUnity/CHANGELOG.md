@@ -4,6 +4,27 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.37.0] - 2026-09-09
+
+### Fixed
+
+- **The whole EditMode run stopped hanging.** A synchronous test blocked on `Task.Result` while the
+  awaited continuation was posted to Unity's SynchronizationContext — the very thread the block was
+  holding — so the editor sat idle forever and no results file was ever written. The fixtures that
+  wait on a task from the calling thread now detach that context for the duration of the test, and
+  the guard test that was supposed to prevent this shape was widened: it only knew about
+  `Assert.ThrowsAsync`/`CatchAsync` and was blind to a blocking `Result`/`Wait()`. A bounded
+  `Wait(timeout)` stays allowed, because it cannot hang a run.
+- **A timeout assertion measured the assertion, not the subject.** `Assert.ThrowsAsync` runs the
+  await inside an async lambda, and the compiler puts an async method's task into the Canceled state
+  whenever its body throws an `OperationCanceledException`-derived exception — which
+  `LlmOperationTimeoutException` is. Those tests therefore reported `TaskCanceledException` no matter
+  what the decorator produced. They now read the finished task directly, the way a caller that
+  re-observes a completed request does.
+- **A write failure that could not create its directory reached the caller with nothing in the log.**
+  `FileConversationSummaryStore` logged every other storage failure; the directory case was outside
+  the try that logs.
+
 ## [7.36.0] - Unreleased
 
 > Release preparation after merging with the published 7.35.0. This version is not released yet. Before the merge, the Core, Source, Tests, MCP and MCP.Tests assemblies compiled without errors; the full EditMode/PlayMode run and the final audit of the merged tree are still to be done. The 7.35.0 verification results below apply only to the published version.

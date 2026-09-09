@@ -7,9 +7,9 @@ namespace CoreAI.Mods.Rbx.Binding
     /// One-way property push for the MVP1 Part surface: the Lua bindings layer calls these
     /// when a script writes a Part property; the binder converts through RbxSpace and
     /// updates the backing GameObject. Signatures are engine-free (Roblox datatypes + ids
-    /// only) so callers never touch UnityEngine types (D2 lint). Reverse sync (Unity physics
-    /// writing back into registry state) is out of scope until the physics rung.
-    /// TODO: MVP8 — reverse sync for unanchored bodies (Position/AssemblyLinearVelocity reads).
+    /// only) so callers never touch UnityEngine types (D2 lint). <see cref="GetLivePositionStuds"/>
+    /// is the one read that crosses back the other way, for the same reason.
+    /// TODO: MVP8 — reverse sync for unanchored bodies (full CFrame/AssemblyLinearVelocity reads).
     /// </summary>
     public interface IPartPropertySink
     {
@@ -49,5 +49,23 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <summary>Stored state, or Roblox Part defaults when none was pushed yet.</summary>
         PartProperties GetPartPropertiesOrDefault(InstanceId id);
+
+        /// <summary>
+        /// Live position in studs, read from a materialized part's own backing object rather than
+        /// the last value a script pushed through <see cref="SetPosition"/>/<see cref="SetCFrame"/>.
+        /// </summary>
+        /// <remarks>
+        /// WHY: a character motor or the world's gravity moves the backing Rigidbody directly and
+        /// never writes back into the stored <see cref="PartProperties"/>, so reading the stored
+        /// value gave every distance query a position frozen at spawn (or at the last script
+        /// write) no matter how far the part had actually moved. Falls back to the stored/default
+        /// position for a part with no backing object yet — an unmaterialized part genuinely has
+        /// no live transform to read. The default body keeps this behavior for the headless sink
+        /// (<see cref="InMemoryPartPropertySink"/>), which never materializes anything.
+        /// </remarks>
+        RbxVector3 GetLivePositionStuds(InstanceId id)
+        {
+            return GetPartPropertiesOrDefault(id).Position;
+        }
     }
 }

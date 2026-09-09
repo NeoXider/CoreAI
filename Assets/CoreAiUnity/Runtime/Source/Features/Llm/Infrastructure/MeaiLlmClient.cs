@@ -2324,14 +2324,37 @@ namespace CoreAI.Infrastructure.Llm
             return spans;
         }
 
+        /// <summary>Matches a candidate whose first key's value opens ANOTHER container; see <see cref="LooksLikeJsonObjectPrefix"/>.</summary>
+        private static readonly Regex NestedContainerPrefixPattern =
+            new(@"^\{\s*""[^""]+""\s*:\s*[\{\[]", RegexOptions.Compiled);
+
+        /// <summary>
+        /// WHY: a truncated object is held only while it might still grow into a tool call. Requiring the
+        /// literal <c>"name"</c>/<c>"arguments"</c>/<c>"arguments_json"</c> keys (rather than any quoted
+        /// key at all) keeps an unrelated JSON example a teacher is typing — e.g. <c>{"key": value</c> with
+        /// no tool-call shape — from being misread as a malformed call and swallowed at turn end.
+        /// <para>
+        /// A second, narrower branch (<see cref="NestedContainerPrefixPattern"/>) also holds a candidate
+        /// whose first key's value opens ANOTHER container (<c>{"function": {</c>, <c>{"call": [</c>) even
+        /// before <c>name</c>/<c>arguments</c> has appeared: some providers wrap the call one level deeper
+        /// (<c>{"function":{"name":...,"arguments":...}}</c>), and truncation can cut the stream off before
+        /// that inner key is visible at all. The branch is deliberately narrower than "any quoted key"
+        /// (which used to swallow the <c>{"key": value</c> example above): it requires the value to itself
+        /// start a container, not just any value, so a scalar-valued key never qualifies.
+        /// </para>
+        /// </summary>
         private static bool LooksLikeJsonObjectPrefix(string candidate)
         {
             string trimmed = candidate?.TrimStart() ?? string.Empty;
-            return trimmed.StartsWith("{", StringComparison.Ordinal) &&
-                   (trimmed.Contains("\"name\"", StringComparison.Ordinal) ||
-                    trimmed.Contains("\"arguments\"", StringComparison.Ordinal) ||
-                    trimmed.Contains("\"arguments_json\"", StringComparison.Ordinal) ||
-                    Regex.IsMatch(trimmed, @"^\{\s*""[^""]+""\s*:"));
+            if (!trimmed.StartsWith("{", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return trimmed.Contains("\"name\"", StringComparison.Ordinal) ||
+                   trimmed.Contains("\"arguments\"", StringComparison.Ordinal) ||
+                   trimmed.Contains("\"arguments_json\"", StringComparison.Ordinal) ||
+                   NestedContainerPrefixPattern.IsMatch(trimmed);
         }
 
         private static bool LooksLikeToolCallObject(string candidate)

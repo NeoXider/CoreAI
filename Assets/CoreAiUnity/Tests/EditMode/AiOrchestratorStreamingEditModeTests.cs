@@ -14,6 +14,26 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class AiOrchestratorStreamingEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY this fixture detaches: a test here waits on a Task from the calling thread. Under
+        /// Unity's SynchronizationContext that task's continuation is posted back to the very thread
+        /// the wait is blocking, and the whole EditMode run hangs with no results file.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         /// <summary>
         /// Orchestrator stub that implements only <see cref="IAiOrchestrationService.RunTaskAsync"/>
         /// and relies on the interface default <c>RunStreamingAsync</c> implementation.

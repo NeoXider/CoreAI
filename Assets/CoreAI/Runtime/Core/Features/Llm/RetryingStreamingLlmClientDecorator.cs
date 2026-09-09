@@ -166,6 +166,13 @@ namespace CoreAI.Infrastructure.Llm
 
                         if (!string.IsNullOrEmpty(current.Error))
                         {
+                            // WHY the commit check is ANDed in after the error-code check, not
+                            // dropped: a retryable ErrorCode alone does not mean the chunk is safe
+                            // to replay. If this same chunk already carries executed tool calls or
+                            // text (IsCommittingChunk), those effects already happened — retrying
+                            // here would replay the stream and run the tool a second time. The
+                            // commit check must gate every retryable code, so it stays required
+                            // even though the error-code check is evaluated first.
                             if (IsRetryableError(current.ErrorCode) && !IsCommittingChunk(current))
                             {
                                 retryablePreCommitFailure = true;

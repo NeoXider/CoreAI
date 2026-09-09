@@ -17,6 +17,27 @@ namespace CoreAI.Tests.EditMode
 #if COREAI_LLM
     public sealed class MeaiLlmClientEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY: <see cref="CompleteAsync_ProviderCancellation_PropagatesOperationCanceledException"/> below
+        /// is a synchronous [Test] that blocks on Assert.CatchAsync; detaching the context sends the
+        /// awaited delegate's continuation to the thread pool instead of back onto this same blocked
+        /// thread, which would deadlock.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         [Test]
         public async Task NoneToolMode_NeverExecutesOrBuildsBindingsAcrossChannels(
             [Values(false, true)] bool streaming, [Values(false, true)] bool native,

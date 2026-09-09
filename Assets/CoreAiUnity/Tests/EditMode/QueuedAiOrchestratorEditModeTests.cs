@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
@@ -636,22 +636,38 @@ namespace CoreAI.Tests.EditMode
             queue.Dispose();
         }
 
+        /// <summary>
+        /// WHY the two connections share one AgentMemoryScope and differ only in their connection id:
+        /// a named actor's durable memory key is (actor, tenant, user, session, topic, role), so what
+        /// survives a reconnect is the SCOPE the host declares, not the transport connection. An earlier
+        /// version of this test reconnected under a different tenant AND user and still expected one
+        /// shared history — that only passed because the store pinned the first scope it saw for an
+        /// actor, which merged two tenants into one file. The pin is gone; this pins what replaced it.
+        /// </summary>
         [Test]
-        public async Task ProductionAdmission_ReconnectResumesActorMemoryAcrossSessions()
+        public async Task ProductionAdmission_ReconnectResumesActorMemoryAcrossConnections()
         {
+            AgentMemoryScope durableScope = new("school", "learner-1", "term-1", "topic-1");
             ActorContext firstConnection = new LocalActorIdentityProvider(
                     "durable-student",
                     "connection-1",
                     "world",
                     ActorGrantSet.None,
-                    new AgentMemoryScope("school", "legacy-user-1", "legacy-session-1", "topic-1"))
+                    durableScope)
                 .GetActorContext("Teacher");
             ActorContext secondConnection = new LocalActorIdentityProvider(
                     "durable-student",
                     "connection-2",
                     "world",
                     ActorGrantSet.None,
-                    new AgentMemoryScope("other-school", "legacy-user-2", "legacy-session-2", "topic-2"))
+                    durableScope)
+                .GetActorContext("Teacher");
+            ActorContext otherTenant = new LocalActorIdentityProvider(
+                    "durable-student",
+                    "connection-3",
+                    "world",
+                    ActorGrantSet.None,
+                    new AgentMemoryScope("other-school", "learner-1", "term-1", "topic-1"))
                 .GetActorContext("Teacher");
             DefaultAgentMemoryScopeProvider scopeProvider = new();
             ScopedPersistenceOrchestrator inner = new(scopeProvider);
@@ -691,6 +707,9 @@ namespace CoreAI.Tests.EditMode
                 Array.ConvertAll(
                     inner.GetHistory(secondConnection, "Teacher"),
                     message => message.Content));
+            CollectionAssert.IsEmpty(
+                inner.GetHistory(otherTenant, "Teacher"),
+                "The same actor id under a different tenant must not read that tenant's history.");
 
             inner.Gates[1].TrySetResult("second-complete");
             await second;

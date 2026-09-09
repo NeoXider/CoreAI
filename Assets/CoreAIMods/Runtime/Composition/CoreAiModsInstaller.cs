@@ -1,4 +1,4 @@
-using CoreAI.Ai;
+﻿using CoreAI.Ai;
 using CoreAI.Ai.Logging;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
@@ -215,7 +215,7 @@ namespace CoreAI.Composition
                     // zero, so MoveTo reported arrival instantly and WalkSpeed moved nothing.
                     InstanceGameObjectBinder binder = rbxHost.Binder;
                     rbxApi.AttachCharacterMotorFactory(humanoid =>
-                        CreateCharacterMotor(binder, humanoid));
+                        CreateCharacterMotor(binder, humanoid, rbxHost));
                 }
 
                 IInGameLlmChatServiceFactory chatFactory =
@@ -366,6 +366,32 @@ namespace CoreAI.Composition
                             stagedApi.AttachChatFactory(chatFactory);
                         }
 
+                        // WHY the replacement world needs this too: a staged API starts with no motor
+                        // factory, so without this a world loaded at runtime gives every Humanoid the
+                        // motor that never moves. The initial session got one at composition; the
+                        // replacement was silently left without it. The staged binder is safe to
+                        // capture here — unlike the physics port below, it is never disposed; Commit
+                        // reparents the staging root instead of replacing the binder.
+                        if (candidate.PartSink is InstanceGameObjectBinder stagedBinder)
+                        {
+                            stagedApi.AttachCharacterMotorFactory(
+                                humanoid => CreateCharacterMotor(
+                                    stagedBinder, humanoid, sceneHost));
+                        }
+
+                        // WHY the physics port is NOT attached here: at Stage time the only port that
+                        // exists is the LIVE one still serving the outgoing world.
+                        // RbxWorldSessionHostAdapter.Commit -> RbxWorldHost.PublishReplacement disposes
+                        // that port and builds a fresh one over the newly published binder, so
+                        // attaching it here would either wire the staged WorldPhysics to a port about
+                        // to be disposed (Dispose only clears contact callbacks; it never throws, so
+                        // Raycast would silently start missing and Touched/TouchEnded would silently
+                        // stop firing once Commit runs) or, before that, relay contacts carrying
+                        // instance ids from the OUTGOING world into the staged one. The correct port
+                        // does not exist until after Commit, so RbxWorldRuntimeSessionController
+                        // attaches it there instead, once IRbxWorldSessionHost.PhysicsPort reflects the
+                        // newly published port. Until then the staged WorldPhysics answers through the
+                        // null port, same as any other pre-publish state.
                         return stagedApi;
                     };
                 System.Func<LuaCsRbxApiBindings, ILuaModSourceStore, ILuaModStore,
@@ -508,6 +534,28 @@ namespace CoreAI.Composition
                                     stackRbxApi.WorldPhysics.BeginPhysicsStep,
                                     physicsHost.PhysicsPort.ApplyGravity);
                             }
+
+                            // WHY the motor pump is attached unconditionally, unlike the physics pumps
+                            // above: a character motor is driven by the fixed step even in a world whose
+                            // physics port is the null one, and a motor stepped from the render frame
+                            // moves at a rate that depends on the frame rate. Leaving this unattached is
+                            // how the motor came to exist without ever being driven.
+                            if (stackRbxApi != null)
+                            {
+                                tickDriver.AttachCharacterMotorStep(stackRbxApi.StepCharacterMotors);
+                            }
+
+                            // WHY a resolver rather than the captured port: PublishReplacement
+                            // disposes the old port and builds a new one over the new binder, so a
+                            // captured ApplyGravity keeps pushing bodies of a world that no longer
+                            // exists. The driver reads this every fixed step.
+                            if (physicsHost != null)
+                            {
+                                tickDriver.AttachLiveGravityPump(
+                                    () => physicsHost.PhysicsPort != null
+                                        ? (System.Action)physicsHost.PhysicsPort.ApplyGravity
+                                        : null);
+                            }
                         }
 
                         // Ordering contract (audit finding W4, see WORLD_COMMANDS.md §7): mod rehydrate
@@ -631,7 +679,9 @@ namespace CoreAI.Composition
         /// and simply does not move, which is the documented null-motor behaviour.
         /// </remarks>
         private static IRbxCharacterMotor CreateCharacterMotor(
-            InstanceGameObjectBinder binder, RbxHumanoid humanoid)
+            InstanceGameObjectBinder binder,
+            RbxHumanoid humanoid,
+            Mods.Rbx.Binding.RbxWorldHost physicsHost)
         {
             RbxInstance root = humanoid?.RootPart;
             if (binder == null || root == null || root.IsDestroyed)
@@ -650,7 +700,18 @@ namespace CoreAI.Composition
                 return null;
             }
 
-            return new UnityRbxCharacterMotor(rigidbody);
+            // WHY the host is asked for its port on every read instead of capturing the port: a
+            // world loaded at runtime disposes the port and builds a new one, and a jump solved
+            // against a dead port's gravity would silently use the previous world's value.
+            // WHY gravity at all: these bodies have Rigidbody.useGravity off — the world's own
+            // acceleration is applied by the port — so a height-based jump solved against
+            // Physics.gravity reaches the wrong height and ignores Workspace.Gravity entirely.
+            return new UnityRbxCharacterMotor(
+                rigidbody,
+                worldGravityMetresPerSecondSquared: () =>
+                    physicsHost?.PhysicsPort?.GravityMetresPerSecondSquared.magnitude
+                    ?? Mods.Rbx.Spatial.RbxSpace.AccelerationToUnity(
+                        (float)RbxWorldPhysics.DefaultGravity));
         }
 
         private static LuaCsModStack CreateSessionStack(

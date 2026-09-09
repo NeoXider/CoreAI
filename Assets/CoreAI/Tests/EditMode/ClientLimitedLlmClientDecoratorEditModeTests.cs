@@ -16,6 +16,28 @@ namespace CoreAI.Core.Tests.EditMode
     /// </summary>
     public sealed class ClientLimitedLlmClientDecoratorEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY this fixture detaches: ConcurrentRequests_CannotSlipPastTheCapTogether is a synchronous
+        /// [Test] that ends on Task.Result. Under Unity's SynchronizationContext the decorator's
+        /// continuation is posted back to the very thread that Result is blocking, so the whole EditMode
+        /// run hangs at this fixture with no results file — the F12 deadlock, reached through a blocking
+        /// property instead of a blocking assertion.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         [Test]
         public async Task RequestLimit_IsReportedAsLocalClientLimit_NotAccountQuota()
         {

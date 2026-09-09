@@ -157,8 +157,6 @@ namespace CoreAI.Tests.EditMode
                 "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
             [("Assets/CoreAI/Runtime/Core/Features/Llm/RetryingStreamingLlmClientDecorator.cs", Primitive.ConfigureAwaitFalse)] =
                 "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
-            [("Assets/CoreAI/Runtime/Core/Features/Llm/TimeoutLlmClientDecorator.cs", Primitive.ConfigureAwaitFalse)] =
-                "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
             [("Assets/CoreAI/Runtime/Core/Features/Llm/HttpClientOpenAiReadinessProbe.cs", Primitive.ConfigureAwaitFalse)] =
                 "унаследовано: HttpClient-проба готовности, в браузере вместо неё UnityWebRequest/fetch-путь",
             [("Assets/CoreAI/Runtime/Core/Features/Orchestration/AiOrchestrator.cs", Primitive.ConfigureAwaitFalse)] =
@@ -170,7 +168,20 @@ namespace CoreAI.Tests.EditMode
             [("Assets/CoreAI/Runtime/Core/Features/Orchestration/InGameLlmChatService.cs", Primitive.ConfigureAwaitFalse)] =
                 "унаследовано (найдено при добавлении примитива в 7.3.1): не на проверенном браузером пути — чат WebGL идёт через MeaiLlmClient -> MeaiOpenAiChatClient -> FetchSseOpenAiTransport, где правило уже соблюдено (7.0.5); разбирается отдельной задачей",
             [("Assets/CoreAI/Runtime/Core/Features/Orchestration/ScriptedLlmClient.cs", Primitive.ConfigureAwaitFalse)] =
-                "тестовый двойник: в реальный плеер не попадает"
+                "тестовый двойник: в реальный плеер не попадает",
+            [("Assets/CoreAiUnity/Runtime/Source/Features/AgentMemory/Infrastructure/FileAgentMemoryStore.cs",
+                Primitive.ConfigureAwaitFalse)] =
+                "ПРОВЕРЕНО (2026-09-09): все 17 вхождений — это await mutationGate.WaitAsync/_gate.WaitAsync/" +
+                "RunOffThread внутри областей, держащих _gate или per-role mutation gate; без флага их " +
+                "продолжение (которое ОСВОБОЖДАЕТ замок) маршалится в SynchronizationContext вызывающего, " +
+                "а синхронные Save/TryLoad/GetTranscriptEntries того же потока берут тот же замок блокирующим " +
+                "Wait() — тред никогда не возвращается качать очередь, вечный deadlock (не WebGL-специфично, " +
+                "воспроизводится в редакторе/десктопе). Флаг здесь НЕ создаёт дефект класса 7.0.5/7.3.1: на " +
+                "WebGL RunOffThread выполняет работу инлайн уже завершённым Task, а цепочка захват-работа-" +
+                "освобождение не уступает поток до освобождения ОБОИХ замков (на единственном кооперативном " +
+                "потоке WebGL больше нечему за них состязаться в этот момент) — то есть каждый await в этой " +
+                "цепочке на WebGL уже завершён к моменту ожидания, и ConfigureAwait(false) там не планирует " +
+                "продолжение вовсе, не говоря уже о постановке в несуществующий пул. См. WHY у поля _gate",
         };
 
         [Test]
