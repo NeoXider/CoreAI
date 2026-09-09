@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using Newtonsoft.Json;
 using System.Collections.Generic;
@@ -82,10 +82,10 @@ namespace CoreAI.Config
                 switch (action)
                 {
                     case "read":
-                        return await ExecuteReadAsync(cancellationToken).ConfigureAwait(false);
+                        return await ExecuteReadAsync(cancellationToken);
 
                     case "update":
-                        return await ExecuteUpdateAsync(content, cancellationToken).ConfigureAwait(false);
+                        return await ExecuteUpdateAsync(content, cancellationToken);
 
                     default:
                         return SerializeResult(new GameConfigResult

@@ -6,6 +6,7 @@ using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
 using VContainer;
@@ -400,6 +401,75 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(expected, LocalModelPlatformSupport.IsSupported(platform));
         }
 #endif
+
+        /// <summary>
+        /// A failover must not quietly change how the model answers. The asset has ONE
+        /// <c>extraBodyJson</c>, and it carries the provider fields that decide sampling, routing and
+        /// thinking; the secondary adapter forwards every other knob (temperature, max tokens,
+        /// reasoning, thinking budget) and used to drop this one alone. Only the endpoint identity —
+        /// URL, key, model — is secondary.
+        /// </summary>
+        [Test]
+        public void SecondaryAdapter_ForwardsProviderBodyJson_AndKeepsOnlyTheEndpointIdentitySecondary()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                settings.ConfigureFallbackBackend(true, "http://localhost:1235/v1", "fallback-model",
+                    "fallback-key");
+                settings.SetProviderBodyParameter("top_k", new JValue(40));
+
+                IOpenAiHttpSettings secondary = new LlmPipelineInstaller.SecondarySettingsAdapter(settings);
+
+                Assert.IsNotEmpty(settings.ExtraBodyJson,
+                    "guard the guard: an empty asset body would let this test pass against the defect");
+                Assert.AreEqual(settings.ExtraBodyJson, secondary.ExtraBodyJson,
+                    "the fallback endpoint must send the same provider body the operator configured — " +
+                    "otherwise a failover answers differently with nothing to see in the settings");
+                Assert.AreEqual("http://localhost:1235/v1", secondary.ApiBaseUrl);
+                Assert.AreEqual("fallback-key", secondary.ApiKey);
+                Assert.AreEqual("fallback-model", secondary.Model);
+            }
+            finally
+            {
+                Object.DestroyImmediate(settings);
+            }
+        }
+
+        /// <summary>
+        /// The mirror case, and deliberately NOT symmetric. Under ServerManagedApi the proxy owns the
+        /// request body: it overrides model/temperature/reasoning and caps tokens, so the knobs forwarded
+        /// below cannot reach the provider unchecked. Raw <c>extraBodyJson</c> has no such owner — its keys
+        /// travel straight through to whichever provider the operator selected today, and a strict
+        /// OpenAI-compatible implementation answers 400 to an unknown parameter, from a field that cannot
+        /// be changed without shipping a new build.
+        /// </summary>
+        [Test]
+        public void ServerManagedAdapter_WithholdsProviderBodyJson_ButStillForwardsServerOwnedKnobs()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                settings.ConfigureServerManagedApi("https://example.invalid/api/v1/ai", "");
+                settings.SetProviderBodyParameter("top_k", new JValue(40));
+
+                IOpenAiHttpSettings serverManaged =
+                    new LlmPipelineInstaller.ServerManagedCoreSettingsAdapter(settings);
+
+                Assert.IsNotEmpty(settings.ExtraBodyJson,
+                    "guard the guard: the asset must actually carry a provider body for this to mean anything");
+                Assert.IsEmpty(serverManaged.ExtraBodyJson,
+                    "a client build must not inject unvalidated provider fields into the server-managed proxy");
+                Assert.AreEqual(LlmExecutionMode.ServerManagedApi, serverManaged.ExecutionMode);
+                Assert.AreEqual(settings.MaxTokens, serverManaged.MaxTokens,
+                    "the withholding is scoped to the raw body: server-owned knobs still travel");
+                Assert.AreEqual(settings.ReasoningMode, serverManaged.ReasoningMode);
+            }
+            finally
+            {
+                Object.DestroyImmediate(settings);
+            }
+        }
 
         private static IObjectResolver BuildPlatformContainer(
             CoreAISettingsAsset settings,

@@ -216,7 +216,7 @@ All AI-spawned objects (primitives and prefabs) are automatically tracked for sa
 
 Every `spawn` call attaches a `WorldObjectComponent` with a unique `persistentId`. On **Play Mode exit** (or `Application.quitting`), the `WorldStateManager` snapshots all active `WorldObjectComponent` instances to a JSON file at `persistentDataPath/CoreAI/WorldState/world_state.json`. On **next Play Mode entry**, the file is loaded and all objects are re-created. Load always starts from a clean slate — any pre-existing `WorldObjectComponent` objects in the scene are destroyed first, so duplicate `persistentId`s can never accumulate across sessions.
 
-A **periodic auto-save** (default every `WorldStateManager.DefaultAutoSaveIntervalSeconds` = 60s) runs always-on in every scene that wires `WorldStateManager` — started by `WorldStateManager.Initialize()` itself, not by a scene-specific component — as crash protection between an edit and the next quit. On WebGL it also calls `CoreAi_PersistFsSync` after each save so the write reaches IndexedDB even without `Application.Quit`. The optional `WorldStateAutoSaveHook` MonoBehaviour (e.g. on the Hub prefab) only overrides the interval for its scene via `WorldStateManager.StartAutoSave(...)`; it does not perform its own quit-save, since `WorldStateManager` already saves exactly once on `Application.quitting`.
+A **periodic auto-save** (default every `WorldStateManager.DefaultAutoSaveIntervalSeconds` = 60s) runs always-on in every scene that wires `WorldStateManager` — started by `WorldStateManager.Initialize()` itself, not by a scene-specific component — as crash protection between an edit and the next quit. On WebGL it also checks `CoreAiWebGlPersistence.Sync()` after each save, so a page without the engine's automatic `persistentDataPath` persistence (`config.autoSyncPersistentDataPath = true` in the web template) is reported instead of silently losing the save. The optional `WorldStateAutoSaveHook` MonoBehaviour (e.g. on the Hub prefab) only overrides the interval for its scene via `WorldStateManager.StartAutoSave(...)`; it does not perform its own quit-save, since `WorldStateManager` already saves exactly once on `Application.quitting`.
 
 ### Mod rehydrate ordering guarantee
 
@@ -257,10 +257,11 @@ The **World** tab in the CoreAI Hub shows:
 
 Both buttons run a *confirmed* flush. They disable themselves, leave the saved-state line at its
 last confirmed value, and update it only from `IWorldStateManager.ConfirmDurability`. On WebGL that
-callback fires from the matching browser `FS.syncfs` completion — never at IDBFS request-issuance
-time, which MVP2.5 gate W3.5 fails as "reporting success before sync"; on desktop the file write is
-already durable, so the callback runs immediately. A flush the browser reports as failed (quota,
-blocked storage) shows "flush NOT confirmed" instead of being hidden behind a green status.
+answer comes from `CoreAiWebGlPersistence`, which reports whether the engine's automatic
+`persistentDataPath` persistence is armed for this page — the only durability signal Unity still
+exposes, now that the manual `FS.syncfs` callback it used to await never fires. On desktop the file
+write is already durable, so the answer is immediate as well. A page that never armed that
+persistence shows "flush NOT confirmed" instead of being hidden behind a green status.
 
 ### Save format
 

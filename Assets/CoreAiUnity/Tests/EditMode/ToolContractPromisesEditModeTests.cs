@@ -216,6 +216,43 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("Error: async boom", asyncResult?.ToString());
         }
 
+        /// <summary>
+        /// Тот же вердикт для инструмента-делегата: MEAI отвергает неконвертируемый аргумент ДО тела, но
+        /// трасса всё равно «вызывался». Раньше здесь стоял источник <c>arg-conversion</c>, полученный
+        /// поиском метода делегата в стеке; под IL2CPP/WebGL фреймы срываются, и по тому же признаку
+        /// исключение ИЗ ТЕЛА объявлялось «инструмент не вызывался» — декораторы ретрая повторяли ход,
+        /// уже изменивший мир. Различение снято целиком, поэтому у безопасной и небезопасной ситуации
+        /// теперь ОДИН консервативный вердикт, и стоит он лишь одной несделанной повторной попытки.
+        /// </summary>
+        [Test]
+        public async Task DelegateLlmTool_ArgumentCoercionFailure_IsTracedAsInvoked()
+        {
+            int sideEffects = 0;
+            DelegateLlmTool tool = new("grant_items", "Grant items.", (Func<int, string>)(count =>
+            {
+                sideEffects += count;
+                return "ok";
+            }));
+            ToolExecutionPolicy policy = MakePolicy(new StubSettings(), tool);
+            MEAI.ChatOptions options = new()
+            {
+                Tools = new List<MEAI.AITool> { tool.CreateAIFunction() }
+            };
+
+            ToolExecutionPolicy.ToolCallResult result = await policy.ExecuteSingleAsync(
+                new MEAI.FunctionCallContent("c1", "grant_items",
+                    new Dictionary<string, object> { ["count"] = "not-an-integer" }),
+                options, CancellationToken.None);
+
+            Assert.AreEqual(0, sideEffects, "Sanity: MEAI really does reject the argument before the body");
+            Assert.IsFalse(result.Succeeded);
+            Assert.AreEqual(1, policy.ExecutedTraces.Count);
+            Assert.AreEqual("native", policy.ExecutedTraces[0].Source,
+                "No stack-shape classification survives: the invocation boundary is the verdict");
+            Assert.IsTrue(LoggingLlmClientDecorator.TraceIndicatesInvocation(policy.ExecutedTraces[0]),
+                "Retry/fallback must treat it as invoked — the cheap verdict is the safe one");
+        }
+
         // ==================== Дефект 6: результат «дословно» ====================
 
         /// <summary>

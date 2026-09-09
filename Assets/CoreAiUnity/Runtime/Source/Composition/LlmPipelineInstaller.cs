@@ -419,8 +419,12 @@ namespace CoreAI.Composition
         }
 
 #if COREAI_LLM
-        /// <summary>Adapts secondary backend fields to <see cref="IOpenAiHttpSettings"/>.</summary>
-        private sealed class SecondarySettingsAdapter : IOpenAiHttpSettings
+        /// <summary>
+        /// Adapts secondary backend fields to <see cref="IOpenAiHttpSettings"/>. Only the endpoint
+        /// identity (URL, key, model) is secondary; every provider knob is the one the operator
+        /// configured for this game, because a failover must not quietly change how the model answers.
+        /// </summary>
+        internal sealed class SecondarySettingsAdapter : IOpenAiHttpSettings
         {
             private readonly CoreAISettingsAsset _s;
 
@@ -436,7 +440,17 @@ namespace CoreAI.Composition
             public float Temperature => _s.Temperature;
             public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;
-            public string ExtraBodyJson => "";
+
+            /// <summary>
+            /// WHY forwarded: the asset has ONE <c>extraBodyJson</c> and it is where provider-specific
+            /// request fields live — the very knobs that decide whether the model thinks, which sampler
+            /// it uses, how it is routed. Dropping them here made a failover answer differently from the
+            /// primary with nothing to see: same prompt, same settings screen, different behaviour.
+            /// Every other provider knob on this adapter (temperature, max tokens, reasoning, thinking
+            /// budget) is already forwarded; this field was the lone silent exception.
+            /// </summary>
+            public string ExtraBodyJson => _s.ExtraBodyJson;
+
             public LlmReasoningMode ReasoningMode => _s.ReasoningMode;
             public int ThinkingBudgetTokens => _s.ThinkingBudgetTokens;
             public bool LogLlmInput => _s.LogLlmInput;
@@ -525,7 +539,7 @@ namespace CoreAI.Composition
         }
 
 #if COREAI_LLM
-        private sealed class ServerManagedCoreSettingsAdapter : IOpenAiHttpSettings
+        internal sealed class ServerManagedCoreSettingsAdapter : IOpenAiHttpSettings
         {
             private readonly CoreAISettingsAsset _settings;
 
@@ -549,7 +563,21 @@ namespace CoreAI.Composition
             public float Temperature => _settings.Temperature;
             public int RequestTimeoutSeconds => _settings.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _settings.MaxTokens;
+
+            /// <summary>
+            /// Deliberately empty, and NOT the same omission as on the secondary adapter. Under
+            /// <see cref="LlmExecutionMode.ServerManagedApi"/> the request body is owned by the backend
+            /// proxy: it decides the provider, overrides model/temperature/reasoning and caps the token
+            /// ceiling, so the knobs forwarded above cannot reach the provider unchecked. Raw
+            /// <c>extraBodyJson</c> has no such owner — its keys are unknown to the proxy and travel
+            /// straight through to whichever provider the operator selected today. A build shipped
+            /// months ago would then keep injecting fields for a provider it never saw, and a strict
+            /// OpenAI-compatible implementation answers 400 to an unknown parameter — the whole class
+            /// would break for every student at once, from a field nobody can change without a release.
+            /// In this mode provider-specific parameters belong to the server's own configuration.
+            /// </summary>
             public string ExtraBodyJson => "";
+
             public LlmReasoningMode ReasoningMode => _settings.ReasoningMode;
             public int ThinkingBudgetTokens => _settings.ThinkingBudgetTokens;
             public bool LogLlmInput => _settings.LogLlmInput;

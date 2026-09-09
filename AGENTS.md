@@ -10,8 +10,10 @@ player on device?"**
   paths) must never be the *primary* path of a feature — at most a secondary convenience.
 - Example: runtime UI = UXML/USS text interpreted at runtime as the core path; materializing real
   project assets is an optional editor-only bonus.
-- WebGL is a first-class target: file persistence must call `CoreAiWebGlPersistence.Sync()`; no
-  threads/blocking waits on the WebGL path.
+- WebGL is a first-class target: after a file write, ask `CoreAiWebGlPersistence.Sync()` whether the
+  engine's automatic `persistentDataPath` persistence is armed, and surface `false` as a failure — do
+  not drive `FS.syncfs` by hand (deprecated since Unity 6.3, its callback never fires) and do not
+  await a durability confirmation the browser never sends. No threads/blocking waits on the WebGL path.
 
 ## Conventions (enforced)
 

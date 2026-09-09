@@ -112,7 +112,7 @@ namespace CoreAI.Infrastructure.Llm
                 LlmCompletionResult result;
                 try
                 {
-                    result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                    result = await _inner.CompleteAsync(request, cancellationToken);
                 }
                 catch (LlmOperationTimeoutException) when (!cancellationToken.IsCancellationRequested)
                 {
@@ -200,7 +200,7 @@ namespace CoreAI.Infrastructure.Llm
                     LlmStreamChunk faultChunk = null;
                     try
                     {
-                        if (!await e.MoveNextAsync().ConfigureAwait(false))
+                        if (!await e.MoveNextAsync())
                         {
                             break;
                         }
@@ -274,7 +274,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     if (e != null)
                     {
-                        await e.DisposeAsync().ConfigureAwait(false);
+                        await e.DisposeAsync();
                     }
                 }
                 finally

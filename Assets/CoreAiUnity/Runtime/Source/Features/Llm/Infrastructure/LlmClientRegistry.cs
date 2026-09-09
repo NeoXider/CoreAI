@@ -161,8 +161,14 @@ namespace CoreAI.Infrastructure.Llm
                 if (cancellationToken.CanBeCanceled && !activation.IsCompleted)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    TaskCompletionSource<bool> cancelled = new(
-                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    // WHY no RunContinuationsAsynchronously: this source is consumed by Task.WhenAny,
+                    // whose internal continuation captures no synchronization context. With the flag,
+                    // cancelling handed that continuation to the thread pool - which a WebGL player does
+                    // not have - so cancelling a wait for endpoint activation parked the caller forever
+                    // instead of throwing. Inline completion is safe here: the registration only
+                    // completes a promise, and our own await (no ConfigureAwait(false)) posts back to
+                    // the host loop.
+                    TaskCompletionSource<bool> cancelled = new();
                     using CancellationTokenRegistration registration =
                         cancellationToken.Register(() => cancelled.TrySetResult(true));
                     await Task.WhenAny(activation, cancelled.Task);
@@ -1470,8 +1476,11 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            TaskCompletionSource<bool> cancelled = new(
-                TaskCreationOptions.RunContinuationsAsynchronously);
+            // WHY no RunContinuationsAsynchronously: see AwaitWithoutCancellingSharedActivation. The
+            // flag combined with Task.WhenAny is exactly the pair that dies in a WebGL player, and this
+            // is the endpoint-activation cancellation path the old guard allowlist described as "not
+            // reproduced in production, so left alone".
+            TaskCompletionSource<bool> cancelled = new();
             using CancellationTokenRegistration registration =
                 cancellationToken.Register(() => cancelled.TrySetResult(true));
             Task completed = await Task.WhenAny(activation, cancelled.Task);

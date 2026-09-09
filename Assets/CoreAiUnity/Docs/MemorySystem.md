@@ -190,6 +190,34 @@ These are **default policy choices**, not hard limits. The key distinction:
 
 **Token-cost note:** ChatHistory sends recent raw turns, so it costs more prompt tokens than compact MemoryTool facts. Keep durable facts in MemoryTool and disable ChatHistory explicitly for roles that must stay deterministic or very small.
 
+### "The conversation is empty after a page reload / app restart" — expected, not a lost write
+
+Worth stating next to the symptom, because the memory *document* does come back while the transcript
+does not, which reads like a bug.
+
+- The **memory document** (MemoryTool facts) is always written to disk, so it survives a restart.
+- The **chat transcript** reaches disk only when the role sets `PersistChatHistory` /
+  `WithChatHistory(persistBetweenSessions: true)`. `AppendChatMessage(..., persistToDisk: false)`
+  means "this process only" and never reaches the file, not even during compaction.
+- A **chat-source request against a role with history off** (the built-in `Programmer`) borrows
+  short-term history for that run only: `AiOrchestrator.ResolveRoleConfigForRequest` enables
+  `WithChatHistory` and explicitly leaves `PersistChatHistory = false`, so nothing is written and the
+  next process starts from an empty transcript. Seen in a browser as a post-reload turn going out
+  with 3 messages where the pre-reload turn carried 16-19.
+- Restoring the *visible* panel history additionally needs `Load Persisted Chat On Startup` on
+  `CoreAiChatPanel` (see `README_CHAT.md`).
+
+To carry a conversation across a restart, use `PlainChat` / `SmartChat`, or opt the role in with
+`WithChatHistory(persistBetweenSessions: true)`. Pinned by
+`AiOrchestratorHistoryEditModeTests.RunTaskAsync_ChatSource_EnablesShortTermHistory_ForProgrammer`,
+`AgentBuilderChatHistoryEditModeTests` and `FileAgentMemoryStoreEditModeTests`.
+
+The Rbx world has the same shape and the same answer: instances a Lua chunk creates live in the
+running world only. `WorldStateManager` saves registered scene objects, not Rbx instances, and world
+packages are captured and restored explicitly — a process restart intentionally returns to the
+previously selected world plus the default source set rather than promoting an in-process session
+(`Docs/CoreAIMods/WORLD_PACKAGE.md`).
+
 Recommended opt-ins:
 
 ```csharp

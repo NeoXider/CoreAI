@@ -3,9 +3,12 @@ using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Mods.Rbx.Binding;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Sandbox.LuaCs;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 {
@@ -247,6 +250,42 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             Assert.AreEqual("false", store.Get("m", "ok"));
             StringAssert.Contains("UNKNOWN_SERVICE", store.Get("m", "err"));
+        }
+
+        [Test]
+        public void MotorLifecycle_DestroyedBody_BecomesUnavailable_WithSafeReads()
+        {
+            GameObject body = new GameObject("Motor lifecycle probe");
+            try
+            {
+                Rigidbody rigidbody = body.AddComponent<Rigidbody>();
+                rigidbody.useGravity = false;
+                UnityRbxCharacterMotor motor = new UnityRbxCharacterMotor(rigidbody);
+                Assert.IsTrue(motor.IsAvailable,
+                    "A motor over a live Rigidbody must report itself available.");
+
+                motor.MoveTo(new RbxVector3(5f, 0f, 0f));
+                motor.Step();
+                Assert.Greater(rigidbody.linearVelocity.magnitude, 0f,
+                    "A live motor must drive velocity toward its MoveTo target.");
+
+                Object.DestroyImmediate(body);
+                Assert.IsFalse(motor.IsAvailable,
+                    "Destroying the body must retire the motor instead of leaving a dead drive.");
+                Assert.AreEqual(RbxVector3.Zero, motor.Position);
+                Assert.AreEqual(RbxVector3.Zero, motor.MoveDirection);
+                Assert.DoesNotThrow(() => motor.Step());
+                Assert.DoesNotThrow(() => motor.Jump(50d, 7.2d, true));
+                Assert.DoesNotThrow(() => motor.MoveTo(null));
+                Assert.DoesNotThrow(() => motor.MoveTo(new RbxVector3(5f, 0f, 0f)));
+            }
+            finally
+            {
+                if (body != null)
+                {
+                    Object.DestroyImmediate(body);
+                }
+            }
         }
     }
 }

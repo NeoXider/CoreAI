@@ -224,8 +224,33 @@ namespace CoreAI.Diagnostics
             GUILayout.Label("Request Load", _headerStyle);
             GUILayout.Label(_loadText, _nearLimitCached ? _alertStyle : _valueStyle);
 
-            GUILayout.Label($"\n[{_toggleKey}] toggle  |  drag to move", _valueStyle);
+            GUILayout.Label(ToggleHintText, _valueStyle);
             GUI.DragWindow(new Rect(0, 0, _windowRect.width, 22f));
+        }
+
+        private string _toggleHintText;
+        private KeyCode _toggleHintKey;
+
+        /// <summary>
+        /// Footer line of the window, rebuilt only when the hotkey changes.
+        /// <para>
+        /// WHY: the interpolation ran on every OnGUI repaint - several per frame while the overlay is
+        /// shown - boxing the <see cref="KeyCode"/> and formatting a new string each time for a line
+        /// that changes only when the hotkey does. Internal so a test can pin the reuse.
+        /// </para>
+        /// </summary>
+        internal string ToggleHintText
+        {
+            get
+            {
+                if (_toggleHintText == null || _toggleHintKey != _toggleKey)
+                {
+                    _toggleHintKey = _toggleKey;
+                    _toggleHintText = $"\n[{_toggleKey}] toggle  |  drag to move";
+                }
+
+                return _toggleHintText;
+            }
         }
 
         /// <summary>

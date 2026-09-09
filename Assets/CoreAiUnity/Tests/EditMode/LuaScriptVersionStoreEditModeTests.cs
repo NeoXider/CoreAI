@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
@@ -10,6 +12,10 @@ using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
+    // WHY no [NonParallelizable]: Unity ships a stripped NUnit (com.unity.ext.nunit,
+    // net40/unity-custom) that does not contain the parallel-execution attributes, so the attribute
+    // fails to compile and takes down every player build, not just the test run. The Unity test
+    // runner executes edit-mode tests sequentially anyway, so there is nothing to opt out of.
     public sealed class LuaScriptVersionStoreEditModeTests
     {
         private const string Key = "test_slot";
@@ -313,7 +319,7 @@ namespace CoreAI.Tests.EditMode
             {
                 FileLuaScriptVersionStore.BeforeAtomicReplaceForTesting =
                     () => throw new IOException("simulated crash");
-                store.RecordSuccessfulExecution("k", "v2");
+                Assert.Throws<IOException>(() => store.RecordSuccessfulExecution("k", "v2"));
             }
             finally
             {
@@ -323,7 +329,263 @@ namespace CoreAI.Tests.EditMode
             FileLuaScriptVersionStore reopened = new(new NullGameLogger(), path);
             Assert.IsTrue(reopened.TryGetSnapshot("k", out LuaScriptVersionRecord snapshot));
             Assert.AreEqual("v1", snapshot.CurrentLua);
-            Assert.IsTrue(File.Exists(path + ".tmp"));
+            Assert.IsEmpty(Directory.GetFiles(Path.GetDirectoryName(path), "atomic.json.*.tmp"));
+        }
+
+        [Test]
+        public void FileStore_ConstructorDoesNotCreateDirectoriesOrReadCorruptFiles()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "coreai-versions-lazy-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string path = Path.Combine(root, "versions.json");
+                FileLuaScriptVersionStore store = new(new NullGameLogger(), path);
+                Assert.IsFalse(Directory.Exists(root), "Construction must not perform filesystem work.");
+                Directory.CreateDirectory(root);
+                File.WriteAllText(path, "{corrupt");
+                Assert.DoesNotThrow(() => new FileLuaScriptVersionStore(new NullGameLogger(), path));
+                Assert.Throws<InvalidDataException>(() => store.GetKnownKeys());
+                Assert.AreEqual("{corrupt", File.ReadAllText(path));
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [Test]
+        public async Task FileStore_AsyncFailedFlushRemainsPendingAcrossInstances_AndRetryDoesNotAddRevision()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "coreai-versions-flush-" + Guid.NewGuid().ToString("N"));
+            string path = Path.Combine(root, "versions.json");
+            bool confirmed = false;
+            try
+            {
+                FileLuaScriptVersionStore writer = new(new NullGameLogger(), path, host: PassThroughLlmAsyncMarshaler.Instance,
+                    confirmDurabilityAsync: _ => Task.FromResult(confirmed));
+                Assert.ThrowsAsync<IOException>(async () => await writer.RecordSuccessfulExecutionAsync("key", "source"));
+                FileLuaScriptVersionStore reader = new(new NullGameLogger(), path, host: PassThroughLlmAsyncMarshaler.Instance);
+                Assert.Throws<InvalidOperationException>(() => reader.GetKnownKeys());
+                Assert.ThrowsAsync<IOException>(async () => await reader.GetSnapshotAsync("key"));
+                confirmed = true;
+                LuaScriptVersionRecord record = await reader.GetSnapshotAsync("key");
+                Assert.AreEqual("source", record.CurrentLua);
+                Assert.AreEqual(1, record.History.Count);
+                await reader.RecordSuccessfulExecutionAsync("key", "source");
+                Assert.AreEqual(1, (await reader.GetSnapshotAsync("key")).History.Count);
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [Test]
+        public async Task FileStore_AsyncCancellationAfterWriteSettlesBeforeAliasWriterCanStart()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "coreai-versions-order-" + Guid.NewGuid().ToString("N"));
+            string path = Path.Combine(root, "versions.json");
+            TaskCompletionSource<bool> entered = new();
+            TaskCompletionSource<bool> flush = new();
+            Task write = null;
+            Task later = null;
+            using CancellationTokenSource cancellation = new();
+            try
+            {
+                FileLuaScriptVersionStore first = new(new NullGameLogger(), path, host: PassThroughLlmAsyncMarshaler.Instance,
+                    confirmDurabilityAsync: token => { Assert.IsFalse(token.CanBeCanceled); entered.TrySetResult(true); return flush.Task; });
+                string aliasPath = Path.Combine(root, ".", "versions.json");
+                if (Path.DirectorySeparatorChar == '\\') aliasPath = aliasPath.ToUpperInvariant();
+                FileLuaScriptVersionStore second = new(new NullGameLogger(), aliasPath,
+                    host: PassThroughLlmAsyncMarshaler.Instance);
+                write = first.RecordSuccessfulExecutionAsync("key", "first", cancellation.Token);
+                Assert.AreSame(entered.Task, await Task.WhenAny(entered.Task, Task.Delay(5000)));
+                cancellation.Cancel();
+                Assert.IsFalse(write.IsCompleted);
+                Task sync = Task.Run(() => Assert.Throws<InvalidOperationException>(() => second.GetKnownKeys()));
+                Assert.AreSame(sync, await Task.WhenAny(sync, Task.Delay(5000)));
+                await sync;
+                later = second.RecordSuccessfulExecutionAsync("key", "second");
+                Assert.IsFalse(later.IsCompleted);
+                flush.TrySetResult(true);
+                await write;
+                await later;
+                LuaScriptVersionRecord result = await second.GetSnapshotAsync("key");
+                Assert.AreEqual("first", result.OriginalLua);
+                Assert.AreEqual("second", result.CurrentLua);
+                Assert.AreEqual(2, result.History.Count);
+            }
+            finally
+            {
+                flush.TrySetResult(true);
+                if (write != null) await write;
+                if (later != null) await later;
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        [Test]
+        public async Task FileStore_AsyncCancellationAtSwapAndParseFailurePreservePreviousBytes()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "coreai-versions-failure-" + Guid.NewGuid().ToString("N"));
+            string path = Path.Combine(root, "versions.json");
+            try
+            {
+                FileLuaScriptVersionStore store = new(new NullGameLogger(), path, host: PassThroughLlmAsyncMarshaler.Instance);
+                await store.RecordSuccessfulExecutionAsync("key", "old");
+                string original = File.ReadAllText(path);
+                using CancellationTokenSource cancellation = new();
+                FileLuaScriptVersionStore.BeforeAtomicReplaceForTesting = cancellation.Cancel;
+                try
+                {
+                    Assert.CatchAsync<OperationCanceledException>(async () =>
+                        await store.RecordSuccessfulExecutionAsync("key", "new", cancellation.Token));
+                }
+                finally { FileLuaScriptVersionStore.BeforeAtomicReplaceForTesting = null; }
+                Assert.AreEqual(original, File.ReadAllText(path));
+                File.WriteAllText(path, "{corrupt");
+                Assert.ThrowsAsync<InvalidDataException>(async () => await store.GetSnapshotAsync("key"));
+                Assert.ThrowsAsync<InvalidDataException>(async () => await store.RecordSuccessfulExecutionAsync("key", "replacement"));
+                Assert.AreEqual("{corrupt", File.ReadAllText(path));
+                File.WriteAllText(path, original);
+                Assert.AreEqual("old", (await store.GetSnapshotAsync("key")).CurrentLua);
+            }
+            finally { FileLuaScriptVersionStore.BeforeAtomicReplaceForTesting = null; if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [Test]
+        public async Task FileStore_LegacyJsonUtilityPayloadAndStableRevisionIndicesSurviveAsyncRewrite()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "coreai-versions-legacy-" + Guid.NewGuid().ToString("N"));
+            string path = Path.Combine(root, "versions.json");
+            try
+            {
+                Directory.CreateDirectory(root);
+                File.WriteAllText(path, "{\"slots\":[{\"scriptKey\":\"legacy\",\"originalLua\":\"first\",\"currentLua\":\"second\",\"history\":[" +
+                    "{\"index\":0,\"source\":\"first\",\"utcTicks\":638935920000000001}," +
+                    "{\"index\":7,\"source\":\"second\",\"utcTicks\":638935920000000002}]}]}");
+                FileLuaScriptVersionStore store = new(new NullGameLogger(), path, host: PassThroughLlmAsyncMarshaler.Instance);
+                LuaScriptVersionRecord before = await store.GetSnapshotAsync("legacy");
+                Assert.AreEqual("first", before.OriginalLua);
+                Assert.AreEqual("second", before.CurrentLua);
+                Assert.AreEqual(638935920000000002L, before.History[1].UtcTicks);
+                await store.RecordSuccessfulExecutionAsync("legacy", "third");
+                FileLuaScriptVersionStore reopened = new(new NullGameLogger(), path, host: PassThroughLlmAsyncMarshaler.Instance);
+                LuaScriptVersionRecord after = await reopened.GetSnapshotAsync("legacy");
+                Assert.AreEqual(before.OriginalLua, after.OriginalLua);
+                Assert.AreEqual(before.History[1].UtcTicks, after.History[1].UtcTicks);
+                Assert.AreEqual(before.History[1].Index + 1, after.History[2].Index);
+                Assert.AreEqual("third", after.CurrentLua);
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [Test]
+        public async Task FileStore_DesktopAtomicWorkDoesNotHoldTheCallingThread()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "coreai-versions-worker-" + Guid.NewGuid().ToString("N"));
+            TaskCompletionSource<bool> entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            using ManualResetEventSlim release = new(false);
+            int callerThread = Thread.CurrentThread.ManagedThreadId;
+            int fileThread = callerThread;
+            Task write = null;
+            try
+            {
+                FileLuaScriptVersionStore store = new(new NullGameLogger(), Path.Combine(root, "versions.json"),
+                    host: PassThroughLlmAsyncMarshaler.Instance);
+                FileLuaScriptVersionStore.BeforeAtomicReplaceForTesting = () =>
+                {
+                    fileThread = Thread.CurrentThread.ManagedThreadId;
+                    entered.TrySetResult(true);
+                    if (!release.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException("The test must release pending filesystem work.");
+                };
+                write = store.RecordSuccessfulExecutionAsync("key", "source");
+                Assert.AreSame(entered.Task, await Task.WhenAny(entered.Task, Task.Delay(5000)));
+                await Task.Yield();
+                Assert.IsFalse(write.IsCompleted, "The caller can continue while private filesystem work is pending.");
+                Assert.AreNotEqual(callerThread, fileThread, "Desktop filesystem work must not run inline on the caller.");
+            }
+            finally
+            {
+                release.Set();
+                FileLuaScriptVersionStore.BeforeAtomicReplaceForTesting = null;
+                if (write != null) await write;
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        [TestCase("{}")]
+        [TestCase("{\"slots\":null}")]
+        public async Task FileStore_MissingSlotCollectionCannotBecomeAnEmptySuccessfulLoad(string invalidJson)
+        {
+            string root = Path.Combine(Path.GetTempPath(), "coreai-versions-schema-" + Guid.NewGuid().ToString("N"));
+            string path = Path.Combine(root, "versions.json");
+            try
+            {
+                Directory.CreateDirectory(root);
+                File.WriteAllText(path, invalidJson);
+                FileLuaScriptVersionStore store = new(new NullGameLogger(), path, host: PassThroughLlmAsyncMarshaler.Instance);
+                Assert.ThrowsAsync<InvalidDataException>(async () => await store.GetKnownKeysAsync());
+                Assert.AreEqual(invalidJson, File.ReadAllText(path));
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [Test]
+        public async Task FileStore_OversizedVersionDoesNotReplaceThePreviousHistory()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "coreai-versions-limit-" + Guid.NewGuid().ToString("N"));
+            string path = Path.Combine(root, "versions.json");
+            try
+            {
+                FileLuaScriptVersionStore store = new(new NullGameLogger(), path, host: PassThroughLlmAsyncMarshaler.Instance);
+                await store.RecordSuccessfulExecutionAsync("key", "old");
+                string oldBytes = File.ReadAllText(path);
+                Assert.ThrowsAsync<InvalidDataException>(async () => await store.RecordSuccessfulExecutionAsync("key", new string('x', FileLuaScriptVersionStore.MaxStoreBytes)));
+                Assert.AreEqual(oldBytes, File.ReadAllText(path));
+                Assert.AreEqual("old", (await store.GetSnapshotAsync("key")).CurrentLua);
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        // WHY: the browser build poisoned itself here. The synchronous Mutate() used to park a pending
+        // durability confirmation under "#if UNITY_WEBGL && !UNITY_EDITOR", but only the async entry
+        // points can clear one and the production callers of this API are synchronous
+        // (LuaCsModRuntime.RecordRevision and friends). The first mod that recorded a revision
+        // succeeded and every later synchronous call threw "Version durability is unconfirmed" - two
+        // red errors per mod load in the player.
+        [Test]
+        public void FileStore_RepeatedSyncWrites_LeaveTheSyncApiUsable()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "coreai-versions-sync-" + Guid.NewGuid().ToString("N"));
+            string path = Path.Combine(root, "versions.json");
+            try
+            {
+                FileLuaScriptVersionStore store = new(new NullGameLogger(), path, host: PassThroughLlmAsyncMarshaler.Instance);
+                store.SeedOriginal("mod_a", "print('a')");
+                Assert.DoesNotThrow(() => store.RecordSuccessfulExecution("mod_a", "print('a2')"));
+                Assert.DoesNotThrow(() => store.SeedOriginal("mod_b", "print('b')"));
+                Assert.DoesNotThrow(() => store.GetKnownKeys());
+                Assert.IsTrue(store.TryGetSnapshot("mod_a", out LuaScriptVersionRecord snapshot));
+                Assert.AreEqual("print('a2')", snapshot.CurrentLua);
+                Assert.AreEqual(2, store.GetKnownKeys().Count);
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [Test]
+        public void FileStore_SyncWrite_WithoutDurableStorage_FailsVisiblyAndKeepsReading()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "coreai-versions-nodurable-" + Guid.NewGuid().ToString("N"));
+            string path = Path.Combine(root, "versions.json");
+            try
+            {
+                FileLuaScriptVersionStore store = new(new NullGameLogger(), path, host: PassThroughLlmAsyncMarshaler.Instance);
+                store.SeedOriginal("mod_a", "print('a')");
+                store.FlushDurabilityForTesting = () => false;
+
+                Assert.Throws<IOException>(() => store.RecordSuccessfulExecution("mod_a", "print('a2')"),
+                    "A page with no durable storage must fail the write visibly, not report success.");
+
+                store.FlushDurabilityForTesting = null;
+                Assert.DoesNotThrow(() => store.GetKnownKeys(),
+                    "A refused flush must not leave the store unusable for every later call.");
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
         }
     }
 }

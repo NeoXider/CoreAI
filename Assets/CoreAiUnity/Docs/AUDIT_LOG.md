@@ -185,9 +185,10 @@ detects the existing trailing `RotationMarker` and reuses its hash instead of ap
 - All flush entry points (the 500ms timer, `Dispose()`, and the test-only `FlushForTesting()`) share
   one lock so they can never interleave and corrupt the chain head.
 - Rotation at 50 MB → `audit_0001.jsonl`, `audit_0002.jsonl`, etc. (see above).
-- On WebGL, a successful flush also calls `CoreAi_PersistFsSync` (via the shared
-  `CoreAiWebGlPersistence` helper) so the write reaches IndexedDB without waiting for
-  `Application.Quit` — the same mechanism `FileAgentMemoryStore` and friends use.
+- On WebGL, a successful flush also checks `CoreAiWebGlPersistence.Sync()` — the shared helper that
+  reports whether the engine's automatic `persistentDataPath` persistence is armed for this page, the
+  same mechanism `FileAgentMemoryStore` and friends use. It requires
+  `config.autoSyncPersistentDataPath = true` in the web template.
 - No gameplay thread blocking.
 
 ## Multiplayer Future

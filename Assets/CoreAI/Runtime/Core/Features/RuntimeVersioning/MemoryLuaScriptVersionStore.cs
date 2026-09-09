@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CoreAI.Ai
 {
@@ -11,7 +13,7 @@ namespace CoreAI.Ai
     /// numbering (indices are never reassigned), so callers that reference a revision by index must not
     /// assume the index equals its position in <see cref="LuaScriptVersionRecord.History"/>.
     /// </summary>
-    public sealed class MemoryLuaScriptVersionStore : ILuaScriptVersionStore
+    public sealed class MemoryLuaScriptVersionStore : ILuaScriptVersionStore, IAsyncLuaScriptVersionStore
     {
         private readonly object _lock = new();
         private readonly Dictionary<string, Slot> _slots = new(StringComparer.Ordinal);
@@ -35,6 +37,19 @@ namespace CoreAI.Ai
             /// <summary>Next stable sequence number to assign; independent of History.Count so numbering stays stable across evictions.</summary>
             public int NextIndex;
         }
+
+        /// <inheritdoc />
+        public Task<LuaScriptVersionRecord> GetSnapshotAsync(string key, CancellationToken cancellationToken = default)
+        { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(TryGetSnapshot(key, out LuaScriptVersionRecord snapshot) ? snapshot : null); }
+        /// <inheritdoc />
+        public Task<IReadOnlyList<string>> GetKnownKeysAsync(CancellationToken cancellationToken = default)
+        { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(GetKnownKeys()); }
+        /// <inheritdoc />
+        public Task SeedOriginalAsync(string key, string source, bool overwriteExistingOriginal = false, CancellationToken cancellationToken = default)
+        { cancellationToken.ThrowIfCancellationRequested(); SeedOriginal(key, source, overwriteExistingOriginal); return Task.CompletedTask; }
+        /// <inheritdoc />
+        public Task RecordSuccessfulExecutionAsync(string key, string source, CancellationToken cancellationToken = default)
+        { cancellationToken.ThrowIfCancellationRequested(); RecordSuccessfulExecution(key, source); return Task.CompletedTask; }
 
         public bool TryGetSnapshot(string scriptKey, out LuaScriptVersionRecord snapshot)
         {

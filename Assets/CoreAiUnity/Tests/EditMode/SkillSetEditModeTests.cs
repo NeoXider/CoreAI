@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -851,8 +852,356 @@ namespace CoreAI.Tests.EditMode
     /// <see cref="SkillAuthoringCoordinator"/>, they persist, version, and become reusable through the same
     /// role's live <c>read_skill</c> catalog.
     /// </summary>
+    public sealed class AsyncSkillAuthoringEditModeTests
+    {
+        private sealed class RawStore : ISkillStore
+        {
+            internal readonly Dictionary<string, SkillRecord> Records = new(StringComparer.OrdinalIgnoreCase);
+            internal int Writes;
+            public void Save(SkillRecord record) { Records[record.Id] = record; Writes++; }
+            public void Delete(string id) { Records.Remove(id); Writes++; }
+            public bool TryLoad(string id, out SkillRecord record) => Records.TryGetValue(id, out record);
+            public IReadOnlyList<SkillRecord> List() => new List<SkillRecord>(Records.Values);
+        }
+
+        private sealed class ControlledStore : ISkillStore, IAsyncSkillStore
+        {
+            internal readonly RawStore Raw = new();
+            private readonly InlineAsyncSkillStoreAdapter _adapter;
+            internal Task BeforeRead = Task.CompletedTask;
+            internal Task BeforeWrite = Task.CompletedTask;
+            internal Task AfterWrite = Task.CompletedTask;
+            internal Action Committed;
+            internal bool RejectDurability;
+            internal int Reads;
+            internal int Mutations;
+            internal int SyncCalls;
+            internal readonly TaskCompletionSource<bool> WriteEntered = new(TaskCreationOptions.None);
+            internal ControlledStore() { _adapter = new InlineAsyncSkillStoreAdapter(Raw); }
+            public void Save(SkillRecord record) { SyncCalls++; Raw.Save(record); }
+            public void Delete(string id) { SyncCalls++; Raw.Delete(id); }
+            public bool TryLoad(string id, out SkillRecord record) { SyncCalls++; return Raw.TryLoad(id, out record); }
+            public IReadOnlyList<SkillRecord> List() { SyncCalls++; return Raw.List(); }
+            public async Task<SkillRecord> LoadAsync(string id, CancellationToken cancellationToken = default)
+            {
+                Reads++;
+                await AwaitCancelable(BeforeRead, cancellationToken);
+                return await _adapter.LoadAsync(id, cancellationToken);
+            }
+            public async Task<IReadOnlyList<SkillRecord>> ListAsync(CancellationToken cancellationToken = default)
+            {
+                Reads++;
+                await AwaitCancelable(BeforeRead, cancellationToken);
+                return await _adapter.ListAsync(cancellationToken);
+            }
+            public async Task<TResult> MutateAndPublishAsync<TResult>(string id,
+                Func<SkillRecord, SkillStoreMutation<TResult>> prepare, Func<TResult, CancellationToken, Task> publish,
+                ILlmAsyncMarshaler context, CancellationToken cancellationToken = default)
+            {
+                Mutations++;
+                WriteEntered.TrySetResult(true);
+                await AwaitCancelable(BeforeWrite, cancellationToken);
+                if (RejectDurability)
+                {
+                    SkillStoreMutation<TResult> mutation = await context.InvokeAsync(() => Task.FromResult(prepare(null)), cancellationToken);
+                    Raw.Save(mutation.Record);
+                    throw new SkillStoreDurabilityException(id);
+                }
+                return await _adapter.MutateAndPublishAsync(id, prepare, async (result, token) =>
+                {
+                    Committed?.Invoke();
+                    await AfterWrite;
+                    if (publish != null) await publish(result, token);
+                }, context, cancellationToken);
+            }
+        }
+
+        private sealed class HostMarshaler : SynchronizationContext, ILlmAsyncMarshaler, IDisposable
+        {
+            private readonly BlockingCollection<Action> _queue = new();
+            private readonly Thread _thread;
+            internal bool Active => Environment.CurrentManagedThreadId == _thread.ManagedThreadId;
+            internal HostMarshaler()
+            {
+                _thread = new Thread(() =>
+                {
+                    SetSynchronizationContext(this);
+                    try { foreach (Action action in _queue.GetConsumingEnumerable()) action(); }
+                    finally { _queue.Dispose(); }
+                }) { IsBackground = true };
+                _thread.Start();
+            }
+            public override void Post(SendOrPostCallback callback, object state) => _queue.Add(() => callback(state));
+            public Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken token)
+            {
+                if (Active) return factory();
+                TaskCompletionSource<T> completion = new(TaskCreationOptions.None);
+                _queue.Add(async () =>
+                {
+                    try { completion.TrySetResult(await factory()); }
+                    catch (OperationCanceledException error) { completion.TrySetCanceled(error.CancellationToken); }
+                    catch (Exception error) { completion.TrySetException(error); }
+                });
+                return completion.Task;
+            }
+            public void Dispose()
+            {
+                _queue.CompleteAdding();
+                if (!Active) _thread.Join();
+            }
+        }
+
+        private static async Task AwaitCancelable(Task pending, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            TaskCompletionSource<bool> canceled = new(TaskCreationOptions.None);
+            using CancellationTokenRegistration registration = token.Register(() => canceled.TrySetCanceled(token));
+            Task winner = await Task.WhenAny(pending, canceled.Task);
+            await winner;
+            token.ThrowIfCancellationRequested();
+        }
+
+        [Test]
+        public async Task MeaiInvocation_AwaitsStorageAndResolvesToolsOnHostContext()
+        {
+            ControlledStore store = new();
+            TaskCompletionSource<bool> release = new(TaskCreationOptions.None);
+            store.BeforeWrite = release.Task;
+            MutableSkillCatalog catalog = new();
+            using HostMarshaler host = new();
+            int resolutions = 0;
+            DelegateLlmTool tool = new("inspect", "Inspect", new Action(() => { }));
+            SkillAuthoringCoordinator coordinator = new(catalog, store, new MemoryLuaScriptVersionStore(), name =>
+            {
+                Assert.IsTrue(host.Active, "Tool resolution must remain on the host context.");
+                resolutions++;
+                return name == tool.Name ? tool : null;
+            }, callbackContext: host);
+            AIFunction function = new ManageSkillsLlmTool(coordinator).CreateAIFunction();
+            Task<object> call = function.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object>
+            {
+                ["action"] = "create", ["name"] = "guide", ["instructions"] = "Inspect first.", ["tool_names"] = "inspect"
+            })).AsTask();
+            await store.WriteEntered.Task;
+            Assert.IsFalse(call.IsCompleted, "The tool must return control while storage is pending.");
+            Assert.IsNull(catalog.Get("guide"));
+            Assert.AreEqual(0, store.Raw.Writes);
+            release.SetResult(true);
+            JObject result = JObject.Parse((await call).ToString());
+            Assert.IsTrue((bool)result["success"]);
+            Assert.Greater(resolutions, 0);
+            Assert.AreSame(tool, catalog.Get("guide").Tools[0]);
+        }
+
+        [TestCase("list")]
+        [TestCase("get")]
+        public void PendingReads_PropagateCancellation(string action)
+        {
+            ControlledStore store = new() { BeforeRead = new TaskCompletionSource<bool>().Task };
+            ManageSkillsLlmTool tool = new(new SkillAuthoringCoordinator(new MutableSkillCatalog(), store, null, _ => null));
+            using CancellationTokenSource cancellation = new();
+            Task<string> call = tool.ExecuteAsync(action, "guide", cancellationToken: cancellation.Token);
+            Assert.IsFalse(call.IsCompleted);
+            cancellation.Cancel();
+            Assert.CatchAsync<OperationCanceledException>(async () => await call);
+            Assert.AreEqual(0, store.Raw.Writes);
+        }
+
+        [Test]
+        public async Task EveryManagementAction_UsesAsyncBoundaryAndPreservesVersions()
+        {
+            ControlledStore store = new();
+            MutableSkillCatalog catalog = new();
+            ManageSkillsLlmTool tool = new(new SkillAuthoringCoordinator(catalog, store, new MemoryLuaScriptVersionStore(), _ => null));
+            foreach (string action in new[] { "create", "update", "get", "list", "delete" })
+            {
+                JObject result = JObject.Parse(await tool.ExecuteAsync(action, "guide", instructions: "body"));
+                Assert.IsTrue((bool)result["success"], action);
+                if (action == "get") Assert.AreEqual(1, (int)result["data"]["version"]);
+            }
+            Assert.AreEqual(0, store.SyncCalls);
+            Assert.AreEqual(3, store.Mutations);
+            Assert.AreEqual(2, store.Reads);
+            Assert.IsNull(catalog.Get("guide"));
+        }
+
+        [Test]
+        public void UnsupportedLegacyStore_IsRejectedBeforeMutation()
+        {
+            RawStore raw = new();
+            SkillAuthoringCoordinator coordinator = new(new MutableSkillCatalog(), raw, null, _ => null);
+            Assert.ThrowsAsync<InvalidOperationException>(async () => await coordinator.CreateAsync("guide", "", "body", null));
+            Assert.AreEqual(0, raw.Writes);
+        }
+
+        [Test]
+        public async Task CancelBeforeCommit_PreservesStateAndReleasesCatalogGate()
+        {
+            ControlledStore store = new() { BeforeWrite = new TaskCompletionSource<bool>().Task };
+            MutableSkillCatalog catalog = new();
+            SkillAuthoringCoordinator coordinator = new(catalog, store, null, _ => null);
+            using CancellationTokenSource cancellation = new();
+            Task<SkillAuthoringResult> call = coordinator.CreateAsync("guide", "", "body", null, cancellation.Token);
+            cancellation.Cancel();
+            Assert.CatchAsync<OperationCanceledException>(async () => await call);
+            Assert.AreEqual(0, store.Raw.Writes);
+            Assert.IsNull(catalog.Get("guide"));
+            store.BeforeWrite = Task.CompletedTask;
+            Assert.IsTrue((await coordinator.CreateAsync("guide", "", "retry", null)).Success);
+        }
+
+        [Test]
+        public async Task CancelAfterCommit_SettlesPublicationWithoutReplayingWrite()
+        {
+            ControlledStore store = new();
+            TaskCompletionSource<bool> release = new(TaskCreationOptions.None);
+            store.AfterWrite = release.Task;
+            MutableSkillCatalog catalog = new();
+            SkillAuthoringCoordinator coordinator = new(catalog, store, new MemoryLuaScriptVersionStore(), _ => null);
+            using CancellationTokenSource cancellation = new();
+            store.Committed = cancellation.Cancel;
+            Task<SkillAuthoringResult> call = coordinator.CreateAsync("guide", "", "body", null, cancellation.Token);
+            Assert.IsTrue(cancellation.IsCancellationRequested);
+            Assert.IsFalse(call.IsCompleted);
+            Assert.IsNull(catalog.Get("guide"));
+            Assert.AreEqual(1, store.Raw.Writes);
+            release.SetResult(true);
+            SkillAuthoringResult result = await call;
+            Assert.IsTrue(result.Success);
+            Assert.IsTrue(result.RevisionRecorded);
+            Assert.AreEqual(1, store.Raw.Writes);
+            Assert.IsNotNull(catalog.Get("guide"));
+        }
+
+        [Test]
+        public async Task PendingAsyncMutation_SyncCallFailsPromptlyAndCanceledWaiterDoesNotPoisonGate()
+        {
+            ControlledStore store = new();
+            TaskCompletionSource<bool> release = new(TaskCreationOptions.None);
+            store.AfterWrite = release.Task;
+            MutableSkillCatalog catalog = new();
+            SkillAuthoringCoordinator coordinator = new(catalog, store, null, _ => null);
+            Task<SkillAuthoringResult> first = coordinator.CreateAsync("guide", "", "body", null);
+            Assert.Throws<InvalidOperationException>(() => coordinator.GetSkill("guide"));
+            using CancellationTokenSource cancellation = new();
+            Task<SkillRecord> canceled = coordinator.GetSkillAsync("guide", cancellation.Token);
+            cancellation.Cancel();
+            Assert.CatchAsync<OperationCanceledException>(async () => await canceled);
+            Task<SkillRecord> surviving = coordinator.GetSkillAsync("guide");
+            Assert.IsFalse(surviving.IsCompleted);
+            release.SetResult(true);
+            Assert.IsTrue((await first).Success);
+            Assert.AreEqual("body", (await surviving).Instructions);
+        }
+
+        [Test]
+        public async Task DelayedPublication_PreventsAnotherCatalogFromOvertakingRevision()
+        {
+            ControlledStore store = new();
+            TaskCompletionSource<bool> release = new(TaskCreationOptions.None);
+            store.AfterWrite = release.Task;
+            MemoryLuaScriptVersionStore versions = new();
+            SkillAuthoringCoordinator first = new(new MutableSkillCatalog(), store, versions, _ => null);
+            SkillAuthoringCoordinator second = new(new MutableSkillCatalog(), store, versions, _ => null);
+            Task<SkillAuthoringResult> create = first.CreateAsync("guide", "", "first", null);
+            Task<SkillAuthoringResult> update = second.UpdateAsync("guide", null, "second", null);
+            Assert.IsFalse(update.IsCompleted);
+            Assert.AreEqual(1, store.Raw.Writes);
+            release.SetResult(true);
+            Assert.IsTrue((await create).Success);
+            Assert.IsTrue((await update).Success);
+            LuaScriptVersionRecord snapshot = await versions.GetSnapshotAsync("skill:guide");
+            Assert.AreEqual(2, snapshot.History.Count);
+            StringAssert.Contains("first", snapshot.OriginalLua);
+            StringAssert.Contains("second", snapshot.CurrentLua);
+        }
+
+        [Test]
+        public async Task AsyncReentryAfterAwait_IsRejectedAndCommittedStoreGateIsReleased()
+        {
+            RawStore raw = new();
+            InlineAsyncSkillStoreAdapter store = new(raw);
+            SkillAuthoringCoordinator coordinator = new(new MutableSkillCatalog(), new NullSkillStore(), null, _ => null);
+            TaskCompletionSource<bool> release = new(TaskCreationOptions.None);
+            Task<bool> call = store.MutateAndPublishAsync("guide", _ =>
+                SkillStoreMutation<bool>.SaveRecord(new SkillRecord("guide", "", "body", null), true), async (_, token) =>
+            {
+                await release.Task;
+                await coordinator.GetSkillAsync("guide", token);
+            }, PassThroughLlmAsyncMarshaler.Instance);
+            release.SetResult(true);
+            SkillStorePublicationException error = Assert.ThrowsAsync<SkillStorePublicationException>(async () => await call);
+            Assert.IsInstanceOf<InvalidOperationException>(error.InnerException);
+            Assert.AreEqual(1, raw.Writes);
+            Assert.AreEqual("body", (await store.LoadAsync("guide")).Instructions);
+        }
+
+        [Test]
+        public async Task DurabilityFailure_ReportsLocalCommitWithoutPublicationOrReplay()
+        {
+            ControlledStore store = new() { RejectDurability = true };
+            MutableSkillCatalog catalog = new();
+            ManageSkillsLlmTool tool = new(new SkillAuthoringCoordinator(catalog, store, null, _ => null));
+            JObject result = JObject.Parse(await tool.ExecuteAsync("create", "guide", instructions: "body"));
+            Assert.IsFalse((bool)result["success"]);
+            Assert.IsTrue((bool)result["committed"]);
+            Assert.IsFalse((bool)result["durable"]);
+            Assert.IsFalse((bool)result["published"]);
+            Assert.IsFalse((bool)result["retryable"]);
+            Assert.AreEqual(1, store.Raw.Writes);
+            Assert.IsNull(catalog.Get("guide"));
+        }
+
+        [Test]
+        public async Task SessionOnlyAsyncStore_KeepsVersionsAcrossCoordinatorReplacement()
+        {
+            MutableSkillCatalog catalog = new();
+            SkillAuthoringCoordinator first = new(catalog, new NullSkillStore(), null, _ => null);
+            Assert.IsTrue((await first.CreateAsync("guide", "", "first", null)).Success);
+            Assert.IsTrue((await first.UpdateAsync("guide", null, "second", null)).Success);
+            SkillAuthoringCoordinator replacement = new(catalog, new NullSkillStore(), null, _ => null);
+            Assert.AreEqual(1, (await replacement.GetSkillAsync("guide")).Version);
+            Assert.IsTrue((await replacement.UpdateAsync("guide", null, "third", null)).Success);
+            IReadOnlyList<SkillRecord> records = await replacement.ListSkillsAsync();
+            Assert.AreEqual(2, records[0].Version);
+            Assert.AreEqual("third", records[0].Instructions);
+        }
+
+        [Test]
+        public async Task AsyncRehydrateAndMainUpdate_PreserveReferenceDocuments()
+        {
+            ControlledStore store = new();
+            SkillSection reference = new("reference.md", "reference body");
+            store.Raw.Save(new SkillRecord("guide", "", "main body", null, sections: new[]
+                { new SkillSection("SKILL.md", "main body"), reference }));
+            MutableSkillCatalog catalog = new();
+            SkillAuthoringCoordinator coordinator = new(catalog, store, new MemoryLuaScriptVersionStore(), _ => null);
+            Assert.AreEqual(1, await coordinator.RehydrateFromStoreAsync());
+            Assert.AreEqual(reference.Content, catalog.Get("guide").Sections[1].Content);
+            Assert.IsTrue((await coordinator.UpdateAsync("guide", null, "revised", null)).Success);
+            SkillRecord record = await coordinator.GetSkillAsync("guide");
+            Assert.AreEqual("revised", record.Sections[0].Content);
+            Assert.AreEqual(reference.Name, record.Sections[1].Name);
+            Assert.AreEqual(reference.Content, record.Sections[1].Content);
+            Assert.AreEqual(2, (await coordinator.ListRevisionsAsync("guide")).Count);
+        }
+    }
+
     public sealed class SkillAuthoringEditModeTests
     {
+        [Test]
+        public void ManageSkills_CanceledCallDoesNotPublishOrPersist()
+        {
+            MutableSkillCatalog catalog = new();
+            SkillAuthoringCoordinator coordinator = new(catalog, new NullSkillStore(), null, _ => null);
+            ManageSkillsLlmTool tool = new(coordinator);
+            using CancellationTokenSource cancellation = new();
+            cancellation.Cancel();
+            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+                await tool.ExecuteAsync("create", "canceled", instructions: "body", cancellationToken: cancellation.Token));
+            Assert.That(catalog.Get("canceled"), Is.Null);
+        }
+
         [TestCase(false, null)]
         [TestCase(true, null)]
         [TestCase(false, "Revised entry document")]
@@ -938,8 +1287,16 @@ namespace CoreAI.Tests.EditMode
             public bool AllowDuplicates => false;
         }
 
-        private sealed class MemorySkillStore : ISkillStore
+        private sealed class MemorySkillStore : ISkillStore, IAsyncSkillStore
         {
+            private InlineAsyncSkillStoreAdapter _async;
+            private InlineAsyncSkillStoreAdapter Async => _async ??= new InlineAsyncSkillStoreAdapter(this);
+            public Task<SkillRecord> LoadAsync(string id, CancellationToken token = default) => Async.LoadAsync(id, token);
+            public Task<IReadOnlyList<SkillRecord>> ListAsync(CancellationToken token = default) => Async.ListAsync(token);
+            public Task<TResult> MutateAndPublishAsync<TResult>(string id, Func<SkillRecord, SkillStoreMutation<TResult>> prepare,
+                Func<TResult, CancellationToken, Task> publish, ILlmAsyncMarshaler context, CancellationToken token = default)
+                => Async.MutateAndPublishAsync(id, prepare, publish, context, token);
+
             private readonly Dictionary<string, SkillRecord> _m = new(StringComparer.Ordinal);
             public bool FailSave;
             public bool FailDelete;
@@ -1214,7 +1571,7 @@ namespace CoreAI.Tests.EditMode
             MemorySkillStore store = new();
             MutableSkillCatalog catalog = new();
             FailingRevisionStore revisions = new();
-            SkillAuthoringCoordinator coordinator = new(catalog, store, revisions, _ => null);
+            SkillAuthoringCoordinator coordinator = new(catalog, store, new InlineAsyncLuaScriptVersionStoreAdapter(revisions), _ => null);
             if (!failCreate) coordinator.Create("guide", "", "initial", Array.Empty<string>());
             revisions.FailWrites = true;
             ManageSkillsLlmTool tool = new(coordinator);

@@ -40,7 +40,10 @@ namespace CoreAI.Ai
         /// </summary>
         public int MaxRetainedToolResultMessages { get; set; }
 
-        /// <summary>Defers durable summary persistence until the owning LLM request succeeds.</summary>
+        /// <summary>
+        /// Defers summary persistence to the snapshot owner. The owner must commit old-history summaries
+        /// before provider dispatch or any history mutation that could discard their source messages.
+        /// </summary>
         public bool DeferSummaryPersistence { get; set; }
     }
 }

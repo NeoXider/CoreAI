@@ -1,271 +1,131 @@
 using System;
-using System.Runtime.InteropServices;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 #if UNITY_WEBGL && !UNITY_EDITOR
-using System.Collections.Generic;
-using AOT;
+using System.Runtime.InteropServices;
 #endif
 
 namespace CoreAI.Infrastructure
 {
     /// <summary>
-    /// Shared WebGL IDBFS-to-IndexedDB flush helper for CoreAI file-backed stores. Wraps the single
-    /// <c>CoreAi_PersistFsSync</c> jslib export (<c>CoreAiPersistFs.jslib</c>) so callers share one
-    /// <c>DllImport</c> declaration instead of redeclaring it per store.
+    /// Durability acknowledgement for CoreAI's file-backed stores on Unity WebGL.
+    /// <para>
+    /// <b>Who persists.</b> The engine does. With <c>config.autoSyncPersistentDataPath = true</c> in
+    /// <c>createUnityInstance()</c>, Unity mounts <c>Application.persistentDataPath</c> as IDBFS with
+    /// <c>autoPersist</c> and queues an IndexedDB persist from its own filesystem node hooks on every
+    /// write/close, rename, unlink, mkdir and rmdir. A store therefore does not have to - and, since
+    /// Unity 6.3, must not - drive <c>FS.syncfs</c> by hand.
+    /// </para>
+    /// <para>
+    /// <b>Why the manual channel is gone.</b> CoreAI used to call <c>FS.syncfs(false, callback)</c>
+    /// from <c>CoreAiPersistFs.jslib</c> and await the callback. In a served WebGL player on
+    /// 2026-09-09 that call neither threw nor ever called back, so every awaited confirmation parked
+    /// forever and <c>memory action=write</c> reported a false failure after the 30 s tool timeout -
+    /// while the bytes were in fact already durable. The engine prints the matching deprecation at
+    /// boot. The dead channel is deleted, not kept behind a flag.
+    /// </para>
+    /// <para>
+    /// <b>What "true" means here.</b> Exactly this: the engine's automatic persistence is armed, so
+    /// the completed file write has been handed to it and will be flushed to IndexedDB. It does NOT
+    /// mean the IndexedDB transaction has committed - Unity exposes no completion signal for that,
+    /// and inventing one is what this class stopped doing. <c>false</c> means the opposite of a
+    /// durability claim: the page did not enable automatic persistence, so the write lives only in
+    /// the tab's in-memory filesystem and dies with the tab. Callers turn that into a visible error.
+    /// Nothing here waits, so no caller can hang on a confirmation that never arrives.
+    /// </para>
+    /// <para>
+    /// Outside a WebGL player every member is a no-op returning <c>true</c>: the OS filesystem is
+    /// durable once the write call returns.
+    /// </para>
     /// </summary>
     public static class CoreAiWebGlPersistence
     {
-        internal readonly struct CompletionWaitResult
-        {
-            public CompletionWaitResult(bool completed, bool succeeded)
-            {
-                Completed = completed;
-                Succeeded = succeeded;
-            }
-
-            public bool Completed { get; }
-
-            public bool Succeeded { get; }
-        }
-
-        public static readonly TimeSpan DefaultSyncTimeout = TimeSpan.FromSeconds(30d);
-
 #if UNITY_WEBGL && !UNITY_EDITOR
-        private static readonly Dictionary<int, UniTaskCompletionSource<bool>> Pending = new();
-        private static readonly CompletionCallback CompletionDelegate = OnCompletion;
-        private static int _nextCallId;
-
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void CompletionCallback(int callId, int succeeded, IntPtr errorPtr);
+        private static bool _misconfigurationReported;
 
         [DllImport("__Internal")]
-        private static extern int CoreAi_PersistFsSync();
-
-        [DllImport("__Internal")]
-        private static extern int CoreAi_PersistFsSyncAsync(int callId, IntPtr onCompletion);
-
-        [DllImport("__Internal")]
-        private static extern void CoreAi_PersistFsCancelWaiter(int callId);
-
-        [DllImport("__Internal")]
-        private static extern int CoreAi_PersistFsPendingRequestCount();
-
-        [DllImport("__Internal")]
-        private static extern int CoreAi_PersistFsPendingFlushCount();
+        private static extern int CoreAi_PersistFsAutoSyncEnabled();
 #endif
 
         /// <summary>
-        /// Actual JS-retained waiter entries across queued, in-flight, and scheduled-delivery
-        /// states. The JS bridge admits at most 64; <see cref="SyncAsync"/> reports false when
-        /// saturated instead of queueing unboundedly. Zero outside WebGL players.
+        /// True when writes under <c>Application.persistentDataPath</c> are persisted automatically by
+        /// the engine. Always true outside a WebGL player. In a WebGL player it is false until the web
+        /// template passes <c>config.autoSyncPersistentDataPath = true</c> to
+        /// <c>createUnityInstance()</c>; <c>CoreAIWebGlPersistentDataSyncBuildGuard</c> fails the build
+        /// before a player can ship without it.
         /// </summary>
-        public static int PendingRequestCount
+        public static bool IsAutoSyncEnabled
         {
             get
             {
 #if UNITY_WEBGL && !UNITY_EDITOR
                 try
                 {
-                    return CoreAi_PersistFsPendingRequestCount();
+                    return CoreAi_PersistFsAutoSyncEnabled() != 0;
                 }
                 catch (Exception)
                 {
-                    return 0;
+                    return false;
                 }
 #else
-                return 0;
+                return true;
 #endif
             }
         }
 
         /// <summary>
-        /// 0 when idle, 1 while one <c>FS.syncfs</c> flush is in flight, 2 when a follow-up
-        /// flush is also required. Zero outside WebGL players.
-        /// </summary>
-        public static int PendingFlushCount
-        {
-            get
-            {
-#if UNITY_WEBGL && !UNITY_EDITOR
-                try
-                {
-                    return CoreAi_PersistFsPendingFlushCount();
-                }
-                catch (Exception)
-                {
-                    return 0;
-                }
-#else
-                return 0;
-#endif
-            }
-        }
-
-        /// <summary>
-        /// On WebGL <b>queues</b> an IDBFS-to-IndexedDB flush and returns immediately; the browser runs
-        /// <c>FS.syncfs</c> asynchronously (single-flight, later requests coalesce behind the active one).
-        /// A preceding write therefore survives a reload only once that flush has completed — a tab closed
-        /// before the completion callback can still lose it. Callers that must know whether the data is
-        /// durable use <see cref="SyncAsync"/>, which completes with the browser's result. On other
-        /// platforms this is a no-op: the OS filesystem is durable once the write call returns.
+        /// Reports whether the completed write is covered by durable storage. Returns immediately; it
+        /// starts nothing and waits for nothing. See the type documentation for the exact meaning of
+        /// each outcome.
         /// </summary>
         /// <returns>
-        /// False when the flush could not be queued or its immediate start was rejected.
-        /// True means "queued", NOT "persisted" — on non-WebGL platforms it means "already durable".
+        /// True when the write is durable (non-WebGL) or has been handed to the engine's automatic
+        /// persistence (WebGL). False only when a WebGL page never armed that persistence.
         /// </returns>
         public static bool Sync()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            try
+            if (IsAutoSyncEnabled)
             {
-                return CoreAi_PersistFsSync() != 0;
+                return true;
             }
-            catch (System.Exception ex)
-            {
-                // WHY: A failed flush must be visible because the preceding write may not survive reload.
-                UnityEngine.Debug.LogWarning(
-                    $"[CoreAiWebGlPersistence] IndexedDB flush failed; last write may not survive a reload: {ex.Message}");
-                return false;
-            }
+
+            ReportMisconfigurationOnce();
+            return false;
 #else
             return true;
 #endif
         }
 
         /// <summary>
-        /// Completes only after the browser reports the matching IDBFS <c>syncfs</c> result. On
-        /// non-WebGL platforms the filesystem write is already complete, so the returned task is true.
+        /// Asynchronous shape of <see cref="Sync"/> for callers that already await their persistence
+        /// step. It completes synchronously with the same answer - there is no confirmation callback to
+        /// wait for, and a wait that cannot end is what this class was fixed to remove.
         /// </summary>
-        public static UniTask<bool> SyncAsync(
-            CancellationToken cancellationToken = default,
-            TimeSpan? timeout = null)
+        public static UniTask<bool> SyncAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-#if UNITY_WEBGL && !UNITY_EDITOR
-            TimeSpan effectiveTimeout = timeout ?? DefaultSyncTimeout;
-            if (effectiveTimeout <= TimeSpan.Zero)
-            {
-                throw new ArgumentOutOfRangeException(nameof(timeout));
-            }
-
-            return SyncWebGlAsync(effectiveTimeout, cancellationToken);
-#else
-            return UniTask.FromResult(true);
-#endif
-        }
-
-        internal static async UniTask<CompletionWaitResult> WaitForCompletionAsync(
-            UniTask<bool> completion,
-            UniTask timeoutOrCancellation)
-        {
-            (bool HasResultLeft, bool Result) outcome = await UniTask.WhenAny(
-                completion,
-                timeoutOrCancellation);
-            return new CompletionWaitResult(outcome.HasResultLeft, outcome.Result);
+            return UniTask.FromResult(Sync());
         }
 
 #if UNITY_WEBGL && !UNITY_EDITOR
-        private static async UniTask<bool> SyncWebGlAsync(
-            TimeSpan timeout,
-            CancellationToken cancellationToken)
+        // WHY: Reported once, but Sync() keeps returning false on every call. A repeated log would
+        // flood a save-heavy session; a single "recovered" answer would hide the data loss. The
+        // caller's own failure (IOException, refused tool result) stays visible per write.
+        private static void ReportMisconfigurationOnce()
         {
-            int callId = NextCallId();
-            UniTaskCompletionSource<bool> completion = new();
-            using CancellationTokenSource waitCancellation =
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            Pending.Add(callId, completion);
-            try
-            {
-                int admitted = CoreAi_PersistFsSyncAsync(
-                    callId,
-                    Marshal.GetFunctionPointerForDelegate(CompletionDelegate));
-                if (admitted == 0)
-                {
-                    Pending.Remove(callId);
-                    LogFailure("persistence request not admitted: queue saturated or scheduler unavailable");
-                    return false;
-                }
-
-                CompletionWaitResult outcome = await WaitForCompletionAsync(
-                    completion.Task,
-                    UniTask.Delay(
-                        timeout,
-                        DelayType.Realtime,
-                        PlayerLoopTiming.Update,
-                        waitCancellation.Token));
-                if (outcome.Completed)
-                {
-                    waitCancellation.Cancel();
-                    return outcome.Succeeded;
-                }
-
-                LogFailure("syncfs completion callback timed out after " + timeout.TotalSeconds
-                    + " seconds");
-                return false;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                LogFailure(ex.Message);
-                return false;
-            }
-            finally
-            {
-                waitCancellation.Cancel();
-                Pending.Remove(callId);
-                try
-                {
-                    // WHY: The C# timeout/cancellation path only drops our own waiter. The JS
-                    // bridge physically removes the entry so a late flush callback is
-                    // suppressed and capacity is freed; the in-flight FS.syncfs (if any) and
-                    // dirty intent are untouched.
-                    CoreAi_PersistFsCancelWaiter(callId);
-                }
-                catch (Exception)
-                {
-                }
-            }
-        }
-
-        private static int NextCallId()
-        {
-            _nextCallId++;
-            if (_nextCallId <= 0)
-            {
-                _nextCallId = 1;
-            }
-
-            while (Pending.ContainsKey(_nextCallId))
-            {
-                _nextCallId++;
-            }
-
-            return _nextCallId;
-        }
-
-        [MonoPInvokeCallback(typeof(CompletionCallback))]
-        private static void OnCompletion(int callId, int succeeded, IntPtr errorPtr)
-        {
-            if (!Pending.TryGetValue(callId, out UniTaskCompletionSource<bool> completion))
+            if (_misconfigurationReported)
             {
                 return;
             }
 
-            Pending.Remove(callId);
-            // WHY: The JS bridge reports each failed physical flush once, including flushes
-            // without waiters; repeating that warning here would produce one log per waiter.
-            completion.TrySetResult(succeeded != 0);
-        }
-
-        private static void LogFailure(string message)
-        {
-            UnityEngine.Debug.LogWarning(
-                "[CoreAiWebGlPersistence] IndexedDB flush failed; last write may not survive a reload: "
-                + message);
+            _misconfigurationReported = true;
+            UnityEngine.Debug.LogError(
+                "[CoreAiWebGlPersistence] This page did not enable automatic persistentDataPath " +
+                "synchronization, so nothing written by CoreAI will survive a reload. Pass " +
+                "config.autoSyncPersistentDataPath = true to createUnityInstance() in the web " +
+                "template this player was built with, or install the one CoreAI ships with the " +
+                "menu item 'CoreAI/Setup/Install WebGL Template' and rebuild.");
         }
 #endif
     }

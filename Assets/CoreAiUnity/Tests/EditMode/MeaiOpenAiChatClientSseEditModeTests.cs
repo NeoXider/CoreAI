@@ -558,8 +558,11 @@ namespace CoreAI.Tests.EditMode
                     InputTokenCount = 3,
                     OutputTokenCount = 5,
                     TotalTokenCount = 8,
-                    CachedInputTokenCount = 1,
-                    ReasoningTokenCount = 2
+                    AdditionalCounts = new MEAI.AdditionalPropertiesDictionary<long>
+                    {
+                        ["prompt_tokens_details.cached_tokens"] = 1,
+                        ["completion_tokens_details.reasoning_tokens"] = 2
+                    }
                 }
             };
 
@@ -582,8 +585,8 @@ namespace CoreAI.Tests.EditMode
                 .SelectMany(u => u.Contents ?? new List<MEAI.AIContent>())
                 .OfType<MEAI.UsageContent>()
                 .Single();
-            Assert.AreEqual(1L, usage.Details.CachedInputTokenCount);
-            Assert.AreEqual(2L, usage.Details.ReasoningTokenCount);
+            Assert.AreEqual(1L, usage.Details.AdditionalCounts["prompt_tokens_details.cached_tokens"]);
+            Assert.AreEqual(2L, usage.Details.AdditionalCounts["completion_tokens_details.reasoning_tokens"]);
         }
 
         [Test]
@@ -677,12 +680,11 @@ namespace CoreAI.Tests.EditMode
                 "{\"choices\":[{\"delta\":{\"content\":\"answer\"}}],\"usage\":{\"prompt_tokens_details\":{\"cached_tokens\":7}}}");
             Assert.AreEqual("answer", update.Text);
             MEAI.UsageContent usage = update.Contents.OfType<MEAI.UsageContent>().Single();
-            Assert.AreEqual(7L, usage.Details.CachedInputTokenCount);
-            Assert.IsNull(usage.Details.AdditionalCounts);
+            Assert.AreEqual(7L, usage.Details.AdditionalCounts["prompt_tokens_details.cached_tokens"]);
         }
 
         [Test]
-        public void ParseSseUpdates_UsageChunkWithDetails_PopulatesTypedCounts()
+        public void ParseSseUpdates_UsageChunkWithDetails_PopulatesAdditionalCounts()
         {
             const string sse =
                 "data: {\"id\":\"chatcmpl-u\",\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":7,\"total_tokens\":17," +
@@ -693,16 +695,30 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("chatcmpl-u", updates[0].MessageId);
             MEAI.UsageContent usage = updates[0].Contents?.OfType<MEAI.UsageContent>().FirstOrDefault();
             Assert.NotNull(usage);
-            Assert.AreEqual(4L, usage.Details.CachedInputTokenCount);
-            Assert.AreEqual(6L, usage.Details.ReasoningTokenCount);
+            Assert.AreEqual(4L, usage.Details.AdditionalCounts["prompt_tokens_details.cached_tokens"]);
+            Assert.AreEqual(6L, usage.Details.AdditionalCounts["completion_tokens_details.reasoning_tokens"]);
             Assert.AreEqual(17L, usage.Details.TotalTokenCount);
         }
 
+        /// <summary>
+        /// A provider delta reaches the consumer WHOLE — one SSE event in, one update out.
+        /// <para>
+        /// This replaces a test that asserted the opposite. A text delta over 24 characters used to be
+        /// re-cut into word-sized pieces spaced 15 ms apart, so that a provider batching many tokens
+        /// into one event would "look" like per-token streaming. That is an illusion built on the
+        /// transport: it puts an artificial delay on the critical path, allocates per manufactured
+        /// piece, and hands the consumer a stream whose shape never existed. Streaming means the
+        /// consumer sees what arrived, when it arrived — a provider that batches is a provider that
+        /// batches, and hiding it here hides it from whoever would otherwise fix it. This test exists
+        /// so the smoothing cannot come back unnoticed.
+        /// </para>
+        /// </summary>
         [Test]
-        public async Task GetStreamingResponseAsync_SplitSmoothing_PropagatesNativeContracts()
+        public async Task GetStreamingResponseAsync_LargeTextDelta_ReachesTheConsumerWhole()
         {
+            const string text = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ";
             const string sse =
-                "data: {\"id\":\"chatcmpl-s\",\"model\":\"router/smooth\",\"choices\":[{\"delta\":{\"content\":\"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ\"}}]}\n\n" +
+                "data: {\"id\":\"chatcmpl-s\",\"model\":\"router/smooth\",\"choices\":[{\"delta\":{\"content\":\"" + text + "\"}}]}\n\n" +
                 "data: [DONE]\n\n";
             MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), new DoneSentinelTransport(sse));
             List<MEAI.ChatResponseUpdate> textUpdates = new();
@@ -716,16 +732,12 @@ namespace CoreAI.Tests.EditMode
                 }
             }
 
-            Assert.Greater(textUpdates.Count, 1, "The 46-char delta must be split for smooth streaming.");
-            Assert.AreEqual(
-                "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ",
-                string.Concat(textUpdates.Select(u => u.Text)));
-            foreach (MEAI.ChatResponseUpdate u in textUpdates)
-            {
-                Assert.AreEqual("router/smooth", u.ModelId);
-                Assert.AreEqual("chatcmpl-s", u.ResponseId);
-                Assert.AreEqual("chatcmpl-s", u.MessageId);
-            }
+            Assert.AreEqual(1, textUpdates.Count,
+                "One provider delta must produce exactly one update: re-cutting it is manufactured streaming.");
+            Assert.AreEqual(text, textUpdates[0].Text);
+            Assert.AreEqual("router/smooth", textUpdates[0].ModelId);
+            Assert.AreEqual("chatcmpl-s", textUpdates[0].ResponseId);
+            Assert.AreEqual("chatcmpl-s", textUpdates[0].MessageId);
         }
 
         [Test]

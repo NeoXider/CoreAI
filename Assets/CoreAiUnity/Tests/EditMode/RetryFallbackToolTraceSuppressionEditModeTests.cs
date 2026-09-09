@@ -149,8 +149,17 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("native", policy.ExecutedTraces[0].Source);
         }
 
+        /// <summary>
+        /// MEAI rejects an unconvertible argument BEFORE the body, so nothing was mutated — and the trace
+        /// still says "invoked". The previous <c>arg-conversion</c> verdict was reached by looking for the
+        /// delegate's method in the exception's stack; IL2CPP/WebGL can strip those frames, and then an
+        /// exception FROM THE BODY was read as a binding failure, the call was declared never-invoked, and
+        /// the retry/fallback decorators replayed a turn that had already changed the world. The
+        /// distinction is gone entirely: the invocation boundary is the verdict. It costs this one case a
+        /// retry it could safely have had, which is the cheaper of the two mistakes.
+        /// </summary>
         [Test]
-        public async Task DelegateLlmTool_ArgumentCoercionFailure_RecordsArgConversionWithoutInvokingBody()
+        public async Task DelegateLlmTool_ArgumentCoercionFailure_IsTracedAsInvoked()
         {
             int sideEffects = 0;
             Func<int, string> body = count =>
@@ -174,10 +183,13 @@ namespace CoreAI.Tests.EditMode
             ToolExecutionPolicy.ToolCallResult result =
                 await policy.ExecuteSingleAsync(call, options, CancellationToken.None);
 
-            Assert.AreEqual(0, sideEffects);
+            Assert.AreEqual(0, sideEffects, "MEAI must still reject the argument before the body runs");
             Assert.IsFalse(result.Succeeded);
             Assert.AreEqual(1, policy.ExecutedTraces.Count);
-            Assert.AreEqual("arg-conversion", policy.ExecutedTraces[0].Source);
+            Assert.AreEqual("native", policy.ExecutedTraces[0].Source);
+            Assert.IsTrue(
+                LoggingLlmClientDecorator.TraceIndicatesInvocation(policy.ExecutedTraces[0]),
+                "Anything that crossed the invocation boundary suppresses retry/fallback replay");
         }
 #endif
 
@@ -350,8 +362,6 @@ namespace CoreAI.Tests.EditMode
                 new LlmToolCallTrace("t", false, 0d, "unbound-native")));
             Assert.IsFalse(LoggingLlmClientDecorator.TraceIndicatesInvocation(
                 new LlmToolCallTrace("t", false, 0d, "schema-validation")));
-            Assert.IsFalse(LoggingLlmClientDecorator.TraceIndicatesInvocation(
-                new LlmToolCallTrace("t", false, 0d, "arg-conversion")));
 
             Assert.IsTrue(LoggingLlmClientDecorator.TraceIndicatesInvocation(
                 new LlmToolCallTrace("t", true, 5d, "native")));

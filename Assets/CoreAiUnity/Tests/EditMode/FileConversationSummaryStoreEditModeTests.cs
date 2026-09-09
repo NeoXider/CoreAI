@@ -240,13 +240,18 @@ namespace CoreAI.Tests.EditMode
             string root = NewTempRoot();
             try
             {
-                FileConversationSummaryStore store = new(root, null, null, _ => Task.FromResult(false));
+                bool confirmed = false;
+                FileConversationSummaryStore store = new(root, null, null, _ => Task.FromResult(confirmed));
                 Exception failure = await CaptureAsync(() => store.SaveSummaryAsync("Role", "v"));
                 Assert.That(failure, Is.InstanceOf<IOException>());
 
                 string path = Path.Combine(root, "Role.json");
                 Assert.IsTrue(File.Exists(path), "VFS write happened; only durability is unconfirmed.");
-                Assert.AreEqual("v", await new FileConversationSummaryStore(root, null).LoadSummaryAsync("Role"));
+                FileConversationSummaryStore reopened = new(root, null);
+                Assert.That(await CaptureAsync(() => reopened.LoadSummaryAsync("Role")), Is.InstanceOf<IOException>(),
+                    "A new reader cannot treat the VFS fold marker as durable after a failed flush.");
+                confirmed = true;
+                Assert.AreEqual("v", await reopened.LoadSummaryAsync("Role"));
             }
             finally
             {
@@ -281,6 +286,142 @@ namespace CoreAI.Tests.EditMode
             {
                 DeleteRoot(root);
             }
+        }
+
+        [Test]
+        public async Task FailedClear_NewReaderMustConfirmDeletionBeforeReturningEmpty()
+        {
+            string root = NewTempRoot();
+            try
+            {
+                bool confirmed = true;
+                FileConversationSummaryStore store = new(root, null, null, _ => Task.FromResult(confirmed));
+                await store.SaveSummaryAsync("Role", "old");
+                confirmed = false;
+                Assert.That(await CaptureAsync(() => store.ClearSummaryAsync("Role")), Is.InstanceOf<IOException>());
+                Assert.IsFalse(File.Exists(Path.Combine(root, "Role.json")));
+                FileConversationSummaryStore reopened = new(root);
+                Assert.That(await CaptureAsync(() => reopened.LoadSummaryAsync("Role")), Is.InstanceOf<IOException>());
+                confirmed = true;
+                Assert.AreEqual("", await reopened.LoadSummaryAsync("Role"));
+            }
+            finally { DeleteRoot(root); }
+        }
+
+        [Test]
+        public async Task OlderSuccessfulFlush_CannotAcknowledgeANewerFailedWrite()
+        {
+            string root = NewTempRoot();
+            TaskCompletionSource<bool> firstEntered = new();
+            TaskCompletionSource<bool> secondEntered = new();
+            TaskCompletionSource<bool> firstGate = new();
+            TaskCompletionSource<bool> secondGate = new();
+            bool recovered = false;
+            Task first = null;
+            Task second = null;
+            try
+            {
+                FileConversationSummaryStore firstStore = new(root, null, null, _ =>
+                {
+                    firstEntered.TrySetResult(true);
+                    return firstGate.Task;
+                });
+                FileConversationSummaryStore secondStore = new(Path.Combine(root, "."), null, null, _ =>
+                {
+                    secondEntered.TrySetResult(true);
+                    return recovered ? Task.FromResult(true) : secondGate.Task;
+                });
+                first = firstStore.SaveSummaryAsync("Role", "older");
+                Assert.AreSame(firstEntered.Task, await Task.WhenAny(firstEntered.Task, Task.Delay(3000)));
+                second = secondStore.SaveSummaryAsync("Role", "newer");
+                Assert.AreSame(secondEntered.Task, await Task.WhenAny(secondEntered.Task, Task.Delay(3000)));
+                firstGate.SetResult(true);
+                await first;
+                FileConversationSummaryStore reopened = new(root);
+                Task<string> read = reopened.LoadSummaryAsync("Role");
+                Assert.IsFalse(read.IsCompleted, "The newer generation still needs its own host confirmation.");
+                secondGate.SetResult(false);
+                Assert.That(await CaptureAsync(() => second), Is.InstanceOf<IOException>());
+                Assert.That(await CaptureAsync(() => read), Is.InstanceOf<IOException>());
+                recovered = true;
+                Assert.AreEqual("newer", await reopened.LoadSummaryAsync("Role"));
+            }
+            finally
+            {
+                firstGate.TrySetResult(true);
+                secondGate.TrySetResult(true);
+                if (first != null) await CaptureAsync(() => first);
+                if (second != null) await CaptureAsync(() => second);
+                DeleteRoot(root);
+            }
+        }
+
+        // WHY this replaced its own opposite: an earlier test asserted that a SUCCESSFUL synchronous
+        // hook must leave the durability mark parked whenever an async hook exists too, and it enshrined
+        // the resulting throw as correct. That rested on the two hooks being different mechanisms - the
+        // async one carrying a manual FS.syncfs handshake. That channel is gone; both hooks now return
+        // the same immediate engine answer, and CoreAILifetimeScope registers exactly that pair
+        // (CoreAiWebGlPersistence.Sync + SyncAsync). Nothing could clear the mark any more, so the first
+        // synchronous save poisoned the file and the next synchronous read threw - on chat-history reset
+        // and in the session inspector.
+        [Test]
+        public async Task SyncSave_WithBothHooksConfigured_LeavesTheSyncApiUsable()
+        {
+            string root = NewTempRoot();
+            try
+            {
+                FileConversationSummaryStore store = new(root, null, () => true, _ => Task.FromResult(true));
+
+                store.SaveSummary("Role", "queued");
+                Assert.AreEqual("queued", store.LoadSummary("Role"),
+                    "A confirmed synchronous save must not leave the file unreadable through the sync API.");
+                Assert.AreEqual("queued", await store.LoadSummaryAsync("Role"));
+
+                store.ClearSummary("Role");
+                Assert.AreEqual("", store.LoadSummary("Role"),
+                    "A confirmed synchronous clear must not leave the file unreadable through the sync API.");
+            }
+            finally { DeleteRoot(root); }
+        }
+
+        [Test]
+        public async Task SyncSave_WithBothHooksConfigured_AndRefusedSyncAnswer_StillBlocksTheSyncApi()
+        {
+            string root = NewTempRoot();
+            try
+            {
+                bool durable = false;
+                FileConversationSummaryStore store = new(root, null, () => durable, _ => Task.FromResult(true));
+
+                Assert.Throws<IOException>(() => store.SaveSummary("Role", "queued"),
+                    "A page with no durable storage must fail the write visibly.");
+                Assert.Throws<InvalidOperationException>(() => store.LoadSummary("Role"),
+                    "An unconfirmed write must not be readable as a durable fold marker.");
+
+                durable = true;
+                Assert.AreEqual("queued", await store.LoadSummaryAsync("Role"),
+                    "Once durability is confirmed the committed write is readable again.");
+            }
+            finally { DeleteRoot(root); }
+        }
+
+        [Test]
+        public async Task DurabilityCallback_ReentrantSameFileReadFailsWithoutRecursion()
+        {
+            string root = NewTempRoot();
+            try
+            {
+                FileConversationSummaryStore reader = new(root);
+                FileConversationSummaryStore writer = new(root, null, null, async _ =>
+                {
+                    await reader.LoadSummaryAsync("Role");
+                    return true;
+                });
+                Exception failure = await CaptureAsync(() => writer.SaveSummaryAsync("Role", "v"));
+                Assert.That(failure, Is.InstanceOf<IOException>());
+                Assert.That(failure.InnerException, Is.InstanceOf<InvalidOperationException>());
+            }
+            finally { DeleteRoot(root); }
         }
 
         [Test]

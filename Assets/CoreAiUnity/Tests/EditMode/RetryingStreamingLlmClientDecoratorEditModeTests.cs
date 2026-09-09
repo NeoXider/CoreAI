@@ -1,6 +1,7 @@
 #if COREAI_LLM
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -261,6 +262,209 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, inner.CompleteCallCount);
         }
 
+        [TestCase(LlmErrorCode.AuthExpired, 401)]
+        [TestCase(LlmErrorCode.PaymentRequired, 402)]
+        [TestCase(LlmErrorCode.InvalidRequest, 400)]
+        public async Task DefaultStreamingAdapter_CodeOnlyPermanentFailure_IsNotRetried(LlmErrorCode code, int status)
+        {
+            CompletionOnlyFailureClient inner = new(code, status);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 2);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(1, inner.CompleteCallCount, "Optional error text must not override a permanent failure category.");
+            Assert.AreEqual(0, sut.RetryCount);
+            Assert.AreEqual(code, chunks[chunks.Count - 1].ErrorCode);
+            Assert.AreEqual(status, chunks[chunks.Count - 1].HttpStatus);
+        }
+
+        /// <summary>
+        /// A failing chunk is defined by "error text OR a non-None code", the same predicate the
+        /// orchestrator uses to end a turn. Matching only on the text let a code-only failure ride
+        /// through as a benign hint: the provider's category was dropped and the caller was told the
+        /// answer was empty instead of rate-limited.
+        /// </summary>
+        [Test]
+        public async Task MidStreamTransientCodeWithoutText_IsRetriedInsteadOfPassedOnAsAHint()
+        {
+            StubStreamingClient inner = new();
+            inner.NextStreams.Enqueue(new[]
+            {
+                new LlmStreamChunk { ErrorCode = LlmErrorCode.RateLimited }, Text("after the failure"), Done()
+            });
+            inner.NextStreams.Enqueue(new[] { Text("recovered"), Done() });
+            RetryingStreamingLlmClientDecorator sut = new(inner, 1);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(1, sut.RetryCount, "A retryable code is a pre-commit failure even with no message.");
+            Assert.AreEqual(2, inner.StreamCallCount);
+            Assert.AreEqual("recovered", Concat(chunks), "Content produced after a failing chunk must not reach the caller.");
+        }
+
+        [Test]
+        public async Task MidStreamPermanentCodeWithoutText_EndsTheStreamWithThatCategory()
+        {
+            StubStreamingClient inner = new();
+            LlmStreamChunk refusal = new() { ErrorCode = LlmErrorCode.PaymentRequired, HttpStatus = 402 };
+            inner.NextStreams.Enqueue(new[] { refusal, Text("after the refusal"), Done() });
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(0, sut.RetryCount, "A permanent refusal answers every replay identically.");
+            Assert.AreEqual(1, inner.StreamCallCount);
+            Assert.AreEqual(1, chunks.Count, "The refusal is terminal: nothing after it belongs to this turn.");
+            Assert.AreSame(refusal, chunks[0], "The provider's own classification must reach the caller.");
+        }
+
+        [Test]
+        public async Task PreCommitChunkWithoutErrorOrCode_StaysABenignHintAndTheStreamContinues()
+        {
+            StubStreamingClient inner = new();
+            LlmStreamChunk hint = new() { Model = "gpt-test" };
+            inner.NextStreams.Enqueue(new[] { hint, Text("answer"), Done() });
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(0, sut.RetryCount);
+            Assert.AreEqual(1, inner.StreamCallCount);
+            Assert.AreSame(hint, chunks[0], "A chunk with no error text and no code carries metadata, not a failure.");
+            Assert.AreEqual("answer", Concat(chunks));
+        }
+
+        [Test]
+        public async Task NullChunkBeforeVisibleAnswer_DoesNotAbortOrReopenTheStream()
+        {
+            StubStreamingClient inner = new();
+            inner.NextStreams.Enqueue(new[] { null, Text("answer"), Done() });
+            RetryingStreamingLlmClientDecorator sut = new(inner, 2);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual("answer", Concat(chunks));
+            Assert.AreEqual(1, inner.StreamCallCount);
+            Assert.AreEqual(0, sut.RetryCount);
+        }
+
+        [Test]
+        public async Task NullOnlyStreams_UseTheBoundedEmptyResponseRetryPolicy()
+        {
+            StubStreamingClient inner = new();
+            inner.NextStreams.Enqueue(new LlmStreamChunk[] { null });
+            inner.NextStreams.Enqueue(new LlmStreamChunk[] { null, null });
+            RetryingStreamingLlmClientDecorator sut = new(inner, 1);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(2, inner.StreamCallCount, "Null entries are not committed output and do not bypass the retry limit.");
+            Assert.AreEqual(1, sut.RetryCount);
+            Assert.AreEqual(LlmErrorCode.EmptyResponse, chunks[chunks.Count - 1].ErrorCode);
+        }
+
+        [Test]
+        public async Task CodeOnlyTransientFailure_AfterRetryBudgetPreservesMetadata()
+        {
+            StubStreamingClient inner = new();
+            LlmStreamChunk terminal = new()
+            {
+                IsDone = true, ErrorCode = LlmErrorCode.BackendUnavailable, HttpStatus = 503, RetryAfterSeconds = 7
+            };
+            inner.NextStreams.Enqueue(new[] { terminal });
+            inner.NextStreams.Enqueue(new[] { terminal });
+            RetryingStreamingLlmClientDecorator sut = new(inner, 1);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreSame(terminal, chunks[chunks.Count - 1], "Retry exhaustion must preserve the provider's original code and metadata.");
+            Assert.AreEqual(2, inner.StreamCallCount);
+            Assert.AreEqual(1, sut.RetryCount);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task CancellationAndDisposalFailure_PreservesCancellationAndDisposesOnce(bool committed)
+        {
+            OperationCanceledException primary = new("Caller stopped the request.");
+            DisposalFailureClient inner = new(committed, primary);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3);
+            Exception observed = null;
+            try { await Drain(sut.CompleteStreamingAsync(Req())); }
+            catch (Exception exception) { observed = exception; }
+
+            Assert.AreSame(primary, observed);
+            Assert.AreSame(inner.CleanupFailure, observed.Data[ClientLimitedLlmClientDecorator.StreamDisposeExceptionDataKey]);
+            Assert.AreEqual(1, inner.Opens);
+            Assert.AreEqual(1, inner.Disposals);
+            Assert.AreEqual(0, sut.RetryCount);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task PermanentFailureAndDisposalFailure_PreservesProviderClassification(bool committed)
+        {
+            LlmClientException primary = new("Authentication expired.", LlmErrorCode.AuthExpired, 401);
+            DisposalFailureClient inner = new(committed, primary);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3, log: _ => throw new IOException("Diagnostic sink failed."));
+            List<LlmStreamChunk> chunks = new();
+            Exception observed = null;
+            try
+            {
+                await foreach (LlmStreamChunk chunk in sut.CompleteStreamingAsync(Req())) chunks.Add(chunk);
+            }
+            catch (Exception exception) { observed = exception; }
+
+            if (committed) Assert.AreSame(primary, observed);
+            else
+            {
+                Assert.IsNull(observed);
+                Assert.AreEqual(LlmErrorCode.AuthExpired, chunks[0].ErrorCode);
+                Assert.AreEqual(401, chunks[0].HttpStatus);
+            }
+            Assert.AreSame(inner.CleanupFailure, primary.Data[ClientLimitedLlmClientDecorator.StreamDisposeExceptionDataKey]);
+            Assert.AreEqual(1, inner.Opens);
+            Assert.AreEqual(1, inner.Disposals);
+            Assert.AreEqual(0, sut.RetryCount);
+        }
+
+        [TestCase(false, LlmErrorCode.AuthExpired, "Provider refused the request.")]
+        [TestCase(true, LlmErrorCode.AuthExpired, "Provider refused the request.")]
+        [TestCase(false, LlmErrorCode.BackendUnavailable, "Provider refused the request.")]
+        [TestCase(true, LlmErrorCode.BackendUnavailable, "Provider refused the request.")]
+        [TestCase(false, LlmErrorCode.AuthExpired, "")]
+        [TestCase(true, LlmErrorCode.AuthExpired, "")]
+        [TestCase(false, LlmErrorCode.BackendUnavailable, "")]
+        [TestCase(true, LlmErrorCode.BackendUnavailable, "")]
+        public async Task ErrorChunkAndDisposalFailure_PreservesTerminalError(bool committed, LlmErrorCode errorCode, string errorText)
+        {
+            LlmStreamChunk terminal = new() { Error = errorText, ErrorCode = errorCode, IsDone = true };
+            DisposalFailureClient inner = new(committed, null) { Terminal = terminal };
+            RetryingStreamingLlmClientDecorator sut = new(inner, 0);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreSame(terminal, chunks[chunks.Count - 1]);
+            Assert.AreEqual(1, inner.Opens);
+            Assert.AreEqual(1, inner.Disposals);
+            Assert.AreEqual(0, sut.RetryCount);
+        }
+
+        [Test]
+        public async Task SuccessfulStreamAndDisposalFailure_SurfacesCleanupFailure()
+        {
+            DisposalFailureClient inner = new(true, null);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3);
+            Exception observed = null;
+            try { await Drain(sut.CompleteStreamingAsync(Req())); }
+            catch (Exception exception) { observed = exception; }
+
+            Assert.AreSame(inner.CleanupFailure, observed);
+            Assert.AreEqual(1, inner.Opens);
+            Assert.AreEqual(1, inner.Disposals);
+            Assert.AreEqual(0, sut.RetryCount);
+        }
+
 
         private static LlmCompletionRequest Req()
         {
@@ -315,6 +519,73 @@ namespace CoreAI.Tests.EditMode
             }
 
             return chunks;
+        }
+
+        private sealed class CompletionOnlyFailureClient : ILlmClient
+        {
+            private readonly LlmErrorCode _code;
+            private readonly int _status;
+            public int CompleteCallCount;
+
+            public CompletionOnlyFailureClient(LlmErrorCode code, int status)
+            {
+                _code = code;
+                _status = status;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                CompleteCallCount++;
+                return Task.FromResult(new LlmCompletionResult { Ok = false, ErrorCode = _code, HttpStatus = _status });
+            }
+        }
+
+        private sealed class DisposalFailureClient : ILlmClient, IAsyncEnumerable<LlmStreamChunk>, IAsyncEnumerator<LlmStreamChunk>
+        {
+            private readonly bool _committed;
+            private readonly Exception _primaryFailure;
+            private int _moves;
+            public readonly IOException CleanupFailure = new("Stream disposal failed.");
+            public int Opens;
+            public int Disposals;
+            public LlmStreamChunk Terminal;
+            public LlmStreamChunk Current { get; private set; }
+
+            public DisposalFailureClient(bool committed, Exception primaryFailure)
+            {
+                _committed = committed;
+                _primaryFailure = primaryFailure;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
+                => throw new NotSupportedException();
+
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                Opens++;
+                return this;
+            }
+
+            public IAsyncEnumerator<LlmStreamChunk> GetAsyncEnumerator(CancellationToken cancellationToken = default) => this;
+
+            public ValueTask<bool> MoveNextAsync()
+            {
+                int move = _moves++;
+                if (_committed && move == 0)
+                {
+                    Current = Text("partial");
+                    return new ValueTask<bool>(true);
+                }
+                if (_primaryFailure != null) return new ValueTask<bool>(Task.FromException<bool>(_primaryFailure));
+                Current = Terminal;
+                return new ValueTask<bool>(Terminal != null && move == (_committed ? 1 : 0));
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Disposals++;
+                return new ValueTask(Task.FromException(CleanupFailure));
+            }
         }
 
         private sealed class RecordingDelayMarshaler : ILlmAsyncMarshaler

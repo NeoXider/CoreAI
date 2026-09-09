@@ -1,10 +1,13 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Messaging;
+using CoreAI.Logging;
 using CoreAI.Session;
 using NUnit.Framework;
 
@@ -142,6 +145,262 @@ namespace CoreAI.Tests.EditMode
         }
 
         #endregion
+
+        private sealed class ExpectedSummaryFailureLog : ILog, IDisposable
+        {
+            private readonly ILog _previous = Log.Instance;
+            private readonly string _failure;
+            private int _observed;
+
+            internal ExpectedSummaryFailureLog(string failure)
+            {
+                _failure = failure;
+                Log.Instance = this;
+            }
+
+            public void Debug(string message, string tag = null) => _previous.Debug(message, tag);
+            public void Info(string message, string tag = null) => _previous.Info(message, tag);
+            public void Warn(string message, string tag = null) => _previous.Warn(message, tag);
+            public void Error(string message, string tag = null)
+            {
+                if (message != null && message.Contains(_failure)) _observed++;
+                else _previous.Error(message, tag);
+            }
+
+            public void Dispose()
+            {
+                Log.Instance = _previous;
+                Assert.AreEqual(1, _observed, "The deliberately injected summary failure must be reported once.");
+            }
+        }
+
+        /// <summary>Shared real-orchestrator scenario for ordinary and streaming durability regressions.</summary>
+        internal sealed class SummaryPreflightScenario
+        {
+            internal readonly BoundedHistory Memory = new();
+            internal readonly ControlledSummary Summary = new();
+            internal readonly CapturingProvider Provider = new();
+            private readonly CapturingSink _sink = new();
+            internal readonly AiOrchestrator Orchestrator;
+            internal int Publications => _sink.PublishCount;
+            internal readonly AiTaskRequest Request = new() { RoleId = "summary-preflight", Hint = "new intent" };
+
+            internal SummaryPreflightScenario(bool denyAuthority = false)
+            {
+                AgentMemoryPolicy policy = new();
+                policy.ConfigureChatHistory(Request.RoleId, true, 8192, true, 1);
+                Orchestrator = new AiOrchestrator(
+                    denyAuthority ? new DenyAiAuthority() : new TestAuthority(), Provider, _sink,
+                    new TestTelemetry(), new AiPromptComposer(new NullSys(), new NullUsr(), null), Memory,
+                    policy, null, null, new TestSettings(), new LocalActorIdentityProvider("summary-owner"),
+                    new DeterministicConversationContextManager(Summary));
+            }
+
+            internal void AssertOldSourceRetained()
+            {
+                Assert.AreEqual(0, Memory.Appends.Count, "Failed preflight must not append and evict old source.");
+                CollectionAssert.AreEqual(Memory.Original, Memory.GetChatHistory(Request.RoleId));
+                Assert.AreEqual(0, Provider.Calls, "The main provider must wait for durable summary confirmation.");
+                Assert.AreEqual(0, Publications, "An unprepared request cannot publish an answer.");
+            }
+
+            internal void AssertPublishedOnce()
+            {
+                Assert.AreEqual(1, Provider.Calls);
+                Assert.AreEqual(1, Publications);
+                Assert.AreEqual(2, Memory.Appends.Count);
+                Assert.AreEqual("user", Memory.Appends[0].Role);
+                Assert.AreEqual(Request.Hint, Memory.Appends[0].Content);
+                Assert.AreEqual("assistant", Memory.Appends[1].Role);
+                Assert.AreEqual("ok", Memory.Appends[1].Content);
+                Assert.AreEqual(0, Summary.SyncCalls, "Async orchestration must not use sync summary storage.");
+                StringAssert.Contains(Memory.Original[0].Content, Summary.Stored,
+                    "The source evicted by bounded appends must already exist in the committed summary.");
+            }
+
+            internal static async Task<Exception> CaptureFailure(Task operation)
+            {
+                try { await operation; return null; }
+                catch (Exception failure) { return failure; }
+            }
+
+            internal static async Task AwaitEntered(Task signal)
+            {
+                Assert.AreSame(signal, await Task.WhenAny(signal, Task.Delay(5000)),
+                    "The operation must reach the controlled async boundary without hanging.");
+                await signal;
+            }
+
+            internal sealed class BoundedHistory : IAgentMemoryStore
+            {
+                internal readonly ChatMessage[] Original =
+                    { new("user", "source that must survive eviction"), new("assistant", "recent answer") };
+                private readonly List<ChatMessage> _history;
+                internal readonly List<ChatMessage> Appends = new();
+                internal BoundedHistory() { _history = new List<ChatMessage>(Original); }
+                public bool TryLoad(string roleId, out AgentMemoryState state) { state = null; return false; }
+                public void Save(string roleId, AgentMemoryState state) { }
+                public void Clear(string roleId) { }
+                public void ClearChatHistory(string roleId) => _history.Clear();
+                public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => _history.ToArray();
+                public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+                {
+                    ChatMessage message = new(role, content);
+                    Appends.Add(message);
+                    _history.Add(message);
+                    while (_history.Count > Original.Length) _history.RemoveAt(0);
+                }
+            }
+
+            internal sealed class ControlledSummary : IConversationSummaryStore, IAsyncConversationSummaryStore
+            {
+                internal readonly TaskCompletionSource<bool> LoadEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                internal readonly TaskCompletionSource<bool> SaveEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                internal TaskCompletionSource<bool> LoadGate;
+                internal TaskCompletionSource<bool> SaveGate;
+                internal const string LoadFailure = "Summary read failed.";
+                internal const string SaveFailure = "Summary confirmation failed.";
+                internal bool FailLoad;
+                internal bool FailSave;
+                internal bool SaveIgnoresCallerCancellation;
+                internal string Stored = "";
+                internal int SyncCalls;
+                public string LoadSummary(string roleId) { SyncCalls++; throw new InvalidOperationException("Sync load forbidden."); }
+                public void SaveSummary(string roleId, string summary) { SyncCalls++; throw new InvalidOperationException("Sync save forbidden."); }
+                public void ClearSummary(string roleId) { SyncCalls++; throw new InvalidOperationException("Sync clear forbidden."); }
+                public async Task<string> LoadSummaryAsync(string roleId, CancellationToken cancellationToken = default)
+                {
+                    LoadEntered.TrySetResult(true);
+                    if (LoadGate != null)
+                    {
+                        using CancellationTokenRegistration registration = cancellationToken.Register(() => LoadGate.TrySetCanceled());
+                        await LoadGate.Task;
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (FailLoad) throw new IOException(LoadFailure);
+                    return Stored;
+                }
+                public async Task SaveSummaryAsync(string roleId, string summary, CancellationToken cancellationToken = default)
+                {
+                    SaveEntered.TrySetResult(true);
+                    if (SaveGate != null) await SaveGate.Task;
+                    if (!SaveIgnoresCallerCancellation) cancellationToken.ThrowIfCancellationRequested();
+                    if (FailSave) throw new IOException(SaveFailure);
+                    Stored = summary;
+                }
+                public Task ClearSummaryAsync(string roleId, CancellationToken cancellationToken = default)
+                { Stored = ""; return Task.CompletedTask; }
+            }
+
+            internal sealed class CapturingProvider : ILlmClient
+            {
+                internal int Calls;
+                internal bool Fail;
+                public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                    CancellationToken cancellationToken = default)
+                {
+                    Calls++;
+                    return Task.FromResult(new LlmCompletionResult { Ok = !Fail, Content = Fail ? null : "ok", Error = Fail ? "HTTP 503" : null });
+                }
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task SummaryPreflight_ConfirmationControlsProviderAndBoundedHistory(bool failConfirmation)
+        {
+            SummaryPreflightScenario scenario = new();
+            scenario.Summary.SaveGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            scenario.Summary.FailSave = failConfirmation;
+            using ExpectedSummaryFailureLog failureLog = failConfirmation
+                ? new ExpectedSummaryFailureLog(SummaryPreflightScenario.ControlledSummary.SaveFailure) : null;
+            Task<string> turn = scenario.Orchestrator.RunTaskAsync(scenario.Request);
+            try
+            {
+                await SummaryPreflightScenario.AwaitEntered(scenario.Summary.SaveEntered.Task);
+                Assert.IsFalse(turn.IsCompleted);
+                scenario.AssertOldSourceRetained();
+            }
+            finally { scenario.Summary.SaveGate.TrySetResult(true); }
+            await turn;
+            if (failConfirmation)
+            {
+                scenario.AssertOldSourceRetained();
+                scenario.Summary.FailSave = false;
+                await scenario.Orchestrator.RunTaskAsync(scenario.Request);
+            }
+            scenario.AssertPublishedOnce();
+        }
+
+        [Test]
+        public async Task SummaryPreflight_FailedLoadPreservesSourceAndCanRetry()
+        {
+            SummaryPreflightScenario scenario = new();
+            scenario.Summary.FailLoad = true;
+            using ExpectedSummaryFailureLog failureLog = new(SummaryPreflightScenario.ControlledSummary.LoadFailure);
+            await scenario.Orchestrator.RunTaskAsync(scenario.Request);
+            scenario.AssertOldSourceRetained();
+            scenario.Summary.FailLoad = false;
+            await scenario.Orchestrator.RunTaskAsync(scenario.Request);
+            scenario.AssertPublishedOnce();
+        }
+
+        [Test]
+        public async Task SummaryPreflight_CancellationDuringLoadDoesNotAppendFromFinally()
+        {
+            SummaryPreflightScenario scenario = new();
+            scenario.Summary.LoadGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using CancellationTokenSource cancellation = new();
+            Task<string> turn = scenario.Orchestrator.RunTaskAsync(scenario.Request, cancellation.Token);
+            await SummaryPreflightScenario.AwaitEntered(scenario.Summary.LoadEntered.Task);
+            cancellation.Cancel();
+            Assert.That(await SummaryPreflightScenario.CaptureFailure(turn), Is.InstanceOf<OperationCanceledException>());
+            scenario.AssertOldSourceRetained();
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task SummaryPreflight_CancellationAfterAcceptedWriteWaitsForConfirmationAndSkipsProvider(bool streaming)
+        {
+            SummaryPreflightScenario scenario = new();
+            scenario.Summary.SaveGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            scenario.Summary.SaveIgnoresCallerCancellation = true;
+            using CancellationTokenSource cancellation = new();
+            Task turn = streaming ? DrainSummaryTurn(scenario, cancellation.Token)
+                : scenario.Orchestrator.RunTaskAsync(scenario.Request, cancellation.Token);
+            try
+            {
+                await SummaryPreflightScenario.AwaitEntered(scenario.Summary.SaveEntered.Task);
+                cancellation.Cancel();
+                Assert.IsFalse(turn.IsCompleted, "An accepted write must finish host confirmation despite caller cancellation.");
+                scenario.AssertOldSourceRetained();
+            }
+            finally { scenario.Summary.SaveGate.TrySetResult(true); }
+            Assert.That(await SummaryPreflightScenario.CaptureFailure(turn), Is.InstanceOf<OperationCanceledException>());
+            Assert.AreEqual(0, scenario.Provider.Calls, "Cancellation must stop the main request after durability finishes.");
+            Assert.AreEqual(0, scenario.Publications);
+            Assert.AreEqual(1, scenario.Memory.Appends.Count, "Confirmed preflight preserves cancellation's write-once user intent.");
+            StringAssert.Contains(scenario.Memory.Original[0].Content, scenario.Summary.Stored);
+        }
+
+        private static async Task DrainSummaryTurn(SummaryPreflightScenario scenario, CancellationToken cancellationToken)
+        {
+            await foreach (LlmStreamChunk chunk in scenario.Orchestrator.RunStreamingAsync(scenario.Request, cancellationToken)) { }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task SummaryPreflight_ProviderFailureAndAuthorityDenialRetainUserIntentOnce(bool denyAuthority)
+        {
+            SummaryPreflightScenario scenario = new(denyAuthority);
+            scenario.Provider.Fail = true;
+            await scenario.Orchestrator.RunTaskAsync(scenario.Request);
+            Assert.AreEqual(denyAuthority ? 0 : 1, scenario.Provider.Calls);
+            Assert.AreEqual(0, scenario.Publications);
+            Assert.AreEqual(1, scenario.Memory.Appends.Count);
+            Assert.AreEqual(scenario.Request.Hint, scenario.Memory.Appends[0].Content);
+            if (!denyAuthority) StringAssert.Contains(scenario.Memory.Original[0].Content, scenario.Summary.Stored);
+        }
 
         // ─────────────────────────────────────────────────
         // ARCH-6: BuildCompletionRequest — all fields forwarded

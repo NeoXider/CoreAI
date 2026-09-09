@@ -1454,11 +1454,38 @@ namespace CoreAI.Ai.LuaCs
             signal.Fire(dt);
         }
 
+        /// <summary>
+        /// Routes every scheduler phase boundary to its matching pump, in scheduler order.
+        /// </summary>
+        /// <remarks>
+        /// WHY all six and not only input: the production frame path advances only the
+        /// scheduler, so any phase ignored here never fires its signals and never steps
+        /// character motors in a built player. Each phase fires exactly once per Advance;
+        /// the standalone Pump* methods stay public for hosts that drive the frame manually.
+        /// </remarks>
         private void PumpSchedulerPhase(SchedulerPhase phase, double deltaSeconds)
         {
-            if (phase == SchedulerPhase.InputProcessing)
+            float frameDelta = (float)deltaSeconds;
+            switch (phase)
             {
-                PumpInput();
+                case SchedulerPhase.PreAnimation:
+                    PumpPreAnimation(frameDelta);
+                    return;
+                case SchedulerPhase.PreSimulation:
+                    PumpPreSimulation(frameDelta);
+                    return;
+                case SchedulerPhase.PostSimulation:
+                    PumpPostSimulation(frameDelta);
+                    return;
+                case SchedulerPhase.Heartbeat:
+                    PumpHeartbeat(frameDelta);
+                    return;
+                case SchedulerPhase.InputProcessing:
+                    PumpInput();
+                    return;
+                case SchedulerPhase.PreRender:
+                    PumpPreRender(frameDelta);
+                    return;
             }
         }
 

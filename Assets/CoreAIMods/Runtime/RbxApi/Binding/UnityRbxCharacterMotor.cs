@@ -43,7 +43,8 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <inheritdoc />
         public RbxVector3 Position => _body == null ? RbxVector3.Zero : RbxSpace.FromUnity(_body.position);
 
-        internal bool IsAvailable => _body != null;
+        /// <summary>Whether the Unity body still exists and can be driven by this motor.</summary>
+        public bool IsAvailable => _body != null;
 
         /// <inheritdoc />
         public RbxVector3 MoveDirection

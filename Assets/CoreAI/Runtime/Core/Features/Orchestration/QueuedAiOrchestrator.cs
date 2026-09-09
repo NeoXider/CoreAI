@@ -1,9 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Tasks.Sources;
 using CoreAI.Authority;
 using CoreAI.Logging;
 
@@ -13,7 +14,7 @@ namespace CoreAI.Ai
     /// <summary>
     /// Adds per-actor fair queueing, concurrency limits, and cancellation scopes around an orchestrator.
     /// </summary>
-    public sealed class QueuedAiOrchestrator : IAiOrchestrationService, IAiActorContextResolver,
+    public sealed class QueuedAiOrchestrator : IAiOrchestrationService, IAiTaskResultService, IAiActorContextResolver,
         IScopedAiTaskCancellation, IDisposable
     {
         private readonly IAiOrchestrationService _inner;
@@ -120,21 +121,35 @@ namespace CoreAI.Ai
         }
 
         /// <inheritdoc />
-        public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+        public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default) =>
+            EnqueueTask(task, false, cancellationToken).Tcs.Task;
+
+        /// <inheritdoc />
+        public bool SupportsTaskResults => _inner is IAiTaskResultService typed && typed.SupportsTaskResults;
+
+        /// <inheritdoc />
+        public Task<LlmCompletionResult> RunTaskResultAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+        {
+            if (!SupportsTaskResults)
+                throw new NotSupportedException("The inner orchestrator does not expose typed task results.");
+            return EnqueueTask(task, true, cancellationToken).TypedTcs.Task;
+        }
+
+        private WorkItem EnqueueTask(AiTaskRequest task, bool typedResult, CancellationToken cancellationToken)
         {
             if (_disposed)
             {
                 throw new ObjectDisposedException(nameof(QueuedAiOrchestrator));
             }
 
-            TaskCompletionSource<string> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
             AiTaskRequest effectiveTask = task ?? new AiTaskRequest();
             ActorContext? actorContext = CaptureActorContext(effectiveTask);
             WorkItem work = new()
             {
                 Task = effectiveTask,
                 OuterCt = cancellationToken,
-                Tcs = tcs,
+                Tcs = typedResult ? null : new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously),
+                TypedTcs = typedResult ? new TaskCompletionSource<LlmCompletionResult>(TaskCreationOptions.RunContinuationsAsynchronously) : null,
                 Priority = effectiveTask.Priority,
                 Sequence = NextSequence(),
                 ActorContext = actorContext,
@@ -147,8 +162,8 @@ namespace CoreAI.Ai
             if (cancellationToken.IsCancellationRequested)
             {
                 RecordUnstartedTurn(work, "pre-cancelled");
-                tcs.TrySetCanceled(cancellationToken);
-                return tcs.Task;
+                work.TrySetCanceled(cancellationToken);
+                return work;
             }
 
             if (cancellationToken.CanBeCanceled)
@@ -158,7 +173,7 @@ namespace CoreAI.Ai
 
             Enqueue(work);
 
-            return tcs.Task;
+            return work;
         }
 
         /// <inheritdoc />
@@ -423,18 +438,31 @@ namespace CoreAI.Ai
                         // Finish it here before inner starts; if cancellation arrives after this check, inner is
                         // always invoked and owns the normal per-invocation teardown instead.
                         RecordUnstartedTurn(w, "cancelled after queue claim");
-                        w.Tcs.TrySetCanceled(token);
+                        w.TrySetCanceled(token);
                         return;
                     }
 
                     // WHY: WebGL player: keep continuation on Unity SynchronizationContext.
                     // ConfigureAwait(false) on single-threaded IL2CPP queues to TaskScheduler.Default
+                    object result;
+                    if (w.TypedResult)
+                    {
+                        IAiTaskResultService typed = (IAiTaskResultService)_inner;
 #if UNITY_WEBGL && !UNITY_EDITOR
-                    string result = await _inner.RunTaskAsync(w.Task, token);
+                        result = await typed.RunTaskResultAsync(w.Task, token);
 #else
-                    string result = await _inner.RunTaskAsync(w.Task, token).ConfigureAwait(false);
+                        result = await typed.RunTaskResultAsync(w.Task, token).ConfigureAwait(false);
 #endif
-                    w.Tcs.TrySetResult(result);
+                    }
+                    else
+                    {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                        result = await _inner.RunTaskAsync(w.Task, token);
+#else
+                        result = await _inner.RunTaskAsync(w.Task, token).ConfigureAwait(false);
+#endif
+                    }
+                    w.TrySetResult(result);
                 }
             }
             // WHY: Таймаут библиотеки наследует OperationCanceledException, но это НЕ отмена: никто
@@ -443,15 +471,15 @@ namespace CoreAI.Ai
             // сообщала ребёнку «запрос остановлен» — то есть что он сам прервал ответ учителя.
             catch (Exception ex) when (TryFindLibraryTimeout(ex, token, out LlmOperationTimeoutException timeout))
             {
-                w.Tcs.TrySetException(timeout);
+                w.TrySetException(timeout);
             }
             catch (Exception ex) when (IsCancellationLike(ex, token))
             {
-                w.Tcs.TrySetCanceled();
+                w.TrySetCanceled();
             }
             catch (Exception ex)
             {
-                w.Tcs.TrySetException(ex);
+                w.TrySetException(ex);
             }
             finally
             {
@@ -563,6 +591,26 @@ namespace CoreAI.Ai
             public AiTaskRequest Task;
             public CancellationToken OuterCt;
             public TaskCompletionSource<string> Tcs;
+            public TaskCompletionSource<LlmCompletionResult> TypedTcs;
+            public bool TypedResult => TypedTcs != null;
+
+            public void TrySetResult(object result)
+            {
+                if (TypedTcs != null) TypedTcs.TrySetResult((LlmCompletionResult)result);
+                else Tcs.TrySetResult((string)result);
+            }
+
+            public void TrySetCanceled(CancellationToken token = default)
+            {
+                if (TypedTcs != null) TypedTcs.TrySetCanceled(token);
+                else Tcs.TrySetCanceled(token);
+            }
+
+            public void TrySetException(Exception error)
+            {
+                if (TypedTcs != null) TypedTcs.TrySetException(error);
+                else Tcs.TrySetException(error);
+            }
             public int Priority;
             public long Sequence;
             public CancellationTokenRegistration PendingCancellation;
@@ -825,7 +873,7 @@ namespace CoreAI.Ai
             {
                 work.PendingCancellation.Dispose();
                 RecordUnstartedTurn(work, "cancelled before task admission");
-                work.Tcs.TrySetCanceled(work.OuterCt);
+                work.TrySetCanceled(work.OuterCt);
                 return;
             }
 
@@ -903,7 +951,7 @@ namespace CoreAI.Ai
             {
                 work.PendingCancellation.Dispose();
                 RecordUnstartedTurn(work, "task queue full");
-                work.Tcs.TrySetException(new AiOrchestrationQueueFullException(work.ActorId, _maxPending));
+                work.TrySetException(new AiOrchestrationQueueFullException(work.ActorId, _maxPending));
                 return;
             }
 
@@ -1143,7 +1191,7 @@ namespace CoreAI.Ai
             {
                 ReleaseScopeToken(work.ScopeKey, work.ScopeCancellation);
                 RecordUnstartedTurn(work, "pending task cancelled");
-                work.Tcs.TrySetCanceled(work.OuterCt);
+                work.TrySetCanceled(work.OuterCt);
             }
         }
 
@@ -1184,7 +1232,7 @@ namespace CoreAI.Ai
                     w.PendingCancellation.Dispose();
                     ReleaseScopeToken(w.ScopeKey, w.ScopeCancellation);
                     RecordUnstartedTurn(w, "pending scoped task cancelled");
-                    w.Tcs.TrySetCanceled();
+                    w.TrySetCanceled();
                 }
             }
 
@@ -1422,22 +1470,55 @@ namespace CoreAI.Ai
             }
         }
 
-        private static async IAsyncEnumerable<LlmStreamChunk> ReadStreamingQueue(AsyncChunkQueue queue)
+        /// <summary>
+        /// What the streaming reader needs from the producer/consumer queue. Internal so the reader's
+        /// interleaving with a producer can be scripted in tests; <see cref="AsyncChunkQueue"/> is the
+        /// only production implementation.
+        /// </summary>
+        internal interface IStreamingChunkSource
+        {
+            /// <summary>Whether the producer has finished writing; set after its last write.</summary>
+            bool IsCompleted { get; }
+
+            /// <summary>Dequeues the next chunk when one is queued.</summary>
+            bool TryTake(out LlmStreamChunk chunk);
+
+            /// <summary>Completes once a chunk or the completion flag became observable after an empty look.</summary>
+            ValueTask<bool> WaitForSignalAsync();
+        }
+
+        internal static async IAsyncEnumerable<LlmStreamChunk> ReadStreamingQueue(IStreamingChunkSource queue)
         {
             while (true)
             {
-                // WHY: No ConfigureAwait(false): WebGL has no working ThreadPool, and the
-                // continuation must come back through UnitySynchronizationContext.
-                // CancellationToken.None on purpose: termination is driven by the producer completing the
-                // queue (it writes a terminal "cancelled" chunk on cancellation), so the consumer drains
-                // to completion instead of dropping that terminal chunk on the caller's cancel.
-                (bool hasValue, LlmStreamChunk chunk) = await queue.TryTakeAsync(CancellationToken.None);
-                if (!hasValue)
+                if (queue.TryTake(out LlmStreamChunk chunk))
                 {
+                    yield return chunk;
+                    continue;
+                }
+
+                if (queue.IsCompleted)
+                {
+                    // WHY the second look: the producer enqueues its last chunk and THEN marks the queue
+                    // complete. A reader that saw an empty queue a moment before the write and the
+                    // completion flag a moment after it used to stop here with that chunk still queued -
+                    // on a multi-threaded host the terminal chunk (usage, executed tool calls, the error)
+                    // vanished. Completion is observed after the write, so one more dequeue is exact.
+                    if (queue.TryTake(out chunk))
+                    {
+                        yield return chunk;
+                        continue;
+                    }
+
                     yield break;
                 }
 
-                yield return chunk;
+                // WHY: No ConfigureAwait(false): WebGL has no working ThreadPool, and the
+                // continuation must come back through UnitySynchronizationContext.
+                // No cancellation token on purpose: termination is driven by the producer completing the
+                // queue (it writes a terminal "cancelled" chunk on cancellation), so the consumer drains
+                // to completion instead of dropping that terminal chunk on the caller's cancel.
+                await queue.WaitForSignalAsync();
             }
         }
 
@@ -1489,7 +1570,7 @@ namespace CoreAI.Ai
             {
                 w.PendingCancellation.Dispose();
                 RecordUnstartedTurn(w, "task queue disposed");
-                w.Tcs.TrySetException(new ObjectDisposedException(nameof(QueuedAiOrchestrator)));
+                w.TrySetException(new ObjectDisposedException(nameof(QueuedAiOrchestrator)));
             }
 
             foreach (StreamWorkItem w in drainedStreamPending)
@@ -1512,16 +1593,29 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Minimal async queue used to bridge streamed chunks between producer and consumer tasks.
+        /// Minimal single-reader async queue used to bridge streamed chunks between the producer task
+        /// and the consumer's iterator.
+        /// <para>
+        /// WHY it is its own <see cref="IValueTaskSource{TResult}"/>: parking the reader used to cost a
+        /// <see cref="TaskCompletionSource{TResult}"/>, its <see cref="Task"/>, the async state machine of
+        /// the take method and its result task - four heap objects for every chunk that arrived after the
+        /// reader had already drained the queue, which on a live stream is nearly every chunk. The wake-up
+        /// promise is now a reusable <see cref="ManualResetValueTaskSourceCore{TResult}"/> owned by the
+        /// queue; parking and waking allocate nothing, and a write with a free reader never touches it.
+        /// </para>
+        /// <para>
+        /// <c>RunContinuationsAsynchronously</c> stays on purpose: the reader awaits the wait directly,
+        /// WITHOUT <c>ConfigureAwait(false)</c>, so the host <see cref="SynchronizationContext"/> captured
+        /// at registration is where the continuation is posted; the flag only forbids resuming the reader
+        /// inline on the producer's stack where there is no context at all.
+        /// </para>
         /// </summary>
-        private sealed class AsyncChunkQueue
+        private sealed class AsyncChunkQueue : IValueTaskSource<bool>, IStreamingChunkSource
         {
             private readonly ConcurrentQueue<LlmStreamChunk> _queue = new();
             private readonly object _signalLock = new();
-
-            private TaskCompletionSource<bool> _signalTcs =
-                new(TaskCreationOptions.RunContinuationsAsynchronously);
-
+            private ManualResetValueTaskSourceCore<bool> _signal = new() { RunContinuationsAsynchronously = true };
+            private bool _parked;
             private volatile bool _completed;
 
             public bool IsCompleted => _completed;
@@ -1554,62 +1648,60 @@ namespace CoreAI.Ai
                 return result;
             }
 
-            public async Task<(bool hasValue, LlmStreamChunk chunk)> TryTakeAsync(CancellationToken ct)
+            public bool TryTake(out LlmStreamChunk chunk)
             {
-                while (true)
+                return _queue.TryDequeue(out chunk);
+            }
+
+            /// <summary>
+            /// Completes as soon as a chunk or the completion flag is observable. The reader re-checks the
+            /// queue afterwards; a completed wait carries no payload of its own.
+            /// </summary>
+            public ValueTask<bool> WaitForSignalAsync()
+            {
+                lock (_signalLock)
                 {
-                    if (_queue.TryDequeue(out LlmStreamChunk chunk))
+                    // WHY: Re-check inside the lock to close the race between Write/Complete and the
+                    // park: a write that landed after the reader's last look would otherwise be
+                    // missed and the reader would park forever.
+                    if (!_queue.IsEmpty || _completed)
                     {
-                        return (true, chunk);
+                        return new ValueTask<bool>(true);
                     }
 
-                    if (_completed)
-                    {
-                        return (false, default);
-                    }
-
-                    Task waitTask;
-                    lock (_signalLock)
-                    {
-                        // WHY: Re-check inside lock to close the race between Write/Complete and the
-                        // we await would be missed and the reader would park forever.
-                        if (_queue.TryDequeue(out LlmStreamChunk chunk2))
-                        {
-                            return (true, chunk2);
-                        }
-
-                        if (_completed)
-                        {
-                            return (false, default);
-                        }
-
-                        waitTask = _signalTcs.Task;
-                    }
-
-                    if (ct.CanBeCanceled)
-                    {
-                        Task cancelTask = Task.Delay(Timeout.Infinite, ct);
-                        await Task.WhenAny(waitTask, cancelTask);
-                        ct.ThrowIfCancellationRequested();
-                    }
-                    else
-                    {
-                        await waitTask;
-                    }
+                    // Only the reader resets, only after it consumed the previous wake-up, and only
+                    // under this lock - so a wake fired by a producer can never be reset away.
+                    _signal.Reset();
+                    _parked = true;
+                    return new ValueTask<bool>(this, _signal.Version);
                 }
             }
 
             private void FireSignal()
             {
-                TaskCompletionSource<bool> toFire;
+                bool wake;
                 lock (_signalLock)
                 {
-                    toFire = _signalTcs;
-                    _signalTcs = new TaskCompletionSource<bool>(
-                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    wake = _parked;
+                    _parked = false;
                 }
 
-                toFire.TrySetResult(true);
+                // Nobody parked - writing a chunk costs no allocation at all. At most one producer sees
+                // the parked flag per park, so the source is completed exactly once per wait.
+                if (wake)
+                {
+                    _signal.SetResult(true);
+                }
+            }
+
+            bool IValueTaskSource<bool>.GetResult(short token) => _signal.GetResult(token);
+
+            ValueTaskSourceStatus IValueTaskSource<bool>.GetStatus(short token) => _signal.GetStatus(token);
+
+            void IValueTaskSource<bool>.OnCompleted(
+                Action<object> continuation, object state, short token, ValueTaskSourceOnCompletedFlags flags)
+            {
+                _signal.OnCompleted(continuation, state, token, flags);
             }
         }
     }

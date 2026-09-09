@@ -422,24 +422,24 @@ namespace CoreAI.Mods.Rbx.Instances
                 {
                     copy._attributes[attribute.Key] = attribute.Value;
                 }
-    
+
                 foreach (string tag in Registry.Tags.GetTags(Id))
                 {
                     Registry.Tags.AddTag(copy.Id, tag);
                 }
-    
+
                 foreach (RbxInstance child in _children)
                 {
                     if (!child._archivable)
                     {
                         continue;
                     }
-    
+
                     RbxInstance childCopy = child.CloneSubtree(
                         overrideOwnership, ownerModId, originTag);
                     childCopy.SetParent(copy);
                 }
-    
+
                 return copy;
             }
             catch

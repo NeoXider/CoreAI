@@ -284,6 +284,82 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// The text-channel wrapper is the native <c>ConfigureOptionsChatClient</c>, so the endpoint
+        /// gets a CLONE with the tool channel stripped - including the raw passthrough copies in
+        /// <c>AdditionalProperties</c> - while the caller's own options object is left intact for the
+        /// invocation layer above.
+        /// </summary>
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task TextChannel_StripsRawToolPassthrough_WithoutTouchingCallerOptions(bool streaming)
+        {
+            OptionsCapturingChatClient provider = new();
+            MEAI.ChatOptions callerOptions = new()
+            {
+                Tools = new List<MEAI.AITool>
+                {
+                    MEAI.AIFunctionFactory.Create((Func<string>)(() => "ok"),
+                        new MEAI.AIFunctionFactoryOptions { Name = "save" })
+                },
+                ToolMode = MEAI.ChatToolMode.Auto,
+                AllowMultipleToolCalls = true,
+                AdditionalProperties = new MEAI.AdditionalPropertiesDictionary
+                {
+                    ["tools"] = "raw", ["tool_choice"] = "required", ["parallel_tool_calls"] = true,
+                    ["temperature_override"] = 0.3f
+                }
+            };
+            MEAI.IChatClient wrapped = MeaiLlmClient.StripNativeToolChannel(provider);
+            if (streaming)
+            {
+                await foreach (MEAI.ChatResponseUpdate _ in wrapped.GetStreamingResponseAsync(
+                    Array.Empty<MEAI.ChatMessage>(), callerOptions)) { }
+            }
+            else
+            {
+                await wrapped.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(), callerOptions);
+            }
+
+            MEAI.ChatOptions seen = provider.Options.Single();
+            Assert.AreNotSame(callerOptions, seen);
+            Assert.IsNull(seen.Tools);
+            Assert.IsNull(seen.ToolMode);
+            Assert.IsNull(seen.AllowMultipleToolCalls);
+            Assert.IsFalse(seen.AdditionalProperties.ContainsKey("tools"));
+            Assert.IsFalse(seen.AdditionalProperties.ContainsKey("tool_choice"));
+            Assert.IsFalse(seen.AdditionalProperties.ContainsKey("parallel_tool_calls"));
+            Assert.IsTrue(seen.AdditionalProperties.ContainsKey("temperature_override"));
+
+            Assert.AreEqual(1, callerOptions.Tools.Count, "The caller's options must survive untouched.");
+            Assert.IsNotNull(callerOptions.ToolMode);
+            Assert.IsTrue(callerOptions.AdditionalProperties.ContainsKey("tools"));
+        }
+
+        private sealed class OptionsCapturingChatClient : MEAI.IChatClient
+        {
+            public List<MEAI.ChatOptions> Options { get; } = new();
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> messages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                Options.Add(options);
+                return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "ok")));
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                Options.Add(options);
+                await Task.CompletedTask;
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "ok");
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null) => null;
+            public void Dispose() { }
+        }
+
         private sealed class TextChannelChatClient : MEAI.IChatClient
         {
             public List<MEAI.ChatOptions> Options { get; } = new();
@@ -694,12 +770,18 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(20, result.CacheWriteTokens);
         }
 
-        [TestCase(0L)]
-        [TestCase(17L)]
-        public async Task CompleteAsync_TypedCacheReadWinsWithoutCountingProviderAliasAgain(long typedRead)
+        /// <summary>
+        /// Cache counters have ONE carrier: <c>AdditionalCounts</c>. The OpenAI wire alias
+        /// <c>prompt_tokens_details.cached_tokens</c> is therefore counted exactly once as a read, and
+        /// a vendor <c>cache_creation_*</c> key exactly once as a write. There is no second typed
+        /// carrier to double-count against or take precedence over (the typed
+        /// <c>UsageDetails.CachedInputTokenCount</c> arrives only in Microsoft.Extensions.AI 10.x,
+        /// above the consumer's 9.10.2 floor, and has no counterpart for cache WRITES in any version).
+        /// </summary>
+        [Test]
+        public async Task CompleteAsync_CacheCountersComeFromAdditionalCountsExactlyOnce()
         {
             MEAI.ChatResponse response = ScriptedUsageChatClient.TextResponse("answer", 100);
-            response.Usage.CachedInputTokenCount = typedRead;
             response.Usage.AdditionalCounts = new MEAI.AdditionalPropertiesDictionary<long>
             {
                 ["prompt_tokens_details.cached_tokens"] = 17,
@@ -712,7 +794,7 @@ namespace CoreAI.Tests.EditMode
                 memoryStore: null);
             LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest { UserPayload = "hi" });
             Assert.IsTrue(result.Ok);
-            Assert.AreEqual(typedRead, result.CacheReadTokens);
+            Assert.AreEqual(17, result.CacheReadTokens);
             Assert.AreEqual(9, result.CacheWriteTokens);
         }
 
@@ -733,6 +815,86 @@ namespace CoreAI.Tests.EditMode
             LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest { UserPayload = "hi" });
             Assert.IsTrue(result.Ok);
             Assert.AreEqual("final answer", result.Content);
+        }
+
+        /// <summary>
+        /// The visible reply of one message is the native <c>ChatMessage.Text</c>: every
+        /// <c>TextContent</c> of that message concatenated, with tool calls and reasoning left out.
+        /// Guards the hand-rolled concatenation that used to sit here from coming back.
+        /// </summary>
+        [Test]
+        public async Task CompleteAsync_FinalAssistantMessage_ConcatenatesTextPartsAndDropsNonText()
+        {
+            MEAI.ChatResponse response = new(new List<MEAI.ChatMessage>
+            {
+                new(MEAI.ChatRole.Assistant, new List<MEAI.AIContent>
+                {
+                    new MEAI.TextContent("visible one. "),
+                    new MEAI.TextReasoningContent("private chain of thought"),
+                    new MEAI.FunctionCallContent("call-1", "lookup", new Dictionary<string, object>()),
+                    new MEAI.TextContent("visible two.")
+                })
+            });
+            MeaiLlmClient client = new(new ScriptedUsageChatClient(response),
+                GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(),
+                supportsNativeToolCalling: true,
+                memoryStore: null);
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest { UserPayload = "hi" });
+            Assert.IsTrue(result.Ok, result.Error);
+            Assert.AreEqual("visible one. visible two.", result.Content);
+            Assert.AreEqual("private chain of thought", result.ReasoningContent);
+        }
+
+        /// <summary>
+        /// Streaming counterpart: a single update carrying several <c>TextContent</c> parts yields all
+        /// of them, not just the first, because the text comes from the native
+        /// <c>ChatResponseUpdate.Text</c>. Reasoning content is not <c>TextContent</c> and stays out of
+        /// the visible stream.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_UpdateWithSeveralTextParts_EmitsAllOfThem()
+        {
+            MultiPartStreamingChatClient provider = new();
+            MeaiLlmClient client = new(provider, GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
+            System.Text.StringBuilder visible = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(
+                new LlmCompletionRequest { UserPayload = "hi" }))
+            {
+                Assert.IsTrue(string.IsNullOrEmpty(chunk.Error), chunk.Error);
+                visible.Append(chunk.Text ?? "");
+            }
+
+            Assert.AreEqual("alpha beta", visible.ToString());
+        }
+
+        private sealed class MultiPartStreamingChatClient : MEAI.IChatClient
+        {
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> messages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default) =>
+                throw new NotSupportedException();
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "")
+                {
+                    Contents = new List<MEAI.AIContent>
+                    {
+                        new MEAI.TextContent("alpha "),
+                        new MEAI.TextReasoningContent("private chain of thought"),
+                        new MEAI.TextContent("beta")
+                    }
+                };
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Tool, "tool chatter never shown");
+                await Task.CompletedTask;
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null) => null;
+            public void Dispose() { }
         }
 
         [Test]

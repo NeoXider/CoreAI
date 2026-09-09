@@ -1,3 +1,7 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
 namespace CoreAI.Ai
 {
     /// <summary>
@@ -5,7 +9,7 @@ namespace CoreAI.Ai
     /// </summary>
     public sealed class ConversationContextSnapshot
     {
-        private readonly object _commitGate = new();
+        private readonly SemaphoreSlim _commitGate = new(1, 1);
         /// <summary>Summary of older messages that were compacted out of the live chat window.</summary>
         public string Summary { get; set; } = "";
 
@@ -16,16 +20,36 @@ namespace CoreAI.Ai
         public bool WasCompacted { get; set; }
 
         internal System.Action CommitSummary { get; set; }
+        internal Func<CancellationToken, Task> CommitSummaryAsync { get; set; }
 
         internal void Commit()
         {
-            lock (_commitGate)
+            if (!_commitGate.Wait(0))
+                throw new InvalidOperationException("Summary commit is already running; await CommitAsync instead.");
+            try
             {
-                // WHY: A failed durable write remains retryable; concurrent consumers cannot publish
-                // the same summary twice after one of them has committed it successfully.
+                if (CommitSummaryAsync != null)
+                    throw new InvalidOperationException("This snapshot requires asynchronous durability confirmation; await CommitAsync.");
                 CommitSummary?.Invoke();
                 CommitSummary = null;
             }
+            finally { _commitGate.Release(); }
+        }
+
+        internal async Task CommitAsync(CancellationToken cancellationToken = default)
+        {
+            await _commitGate.WaitAsync(cancellationToken);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (CommitSummary != null)
+                    throw new InvalidOperationException("BuildSnapshotAsync is required for nonblocking asynchronous summary persistence.");
+                if (CommitSummaryAsync == null) return;
+                await CommitSummaryAsync(cancellationToken);
+                // WHY: The store owns post-commit cancellation and durability; only acknowledged success consumes the callback.
+                CommitSummaryAsync = null;
+            }
+            finally { _commitGate.Release(); }
         }
     }
 }

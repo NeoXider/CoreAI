@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -118,7 +119,7 @@ namespace CoreAI.Ai
             AppendCanonicalPart(canonical, scope.SessionId);
             AppendCanonicalPart(canonical, scope.TopicId);
             AppendCanonicalPart(canonical, roleId);
-            return ScopedKeyPrefix + Sha256Hex(canonical.ToString());
+            return PrefixedDigest(ScopedKeyPrefix, ScopedKeys, canonical.ToString());
         }
 
         private static string ResolveActorId(string actorId, AgentMemoryScope scope, string roleId)
@@ -149,7 +150,7 @@ namespace CoreAI.Ai
             }
 
             AppendCanonicalPart(canonical, roleId);
-            return ActorKeyPrefix + Sha256Hex(canonical.ToString());
+            return PrefixedDigest(ActorKeyPrefix, ActorKeys, canonical.ToString());
         }
 
         /// <summary>
@@ -186,21 +187,52 @@ namespace CoreAI.Ai
             sb.Append(raw.Length).Append(':').Append(raw).Append(';');
         }
 
-        private static string Sha256Hex(string value)
+        /// <summary>Upper bound on memoized keys per prefix; a table is cleared when it reaches this.</summary>
+        private const int KeyCacheCapacity = 512;
+
+        private static readonly object KeyCacheGate = new();
+        private static readonly Dictionary<string, string> ScopedKeys = new(StringComparer.Ordinal);
+        private static readonly Dictionary<string, string> ActorKeys = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// <c>prefix + SHA-256 hex of the canonical tuple</c>, memoized by the tuple text.
+        /// <para>
+        /// WHY: every memory-store call of a scoped host - each history append, each history read, each
+        /// memory load and save, several per turn - derived its storage key by hashing the same handful
+        /// of (scope, actor, role) tuples again: a fresh <see cref="SHA256"/> instance, the UTF-8 bytes,
+        /// thirty-two formatted strings for the hex and the prefixed concatenation. A process sees only
+        /// a few distinct tuples, and the key is a pure function of the text, so remembering it is exact;
+        /// the tables are small and hold strings only, so they survive domain reloads harmlessly.
+        /// </para>
+        /// </summary>
+        private static string PrefixedDigest(string prefix, Dictionary<string, string> cache, string canonical)
         {
-            byte[] digest;
-            using (SHA256 sha = SHA256.Create())
+            lock (KeyCacheGate)
             {
-                digest = sha.ComputeHash(Encoding.UTF8.GetBytes(value));
+                if (cache.TryGetValue(canonical, out string cached))
+                {
+                    return cached;
+                }
             }
 
-            StringBuilder sb = new(digest.Length * 2);
-            for (int i = 0; i < digest.Length; i++)
+            string key = prefix + ComputeSha256Hex(canonical);
+            lock (KeyCacheGate)
             {
-                sb.Append(digest[i].ToString("x2"));
+                if (cache.Count >= KeyCacheCapacity)
+                {
+                    cache.Clear();
+                }
+
+                cache[canonical] = key;
             }
 
-            return sb.ToString();
+            return key;
+        }
+
+        private static string ComputeSha256Hex(string value)
+        {
+            using SHA256 sha = SHA256.Create();
+            return CoreAI.Audit.AuditHash.ByteArrayToHex(sha.ComputeHash(Encoding.UTF8.GetBytes(value)));
         }
     }
 

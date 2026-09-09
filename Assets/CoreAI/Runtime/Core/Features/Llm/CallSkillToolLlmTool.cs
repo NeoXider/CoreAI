@@ -22,26 +22,34 @@ namespace CoreAI.Ai
     public sealed class ResolvedLlmToolInvocation
     {
         private readonly SkillToolDescriptor _descriptor;
-        private readonly string _argumentsJson;
+        private readonly JObject _arguments;
+        private string _argumentsJson;
 
-        internal ResolvedLlmToolInvocation(SkillToolDescriptor descriptor, string argumentsJson)
+        internal ResolvedLlmToolInvocation(SkillToolDescriptor descriptor, JObject arguments)
         {
             _descriptor = descriptor;
-            _argumentsJson = argumentsJson;
+            _arguments = arguments ?? new JObject();
         }
 
         public ILlmTool SourceTool => _descriptor.SourceTool;
         public string Name => _descriptor.Name;
+
+        // WHY built from the parsed object: the arguments arrive as ONE JSON string, and this call used to
+        // parse it three times per skill tool call - once to validate it, once here for the
+        // duplicate-call signature, once again to invoke. The parse happens once, in the resolver.
         public IDictionary<string, object> Arguments => new ReadOnlyDictionary<string, object>(
-            SkillSetToolResolver.CreateArguments(_argumentsJson));
+            SkillSetToolResolver.CreateArguments(_arguments));
+
+        /// <summary>Compact JSON of the captured arguments, produced on first use for JSON-invocable tools.</summary>
+        private string ArgumentsJson => _argumentsJson ??= _arguments.ToString(Formatting.None);
 
         /// <summary>Invokes the captured binding, honoring cancellation before any tool body is entered.</summary>
         public async Task<object> InvokeAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             object result = _descriptor.JsonTool != null
-                ? await _descriptor.JsonTool.InvokeJsonAsync(_argumentsJson, cancellationToken)
-                : await _descriptor.Function.InvokeAsync(SkillSetToolResolver.CreateArguments(_argumentsJson),
+                ? await _descriptor.JsonTool.InvokeJsonAsync(ArgumentsJson, cancellationToken)
+                : await _descriptor.Function.InvokeAsync(SkillSetToolResolver.CreateArguments(_arguments),
                     cancellationToken);
             return SkillSetToolResolver.SerializeResult(result);
         }
@@ -97,10 +105,28 @@ namespace CoreAI.Ai
 
             private readonly Func<IReadOnlyList<ILlmTool>> _directToolsProvider;
 
-            // WHY: When the backing list is a live MutableSkillCatalog (skill authoring), the tool map is
-            // rebuilt per call so a tool exposed by a just-authored skill is immediately invocable.
-            private readonly bool _isLive;
+            // WHY: When the backing list is a live MutableSkillCatalog (skill authoring), the tool map
+            // follows the catalog so a tool exposed by a just-authored skill is immediately invocable.
+            // It is rebuilt only when the catalog's version moves: building it creates every skill tool's
+            // MEAI function by reflection and serializes every schema, and doing that on every call made
+            // each call_skill_tool invocation (and each per-request allowlist probe) pay the full cost of
+            // registering the catalog again.
+            private readonly MutableSkillCatalog _liveCatalog;
+            private readonly object _liveMapGate = new();
             private readonly Dictionary<string, SkillToolDescriptor> _toolsByName;
+            private LiveToolMap _liveMap;
+
+            private sealed class LiveToolMap
+            {
+                public LiveToolMap(long version, Dictionary<string, SkillToolDescriptor> map)
+                {
+                    Version = version;
+                    Map = map;
+                }
+
+                public long Version { get; }
+                public Dictionary<string, SkillToolDescriptor> Map { get; }
+            }
 
             public CallSkillToolProxy(
                 IReadOnlyList<SkillSet> skills,
@@ -108,17 +134,42 @@ namespace CoreAI.Ai
                 Func<IReadOnlyList<ILlmTool>> directToolsProvider)
             {
                 if (skills == null) throw new ArgumentNullException(nameof(skills));
-                _skills = skills is MutableSkillCatalog ? skills : new List<SkillSet>(skills).AsReadOnly();
+                _liveCatalog = skills as MutableSkillCatalog;
+                _skills = _liveCatalog ?? (IReadOnlyList<SkillSet>)new List<SkillSet>(skills).AsReadOnly();
                 SkillSetToolResolver.ValidateCatalog(_skills);
                 _allowedToolNames = allowedToolNames == null ? null : new List<string>(allowedToolNames).AsReadOnly();
                 _directToolsProvider = directToolsProvider;
-                _isLive = skills is MutableSkillCatalog;
-                _toolsByName = _isLive ? null : BuildToolMap(_skills, allowedToolNames);
+                _toolsByName = _liveCatalog != null ? null : BuildToolMap(_skills, allowedToolNames);
             }
 
             private Dictionary<string, SkillToolDescriptor> ResolveToolMap()
             {
-                return _isLive ? BuildToolMap(_skills, _allowedToolNames) : _toolsByName;
+                if (_liveCatalog == null)
+                {
+                    return _toolsByName;
+                }
+
+                LiveToolMap cached = Volatile.Read(ref _liveMap);
+                if (cached != null && cached.Version == _liveCatalog.Version)
+                {
+                    return cached.Map;
+                }
+
+                lock (_liveMapGate)
+                {
+                    cached = _liveMap;
+                    // WHY the version is read BEFORE building: a catalog change that lands during the
+                    // build leaves the map tagged with the older version, so the next call rebuilds.
+                    long version = _liveCatalog.Version;
+                    if (cached != null && cached.Version == version)
+                    {
+                        return cached.Map;
+                    }
+
+                    Dictionary<string, SkillToolDescriptor> map = BuildToolMap(_skills, _allowedToolNames);
+                    Volatile.Write(ref _liveMap, new LiveToolMap(version, map));
+                    return map;
+                }
             }
 
             public override string Name => "call_skill_tool";
@@ -172,8 +223,7 @@ namespace CoreAI.Ai
                 }
                 try
                 {
-                    JObject parsed = JObject.Parse(json);
-                    invocation = new ResolvedLlmToolInvocation(descriptor, parsed.ToString(Formatting.None));
+                    invocation = new ResolvedLlmToolInvocation(descriptor, JObject.Parse(json));
                     return true;
                 }
                 catch (JsonException ex)

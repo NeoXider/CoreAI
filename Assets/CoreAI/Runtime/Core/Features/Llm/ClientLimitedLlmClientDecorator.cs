@@ -97,7 +97,7 @@ namespace CoreAI.Infrastructure.Llm
             bool succeeded = false;
             try
             {
-                LlmCompletionResult result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                LlmCompletionResult result = await _inner.CompleteAsync(request, cancellationToken);
                 succeeded = result != null && result.Ok;
                 return result;
             }

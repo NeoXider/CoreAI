@@ -946,7 +946,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     case SchedulerPhase.PreSimulation:
                         RecordMissing(store, missedBoundaries,
                             "attribute_PreAnimation", "PreAnimation");
-                        bindings.PumpPreSimulation((float)deltaSeconds);
                         workspace.SetAttribute("PreSimulation", true);
                         break;
                     case SchedulerPhase.PostSimulation:
@@ -961,7 +960,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                         RecordMissing(store, missedBoundaries,
                             "attribute_Legacy", "legacy script resumption");
                         RecordMissing(store, missedBoundaries, "attribute_Task", "task resumption");
-                        bindings.PumpHeartbeat((float)deltaSeconds);
                         workspace.SetAttribute("Heartbeat", true);
                         break;
                     case SchedulerPhase.InputProcessing:
@@ -974,7 +972,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                         RecordMissing(store, missedBoundaries, "input", "input processing signal");
                         RecordMissing(store, missedBoundaries,
                             "attribute_InputProcessing", "input processing mutation");
-                        bindings.PumpPreRender((float)deltaSeconds);
                         workspace.SetAttribute("PreRender", true);
                         break;
                 }

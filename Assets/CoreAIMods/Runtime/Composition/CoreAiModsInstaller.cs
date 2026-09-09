@@ -11,6 +11,7 @@ using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Mods.WorldPackages;
+using CoreAI.Scripting;
 using Newtonsoft.Json;
 using UnityEngine;
 using VContainer;
@@ -251,6 +252,10 @@ namespace CoreAI.Composition
                         .GetActorContext(BuiltInAgentRoleIds.Programmer),
                     Capabilities = scriptCapabilities,
                     OneOffCapabilities = oneOffCapabilities,
+                    // WHY: a one-shot chunk may run for seconds under its wall-clock budget; on a
+                    // single-threaded player that would freeze the whole page (measured: ~6 s on WebGL).
+                    // The player-loop yielder lets the guard hand a frame back while the chunk runs.
+                    FrameYielder = PlayerLoopScriptFrameYielder.Instance,
                     // WHY: one shared Roblox world too — persistent mods and one-off execute_lua resolve
                     // the same InstanceRegistry/game/workspace, so an instance a mod creates is the one the
                     // console navigates (roadmap §5.1.3). Opt-in per stack; wired here for production.
@@ -689,6 +694,7 @@ namespace CoreAI.Composition
                     .GetActorContext(BuiltInAgentRoleIds.Programmer),
                 Capabilities = scriptCapabilities,
                 OneOffCapabilities = oneOffCapabilities,
+                FrameYielder = PlayerLoopScriptFrameYielder.Instance,
                 RbxApi = rbxApi,
                 RegisterWorldEditBuildBindings = false
             });

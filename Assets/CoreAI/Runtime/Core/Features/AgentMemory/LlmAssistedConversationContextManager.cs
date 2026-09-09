@@ -79,7 +79,10 @@ namespace CoreAI.Ai
             // the FULL history. Pruning first would drop superseded tool results before they are
             // summarized and they would vanish from every future prompt without a trace. Pruning
             // still applies, but only to the emitted recent tail (prompt-level noise control).
-            string storedSummary = _summaryStore.LoadSummary(roleId) ?? "";
+            string summaryRoleId = roleId;
+            IAsyncConversationSummaryStore asyncStore = DeterministicConversationContextManager.RequireAsyncStore(_summaryStore, ref summaryRoleId);
+            string storedSummary = await asyncStore.LoadSummaryAsync(summaryRoleId, cancellationToken) ?? "";
+            cancellationToken.ThrowIfCancellationRequested();
             // WHY: The persisted summary carries a machine-only fold marker as its final line; every
             // snapshot/LLM-facing path must see only the clean prose.
             string cleanStoredSummary = ConversationFoldMarker.Strip(storedSummary);
@@ -143,7 +146,7 @@ namespace CoreAI.Ai
                     splitExclusive,
                     foldStart,
                     orchestrationTraceId ?? "t",
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -178,14 +181,9 @@ namespace CoreAI.Ai
                 WasCompacted = true
             };
 
-            if (buildArgs?.DeferSummaryPersistence == true)
-            {
-                snapshot.CommitSummary = () => _summaryStore.SaveSummary(roleId, persistedSummary);
-            }
-            else
-            {
-                _summaryStore.SaveSummary(roleId, persistedSummary);
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            snapshot.CommitSummaryAsync = token => asyncStore.SaveSummaryAsync(summaryRoleId, persistedSummary, token);
+            if (buildArgs?.DeferSummaryPersistence != true) await snapshot.CommitAsync(cancellationToken);
 
             return snapshot;
         }

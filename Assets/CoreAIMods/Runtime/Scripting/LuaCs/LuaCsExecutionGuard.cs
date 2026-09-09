@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Threading.Tasks;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
+using CoreAI.Scripting;
 using Lua;
 using Lua.Runtime;
 
@@ -107,7 +109,16 @@ namespace CoreAI.Sandbox.LuaCs
     /// per-instruction guarantee this backstop replaced. This is the only defense against allocation
     /// bombs built from plain string concatenation: that is ordinary VM opcodes with no library call
     /// site to cap, unlike <c>string.rep</c>/<c>string.format</c>/<c>table.concat</c>, which are capped
-    /// directly in <see cref="LuaCsSecureEnvironment"/>.
+    /// directly in <see cref="LuaCsSecureEnvironment"/>. The allocation rule itself — a sampled suspicion
+    /// that only becomes a trip once a forced collection confirms the growth is LIVE — lives in
+    /// <see cref="LuaCsAllocationBudget"/>, shared with the per-resume coroutine hook.
+    /// </para>
+    /// <para>
+    /// <see cref="ExecuteAsync"/> additionally lets the hook release the host frame every
+    /// <see cref="FrameYieldSliceMs"/> through an <see cref="IScriptFrameYielder"/>, so a chunk that
+    /// legitimately runs for seconds does not freeze a single-threaded player. The synchronous
+    /// <c>Execute</c> overloads never arm a yielder: their caller is blocked in
+    /// <c>GetAwaiter().GetResult()</c>, so awaiting a frame from inside the hook could not complete.
     /// </para>
     /// </summary>
     public sealed class LuaCsExecutionGuard
@@ -155,6 +166,14 @@ namespace CoreAI.Sandbox.LuaCs
         // allocation budget by more than ~one doubling between samples (see the type doc). Each hook fire
         // charges this many instructions to the step budget, so the SAME max-instruction limit holds.
         private const int HookInstructionBatch = 4;
+
+        /// <summary>
+        /// Wall-clock slice a chunk may hold the host frame for before the hook yields it (async path
+        /// only). Sized as a fraction of a 60 Hz frame: short enough that a runaway never stutters the
+        /// host, long enough that an ordinary chunk — which finishes in far less than this — never pays
+        /// for a single yield.
+        /// </summary>
+        public const int FrameYieldSliceMs = 6;
 
         // WHY: Pooled to keep steady-state allocation at zero — hundreds of guarded calls per second would
         // otherwise build a fresh LuaFunction/closure/Stopwatch each time, churning the single-threaded
@@ -222,7 +241,12 @@ namespace CoreAI.Sandbox.LuaCs
                 throw new ArgumentNullException(nameof(closure));
             }
 
-            GuardHook hook = BeginGuard(state, out Stack<GuardHook> installed);
+            // WHY: null yielder, always. A synchronous caller is blocked in GetAwaiter().GetResult()
+            // below, so a hook that awaited a frame yield would wait for a loop iteration that cannot
+            // run until this very call returns — a guaranteed deadlock on the single WebGL thread. The
+            // yielder is a parameter of BeginGuard rather than a field precisely so that no synchronous
+            // entry point can arm one.
+            GuardHook hook = BeginGuard(state, null, out Stack<GuardHook> installed);
             bool completed = false;
             try
             {
@@ -236,6 +260,51 @@ namespace CoreAI.Sandbox.LuaCs
             }
             finally
             {
+                EndGuard(state, installed, hook, completed);
+            }
+        }
+
+        /// <summary>
+        /// Runs a loaded Lua-CSharp chunk asynchronously under the guard, releasing the host frame every
+        /// <see cref="FrameYieldSliceMs"/> when <paramref name="frameYielder"/> is supplied.
+        /// <para>
+        /// This is the one-shot chunk entry (<c>execute_lua</c>). The synchronous <see cref="Execute(LuaState,
+        /// LuaClosure, CancellationToken)"/> stays for the short mod-event/handler call sites, which run
+        /// at 20 Hz inside the host loop and have nothing to yield to.
+        /// </para>
+        /// </summary>
+        /// <param name="state">The sandboxed state to run on.</param>
+        /// <param name="closure">The loaded chunk.</param>
+        /// <param name="frameYielder">Host frame port; null runs without yielding, exactly as before.</param>
+        /// <param name="cancellationToken">Cancels the run; the guard hook is restored either way.</param>
+        public async Task<LuaValue[]> ExecuteAsync(
+            LuaState state,
+            LuaClosure closure,
+            IScriptFrameYielder frameYielder = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (state == null)
+            {
+                throw new ArgumentNullException(nameof(state));
+            }
+
+            if (closure == null)
+            {
+                throw new ArgumentNullException(nameof(closure));
+            }
+
+            GuardHook hook = BeginGuard(state, frameYielder, out Stack<GuardHook> installed);
+            bool completed = false;
+            try
+            {
+                LuaValue[] results = await state.ExecuteAsync(closure, cancellationToken);
+                completed = true;
+                return results;
+            }
+            finally
+            {
+                // WHY: the same EndGuard as the synchronous path, so a cancelled or timed-out async
+                // chunk re-arms an enclosing guarded call's hook instead of leaving the state unguarded.
                 EndGuard(state, installed, hook, completed);
             }
         }
@@ -258,7 +327,8 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             args ??= Array.Empty<LuaValue>();
-            GuardHook hook = BeginGuard(state, out Stack<GuardHook> installed);
+            // WHY: null yielder — see the note on the synchronous chunk overload above.
+            GuardHook hook = BeginGuard(state, null, out Stack<GuardHook> installed);
             bool completed = false;
             try
             {
@@ -287,10 +357,11 @@ namespace CoreAI.Sandbox.LuaCs
         // WHY: Split into Begin/End rather than a Func<> body wrapper — a delegate body would capture
         // state/closure/function/args into a fresh display-class on EVERY guarded call (20 Hz timers/
         // events across mods), reintroducing the per-call heap churn the pooled GuardHook removes.
-        private GuardHook BeginGuard(LuaState state, out Stack<GuardHook> installed)
+        private GuardHook BeginGuard(LuaState state, IScriptFrameYielder frameYielder,
+            out Stack<GuardHook> installed)
         {
             GuardHook hook = RentHook();
-            hook.Reset(_maxSteps, _timeoutMs, _maxAllocatedBytes);
+            hook.Reset(_maxSteps, _timeoutMs, _maxAllocatedBytes, frameYielder);
 
             installed = InstalledHooks.GetOrCreateValue(state);
             installed.Push(hook);
@@ -354,6 +425,9 @@ namespace CoreAI.Sandbox.LuaCs
                 }
             }
 
+            // WHY: the pool is process-lived, so a returned hook must not keep the caller's frame port
+            // (and whatever it closes over) reachable until the hook happens to be rented again.
+            hook.ClearFrameYielder();
             ReturnHook(hook);
         }
 
@@ -385,8 +459,11 @@ namespace CoreAI.Sandbox.LuaCs
             private long _startTimestamp;
             private long _timeoutTicks;
             private int _timeoutMs;
-            private long _maxAllocatedBytes;
-            private long _allocBaseline;
+            private LuaCsAllocationBudget _allocation;
+            private IScriptFrameYielder _frameYielder;
+            private long _frameYieldSliceTicks;
+            private long _lastYieldTimestamp;
+            private long _yieldedTicks;
             private LuaCsGuardTripKind _trip;
 
             /// <summary>Instruction steps accumulated by the current guarded execution.</summary>
@@ -408,7 +485,8 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             /// <summary>Re-arms a fresh per-call budget onto this reusable hook.</summary>
-            public void Reset(long maxSteps, int timeoutMs, long maxAllocatedBytes)
+            public void Reset(long maxSteps, int timeoutMs, long maxAllocatedBytes,
+                IScriptFrameYielder frameYielder)
             {
                 _steps = 0;
                 _trip = LuaCsGuardTripKind.None;
@@ -422,14 +500,18 @@ namespace CoreAI.Sandbox.LuaCs
                 _startTimestamp = Stopwatch.GetTimestamp();
                 _timeoutTicks = (long)_timeoutMs * Stopwatch.Frequency / 1000;
 
-                _maxAllocatedBytes = maxAllocatedBytes;
+                _allocation.Reset(maxAllocatedBytes);
 
-                // WHY: Uses GC.GetTotalMemory(false) because Unity's Mono does not implement
-                // GC.GetAllocatedBytesForCurrentThread (returns 0 unconditionally, verified empirically).
-                // The process-wide heap total is noisy from concurrent/collected allocations, but a
-                // doubling bomb overwhelms that noise within a few iterations, which is what this
-                // backstop targets.
-                _allocBaseline = maxAllocatedBytes > 0 ? GC.GetTotalMemory(false) : 0;
+                _frameYielder = frameYielder;
+                _frameYieldSliceTicks = (long)FrameYieldSliceMs * Stopwatch.Frequency / 1000;
+                _lastYieldTimestamp = _startTimestamp;
+                _yieldedTicks = 0;
+            }
+
+            /// <summary>Drops the frame port before this hook goes back to the pool.</summary>
+            public void ClearFrameYielder()
+            {
+                _frameYielder = null;
             }
 
             private System.Threading.Tasks.ValueTask<int> Hook(LuaFunctionExecutionContext ctx, CancellationToken ct)
@@ -449,7 +531,13 @@ namespace CoreAI.Sandbox.LuaCs
                 // ~6% (measured) and defeats the timeout in its key case: the count hook does not fire
                 // during a host call, so a handler of mostly expensive bindings (Instance.new, property
                 // writes) can blow a per-frame budget while hitting the sampling threshold zero times.
-                if (Stopwatch.GetTimestamp() - _startTimestamp > _timeoutTicks)
+                //
+                // WHY: _yieldedTicks is subtracted so the budget measures EXECUTED time, matching what it
+                // promises ("~10 s of continuous execution"). Without it, a legitimate long chunk on the
+                // yielding path would spend most of its wall clock waiting for frames and be cut for work
+                // it never did.
+                long now = Stopwatch.GetTimestamp();
+                if (now - _startTimestamp - _yieldedTicks > _timeoutTicks)
                 {
                     _trip = LuaCsGuardTripKind.Timeout;
                     throw new LuaRuntimeException(ctx.State,
@@ -459,26 +547,37 @@ namespace CoreAI.Sandbox.LuaCs
                 // WHY: Backstop for plain concatenation (s = s .. s), which unlike string.rep/format/
                 // table.concat has no library call site to cap — it is ordinary VM opcodes. Checking
                 // allocations between instruction batches is the only place this hook can catch that.
-                if (_maxAllocatedBytes > 0)
+                // The sampled/confirmed rule and why the trip may NOT be decided by the cheap sampled
+                // reading alone live in LuaCsAllocationBudget. Classified by TYPE
+                // (LuaMemoryBudgetException), not message text, so a mod cannot forge the trip.
+                if (_allocation.IsExceeded())
                 {
-                    // WHY: No forced-GC "confirmation" — a forced GC.GetTotalMemory(true) undercounts
-                    // against a garbage-inclusive baseline (the baseline's own garbage gets freed), so the
-                    // trip fires too late. This is a PER-CALL, first-growth backstop, not cumulative:
-                    // GC.GetTotalMemory reports the committed high-water mark, so only the first oversized
-                    // call trips; later calls reuse that space and are bounded by the step/time budgets
-                    // instead. Classified by TYPE (LuaMemoryBudgetException), not message text, so a mod
-                    // cannot forge the trip.
-                    long allocated = GC.GetTotalMemory(false) - _allocBaseline;
-                    if (allocated > _maxAllocatedBytes)
-                    {
-                        _trip = LuaCsGuardTripKind.Memory;
-                        throw new LuaRuntimeException(ctx.State,
-                            new LuaMemoryBudgetException(
-                                $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({_maxAllocatedBytes} bytes)"));
-                    }
+                    _trip = LuaCsGuardTripKind.Memory;
+                    throw new LuaRuntimeException(ctx.State,
+                        new LuaMemoryBudgetException(
+                            $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({_allocation.BudgetBytes} bytes)"));
+                }
+
+                if (_frameYielder != null && now - _lastYieldTimestamp > _frameYieldSliceTicks)
+                {
+                    return YieldFrameAsync(ctx, ct);
                 }
 
                 return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
+            }
+
+            // WHY: kept out of Hook so the fast path stays a plain (non-async) method returning a
+            // completed ValueTask. An async Hook would build a state machine on EVERY fire — hundreds of
+            // guarded calls per second across mods — while this one is entered only on the ~6 ms slice.
+            private async System.Threading.Tasks.ValueTask<int> YieldFrameAsync(
+                LuaFunctionExecutionContext ctx, CancellationToken ct)
+            {
+                long yieldStart = Stopwatch.GetTimestamp();
+                await _frameYielder.YieldFrameAsync(ct);
+                long resumed = Stopwatch.GetTimestamp();
+                _yieldedTicks += resumed - yieldStart;
+                _lastYieldTimestamp = resumed;
+                return ctx.Return();
             }
         }
     }

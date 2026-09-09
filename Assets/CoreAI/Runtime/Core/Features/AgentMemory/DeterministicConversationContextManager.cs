@@ -37,11 +37,26 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot();
             }
 
+            ConversationContextSnapshot snapshot = ProjectSnapshot(roleId, history, roleConfig, buildArgs,
+                _summaryStore.LoadSummary(roleId) ?? "", out string persistedSummary);
+            if (persistedSummary != null)
+            {
+                snapshot.CommitSummary = () => _summaryStore.SaveSummary(roleId, persistedSummary);
+                if (buildArgs?.DeferSummaryPersistence != true) snapshot.Commit();
+            }
+            return snapshot;
+        }
+
+        private ConversationContextSnapshot ProjectSnapshot(string roleId, ChatMessage[] history,
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig, ConversationContextBuildArgs buildArgs,
+            string storedSummary, out string persistedSummary)
+        {
+            persistedSummary = null;
+
             // WHY: Compaction folds the old prefix into the durable rolling summary, so it must see
             // the FULL history. Pruning first would drop superseded tool results before they are
             // summarized and they would vanish from every future prompt without a trace. Pruning
             // still applies, but only to the emitted recent tail (prompt-level noise control).
-            string storedSummary = _summaryStore.LoadSummary(roleId) ?? "";
             // WHY: The persisted summary carries a machine-only fold marker as its final line; every
             // snapshot-facing path must see only the clean prose.
             string cleanStoredSummary = ConversationFoldMarker.Strip(storedSummary);
@@ -100,22 +115,14 @@ namespace CoreAI.Ai
             {
                 // WHY: The limiter runs BEFORE stamping so the fold marker (final line of the persisted
                 // text) can never be trimmed away; the snapshot keeps the clean summary without the marker.
-                string persistedSummary = ConversationFoldMarker.Stamp(compactedSummary, history, splitExclusive);
-                if (buildArgs?.DeferSummaryPersistence == true)
-                {
-                    snapshot.CommitSummary = () => _summaryStore.SaveSummary(roleId, persistedSummary);
-                }
-                else
-                {
-                    _summaryStore.SaveSummary(roleId, persistedSummary);
-                }
+                persistedSummary = ConversationFoldMarker.Stamp(compactedSummary, history, splitExclusive);
             }
 
             return snapshot;
         }
 
         /// <inheritdoc />
-        public Task<ConversationContextSnapshot> BuildSnapshotAsync(
+        public async Task<ConversationContextSnapshot> BuildSnapshotAsync(
             string roleId,
             ChatMessage[] history,
             AgentMemoryPolicy.RoleMemoryConfig roleConfig,
@@ -124,7 +131,26 @@ namespace CoreAI.Ai
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(BuildSnapshot(roleId, history, roleConfig, buildArgs));
+            if (history == null || history.Length == 0) return new ConversationContextSnapshot();
+            string summaryRoleId = roleId;
+            IAsyncConversationSummaryStore asyncStore = RequireAsyncStore(_summaryStore, ref summaryRoleId);
+            string storedSummary = await asyncStore.LoadSummaryAsync(summaryRoleId, cancellationToken) ?? "";
+            cancellationToken.ThrowIfCancellationRequested();
+            ConversationContextSnapshot snapshot = ProjectSnapshot(roleId, history, roleConfig, buildArgs,
+                storedSummary, out string persistedSummary);
+            if (persistedSummary != null)
+            {
+                snapshot.CommitSummaryAsync = token => asyncStore.SaveSummaryAsync(summaryRoleId, persistedSummary, token);
+                if (buildArgs?.DeferSummaryPersistence != true) await snapshot.CommitAsync(cancellationToken);
+            }
+            return snapshot;
+        }
+
+        internal static IAsyncConversationSummaryStore RequireAsyncStore(IConversationSummaryStore store, ref string roleId)
+        {
+            if (store is ScopedConversationSummaryStoreDecorator scoped) return scoped.BindAsync(roleId, out roleId);
+            return store as IAsyncConversationSummaryStore ?? throw new NotSupportedException(
+                "Async context preparation requires IAsyncConversationSummaryStore; explicitly wrap a sync-only backend in BlockingSyncSummaryStoreAsyncAdapter if blocking is acceptable.");
         }
 
         internal static int ResolveMessageLimit(AgentMemoryPolicy.RoleMemoryConfig roleConfig)

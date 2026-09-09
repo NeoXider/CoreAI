@@ -6,6 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Authority;
+using CoreAI.Session;
+using CoreAI.Messaging;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -16,6 +18,182 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class QueuedAiOrchestratorEditModeTests
     {
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task TypedTask_RealOrchestratorFailureRetainsPartialToolsAndUsage(bool thrownFailure)
+        {
+            ReceiptLlmClient provider = new() { ThrowFailure = thrownFailure };
+            AiOrchestrator core = BuildReceiptOrchestrator(provider);
+            using QueuedAiOrchestrator queue = new(core, new AiOrchestrationQueueOptions());
+            LlmCompletionResult result = await queue.RunTaskResultAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "help", SourceTag = "Chat" });
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.RateLimited, result.ErrorCode);
+            Assert.AreEqual("partial", result.Content);
+            Assert.AreEqual("receipt-model", result.Model);
+            Assert.AreEqual(429, result.HttpStatus);
+            Assert.AreEqual(9, result.RetryAfterSeconds);
+            Assert.AreEqual(37, result.TotalTokens);
+            Assert.AreEqual(1, result.ExecutedToolCalls.Count);
+            Assert.AreEqual(1, provider.Calls, "An accepted tool turn must not replay.");
+        }
+
+        [TestCase(false, "provider rejected")]
+        [TestCase(true, "provider rejected")]
+        [TestCase(false, "")]
+        [TestCase(true, "")]
+        public async Task TypedTask_ContextOverflowAfterToolExecutionNeverReplays(bool uiStream, string errorMessage)
+        {
+            ReceiptLlmClient provider = new() { ErrorCode = LlmErrorCode.ContextLengthExceeded, Text = "", ErrorMessage = errorMessage };
+            AiOrchestrator core = BuildReceiptOrchestrator(provider);
+            AiTaskRequest request = new() { RoleId = "Teacher", Hint = "help", SourceTag = "Chat" };
+            if (uiStream)
+            {
+                LlmStreamChunk terminal = null;
+                await foreach (LlmStreamChunk chunk in core.RunStreamingAsync(request)) if (chunk.IsDone) terminal = chunk;
+                Assert.IsNotNull(terminal);
+                Assert.AreEqual(LlmErrorCode.ContextLengthExceeded, terminal.ErrorCode);
+                Assert.AreEqual(1, terminal.ExecutedToolCalls.Count);
+                Assert.AreEqual(37, terminal.TotalTokens);
+            }
+            else
+            {
+                LlmCompletionResult result = await core.RunTaskResultAsync(request);
+                Assert.IsFalse(result.Ok);
+                Assert.AreEqual(LlmErrorCode.ContextLengthExceeded, result.ErrorCode);
+                Assert.AreEqual(1, result.ExecutedToolCalls.Count);
+            }
+            Assert.AreEqual(1, provider.Calls, "A provider's error must not re-execute its completed tool.");
+            Assert.AreEqual(0, provider.Sink.Publications, "A typed failure must not publish a successful command.");
+        }
+
+        [Test]
+        public async Task TypedTask_SummaryPreflightFailureDoesNotEnterProviderOrEvictHistory()
+        {
+            AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario scenario = new();
+            scenario.Summary.FailSave = true;
+            LlmCompletionResult result = await scenario.Orchestrator.RunTaskResultAsync(scenario.Request);
+            Assert.IsFalse(result.Ok);
+            scenario.AssertOldSourceRetained();
+            scenario.Summary.FailSave = false;
+            Assert.IsTrue((await scenario.Orchestrator.RunTaskResultAsync(scenario.Request)).Ok);
+            scenario.AssertPublishedOnce();
+        }
+
+        private static AiOrchestrator BuildReceiptOrchestrator(ReceiptLlmClient provider) => new(
+            new ReceiptAuthority(), provider, provider.Sink, new ReceiptTelemetry(),
+            new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider(), null),
+            null, new AgentMemoryPolicy(), null, null, new CoreAISettingsOptions { EnableStreaming = true },
+            new LocalActorIdentityProvider("typed-receipt-test"));
+        private sealed class ReceiptAuthority : IAuthorityHost
+        {
+            public bool CanRunAiTasks => true;
+            public bool IsServer => true;
+            public bool IsClient => true;
+        }
+        private sealed class ReceiptSink : IAiGameCommandSink { public int Publications; public void Publish(ApplyAiGameCommand command) { Publications++; } }
+        private sealed class ReceiptTelemetry : ISessionTelemetryProvider
+        { public GameSessionSnapshot BuildSnapshot() => new(); }
+        private sealed class ReceiptLlmClient : ILlmClient
+        {
+            public bool ThrowFailure;
+            public readonly ReceiptSink Sink = new();
+            public string ErrorMessage = "provider rejected";
+            public string Text = "partial";
+            public LlmErrorCode ErrorCode = LlmErrorCode.RateLimited;
+            public int Calls;
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken token = default) =>
+                throw new InvalidOperationException("The configured streaming provider must run exactly once.");
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token = default)
+            {
+                Calls++;
+                yield return new LlmStreamChunk { Text = Text, Model = "receipt-model", TotalTokens = 37,
+                    ExecutedToolCalls = new[] { new LlmToolCallTrace("lesson_tool", true, 1, "test") } };
+                if (ThrowFailure) throw new LlmClientException("provider rejected", ErrorCode, 429, 9);
+                yield return new LlmStreamChunk { IsDone = true, Error = ErrorMessage, ErrorCode = ErrorCode,
+                    HttpStatus = 429, RetryAfterSeconds = 9 };
+                await Task.CompletedTask;
+            }
+        }
+
+        [Test]
+        public async Task TypedTask_FailurePreservesMetadataWithoutExecutingLegacyPath()
+        {
+            LlmCompletionResult failure = new() { Ok = false, Content = "partial output", Error = "rate limited",
+                ErrorCode = LlmErrorCode.RateLimited, HttpStatus = 429, RetryAfterSeconds = 3,
+                Model = "test-model", TotalTokens = 17, CacheReadTokens = 8 };
+            TypedResultOrchestrator inner = new(failure);
+            using QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions());
+            LlmCompletionResult result = await queue.RunTaskResultAsync(new AiTaskRequest { Hint = "typed" });
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.RateLimited, result.ErrorCode);
+            Assert.AreEqual(429, result.HttpStatus);
+            Assert.AreEqual(3, result.RetryAfterSeconds);
+            Assert.AreEqual("partial output", result.Content);
+            Assert.AreEqual(17, result.TotalTokens);
+            Assert.AreEqual(8, result.CacheReadTokens);
+            Assert.AreEqual(1, inner.TypedCalls);
+            Assert.AreEqual(0, inner.LegacyCalls);
+        }
+
+        [Test]
+        public void TypedTask_LegacyDecoratorCannotAdvertiseOrInventSuccess()
+        {
+            using QueuedAiOrchestrator inner = new(new RecordingOrchestrator(), new AiOrchestrationQueueOptions());
+            using QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions());
+            Assert.IsFalse(((IAiTaskResultService)queue).SupportsTaskResults);
+            Assert.Throws<NotSupportedException>(() => queue.RunTaskResultAsync(new AiTaskRequest()));
+        }
+
+        [Test]
+        public async Task TypedTask_LibraryTimeoutRemainsFaultAndReleasesQueue()
+        {
+            TypedResultOrchestrator inner = new(new LlmCompletionResult { Ok = true, Content = "next" });
+            inner.Failure = new LlmOperationTimeoutException();
+            using QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions());
+            Task<LlmCompletionResult> first = queue.RunTaskResultAsync(new AiTaskRequest());
+            try { await first; Assert.Fail("A timed out execution must fail."); }
+            catch (LlmOperationTimeoutException) { }
+            Assert.IsTrue(first.IsFaulted, "A library timeout is not caller cancellation.");
+            inner.Failure = null;
+            Assert.IsTrue((await queue.RunTaskResultAsync(new AiTaskRequest())).Ok);
+        }
+
+        [Test]
+        public async Task TypedTask_PreCancelledNeverExecutesProvider()
+        {
+            TypedResultOrchestrator inner = new(new LlmCompletionResult { Ok = true, Content = "unexpected" });
+            using QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions());
+            using CancellationTokenSource cancellation = new();
+            cancellation.Cancel();
+            Task<LlmCompletionResult> turn = queue.RunTaskResultAsync(new AiTaskRequest(), cancellation.Token);
+            try { await turn; Assert.Fail("Cancellation must not be converted into a completion."); }
+            catch (OperationCanceledException) { }
+            Assert.IsTrue(turn.IsCanceled);
+            Assert.AreEqual(0, inner.TypedCalls);
+            Assert.AreEqual(0, inner.LegacyCalls);
+        }
+
+        private sealed class TypedResultOrchestrator : IAiOrchestrationService, IAiTaskResultService
+        {
+            private readonly LlmCompletionResult _result;
+            public int TypedCalls;
+            public int LegacyCalls;
+            public Exception Failure;
+            public TypedResultOrchestrator(LlmCompletionResult result) { _result = result; }
+            public Task<LlmCompletionResult> RunTaskResultAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+            {
+                TypedCalls++;
+                return Failure == null ? Task.FromResult(_result) : Task.FromException<LlmCompletionResult>(Failure);
+            }
+            public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+            {
+                LegacyCalls++;
+                return Task.FromResult("legacy text is not a receipt");
+            }
+            public void CancelTasks(string scope) { }
+        }
+
         #region Helpers
 
         /// <summary>
@@ -416,7 +594,7 @@ namespace CoreAI.Tests.EditMode
 
             public ChatMessage[] GetHistory(ActorContext actorContext, string roleId)
             {
-                using (AgentMemoryScopeExecutionContext.Push(actorContext))
+                using (AgentMemoryActorScope.Enter(actorContext))
                 {
                     return _memory.GetChatHistory(roleId);
                 }
@@ -636,26 +814,35 @@ namespace CoreAI.Tests.EditMode
             queue.Dispose();
         }
 
-        [Test]
-        public async Task ProductionAdmission_ReconnectResumesActorMemoryAcrossSessions()
+        [TestCase("school", "student-memory", "lesson-session", "topic-1", true)]
+        [TestCase("other-school", "student-memory", "lesson-session", "topic-1", false)]
+        [TestCase("school", "other-student", "lesson-session", "topic-1", false)]
+        [TestCase("school", "student-memory", "other-lesson-session", "topic-1", false)]
+        [TestCase("school", "student-memory", "lesson-session", "topic-2", false)]
+        public async Task ProductionAdmission_ReconnectResumesMemoryOnlyWithinTheSameDurableScope(
+            string tenantId,
+            string userId,
+            string memorySessionId,
+            string topicId,
+            bool sharesHistory)
         {
             ActorContext firstConnection = new LocalActorIdentityProvider(
                     "durable-student",
                     "connection-1",
                     "world",
                     ActorGrantSet.None,
-                    new AgentMemoryScope("school", "legacy-user-1", "legacy-session-1", "topic-1"))
+                    new AgentMemoryScope("school", "student-memory", "lesson-session", "topic-1"))
                 .GetActorContext("Teacher");
             ActorContext secondConnection = new LocalActorIdentityProvider(
                     "durable-student",
                     "connection-2",
                     "world",
                     ActorGrantSet.None,
-                    new AgentMemoryScope("other-school", "legacy-user-2", "legacy-session-2", "topic-2"))
+                    new AgentMemoryScope(tenantId, userId, memorySessionId, topicId))
                 .GetActorContext("Teacher");
             DefaultAgentMemoryScopeProvider scopeProvider = new();
             ScopedPersistenceOrchestrator inner = new(scopeProvider);
-            QueuedAiOrchestrator queue = new(
+            using QueuedAiOrchestrator queue = new(
                 inner,
                 new AiOrchestrationQueueOptions { MaxConcurrent = 1 },
                 scopeProvider);
@@ -680,21 +867,25 @@ namespace CoreAI.Tests.EditMode
             });
             await WaitUntilAsync(() => inner.Gates.Count == 2, "Reconnected actor must start.");
 
-            string[] expected = { "started:first-connection", "started:second-connection" };
+            string[] firstHistory = sharesHistory
+                ? new[] { "started:first-connection", "started:second-connection" }
+                : new[] { "started:first-connection" };
+            string[] secondHistory = sharesHistory
+                ? firstHistory
+                : new[] { "started:second-connection" };
             CollectionAssert.AreEqual(
-                expected,
+                firstHistory,
                 Array.ConvertAll(
                     inner.GetHistory(firstConnection, "Teacher"),
                     message => message.Content));
             CollectionAssert.AreEqual(
-                expected,
+                secondHistory,
                 Array.ConvertAll(
                     inner.GetHistory(secondConnection, "Teacher"),
                     message => message.Content));
 
             inner.Gates[1].TrySetResult("second-complete");
             await second;
-            queue.Dispose();
         }
 
         [Test]

@@ -165,13 +165,22 @@ namespace CoreAI.Ai
 
         public static AIFunctionArguments CreateArguments(string json)
         {
+            return CreateArguments(string.IsNullOrWhiteSpace(json) ? null : JObject.Parse(json));
+        }
+
+        /// <summary>
+        /// Same normalization from an already-parsed object. A resolved skill call keeps its parsed
+        /// arguments and builds from them every time it needs a fresh argument set: the duplicate-call
+        /// signature, the MEAI invocation - formerly each of those re-parsed the JSON string.
+        /// </summary>
+        public static AIFunctionArguments CreateArguments(JObject args)
+        {
             Dictionary<string, object> normalized = new(StringComparer.Ordinal);
-            if (string.IsNullOrWhiteSpace(json))
+            if (args == null)
             {
                 return new AIFunctionArguments(normalized);
             }
 
-            JObject args = JObject.Parse(json);
             foreach (KeyValuePair<string, JToken> prop in args)
             {
                 // WHY: shared chokepoint (LlmToolArgumentNormalizer) — same rule as the

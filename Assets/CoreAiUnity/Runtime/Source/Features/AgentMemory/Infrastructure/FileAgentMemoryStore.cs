@@ -82,13 +82,24 @@ namespace CoreAI.Infrastructure.AiMemory
     /// этом процессе»: такая запись НИКОГДА не попадает на диск, в том числе при уплотнении.
     /// </para>
     /// <para>
-    /// <b>WebGL.</b> <c>persistentDataPath</c> здесь — MEMFS в памяти вкладки; в IndexedDB его доводит
-    /// асинхронный <c>FS.syncfs</c>. Синхронные методы интерфейса после записи лишь СТАВЯТ флаш в очередь
-    /// (<see cref="CoreAiWebGlPersistence.Sync"/>) — они не могут ждать на единственном потоке. Async-варианты
-    /// (<see cref="SaveAsync"/>, <see cref="MutateAsync{TResult}"/>, <see cref="AppendChatMessageAsync"/> и
-    /// далее) возвращаются только после подтверждения браузера и бросают <see cref="IOException"/>, если
-    /// подтверждения нет. После серии синхронных записей вызовите <see cref="FlushAsync"/>, чтобы дождаться
-    /// подтверждения всего, что уже записано. На остальных платформах подтверждение мгновенно.
+    /// <b>WebGL.</b> <c>persistentDataPath</c> is the tab's in-memory filesystem; the ENGINE carries it
+    /// into IndexedDB, provided the page passes <c>config.autoSyncPersistentDataPath = true</c> to
+    /// <c>createUnityInstance()</c>. Both the synchronous and the asynchronous methods therefore get the
+    /// same immediate durability answer from <see cref="CoreAiWebGlPersistence"/>: the async ones
+    /// (<see cref="SaveAsync"/>, <see cref="MutateAsync{TResult}"/>, <see cref="AppendChatMessageAsync"/>
+    /// and the rest) throw <see cref="IOException"/> when the page has no durable storage armed, and the
+    /// synchronous ones log it. Nothing here waits for a browser callback, because the browser has none
+    /// to give; <see cref="FlushAsync"/> is kept as the explicit "is my data covered?" query.
+    /// </para>
+    /// <para>
+    /// <b>No <c>ConfigureAwait(false)</c> in this file — ever.</b> WebGL has no thread pool, so an
+    /// awaited continuation that dropped the Unity synchronization context is posted to a scheduler
+    /// that never runs and the async method silently never resumes. The <c>CAIU001</c> analyzer flags
+    /// every reintroduction. Historical note, so the next reader does not repeat the diagnosis: 17
+    /// occurrences were removed here on 2026-09-09 while chasing a <c>memory action=write</c> that hung
+    /// until the 30 s tool timeout, and a rebuilt player proved that was NOT the cause — the cause was
+    /// the durability confirmation itself, an <c>FS.syncfs</c> callback Unity 6.3 never delivers. The
+    /// rule stays because the hazard it prevents is real, not because it fixed that bug.
     /// </para>
     /// </summary>
     public sealed class FileAgentMemoryStore : IAgentMemoryStore, IAgentMemoryLoadDiagnostics,
@@ -296,9 +307,9 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Дожидается подтверждения долговечности всего, что уже записано: на WebGL — завершения
-        /// <c>FS.syncfs</c> в IndexedDB, на остальных платформах — мгновенно. <c>false</c> — браузер
-        /// подтверждения не дал (уже в логе), последние записи могут не пережить перезагрузку.
+        /// Reports whether everything written so far is covered by durable storage. Completes
+        /// immediately on every platform. <c>false</c> means a browser page without Unity's automatic
+        /// <c>persistentDataPath</c> persistence: those writes will not survive a reload.
         /// </summary>
         public Task<bool> FlushAsync(CancellationToken cancellationToken = default)
         {
@@ -306,8 +317,8 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Подтверждение долговечности для async-путей. Вызывается ПОСЛЕ освобождения замков: на WebGL
-        /// ожидание колбэка под замком остановило бы синхронных вызывающих на единственном потоке.
+        /// Durability check for the async paths. Called AFTER the locks are released so a synchronous
+        /// caller on the single WebGL thread is never blocked behind it.
         /// </summary>
         private static async Task ConfirmDurableAsync(CancellationToken cancellationToken)
         {
@@ -315,8 +326,8 @@ namespace CoreAI.Infrastructure.AiMemory
             if (!durable)
             {
                 throw new IOException(
-                    "[FileAgentMemoryStore] The write reached the in-memory filesystem but the browser did not " +
-                    "confirm it in IndexedDB; it may not survive a reload.");
+                    "[FileAgentMemoryStore] The write reached the in-memory filesystem, but this browser page " +
+                    "has no durable storage armed, so it will not survive a reload.");
             }
         }
 
@@ -349,7 +360,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <exception cref="AgentMemoryLoadException">Документ есть, но прочитать его не удалось.</exception>
         public async Task<AgentMemoryState> TryLoadAsync(string roleId)
         {
-            await _gate.WaitAsync().ConfigureAwait(false);
+            await _gate.WaitAsync();
             try
             {
                 return await RunOffThread(() =>
@@ -361,7 +372,7 @@ namespace CoreAI.Infrastructure.AiMemory
                     }
 
                     return state;
-                }).ConfigureAwait(false);
+                });
             }
             finally
             {
@@ -456,13 +467,13 @@ namespace CoreAI.Infrastructure.AiMemory
         public async Task SaveAsync(string roleId, AgentMemoryState state, CancellationToken cancellationToken = default)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await mutationGate.WaitAsync(cancellationToken);
             try
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await _gate.WaitAsync(cancellationToken);
                 try
                 {
-                    await RunOffThread(() => SaveCore(roleId, state, false)).ConfigureAwait(false);
+                    await RunOffThread(() => SaveCore(roleId, state, false));
                 }
                 finally
                 {
@@ -498,10 +509,10 @@ namespace CoreAI.Infrastructure.AiMemory
 
             TResult result;
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await mutationGate.WaitAsync(cancellationToken);
             try
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await _gate.WaitAsync(cancellationToken);
                 try
                 {
                     result = await RunOffThread(() =>
@@ -519,7 +530,7 @@ namespace CoreAI.Infrastructure.AiMemory
                         TResult mutated = mutator(state);
                         SaveCore(roleId, state, false);
                         return mutated;
-                    }).ConfigureAwait(false);
+                    });
                 }
                 finally
                 {
@@ -604,13 +615,13 @@ namespace CoreAI.Infrastructure.AiMemory
         public async Task ClearAsync(string roleId, CancellationToken cancellationToken = default)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await mutationGate.WaitAsync(cancellationToken);
             try
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await _gate.WaitAsync(cancellationToken);
                 try
                 {
-                    await RunOffThread(() => ClearCore(roleId, false)).ConfigureAwait(false);
+                    await RunOffThread(() => ClearCore(roleId, false));
                 }
                 finally
                 {
@@ -686,13 +697,13 @@ namespace CoreAI.Infrastructure.AiMemory
         public async Task ClearChatHistoryAsync(string roleId, CancellationToken cancellationToken = default)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await mutationGate.WaitAsync(cancellationToken);
             try
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await _gate.WaitAsync(cancellationToken);
                 try
                 {
-                    await RunOffThread(() => ClearChatHistoryCore(roleId, false)).ConfigureAwait(false);
+                    await RunOffThread(() => ClearChatHistoryCore(roleId, false));
                 }
                 finally
                 {
@@ -866,14 +877,13 @@ namespace CoreAI.Infrastructure.AiMemory
             SynchronizationContext callbackContext = SynchronizationContext.Current;
             AgentHistoryTrimmedEventArgs? trimmed;
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await mutationGate.WaitAsync(cancellationToken);
             try
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await _gate.WaitAsync(cancellationToken);
                 try
                 {
-                    trimmed = await RunOffThread(() => AppendLineCore(roleId, line, persistToDisk, false, false))
-                        .ConfigureAwait(false);
+                    trimmed = await RunOffThread(() => AppendLineCore(roleId, line, persistToDisk, false, false));
                 }
                 finally
                 {
@@ -1720,13 +1730,17 @@ namespace CoreAI.Infrastructure.AiMemory
             }
         }
 
-        /// <summary>Ставит WebGL-флаш в очередь; провал постановки — в лог, ждать здесь нельзя.</summary>
+        /// <summary>
+        /// Checks the durability answer after a synchronous write. A <c>void</c> interface method
+        /// cannot fail the caller, so a page without durable storage is reported to the log; the async
+        /// entry points throw for the same condition.
+        /// </summary>
         private void QueueFlush()
         {
             if (!CoreAiWebGlPersistence.Sync())
             {
-                _log?.Warn("[FileAgentMemoryStore] Durability flush could not be queued; the last write may " +
-                           "not survive a reload.");
+                _log?.Warn("[FileAgentMemoryStore] This browser page has no durable storage armed; the last " +
+                           "write will not survive a reload.");
             }
         }
 

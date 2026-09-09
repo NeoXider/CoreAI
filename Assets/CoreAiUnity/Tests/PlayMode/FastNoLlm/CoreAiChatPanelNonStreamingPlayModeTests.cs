@@ -19,6 +19,59 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class CoreAiChatPanelNonStreamingPlayModeTests
     {
+        [UnityTest]
+        public IEnumerator TypedBufferedFailure_IsAdmittedWithoutCompletionEventOrLegacyExecution()
+        {
+            GameObject go = new("TypedBufferedFailure");
+            go.SetActive(false);
+            PanelHarness panel = go.AddComponent<PanelHarness>();
+            panel.SetRuntimeOptions(new CoreAiChatOptions { RoleId = "Teacher", EnableStreaming = false,
+                WelcomeMessage = "", LoadPersistedChatOnStartup = false, EnableCameraTool = false });
+            BufferedTypedOrchestrator provider = new();
+            panel.ChatService = new CoreAiChatService(provider);
+            go.SetActive(true);
+            int completed = 0;
+            panel.OnAiResponseCompleted += _ => completed++;
+            try
+            {
+                Task<CoreAiChatExternalSubmitResult> task = panel.SubmitMessageFromExternalResultAsync("help",
+                    new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+                float deadline = Time.realtimeSinceStartup + 8;
+                while (!task.IsCompleted && Time.realtimeSinceStartup < deadline) yield return null;
+                Assert.IsTrue(task.IsCompleted, "Buffered typed submission must finish.");
+                Assert.IsFalse(task.IsFaulted);
+                Assert.IsTrue(task.Result.Admitted);
+                Assert.IsFalse(task.Result.Completion.Ok);
+                Assert.AreEqual(LlmErrorCode.RateLimited, task.Result.Completion.ErrorCode);
+                Assert.AreEqual("partial", task.Result.Completion.Content);
+                Assert.AreEqual(31, task.Result.Completion.TotalTokens);
+                Assert.AreEqual(1, provider.Calls);
+                Assert.AreEqual(0, completed);
+                Assert.IsFalse(panel.IsBusy);
+                go.SetActive(false);
+                Task<CoreAiChatExternalSubmitResult> inactive = panel.SubmitMessageFromExternalResultAsync("later");
+                Assert.IsTrue(inactive.IsCompleted);
+                Assert.IsFalse(inactive.Result.Admitted);
+                Assert.AreEqual(CoreAiChatExternalSubmitRejection.Inactive, inactive.Result.Rejection);
+                Assert.AreEqual(1, provider.Calls);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        private sealed class BufferedTypedOrchestrator : IAiOrchestrationService, IAiTaskResultService
+        {
+            public int Calls;
+            public Task<LlmCompletionResult> RunTaskResultAsync(AiTaskRequest task, CancellationToken token = default)
+            {
+                Calls++;
+                return Task.FromResult(new LlmCompletionResult { Ok = false, Content = "partial", Error = "limited",
+                    ErrorCode = LlmErrorCode.RateLimited, HttpStatus = 429, TotalTokens = 31 });
+            }
+            public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken token = default) =>
+                throw new System.InvalidOperationException("Legacy execution must not run.");
+            public void CancelTasks(string scope) { }
+        }
+
         private sealed class PanelHarness : CoreAiChatPanel
         {
             public void AssignTest(CoreAiChatConfig cfg, CoreAiChatService svc)

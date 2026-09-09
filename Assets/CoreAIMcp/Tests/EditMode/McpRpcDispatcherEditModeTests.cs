@@ -315,6 +315,49 @@ namespace CoreAI.Mcp.Tests
             Assert.IsTrue(JToken.DeepEquals(id, result.Response["id"]));
         }
 
+        [TestCase("2026-09-08T10:00:00Z")]
+        [TestCase("2026-09-08T15:00:00.1234567+05:00")]
+        [TestCase("2026-09-08T10:00:00.000Z")]
+        public async Task RawRequest_DateShapedStringId_RoundTripsWithoutCoercion(string id)
+        {
+            string body = "{\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"id\":" + Newtonsoft.Json.JsonConvert.SerializeObject(id) + "}";
+            Assert.IsTrue(JsonRpc.TryParse(body, out JObject request, out _));
+
+            McpDispatchResult result = await NewDispatcher().DispatchAsync(request, CancellationToken.None);
+
+            Assert.IsNull(result.Response["error"]);
+            Assert.AreEqual(JTokenType.String, result.Response["id"].Type);
+            Assert.AreEqual(id, result.Response["id"].Value<string>());
+        }
+
+        [TestCase("2026-09-08T10:00:00Z")]
+        [TestCase("2026-09-08T15:00:00.1234567+05:00")]
+        public async Task RawToolRequest_DateShapedNameAndArgument_PreserveExactStrings(string value)
+        {
+            FakeMcpTool tool = new(value);
+            string encoded = Newtonsoft.Json.JsonConvert.SerializeObject(value);
+            string body = "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"id\":1,\"params\":{\"name\":" + encoded +
+                ",\"arguments\":{\"echo\":" + encoded + "}}}";
+            Assert.IsTrue(JsonRpc.TryParse(body, out JObject request, out _));
+
+            McpDispatchResult result = await NewDispatcher(tool).DispatchAsync(request, CancellationToken.None);
+
+            Assert.IsNull(result.Response["error"]);
+            Assert.AreEqual(1, tool.InvocationCount);
+            Assert.AreEqual(value + ":" + value, result.Response["result"]["content"][0]["text"].Value<string>());
+        }
+
+        [TestCase("{}")]
+        [TestCase("true")]
+        [TestCase("trailing")]
+        public void RawRequest_TrailingContent_RemainsAParseError(string suffix)
+        {
+            Assert.IsFalse(JsonRpc.TryParse("{\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"id\":1} " + suffix,
+                out JObject request, out JObject error));
+            Assert.IsNull(request);
+            Assert.AreEqual(JsonRpcErrorCodes.ParseError, error["error"]["code"].Value<int>());
+        }
+
         [Test]
         public void MalformedJson_MapsToParseError()
         {

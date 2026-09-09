@@ -1,6 +1,34 @@
-﻿# CoreAI Developer Guide (template)
+﻿# CoreAI Developer Guide
 
-For teams who **wire the core into their own game** or **extend this repository**. Normative contracts and the roadmap live in **[DGF_SPEC.md](DGF_SPEC.md)**; this document is a practical map of the codebase and common tasks.
+**What this is.** A practical map of the codebase for people who wire CoreAI into their own game or
+change this repository: which assembly owns what, how a request flows from UI to model to tool to
+world, where the extension points are, and the recipes for the tasks that come up most.
+
+**What this is not.** Not a first-run guide — that is [QUICK_START](QUICK_START.md) and
+[the Unity package README](../README.md). Not the normative spec — that is [DGF_SPEC](DGF_SPEC.md).
+Not the architectural rationale — that is [ARCHITECTURE](ARCHITECTURE.md).
+
+**Find your task:**
+
+| I want to… | Go to |
+|---|---|
+| Know what to read, in order | [§1 Where to start](#1-where-to-start-reading-order) |
+| Know which assembly my code belongs in | [§2 Assemblies and responsibility boundaries](#2-assemblies-and-responsibility-boundaries) |
+| Understand what works with no configuration, and what I can tune | [§2.1 Default behavior](#21-default-behavior-out-of-the-box-and-tuning-points) |
+| Route logs into Serilog or my own sink | [§2.2 Logging](#22-logging-igamelogger-tagsfeatures-and-external-libraries-serilog-etc) |
+| Trace a request end to end | [§3 Data flow](#3-data-flow-how-everything-connects) |
+| Understand the queue, long context, or tool observability | [§3.1](#31-queue-semantics) · [§3.2](#32-long-context-management) · [§3.3](#33-tool-call-observability) |
+| See exactly what the model receives | [§3.5 Prompt Layers](#35-prompt-layers-what-the-model-actually-sees) |
+| Pick or switch an LLM backend at runtime | [§4 Execution modes and routing](#4-llm-execution-modes-and-routing) |
+| Add a role or edit prompts | [§5 Prompts and roles](#5-prompts-and-roles) |
+| React to CoreAI events from my own systems | [§5.1 MessagePipe extension points](#51-messagepipe-extension-points-beginner--pro) |
+| Expose a new API to AI-written Lua | [§6 Lua for the Programmer agent](#6-lua-for-the-programmer-agent) |
+| Write tests that will not be deleted as brittle | [§7 Tests](#7-tests) and [ARCHITECTURE §Test Integrity Rule](ARCHITECTURE.md#test-integrity-rule) |
+| Stop an agent, clear context, hook tool execution | [§9.1 Agent control](#91-agent-control-control-api) |
+| Simplify a pipeline that got heavy | [§9.2 Where CoreAI is often "heavy"](#92-where-coreai-is-often-heavy-and-how-to-simplify-the-pipeline-recommendations) |
+| Open a PR here | [§10 PR checklist](#10-pr-checklist) |
+
+## 0. Runtime LLM routing in one screen
 
 CoreAI 7.0 uses endpoint/profile/role separation for runtime LLM routing. Prefer
 `ILlmEndpointRegistry` plus `AgentBuilder.WithLlmProfile(...)` over mutating one global backend. Legacy
@@ -522,7 +550,7 @@ This is **separate** CoreAI file storage under `Application.persistentDataPath` 
 
 - **After restarting the game**, when the container starts the store reads JSON again: **current** text (`current`) and **revision history** are restored; orchestrator/Lua use the loaded state.
 - **Android / iOS / Desktop** — normal writes to the app directory; data persists across sessions until the user uninstalls the app or clears “app data”.
-- **WebGL** — in `AgentMemoryPersistenceMode.Persistent` mode `persistentDataPath` maps to browser storage (IndexedDB / IDBFS): agent memory and chat JSON use **`FileAgentMemoryStore`** under **`CoreAILifetimeScope`** on the **player** too (**v1.6.19+**), with **`CoreAi_PersistFsSync`** after writes so data survives reload when **`Application.Quit`** does not run. Since **v1.7.2**, **`CoreAiPersistFs.jslib`** queues **`FS.syncfs`** so only one sync runs at a time (avoids concurrent sync warnings and related stalls). Conversation **summaries** for compaction stay **in-memory** on WebGL. `SessionOnly` keeps memory, chat, transcript and summary in memory and does not call file persistence. Users can clear site data; quota limits may apply — see [Unity documentation](https://docs.unity3d.com/) for your version under WebGL.
+- **WebGL** — in `AgentMemoryPersistenceMode.Persistent` mode `persistentDataPath` maps to browser storage (IndexedDB / IDBFS): agent memory and chat JSON use **`FileAgentMemoryStore`** under **`CoreAILifetimeScope`** on the **player** too (**v1.6.19+**). **The web template must pass `config.autoSyncPersistentDataPath = true` to `createUnityInstance()`** — that is what makes the engine flush every `persistentDataPath` write to IndexedDB by itself. Unity's stock templates ship the line commented out, so add it to your own template or run **`CoreAI/Setup/Install WebGL Template`**, which copies the template shipped inside the package into `Assets/WebGLTemplates/CoreAI` and selects it. `CoreAIWebGlPersistentDataSyncBuildGuard` fails the build without it (opt out for a player that ships without CoreAI storage with the scripting define symbol **`COREAI_WEBGL_NO_PERSISTENCE`**, which is logged on every build) and `CoreAiWebGlPersistence` reports a visible error at runtime. CoreAI no longer drives `FS.syncfs` by hand: Unity 6.3 deprecated that path and its completion callback never fires, so awaiting it only produced false failures. Conversation **summaries** for compaction stay **in-memory** on WebGL. `SessionOnly` keeps memory, chat, transcript and summary in memory and does not call file persistence. Users can clear site data; quota limits may apply — see [Unity documentation](https://docs.unity3d.com/) for your version under WebGL.
 - **Sync with cloud / a single game save** needs a separate integration (copy files, custom provider, or mirroring after `RecordSuccessfulExecution`).
 
 ---
@@ -814,4 +842,4 @@ Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOP
 
 **UPM sync:** the number in the README header and in **QUICK_START** should match the current **`package.json`**, or package consumers see a stale version.
 
-**Version of this guide:** 7.36.0 (2026-09-08) — six-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.
+**Version of this guide:** 7.37.0 (2026-09-09) — six-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.

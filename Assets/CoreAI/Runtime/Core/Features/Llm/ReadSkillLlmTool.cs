@@ -47,60 +47,95 @@ namespace CoreAI.Ai
         {
             private readonly IReadOnlyList<SkillSet> _skills;
 
-            // WHY: When the backing list is a live MutableSkillCatalog (skill authoring), the lookup is
-            // rebuilt per call so a skill the model just created/updated is immediately visible here.
-            private readonly bool _isLive;
-            private readonly Dictionary<string, SkillSet> _skillsByName;
+            // WHY: When the backing list is a live MutableSkillCatalog (skill authoring), the index follows
+            // the catalog so a skill the model just created/updated is immediately visible here. It is
+            // rebuilt only when the catalog's version moves: indexing creates every skill tool's MEAI
+            // function by reflection, and doing that per call made every read_skill and every per-request
+            // allowlist probe pay the cost of registering the whole catalog again.
+            private readonly MutableSkillCatalog _liveCatalog;
+            private readonly object _liveIndexGate = new();
+            private readonly SkillIndex _staticIndex;
             private readonly IReadOnlyCollection<string> _allowedToolNames;
-            private readonly HashSet<string> _skillToolNames;
+            private SkillIndex _liveIndex;
+            private string _parametersSchema;
+
+            private sealed class SkillIndex
+            {
+                public SkillIndex(long version)
+                {
+                    Version = version;
+                }
+
+                public long Version { get; }
+                public Dictionary<string, SkillSet> SkillsByName { get; } = new(StringComparer.OrdinalIgnoreCase);
+                public HashSet<string> ToolNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+            }
 
             public ReadSkillProxy(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames)
             {
                 if (skills == null) throw new ArgumentNullException(nameof(skills));
-                _skills = skills is MutableSkillCatalog ? skills : new List<SkillSet>(skills).AsReadOnly();
+                _liveCatalog = skills as MutableSkillCatalog;
+                _skills = _liveCatalog ?? (IReadOnlyList<SkillSet>)new List<SkillSet>(skills).AsReadOnly();
                 SkillSetToolResolver.ValidateCatalog(_skills);
-                _isLive = skills is MutableSkillCatalog;
                 _allowedToolNames = allowedToolNames == null ? null : new List<string>(allowedToolNames).AsReadOnly();
-                _skillsByName = new Dictionary<string, SkillSet>(StringComparer.OrdinalIgnoreCase);
-                _skillToolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                if (!_isLive)
-                {
-                    IndexSkills(_skills, _skillsByName, _skillToolNames);
-                }
+                _staticIndex = _liveCatalog != null ? null : IndexSkills(_skills, 0);
             }
 
-            private static void IndexSkills(IReadOnlyList<SkillSet> skills,
-                Dictionary<string, SkillSet> skillsByName, HashSet<string> skillToolNames)
+            private static SkillIndex IndexSkills(IReadOnlyList<SkillSet> skills, long version)
             {
+                SkillIndex index = new(version);
                 foreach (SkillSet skill in skills)
                 {
                     if (skill != null && !string.IsNullOrWhiteSpace(skill.Name))
                     {
-                        skillsByName[skill.Name] = skill;
+                        index.SkillsByName[skill.Name] = skill;
                     }
 
                     foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(skill))
                     {
                         if (!string.IsNullOrWhiteSpace(descriptor.Name))
                         {
-                            skillToolNames.Add(descriptor.Name);
+                            index.ToolNames.Add(descriptor.Name);
                         }
                     }
+                }
+
+                return index;
+            }
+
+            private SkillIndex ResolveIndex()
+            {
+                if (_liveCatalog == null)
+                {
+                    return _staticIndex;
+                }
+
+                SkillIndex cached = Volatile.Read(ref _liveIndex);
+                if (cached != null && cached.Version == _liveCatalog.Version)
+                {
+                    return cached;
+                }
+
+                lock (_liveIndexGate)
+                {
+                    cached = _liveIndex;
+                    // WHY the version is read BEFORE indexing: a catalog change that lands during the
+                    // build leaves the index tagged with the older version, so the next call rebuilds.
+                    long version = _liveCatalog.Version;
+                    if (cached != null && cached.Version == version)
+                    {
+                        return cached;
+                    }
+
+                    SkillIndex index = IndexSkills(_skills, version);
+                    Volatile.Write(ref _liveIndex, index);
+                    return index;
                 }
             }
 
             private Dictionary<string, SkillSet> ResolveSkillsByName()
             {
-                if (!_isLive)
-                {
-                    return _skillsByName;
-                }
-
-                Dictionary<string, SkillSet> map = new(StringComparer.OrdinalIgnoreCase);
-                HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
-                IndexSkills(_skills, map, names);
-                return map;
+                return ResolveIndex().SkillsByName;
             }
 
             public override string Name => "read_skill";
@@ -111,32 +146,17 @@ namespace CoreAI.Ai
                 "Pass the skill name exactly as listed in the catalog. The default is the complete entry document " +
                 "and a reference index; use section for one reference or all=true for every document.";
 
-            public override string ParametersSchema => CreateAIFunction().JsonSchema.GetRawText();
+            // WHY cached: the schema is derived by reflection from a fixed delegate and never changes, yet
+            // this property is read several times per request (token budgeting, logging, the text tool
+            // contract), and each read used to create a whole MEAI function and serialize its schema.
+            public override string ParametersSchema =>
+                _parametersSchema ??= CreateAIFunction().JsonSchema.GetRawText();
 
             public override bool AllowDuplicates => true;
 
             public bool ContainsSkillTool(string toolName)
             {
-                if (string.IsNullOrWhiteSpace(toolName))
-                {
-                    return false;
-                }
-
-                if (!_isLive)
-                {
-                    return _skillToolNames.Contains(toolName.Trim());
-                }
-
-                string trimmed = toolName.Trim();
-                foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(_skills))
-                {
-                    if (string.Equals(descriptor.Name, trimmed, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-
-                return false;
+                return !string.IsNullOrWhiteSpace(toolName) && ResolveIndex().ToolNames.Contains(toolName.Trim());
             }
 
             public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)

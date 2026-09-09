@@ -85,27 +85,39 @@ When the limiter is saturated, the envelope fails with `Lua rate limit exceeded`
 - `table.concat` is capped the same way (`MaxTableConcatLength`, same `1_000_000` value): the
   replacement mirrors the real `table.concat` algorithm but aborts as soon as the
   in-progress result exceeds the cap, instead of finishing a potentially huge build first.
-- **Total per-execution allocation budget (default 64MB, F-08).** `string.rep`,
+- **Per-execution allocation budget (default 256MB, F-08).** `string.rep`,
   `string.format`, and `table.concat` are capped at their library call site, but plain string
   concatenation (`s = s .. s`) is ordinary VM opcodes with no call site to intercept — a ~1MB allowed
   string can be doubled repeatedly into hundreds of MB well within the instruction budget. The
-  per-instruction hook (`LuaCsExecutionGuard`) now also samples `GC.GetAllocatedBytesForCurrentThread()`
-  against a baseline captured at the start of the guarded call and aborts with
-  `EXCEEDED_MEMORY_BUDGET` once the delta exceeds the budget. This check runs on **every** instruction,
-  not on a coarse sample interval: concatenation doubling grows exponentially, so a handful of loop
-  iterations can jump from megabytes to gigabytes, and any sampling interval wide enough to matter for
-  performance is also wide enough to either miss the attack or let the runtime approach a real
-  out-of-memory condition before the next sample point. `GC.GetAllocatedBytesForCurrentThread()` is a
-  thread-local counter read (not a GC pass), the same cost class as the wall-clock check already
-  performed unconditionally on the same hot path, so this adds no new performance risk. Configure the
-  budget via the `maxAllocatedBytes` constructor parameter on `LuaCsExecutionGuard`, or
+  instruction hook (`LuaCsExecutionGuard`, and the per-resume coroutine hook in
+  `LuaCsSecureEnvironment`) therefore also watches the heap through `LuaCsAllocationBudget` and aborts
+  with `EXCEEDED_MEMORY_BUDGET`. The hook fires once per small instruction batch, tight enough that a
+  doubling bomb cannot overshoot the budget by more than about one doubling between samples.
+  Configure the budget via the `maxAllocatedBytes` constructor parameter on `LuaCsExecutionGuard`, or
   `LuaCsSecureEnvironment.MaxAllocatedBytesBudget` for the default.
-  - **What this does not cover:** the budget is a total-allocation backstop, not a live heap-size cap —
-    a script that allocates and discards memory in a tight loop can still cause GC churn without
-    tripping it (GC pauses are bounded by the existing timeout instead). A single host callback that
-    allocates a large amount of memory in one call (not driven by VM instructions) is not observed by
-    this hook either; host bindings must still bound their own worst-case allocations, the same caveat
-    that already applies to the wall-clock guarantee documented on `LuaCsExecutionGuard`.
+  - **A sample is a suspicion, not a trip.** Unity's Mono does not implement
+    `GC.GetAllocatedBytesForCurrentThread` (it returns 0 unconditionally), so the cheap reading is
+    `GC.GetTotalMemory(false)`: process-wide and garbage-inclusive. In a WebGL player that reading
+    crosses a 256MB budget after a few seconds of a loop that retains nothing, which cut
+    pure-arithmetic runaways with `EXCEEDED_MEMORY_BUDGET` instead of their own wall-clock limit. The
+    trip is therefore decided by one confirming `GC.GetTotalMemory(true)`: a real bomb's result string
+    is live and survives the collection, while transient runtime garbage does not. A cleared suspicion
+    re-baselines from the post-collection reading, so forced collections stay bounded.
+  - **What this does not cover:** the budget bounds live growth, not GC churn — a script that allocates
+    and discards memory in a tight loop is bounded by the wall-clock timeout instead. A single host
+    callback that allocates a large amount of memory in one call (not driven by VM instructions) is not
+    observed by this hook either; host bindings must still bound their own worst-case allocations, the
+    same caveat that already applies to the wall-clock guarantee documented on `LuaCsExecutionGuard`.
+- **A long chunk must not hold the host frame.** The wall-clock budget allows ~10s of execution, which
+  on a single-threaded player (WebGL) would freeze the page for that whole time. The one-shot chunk
+  path (`execute_lua`) runs through `IScriptEngine.RunChunkAsync` / `LuaCsExecutionGuard.ExecuteAsync`,
+  where the guard hook releases the frame through an `IScriptFrameYielder` every few milliseconds and
+  the yielded time is excluded from the wall-clock budget. The synchronous entries (mod events, timers,
+  handlers) never arm a yielder: their caller is blocked on the result, so awaiting a frame from inside
+  the hook could not complete. **Not yet covered:** the actor-scoped and mutation-envelope overloads of
+  `LuaCsGameToolExecutor` still run the chunk synchronously, because `InstanceRegistry.ApplyMutation`
+  runs its operation under a monitor and under an ambient `MutationEnvelopeScope` held in a registry
+  field — yielding there needs an execution-scoped envelope and an async mutation protocol first.
 - Coroutine abuse has a total-lifetime budget through `LuaCoroutineHandle`.
   `LuaCoroutineHandle.DefaultTotalLifetimeSteps` is `1_000_000` across all resumes
   for one handle, and the handle is forcibly killed when exceeded.

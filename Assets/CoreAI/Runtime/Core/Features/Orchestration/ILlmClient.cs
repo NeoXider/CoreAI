@@ -487,7 +487,7 @@ namespace CoreAI.Ai
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
-            LlmCompletionResult result = await CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+            LlmCompletionResult result = await CompleteAsync(request, cancellationToken);
             if (result == null)
             {
                 yield return new LlmStreamChunk

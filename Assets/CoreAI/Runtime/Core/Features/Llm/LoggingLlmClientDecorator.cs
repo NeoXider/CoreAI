@@ -141,11 +141,14 @@ namespace CoreAI.Infrastructure.Llm
                 ? _backendLabel
                 : $"{_backendLabel}->{request.RoutingProfileId.Trim()}";
 
+            // WHY once per request: the budget line scans the whole system prompt and every tool schema;
+            // it depends only on the request, so the completion log line reuses this instance.
+            string promptBudgetLine = FormatPromptBudgetLine(system, user, request.Tools);
             _logger.Info(
                 $"LLM > traceId={trace} role={role} backend={backendLine}\n" +
                 $"  system ({system.Length} chars): {PromptPreview(system, SystemPreviewChars)}\n" +
                 $"  user ({user.Length} chars): {PromptPreview(user, UserPreviewChars)}\n" +
-                $"  {FormatPromptBudgetLine(system, user, request.Tools)}", LogTag.Llm);
+                $"  {promptBudgetLine}", LogTag.Llm);
 
             Stopwatch sw = Stopwatch.StartNew();
             LlmCompletionResult result = null;
@@ -258,7 +261,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             string content = result.Content ?? "";
-            string tokLine = FormatTokenLine(result, wallMs, content.Length, system, user, request.Tools);
+            string tokLine = FormatTokenLine(result, wallMs, content.Length, promptBudgetLine);
             string toolsLine = FormatExecutedTools(result.ExecutedToolCalls);
             _logger.Info(
                 $"LLM < traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}{toolsLine}\n" +
@@ -364,7 +367,6 @@ namespace CoreAI.Infrastructure.Llm
                 case "missing":
                 case "unbound-native":
                 case "schema-validation":
-                case "arg-conversion":
                     return false;
                 default:
                     // WHY: fail safe - any unknown/new trace source counts as an invocation so the
@@ -509,11 +511,13 @@ namespace CoreAI.Infrastructure.Llm
             string streamUser = request.UserPayload ?? "";
             IReadOnlyList<ILlmTool> streamTools = request.Tools;
 
+            // WHY once per request: see CompleteAsync - the completion line reuses the same text.
+            string promptBudgetLine = FormatPromptBudgetLine(streamSystem, streamUser, streamTools);
             _logger.Info(
                 $"LLM > (stream) traceId={trace} role={role} backend={backendLine}\n" +
                 $"  system ({streamSystem.Length} chars): {PromptPreview(request.SystemPrompt, SystemPreviewChars)}\n" +
                 $"  user ({streamUser.Length} chars): {PromptPreview(request.UserPayload, UserPreviewChars)}\n" +
-                $"  {FormatPromptBudgetLine(streamSystem, streamUser, streamTools)}", LogTag.Llm);
+                $"  {promptBudgetLine}", LogTag.Llm);
 
             Stopwatch sw = Stopwatch.StartNew();
             StringBuilder accumulated = new();
@@ -696,8 +700,7 @@ namespace CoreAI.Infrastructure.Llm
                     Error = terminalError ?? "",
                     ExecutedToolCalls = executedTools
                 };
-                string tokLine = FormatTokenLine(synthetic, wallMs, content.Length, streamSystem, streamUser,
-                    streamTools);
+                string tokLine = FormatTokenLine(synthetic, wallMs, content.Length, promptBudgetLine);
                 string toolsLine = FormatExecutedTools(executedTools);
 
                 if (!string.IsNullOrEmpty(terminalError))
@@ -762,11 +765,9 @@ namespace CoreAI.Infrastructure.Llm
             LlmCompletionResult result,
             double wallMs,
             int outChars,
-            string systemPrompt,
-            string userPayload,
-            IReadOnlyList<ILlmTool> tools)
+            string promptBudgetLine)
         {
-            string budgetSuffix = " | " + FormatPromptBudgetLine(systemPrompt ?? "", userPayload ?? "", tools);
+            string budgetSuffix = " | " + promptBudgetLine;
             string outWordsPart = outChars > 0
                 ? $" | outWords~{CountWords(result.Content ?? "")}"
                 : "";
@@ -847,7 +848,7 @@ namespace CoreAI.Infrastructure.Llm
             int chatTok = EstimateTokensRough(userPayload);
             int coreWords = CountWords(core);
             int memWords = CountWords(mem);
-            int toolsWords = CountWords(BuildToolsCatalogBlobForWordCount(tools));
+            int toolsWords = CountToolsCatalogWords(tools);
             int chatWords = CountWords(userPayload);
 
             int sysTokFromParts = coreTok + memTok;
@@ -896,14 +897,20 @@ namespace CoreAI.Infrastructure.Llm
             "3. DO NOT output conversational text if you call a tool. ONLY output the JSON block.\n\nAVAILABLE TOOLS:\n"
                 .Length;
 
-        private static string BuildToolsCatalogBlobForWordCount(IReadOnlyList<ILlmTool> tools)
+        /// <summary>
+        /// Word count of the tool catalog as if name, description and schema of every tool were joined
+        /// with single spaces. Counting each field on its own gives the same number - a space always
+        /// separates the fields, so no word can straddle two of them - without materializing the
+        /// catalog (tens of kilobytes of schema text) twice per request just to count it.
+        /// </summary>
+        internal static int CountToolsCatalogWords(IReadOnlyList<ILlmTool> tools)
         {
             if (tools == null || tools.Count == 0)
             {
-                return "";
+                return 0;
             }
 
-            StringBuilder sb = new();
+            int words = 0;
             foreach (ILlmTool t in tools)
             {
                 if (t == null)
@@ -911,15 +918,12 @@ namespace CoreAI.Infrastructure.Llm
                     continue;
                 }
 
-                sb.Append(t.Name);
-                sb.Append(' ');
-                sb.Append(t.Description);
-                sb.Append(' ');
-                sb.Append(t.ParametersSchema);
-                sb.Append(' ');
+                words += CountWords(t.Name);
+                words += CountWords(t.Description);
+                words += CountWords(t.ParametersSchema);
             }
 
-            return sb.ToString();
+            return words;
         }
 
         private static int EstimateTokensRoughFromCharCount(int charCount)
@@ -993,13 +997,27 @@ namespace CoreAI.Infrastructure.Llm
                 return "(empty)";
             }
 
-            string t = text.Trim();
-            if (t.Length <= maxChars)
+            // WHY trim by bounds: Trim() copies the whole prompt when it merely ends in a newline, and the
+            // preview then copied it a second time. One copy of at most the preview length is enough.
+            int start = 0;
+            int end = text.Length - 1;
+            while (start <= end && char.IsWhiteSpace(text[start]))
             {
-                return t;
+                start++;
             }
 
-            return t.Substring(0, maxChars) + $"... [+{t.Length - maxChars} chars]";
+            while (end >= start && char.IsWhiteSpace(text[end]))
+            {
+                end--;
+            }
+
+            int length = end - start + 1;
+            if (length <= maxChars)
+            {
+                return length == text.Length ? text : text.Substring(start, length);
+            }
+
+            return text.Substring(start, maxChars) + $"... [+{length - maxChars} chars]";
         }
     }
 }

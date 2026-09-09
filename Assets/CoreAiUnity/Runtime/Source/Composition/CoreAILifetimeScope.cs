@@ -13,6 +13,7 @@ using CoreAI.Infrastructure;
 using CoreAI.Logging;
 using CoreAI.Unity;
 using System.IO;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Serialization;
 using VContainer;
@@ -444,14 +445,14 @@ namespace CoreAI.Composition
         /// <c>Application.persistentDataPath/CoreAI/ConversationSummaries</c> on EVERY player, WebGL included;
         /// <see cref="AgentMemoryPersistenceMode.SessionOnly"/> uses an in-memory backing.
         /// <para>
-        /// WHY WebGL тоже файловый: сводка — это пересказ всего, что старше окна истории. Оперативное
-        /// хранилище на WebGL означало, что после перезагрузки вкладки сводка пуста, начало урока исчезает,
-        /// а следующая компакция суммирует тот же префикс заново — лишний оплаченный вызов LLM. Прежнее
-        /// обоснование («синхронный File IO на WebGL идёт в IndexedDB и стопорит цикл») не соответствует
-        /// устройству платформы: <c>persistentDataPath</c> там — MEMFS в памяти вкладки, в IndexedDB его
-        /// доводит только асинхронный <c>FS.syncfs</c>, а <see cref="FileAgentMemoryStore"/> те же
-        /// синхронные вызовы делает на WebGL каждый ход. Единственное, чего портативному стору не хватало, —
-        /// постановка флаша в очередь после записи; она передаётся хуком <c>afterWrite</c>.
+        /// WHY file-backed on WebGL too: the summary retells everything older than the history window.
+        /// A session-only store meant an empty summary after a tab reload — the start of the lesson gone,
+        /// and the next compaction paying an LLM call to summarize the same prefix again. The old
+        /// objection ("synchronous file IO on WebGL goes to IndexedDB and stalls the loop") does not match
+        /// the platform: <c>persistentDataPath</c> there is the tab's in-memory filesystem, the engine
+        /// carries it to IndexedDB on its own, and <see cref="FileAgentMemoryStore"/> makes the same
+        /// synchronous calls on WebGL every turn. The only thing the portable store lacked is the
+        /// post-write durability check, supplied through the <c>afterWrite</c> hook.
         /// </para>
         /// </summary>
         internal static void RegisterConversationSummaryForCoreAiLifetimeScope(
@@ -476,7 +477,8 @@ namespace CoreAI.Composition
                             Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
                                 CoreAiPersistentPaths.ConversationSummaries),
                             ResolveLogOrNull(c),
-                            CoreAiWebGlPersistence.Sync),
+                            CoreAiWebGlPersistence.Sync,
+                            token => CoreAiWebGlPersistence.SyncAsync(token).AsTask()),
                         Lifetime.Singleton)
                     .AsSelf();
                 builder.Register<IConversationSummaryStore>(c =>

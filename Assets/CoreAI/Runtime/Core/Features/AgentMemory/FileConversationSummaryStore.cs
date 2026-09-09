@@ -9,29 +9,18 @@ using Newtonsoft.Json;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Persists per-role conversation summaries under a host-provided directory (portable filesystem).
-    /// <para>
-    /// Стор портативный и сам не знает, что на WebGL каталог <c>persistentDataPath</c> — это MEMFS в памяти
-    /// вкладки, а в IndexedDB его доводит отдельный вызов <c>FS.syncfs</c>. Поэтому после каждой записи и
-    /// удаления он зовёт хук долговечности, куда Unity-хост передаёт <c>CoreAiWebGlPersistence.Sync</c>
-    /// (синхронный путь) или <c>SyncAsync</c> (асинхронный путь); на остальных платформах хук не нужен:
-    /// там запись долговечна с момента возврата из <see cref="File"/>.
-    /// </para>
-    /// <para>
-    /// Честность: неудачные save/clear бросают исключение, а не возвращают молчаливый успех; строгое
-    /// асинхронное чтение пробрасывает битое или нечитаемое хранилище вместо тихой перезаписи, отсутствие
-    /// файла остаётся пустой строкой. Отмена вызывающего до начала ввода-вывода предотвращает мутацию;
-    /// подтверждение долговечности после коммита всегда ожидается без отмены вызывающего и сообщает
-    /// реальный исход. Колбэк долговечности обязан сам ограничивать время завершения: стор не ставит
-    /// поверх него параллельный таймаут (на проде им владеет <c>CoreAiWebGlPersistence.SyncAsync</c>).
-    /// </para>
-    /// <para>
-    /// Синхронный путь выполняет блокирующий дисковый ввод-вывод на вызывающем потоке и fail-fast бросает
-    /// <see cref="InvalidOperationException"/>, когда целевой файл занят активной асинхронной операцией, —
-    /// вместо блокировки главного потока Unity. Файловые гейты общие на процесс и на целевой путь (паттерн
-    /// <c>FileAgentMemoryStore.MutationLocks</c>): они намеренно никогда не выселяются и не освобождаются,
-    /// поэтому <see cref="Dispose"/> лишь запрещает новые вызовы, а принятые операции спокойно завершаются.
-    /// </para>
+    /// Persists per-role summaries with atomic filesystem writes and host-owned durability confirmation.
+    /// <para>On desktop, private file work runs off the calling thread. WebGL runs MEMFS work inline
+    /// and awaits the host's IndexedDB flush. Failed writes, deletes, and confirmations throw; missing
+    /// files read as empty while corrupt or inaccessible files fail strict async reads.</para>
+    /// <para>Canonical-path state is shared across store instances. A VFS mutation remains unconfirmed
+    /// until its generation is acknowledged, including when a different instance next reads its fold
+    /// marker. An older callback cannot confirm a newer write. Host callbacks run outside file gates,
+    /// on the entry context; they own their timeout and cannot recursively access the same file.</para>
+    /// <para>Cancellation before the atomic swap prevents mutation. After commit, confirmation runs
+    /// without caller cancellation. Synchronous compatibility calls fail promptly if file work is busy
+    /// or the requested read still needs async confirmation. Dispose rejects new calls; admitted work
+    /// finishes and shared path gates remain valid.</para>
     /// </summary>
     public sealed class FileConversationSummaryStore : IConversationSummaryStore, IAsyncConversationSummaryStore, IDisposable
     {
@@ -46,8 +35,59 @@ namespace CoreAI.Ai
         /// while an eviction hands a second caller a fresh one, silently breaking the mutual exclusion.
         /// The key set is bounded by the number of distinct roles a host ever creates.
         /// </summary>
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationGates =
+        private static readonly ConcurrentDictionary<string, PathState> MutationGates =
             new(Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        private static readonly AsyncLocal<ConfirmationFrame> CurrentConfirmation = new();
+
+        private sealed class ConfirmationFrame
+        {
+            internal PathState State;
+            internal ConfirmationFrame Previous;
+        }
+
+        private sealed class DurabilityRequest
+        {
+            internal long Generation;
+            internal Func<Task> ConfirmAsync;
+            internal Action ConfirmSync;
+        }
+
+        private sealed class PathState
+        {
+            internal readonly SemaphoreSlim Gate = new(1, 1);
+            private readonly object _stateGate = new();
+            private long _generation;
+            private DurabilityRequest _pending;
+
+            internal DurabilityRequest RecordMutation(FileConversationSummaryStore owner)
+            {
+                lock (_stateGate)
+                {
+                    bool inherit = owner._afterWrite == null && owner._afterWriteAsync == null && _pending != null;
+                    _pending = new DurabilityRequest
+                    {
+                        Generation = ++_generation,
+                        ConfirmAsync = inherit ? _pending.ConfirmAsync : owner.ConfirmDurabilityAsync,
+                        ConfirmSync = inherit ? _pending.ConfirmSync : owner.ConfirmDurabilitySync
+                    };
+                    return _pending;
+                }
+            }
+
+            internal DurabilityRequest Pending
+            {
+                get { lock (_stateGate) return _pending; }
+            }
+
+            internal void Confirmed(DurabilityRequest request)
+            {
+                lock (_stateGate)
+                {
+                    // WHY: A callback begun for an older write cannot acknowledge a newer generation.
+                    if (_pending != null && _pending.Generation <= request.Generation) _pending = null;
+                }
+            }
+        }
 
         private readonly string _dir;
         private readonly ILog _log;
@@ -67,16 +107,16 @@ namespace CoreAI.Ai
         /// <param name="rootDirectory">Directory path; created on first write.</param>
         /// <param name="log">Optional logger.</param>
         /// <param name="afterWrite">
-        /// Хук долговечности: вызывается после каждой успешной записи и удаления файла. Возвращает
-        /// <c>false</c>, если довести запись до долговечного хранилища не удалось даже поставить в очередь —
-        /// save/clear бросают честный <see cref="IOException"/>: запись в VFS состоялась, но долговечность
-        /// не подтверждена. <c>null</c> — платформа долговечна сама по себе.
+        /// Synchronous host hook, used by the synchronous API. False or an exception reports an
+        /// unconfirmed VFS mutation and leaves the file unreadable through the synchronous API until a
+        /// confirmation succeeds. A successful answer confirms the write outright: the two hooks are
+        /// two SHAPES of one durability answer, not two stages of one, so a present async hook does not
+        /// turn a successful sync answer into a mere queue request.
         /// </param>
         /// <param name="afterWriteAsync">
-        /// Асинхронный хук долговечности для async-пути. Вызывается с <see cref="CancellationToken.None"/>
-        /// после зафиксированной мутации, вне файловых гейтов, на исходном контексте вызывающего; обязан
-        /// сам ограничивать время завершения. <c>false</c> или исключение сообщают реальный исход через
-        /// <see cref="IOException"/>. <c>null</c> — используется синхронный хук.
+        /// Async host confirmation, invoked with CancellationToken.None outside file gates on the
+        /// calling context. Must bound its own completion time; false or an exception becomes IOException.
+        /// If absent, the explicitly configured sync hook is used. No hooks means ordinary filesystem persistence.
         /// </param>
         public FileConversationSummaryStore(
             string rootDirectory,
@@ -130,7 +170,8 @@ namespace CoreAI.Ai
             EnterOperation();
             try
             {
-                SemaphoreSlim gate = ForPath(GetPath(roleId));
+                PathState state = ForPath(GetPath(roleId));
+                SemaphoreSlim gate = state.Gate;
                 if (!gate.Wait(0))
                 {
                     throw new InvalidOperationException(
@@ -140,6 +181,8 @@ namespace CoreAI.Ai
 
                 try
                 {
+                    if (state.Pending != null)
+                        throw new InvalidOperationException("Summary durability is unconfirmed; await LoadSummaryAsync before using the stored fold marker.");
                     return LoadSummaryCore(roleId);
                 }
                 finally
@@ -169,8 +212,13 @@ namespace CoreAI.Ai
             try
             {
                 // WHY: awaited with default capture so the logging below runs on the original entry
-                // context; the disk helper itself uses ConfigureAwait(false) internally.
-                string summary = await ReadCommittedAsync(roleId, cancellationToken);
+                // context; only the private file delegate runs on a worker.
+                (string summary, DurabilityRequest pending) = await ReadCommittedAsync(roleId, cancellationToken);
+                if (pending != null)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await ConfirmPendingAsync(ForPath(GetPath(roleId)), pending);
+                }
                 return summary;
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
@@ -184,10 +232,11 @@ namespace CoreAI.Ai
             }
         }
 
-        private async Task<string> ReadCommittedAsync(string roleId, CancellationToken cancellationToken)
+        private async Task<(string Summary, DurabilityRequest Pending)> ReadCommittedAsync(string roleId, CancellationToken cancellationToken)
         {
-            SemaphoreSlim gate = ForPath(GetPath(roleId));
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            PathState state = ForPath(GetPath(roleId));
+            SemaphoreSlim gate = state.Gate;
+            await gate.WaitAsync(cancellationToken);
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -195,8 +244,8 @@ namespace CoreAI.Ai
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     return ReadSummaryCoreStrict(roleId);
-                }).ConfigureAwait(false);
-                return result;
+                });
+                return (result, state.Pending);
             }
             finally
             {
@@ -272,7 +321,8 @@ namespace CoreAI.Ai
             try
             {
                 RequireSynchronousConfirmation();
-                SemaphoreSlim gate = ForPath(GetPath(roleId));
+                PathState state = ForPath(GetPath(roleId));
+                SemaphoreSlim gate = state.Gate;
                 if (!gate.Wait(0))
                 {
                     throw new InvalidOperationException(
@@ -280,16 +330,18 @@ namespace CoreAI.Ai
                         "await the async API instead of blocking the calling (Unity main) thread on sync I/O.");
                 }
 
+                DurabilityRequest pending;
                 try
                 {
                     WriteSummaryCore(GetPath(roleId), summary ?? "");
+                    pending = state.RecordMutation(this);
                 }
                 finally
                 {
                     gate.Release();
                 }
 
-                ConfirmDurabilitySync();
+                ConfirmPendingSync(state, pending);
             }
             finally
             {
@@ -314,9 +366,10 @@ namespace CoreAI.Ai
             try
             {
                 // WHY: awaited with default capture so durability confirmation and logging below run on
-                // the original entry context outside the file gate; the helper uses ConfigureAwait(false).
-                await CommitSaveAsync(GetPath(roleId), summary ?? "", cancellationToken);
-                await ConfirmDurabilityAsync();
+                // the original entry context outside the file gate.
+                string path = GetPath(roleId);
+                DurabilityRequest pending = await CommitSaveAsync(path, summary ?? "", cancellationToken);
+                await ConfirmPendingAsync(ForPath(path), pending);
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
@@ -329,10 +382,11 @@ namespace CoreAI.Ai
             }
         }
 
-        private async Task CommitSaveAsync(string path, string summary, CancellationToken cancellationToken)
+        private async Task<DurabilityRequest> CommitSaveAsync(string path, string summary, CancellationToken cancellationToken)
         {
-            SemaphoreSlim gate = ForPath(path);
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            PathState state = ForPath(path);
+            SemaphoreSlim gate = state.Gate;
+            await gate.WaitAsync(cancellationToken);
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -342,7 +396,8 @@ namespace CoreAI.Ai
                     PersistedDto dto = new() { Summary = summary };
                     string json = JsonConvert.SerializeObject(dto, JsonSettings);
                     AtomicWriteAllText(path, json, cancellationToken);
-                }).ConfigureAwait(false);
+                });
+                return state.RecordMutation(this);
             }
             finally
             {
@@ -422,7 +477,8 @@ namespace CoreAI.Ai
             {
                 RequireSynchronousConfirmation();
                 string path = GetPath(roleId);
-                SemaphoreSlim gate = ForPath(path);
+                PathState state = ForPath(path);
+                SemaphoreSlim gate = state.Gate;
                 if (!gate.Wait(0))
                 {
                     throw new InvalidOperationException(
@@ -430,10 +486,11 @@ namespace CoreAI.Ai
                         "await the async API instead of blocking the calling (Unity main) thread on sync I/O.");
                 }
 
-                bool mutated;
+                DurabilityRequest pending;
                 try
                 {
-                    mutated = DeleteSummaryCore(path);
+                    DeleteSummaryCore(path);
+                    pending = state.RecordMutation(this);
                 }
                 finally
                 {
@@ -441,7 +498,7 @@ namespace CoreAI.Ai
                 }
 
                 // WHY: A retry after unconfirmed deletion must flush again even when the VFS file is already absent.
-                ConfirmDurabilitySync();
+                ConfirmPendingSync(state, pending);
             }
             finally
             {
@@ -466,9 +523,10 @@ namespace CoreAI.Ai
             try
             {
                 // WHY: awaited with default capture so durability confirmation and logging below run on
-                // the original entry context outside the file gate; the helper uses ConfigureAwait(false).
-                await CommitClearAsync(GetPath(roleId), cancellationToken);
-                await ConfirmDurabilityAsync();
+                // the original entry context outside the file gate.
+                string path = GetPath(roleId);
+                DurabilityRequest pending = await CommitClearAsync(path, cancellationToken);
+                await ConfirmPendingAsync(ForPath(path), pending);
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
@@ -481,19 +539,20 @@ namespace CoreAI.Ai
             }
         }
 
-        private async Task<bool> CommitClearAsync(string path, CancellationToken cancellationToken)
+        private async Task<DurabilityRequest> CommitClearAsync(string path, CancellationToken cancellationToken)
         {
-            SemaphoreSlim gate = ForPath(path);
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            PathState state = ForPath(path);
+            SemaphoreSlim gate = state.Gate;
+            await gate.WaitAsync(cancellationToken);
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                bool result = await RunOffThread(() =>
+                await RunOffThread(() =>
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     return TryDeleteFile(path);
-                }).ConfigureAwait(false);
-                return result;
+                });
+                return state.RecordMutation(this);
             }
             finally
             {
@@ -594,9 +653,48 @@ namespace CoreAI.Ai
             }
         }
 
-        private static SemaphoreSlim ForPath(string path)
+        private static PathState ForPath(string path)
         {
-            return MutationGates.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
+            PathState state = MutationGates.GetOrAdd(path, _ => new PathState());
+            for (ConfirmationFrame frame = CurrentConfirmation.Value; frame != null; frame = frame.Previous)
+            {
+                if (ReferenceEquals(frame.State, state))
+                    throw new InvalidOperationException("A summary durability callback cannot reenter the same summary file.");
+            }
+            return state;
+        }
+
+        private static async Task ConfirmPendingAsync(PathState state, DurabilityRequest pending)
+        {
+            ConfirmationFrame previous = CurrentConfirmation.Value;
+            CurrentConfirmation.Value = new ConfirmationFrame { State = state, Previous = previous };
+            try
+            {
+                await pending.ConfirmAsync();
+                state.Confirmed(pending);
+            }
+            finally { CurrentConfirmation.Value = previous; }
+        }
+
+        private static void ConfirmPendingSync(PathState state, DurabilityRequest pending)
+        {
+            ConfirmationFrame previous = CurrentConfirmation.Value;
+            CurrentConfirmation.Value = new ConfirmationFrame { State = state, Previous = previous };
+            try
+            {
+                pending.ConfirmSync();
+                // WHY unconditional: the synchronous hook used to be treated as a mere QUEUE request
+                // whenever an async hook was configured too, leaving the mark parked "until the async
+                // one confirms". That rested on the two hooks being different things - a manual
+                // FS.syncfs handshake behind the async one. That channel is gone: both hooks now carry
+                // the SAME immediate engine answer (CoreAiWebGlPersistence.Sync / SyncAsync), which is
+                // exactly the pair CoreAILifetimeScope configures. Nothing ever cleared the mark, so a
+                // synchronous save poisoned the file and the next synchronous read threw - on the live
+                // chat-history reset and session-inspector paths. A hook that says false still throws
+                // above and leaves the mark, which is the guarantee worth keeping.
+                state.Confirmed(pending);
+            }
+            finally { CurrentConfirmation.Value = previous; }
         }
 
         private string GetPath(string roleId)

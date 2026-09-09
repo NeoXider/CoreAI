@@ -1,7 +1,43 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CoreAI.Ai
 {
+    /// <summary>Awaitable revision operations needed by persistent skill authoring.</summary>
+    public interface IAsyncLuaScriptVersionStore
+    {
+        Task<LuaScriptVersionRecord> GetSnapshotAsync(string key, CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<string>> GetKnownKeysAsync(CancellationToken cancellationToken = default);
+        Task SeedOriginalAsync(string key, string source, bool overwriteExistingOriginal = false, CancellationToken cancellationToken = default);
+        Task RecordSuccessfulExecutionAsync(string key, string source, CancellationToken cancellationToken = default);
+    }
+
+    /// <summary>Explicit promise that a legacy version store performs only fast, nonblocking inline work.</summary>
+    public sealed class InlineAsyncLuaScriptVersionStoreAdapter : ILuaScriptVersionStore, IAsyncLuaScriptVersionStore
+    {
+        private readonly ILuaScriptVersionStore _store;
+        internal ILuaScriptVersionStore OrderingIdentity => _store;
+        public InlineAsyncLuaScriptVersionStoreAdapter(ILuaScriptVersionStore store) { _store = store is InlineAsyncLuaScriptVersionStoreAdapter adapter ? adapter._store : store ?? throw new ArgumentNullException(nameof(store)); }
+        public bool TryGetSnapshot(string key, out LuaScriptVersionRecord snapshot) => _store.TryGetSnapshot(key, out snapshot);
+        public IReadOnlyList<string> GetKnownKeys() => _store.GetKnownKeys();
+        public void SeedOriginal(string key, string source, bool overwriteExistingOriginal = false) => _store.SeedOriginal(key, source, overwriteExistingOriginal);
+        public void RecordSuccessfulExecution(string key, string source) => _store.RecordSuccessfulExecution(key, source);
+        public void ResetToOriginal(string key) => _store.ResetToOriginal(key);
+        public void ResetToRevision(string key, int revisionIndex) => _store.ResetToRevision(key, revisionIndex);
+        public void ResetAllToOriginal() => _store.ResetAllToOriginal();
+        public string BuildProgrammerPromptSection(string key) => _store.BuildProgrammerPromptSection(key);
+        public Task<LuaScriptVersionRecord> GetSnapshotAsync(string key, CancellationToken cancellationToken = default)
+        { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(TryGetSnapshot(key, out LuaScriptVersionRecord snapshot) ? snapshot : null); }
+        public Task<IReadOnlyList<string>> GetKnownKeysAsync(CancellationToken cancellationToken = default)
+        { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(GetKnownKeys()); }
+        public Task SeedOriginalAsync(string key, string source, bool overwriteExistingOriginal = false, CancellationToken cancellationToken = default)
+        { cancellationToken.ThrowIfCancellationRequested(); SeedOriginal(key, source, overwriteExistingOriginal); return Task.CompletedTask; }
+        public Task RecordSuccessfulExecutionAsync(string key, string source, CancellationToken cancellationToken = default)
+        { cancellationToken.ThrowIfCancellationRequested(); RecordSuccessfulExecution(key, source); return Task.CompletedTask; }
+    }
+
     /// <summary>
     /// Tracks original and current Lua script versions.
     /// </summary>

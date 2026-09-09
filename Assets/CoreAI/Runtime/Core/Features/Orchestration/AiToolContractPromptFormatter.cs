@@ -309,6 +309,23 @@ namespace CoreAI.Ai
             return normalized;
         }
 
+        /// <summary>Upper bound on memoized canonical schemas; the table is cleared when reached.</summary>
+        private const int CanonicalSchemaCacheCapacity = 256;
+
+        private static readonly object CanonicalSchemaGate = new();
+
+        private static readonly Dictionary<string, string> CanonicalSchemaCache =
+            new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Key-sorted compact JSON of a tool schema, memoized by the schema text.
+        /// <para>
+        /// WHY: on a text-shaped endpoint the role tool contract is rebuilt for every request, and each
+        /// rebuild parsed, sorted and re-serialized the schema of every tool - the same few dozen constant
+        /// strings, request after request. The canonical form is a pure function of the text, so the
+        /// table (strings only, bounded) returns it without a parse.
+        /// </para>
+        /// </summary>
         internal static string CanonicalizeSchemaOrRaw(string schema)
         {
             if (string.IsNullOrWhiteSpace(schema))
@@ -316,6 +333,30 @@ namespace CoreAI.Ai
                 return schema ?? "";
             }
 
+            lock (CanonicalSchemaGate)
+            {
+                if (CanonicalSchemaCache.TryGetValue(schema, out string cached))
+                {
+                    return cached;
+                }
+            }
+
+            string canonical = CanonicalizeSchemaOrRawUncached(schema);
+            lock (CanonicalSchemaGate)
+            {
+                if (CanonicalSchemaCache.Count >= CanonicalSchemaCacheCapacity)
+                {
+                    CanonicalSchemaCache.Clear();
+                }
+
+                CanonicalSchemaCache[schema] = canonical;
+            }
+
+            return canonical;
+        }
+
+        private static string CanonicalizeSchemaOrRawUncached(string schema)
+        {
             try
             {
                 JToken token = JToken.Parse(schema);

@@ -50,6 +50,19 @@ completion even with an empty final response.
 
 ### Waiting for HTTP in Unity
 
+Streaming retry disposes each provider enumerator once. If the request already failed, a secondary
+disposal failure cannot replace caller cancellation, a typed provider error, or an emitted terminal
+error chunk. For thrown primary failures, the cleanup exception is retained in
+`Exception.Data[ClientLimitedLlmClientDecorator.StreamDisposeExceptionDataKey]`; an optional diagnostic
+sink also receives it. A cleanup-only failure still propagates. Text or executed tool output remains
+the commit boundary: cleanup never authorizes replay after that boundary.
+
+`ErrorCode` classifies a streaming failure even when its optional `Error` text is empty, including
+chunks emitted by the default `ILlmClient` completion-to-stream adapter. Permanent codes are never
+retried; retry exhaustion preserves the original transient error chunk and HTTP/retry metadata.
+Null control entries are ignored before commit. A stream containing only null entries still reaches
+the bounded empty-response retry policy when its enumeration ends.
+
 Readiness, the tool probe, and the ordinary HTTP transport use a single `AsyncOperation.completed` wait.
 It does not poll `isDone` in a loop and does not occupy a frame. An already completed operation is also accepted safely;
 the event rules are described in [Unity Scripting API](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/AsyncOperation-completed.html).

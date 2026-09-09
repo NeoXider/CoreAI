@@ -440,9 +440,21 @@ A tool that throws is always logged as an error: `[ToolPolicy] <name> threw: <me
 
 ### How tool success/failure is surfaced
 
-- **To the model (always):** the exact tool result — including the failure reason — is returned in the
+- **To the model (always):** the tool result — including the failure reason — is returned in the
   `tool` message, so the model can self-correct and retry. Unknown tool, malformed/missing arguments,
-  timeout, and thrown exceptions each return a descriptive error the model sees verbatim.
+  timeout, and thrown exceptions each return a descriptive error the model reads as-is.
+
+  `ToolExecutionPolicy` makes exactly **two** edits to a result, both deliberate and both visible:
+
+  | When | What the model gets | Why |
+  | --- | --- | --- |
+  | Result longer than `MaxToolResultChars` (8000 by default) | the first `MaxToolResultChars` characters plus a marker line `...[truncated: <original> chars total -> <shown> shown]` | An unmarked cut is read as a complete answer: the model finishes a severed JSON object and reasons on half the data. Success/failure is classified from the **full** text before the cut, so truncation never changes the verdict. |
+  | Result empty or whitespace-only | `{"ok":true,"empty":true,"message":"The tool returned an empty result. …"}` | Providers reject an empty `tool` message. The envelope says the tool completed and had nothing to say, instead of inventing a payload the tool never returned. `ok:true` simply repeats the verdict an empty string already has. |
+
+  A cross-turn echo is not an edit of a result but a substitute for one: the call is not executed and the model
+  gets `{"ok":true,"duplicate":true,"message":…}` (see
+  [TOOL_CALLING_BEST_PRACTICES.md](../../CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md) → Duplicate Calls).
+  Everything else reaches the model unchanged, byte for byte.
 - **To the user (tool-only turns):** when the model emits tool calls and no text,
   `AiOrchestrator.ResolveToolOnlyCompletionContent` produces a status message —
   `Tool call completed: <name>.` on success, or `Tool call failed: <name>: <reason>.` on failure — instead

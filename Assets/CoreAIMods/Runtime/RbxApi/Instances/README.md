@@ -26,9 +26,14 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
   character as well as the player. Disconnect removes the character and its signal subscriptions.
 - Character signals are deferred. `CharacterRemoving` permits the outgoing model's tombstone
   identity reads (for example `Name`); it does not preserve the destroyed descendant tree.
-- The Unity composition attaches motors after the root part exists and drives them before
-  simulation. Anchored roots remain anchored. Hosts can supply an `IRbxCharacterMotor` factory;
-  headless worlds retain character health and state without requiring Unity physics.
+- The Unity composition attaches motors after the root part exists and steps them at
+  the scheduler's PreSimulation boundary, once per `Scheduler.Advance` alongside the
+  PreSimulation/Stepped signals. Every scheduler phase boundary routes to its matching
+  pump — PreAnimation, PreSimulation, PostSimulation, Heartbeat, InputProcessing,
+  PreRender — in scheduler order, with the render pair withheld where the topology
+  draws no frames. Anchored roots remain anchored. Hosts can supply an
+  `IRbxCharacterMotor` factory; headless worlds retain character health and state
+  without requiring Unity physics.
 - This character slice does not implement avatar rigs, animation, appearance loading, automatic
   death/respawn scheduling, or a production multiplayer transport. `RespawnTime` remains a stored
   setting until automatic respawn scheduling is implemented.

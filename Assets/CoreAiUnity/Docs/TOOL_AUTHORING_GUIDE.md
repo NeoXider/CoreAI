@@ -38,6 +38,7 @@ From `ILlmTool.cs`:
 | `Description` | abstract | One short paragraph; list the actions. Reaches the model on **both** paths. |
 | `ParametersSchema` | virtual, default `"{}"` | Text-path only. Keep in sync with the attributes. `JsonParams(...)` helper builds it. |
 | `AllowDuplicates` | virtual, default `false` | `false` is correct for almost every tool — see below. |
+| `IsMutating` | virtual, default `false` | `true` = the tool writes shared state; the policy never runs it concurrently with another mutating call — see below. |
 | `ToolTimeoutMsOverride` | virtual, default `null` | `null` = the global `DefaultToolTimeoutMs`. Only a tool that **waits for a human** needs its own — see below. |
 | `EndsTurn` | virtual, default `false` | `true` = a successful call is the LAST thing in the turn; the loop does not send the result back to the model — see below. |
 | `CreateAIFunction()` | `IAIFunctionLlmTool` | Builds the `AIFunction` via `AIFunctionFactory.Create`. |
@@ -112,24 +113,71 @@ The trailing `CancellationToken` is bound automatically and is not exposed to th
 - [ ] **Concise `Description`** that names the actions. It is the only per-tool text that reaches both paths.
 - [ ] **Pick `AllowDuplicates` correctly** — almost always leave it `false` (the default). See the next section
       so you do not set it `true` "to allow many calls".
+- [ ] **Set `IsMutating => true` if the tool writes anything shared** (world, save, memory, files, a server).
+      The default is `false` and means "safe to run concurrently with everything else in the turn".
 - [ ] `using System.ComponentModel;` is present (for `[Description]`).
 - [ ] Implement `IAIFunctionLlmTool` (or `IAIFunctionsLlmTool`); build the function with
       `AIFunctionFactory.Create`.
 
 ### Understanding `AllowDuplicates` (args-aware dedup)
 
-`ToolExecutionPolicy.CheckDuplicate` (`ToolExecutionPolicy.cs:140`) suppresses a tool call only when an
-**identical** call already ran in this turn. The dedup key is **tool name + canonicalized arguments** —
-`$"{fc.Name}({argsSig})"` (`ToolExecutionPolicy.cs:160-177`), where `argsSig` is the key-sorted serialization
-of the arguments. A tool whose `AllowDuplicates => true` is excluded from the check entirely
-(`ToolExecutionPolicy.cs:152`).
+`ToolExecutionPolicy` suppresses a call only when **that exact call already SUCCEEDED in an EARLIER turn of
+the same request**. The key is per call — `name(canonicalized arguments)`, built by
+`TryBuildDuplicateSignature`, where the arguments are serialized from a key-sorted projection so a re-emitted
+call with a different key order still collides. A tool whose `AllowDuplicates => true` is excluded from the
+check entirely, including the built-in mutating names.
 
-The key insight: **distinct arguments produce distinct keys, so they are never duplicates.** Spawning ten
-cubes at ten different positions is ten different calls and all run. You do **not** need `AllowDuplicates =>
-true` to "allow many calls" — you only need it if the *same call with the same arguments* should run more than
-once (genuinely rare; a truly idempotent-to-repeat action). Leaving the default `false` is correct for nearly
-every tool, and is essential for spammy spawn-style tools: it stops a model from looping on the exact same
-spawn forever.
+Three consequences worth knowing before you touch the flag:
+
+- **Distinct arguments produce distinct keys, so they are never duplicates.** Spawning ten cubes at ten
+  different positions is ten different calls and all run. You do **not** need `AllowDuplicates => true` to
+  "allow many calls" — only if the *same call with the same arguments* should run more than once (genuinely
+  rare; a truly idempotent-to-repeat action).
+- **Repeats inside ONE turn always execute.** Three identical `spawn tree` calls emitted together are a
+  legitimate request; signatures are only compared against earlier turns, never against sibling slots.
+- **Only success registers a signature.** A failed call stays repeatable with identical arguments, so a retry
+  of exactly the call that failed is never blocked.
+
+The key is per call and not per turn on purpose: a batch-wide key let the model slip an echo past the guard
+just by changing what it sent *alongside* the repeated call (turn 1 = `[A]`, turn 2 = `[A, B]` re-executed
+`A`). That is why the guide can promise you do **not** need your own idempotency key for echo suppression —
+keep one only for currency- or billing-sensitive work that must stay idempotent across independent requests.
+
+Suppression is not an error: the model gets `{"ok": true, "duplicate": true, "message": …}`, the trace is a
+SUCCESS with `source=duplicate`, and a turn made only of suppressed calls leaves the consecutive-error counter
+untouched. Leaving the default `false` is correct for nearly every tool, and is essential for spammy
+spawn-style tools: it stops a model from looping on the exact same spawn forever.
+
+### Understanding `IsMutating` (tools that write shared state)
+
+`IsMutating => true` means "this tool writes something other calls can also write" — the world, a save file,
+memory, a registry, a server. All mutating calls of a turn share ONE ordered serialization chain, so no two of
+them ever overlap, while everything else runs concurrently under `MaxParallelToolCalls`. Two mutations racing
+for the same store lose writes or read torn state, and a tool body cannot defend against that from the inside,
+which is why the flag lives in the contract rather than in the implementation.
+
+```csharp
+public override bool IsMutating => true;   // LlmToolBase / ILlmTool
+```
+
+```csharp
+new DelegateLlmTool("grant_item", "Grant an item.", body) { IsMutating = true };
+```
+
+Rules of thumb:
+
+- **The default is `false` and it means read-only.** An undeclared tool may overlap with any other call in the
+  turn. If your tool has a side effect and you skip the flag, the guarantee simply does not apply to it.
+- **Do not go looking for a name list to edit.** The policy also recognizes the built-in mutating names
+  (`memory`, `manage_mods`, `manage_skills`, `world_command`, `component_command`, `execute_lua`,
+  `call_skill_tool`) so hosts that registered them keep working unchanged. That list is backward compatibility,
+  not an extension point — never patch package source to add a name to it.
+- **The flag is resolved by name from the role's tool list**, exactly like `ToolTimeoutMsOverride`. A tool
+  reached through the skill proxy is covered twice over: the proxy itself is treated as mutating, and the
+  policy also reads the resolved inner tool's own flag before scheduling the call.
+- **It is unrelated to echo suppression.** `IsMutating` decides ordering; `AllowDuplicates` decides whether a
+  repeat is suppressed. A read-only tool is still echo-suppressed, and a mutating tool with
+  `AllowDuplicates => true` is still exempt.
 
 ### Understanding `ToolTimeoutMsOverride` (tools that wait for a human)
 

@@ -21,16 +21,18 @@ namespace CoreAI.Infrastructure.World
         public const float DefaultAutoSaveIntervalSeconds = 60f;
 
         /// <summary>
-        /// WebGL IDBFS→IndexedDB flush invoked after durable file mutations; returns false when the
-        /// flush failed. Internal set accessor is the test seam (InternalsVisibleTo) used to observe
-        /// the flush without a browser.
+        /// Durability answer for the writes this manager has just performed; false when the browser
+        /// page has no durable storage armed. Internal set accessor is the test seam
+        /// (InternalsVisibleTo) used to observe the answer without a browser.
         /// </summary>
         internal Func<bool> WebGlFlushSync { get; set; } = CoreAiWebGlPersistence.Sync;
 
         /// <summary>
-        /// Confirmed WebGL IDBFS→IndexedDB flush: the task completes only from the matching browser
-        /// <c>FS.syncfs</c> callback (see <c>WORLD_PACKAGE.md</c> "Persistence status"). Internal set
-        /// accessor is the test seam (InternalsVisibleTo) used to release the callback without a browser.
+        /// Asynchronous shape of <see cref="WebGlFlushSync"/> for the confirmation path. It resolves
+        /// immediately: since Unity 6.3 the engine persists <c>persistentDataPath</c> itself and offers
+        /// no completion callback, so there is nothing left to await (see
+        /// <see cref="CoreAiWebGlPersistence"/>). Internal set accessor is the test seam
+        /// (InternalsVisibleTo) used to answer without a browser.
         /// </summary>
         internal Func<UniTask<bool>> WebGlFlushAsync { get; set; } =
             () => CoreAiWebGlPersistence.SyncAsync();
@@ -44,10 +46,9 @@ namespace CoreAI.Infrastructure.World
                 return;
             }
 
-            // WHY: this is a second flush after the fire-and-forget one Save()/Reset() already issued.
-            // The jslib queue serialises requests, so this one's FS.syncfs starts after that one
-            // finishes and its callback is a strict superset of it — the cheap way to get a confirmed
-            // answer without changing the unattended autosave/quit paths.
+            // WHY: still routed through the async seam although it now resolves immediately - the
+            // callback contract (never inline, never throwing) is what callers were built against, and
+            // a host that supplies its own confirmation through the seam keeps working.
             ConfirmDurabilityAsync(onConfirmed).Forget();
         }
 
@@ -269,8 +270,11 @@ namespace CoreAI.Infrastructure.World
                 }
 
                 Transform t = tag.transform;
-                Color color = ReadColor(tag.gameObject);
+                Color color = ReadColor(tag.gameObject, _colorScratch ??= new MaterialPropertyBlock());
                 bool hasColor = color.r >= 0f;
+                Vector3 position = t.position;
+                Vector3 euler = t.eulerAngles;
+                Vector3 scale = t.localScale;
 
                 // WHY: Prefer the parent's persistentId (stable across renames and duplicate names);
                 // fall back to the parent's name only when the parent isn't itself a tracked
@@ -301,15 +305,15 @@ namespace CoreAI.Infrastructure.World
                     id = tag.persistentId,
                     prefabKey = tag.prefabKey,
                     name = tag.gameObject.name,
-                    px = t.position.x,
-                    py = t.position.y,
-                    pz = t.position.z,
-                    rx = t.eulerAngles.x,
-                    ry = t.eulerAngles.y,
-                    rz = t.eulerAngles.z,
-                    sx = t.localScale.x,
-                    sy = t.localScale.y,
-                    sz = t.localScale.z,
+                    px = position.x,
+                    py = position.y,
+                    pz = position.z,
+                    rx = euler.x,
+                    ry = euler.y,
+                    rz = euler.z,
+                    sx = scale.x,
+                    sy = scale.y,
+                    sz = scale.z,
                     parent = parentValue,
                     active = tag.gameObject.activeSelf,
                     cr = hasColor ? color.r : -1f,
@@ -642,7 +646,23 @@ namespace CoreAI.Infrastructure.World
             }
         }
 
-        private static Color ReadColor(GameObject go)
+        /// <summary>
+        /// One property block reused by every object of a <see cref="Save"/> pass.
+        /// <para>
+        /// WHY: <see cref="ReadColor"/> allocated a fresh <see cref="MaterialPropertyBlock"/> - a
+        /// native-backed object - for EVERY tracked object on EVERY auto-save (once a minute, plus every
+        /// quit and every explicit save). One scratch block, cleared before each read, costs nothing per
+        /// object; the read itself is unchanged.
+        /// </para>
+        /// </summary>
+        private MaterialPropertyBlock _colorScratch;
+
+        /// <summary>
+        /// Reads the per-renderer <c>_Color</c> / <c>_BaseColor</c> override of <paramref name="go"/>
+        /// into <paramref name="scratch"/>, or <see cref="NoColor"/> when there is no renderer or no
+        /// override. Allocation-free: the caller owns the scratch block.
+        /// </summary>
+        internal static Color ReadColor(GameObject go, MaterialPropertyBlock scratch)
         {
             Renderer renderer = go.GetComponent<Renderer>();
             if (renderer == null)
@@ -650,16 +670,18 @@ namespace CoreAI.Infrastructure.World
                 return NoColor;
             }
 
-            MaterialPropertyBlock mpb = new();
-            renderer.GetPropertyBlock(mpb);
-            if (mpb.HasColor("_Color"))
+            // WHY Clear: GetPropertyBlock fills the block from the renderer; clearing first makes the
+            // reused block indistinguishable from the fresh one the previous shape allocated per call.
+            scratch.Clear();
+            renderer.GetPropertyBlock(scratch);
+            if (scratch.HasColor("_Color"))
             {
-                return mpb.GetColor("_Color");
+                return scratch.GetColor("_Color");
             }
 
-            if (mpb.HasColor("_BaseColor"))
+            if (scratch.HasColor("_BaseColor"))
             {
-                return mpb.GetColor("_BaseColor");
+                return scratch.GetColor("_BaseColor");
             }
 
             return NoColor;

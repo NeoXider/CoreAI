@@ -25,8 +25,10 @@ namespace CoreAI.Tests.EditMode
     public sealed class CoreAiWebGlQaEditModeTests
     {
         /// <summary>
-        /// World-state double whose durability confirmation is released by the test, standing in for
-        /// the browser's asynchronous <c>FS.syncfs</c> completion callback.
+        /// World-state double whose durability confirmation is released by the test. The production
+        /// confirmation now resolves immediately (the engine owns browser persistence — see
+        /// <c>CoreAiWebGlPersistence</c>), but the rule under test is about ORDER, not latency: the
+        /// page must never publish a durable state before the confirmation it asked for comes back.
         /// </summary>
         private sealed class DeferredDurabilityWorldStateManager : IWorldStateManager
         {

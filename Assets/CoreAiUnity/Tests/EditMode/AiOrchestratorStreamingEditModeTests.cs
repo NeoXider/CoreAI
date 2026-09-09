@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +15,73 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class AiOrchestratorStreamingEditModeTests
     {
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task SummaryPreflight_StreamingWaitsForConfirmationBeforeProviderAndEviction(bool failConfirmation)
+        {
+            AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario scenario = new();
+            scenario.Summary.SaveGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            scenario.Summary.FailSave = failConfirmation;
+            Task<List<LlmStreamChunk>> turn = CollectAsync(scenario.Orchestrator.RunStreamingAsync(scenario.Request));
+            try
+            {
+                await AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario.AwaitEntered(scenario.Summary.SaveEntered.Task);
+                Assert.IsFalse(turn.IsCompleted);
+                scenario.AssertOldSourceRetained();
+            }
+            finally { scenario.Summary.SaveGate.TrySetResult(true); }
+            if (failConfirmation)
+            {
+                Assert.That(await AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario.CaptureFailure(turn),
+                    Is.TypeOf<IOException>());
+                scenario.AssertOldSourceRetained();
+                scenario.Summary.FailSave = false;
+                await CollectAsync(scenario.Orchestrator.RunStreamingAsync(scenario.Request));
+            }
+            else { await turn; }
+            scenario.AssertPublishedOnce();
+        }
+
+        [Test]
+        public async Task SummaryPreflight_StreamingFailedLoadPreservesSourceAndCanRetry()
+        {
+            AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario scenario = new();
+            scenario.Summary.FailLoad = true;
+            Assert.That(await AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario.CaptureFailure(
+                CollectAsync(scenario.Orchestrator.RunStreamingAsync(scenario.Request))), Is.TypeOf<IOException>());
+            scenario.AssertOldSourceRetained();
+            scenario.Summary.FailLoad = false;
+            await CollectAsync(scenario.Orchestrator.RunStreamingAsync(scenario.Request));
+            scenario.AssertPublishedOnce();
+        }
+
+        [Test]
+        public async Task SummaryPreflight_StreamingCancellationDuringLoadDoesNotAppendFromFinally()
+        {
+            AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario scenario = new();
+            scenario.Summary.LoadGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using CancellationTokenSource cancellation = new();
+            Task<List<LlmStreamChunk>> turn = CollectAsync(scenario.Orchestrator.RunStreamingAsync(scenario.Request, cancellation.Token));
+            await AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario.AwaitEntered(scenario.Summary.LoadEntered.Task);
+            cancellation.Cancel();
+            Assert.That(await AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario.CaptureFailure(turn),
+                Is.InstanceOf<OperationCanceledException>());
+            scenario.AssertOldSourceRetained();
+        }
+
+        [Test]
+        public async Task SummaryPreflight_StreamingProviderFailureAfterConfirmationRetainsUserIntentOnce()
+        {
+            AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario scenario = new();
+            scenario.Provider.Fail = true;
+            await CollectAsync(scenario.Orchestrator.RunStreamingAsync(scenario.Request));
+            Assert.AreEqual(1, scenario.Provider.Calls);
+            Assert.AreEqual(0, scenario.Publications);
+            Assert.AreEqual(1, scenario.Memory.Appends.Count);
+            Assert.AreEqual(scenario.Request.Hint, scenario.Memory.Appends[0].Content);
+            StringAssert.Contains(scenario.Memory.Original[0].Content, scenario.Summary.Stored);
+        }
+
         /// <summary>
         /// Orchestrator stub that implements only <see cref="IAiOrchestrationService.RunTaskAsync"/>
         /// and relies on the interface default <c>RunStreamingAsync</c> implementation.

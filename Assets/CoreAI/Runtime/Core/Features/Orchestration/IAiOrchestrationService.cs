@@ -6,6 +6,19 @@ using CoreAI.Authority;
 namespace CoreAI.Ai
 {
     /// <summary>
+    /// Optional truthful completion capability. A legacy string result does not prove success and
+    /// must never be promoted to a successful completion by consumers of this contract.
+    /// </summary>
+    public interface IAiTaskResultService
+    {
+        /// <summary>Whether the complete decorated execution path exposes truthful task results.</summary>
+        bool SupportsTaskResults => true;
+
+        /// <summary>Runs the same task pipeline while retaining completion metadata and failure status.</summary>
+        Task<LlmCompletionResult> RunTaskResultAsync(AiTaskRequest task, CancellationToken cancellationToken = default);
+    }
+
+    /// <summary>
     /// AI task entry point: prompts, LLM invocation, memory, publishing <see cref="CoreAI.Messaging.ApplyAiGameCommand"/>.
     /// Typical production wiring layers <see cref="QueuedAiOrchestrator"/> above <see cref="AiOrchestrator"/>.
     /// </summary>
@@ -27,7 +40,30 @@ namespace CoreAI.Ai
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
-            string content = await RunTaskAsync(task, cancellationToken).ConfigureAwait(false);
+            if (this is IAiTaskResultService typed && typed.SupportsTaskResults)
+            {
+                LlmCompletionResult result = await typed.RunTaskResultAsync(task, cancellationToken);
+                yield return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Text = result?.Content ?? "",
+                    Error = result?.Ok == true ? null : result?.Error ?? "No typed completion was returned.",
+                    ErrorCode = result?.Ok == true ? LlmErrorCode.None :
+                        result?.ErrorCode is LlmErrorCode code && code != LlmErrorCode.None ? code : LlmErrorCode.ProviderError,
+                    HttpStatus = result?.HttpStatus,
+                    RetryAfterSeconds = result?.RetryAfterSeconds,
+                    Model = result?.Model ?? "",
+                    PromptTokens = result?.PromptTokens,
+                    CompletionTokens = result?.CompletionTokens,
+                    TotalTokens = result?.TotalTokens,
+                    LastRoundtripPromptTokens = result?.LastRoundtripPromptTokens,
+                    CacheReadTokens = result?.CacheReadTokens ?? 0,
+                    CacheWriteTokens = result?.CacheWriteTokens ?? 0,
+                    ExecutedToolCalls = result?.ExecutedToolCalls ?? System.Array.Empty<LlmToolCallTrace>()
+                };
+                yield break;
+            }
+            string content = await RunTaskAsync(task, cancellationToken);
             if (string.IsNullOrEmpty(content))
             {
                 yield return new LlmStreamChunk { IsDone = true, Error = "empty result" };

@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Threading.Tasks;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
@@ -86,7 +87,37 @@ namespace CoreAI.Scripting.LuaCs
             IScriptExecutionGuard guard = null,
             CancellationToken cancellationToken = default)
         {
-            LuaState lua = LuaCsScriptState.Unwrap(state);
+            LuaValue[] results = _environment.RunChunk(
+                LuaCsScriptState.Unwrap(state),
+                source,
+                ResolveGuard(guard),
+                cancellationToken);
+
+            return Box(results);
+        }
+
+        /// <inheritdoc />
+        public async Task<object[]> RunChunkAsync(
+            IScriptState state,
+            string source,
+            IScriptExecutionGuard guard = null,
+            IScriptFrameYielder frameYielder = null,
+            CancellationToken cancellationToken = default)
+        {
+            LuaValue[] results = await _environment.RunChunkAsync(
+                LuaCsScriptState.Unwrap(state),
+                source,
+                ResolveGuard(guard),
+                frameYielder,
+                cancellationToken);
+
+            return Box(results);
+        }
+
+        // WHY: a caller that supplied no guard still has to get the engine's observability/observer
+        // wiring, which is why this is not simply "null means defaults" inside the environment.
+        private LuaCsExecutionGuard ResolveGuard(IScriptExecutionGuard guard)
+        {
             LuaCsExecutionGuard luaGuard = (guard as LuaCsScriptExecutionGuard)?.Inner;
             if (luaGuard == null && (_observability != null || _guardObserver != null))
             {
@@ -96,12 +127,11 @@ namespace CoreAI.Scripting.LuaCs
                     guardObserver: _guardObserver);
             }
 
-            LuaValue[] results = _environment.RunChunk(
-                lua,
-                source,
-                luaGuard,
-                cancellationToken);
+            return luaGuard;
+        }
 
+        private static object[] Box(LuaValue[] results)
+        {
             object[] boxed = new object[results.Length];
             for (int i = 0; i < results.Length; i++)
             {

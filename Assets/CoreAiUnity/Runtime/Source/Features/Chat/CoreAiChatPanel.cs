@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI;
@@ -144,6 +145,16 @@ namespace CoreAI.Chat
         protected VisualElement HeaderIcon;
         private Label _longRequestHint;
         private float _longRequestHintArmedSince = float.NaN;
+
+        /// <summary>
+        /// Second already rendered into the long-request hint; <c>-1</c> means the hint is not shown.
+        /// <para>
+        /// WHY the field: the hint text was rebuilt in <c>Update()</c> EVERY frame - a string Replace,
+        /// an <c>int.ToString()</c> and a UI Toolkit text re-layout - although it changes once per
+        /// second. At 60 fps that is 120 strings a second of garbage for one visible change.
+        /// </para>
+        /// </summary>
+        private int _longRequestHintShownSeconds = -1;
         private const float LongRequestHintMinSeconds = 3f;
         private const string DefaultStreamingToolProgressHint = "Processing...";
 
@@ -2150,7 +2161,12 @@ namespace CoreAI.Chat
             }
 
             int sec = Mathf.Max((int)LongRequestHintMinSeconds, Mathf.FloorToInt(elapsed));
-            _longRequestHint.text = tpl.Replace("{elapsed}", sec.ToString());
+            if (sec != _longRequestHintShownSeconds)
+            {
+                _longRequestHintShownSeconds = sec;
+                _longRequestHint.text = tpl.Replace("{elapsed}", sec.ToString());
+            }
+
             _longRequestHint.style.display = DisplayStyle.Flex;
         }
 
@@ -2167,6 +2183,7 @@ namespace CoreAI.Chat
         private void ResetLongRequestHint()
         {
             _longRequestHintArmedSince = float.NaN;
+            _longRequestHintShownSeconds = -1;
             if (_longRequestHint == null || !IsElementReadyForStyle(_longRequestHint))
             {
                 return;
@@ -2510,15 +2527,54 @@ namespace CoreAI.Chat
         /// <returns>
         /// Final assistant text, simulated text, or <c>null</c> when the panel is busy, canceled, or given empty input.
         /// </returns>
-        public async Task<string?> SubmitMessageFromExternalAsync(
+        public Task<string?> SubmitMessageFromExternalAsync(
             string messageText,
             CoreAiChatExternalSubmitOptions options = null,
+            CancellationToken cancellationToken = default) =>
+            SubmitExternalCoreAsync(messageText, options, cancellationToken, null);
+
+        /// <summary>
+        /// Submits through the existing panel pipeline with truthful admission and completion status.
+        /// Failed admitted turns are never automatically retried. Failure presentation belongs to the caller.
+        /// </summary>
+        public async Task<CoreAiChatExternalSubmitResult> SubmitMessageFromExternalResultAsync(
+            string messageText, CoreAiChatExternalSubmitOptions options = null,
             CancellationToken cancellationToken = default)
+        {
+            CoreAiChatExternalSubmitResult outcome = new();
+            try
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    outcome.Rejection = CoreAiChatExternalSubmitRejection.Cancelled;
+                    SetExternalFailure(outcome, LlmErrorCode.Cancelled, "External submit was cancelled.");
+                    return outcome;
+                }
+                await SubmitExternalCoreAsync(messageText, options, cancellationToken, outcome);
+            }
+            catch (OperationCanceledException)
+            {
+                SetExternalFailure(outcome, LlmErrorCode.Cancelled, "External submit was cancelled.");
+            }
+            catch (Exception error)
+            {
+                SetExternalFailure(outcome, error is LlmClientException typed ? typed.ErrorCode : LlmErrorCode.ProviderError,
+                    error.Message, error as LlmClientException);
+            }
+            outcome.Completion ??= new LlmCompletionResult
+                { Ok = false, ErrorCode = LlmErrorCode.InvalidRequest, Error = "External submit was not admitted." };
+            return outcome;
+        }
+
+        private async Task<string?> SubmitExternalCoreAsync(string messageText,
+            CoreAiChatExternalSubmitOptions options, CancellationToken cancellationToken,
+            CoreAiChatExternalSubmitResult outcome)
         {
             options ??= new CoreAiChatExternalSubmitOptions();
 
             if (!CanStartAgentTurn())
             {
+                if (outcome != null) outcome.Rejection = CoreAiChatExternalSubmitRejection.Inactive;
                 Logger.LogWarning(GameLogFeature.Core,
                     "[CoreAiChatPanel] SubmitMessageFromExternalAsync: ignored (panel inactive).");
                 return null;
@@ -2526,6 +2582,7 @@ namespace CoreAI.Chat
 
             if (IsActionInProgress())
             {
+                if (outcome != null) outcome.Rejection = CoreAiChatExternalSubmitRejection.Busy;
                 Logger.LogWarning(GameLogFeature.Core,
                     "[CoreAiChatPanel] SubmitMessageFromExternalAsync: ignored (chat busy).");
                 return null;
@@ -2533,6 +2590,7 @@ namespace CoreAI.Chat
 
             if (string.IsNullOrWhiteSpace(messageText))
             {
+                if (outcome != null) outcome.Rejection = CoreAiChatExternalSubmitRejection.EmptyInput;
                 return null;
             }
 
@@ -2546,7 +2604,28 @@ namespace CoreAI.Chat
             text = OnMessageSending(text);
             if (string.IsNullOrEmpty(text))
             {
+                if (outcome != null) outcome.Rejection = CoreAiChatExternalSubmitRejection.Filtered;
                 return null;
+            }
+
+            if (outcome != null)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    outcome.Rejection = CoreAiChatExternalSubmitRejection.Cancelled;
+                    SetExternalFailure(outcome, LlmErrorCode.Cancelled, "External submit was cancelled before admission.");
+                    return null;
+                }
+                if (!CanStartAgentTurn() || IsActionInProgress())
+                {
+                    outcome.Rejection = CanStartAgentTurn() ? CoreAiChatExternalSubmitRejection.Busy : CoreAiChatExternalSubmitRejection.Inactive;
+                    return null;
+                }
+                if (string.IsNullOrWhiteSpace(options.SimulatedAssistantReply) && (_chatService == null || !_chatService.SupportsTaskResults))
+                {
+                    outcome.Rejection = _chatService == null ? CoreAiChatExternalSubmitRejection.ServiceUnavailable : CoreAiChatExternalSubmitRejection.TypedResultsUnavailable;
+                    return null;
+                }
             }
 
             if (options.AppendUserMessageToChat)
@@ -2558,7 +2637,38 @@ namespace CoreAI.Chat
             using CancellationTokenSource linked =
                 CancellationTokenSource.CreateLinkedTokenSource(GetOrCreateCancellationTokenSource().Token,
                     cancellationToken);
-            return await RunAgentTurnAsync(text, options.SimulatedAssistantReply, linked.Token);
+            return await RunAgentTurnAsync(text, options.SimulatedAssistantReply, linked.Token, outcome);
+        }
+
+        private static void SetExternalFailure(CoreAiChatExternalSubmitResult outcome, LlmErrorCode code,
+            string error, LlmClientException provider = null)
+        {
+            if (outcome == null) return;
+            outcome.Completion ??= new LlmCompletionResult();
+            outcome.Completion.Ok = false;
+            outcome.Completion.ErrorCode = code;
+            outcome.Completion.Error = error ?? "";
+            if (provider != null)
+            {
+                outcome.Completion.HttpStatus = provider.HttpStatus;
+                outcome.Completion.RetryAfterSeconds = provider.RetryAfterSeconds;
+                outcome.Completion.ProviderErrorBody = provider.ProviderErrorBody;
+            }
+        }
+
+        private static void CaptureExternalChunk(CoreAiChatExternalSubmitResult outcome, LlmStreamChunk chunk)
+        {
+            LlmCompletionResult result = outcome.Completion;
+            if (!string.IsNullOrEmpty(chunk.Model)) result.Model = chunk.Model;
+            if (chunk.HttpStatus.HasValue) result.HttpStatus = chunk.HttpStatus;
+            if (chunk.RetryAfterSeconds.HasValue) result.RetryAfterSeconds = chunk.RetryAfterSeconds;
+            if (chunk.PromptTokens.HasValue) result.PromptTokens = chunk.PromptTokens;
+            if (chunk.CompletionTokens.HasValue) result.CompletionTokens = chunk.CompletionTokens;
+            if (chunk.TotalTokens.HasValue) result.TotalTokens = chunk.TotalTokens;
+            if (chunk.LastRoundtripPromptTokens.HasValue) result.LastRoundtripPromptTokens = chunk.LastRoundtripPromptTokens;
+            if (chunk.CacheReadTokens != 0) result.CacheReadTokens = chunk.CacheReadTokens;
+            if (chunk.CacheWriteTokens != 0) result.CacheWriteTokens = chunk.CacheWriteTokens;
+            if (chunk.ExecutedToolCalls != null && chunk.ExecutedToolCalls.Count > 0) result.ExecutedToolCalls = chunk.ExecutedToolCalls;
         }
 
         private CancellationTokenSource GetOrCreateCancellationTokenSource()
@@ -2604,24 +2714,49 @@ namespace CoreAI.Chat
         private async Task<string?> RunAgentTurnAsync(
             string userTextForModel,
             string simulatedAssistantReply,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            CoreAiChatExternalSubmitResult outcome = null)
         {
             if (!CanStartAgentTurn())
             {
+                if (outcome != null) outcome.Rejection = CoreAiChatExternalSubmitRejection.Inactive;
                 Logger.LogWarning(GameLogFeature.Core,
                     "[CoreAiChatPanel] RunAgentTurnAsync: ignored (panel inactive).");
                 return null;
             }
 
+            if (outcome != null && IsActionInProgress())
+            {
+                outcome.Rejection = CoreAiChatExternalSubmitRejection.Busy;
+                return null;
+            }
+            if (outcome != null && cancellationToken.IsCancellationRequested)
+            {
+                outcome.Rejection = CoreAiChatExternalSubmitRejection.Cancelled;
+                SetExternalFailure(outcome, LlmErrorCode.Cancelled, "External submit was cancelled before admission.");
+                return null;
+            }
+
             if (!string.IsNullOrWhiteSpace(simulatedAssistantReply))
             {
+                if (outcome != null)
+                {
+                    outcome.Admitted = true;
+                    outcome.TurnGeneration = Interlocked.Increment(ref _currentTurnGeneration);
+                }
                 ResetLongRequestHint();
                 string raw = simulatedAssistantReply.Trim();
                 string stripped = StripThinkBlocks(raw);
                 string formatted = FormatResponseText(string.IsNullOrEmpty(stripped) ? raw : stripped);
+                if (outcome != null && string.IsNullOrWhiteSpace(formatted))
+                {
+                    SetExternalFailure(outcome, LlmErrorCode.EmptyResponse, "The simulated turn produced no visible response.");
+                    return null;
+                }
                 AddMessage(formatted, false);
                 OnResponseReceived(formatted);
                 OnAiResponseCompleted?.Invoke(formatted);
+                if (outcome != null) outcome.Completion = new LlmCompletionResult { Ok = true, Content = formatted };
                 return formatted;
             }
 
@@ -2630,7 +2765,15 @@ namespace CoreAI.Chat
                 _isSending = false;
                 ResetLongRequestHint();
                 UpdateSendButtonVisualState();
-                AddMessage(Options.ErrorMessagePrefix + "AI service is not connected.", false);
+                if (outcome == null) AddMessage(Options.ErrorMessagePrefix + "AI service is not connected.", false);
+                else outcome.Rejection = CoreAiChatExternalSubmitRejection.ServiceUnavailable;
+                return null;
+            }
+
+            if (outcome != null && !_chatService.SupportsTaskResults)
+            {
+                outcome.Rejection = CoreAiChatExternalSubmitRejection.TypedResultsUnavailable;
+                SetExternalFailure(outcome, LlmErrorCode.InvalidRequest, "The chat service does not expose typed task results.");
                 return null;
             }
 
@@ -2638,6 +2781,12 @@ namespace CoreAI.Chat
             // WHY: capture this turn's generation so code after awaits can detect "a newer turn is
             // already in flight" and drop stale UI appends/finishes (see IsStaleTurn).
             int turnGeneration = Interlocked.Increment(ref _currentTurnGeneration);
+            if (outcome != null)
+            {
+                outcome.Admitted = true;
+                outcome.TurnGeneration = turnGeneration;
+                SetExternalFailure(outcome, LlmErrorCode.Cancelled, "The admitted turn did not complete.");
+            }
             _toolRoundIterationInTurn = 1;
             _stopRequestedByUser = false;
             CancellationTokenSource requestCts =
@@ -2676,13 +2825,15 @@ namespace CoreAI.Chat
 
                 if (useStreaming)
                 {
-                    return await SendStreamingAsync(request, turnGeneration, requestCts.Token);
+                    return await SendStreamingAsync(request, turnGeneration, requestCts.Token, outcome);
                 }
 
-                return await SendNonStreamingAsync(request, turnGeneration, requestCts.Token);
+                return await SendNonStreamingAsync(request, turnGeneration, requestCts.Token, outcome);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException error)
             {
+                SetExternalFailure(outcome, error is LlmOperationTimeoutException ? LlmErrorCode.Timeout : LlmErrorCode.Cancelled,
+                    error.Message);
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 if (IsStaleTurn(turnGeneration, _currentTurnGeneration))
                 {
@@ -2692,7 +2843,7 @@ namespace CoreAI.Chat
                 FinishStreaming();
                 HideTypingIndicator();
                 ResetLongRequestHint();
-                if (!_stopRequestedByUser)
+                if (!_stopRequestedByUser && outcome == null)
                 {
                     string bubble = ResolveTimeoutMessage(false);
                     if (!string.IsNullOrEmpty(bubble))
@@ -2705,6 +2856,8 @@ namespace CoreAI.Chat
             }
             catch (Exception ex)
             {
+                SetExternalFailure(outcome, ex is LlmClientException typed ? typed.ErrorCode : LlmErrorCode.ProviderError,
+                    ex.Message, ex as LlmClientException);
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 // WHY: two audiences, two strings. The log keeps EVERYTHING (typed code, HTTP status,
                 // retry hint, raw provider body, stack trace); the transcript gets one readable
@@ -2716,7 +2869,7 @@ namespace CoreAI.Chat
                 if (!IsStaleTurn(turnGeneration, _currentTurnGeneration))
                 {
                     FinishStreaming();
-                    AddMessage(Options.ErrorMessagePrefix + ResolveErrorMessage(ex), false);
+                    if (outcome == null) AddMessage(Options.ErrorMessagePrefix + ResolveErrorMessage(ex), false);
                 }
 
                 return null;
@@ -2823,7 +2976,8 @@ namespace CoreAI.Chat
         private async Task<string?> SendStreamingAsync(
             AiTaskRequest request,
             int turnGeneration,
-            CancellationToken ct)
+            CancellationToken ct,
+            CoreAiChatExternalSubmitResult outcome = null)
         {
             ShowTypingIndicator();
             ResetThinkFilter();
@@ -2845,7 +2999,21 @@ namespace CoreAI.Chat
             _isStreaming = true;
             UpdateSendButtonVisualState();
 
-            string fullResponse = "";
+            // WHY builders, not strings: both accumulators grew by `+=` on EVERY visible chunk, which
+            // copies the whole turn's text per token — quadratic in the answer length, on WebGL's single
+            // thread, while the model is still speaking. Nothing here needs the text as a string until
+            // the turn ends, so it is assembled once.
+            StringBuilder fullResponse = new();
+            // Reused across the whole turn: the separator rule lives in StreamedMessageJoiner and its
+            // builder overload speaks LlmStreamChunk, so one scratch instance keeps that single owner
+            // without trading an O(n) copy per chunk for an allocation per chunk.
+            LlmStreamChunk joinScratch = new();
+            // WHY deferred: outcome.Completion.Content was re-assigned the full text on every chunk.
+            // The outcome object is created by SubmitExternalAsync, never escapes before this method's
+            // finally runs, and nothing reads Content mid-stream — so the last write is the only one
+            // that was ever observable. This flag marks that a write is owed.
+            bool outcomeContentPending = false;
+            bool terminalSeen = false;
             DateTime lastChunkAt = DateTime.UtcNow;
             // WHY: the bubbles THIS turn opened, tracked locally because _turnStreamingBubbles is reset by
             // whichever turn starts next — and an abandoned turn unwinds after that reset.
@@ -2855,7 +3023,7 @@ namespace CoreAI.Chat
             // включили, PanelRenderer перезагрузил документ) — пузырь отпущен, лента очищена гидрацией,
             // а ответ продолжает идти. Тогда сегмент открывает пузырь в новом дереве с начала, а не
             // хвостом без начала.
-            string segmentRendered = string.Empty;
+            StringBuilder segmentRendered = new();
 
             // Дописывает один видимый кусок в полный ответ и в пузырь на экране. Общий путь для чанков
             // потока и для хвоста, который фильтр удерживал до конца потока.
@@ -2879,7 +3047,7 @@ namespace CoreAI.Chat
                 if (startsNewMessage)
                 {
                     SealStreamingBubbleIfAny();
-                    segmentRendered = string.Empty;
+                    segmentRendered.Clear();
                 }
 
                 bool opensSegment = !_streamingStartedVisible || _streamingBubbleSealed;
@@ -2888,7 +3056,7 @@ namespace CoreAI.Chat
                 {
                     if (opensSegment)
                     {
-                        segmentRendered = string.Empty;
+                        segmentRendered.Clear();
                     }
 
                     _streamingStartedVisible = true;
@@ -2898,7 +3066,9 @@ namespace CoreAI.Chat
                         ownStreamingBubbles.Add(opened);
                         if (bubbleLostToRebind && segmentRendered.Length > 0)
                         {
-                            AppendToStreaming(segmentRendered, turnGeneration);
+                            // The rebind path only: materialising the segment here costs one copy per
+                            // lost bubble, not one per chunk.
+                            AppendToStreaming(segmentRendered.ToString(), turnGeneration);
                         }
                     }
                 }
@@ -2909,8 +3079,9 @@ namespace CoreAI.Chat
                 // Пузыри разъехались, но fullResponse уходит в историю и обработчикам
                 // одной строкой — там граница обязана остаться пустой строкой, иначе
                 // склейка вернётся при следующем показе той же истории.
-                fullResponse = AppendStreamedMessage(fullResponse, formatted, startsNewMessage);
-                segmentRendered += formatted;
+                AppendStreamedMessage(fullResponse, formatted, startsNewMessage, joinScratch);
+                if (outcome != null) outcomeContentPending = true;
+                segmentRendered.Append(formatted);
                 AppendToStreaming(formatted, turnGeneration);
             }
 
@@ -2942,7 +3113,9 @@ namespace CoreAI.Chat
                         return null;
                     }
 
-                    if (!string.IsNullOrEmpty(chunk.Error))
+                    if (outcome != null) CaptureExternalChunk(outcome, chunk);
+                    terminalSeen |= chunk.IsDone;
+                    if (!string.IsNullOrEmpty(chunk.Error) || (outcome != null && chunk.ErrorCode != LlmErrorCode.None))
                     {
                         if (_stopRequestedByUser &&
                             string.Equals(chunk.Error, "cancelled", StringComparison.OrdinalIgnoreCase))
@@ -2950,8 +3123,17 @@ namespace CoreAI.Chat
                             return null;
                         }
 
+                        if (outcome != null)
+                        {
+                            // A terminal failure may carry the final visible delta in the same chunk.
+                            if (!string.IsNullOrEmpty(chunk.Text))
+                                AppendVisibleText(FilterStreamChunk(chunk.Text), chunk.StartsNewMessage);
+                            AppendVisibleText(_thinkFilter.Flush(), false);
+                        }
                         Logger.LogError(GameLogFeature.Core, $"[CoreAiChatPanel] Stream error: {chunk.Error}");
-                        AddMessage(Options.ErrorMessagePrefix + ResolveStreamErrorMessage(chunk.Error), false);
+                        SetExternalFailure(outcome, chunk.ErrorCode == LlmErrorCode.None ? LlmErrorCode.ProviderError : chunk.ErrorCode,
+                            chunk.Error ?? "Streaming completion failed.");
+                        if (outcome == null) AddMessage(Options.ErrorMessagePrefix + ResolveStreamErrorMessage(chunk.Error), false);
                         return null;
                     }
 
@@ -2974,7 +3156,7 @@ namespace CoreAI.Chat
                             // WHY: сегмент до инструментов закончился; если пузыря уже нет (дерево
                             // отпущено), запечатать нечего, и без сброса следующая проза после
                             // инструментов открылась бы в новом дереве вместе с чужим началом.
-                            segmentRendered = string.Empty;
+                            segmentRendered.Clear();
                         }
 
                         if (chunk.BufferedStreamingUseToolProgressHint)
@@ -3006,6 +3188,7 @@ namespace CoreAI.Chat
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(ct);
                 if (IsStaleTurn(turnGeneration, _currentTurnGeneration))
                 {
+                    SetExternalFailure(outcome, LlmErrorCode.Cancelled, "A newer turn superseded this invocation.");
                     return null;
                 }
 
@@ -3014,22 +3197,48 @@ namespace CoreAI.Chat
                 // «оператор сравнения: <» терял последний символ и в ленте, и в истории.
                 AppendVisibleText(_thinkFilter.Flush(), false);
 
-                if (string.IsNullOrEmpty(fullResponse))
+                if (fullResponse.Length == 0)
                 {
-                    AddMessage(Options.NoResponseMessage ?? "No response.", false);
+                    SetExternalFailure(outcome, LlmErrorCode.EmptyResponse, "The turn produced no visible assistant response.");
+                    if (outcome == null) AddMessage(Options.NoResponseMessage ?? "No response.", false);
                     return null;
+                }
+
+                // The turn is over: assembling the string once here is the whole point of the builder.
+                string completedResponse = fullResponse.ToString();
+
+                if (outcome != null)
+                {
+                    if (!terminalSeen)
+                    {
+                        SetExternalFailure(outcome, LlmErrorCode.ProviderError, "The stream ended without a terminal completion.");
+                        return null;
+                    }
+                    outcome.Completion.Ok = true;
+                    outcome.Completion.Error = "";
+                    outcome.Completion.ErrorCode = LlmErrorCode.None;
+                    outcome.Completion.Content = completedResponse;
                 }
 
                 // WHY: the streamed reply renders through the streaming label, not AddMessage, so record it
                 // into the per-role transcript cache here — otherwise switching agent and back restores the
                 // user's turns with no assistant answers whenever the store is off/opted-out (HIGH #2).
-                RecordRoleTranscriptMessage(ActiveRoleId, fullResponse, false);
-                OnResponseReceived(fullResponse);
-                OnAiResponseCompleted?.Invoke(fullResponse);
-                return fullResponse;
+                RecordRoleTranscriptMessage(ActiveRoleId, completedResponse, false);
+                OnResponseReceived(completedResponse);
+                OnAiResponseCompleted?.Invoke(completedResponse);
+                return completedResponse;
             }
             finally
             {
+                // WHY here: the per-chunk assignment this replaces was only ever observable through its
+                // LAST write — the outcome object does not reach the caller until this finally has run.
+                // Every early return (stale turn, stream error, cancelled) still hands back the partial
+                // text it handed back before.
+                if (outcomeContentPending && outcome?.Completion != null)
+                {
+                    outcome.Completion.Content = fullResponse.ToString();
+                }
+
                 try
                 {
                     await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
@@ -3057,17 +3266,27 @@ namespace CoreAI.Chat
         private async Task<string?> SendNonStreamingAsync(
             AiTaskRequest request,
             int turnGeneration,
-            CancellationToken ct)
+            CancellationToken ct,
+            CoreAiChatExternalSubmitResult outcome = null)
         {
             ShowTypingIndicator();
             _nonStreamAssistantOutputStarted = false;
 
             try
             {
-                string response = await _chatService.SendMessageAsync(request, ct);
+                string response;
+                if (outcome == null) response = await _chatService.SendMessageAsync(request, ct);
+                else
+                {
+                    outcome.Completion = await _chatService.SendMessageResultAsync(request, ct) ??
+                        new LlmCompletionResult { Ok = false, ErrorCode = LlmErrorCode.EmptyResponse, Error = "No task completion was returned." };
+                    if (!outcome.Completion.Ok) return null;
+                    response = outcome.Completion.Content;
+                }
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 if (IsStaleTurn(turnGeneration, _currentTurnGeneration))
                 {
+                    SetExternalFailure(outcome, LlmErrorCode.Cancelled, "A newer turn superseded this invocation.");
                     return null;
                 }
 
@@ -3075,7 +3294,8 @@ namespace CoreAI.Chat
 
                 if (string.IsNullOrEmpty(response))
                 {
-                    AddMessage(Options.NoResponseMessage ?? "No response.", false);
+                    SetExternalFailure(outcome, LlmErrorCode.EmptyResponse, "The turn produced no visible assistant response.");
+                    if (outcome == null) AddMessage(Options.NoResponseMessage ?? "No response.", false);
                     return null;
                 }
 
@@ -3083,10 +3303,12 @@ namespace CoreAI.Chat
                 string formatted = FormatResponseText(response);
                 if (string.IsNullOrEmpty(formatted))
                 {
-                    AddMessage(Options.NoResponseMessage ?? "No response.", false);
+                    SetExternalFailure(outcome, LlmErrorCode.EmptyResponse, "The turn produced no visible assistant response.");
+                    if (outcome == null) AddMessage(Options.NoResponseMessage ?? "No response.", false);
                     return null;
                 }
 
+                if (outcome != null) outcome.Completion.Content = formatted;
                 _nonStreamAssistantOutputStarted = true;
                 AddMessage(formatted, false);
                 OnResponseReceived(formatted);
@@ -4174,6 +4396,28 @@ namespace CoreAI.Chat
             StreamedMessageJoiner.Append(fullResponse, formatted, startsNewMessage);
 
         /// <summary>
+        /// The same contract for a builder accumulator, so a streamed turn never re-copies its own text.
+        /// <para>
+        /// WHY: the string form copies everything accumulated so far on every visible chunk, so the work
+        /// grows with the square of the answer length — on WebGL's single thread, while the model is
+        /// still generating. The separation rule itself is NOT duplicated here: it stays the one owned by
+        /// <see cref="StreamedMessageJoiner"/>, which already has a builder overload.
+        /// </para>
+        /// <para>
+        /// <paramref name="scratch"/> is one instance reused for the whole turn. The joiner's builder
+        /// overload takes a chunk, and allocating a fresh one per token would just swap a large copy for
+        /// a small allocation instead of removing per-chunk work.
+        /// </para>
+        /// </summary>
+        internal static void AppendStreamedMessage(StringBuilder fullResponse, string formatted,
+            bool startsNewMessage, LlmStreamChunk scratch)
+        {
+            scratch.Text = formatted;
+            scratch.StartsNewMessage = startsNewMessage;
+            StreamedMessageJoiner.Append(fullResponse, scratch);
+        }
+
+        /// <summary>
         /// Closes the in-flight streaming bubble at a tool-round boundary so subsequent prose opens a
         /// fresh bubble below the tool-call bubbles (claude/cursor behaviour), instead of being appended
         /// to the bubble that was opened before the tools ran.
@@ -4260,6 +4504,26 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Same as <see cref="ScheduleOnMessageScroll"/> for a job that already carries the
+        /// <see cref="RunMessageScrollJob"/> guard (the cached jobs built by <see cref="EnsureScrollJobs"/>),
+        /// so scheduling it allocates no wrapper closure.
+        /// </summary>
+        private void ScheduleGuardedOnMessageScroll(Action guardedJob, long delayMilliseconds = 0)
+        {
+            ScrollView scroll = MessageScroll;
+            if (scroll == null)
+            {
+                return;
+            }
+
+            IVisualElementScheduledItem item = scroll.schedule.Execute(guardedJob);
+            if (delayMilliseconds > 0)
+            {
+                item.StartingIn(delayMilliseconds);
+            }
+        }
+
+        /// <summary>
         /// Runs a scheduled scroll job unless the panel or its UI references went away first. Named (not
         /// inlined into the closure) so the guard itself is reachable from a regression test.
         /// </summary>
@@ -4271,6 +4535,52 @@ namespace CoreAI.Chat
             }
 
             job();
+        }
+
+        // The bottom-scroll jobs, built once per panel (see EnsureScrollJobs).
+        private Action _guardedSnapScrollToBottomJob;
+        private Action _guardedScrollToBottomPassJob;
+        private Action _guardedStreamingScrollPassJob;
+
+        /// <summary>
+        /// Builds the bottom-scroll jobs once. They capture only the panel, so one instance of each
+        /// serves every scroll for the panel's lifetime.
+        /// <para>
+        /// WHY: <see cref="ScheduleStreamingScrollToBottom"/> runs once per frame for the whole time an
+        /// answer streams, and every run allocated the pass closure, the wrapper closure that guards
+        /// it, the <see cref="SnapScrollToBottom"/> method-group delegate and a second wrapper - four
+        /// delegates a frame, at 60 fps, for the entire answer. The scheduler item UI Toolkit creates
+        /// per <c>schedule.Execute</c> remains; the delegates are now zero.
+        /// </para>
+        /// </summary>
+        private void EnsureScrollJobs()
+        {
+            if (_guardedStreamingScrollPassJob != null)
+            {
+                return;
+            }
+
+            Action snapScrollToBottom = SnapScrollToBottom;
+            _guardedSnapScrollToBottomJob = () => RunMessageScrollJob(snapScrollToBottom);
+
+            Action scrollToBottomPass = () =>
+            {
+                _scrollToBottomScheduled = false;
+                SnapScrollToBottom();
+                ScheduleGuardedOnMessageScroll(_guardedSnapScrollToBottomJob);
+                ScheduleGuardedOnMessageScroll(_guardedSnapScrollToBottomJob, 80);
+                ScheduleGuardedOnMessageScroll(_guardedSnapScrollToBottomJob, 200);
+                ScheduleGuardedOnMessageScroll(_guardedSnapScrollToBottomJob, 500);
+            };
+            _guardedScrollToBottomPassJob = () => RunMessageScrollJob(scrollToBottomPass);
+
+            Action streamingScrollPass = () =>
+            {
+                _streamingScrollScheduled = false;
+                SnapScrollToBottom();
+                ScheduleGuardedOnMessageScroll(_guardedSnapScrollToBottomJob);
+            };
+            _guardedStreamingScrollPassJob = () => RunMessageScrollJob(streamingScrollPass);
         }
 
         /// <summary>
@@ -4286,15 +4596,8 @@ namespace CoreAI.Chat
             }
 
             _scrollToBottomScheduled = true;
-            ScheduleOnMessageScroll(() =>
-            {
-                _scrollToBottomScheduled = false;
-                SnapScrollToBottom();
-                ScheduleOnMessageScroll(SnapScrollToBottom);
-                ScheduleOnMessageScroll(SnapScrollToBottom, 80);
-                ScheduleOnMessageScroll(SnapScrollToBottom, 200);
-                ScheduleOnMessageScroll(SnapScrollToBottom, 500);
-            });
+            EnsureScrollJobs();
+            ScheduleGuardedOnMessageScroll(_guardedScrollToBottomPassJob);
         }
 
         /// <summary>
@@ -4313,12 +4616,8 @@ namespace CoreAI.Chat
             }
 
             _streamingScrollScheduled = true;
-            ScheduleOnMessageScroll(() =>
-            {
-                _streamingScrollScheduled = false;
-                SnapScrollToBottom();
-                ScheduleOnMessageScroll(SnapScrollToBottom);
-            });
+            EnsureScrollJobs();
+            ScheduleGuardedOnMessageScroll(_guardedStreamingScrollPassJob);
         }
 
         private void SnapScrollToBottom()

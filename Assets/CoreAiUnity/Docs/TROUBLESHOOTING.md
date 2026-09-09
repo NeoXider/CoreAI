@@ -148,7 +148,7 @@ CoreAISettings → ⚙️ General → LLM Timeout = 120
 
 For large models (9B+) or weaker hardware you may need 120–300 seconds.
 
-> **v1.5.1 note:** Timeout is now enforced by `CoreAiChatService` via UniTask `CancelAfterSlim` (PlayerLoop-based), which is fully compatible with **WebGL**. The portable layer (`AiOrchestrator`, `LoggingLlmClientDecorator`) no longer uses `CancellationTokenSource.CancelAfter()`, which relied on `System.Threading.Timer` and caused indefinite hangs in WebGL/Emscripten builds. See [`STREAMING_ARCHITECTURE.md`](STREAMING_ARCHITECTURE.md) §8.
+> **v1.5.1 note:** Timeout is now enforced by `CoreAiChatService` via a UniTask PlayerLoop-driven idle watchdog (`IdleTimeoutDeadline`, re-armed by every streamed chunk and tool-call event), which is fully compatible with **WebGL**. The portable layer (`AiOrchestrator`, `LoggingLlmClientDecorator`) no longer uses `CancellationTokenSource.CancelAfter()`, which relied on `System.Threading.Timer` and caused indefinite hangs in WebGL/Emscripten builds. See [`STREAMING_ARCHITECTURE.md`](STREAMING_ARCHITECTURE.md) §8.
 
 ---
 
@@ -317,7 +317,8 @@ Debug.Log($"Memory path: {Application.persistentDataPath}/CoreAI/AgentMemory/");
 | NullAgentMemoryStore | Expected when using **`RegisterCorePortable()`** without **`suppressDefaultAgentMemoryStore: true`** and no host **`IAgentMemoryStore`**. With **`CoreAILifetimeScope`**, `Persistent` resolves a scoped facade over **`FileAgentMemoryStore`** on all players (WebGL included), while `SessionOnly` resolves it over **`InMemoryAgentMemoryStore`**. If you still see **`NullAgentMemoryStore`**, check custom DI / duplicate registrations. |
 | File not created | Check permissions on `persistentDataPath` |
 | ChatHistory not working | Ensure `useChatHistory: true` and backend = LLMUnity |
-| WebGL: **`2 FS.syncfs operations in flight`** (console) / UI stops updating after several messages | **`CoreAiPersistFs.jslib`** (**v1.7.2+**) serializes **`FS.syncfs`** so only one sync runs at a time; bursts from **`FileAgentMemoryStore`** (chat JSON + memory writes in the same turn) no longer overlap. Rebuild the WebGL player after upgrading **`com.neoxider.coreaiunity`**. |
+| WebGL: nothing survives a page reload, or the console shows `[CoreAiWebGlPersistence] This page did not enable automatic persistentDataPath synchronization` | The web template does not pass **`config.autoSyncPersistentDataPath = true`** to `createUnityInstance()`. Unity's stock templates ship that line **commented out**, and since Unity 6.3 it is the only channel that persists `persistentDataPath` — CoreAI no longer drives the deprecated manual `FS.syncfs`. Add the line to your own template or run **`CoreAI/Setup/Install WebGL Template`** (copies the template shipped in the package into `Assets/WebGLTemplates/CoreAI` and selects it); `CoreAIWebGlPersistentDataSyncBuildGuard` fails the build when it is missing, unless the project defines **`COREAI_WEBGL_NO_PERSISTENCE`** for the Web platform. |
+| WebGL: `memory action=write` fails after ~30 s while the data is actually saved | Fixed. CoreAI used to await an `FS.syncfs` completion callback that Unity 6.3 never delivers, so every durability wait ran into the caller's timeout. Durability is now answered immediately; rebuild the player after upgrading **`com.neoxider.coreaiunity`**. |
 
 ### Clearing all CoreAI file persistence (Editor)
 

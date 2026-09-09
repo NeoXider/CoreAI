@@ -714,7 +714,17 @@ namespace CoreAI.Core.Tests.EditMode
                 [EnumeratorCancellation]
                 CancellationToken cancellationToken = default)
             {
-                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+                // WHY not Task.Delay: it answers cancellation on a thread-pool hop (the promise switches to
+                // RunContinuationsAsynchronously when cancelled), so the cooperative "Cancelled" chunk the
+                // logging decorator derives from it raced the timeout decorator's one-yield bias and the
+                // caller-stop assertion depended on scheduling luck under load. A stall that reacts to the
+                // stop inline exercises the same contract deterministically.
+                TaskCompletionSource<bool> stalled = new();
+                using (cancellationToken.Register(() => stalled.TrySetCanceled(cancellationToken)))
+                {
+                    await stalled.Task;
+                }
+
                 yield return new LlmStreamChunk { IsDone = true, Text = "never reached" };
             }
         }

@@ -88,8 +88,10 @@ namespace CoreAI.Demos
                 new SelfTestBindings(),
                 new NullLuaExecutionObserver());
 
-            // ExecuteAsync completes synchronously (RunChunk drives the VM under a guard and returns a
-            // finished Task), so blocking here cannot deadlock — there is no async continuation to await.
+            // ExecuteAsync completes synchronously because this executor has no FrameYielder: the guard
+            // drives the VM with no yield points and returns a finished Task, so blocking here cannot
+            // deadlock. Setting LuaCsGameToolExecutor.FrameYielder would break that and must never be
+            // combined with GetAwaiter().GetResult().
             LuaTool.LuaResult Run(string code)
             {
                 return executor.ExecuteAsync(code, CancellationToken.None).GetAwaiter().GetResult();

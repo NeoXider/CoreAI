@@ -107,6 +107,7 @@ namespace CoreAI.Infrastructure.Llm
                 bool committed = false;
                 bool retryablePreCommitFailure = false;
                 LlmStreamChunk terminalErrorChunk = null;
+                Exception primaryFailure = null;
 
                 IAsyncEnumerator<LlmStreamChunk> enumerator = null;
                 try
@@ -121,18 +122,20 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             enumerator ??= _inner.CompleteStreamingAsync(request, cancellationToken)
                                 .GetAsyncEnumerator(cancellationToken);
-                            hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                            hasNext = await enumerator.MoveNextAsync();
                             current = hasNext ? enumerator.Current : null;
                         }
-                        catch (OperationCanceledException)
+                        catch (OperationCanceledException ex)
                         {
                             // WHY: The OCE may carry a token other than the caller's (timeout decorator's
                             // linked CTS, per-read idle timer). Retrying it would re-open the stream against
                             // a backend that just timed out, so all cancellation propagates unchanged.
+                            primaryFailure = ex;
                             throw;
                         }
                         catch (Exception ex)
                         {
+                            primaryFailure = ex;
                             transportFailure = DescribeTransportFailure(ex);
                         }
 
@@ -164,12 +167,26 @@ namespace CoreAI.Infrastructure.Llm
                             break;
                         }
 
-                        if (!string.IsNullOrEmpty(current.Error))
+                        // WHY: Null control entries do not commit the stream; only enumeration end triggers an empty-response retry.
+                        if (current == null) continue;
+
+                        // WHY: A failing chunk is one the consumer would treat as failed, and the
+                        // orchestrator's definition is "error text OR a non-None code". Matching only on
+                        // the text let a code-only failure (Timeout with no message) pass for a benign
+                        // hint, so its classification was lost and the turn ended as EmptyResponse.
+                        if (!string.IsNullOrEmpty(current.Error) || current.ErrorCode != LlmErrorCode.None)
                         {
+                            terminalErrorChunk = current;
+
+                            // WHY: "Already executed" (IsCommittingChunk) is checked TOGETHER WITH
+                            // retryability, and it is what protects against double execution. Deciding on
+                            // the code alone would leave that protection resting on producers happening to
+                            // leave ErrorCode = None on a chunk that carries ExecutedToolCalls: label such
+                            // a chunk Timeout/BackendUnavailable honestly and spawn_quiz would run a second
+                            // time and memory would be written twice.
                             if (IsRetryableError(current.ErrorCode) && !IsCommittingChunk(current))
                             {
                                 retryablePreCommitFailure = true;
-                                terminalErrorChunk = current;
                                 break;
                             }
 
@@ -203,9 +220,25 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (committed)
                     {
-                        while (await enumerator.MoveNextAsync().ConfigureAwait(false))
+                        while (true)
                         {
-                            yield return enumerator.Current;
+                            bool hasNext;
+                            LlmStreamChunk current;
+                            try
+                            {
+                                hasNext = await enumerator.MoveNextAsync();
+                                current = hasNext ? enumerator.Current : null;
+                            }
+                            catch (Exception ex)
+                            {
+                                primaryFailure = ex;
+                                throw;
+                            }
+
+                            if (!hasNext) break;
+                            if (current != null && (!string.IsNullOrEmpty(current.Error) || current.ErrorCode != LlmErrorCode.None))
+                                terminalErrorChunk = current;
+                            yield return current;
                         }
 
                         yield break;
@@ -215,7 +248,24 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     if (enumerator != null)
                     {
-                        await enumerator.DisposeAsync().ConfigureAwait(false);
+                        try
+                        {
+                            await enumerator.DisposeAsync();
+                        }
+                        catch (Exception cleanupFailure) when (primaryFailure != null || terminalErrorChunk != null)
+                        {
+                            // WHY: Cleanup must not replace cancellation, provider classification, or the terminal error chunk.
+                            if (primaryFailure != null)
+                                primaryFailure.Data[ClientLimitedLlmClientDecorator.StreamDisposeExceptionDataKey] = cleanupFailure;
+                            try
+                            {
+                                _log?.Invoke($"[StreamRetry] secondary stream disposal failure: {cleanupFailure.Message}");
+                            }
+                            catch (Exception)
+                            {
+                                // WHY: An optional diagnostic sink cannot replace the request's primary failure either.
+                            }
+                        }
                     }
                 }
 

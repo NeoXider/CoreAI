@@ -539,7 +539,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             for (int frame = 0; frame < 4; frame++)
             {
-                harness.Bindings.PumpFrame(1f / 60f);
+                // WHY Advance only: every scheduler phase boundary already routes to its
+                // matching pump, so an extra PumpFrame would fire each signal twice.
                 harness.Bindings.Scheduler.Advance(1d / 60d);
             }
 
@@ -571,7 +572,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             for (int frame = 0; frame < 4; frame++)
             {
-                harness.Bindings.PumpFrame(1f / 60f);
+                // WHY Advance only: every scheduler phase boundary already routes to its
+                // matching pump, so an extra PumpFrame would fire each signal twice.
                 harness.Bindings.Scheduler.Advance(1d / 60d);
             }
 
@@ -626,7 +628,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             for (int frame = 0; frame < 8; frame++)
             {
-                harness.Bindings.PumpFrame(1f / 60f);
+                // WHY Advance only: every scheduler phase boundary already routes to its
+                // matching pump, so an extra PumpFrame would fire each signal twice.
                 harness.Bindings.Scheduler.Advance(1d / 60d);
             }
 
@@ -677,12 +680,25 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 RbxHumanoid humanoid = (RbxHumanoid)player.Character.FindFirstChild("Humanoid");
                 Assert.AreSame(player.Character.FindFirstChild("HumanoidRootPart"), humanoid.RootPart);
 
-                humanoid.MoveTo(new RbxVector3(20d, 0d, 0d));
-                harness.Bindings.PumpPreSimulation(1f / 60f);
-                Assert.Greater(rigidbody.linearVelocity.magnitude, 0f);
+                List<string> order = new();
+                harness.Bindings.RunService.PreSimulation.Connect(
+                    (Action<object[]>)(_ => order.Add("PreSimulation")));
+                harness.Bindings.RunService.Stepped.Connect(
+                    (Action<object[]>)(_ => order.Add("Stepped")));
+
+                humanoid.MoveTo(new RbxVector3(20f, 0f, 0f));
+                // WHY Advance only: this is the production frame path. A direct
+                // PumpPreSimulation call would pass while the wiring under test stays dead.
+                harness.Bindings.Scheduler.Advance(1d / 60d);
+                Assert.Greater(rigidbody.linearVelocity.magnitude, 0f,
+                    "One scheduler Advance must step the motor toward the MoveTo target.");
+                Assert.AreEqual(2, order.Count,
+                    "PreSimulation and its legacy alias Stepped must each fire exactly once.");
+                Assert.AreEqual("PreSimulation", order[0]);
+                Assert.AreEqual("Stepped", order[1]);
 
                 player.Character.Destroy();
-                Assert.DoesNotThrow(() => harness.Bindings.PumpPreSimulation(1f / 60f));
+                Assert.DoesNotThrow(() => harness.Bindings.Scheduler.Advance(1d / 60d));
             }
             finally
             {

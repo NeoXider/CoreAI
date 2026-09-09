@@ -279,9 +279,12 @@ namespace CoreAI.Ai
             int foldStart = 0;
             HashSet<string> consumedHashes = new(StringComparer.Ordinal);
             int limit = Math.Min(splitExclusive, history.Length);
+            // WHY one hasher for the pass: this probe hashes every folded message on every request, and
+            // creating a SHA-256 instance per message multiplied that by the history length.
+            using SHA256 sha = SHA256.Create();
             for (int i = 0; i < limit; i++)
             {
-                string hash = ConversationFoldMarker.HashMessage(history[i]);
+                string hash = ConversationFoldMarker.HashMessage(sha, history[i]);
                 if (markerHashes.Contains(hash) && consumedHashes.Add(hash))
                 {
                     anyHashMatched = true;
@@ -488,9 +491,10 @@ namespace CoreAI.Ai
 
             List<string> hashes = new(StoredHashCount);
             HashSet<string> seen = new(StringComparer.Ordinal);
+            using SHA256 sha = SHA256.Create();
             for (int i = end - 1; i >= 0 && hashes.Count < StoredHashCount; i--)
             {
-                string hash = HashMessage(history[i]);
+                string hash = HashMessage(sha, history[i]);
                 if (seen.Add(hash))
                 {
                     hashes.Add(hash);
@@ -576,20 +580,30 @@ namespace CoreAI.Ai
         /// </summary>
         public static string HashMessage(ChatMessage message)
         {
+            using SHA256 sha = SHA256.Create();
+            return HashMessage(sha, message);
+        }
+
+        /// <summary>Same digest as <see cref="HashMessage(ChatMessage)"/> with a caller-owned hasher.</summary>
+        internal static string HashMessage(SHA256 sha, ChatMessage message)
+        {
             string role = (message.Role ?? "").Trim();
             string content = (message.Content ?? "").Trim();
-            byte[] bytes = Encoding.UTF8.GetBytes(role + "\n" + content);
-            using (SHA256 sha = SHA256.Create())
+            byte[] digest = sha.ComputeHash(Encoding.UTF8.GetBytes(role + "\n" + content));
+            char[] hex = new char[HashHexLength];
+            for (int i = 0; i < HashHexLength / 2; i++)
             {
-                byte[] digest = sha.ComputeHash(bytes);
-                StringBuilder sb = new(HashHexLength);
-                for (int i = 0; i < HashHexLength / 2; i++)
-                {
-                    sb.Append(digest[i].ToString("x2"));
-                }
-
-                return sb.ToString();
+                int value = digest[i];
+                hex[i * 2] = HexDigit(value >> 4);
+                hex[i * 2 + 1] = HexDigit(value & 0x0F);
             }
+
+            return new string(hex);
+        }
+
+        private static char HexDigit(int nibble)
+        {
+            return (char)(nibble < 10 ? '0' + nibble : 'a' + nibble - 10);
         }
 
         private static bool IsMarkerLine(string line)

@@ -20,6 +20,51 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class CoreAiChatServiceEditModeTests
     {
+        [Test]
+        public async Task TypedSend_PreservesFailureAndClearsCancellationOwnership()
+        {
+            TypedChatOrchestrator orchestrator = new();
+            CoreAiChatService service = new(orchestrator);
+            AiTaskRequest request = new() { RoleId = "Teacher", Hint = "help" };
+            LlmCompletionResult result = await service.SendMessageResultAsync(request);
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.RateLimited, result.ErrorCode);
+            Assert.AreEqual(429, result.HttpStatus);
+            Assert.AreEqual(5, result.RetryAfterSeconds);
+            Assert.AreEqual(23, result.TotalTokens);
+            Assert.AreEqual("partial", result.Content);
+            Assert.AreEqual(1, orchestrator.TypedCalls);
+            Assert.AreEqual(0, orchestrator.LegacyCalls);
+            Assert.IsFalse(request.DeadlineCancellationToken.CanBeCanceled);
+        }
+
+        [Test]
+        public void TypedSend_RejectsLegacyAndNestedLegacyQueueBeforeExecution()
+        {
+            using QueuedAiOrchestrator queue = new(new FakeAiOrchestrator("looks successful"), new AiOrchestrationQueueOptions());
+            CoreAiChatService service = new(queue);
+            Assert.IsFalse(service.SupportsTaskResults);
+            Assert.Throws<NotSupportedException>(() => service.SendMessageResultAsync(new AiTaskRequest()));
+        }
+
+        private sealed class TypedChatOrchestrator : IAiOrchestrationService, IAiTaskResultService
+        {
+            public int TypedCalls;
+            public int LegacyCalls;
+            public Task<LlmCompletionResult> RunTaskResultAsync(AiTaskRequest request, CancellationToken token = default)
+            {
+                TypedCalls++;
+                return Task.FromResult(new LlmCompletionResult { Ok = false, Content = "partial", Error = "limited",
+                    ErrorCode = LlmErrorCode.RateLimited, HttpStatus = 429, RetryAfterSeconds = 5, TotalTokens = 23 });
+            }
+            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken token = default)
+            {
+                LegacyCalls++;
+                return Task.FromResult("legacy failure text");
+            }
+            public void CancelTasks(string scope) { }
+        }
+
         [SetUp]
         public void SetUp()
         {

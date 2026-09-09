@@ -185,7 +185,7 @@ If you use [`CoreAiChatPanel`](../Runtime/Source/Features/Chat/README_CHAT.md) w
 
 ---
 
-## Conversation summary stores (phase 1: storage boundary)
+## Conversation summary stores and async context preparation
 
 Compact dialogue summaries (`## Conversation Summary`) live separately from memory via the contract [`IConversationSummaryStore`](../../CoreAI/Runtime/Core/Features/AgentMemory/IConversationSummaryStore.cs) and its portable async companion `IAsyncConversationSummaryStore` (Load/Save/Clear with `CancellationToken`). The sync API is kept for compatibility, but failed save/clear now throws instead of returning a silent success.
 
@@ -196,8 +196,34 @@ Built-in implementations:
 - `InMemoryConversationSummaryStore`, `NullConversationSummaryStore` — implement async directly.
 - `BlockingSyncSummaryStoreAsyncAdapter` — explicit opt-in bridge for third-party sync backends (runs inline, blocks the calling thread on disk I/O).
 
-Durability hooks (WebGL): the `FileConversationSummaryStore` constructor takes the legacy `Func<bool> afterWrite` (for the sync path, `CoreAiWebGlPersistence.Sync`) plus the added `Func<CancellationToken, Task<bool>> afterWriteAsync` (for the async path, the future `SyncAsync`). The hook runs after a committed mutation, outside the file gates, on the caller's original context, with `CancellationToken.None`; `false` throws an honest `IOException` (the VFS write happened, durability is unconfirmed). The hook must bound its own completion time — the store sets no separate timeout (in production `SyncAsync` owns it with a bounded 30s). The sync path fail-fasts with `InvalidOperationException` when the file is busy instead of blocking the main thread.
+Durability hooks (WebGL): the `FileConversationSummaryStore` constructor takes the legacy `Func<bool> afterWrite` (queue-only `CoreAiWebGlPersistence.Sync`) and `Func<CancellationToken, Task<bool>> afterWriteAsync` (confirmed `SyncAsync`). The async hook runs after a committed mutation, outside file gates, on the calling context, with `CancellationToken.None`; false or an exception reports `IOException`. The host owns its timeout; the store adds no competing timer. Sync calls fail promptly when file work is busy. If both hooks are configured, a successful sync call only queues flushing; an async read must still obtain confirmation.
+
+Each canonical path retains an unconfirmed write generation and its host callback across store instances. A failed flush cannot become an apparently successful read merely because VFS already contains the new fold marker. A subsequent async read re-confirms that generation before returning its summary, even through a new store instance without hooks. A later successful callback cannot acknowledge a newer write it did not observe. Delete follows the same rule: an absent VFS file is not proof that deletion reached IndexedDB. A confirmation callback must not recursively access the same summary file; this fails explicitly instead of recursing or deadlocking.
 
 Strict async reads: a corrupt/unreadable file propagates the exception and does not overwrite data; a missing file means an empty string (sync reads keep the legacy `""` fallback).
 
-Current-phase limits: manager/orchestrator/DI integration is not done (root — separately); identity-hashing and scope migration are out of scope — scope-key and file formats did not change; no rollback after commit — caller cancellation before I/O prevents the mutation, after commit the host acknowledgement reports the outcome.
+`DeterministicConversationContextManager.BuildSnapshotAsync` and `LlmAssistedConversationContextManager.BuildSnapshotAsync` await actual async loads and saves. Sync-only custom backends must be explicitly wrapped in `BlockingSyncSummaryStoreAsyncAdapter`; there is no inferred blocking fallback. The deterministic projection is shared with the synchronous API. Deferred snapshots provide an internal awaited commit: concurrent consumers serialize, successful commits write once, failed commits retain their callback for retry, and cancellation of a waiting consumer does not cancel another accepted write. A synchronous snapshot commit cannot wait behind an asynchronous one.
+
+When using the built-in scoped summary decorator, both async managers bind its effective role/actor/user key before the first storage await. Immediate writes and deferred commits retain that binding even if the host changes its scope provider meanwhile. The compaction provider still receives the original agent role; storage partition keys do not become routing roles.
+
+The snapshot owner must acknowledge the old-history summary before dispatching the main provider or appending messages that may evict its source. This also prevents a persistence failure after tool execution from encouraging tool replay. File names, scope keys, and JSON format remain unchanged. Cancellation before commit prevents mutation; after commit, host confirmation reports the real outcome without claiming rollback.
+
+Both ordinary and streaming orchestrator requests await this summary preflight before opening the main provider. If summary loading or confirmation fails, teardown does not append a user turn into bounded history and discard the unsummarized source. After successful preflight, existing provider-failure/cancellation history behavior remains unchanged. Unity persistent composition supplies `SyncAsync`, so async summary writes wait for host confirmation instead of accepting a queued flush as durability.
+
+Cancellation during an accepted write waits for its host confirmation. Once durability succeeds, the orchestrator rechecks cancellation before opening the main provider, while retaining the normal write-once user-intent record.
+
+Integration limit: other memory/history APIs retain synchronous compatibility paths; this section does not claim the entire orchestration pipeline is free of blocking file I/O. Desktop tests do not prove browser IndexedDB persistence; WebGL release validation must include actual host confirmation and reload.
+
+## Async skill and revision persistence
+
+`FileSkillStore` implements `IAsyncSkillStore`; `FileLuaScriptVersionStore` implements `IAsyncLuaScriptVersionStore`. Their constructors configure paths without reading files or creating directories. Use the async authoring coordinator for live agents. Synchronous APIs remain explicit compatibility entry points and fail promptly when an operation owns the same directory/file gate; they must not block a player loop waiting for an async flush.
+
+Desktop async operations put private filesystem and JSON work on workers. Preparation, catalog publication, Unity persistence callbacks, and logging use the host marshaler. WebGL uses its host context and the existing `CoreAiWebGlPersistence.SyncAsync` completion/timeout, with no worker-thread assumption. Both stores accept optional host and durability callbacks for host composition and controlled failure tests; production defaults use the existing Unity marshaler and browser persistence implementation.
+
+The shared canonical-path gate covers write, confirmed flush, and publication. Windows path aliases share that gate. Caller cancellation before the atomic replacement prevents the edit; cancellation after a committed write does not abandon confirmation/publication or pretend to roll the edit back. Skill publication failure is a `SkillStorePublicationException`: storage committed, so do not replay the edit. A version write failure propagates to the coordinator, which keeps an already committed skill and reports `RevisionRecorded=false`.
+
+A failed browser flush leaves a shared pending confirmation generation. A new async reader retries the retained confirmation, without replaying the edit, before exposing the VFS record; a synchronous reader rejects unconfirmed data. This applies to legacy skill filename migration as well as new writes and deletion. `SkillStoreDurabilityException` identifies local commit with durability unconfirmed and catalog unpublished. Once confirmation recovers, normal rehydration can publish the stored skill. These guarantees do not promise exactly-once completion across browser/process death.
+
+Skill async reads preserve all ordered `Sections`; editing the main document preserves reference documents. Legacy version files retain the existing `slots`/`scriptKey`/`originalLua`/`currentLua`/`history` field names and stable revision indices. Corrupt reads and failed atomic writes do not replace earlier coherent state or silently reset it to empty.
+
+Payload bounds are explicit: **1 MiB of encoded JSON per skill record** (`FileSkillStore.MaxRecordBytes`) and **4 MiB per version-store JSON file** (`FileLuaScriptVersionStore.MaxStoreBytes`). Oversized inputs fail instead of being truncated. WebGL yields between skill records and reconstructed version slots. Directory enumeration and bounded JSON parsing/serialization still consume synchronous CPU time; these byte limits and desktop tests are **not proof of a frame-time budget**. Profile representative maximum documents in an actual WebGL player before claiming frame-time guarantees.

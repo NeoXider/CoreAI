@@ -45,6 +45,15 @@ namespace CoreAI.Infrastructure.Llm
     /// MEAI <see cref="MEAI.IChatClient"/> for OpenAI-compatible HTTP APIs.
     /// Uses <see cref="IOpenAiHttpTransport"/> (default <see cref="HttpClientOpenAiTransport"/> outside WebGL player;
     /// WebGL uses <c>UnityWebRequest</c> from CoreAI.Source). Continuations preserve sync context when present.
+    /// <para>
+    /// WHY this exists next to the official <c>Microsoft.Extensions.AI.OpenAI</c> adapter: WebGL has no
+    /// <c>System.Net.Http</c>, so the transport must be pluggable (<see cref="IOpenAiHttpTransport"/>)
+    /// and the <c>HttpClient</c> constructor here is compiled out on WebGL players. The official adapter
+    /// owns its own <c>HttpClient</c> and pulls in the OpenAI SDK plus <c>System.ClientModel</c>, none of
+    /// it verified for WebGL, and it has no seam for the SSE-less fallback that replays a full response
+    /// as updates. This is a transport boundary, not a duplicate of MEAI's contracts: the messages,
+    /// contents, tool declarations, usage and finish reasons crossing it are all native MEAI types.
+    /// </para>
     /// </summary>
     public sealed class MeaiOpenAiChatClient : MEAI.IChatClient, IDisposable
     {
@@ -257,11 +266,15 @@ namespace CoreAI.Infrastructure.Llm
                 _log.Info("MeaiOpenAiChatClient: === LLM Input ===", LogTag.Llm);
                 foreach (MEAI.ChatMessage msg in msgs)
                 {
-                    string content = msg.Text ?? "";
-                    if (string.IsNullOrEmpty(content) && msg.Contents != null && msg.Contents.Count > 0)
+                    // ChatMessage.Text IS the join of the message's TextContent parts and never returns
+                    // null, so re-reading those parts here could only reproduce it. The one thing it
+                    // cannot show is a message carrying no text at all (tool calls, images) - those get
+                    // stringified so the log line is not blank.
+                    string content = msg.Text;
+                    if (content.Length == 0 && msg.Contents.Count > 0 &&
+                        !msg.Contents.Any(part => part is MEAI.TextContent))
                     {
-                        MEAI.TextContent textContent = msg.Contents.OfType<MEAI.TextContent>().FirstOrDefault();
-                        content = textContent?.Text ?? string.Join(", ", msg.Contents.Select(c => c.ToString()));
+                        content = string.Join(", ", msg.Contents.Select(c => c.ToString()));
                     }
 
                     _log.Info($"MeaiOpenAiChatClient: [{msg.Role}] {content}", LogTag.Llm);
@@ -675,44 +688,23 @@ namespace CoreAI.Infrastructure.Llm
                             }
                         }
 
-                        foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(line + "\n", toolAccumulator))
+                        // WHY: one line in, at most one update out — no `line + "\n"` copy and no Split
+                        // array to re-find a boundary the reader already framed (see ParseSseLine).
+                        MEAI.ChatResponseUpdate update = ParseSseLine(line, toolAccumulator);
+                        if (update != null)
                         {
                             parsedSseDeltas++;
-                            string updateText = update?.Text ?? "";
-                            bool textOnly = !string.IsNullOrEmpty(updateText)
-                                            && (update.Contents == null
-                                                || update.Contents.Count == 0
-                                                || update.Contents.All(c => c is MEAI.TextContent));
-                            // WHY: Some upstream providers (e.g. OpenRouter `:free` models from Nvidia/etc.)
-                            // batch many tokens into a single SSE delta, which makes streaming look
-                            // jumpy in the UI. Re-emit large text-only deltas in small word-sized
-                            // pieces with a tiny delay so the UI sees smooth per-word streaming.
-                            // True per-token providers (LM Studio, paid models) already send small
-                            // deltas and skip this path.
-                            if (textOnly && updateText.Length > 24)
-                            {
-                                List<string> pieces = SplitForSmoothStreaming(updateText).ToList();
-                                for (int pieceIndex = 0; pieceIndex < pieces.Count; pieceIndex++)
-                                {
-                                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, pieces[pieceIndex])
-                                    {
-                                        // WHY: the re-emitted pieces replace the original delta, so the
-                                        // served model id has to travel with them or the consumer never
-                                        // sees which model answered a smoothly-streamed turn. The native
-                                        // response identity and finish reason travel for the same reason:
-                                        // without them the pieces would split the message boundary.
-                                        ModelId = update.ModelId,
-                                        ResponseId = update.ResponseId,
-                                        MessageId = update.MessageId,
-                                        FinishReason = pieceIndex == pieces.Count - 1 ? update.FinishReason : null
-                                    };
-                                    await DelayBetweenSyntheticStreamPiecesAsync(cancellationToken);
-                                }
-                            }
-                            else
-                            {
-                                yield return update;
-                            }
+                            // WHY: the provider's delta is passed through EXACTLY as it arrived. This
+                            // used to re-cut any text-only delta over 24 characters into word-sized
+                            // pieces and space them 15 ms apart, to make a provider that batches many
+                            // tokens into one SSE event "look" like per-token streaming. That is a
+                            // rendering illusion built on the transport, and it costs what a chat
+                            // lives on: an artificial delay on the critical path, an allocation per
+                            // manufactured piece, and a stream whose shape no longer matches what the
+                            // model actually sent. Streaming means the consumer sees what arrived,
+                            // when it arrived; a provider that batches is a provider that batches,
+                            // and hiding that here hides it from whoever would otherwise fix it.
+                            yield return update;
                         }
 
                         // WHY: Execute-as-you-stream: surface every tool call whose arguments JSON is
@@ -803,45 +795,6 @@ namespace CoreAI.Infrastructure.Llm
             {
                 yield return u;
             }
-        }
-
-        /// <summary>
-        /// Splits a large text delta into smaller pieces (~6 chars or one word boundary) so the UI
-        /// can render smooth per-word streaming even when an upstream provider batches many tokens
-        /// into one SSE event.
-        /// </summary>
-        private static IEnumerable<string> SplitForSmoothStreaming(string text)
-        {
-            if (string.IsNullOrEmpty(text))
-            {
-                yield break;
-            }
-
-            const int targetChunkSize = 6;
-            int i = 0;
-            while (i < text.Length)
-            {
-                int end = Math.Min(i + targetChunkSize, text.Length);
-                while (end < text.Length && !char.IsWhiteSpace(text[end - 1]) && end - i < targetChunkSize * 2)
-                {
-                    end++;
-                }
-
-                yield return text.Substring(i, end - i);
-                i = end;
-            }
-        }
-
-        private static Task DelayBetweenSyntheticStreamPiecesAsync(CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-#if UNITY_WEBGL && !UNITY_EDITOR
-            // WHY: Browser WebGL has no reliable worker ThreadPool. A timer-based Task.Delay here can
-            // leave a synthetic split delta stuck after the first visible piece on some builds.
-            return Task.CompletedTask;
-#else
-            return Task.Delay(15, cancellationToken);
-#endif
         }
 
         /// <summary>
@@ -1170,19 +1123,18 @@ namespace CoreAI.Infrastructure.Llm
             return null;
         }
 
-        private static IEnumerable<MEAI.AIContent> EnumerableContents(MEAI.ChatMessage msg)
-        {
-            if (msg.Contents == null)
-            {
-                yield break;
-            }
-
-            foreach (MEAI.AIContent c in msg.Contents)
-            {
-                yield return c;
-            }
-        }
-
+        /// <summary>
+        /// Replays a completed response as streaming updates for transports without SSE (WebGL) and for
+        /// the stream-to-non-stream fallback.
+        /// </summary>
+        /// <remarks>
+        /// WHY not the native <c>ChatResponse.ToChatResponseUpdates()</c>: it emits ONE update per
+        /// message and stamps <c>FinishReason</c> on every one of them, while its trailing usage update
+        /// carries no <c>ModelId</c>/<c>ResponseId</c>. Our streaming consumer treats a finish reason as
+        /// the end of the turn and latches the served model off the last update, so the native shape
+        /// would end the turn before the contents were delivered and lose the model id. This splits per
+        /// CONTENT and keeps the finish reason on the single terminal update.
+        /// </remarks>
         private static IEnumerable<MEAI.ChatResponseUpdate> FullResponseToSimulatedStreamingUpdates(
             MEAI.ChatResponse response)
         {
@@ -1191,7 +1143,6 @@ namespace CoreAI.Infrastructure.Llm
                 yield break;
             }
 
-            // WHY: content updates must not look terminal before their trailing contents/usage arrive.
             MEAI.ChatResponseUpdate terminal = new(MEAI.ChatRole.Assistant, "")
             {
                 ModelId = response.ModelId,
@@ -1201,7 +1152,7 @@ namespace CoreAI.Infrastructure.Llm
             foreach (MEAI.ChatMessage message in response.Messages)
             {
                 terminal.MessageId = message.MessageId;
-                foreach (MEAI.AIContent content in EnumerableContents(message))
+                foreach (MEAI.AIContent content in message.Contents)
                 {
                     yield return new MEAI.ChatResponseUpdate(message.Role, "")
                     {
@@ -1849,31 +1800,108 @@ namespace CoreAI.Infrastructure.Llm
                 : fieldReasoning + "\n" + inlineThink;
         }
 
+        /// <summary>
+        /// Locates the payload of one SSE line WITHOUT allocating: the <c>[start, end)</c> range of the
+        /// value after <c>data:</c>, trimmed exactly like <c>line.Trim().Substring(5).TrimStart()</c>.
+        /// Returns <c>false</c> for blanks, comments and any other non-<c>data:</c> line.
+        /// <para>
+        /// WHY indices instead of strings: this runs once per streamed SSE line — hundreds of times per
+        /// turn, on WebGL's single thread. The previous shape allocated <c>Trim</c> + <c>Substring</c> +
+        /// <c>TrimStart</c> throwaway strings, and did it TWICE per line because the <c>[DONE]</c> check
+        /// repeated the same framing. Finding where the JSON starts does not need a copy of the line.
+        /// </para>
+        /// </summary>
+        private static bool TryGetSseDataRange(string line, out int start, out int end)
+        {
+            start = 0;
+            end = 0;
+            if (string.IsNullOrEmpty(line))
+            {
+                return false;
+            }
+
+            int first = 0;
+            while (first < line.Length && char.IsWhiteSpace(line[first]))
+            {
+                first++;
+            }
+
+            int last = line.Length - 1;
+            while (last >= first && char.IsWhiteSpace(line[last]))
+            {
+                last--;
+            }
+
+            // WHY: OpenAI uses "data: {...}"; some local servers (LM Studio, llama.cpp) omit the space after "data:".
+            if (last - first + 1 < SseDataPrefix.Length ||
+                string.Compare(line, first, SseDataPrefix, 0, SseDataPrefix.Length,
+                    StringComparison.OrdinalIgnoreCase) != 0)
+            {
+                return false;
+            }
+
+            int payload = first + SseDataPrefix.Length;
+            while (payload <= last && char.IsWhiteSpace(line[payload]))
+            {
+                payload++;
+            }
+
+            start = payload;
+            end = last + 1;
+            return true;
+        }
+
+        private const string SseDataPrefix = "data:";
+
+        private const string SseDonePayload = "[DONE]";
+
+        /// <summary>True when the payload range found by <see cref="TryGetSseDataRange"/> is <c>[DONE]</c>.</summary>
+        private static bool IsSseDoneRange(string line, int start, int end)
+        {
+            return end - start == SseDonePayload.Length &&
+                   string.CompareOrdinal(line, start, SseDonePayload, 0, SseDonePayload.Length) == 0;
+        }
+
+        /// <summary>
+        /// Parses ONE SSE line and returns its update, or <c>null</c> for blanks, comments,
+        /// non-<c>data:</c> lines, <c>[DONE]</c> and payloads that carry nothing usable.
+        /// <para>
+        /// WHY a per-line entry point exists next to <see cref="ParseSseUpdates"/>: the streaming loop
+        /// has exactly one line in hand, and routing it through the multi-line parser meant
+        /// <c>line + "\n"</c> plus a <c>Split</c> array plus its parts — four allocations per token to
+        /// re-discover a boundary the reader had already found.
+        /// </para>
+        /// </summary>
+        private static MEAI.ChatResponseUpdate ParseSseLine(string line, SseToolCallAccumulator accumulator)
+        {
+            if (!TryGetSseDataRange(line, out int start, out int end) ||
+                end <= start ||
+                IsSseDoneRange(line, start, end))
+            {
+                return null;
+            }
+
+            return ExtractDeltaUpdate(line.Substring(start, end - start), accumulator);
+        }
+
         private static IEnumerable<MEAI.ChatResponseUpdate> ParseSseUpdates(string raw,
             SseToolCallAccumulator accumulator)
         {
             string[] lines = raw.Split('\n');
             foreach (string line in lines)
             {
-                string trimmed = line.Trim();
-                // WHY: OpenAI uses "data: {...}"; some local servers (LM Studio, llama.cpp) omit the space after "data:".
-                if (!trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                if (!TryGetSseDataRange(line, out int start, out int end) || end <= start)
                 {
                     continue;
                 }
 
-                string data = trimmed.Length <= 5 ? "" : trimmed.Substring(5).TrimStart();
-                if (string.IsNullOrEmpty(data))
-                {
-                    continue;
-                }
-
-                if (data == "[DONE]")
+                if (IsSseDoneRange(line, start, end))
                 {
                     yield break;
                 }
 
-                MEAI.ChatResponseUpdate update = ExtractDeltaUpdate(data, accumulator);
+                MEAI.ChatResponseUpdate update =
+                    ExtractDeltaUpdate(line.Substring(start, end - start), accumulator);
                 if (update != null)
                 {
                     yield return update;
@@ -1883,15 +1911,33 @@ namespace CoreAI.Infrastructure.Llm
 
         private static bool IsSseDoneLine(string line)
         {
-            string trimmed = line?.Trim();
-            if (string.IsNullOrEmpty(trimmed) ||
-                !trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            return TryGetSseDataRange(line, out int start, out int end) && IsSseDoneRange(line, start, end);
+        }
+
+        /// <summary>
+        /// True when the delta already carries usage.
+        /// <para>
+        /// WHY hand-rolled: <c>OfType&lt;T&gt;().Any()</c> allocates a filter iterator plus its
+        /// enumerator on every streamed delta. The question is one indexed walk over a couple of items.
+        /// </para>
+        /// </summary>
+        private static bool HasUsageContent(MEAI.ChatResponseUpdate update)
+        {
+            IList<MEAI.AIContent> contents = update.Contents;
+            if (contents == null)
             {
                 return false;
             }
 
-            string data = trimmed.Length <= 5 ? "" : trimmed.Substring(5).TrimStart();
-            return string.Equals(data, "[DONE]", StringComparison.Ordinal);
+            for (int i = 0; i < contents.Count; i++)
+            {
+                if (contents[i] is MEAI.UsageContent)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>EditMode tests: full SSE line(s) including the <c>data:</c> prefix.</summary>
@@ -1903,6 +1949,27 @@ namespace CoreAI.Infrastructure.Llm
         internal static bool IsSseDoneLineForTests(string line)
         {
             return IsSseDoneLine(line);
+        }
+
+        /// <summary>
+        /// EditMode tests: the single-line entry point the streaming loop uses. Must agree with
+        /// <see cref="ParseSseUpdatesForTests"/> fed the same line — they frame the payload the same way.
+        /// </summary>
+        internal static MEAI.ChatResponseUpdate ParseSseLineForTests(string line)
+        {
+            return ParseSseLine(line, new SseToolCallAccumulator());
+        }
+
+        /// <summary>
+        /// EditMode tests: the payload range <see cref="ParseSseLine"/> extracts, or <c>null</c> for a
+        /// line that is not an SSE <c>data:</c> line. Pins the allocation-free framing against the
+        /// string shape it replaced (<c>line.Trim().Substring(5).TrimStart()</c>).
+        /// </summary>
+        internal static string SseDataPayloadForTests(string line)
+        {
+            return TryGetSseDataRange(line, out int start, out int end)
+                ? line.Substring(start, end - start)
+                : null;
         }
 
         /// <summary>
@@ -1934,7 +2001,7 @@ namespace CoreAI.Infrastructure.Llm
                 return null;
             }
 
-            if (!update.Contents.OfType<MEAI.UsageContent>().Any())
+            if (!HasUsageContent(update))
             {
                 MEAI.ChatResponseUpdate usageUpdate = TryParseStreamingUsageChunk(root);
                 if (usageUpdate != null)
@@ -2084,16 +2151,26 @@ namespace CoreAI.Infrastructure.Llm
             return update;
         }
 
+        /// <summary>
+        /// Maps an OpenAI <c>usage</c> object onto <see cref="MEAI.UsageDetails"/>: the three counters
+        /// MEAI types (input/output/total), everything else flattened into <c>AdditionalCounts</c>.
+        /// </summary>
+        /// <remarks>
+        /// WHY no typed <c>CachedInputTokenCount</c>/<c>ReasoningTokenCount</c>: those properties were
+        /// added in Microsoft.Extensions.AI 10.x, and CoreAI ships as SOURCE compiled inside the
+        /// consumer, whose floor is 9.10.2 (Unity 6 substitutes its own System.Text.Json 8.0.0.0, so the
+        /// consumer cannot move to 10.x). Writing them makes the framework fail to compile there.
+        /// Cache and reasoning counters therefore travel with every other vendor counter in
+        /// <c>AdditionalCounts</c>, which the native <c>UsageDetails.Add</c> sums key-by-key across
+        /// roundtrips exactly like the typed fields would. One carrier, not two.
+        /// </remarks>
         private static MEAI.UsageDetails BuildUsageDetailsFromOpenAiUsageObject(JObject usage)
         {
             int prompt = usage["prompt_tokens"]?.ToObject<int>() ?? 0;
             int completion = usage["completion_tokens"]?.ToObject<int>() ?? 0;
             int total = usage["total_tokens"]?.ToObject<int>() ?? 0;
             MEAI.AdditionalPropertiesDictionary<long> additionalCounts = BuildAdditionalUsageCounts(usage);
-            long? cachedInput = ReadUsageInt64(usage["prompt_tokens_details"] as JObject, "cached_tokens");
-            long? reasoning = ReadUsageInt64(usage["completion_tokens_details"] as JObject, "reasoning_tokens");
             if (prompt == 0 && completion == 0 && total == 0 &&
-                !cachedInput.HasValue && !reasoning.HasValue &&
                 (additionalCounts == null || additionalCounts.Count == 0))
             {
                 return null;
@@ -2109,8 +2186,6 @@ namespace CoreAI.Infrastructure.Llm
                 InputTokenCount = prompt,
                 OutputTokenCount = completion,
                 TotalTokenCount = total,
-                CachedInputTokenCount = cachedInput,
-                ReasoningTokenCount = reasoning,
                 AdditionalCounts = additionalCounts
             };
         }
@@ -2144,23 +2219,6 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return new MEAI.ChatFinishReason(value);
-        }
-
-        /// <summary>Reads one integer leaf of an OpenAI usage details object; null when absent/non-integer.</summary>
-        private static long? ReadUsageInt64(JObject parent, string child)
-        {
-            if (parent == null)
-            {
-                return null;
-            }
-
-            JToken token = parent[child];
-            if (token == null || token.Type != JTokenType.Integer)
-            {
-                return null;
-            }
-
-            return token.Value<long>();
         }
 
         /// <summary>Synthetic per-response id for providers that omit the OpenAI response <c>id</c>.</summary>
@@ -2210,12 +2268,12 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             long value = token.Value<long>();
+            // Only the three counters MEAI types are skipped here; every other leaf (cache reads and
+            // writes, reasoning, audio, vendor extensions) keeps its dotted wire path as the key.
             if (value > 0 &&
                 !string.Equals(prefix, "prompt_tokens", StringComparison.Ordinal) &&
                 !string.Equals(prefix, "completion_tokens", StringComparison.Ordinal) &&
-                !string.Equals(prefix, "total_tokens", StringComparison.Ordinal) &&
-                !string.Equals(prefix, "prompt_tokens_details.cached_tokens", StringComparison.Ordinal) &&
-                !string.Equals(prefix, "completion_tokens_details.reasoning_tokens", StringComparison.Ordinal))
+                !string.Equals(prefix, "total_tokens", StringComparison.Ordinal))
             {
                 counts[prefix] = value;
             }
@@ -2274,6 +2332,42 @@ namespace CoreAI.Infrastructure.Llm
             return SseToolCallAccumulator.IsCompleteJsonObject(s);
         }
 
+        /// <summary>
+        /// EditMode tests: replays <paramref name="dataJsonChunks"/> exactly as the streaming loop does
+        /// (extract delta, then <c>DrainCompleted()</c> per line, then one <c>Flush()</c>) and reports how
+        /// many times an argument buffer had to be materialised into a string. Guards the incremental
+        /// completeness scan: the number must follow the count of tool calls, not the count of lines.
+        /// </summary>
+        internal static int ArgumentMaterialisationsForTests(IEnumerable<string> dataJsonChunks)
+        {
+            SseToolCallAccumulator accumulator = new();
+            foreach (string dataJson in dataJsonChunks)
+            {
+                ExtractDeltaUpdate(dataJson, accumulator);
+                accumulator.DrainCompleted();
+            }
+
+            accumulator.Flush();
+            return accumulator.ArgumentMaterialisations;
+        }
+
+        /// <summary>
+        /// EditMode tests: feeds <paramref name="argumentFragments"/> into one streamed tool call and
+        /// reports the INCREMENTAL verdict on "are the accumulated arguments exactly one JSON object?".
+        /// Must equal <see cref="IsCompleteJsonObjectForTests"/> over the concatenation for every
+        /// fragmentation — that equality is the whole safety argument for scanning each char once.
+        /// </summary>
+        internal static bool IncrementalArgumentsCompleteForTests(IEnumerable<string> argumentFragments)
+        {
+            SseToolCallAccumulator accumulator = new();
+            foreach (string fragment in argumentFragments)
+            {
+                accumulator.Feed(0, "call_probe", "probe", fragment);
+            }
+
+            return accumulator.ArgumentsCompleteForTests(0);
+        }
+
         /// <summary>EditMode tests: marker key carrying the raw argument string when JSON parsing failed.</summary>
         internal static string ToolCallRawArgumentsKeyForTests => SseToolCallAccumulator.RawArgumentsKey;
 
@@ -2296,6 +2390,21 @@ namespace CoreAI.Infrastructure.Llm
             private readonly Dictionary<string, PendingToolCall> _pendingById = new(StringComparer.Ordinal);
             private readonly Dictionary<int, PendingToolCall> _pendingByIndex = new();
 
+            /// <summary>
+            /// The provider's tool_calls order: ascending index (index-less calls last), ties broken by
+            /// arrival. One cached delegate, because both <see cref="DrainCompleted"/> and
+            /// <see cref="Flush"/> order by it and dependent pairs (create -> configure) must never run
+            /// out of order.
+            /// </summary>
+            private static readonly Comparison<PendingToolCall> ByProviderOrder = (left, right) =>
+            {
+                int leftIndex = left.Index ?? int.MaxValue;
+                int rightIndex = right.Index ?? int.MaxValue;
+                return leftIndex != rightIndex
+                    ? leftIndex.CompareTo(rightIndex)
+                    : left.Sequence.CompareTo(right.Sequence);
+            };
+
             // WHY: Tombstones for calls already surfaced by DrainCompleted(). One accumulator instance
             // exists per stream response (created fresh per attempt in GetStreamingResponseAsync),
             // so these are per-response by construction and need no explicit reset. They stop
@@ -2308,6 +2417,32 @@ namespace CoreAI.Infrastructure.Llm
 
             private readonly ILog _log;
             private int _nextSequence;
+
+            /// <summary>
+            /// How many times an accumulated argument buffer was materialised into a string. The
+            /// completeness question is answered incrementally, so this must stay proportional to the
+            /// number of tool calls, NOT to the number of streamed lines. Pinned by
+            /// <c>MeaiOpenAiChatClientStreamHotPathEditModeTests</c>.
+            /// </summary>
+            internal int ArgumentMaterialisations { get; private set; }
+
+            /// <summary>
+            /// The ONE place accumulated arguments turn into a string. Single funnel on purpose: it
+            /// keeps the cost countable, and it makes an accidental "just call ToString() to check
+            /// something" on a per-line path visible instead of silently quadratic.
+            /// </summary>
+            private string MaterialiseArguments(PendingToolCall pending)
+            {
+                ArgumentMaterialisations++;
+                return pending.ArgumentsText();
+            }
+
+            /// <summary>EditMode tests: the incremental completeness verdict for one pending index.</summary>
+            internal bool ArgumentsCompleteForTests(int index)
+            {
+                return _pendingByIndex.TryGetValue(index, out PendingToolCall pending) &&
+                       pending.HasCompleteArgumentsJson;
+            }
 
             /// <summary>Wire response id latched from the first chunk that carries one (per attempt).</summary>
             internal string LatchedResponseId { get; private set; }
@@ -2382,7 +2517,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (!string.IsNullOrEmpty(argumentsFragment))
                 {
-                    entry.Arguments.Append(argumentsFragment);
+                    entry.AppendArguments(argumentsFragment);
                 }
             }
 
@@ -2455,8 +2590,7 @@ namespace CoreAI.Infrastructure.Llm
             /// </summary>
             private static bool IsOpenForMoreArguments(PendingToolCall pending)
             {
-                string argsStr = pending.Arguments.ToString();
-                return argsStr.Length == 0 || !IsCompleteJsonObject(argsStr);
+                return !pending.HasCompleteArgumentsJson;
             }
 
             /// <summary>
@@ -2585,10 +2719,14 @@ namespace CoreAI.Infrastructure.Llm
                     return null;
                 }
 
+                // WHY in place instead of OrderBy().ThenBy(): this runs once per streamed SSE line while
+                // any call is pending, and the LINQ pipeline allocated its iterators, key arrays and
+                // comparers every time to reorder two or three entries. The comparison is a total order
+                // (Sequence is unique), so the sorted result is identical to the stable LINQ one.
+                _pending.Sort(ByProviderOrder);
+
                 List<PendingToolCall> ready = null;
-                foreach (PendingToolCall pending in _pending
-                             .OrderBy(p => p.Index ?? int.MaxValue)
-                             .ThenBy(p => p.Sequence))
+                foreach (PendingToolCall pending in _pending)
                 {
                     if (!IsReadyToDrain(pending))
                     {
@@ -2608,7 +2746,7 @@ namespace CoreAI.Infrastructure.Llm
                 foreach (PendingToolCall pending in ready)
                 {
                     Dictionary<string, object> args =
-                        ParseArguments(pending.Arguments.ToString(), pending.Name, pending);
+                        ParseArguments(MaterialiseArguments(pending), pending.Name, pending);
                     update.Contents.Add(new MEAI.FunctionCallContent(
                         pending.Id ?? $"sse_{pending.Name}_{Guid.NewGuid():N}",
                         pending.Name, args));
@@ -2640,8 +2778,7 @@ namespace CoreAI.Infrastructure.Llm
                     return false;
                 }
 
-                string argsStr = pending.Arguments.ToString();
-                return argsStr.Length > 0 && IsCompleteJsonObject(argsStr);
+                return pending.HasCompleteArgumentsJson;
             }
 
             /// <summary>
@@ -2719,27 +2856,26 @@ namespace CoreAI.Infrastructure.Llm
                 update.Contents = new List<MEAI.AIContent>();
 
                 // WHY: Emit in ascending tool-call index order so the FunctionCallContent order is
-                // deterministic and matches the provider's tool_calls index order.
-                foreach (PendingToolCall pending in _pending
-                             .OrderBy(p => p.Index ?? int.MaxValue)
-                             .ThenBy(p => p.Sequence))
+                // deterministic and matches the provider's tool_calls index order (same comparison as
+                // DrainCompleted, so the two can never disagree about "provider order").
+                _pending.Sort(ByProviderOrder);
+                foreach (PendingToolCall pending in _pending)
                 {
-                    string argsStr = pending.Arguments.ToString();
-
                     if (string.IsNullOrEmpty(pending.Name))
                     {
-                        if (!string.IsNullOrEmpty(pending.Id) || !string.IsNullOrEmpty(argsStr))
+                        if (!string.IsNullOrEmpty(pending.Id) || pending.ArgumentsLength > 0)
                         {
                             _log.Warn(
                                 $"MeaiOpenAiChatClient: dropped streamed tool call at {pending.IdentityLabel} - missing function name " +
-                                $"(id='{pending.Id ?? ""}', args length={argsStr.Length}).",
+                                $"(id='{pending.Id ?? ""}', args length={pending.ArgumentsLength}).",
                                 LogTag.Llm);
                         }
 
                         continue;
                     }
 
-                    Dictionary<string, object> args = ParseArguments(argsStr, pending.Name, pending);
+                    Dictionary<string, object> args =
+                        ParseArguments(MaterialiseArguments(pending), pending.Name, pending);
                     update.Contents.Add(new MEAI.FunctionCallContent(
                         pending.Id ?? $"sse_{pending.Name}_{Guid.NewGuid():N}",
                         pending.Name, args));
@@ -2817,9 +2953,150 @@ namespace CoreAI.Infrastructure.Llm
                 public string Name;
                 public int Sequence;
                 public bool ForceParseError;
-                public readonly StringBuilder Arguments = new();
+
+                private readonly StringBuilder _arguments = new();
+
+                // Incremental mirror of IsCompleteJsonObject over _arguments: every appended character is
+                // examined EXACTLY ONCE, and "are the arguments a complete JSON object?" becomes a field
+                // read. WHY: the answer is asked on every streamed SSE line (DrainCompleted, and
+                // FindSoleOpenPendingCall/MarkAmbiguousMissingIndex on id-less fragments). Asking it by
+                // re-materialising the buffer and re-scanning it from the start made a long tool call
+                // quadratic in its own argument length — on WebGL's single thread, with the model still
+                // generating. The scanner is a state machine, so a fragment boundary in the middle of a
+                // string or right after a backslash carries over exactly as the batch scan would resume.
+                private enum ScanState
+                {
+                    /// <summary>Leading whitespace before the opening brace.</summary>
+                    BeforeObject,
+
+                    /// <summary>Inside the object; <see cref="_depth"/> braces still open.</summary>
+                    InsideObject,
+
+                    /// <summary>The outermost brace closed; only whitespace may follow.</summary>
+                    Closed,
+
+                    /// <summary>Not one complete object and never can be (bad prefix or trailing junk).</summary>
+                    Invalid
+                }
+
+                private ScanState _state = ScanState.BeforeObject;
+                private int _scanned;
+                private int _depth;
+                private bool _inString;
+                private bool _skipEscaped;
 
                 public string IdentityLabel => Index.HasValue ? $"index {Index.Value}" : $"sequence {Sequence}";
+
+                /// <summary>Characters accumulated so far (no materialisation).</summary>
+                public int ArgumentsLength => _arguments.Length;
+
+                /// <summary>
+                /// True when the accumulated arguments are EXACTLY one complete JSON object — the same
+                /// predicate as <c>Arguments.Length &gt; 0 &amp;&amp; IsCompleteJsonObject(Arguments)</c>,
+                /// answered from the incremental scan instead of a fresh pass.
+                /// </summary>
+                public bool HasCompleteArgumentsJson => _state == ScanState.Closed;
+
+                public void AppendArguments(string fragment)
+                {
+                    if (string.IsNullOrEmpty(fragment))
+                    {
+                        return;
+                    }
+
+                    _arguments.Append(fragment);
+                    ScanAppended();
+                }
+
+                /// <summary>Materialises the buffer. Called once per call at drain/flush, never per line.</summary>
+                public string ArgumentsText()
+                {
+                    return _arguments.ToString();
+                }
+
+                private void ScanAppended()
+                {
+                    for (; _scanned < _arguments.Length; _scanned++)
+                    {
+                        if (_state == ScanState.Invalid)
+                        {
+                            // Nothing later can repair a bad prefix or trailing junk; stop looking.
+                            _scanned = _arguments.Length;
+                            return;
+                        }
+
+                        char symbol = _arguments[_scanned];
+                        switch (_state)
+                        {
+                            case ScanState.BeforeObject:
+                                if (char.IsWhiteSpace(symbol))
+                                {
+                                    continue;
+                                }
+
+                                if (symbol != '{')
+                                {
+                                    _state = ScanState.Invalid;
+                                    continue;
+                                }
+
+                                _state = ScanState.InsideObject;
+                                _depth = 1;
+                                continue;
+
+                            case ScanState.InsideObject:
+                                if (_skipEscaped)
+                                {
+                                    // The char after a backslash inside a string is consumed verbatim
+                                    // (covers \" and \\), exactly as the batch scan's extra i++ does.
+                                    _skipEscaped = false;
+                                    continue;
+                                }
+
+                                if (_inString)
+                                {
+                                    if (symbol == '\\')
+                                    {
+                                        _skipEscaped = true;
+                                    }
+                                    else if (symbol == '"')
+                                    {
+                                        _inString = false;
+                                    }
+
+                                    continue;
+                                }
+
+                                if (symbol == '"')
+                                {
+                                    _inString = true;
+                                }
+                                else if (symbol == '{')
+                                {
+                                    _depth++;
+                                }
+                                else if (symbol == '}')
+                                {
+                                    _depth--;
+                                    if (_depth == 0)
+                                    {
+                                        _state = ScanState.Closed;
+                                    }
+                                }
+
+                                continue;
+
+                            case ScanState.Closed:
+                                if (!char.IsWhiteSpace(symbol))
+                                {
+                                    // Trailing junk: not exactly one object, and more text cannot fix it.
+                                    _state = ScanState.Invalid;
+                                }
+
+                                continue;
+                        }
+                    }
+                }
             }
         }
 
@@ -2848,18 +3125,16 @@ namespace CoreAI.Infrastructure.Llm
 
             foreach (MEAI.ChatMessage msg in msgs)
             {
-                string content = msg.Text ?? "";
-                if (string.IsNullOrEmpty(content) && msg.Contents != null && msg.Contents.Count > 0)
+                // ChatMessage.Text IS the join of the message's TextContent parts and never returns
+                // null, so re-reading those parts here could only reproduce it (a TextContent's own
+                // Text is never null either - MEAI coerces null to empty). The one case Text cannot
+                // cover is a message with NO TextContent at all (tool calls, images): the wire still
+                // needs something there, so those parts are stringified.
+                string content = msg.Text;
+                if (content.Length == 0 && msg.Contents.Count > 0 &&
+                    !msg.Contents.Any(part => part is MEAI.TextContent))
                 {
-                    MEAI.TextContent textContent = msg.Contents.OfType<MEAI.TextContent>().FirstOrDefault();
-                    if (textContent != null)
-                    {
-                        content = textContent.Text;
-                    }
-                    else
-                    {
-                        content = string.Join("\n", msg.Contents.Select(c => c.ToString()));
-                    }
+                    content = string.Join("\n", msg.Contents.Select(c => c.ToString()));
                 }
 
                 Dictionary<string, object> msgDict = new()
@@ -3110,6 +3385,13 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
+        /// <summary>
+        /// Maps declared tools onto the OpenAI wire shape. The schema itself is never authored here —
+        /// it is <c>AIFunction.JsonSchema</c>, produced by <c>AIFunctionFactory</c>. The
+        /// <c>JsonConvert.DeserializeObject</c> hop is only a bridge: the schema is a
+        /// <c>System.Text.Json</c> element while this whole request envelope is Newtonsoft, and moving
+        /// the envelope off Newtonsoft is a separate change with its own WebGL risk.
+        /// </summary>
         private static List<Dictionary<string, object>> BuildToolsPayload(MEAI.ChatOptions? options)
         {
             List<Dictionary<string, object>> toolsList = new();

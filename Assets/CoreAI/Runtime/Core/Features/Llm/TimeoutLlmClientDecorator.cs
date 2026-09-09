@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Tasks.Sources;
 using CoreAI.Ai;
 
 namespace CoreAI.Infrastructure.Llm
@@ -51,8 +53,14 @@ namespace CoreAI.Infrastructure.Llm
         // is allocated for individual chunks.
         private sealed class CancellationSignal : IDisposable
         {
-            private readonly TaskCompletionSource<bool> _source =
-                new(TaskCreationOptions.RunContinuationsAsynchronously);
+            // WHY no RunContinuationsAsynchronously: this source is awaited through Task.WhenAny, and
+            // WhenAny's own internal continuation does NOT capture a synchronization context. With the
+            // flag, completing this source hands that continuation to the thread pool - which a WebGL
+            // player does not have, so the wait never ends. Without the flag WhenAny completes inline on
+            // the cancelling stack and our own continuation (we await WITHOUT ConfigureAwait(false))
+            // posts to the host loop. Inline completion is safe here: we only post, and no
+            // CancellationTokenSource lock is held across it.
+            private readonly TaskCompletionSource<bool> _source = new();
             private readonly CancellationTokenRegistration _registration;
 
             public CancellationSignal(CancellationToken token)
@@ -69,21 +77,34 @@ namespace CoreAI.Infrastructure.Llm
         {
             if (!operation.IsCompleted)
             {
-                await Task.WhenAny(operation, signal.Task).ConfigureAwait(false);
+                await Task.WhenAny(operation, signal.Task);
+                if (!operation.IsCompleted)
+                {
+                    // WHY one yield before giving up: the signal and the inner client watch the SAME
+                    // token, and a cooperative inner client answers a stop with a terminal Cancelled
+                    // chunk rather than an exception. Winning that race by nanoseconds would throw away
+                    // an answer that already exists and turn a clean stop into a raw exception for the
+                    // caller. The previous code got this bias for free from a thread-pool hop
+                    // (RunContinuationsAsynchronously on the signal), which is exactly the trick that is
+                    // dead in a WebGL player - so the bias is now explicit and host-scheduled: a yield
+                    // posts to the host loop where a pool queue would never run.
+                    await Task.Yield();
+                }
+
                 if (!operation.IsCompleted)
                 {
                     throw new OperationCanceledException(token);
                 }
             }
 
-            return await operation.ConfigureAwait(false);
+            return await operation;
         }
 
         private static async Task ObserveOperationAsync(Task operation)
         {
             try
             {
-                await operation.ConfigureAwait(false);
+                await operation;
             }
             catch (Exception)
             {
@@ -94,14 +115,235 @@ namespace CoreAI.Infrastructure.Llm
 
         private static async Task DisposeAfterOperationAsync(Task operation, IAsyncEnumerator<LlmStreamChunk> enumerator)
         {
-            await ObserveOperationAsync(operation).ConfigureAwait(false);
+            await ObserveOperationAsync(operation);
             try
             {
-                await enumerator.DisposeAsync().ConfigureAwait(false);
+                await enumerator.DisposeAsync();
             }
             catch (Exception)
             {
                 // Cleanup belongs to the abandoned operation and must also be observed.
+            }
+        }
+
+        /// <summary>
+        /// Races one pending <c>MoveNextAsync</c> against the request's cancellation signal without
+        /// allocating anything per chunk.
+        /// <para>
+        /// WHY it exists: the previous per-chunk wait was <c>move.AsTask()</c> + an <c>async</c> helper +
+        /// <c>Task.WhenAny(operation, signal)</c>. Per chunk that arrives asynchronously (the normal case on a
+        /// real network stream) that is a wrapper <see cref="Task"/>, a state-machine box with its own
+        /// <see cref="Task"/>, the <c>params</c> array of <c>WhenAny</c>, the <c>WhenAny</c> promise and a
+        /// posted continuation - five or six heap objects for every token a learner reads. This type is one
+        /// object per request: it is a reusable <see cref="IValueTaskSource{TResult}"/> that the loop awaits
+        /// directly, its move-completion callback is one cached delegate, and the cancellation registration
+        /// is taken once. Only the timeout path allocates (the exception it reports).
+        /// </para>
+        /// <para>
+        /// The guarantee is unchanged: the wait ends when the signal fires even if the inner client never
+        /// observes its token. A move that completes after the signal won is still consumed exactly once,
+        /// on the "late" side: its result is kept for <see cref="TryClaimLateResult"/> (the one-hop bias
+        /// that prefers an answer which already exists over reporting a timeout) and
+        /// <see cref="AbandonedMoveCompletion"/> lets the enumerator be disposed only after that move has
+        /// finished, never overlapping an active <c>MoveNext</c>.
+        /// </para>
+        /// </summary>
+        private sealed class MoveNextRace : IValueTaskSource<bool>, IDisposable
+        {
+            private const int Idle = 0;
+            private const int Racing = 1;
+            private const int MoveWon = 2;
+            private const int SignalWon = 3;
+
+            private readonly CancellationToken _token;
+            private readonly Action _onMoveCompleted;
+            private readonly CancellationTokenRegistration _registration;
+            private readonly object _lateGate = new();
+
+            // WHY RunContinuationsAsynchronously stays false: the loop awaits this source WITHOUT
+            // ConfigureAwait(false), so a host SynchronizationContext is captured at registration and the
+            // continuation is posted to it on completion regardless of the flag. Where there is no context
+            // the continuation runs inline on the completing stack - exactly what the former inline
+            // TaskCompletionSource + WhenAny chain did - instead of being queued to a thread pool the WebGL
+            // player does not have.
+            private ManualResetValueTaskSourceCore<bool> _core;
+            private ValueTaskAwaiter<bool> _pending;
+            private int _state;
+            private volatile bool _signaled;
+
+            private bool _lateAvailable;
+            private bool _lateHasNext;
+            private Exception _lateError;
+            private TaskCompletionSource<bool> _abandoned;
+
+            public MoveNextRace(CancellationToken token)
+            {
+                _token = token;
+                _onMoveCompleted = OnMoveCompleted;
+                _registration = token.Register(OnSignal);
+            }
+
+            /// <summary>
+            /// Whether a move was left running after the signal won and nobody claimed its outcome yet.
+            /// Only <see cref="TryClaimLateResult"/> leaves that state.
+            /// </summary>
+            public bool HasAbandonedMove => Volatile.Read(ref _state) == SignalWon;
+
+            /// <summary>
+            /// Completes once an abandoned move has finished (its outcome is observed here, never thrown).
+            /// Already completed when there is no abandoned move.
+            /// </summary>
+            public Task AbandonedMoveCompletion
+            {
+                get
+                {
+                    lock (_lateGate)
+                    {
+                        if (Volatile.Read(ref _state) != SignalWon || _lateAvailable)
+                        {
+                            return Task.CompletedTask;
+                        }
+
+                        _abandoned ??= new TaskCompletionSource<bool>();
+                        return _abandoned.Task;
+                    }
+                }
+            }
+
+            /// <summary>Waits for an incomplete move or the signal, whichever comes first.</summary>
+            public ValueTask<bool> WaitAsync(ValueTask<bool> move)
+            {
+                if (Volatile.Read(ref _state) != Idle)
+                {
+                    throw new InvalidOperationException("A MoveNext race is already in flight.");
+                }
+
+                // WHY this order: the core is reset and the awaiter stored BEFORE the round opens, so a
+                // signal that lands right after the state flip completes a fresh core (a reset after
+                // SetException would discard the completion and the wait would never end), and the
+                // move callback can read the awaiter the moment it is registered.
+                _core.Reset();
+                // WHY the callback keeps the scheduling context (no ConfigureAwait(false)): a Task-backed
+                // move that completes on a host thread with a derived SynchronizationContext (the Unity
+                // main thread) is not inlined by .NET but queued to the thread pool when its awaiter asked
+                // for no context - and a WebGL player has no thread pool, so the callback would never run
+                // and the stream would hang. With the context the inner posts the callback to the host
+                // loop: one small post per chunk, and still no Task, WhenAny or state machine.
+                _pending = move.GetAwaiter();
+                Volatile.Write(ref _state, Racing);
+                _pending.UnsafeOnCompleted(_onMoveCompleted);
+                if (_signaled)
+                {
+                    TrySignal();
+                }
+
+                return new ValueTask<bool>(this, _core.Version);
+            }
+
+            /// <summary>
+            /// Hands over the outcome of a move that finished after the signal won. True at most once per
+            /// abandoned move; after a successful claim the race can be used for the next chunk.
+            /// </summary>
+            public bool TryClaimLateResult(out bool hasNext, out Exception error)
+            {
+                lock (_lateGate)
+                {
+                    if (Volatile.Read(ref _state) != SignalWon || !_lateAvailable)
+                    {
+                        hasNext = false;
+                        error = null;
+                        return false;
+                    }
+
+                    hasNext = _lateHasNext;
+                    error = _lateError;
+                    _lateAvailable = false;
+                    _lateHasNext = false;
+                    _lateError = null;
+                    Volatile.Write(ref _state, Idle);
+                    return true;
+                }
+            }
+
+            public void Dispose()
+            {
+                _registration.Dispose();
+            }
+
+            bool IValueTaskSource<bool>.GetResult(short token)
+            {
+                try
+                {
+                    return _core.GetResult(token);
+                }
+                finally
+                {
+                    // The signal's round stays SignalWon so the late side can still be claimed or awaited.
+                    Interlocked.CompareExchange(ref _state, Idle, MoveWon);
+                }
+            }
+
+            ValueTaskSourceStatus IValueTaskSource<bool>.GetStatus(short token) => _core.GetStatus(token);
+
+            void IValueTaskSource<bool>.OnCompleted(
+                Action<object> continuation, object state, short token, ValueTaskSourceOnCompletedFlags flags)
+            {
+                _core.OnCompleted(continuation, state, token, flags);
+            }
+
+            private void OnSignal()
+            {
+                _signaled = true;
+                TrySignal();
+            }
+
+            private void TrySignal()
+            {
+                if (Interlocked.CompareExchange(ref _state, SignalWon, Racing) == Racing)
+                {
+                    _core.SetException(new OperationCanceledException(_token));
+                }
+            }
+
+            private void OnMoveCompleted()
+            {
+                if (Interlocked.CompareExchange(ref _state, MoveWon, Racing) == Racing)
+                {
+                    try
+                    {
+                        _core.SetResult(_pending.GetResult());
+                    }
+                    catch (Exception ex)
+                    {
+                        _core.SetException(ex);
+                    }
+
+                    return;
+                }
+
+                // The signal won this round: consume the move here so the inner source is released, and
+                // keep the outcome for the late side.
+                bool hasNext = false;
+                Exception error = null;
+                try
+                {
+                    hasNext = _pending.GetResult();
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                }
+
+                TaskCompletionSource<bool> abandoned;
+                lock (_lateGate)
+                {
+                    _lateHasNext = hasNext;
+                    _lateError = error;
+                    _lateAvailable = true;
+                    abandoned = _abandoned;
+                }
+
+                abandoned?.TrySetResult(true);
             }
         }
 
@@ -163,8 +405,7 @@ namespace CoreAI.Infrastructure.Llm
                     while (true)
                     {
                         long seen = Volatile.Read(ref _progressCount);
-                        await _asyncMarshaler.DelayAsync(ToMilliseconds(remainingTicks), _stopToken)
-                            .ConfigureAwait(false);
+                        await _asyncMarshaler.DelayAsync(ToMilliseconds(remainingTicks), _stopToken);
                         if (_stopToken.IsCancellationRequested)
                         {
                             elapsed = false;
@@ -321,7 +562,7 @@ namespace CoreAI.Infrastructure.Llm
             float timeoutSeconds = _timeoutSecondsProvider();
             if (timeoutSeconds <= 0f)
             {
-                return await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                return await _inner.CompleteAsync(request, cancellationToken);
             }
 
             using CancellationTokenSource timeoutCts =
@@ -334,7 +575,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 operation = _inner.CompleteAsync(request, timeoutCts.Token);
                 LlmCompletionResult result =
-                    await AwaitOperationAsync(operation, signal, timeoutCts.Token).ConfigureAwait(false);
+                    await AwaitOperationAsync(operation, signal, timeoutCts.Token);
                 // ПОЧЕМУ: часть внутренних клиентов переводит отменённый связанный токен в результат
                 // Cancelled. Этот декоратор — САМЫЙ ВНЕШНИЙ слой (retry/fallback внутри уже видели результат
                 // Cancelled, и повторять на сработавшем токене всё равно бесполезно); переписывается только
@@ -377,8 +618,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 await foreach (LlmStreamChunk chunk in _inner
                                    .CompleteStreamingAsync(request, cancellationToken)
-                                   .WithCancellation(cancellationToken)
-                                   .ConfigureAwait(false))
+                                   .WithCancellation(cancellationToken))
                 {
                     yield return chunk;
                 }
@@ -390,10 +630,10 @@ namespace CoreAI.Infrastructure.Llm
                 CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             using CancellationSignal signal = new(timeoutCts.Token);
             using IdleDeadline deadline = new(_asyncMarshaler, timeoutCts, timeoutSeconds, _onDeadlineTimerFault);
+            using MoveNextRace race = new(timeoutCts.Token);
 
             IAsyncEnumerator<LlmStreamChunk> enumerator =
                 _inner.CompleteStreamingAsync(request, timeoutCts.Token).GetAsyncEnumerator(timeoutCts.Token);
-            Task<bool> pendingMove = null;
             try
             {
                 while (true)
@@ -401,20 +641,67 @@ namespace CoreAI.Infrastructure.Llm
                     LlmStreamChunk current = null;
                     bool hasNext = false;
                     bool timedOut = false;
+                    OperationCanceledException lost = null;
 
                     try
                     {
-                        pendingMove = enumerator.MoveNextAsync().AsTask();
-                        hasNext = await AwaitOperationAsync(pendingMove, signal, timeoutCts.Token).ConfigureAwait(false);
+                        // WHY the fast path: with a buffering transport the next chunk is usually already
+                        // in the buffer and MoveNextAsync completes synchronously; awaiting a completed
+                        // ValueTask allocates nothing. An incomplete move is raced against the signal by
+                        // MoveNextRace, which is one object per request - the former AsTask + async helper
+                        // + Task.WhenAny cost five or six heap objects per asynchronously delivered chunk.
+                        ValueTask<bool> move = enumerator.MoveNextAsync();
+                        hasNext = move.IsCompleted ? await move : await race.WaitAsync(move);
                         current = hasNext ? enumerator.Current : null;
                     }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
                     {
-                        throw;
+                        lost = ex;
                     }
-                    catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+
+                    if (lost != null)
                     {
-                        timedOut = true;
+                        // WHY one yield before giving up: the signal and the inner client watch the SAME
+                        // token, and a cooperative inner client answers a stop with a terminal Cancelled
+                        // chunk rather than an exception. Winning that race by nanoseconds would throw away
+                        // an answer that already exists and turn a clean stop into a raw exception for the
+                        // caller. The hop is host-scheduled (a yield posts to the host loop) because the
+                        // thread-pool hop that used to provide this bias for free is dead in a WebGL player.
+                        bool recovered = false;
+                        if (race.HasAbandonedMove)
+                        {
+                            await Task.Yield();
+                            if (race.TryClaimLateResult(out bool lateHasNext, out Exception lateError))
+                            {
+                                if (lateError == null)
+                                {
+                                    recovered = true;
+                                    hasNext = lateHasNext;
+                                    current = hasNext ? enumerator.Current : null;
+                                }
+                                else if (lateError is OperationCanceledException lateCancel &&
+                                         timeoutCts.IsCancellationRequested)
+                                {
+                                    lost = lateCancel;
+                                }
+                                else
+                                {
+                                    ExceptionDispatchInfo.Capture(lateError).Throw();
+                                }
+                            }
+                        }
+
+                        if (!recovered)
+                        {
+                            // A genuine stop by the caller propagates unchanged; a deadline at a live
+                            // caller token is the library timeout.
+                            if (cancellationToken.IsCancellationRequested)
+                            {
+                                ExceptionDispatchInfo.Capture(lost).Throw();
+                            }
+
+                            timedOut = true;
+                        }
                     }
 
                     if (timedOut)
@@ -471,20 +758,23 @@ namespace CoreAI.Infrastructure.Llm
             }
             finally
             {
-                if (timeoutCts.IsCancellationRequested || (pendingMove != null && !pendingMove.IsCompleted))
+                if (timeoutCts.IsCancellationRequested || race.HasAbandonedMove)
                 {
-                    _ = DisposeAfterOperationAsync(pendingMove ?? Task.CompletedTask, enumerator);
+                    // WHY: a move the signal beat may still be running inside the inner client; disposing
+                    // the enumerator now would overlap its active MoveNext. The disposal waits for that move
+                    // (whose outcome the race has already observed) without holding the caller.
+                    _ = DisposeAfterOperationAsync(race.AbandonedMoveCompletion, enumerator);
                 }
                 else
                 {
                     Task disposal = enumerator.DisposeAsync().AsTask();
                     if (!disposal.IsCompleted)
                     {
-                        await Task.WhenAny(disposal, signal.Task).ConfigureAwait(false);
+                        await Task.WhenAny(disposal, signal.Task);
                     }
                     if (disposal.IsCompleted)
                     {
-                        await disposal.ConfigureAwait(false);
+                        await disposal;
                     }
                     else
                     {

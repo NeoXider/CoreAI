@@ -90,6 +90,209 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class AsyncOnlySummaryStore : IConversationSummaryStore, IAsyncConversationSummaryStore
+        {
+            internal readonly TaskCompletionSource<string> LoadGate = new();
+            internal readonly TaskCompletionSource<bool> SaveGate = new();
+            internal readonly TaskCompletionSource<bool> SaveEntered = new();
+            internal int Loads;
+            internal int Saves;
+            internal int SyncCalls;
+            internal bool FailNextSave;
+            internal string Saved;
+            internal string LoadedRoleId;
+            internal string SavedRoleId;
+
+            public string LoadSummary(string roleId) { SyncCalls++; throw new InvalidOperationException("Synchronous read was called."); }
+            public void SaveSummary(string roleId, string summary) { SyncCalls++; throw new InvalidOperationException("Synchronous write was called."); }
+            public void ClearSummary(string roleId) { SyncCalls++; throw new InvalidOperationException("Synchronous clear was called."); }
+            public async Task<string> LoadSummaryAsync(string roleId, CancellationToken cancellationToken = default)
+            {
+                Loads++;
+                LoadedRoleId = roleId;
+                cancellationToken.ThrowIfCancellationRequested();
+                return await LoadGate.Task;
+            }
+            public async Task SaveSummaryAsync(string roleId, string summary, CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Saves++;
+                SavedRoleId = roleId;
+                SaveEntered.TrySetResult(true);
+                await SaveGate.Task;
+                if (FailNextSave)
+                {
+                    FailNextSave = false;
+                    throw new System.IO.IOException("Durability confirmation failed.");
+                }
+                Saved = summary;
+            }
+            public Task ClearSummaryAsync(string roleId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        }
+
+        private static IAsyncConversationContextManager AsyncManager(IConversationSummaryStore store, bool useLlm, RecordingLlmClient llm)
+            => useLlm ? new LlmAssistedConversationContextManager(store, new FlatTokenEstimator(1), llm)
+                : new DeterministicConversationContextManager(store, new FlatTokenEstimator(1));
+
+        private static Task<ConversationContextSnapshot> BuildAsync(IAsyncConversationContextManager manager, bool defer)
+            => manager.BuildSnapshotAsync("role", new[] { new ChatMessage("user", "old fact"), new ChatMessage("assistant", "recent fact") },
+                new AgentMemoryPolicy.RoleMemoryConfig { MaxChatHistoryMessages = 1 },
+                new ConversationContextBuildArgs { HistoryTokenBudget = 1000, DeferSummaryPersistence = defer }, "trace", CancellationToken.None);
+
+        private static async Task<Exception> CaptureFailure(Task operation)
+        {
+            try { await operation; return null; }
+            catch (Exception exception) { return exception; }
+        }
+
+        private sealed class MutableSummaryScope : IAgentMemoryScopeProvider
+        {
+            internal string UserId = "first-user";
+            public AgentMemoryScope GetScope(string roleId) => new("tenant", UserId, "lesson", "topic");
+        }
+
+        [TestCase(false, false)]
+        [TestCase(false, true)]
+        [TestCase(true, false)]
+        [TestCase(true, true)]
+        public async Task AsyncManager_ScopeChangeCannotRedirectLoadedHistoryOrDeferredSummary(bool useLlm, bool defer)
+        {
+            AsyncOnlySummaryStore store = new();
+            MutableSummaryScope scope = new();
+            ScopedConversationSummaryStoreDecorator scoped = new(store, scope);
+            Task<ConversationContextSnapshot> build = BuildAsync(AsyncManager(scoped, useLlm, new RecordingLlmClient()), defer);
+            Assert.AreEqual(1, store.Loads);
+            scope.UserId = "second-user";
+            store.SaveGate.SetResult(true);
+            store.LoadGate.SetResult("");
+            ConversationContextSnapshot snapshot = await build;
+            if (defer)
+            {
+                Assert.AreEqual(0, store.Saves);
+                scope.UserId = "third-user";
+                await snapshot.CommitAsync();
+            }
+            Assert.AreEqual(store.LoadedRoleId, store.SavedRoleId,
+                "A summary must be saved to the same effective user partition that supplied its old history.");
+            Assert.IsNotEmpty(store.Saved);
+            Assert.AreEqual(1, store.Saves);
+            Assert.AreEqual(0, store.SyncCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_BoundScopePreservesExplicitBlockingBackendOptIn(bool useLlm)
+        {
+            RecordingSummaryStore store = new();
+            MutableSummaryScope scope = new();
+            ScopedConversationSummaryStoreDecorator strict = new(store, scope);
+            Assert.That(await CaptureFailure(BuildAsync(AsyncManager(strict, useLlm, new RecordingLlmClient()), false)),
+                Is.InstanceOf<NotSupportedException>());
+            ScopedConversationSummaryStoreDecorator explicitBridge = new(store, scope, allowBlockingSyncFallback: true);
+            ConversationContextSnapshot snapshot = await BuildAsync(AsyncManager(explicitBridge, useLlm, new RecordingLlmClient()), false);
+            Assert.IsTrue(snapshot.WasCompacted);
+            Assert.AreEqual(1, store.SaveSummaryCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_AwaitsLoadAndDurableSaveWithoutCallingSyncBackend(bool useLlm)
+        {
+            AsyncOnlySummaryStore store = new();
+            RecordingLlmClient llm = new();
+            Task<ConversationContextSnapshot> build = BuildAsync(AsyncManager(store, useLlm, llm), false);
+            Assert.AreEqual(1, store.Loads);
+            Assert.IsFalse(build.IsCompleted);
+            Assert.AreEqual(0, llm.CompleteCallCount);
+            store.LoadGate.SetResult("");
+            Assert.AreSame(store.SaveEntered.Task, await Task.WhenAny(store.SaveEntered.Task, Task.Delay(3000)));
+            Assert.IsFalse(build.IsCompleted);
+            Assert.IsNull(store.Saved);
+            store.SaveGate.SetResult(true);
+            ConversationContextSnapshot snapshot = await build;
+            Assert.IsTrue(snapshot.WasCompacted);
+            Assert.IsNotEmpty(store.Saved);
+            Assert.AreEqual(0, store.SyncCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_DeferredCommitIsAwaitedAndConcurrentConsumersWriteOnce(bool useLlm)
+        {
+            AsyncOnlySummaryStore store = new();
+            store.LoadGate.SetResult("");
+            ConversationContextSnapshot snapshot = await BuildAsync(AsyncManager(store, useLlm, new RecordingLlmClient()), true);
+            Assert.AreEqual(0, store.Saves);
+            Task first = snapshot.CommitAsync();
+            Task second = snapshot.CommitAsync();
+            try
+            {
+                Assert.IsFalse(first.IsCompleted);
+                Assert.IsFalse(second.IsCompleted);
+                Assert.Throws<InvalidOperationException>(() => snapshot.Commit());
+                using CancellationTokenSource cancellation = new();
+                Task cancelledWaiter = snapshot.CommitAsync(cancellation.Token);
+                cancellation.Cancel();
+                Assert.That(await CaptureFailure(cancelledWaiter), Is.InstanceOf<OperationCanceledException>());
+                Assert.AreEqual(1, store.Saves);
+            }
+            finally
+            {
+                store.SaveGate.TrySetResult(true);
+                await Task.WhenAll(first, second);
+            }
+            await snapshot.CommitAsync();
+            Assert.AreEqual(1, store.Saves);
+            Assert.AreEqual(0, store.SyncCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_FailedCommitRetainsTheSummaryForRetry(bool useLlm)
+        {
+            AsyncOnlySummaryStore store = new() { FailNextSave = true };
+            store.LoadGate.SetResult("");
+            store.SaveGate.SetResult(true);
+            ConversationContextSnapshot snapshot = await BuildAsync(AsyncManager(store, useLlm, new RecordingLlmClient()), true);
+            Assert.That(await CaptureFailure(snapshot.CommitAsync()), Is.InstanceOf<System.IO.IOException>());
+            Assert.IsNull(store.Saved);
+            await snapshot.CommitAsync();
+            await snapshot.CommitAsync();
+            Assert.AreEqual(2, store.Saves);
+            Assert.IsNotEmpty(store.Saved);
+            Assert.AreEqual(0, store.SyncCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_CancelledCommitDoesNotWriteAndRemainsRetryable(bool useLlm)
+        {
+            AsyncOnlySummaryStore store = new();
+            store.LoadGate.SetResult("");
+            store.SaveGate.SetResult(true);
+            ConversationContextSnapshot snapshot = await BuildAsync(AsyncManager(store, useLlm, new RecordingLlmClient()), true);
+            using CancellationTokenSource cancellation = new();
+            cancellation.Cancel();
+            Assert.That(await CaptureFailure(snapshot.CommitAsync(cancellation.Token)), Is.InstanceOf<OperationCanceledException>());
+            Assert.AreEqual(0, store.Saves);
+            await snapshot.CommitAsync();
+            Assert.AreEqual(1, store.Saves);
+            Assert.AreEqual(0, store.SyncCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_SyncOnlyBackendRequiresExplicitAdapter(bool useLlm)
+        {
+            RecordingSummaryStore store = new();
+            Assert.That(await CaptureFailure(BuildAsync(AsyncManager(store, useLlm, new RecordingLlmClient()), false)),
+                Is.InstanceOf<NotSupportedException>());
+            ConversationContextSnapshot snapshot = await BuildAsync(AsyncManager(new BlockingSyncSummaryStoreAsyncAdapter(store), useLlm,
+                new RecordingLlmClient()), false);
+            Assert.IsTrue(snapshot.WasCompacted);
+            Assert.AreEqual(1, store.SaveSummaryCalls);
+        }
+
         [TestCase(false)]
         [TestCase(true)]
         public async Task MessageCountOverflow_FoldsOldPrefixEvenBelowTokenTrigger(bool useLlm)
@@ -97,8 +300,8 @@ namespace CoreAI.Tests.EditMode
             RecordingSummaryStore store = new();
             RecordingLlmClient llm = new();
             IAsyncConversationContextManager manager = useLlm
-                ? new LlmAssistedConversationContextManager(store, new FlatTokenEstimator(1), llm)
-                : new DeterministicConversationContextManager(store, new FlatTokenEstimator(1));
+                ? new LlmAssistedConversationContextManager(new BlockingSyncSummaryStoreAsyncAdapter(store), new FlatTokenEstimator(1), llm)
+                : new DeterministicConversationContextManager(new BlockingSyncSummaryStoreAsyncAdapter(store), new FlatTokenEstimator(1));
             ChatMessage[] history = Enumerable.Range(0, 6)
                 .Select(i => new ChatMessage("user", "fact-" + i)).ToArray();
             AgentMemoryPolicy.RoleMemoryConfig config = new() { MaxChatHistoryMessages = 2 };
@@ -134,57 +337,6 @@ namespace CoreAI.Tests.EditMode
 
             Assert.That(store.LoadSummary("r"), Does.Contain("old fact"));
             Assert.AreEqual(2, store.SaveSummaryCalls, "Only the failed attempt and one successful commit may write.");
-        }
-
-        [Test]
-        public async Task DeferredCommit_ConcurrentConsumersPublishOnlyOnce()
-        {
-            RecordingSummaryStore store = new();
-            TaskCompletionSource<bool> firstEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            TaskCompletionSource<bool> secondEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            TaskCompletionSource<bool> secondStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            using ManualResetEventSlim release = new(false);
-            int entries = 0;
-            store.OnSaving = () =>
-            {
-                if (Interlocked.Increment(ref entries) == 1)
-                {
-                    firstEntered.TrySetResult(true);
-                    if (!release.Wait(TimeSpan.FromSeconds(5)))
-                    {
-                        throw new TimeoutException("test failed to release durable write");
-                    }
-                }
-                else
-                {
-                    secondEntered.TrySetResult(true);
-                }
-            };
-            ConversationContextSnapshot snapshot = new DeterministicConversationContextManager(store)
-                .BuildSnapshot("r", new[] { new ChatMessage("user", "old"), new ChatMessage("user", "new") },
-                    new AgentMemoryPolicy.RoleMemoryConfig { MaxChatHistoryMessages = 1 },
-                    new ConversationContextBuildArgs { HistoryTokenBudget = 1000, DeferSummaryPersistence = true });
-            Task first = Task.Run(() => snapshot.Commit());
-            Task second = null;
-            try
-            {
-                Assert.AreSame(firstEntered.Task, await Task.WhenAny(firstEntered.Task, Task.Delay(3000)));
-                second = Task.Run(() => { secondStarted.TrySetResult(true); snapshot.Commit(); });
-                Assert.AreSame(secondStarted.Task, await Task.WhenAny(secondStarted.Task, Task.Delay(3000)));
-                Assert.AreNotSame(secondEntered.Task, await Task.WhenAny(secondEntered.Task, Task.Delay(250)),
-                    "A second writer cannot enter while the first durable commit is blocked.");
-            }
-            finally
-            {
-                release.Set();
-                await first;
-                if (second != null)
-                {
-                    await second;
-                }
-            }
-            Assert.AreEqual(1, store.SaveSummaryCalls);
-            Assert.That(store.LoadSummary("r"), Does.Contain("old"));
         }
 
         [Test]

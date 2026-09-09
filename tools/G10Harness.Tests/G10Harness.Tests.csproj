@@ -34,19 +34,19 @@
       <Private>true</Private>
     </Reference>
     <Reference Include="Microsoft.Extensions.AI">
-      <HintPath>../../Assets/Packages/Microsoft.Extensions.AI.10.7.0/lib/netstandard2.0/Microsoft.Extensions.AI.dll</HintPath>
+      <HintPath>../../Assets/Packages/Microsoft.Extensions.AI.9.10.2/lib/netstandard2.0/Microsoft.Extensions.AI.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Microsoft.Extensions.AI.Abstractions">
-      <HintPath>../../Assets/Packages/Microsoft.Extensions.AI.Abstractions.10.7.0/lib/netstandard2.0/Microsoft.Extensions.AI.Abstractions.dll</HintPath>
+      <HintPath>../../Assets/Packages/Microsoft.Extensions.AI.Abstractions.9.10.2/lib/netstandard2.0/Microsoft.Extensions.AI.Abstractions.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Microsoft.Bcl.AsyncInterfaces">
-      <HintPath>../../Assets/Packages/Microsoft.Bcl.AsyncInterfaces.10.0.9/lib/netstandard2.1/Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
+      <HintPath>../../Assets/Packages/Microsoft.Bcl.AsyncInterfaces.8.0.0/lib/netstandard2.1/Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Microsoft.Bcl.TimeProvider">
-      <HintPath>../../Assets/Packages/Microsoft.Bcl.TimeProvider.10.0.9/lib/netstandard2.0/Microsoft.Bcl.TimeProvider.dll</HintPath>
+      <HintPath>../../Assets/Packages/Microsoft.Bcl.TimeProvider.8.0.0/lib/netstandard2.0/Microsoft.Bcl.TimeProvider.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <None Include="../../Assets/CoreAIMods/Runtime/Diagnostics/G10/bench_actor.lua"

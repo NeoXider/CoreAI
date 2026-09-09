@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Logging;
@@ -70,6 +71,7 @@ namespace CoreAI.Ai
         private ILuaScriptVersionStore _skillVersionStore;
         private bool _skillAuthoring;
         private bool _requireKnownSkillTools = true;
+        private ILlmAsyncMarshaler _asyncMarshaler;
 
         private readonly ICoreAISettings _settings;
 
@@ -122,9 +124,9 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Явно объявляет, что непустой системный промпт будет задан в каждом
-        /// <see cref="AiTaskRequest.SystemPrompt"/>. Метод не задаёт текст промпта;
-        /// ответственность за его передачу остаётся у вызывающего кода.
+        /// Declares explicitly that a non-empty system prompt is supplied on every
+        /// <see cref="AiTaskRequest.SystemPrompt"/>. This method does not set prompt text;
+        /// passing it stays the caller's responsibility.
         /// </summary>
         public AgentBuilder WithPerRequestSystemPrompt()
         {
@@ -248,6 +250,18 @@ namespace CoreAI.Ai
             _skillStore = store;
             _skillVersionStore = versionStore;
             _requireKnownSkillTools = requireKnownTools;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the host callback marshaler used for asynchronous skill hydration
+        /// (<see cref="AgentConfig.ApplyToPolicyAsync"/> and <see cref="BuildAsync"/>).
+        /// Null (default) resolves at build time from the builder settings
+        /// (<see cref="ICoreAISettings.ToolInvocationMarshaler"/>), else portable passthrough.
+        /// </summary>
+        public AgentBuilder WithAsyncMarshaler(ILlmAsyncMarshaler asyncMarshaler)
+        {
+            _asyncMarshaler = asyncMarshaler;
             return this;
         }
 
@@ -501,6 +515,33 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Builds the <see cref="AgentConfig"/> and applies it to the current global
+        /// <see cref="CoreAIAgent.Policy"/> when available, hydrating persisted skills
+        /// asynchronously before the role becomes ready. A hydration failure or cancellation
+        /// leaves the previously ready role untouched.
+        /// </summary>
+        public Task<AgentConfig> BuildAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AgentConfig config = BuildDetached();
+
+            AgentMemoryPolicy policy = CoreAIAgent.Policy;
+            if (policy == null)
+            {
+                return Task.FromResult(config);
+            }
+
+            return BuildAndApplyAsync(config, policy, cancellationToken);
+        }
+
+        private static async Task<AgentConfig> BuildAndApplyAsync(AgentConfig config,
+            AgentMemoryPolicy policy, CancellationToken cancellationToken)
+        {
+            await config.ApplyToPolicyAsync(policy, cancellationToken);
+            return config;
+        }
+
+        /// <summary>
         /// Builds <see cref="AgentConfig"/> without mutating global runtime policy.
         /// </summary>
         public AgentConfig BuildDetached()
@@ -538,7 +579,9 @@ namespace CoreAI.Ai
                 EnableStreaming = _enableStreaming,
                 MemoryDefaultAction = _memoryDefaultAction,
                 OverrideUniversalPrefix = _overrideUniversalPrefix,
-                UseLlmContextCompaction = _useLlmContextCompaction ?? true
+                UseLlmContextCompaction = _useLlmContextCompaction ?? true,
+                AsyncMarshaler = _asyncMarshaler ?? _settings?.ToolInvocationMarshaler
+                    ?? PassThroughLlmAsyncMarshaler.Instance
             };
         }
 
@@ -714,6 +757,12 @@ namespace CoreAI.Ai
         public bool RequireKnownSkillTools { get; internal set; } = true;
 
         /// <summary>
+        /// Host callback marshaler used for asynchronous skill hydration. Resolved at build time
+        /// from <see cref="AgentBuilder.WithAsyncMarshaler"/>, else builder settings, else passthrough.
+        /// </summary>
+        public ILlmAsyncMarshaler AsyncMarshaler { get; internal set; }
+
+        /// <summary>
         /// Applies this built agent configuration to a mutable <see cref="AgentMemoryPolicy"/>.
         /// <para>
         /// For the common case you do NOT need to call this: <c>AskAsync</c>/<c>AskWithCallback</c>
@@ -721,34 +770,88 @@ namespace CoreAI.Ai
         /// Call this explicitly only when targeting a custom policy, or to register the role up front
         /// (e.g. so the orchestrator can route to it before the first ask).
         /// </para>
+        /// <para>
+        /// Synchronous compatibility path: persisted skills hydrate inline before the role is
+        /// published. Prefer <see cref="ApplyToPolicyAsync"/> on hosts that must not block.
+        /// </para>
         /// </summary>
         public void ApplyToPolicy(AgentMemoryPolicy policy)
         {
-            policy.SetToolsForRole(RoleId, Tools);
-
-            policy.ConfigureRole(RoleId, defaultAction: MemoryDefaultAction,
-                allowDuplicateToolCalls: AllowDuplicateToolCalls);
-
-            if (Tools.Count == 0 || !HasMemoryTool())
+            if (policy == null)
             {
-                policy.DisableMemoryTool(RoleId);
+                throw new ArgumentNullException(nameof(policy));
             }
 
-            policy.ConfigureChatHistory(RoleId, WithChatHistory, ContextWindowTokens,
-                PersistChatHistoryBetweenSessions, MaxChatHistoryMessages);
-            policy.ConfigureLlmContextCompaction(RoleId, UseLlmContextCompaction);
-            policy.SetMaxOutputTokens(RoleId, MaxOutputTokens);
-            policy.SetMaxToolCallRoundtrips(RoleId, MaxToolCallRoundtrips);
-            policy.SetTemperature(RoleId, Temperature);
-            policy.SetToolResultMemoryPolicy(RoleId, ToolResultMemory);
-            policy.SetCompactionTriggerRatio(RoleId, CompactionTriggerRatio);
+            MutableSkillCatalog liveCatalog = null;
+            SkillAuthoringCoordinator coordinator = null;
+            if (SkillAuthoringEnabled)
+            {
+                liveCatalog = new MutableSkillCatalog(Skills);
+                coordinator = CreateCoordinator(liveCatalog);
+                coordinator.RehydrateFromStore();
+            }
 
+            policy.ApplyPreparedRole(BuildPreparedRole(policy, liveCatalog, coordinator));
+        }
+
+        /// <summary>
+        /// Applies this built agent configuration to a mutable <see cref="AgentMemoryPolicy"/>,
+        /// hydrating persisted skills asynchronously before the role becomes ready. The tool list,
+        /// catalog, coordinator, and config are built detached; a hydration failure or cancellation
+        /// leaves the previously ready role untouched. Concurrent calls for one role serialize
+        /// through a shared registration: an explicit apply replaces the previous role.
+        /// </summary>
+        public Task ApplyToPolicyAsync(AgentMemoryPolicy policy,
+            CancellationToken cancellationToken = default)
+        {
+            if (policy == null)
+            {
+                throw new ArgumentNullException(nameof(policy));
+            }
+
+            return AgentRoleRegistration.ApplyReplacementAsync(policy, this, cancellationToken);
+        }
+
+        /// <summary>
+        /// Builds the detached prepared role and publishes it. Called by the registration gate;
+        /// explicit callers must go through <see cref="ApplyToPolicyAsync"/> for serialization.
+        /// </summary>
+        internal Task PublishPreparedAsync(AgentMemoryPolicy policy,
+            CancellationToken cancellationToken)
+        {
+            ILlmAsyncMarshaler marshaler = AsyncMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
+            return marshaler.InvokeAsync(async () =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                MutableSkillCatalog liveCatalog = null;
+                SkillAuthoringCoordinator coordinator = null;
+                if (SkillAuthoringEnabled)
+                {
+                    liveCatalog = new MutableSkillCatalog(Skills);
+                    coordinator = CreateCoordinator(liveCatalog);
+                    await coordinator.RehydrateFromStoreAsync(cancellationToken);
+                }
+
+                return await marshaler.InvokeAsync(() =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    AgentMemoryPolicy.PreparedAgentRole prepared =
+                        BuildPreparedRole(policy, liveCatalog, coordinator);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    policy.ApplyPreparedRole(prepared);
+                    return Task.FromResult(true);
+                }, cancellationToken);
+            }, cancellationToken);
+        }
+
+        /// <summary>
+        /// Builds the detached publication unit: tool list, private mutable catalog, coordinator
+        /// products, system prompt, and role config. Nothing is published here.
+        /// </summary>
+        private AgentMemoryPolicy.PreparedAgentRole BuildPreparedRole(AgentMemoryPolicy policy,
+            MutableSkillCatalog liveCatalog, SkillAuthoringCoordinator coordinator)
+        {
             string additionalPrompt = SystemPrompt;
-
-            if (OverrideUniversalPrefix)
-            {
-                policy.SetOverrideUniversalPrefix(RoleId, true);
-            }
 
             bool? streamingOverride = EnableStreaming;
             if (!streamingOverride.HasValue &&
@@ -757,28 +860,22 @@ namespace CoreAI.Ai
                 streamingOverride = true;
             }
 
-            policy.SetStreamingEnabled(RoleId, streamingOverride);
-
             // WHY: Self-service skills: register catalog context provider + meta-tools.
             // The catalog (name + description per skill) goes into the system prompt.
             // The model calls read_skill(name) to load instructions + tool schemas,
             // then call_skill_tool(tool_name, args_json) to execute them.
             // This keeps the model's visible tool count at exactly 2 (+1 for manage_skills when
             // authoring is enabled) regardless of skill count.
+            ILlmTool readSkillTool = null;
+            ILlmTool callSkillTool = null;
+            ILlmTool manageSkillsTool = null;
             bool hasSkills = Skills != null && Skills.Count > 0;
             if (hasSkills || SkillAuthoringEnabled)
             {
-                // WHY: When the agent can author skills, the read_skill / call_skill_tool proxies read from a
-                // LIVE catalog so a skill created via manage_skills is immediately visible to the same
-                // agent. Without authoring, the static snapshot is used (cacheable, unchanged behavior).
-                IReadOnlyList<SkillSet> catalogSkills = Skills ?? (IReadOnlyList<SkillSet>)Array.Empty<SkillSet>();
-                MutableSkillCatalog liveCatalog = null;
-                if (SkillAuthoringEnabled)
-                {
-                    liveCatalog = new MutableSkillCatalog(catalogSkills);
-                    RehydrateAndRegisterAuthoring(policy, liveCatalog);
-                    catalogSkills = liveCatalog;
-                }
+                // WHY: Policy lookup, dynamic additions and both proxies share one catalog,
+                // including host-provided skills on roles without authoring.
+                liveCatalog ??= new MutableSkillCatalog(Skills);
+                IReadOnlyList<SkillSet> catalogSkills = liveCatalog;
 
                 // WHY: Inject the lightweight catalog into the stable system prefix. Skill catalog data is static
                 // per agent build (host skills), unlike live world-state context, so it stays cacheable.
@@ -793,27 +890,70 @@ namespace CoreAI.Ai
                 // WHY: the provider reads the SAME role's tools, so a top-level tool the model wrapped
                 // in call_skill_tool by analogy with the skill's own tools still runs instead of coming
                 // back as a "not found" the learner never sees.
-                string roleForDirectTools = RoleId;
-                policy.AddToolForRole(RoleId, ReadSkillLlmTool.Create(catalogSkills));
-                policy.AddToolForRole(RoleId, CallSkillToolLlmTool.Create(
+                readSkillTool = ReadSkillLlmTool.Create(catalogSkills);
+                callSkillTool = CallSkillToolLlmTool.Create(
                     catalogSkills,
-                    () => policy.GetToolsForRole(roleForDirectTools)));
+                    () => policy.GetToolsForRole(RoleId));
+                if (SkillAuthoringEnabled && coordinator != null)
+                {
+                    manageSkillsTool = new ManageSkillsLlmTool(coordinator);
+                }
             }
 
-            if (!string.IsNullOrWhiteSpace(additionalPrompt))
+            List<ILlmTool> tools = Tools != null ? new List<ILlmTool>(Tools) : new List<ILlmTool>();
+            if (readSkillTool != null)
             {
-                policy.SetAdditionalSystemPrompt(RoleId, additionalPrompt);
+                tools.RemoveAll(IsSkillProxy);
+                tools.Add(readSkillTool);
+                tools.Add(callSkillTool);
             }
+            else if (!tools.Exists(IsSkillProxy))
+            {
+                foreach (ILlmTool existing in policy.SnapshotCustomToolsForPreparation(RoleId))
+                {
+                    if (IsSkillProxy(existing))
+                    {
+                        tools.Add(existing);
+                    }
+                }
+            }
+
+            if (manageSkillsTool != null)
+            {
+                tools.Add(manageSkillsTool);
+            }
+
+            return new AgentMemoryPolicy.PreparedAgentRole
+            {
+                RoleId = RoleId,
+                Tools = tools,
+                MemoryDefaultAction = MemoryDefaultAction,
+                AllowDuplicateToolCalls = AllowDuplicateToolCalls,
+                HasMemoryTool = HasMemoryTool(),
+                WithChatHistory = WithChatHistory,
+                ContextWindowTokens = ContextWindowTokens,
+                PersistChatHistory = PersistChatHistoryBetweenSessions,
+                MaxChatHistoryMessages = MaxChatHistoryMessages,
+                UseLlmContextCompaction = UseLlmContextCompaction,
+                MaxOutputTokens = MaxOutputTokens,
+                MaxToolCallRoundtrips = MaxToolCallRoundtrips,
+                Temperature = Temperature,
+                ToolResultMemory = ToolResultMemory,
+                CompactionTriggerRatio = CompactionTriggerRatio,
+                OverrideUniversalPrefix = OverrideUniversalPrefix,
+                StreamingOverride = streamingOverride,
+                AdditionalPrompt = additionalPrompt,
+                LiveCatalog = liveCatalog
+            };
         }
 
         /// <summary>
-        /// Builds the <see cref="SkillAuthoringCoordinator"/> for this role, rehydrates persisted skills
-        /// into <paramref name="liveCatalog"/>, and registers the <c>manage_skills</c> tool. The tool
-        /// resolver maps an authored skill's allowlisted name to a real registered tool: the role's direct
-        /// <see cref="Tools"/> plus the tools inside host-registered <see cref="Skills"/>. This is what
-        /// enforces "a skill may only reference existing tools".
+        /// Builds the <see cref="SkillAuthoringCoordinator"/> for this role over a detached catalog.
+        /// The tool resolver maps an authored skill's allowlisted name to a real registered tool: the
+        /// role's direct <see cref="Tools"/> plus the tools inside host-registered <see cref="Skills"/>.
+        /// This is what enforces "a skill may only reference existing tools".
         /// </summary>
-        private void RehydrateAndRegisterAuthoring(AgentMemoryPolicy policy, MutableSkillCatalog liveCatalog)
+        private SkillAuthoringCoordinator CreateCoordinator(MutableSkillCatalog liveCatalog)
         {
             Dictionary<string, ILlmTool> toolsByName = new(StringComparer.OrdinalIgnoreCase);
             foreach (ILlmTool tool in Tools)
@@ -846,19 +986,29 @@ namespace CoreAI.Ai
             SkillToolResolver resolver = name =>
                 !string.IsNullOrWhiteSpace(name) && toolsByName.TryGetValue(name.Trim(), out ILlmTool t) ? t : null;
 
-            SkillAuthoringCoordinator coordinator = new(
+            return new SkillAuthoringCoordinator(
                 liveCatalog,
                 SkillStore,
                 SkillVersionStore,
                 resolver,
-                RequireKnownSkillTools);
+                RequireKnownSkillTools,
+                AsyncMarshaler ?? PassThroughLlmAsyncMarshaler.Instance);
+        }
 
-            coordinator.RehydrateFromStore();
-            policy.AddToolForRole(RoleId, new ManageSkillsLlmTool(coordinator));
+        private static bool IsSkillProxy(ILlmTool tool)
+        {
+            return tool != null &&
+                (string.Equals(tool.Name, "read_skill", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(tool.Name, "call_skill_tool", StringComparison.OrdinalIgnoreCase));
         }
 
         private bool HasMemoryTool()
         {
+            if (Tools == null)
+            {
+                return false;
+            }
+
             foreach (ILlmTool tool in Tools)
             {
                 if (tool is MemoryLlmTool)

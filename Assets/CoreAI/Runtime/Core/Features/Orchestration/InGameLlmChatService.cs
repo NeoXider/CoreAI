@@ -135,7 +135,7 @@ namespace CoreAI.Ai
             // ПОЧЕМУ: _historyLock охраняет лишь отдельные чтения/записи (HistoryPairCount / ClearHistory),
             // а не последовательность «снимок → LLM → дописать». _requestGate сериализует её целиком, чтобы
             // параллельный запрос не снял снимок без предыдущего хода и не вклинился дописыванием.
-            await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await _requestGate.WaitAsync(cancellationToken);
             try
             {
                 if (!TryAcquireRateSlot(out DateTime stamp, out retryAfterSeconds))
@@ -172,7 +172,7 @@ namespace CoreAI.Ai
                                 ChatHistory = history,
                                 TraceId = Guid.NewGuid().ToString("N")
                             },
-                            cancellationToken).ConfigureAwait(false);
+                            cancellationToken);
                     }
                     catch (LlmOperationTimeoutException)
                     {

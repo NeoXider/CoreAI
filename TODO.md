@@ -10,6 +10,30 @@
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
+## WebGL storage gate shipped with its fix (2026-09-09) — closes a 7.37.0 pre-publication blocker
+
+`CoreAIWebGlPersistentDataSyncBuildGuard` travelled inside `com.neoxider.coreaiunity` while the
+template satisfying it lived in CoreAI's own `Assets/WebGLTemplates`, outside both packages: a
+consumer got an unconditional build failure pointing at a path that does not exist in their project.
+Confirmed on RedoSchool, whose own template lacked the line.
+
+- [x] The template ships in the package as `Assets/CoreAiUnity/WebGLTemplates~/CoreAI`. Unity builds
+      the template list from `Application.dataPath/WebGLTemplates` plus the editor installation
+      (`WebGLTemplateManager` / `WebGlBuildPostprocessor.UpdateHTMLTemplatePath`), so a package cannot
+      publish a selectable template — `CoreAIWebGlTemplateInstaller` + `CoreAI/Setup/Install WebGL
+      Template` copy it into `Assets/WebGLTemplates/CoreAI` and select it.
+- [x] Every failure message names project-local actions: the exact line, the menu item, the opt-out.
+- [x] `COREAI_WEBGL_NO_PERSISTENCE` (Web platform scripting define) stands the gate down and logs one
+      warning per build; the warning says the symbol is redundant when the template arms storage anyway.
+- [x] Tests: 20 for the guard, 6 for the installer, including a drift check between the packaged
+      template and the copy installed in this repository. Verified with 13 planted defects, each caught
+      by the intended test, executed outside Unity against the real sources.
+- [ ] **Verification gate (next editor session):** run
+      `CoreAIWebGlPersistentDataSyncBuildGuardEditModeTests` and
+      `CoreAIWebGlTemplateInstallerEditModeTests` in the Unity Test Runner — the editor was held by a
+      full EditMode run, so only `dotnet build` (CoreAI.Editor, CoreAI.Tests) and the portable suite
+      (1317/1317) were used as gates here.
+
 ### Demo scene smoke — cause found and fixed, 2026-09-06
 
 `CoreAiDemoScenesSmokePlayModeTests` did not "hang since 2026-08-30". Three separate causes, two of
@@ -1351,3 +1375,10 @@ Open:
   Also Hermes/Qwen-Agent XML tool-call parsing.
 - 4.12.1 — memory instruction now reaches native tool-calling roles (`AiToolContractPromptFormatter` early-return bug).
 - 4.12.0 — live streaming through tool calls, partial-SSE accumulation, WebGL Lua AOT hardening, stale-`<think>` prune, Lua mod versioning + diagnostics, vision host send path + gate + lift, P3 nits.
+
+## Active release gates — 2026-09-08
+
+- [ ] Root + memory-boundary owner: remove blocking memory/history I/O from async turns end to end, including scoped capabilities and append/rejected-turn paths; verify cold reads and contention with a responsive host. A flush-held-lock deadlock has not been demonstrated: the current file store releases gates before confirmation.
+- [ ] Root + skills owners: integrate async persistence/readiness, preserve both meta tools, prove first-waiter cancellation and replacement recovery, complete independent audit and real Unity/WebGL checks.
+- [ ] Root + typed-chat owner: preserve admitted turn identity and explicit failure/tool metadata through queue/service/panel; update Redo only after verified release.
+- [ ] Root: diagnose the stalled summary Unity run, settle the Mods signal-quota fixture with real event evidence, then rerun the complete release suites against frozen sources.

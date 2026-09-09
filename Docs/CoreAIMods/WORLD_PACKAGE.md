@@ -73,18 +73,19 @@ persistence callback reports success. The just-confirmed autosave is never a rot
 host clock that moved backwards cannot make a successful backup delete itself. Store mutations are
 serialized so two saves cannot interleave their durability phases. Manual bytes are never rotated.
 
-Autosave rotation is a two-phase durability protocol. The first browser callback confirms the new
-file. Old files are then journalled before deletion, and a second callback confirms the frozen ring.
+Autosave rotation is a two-phase durability protocol. The first durability check confirms the new
+file. Old files are then journalled before deletion, and a second check confirms the frozen ring.
 If either phase fails, the new file is removed, the exact prior ring is restored, and a separate
-uncancelled recovery sync is requested. A failed recovery callback is reported as durability
+uncancelled recovery check is requested. A failed recovery check is reported as durability
 unconfirmed; it is never promoted to success. Deterministic volatile/durable filesystem tests reload
 after failed first sync, failed second sync, successful second sync, and a mid-rotation I/O exception.
 
-The store's default WebGL path uses `CoreAiWebGlPersistence.SyncAsync()`. Its task completes only from
-the matching `FS.syncfs` success/error callback. A caller cancellation or 30-second realtime PlayerLoop
-timeout removes the pending call; a late callback is ignored. Desktop completes true because native
-file writes are already durable at this boundary. The legacy Boolean `Sync()` remains for existing
-callers but is not used as a durability result by the world-package store.
+The store's default WebGL path uses `CoreAiWebGlPersistence.SyncAsync()`, which returns immediately.
+It reports whether the engine's automatic `persistentDataPath` persistence is armed for this page —
+that is the only durability signal Unity exposes since 6.3 deprecated the manual `FS.syncfs` path,
+whose completion callback never fired. `true` means the completed write has been handed to that
+persistence; it does not claim the IndexedDB transaction has committed. Desktop returns true because
+native file writes are already durable at this boundary.
 
 `ConfirmedWorldMutationGate` is the reusable pre-mutation orchestration boundary. A runtime host
 constructs one shared instance from its current-world capture delegate and `IRbxWorldPackageStore`,

@@ -46,7 +46,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 throw new ArgumentNullException(nameof(innerClient));
             }
-            _innerClient = supportsNativeToolCalling ? innerClient : new TextToolChannelChatClient(innerClient);
+            _innerClient = supportsNativeToolCalling ? innerClient : StripNativeToolChannel(innerClient);
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _memoryStore = memoryStore;
@@ -54,46 +54,26 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Keeps local MEAI function bindings available to the invocation layer while a text-only
-        /// endpoint receives no native tool declarations or forced native tool choice.
+        /// Hides the native tool channel from an endpoint that has none, while the local MEAI function
+        /// bindings stay available to the invocation layer above. The native
+        /// <see cref="MEAI.ConfigureOptionsChatClient"/> does the wrapping: it hands the callback a
+        /// CLONE of the caller's options (or a fresh instance when the caller passed none), so the
+        /// request the endpoint sees loses the tool declarations and forced tool choice without the
+        /// caller's own options object ever being touched.
         /// </summary>
-        private sealed class TextToolChannelChatClient : MEAI.DelegatingChatClient
+        internal static MEAI.IChatClient StripNativeToolChannel(MEAI.IChatClient innerClient)
         {
-            public TextToolChannelChatClient(MEAI.IChatClient innerClient) : base(innerClient) { }
-
-            public override Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> messages,
-                MEAI.ChatOptions? options = null, CancellationToken cancellationToken = default)
+            return new MEAI.ConfigureOptionsChatClient(innerClient, options =>
             {
-                return base.GetResponseAsync(messages, ProviderOptions(options), cancellationToken);
-            }
-
-            public override IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
-                IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions? options = null,
-                CancellationToken cancellationToken = default)
-            {
-                return base.GetStreamingResponseAsync(messages, ProviderOptions(options), cancellationToken);
-            }
-
-            private static MEAI.ChatOptions? ProviderOptions(MEAI.ChatOptions? options)
-            {
-                if (options == null) return null;
-                MEAI.ChatOptions provider = options.Clone();
-                provider.Tools = null;
-                provider.ToolMode = null;
-                provider.AllowMultipleToolCalls = null;
-                if (options.AdditionalProperties != null)
-                {
-                    provider.AdditionalProperties = new MEAI.AdditionalPropertiesDictionary();
-                    foreach (KeyValuePair<string, object?> property in options.AdditionalProperties)
-                    {
-                        if (property.Key != "tools" && property.Key != "tool_choice" && property.Key != "parallel_tool_calls")
-                        {
-                            provider.AdditionalProperties[property.Key] = property.Value;
-                        }
-                    }
-                }
-                return provider;
-            }
+                options.Tools = null;
+                options.ToolMode = null;
+                options.AllowMultipleToolCalls = null;
+                // Raw passthrough copies of the same three fields, for transports that read them from
+                // AdditionalProperties instead of the typed options.
+                options.AdditionalProperties?.Remove("tools");
+                options.AdditionalProperties?.Remove("tool_choice");
+                options.AdditionalProperties?.Remove("parallel_tool_calls");
+            });
         }
 
         /// <inheritdoc />
@@ -323,7 +303,7 @@ namespace CoreAI.Infrastructure.Llm
                 result.CompletionTokens = (int)(response.Usage.OutputTokenCount ?? 0);
                 result.TotalTokens = (int)(response.Usage.TotalTokenCount ?? 0);
                 (result.CacheReadTokens, result.CacheWriteTokens) =
-                    ExtractUsageCacheTokenCounts(response.Usage);
+                    ExtractCacheTokenCounts(response.Usage.AdditionalCounts);
                 // WHY: PromptTokens stays the whole-turn CUMULATIVE sum (Prompt + Completion == Total
                 // for cost telemetry); the prompt-size calibration reads the dedicated last-roundtrip
                 // field instead. Zero counts are ignored (zero-emitting providers must not pollute it).
@@ -337,7 +317,13 @@ namespace CoreAI.Infrastructure.Llm
             return result;
         }
 
-        /// <summary>Only the final assistant message is user-visible after the native tool loop.</summary>
+        /// <summary>
+        /// Only the final assistant message is user-visible after the native tool loop.
+        /// <see cref="MEAI.ChatResponse.Text"/> is deliberately NOT used here: it concatenates EVERY
+        /// message of the response, so the tool transcript would be pasted into the teacher's reply.
+        /// Per-message <see cref="MEAI.ChatMessage.Text"/> is the native concatenation of that one
+        /// message's text contents.
+        /// </summary>
         private static string GetFinalAssistantText(MEAI.ChatResponse response)
         {
             for (int index = response.Messages.Count - 1; index >= 0; index--)
@@ -345,7 +331,7 @@ namespace CoreAI.Infrastructure.Llm
                 MEAI.ChatMessage message = response.Messages[index];
                 if (message.Role == MEAI.ChatRole.Assistant)
                 {
-                    return string.Concat(message.Contents.OfType<MEAI.TextContent>().Select(content => content.Text));
+                    return message.Text;
                 }
             }
 
@@ -429,8 +415,11 @@ namespace CoreAI.Infrastructure.Llm
                 return message;
             }
 
+            // ChatMessage.Text is MEAI's own join of the message's TextContent parts and never returns
+            // null, so no null guard is needed on it. Only a system message carrying no text at all
+            // (attachments, tool traces) falls through to stringifying its parts.
             string text = message.Text;
-            if (string.IsNullOrEmpty(text) && message.Contents != null)
+            if (text.Length == 0)
             {
                 text = string.Join(
                     "\n",
@@ -439,7 +428,7 @@ namespace CoreAI.Infrastructure.Llm
                         .Where(content => !string.IsNullOrWhiteSpace(content)));
             }
 
-            return new MEAI.ChatMessage(MEAI.ChatRole.User, "System context update:\n" + (text ?? string.Empty));
+            return new MEAI.ChatMessage(MEAI.ChatRole.User, "System context update:\n" + text);
         }
 
         /// <summary>
@@ -479,6 +468,15 @@ namespace CoreAI.Infrastructure.Llm
         /// <para>
         /// Tool execution can require additional model turns, so the method yields assistant text,
         /// tool-call chunks, and final completion chunks as they become available.
+        /// </para>
+        /// <para>
+        /// WHY this loop is not <c>FunctionInvokingChatClient</c>, unlike the non-streaming one in
+        /// <see cref="SmartToolCallingChatClient"/>: MEAI's loop cannot invoke a tool until it has
+        /// materialised the iteration's messages, i.e. until the iteration's stream has ended. Handing
+        /// streaming to it stops the visible reply at the first tool call and resumes it only after the
+        /// tool has run — the teacher freezes mid-sentence. This loop instead executes a call the moment
+        /// its argument JSON is complete, while the model is still producing the rest of the turn.
+        /// Do not "unify" the two loops onto MEAI without measuring that on a live model first.
         /// </para>
         /// <para>
         /// WebGL transports may use the browser fetch bridge while editor and standalone players use
@@ -1801,21 +1799,32 @@ namespace CoreAI.Infrastructure.Llm
             chunk.CompletionTokens = (int)(usage.OutputTokenCount ?? 0);
             chunk.TotalTokens = (int)(usage.TotalTokenCount ?? 0);
             (chunk.CacheReadTokens, chunk.CacheWriteTokens) =
-                ExtractUsageCacheTokenCounts(usage);
+                ExtractCacheTokenCounts(usage.AdditionalCounts);
             if (!string.IsNullOrEmpty(model))
             {
                 chunk.Model = model;
             }
         }
 
-        /// <summary>MEAI typed cache reads take precedence; vendor counters supply legacy reads and writes.</summary>
-        internal static (int CacheReadTokens, int CacheWriteTokens) ExtractUsageCacheTokenCounts(MEAI.UsageDetails usage)
-        {
-            (int reads, int writes) = ExtractCacheTokenCounts(usage?.AdditionalCounts);
-            return (usage?.CachedInputTokenCount is long cached ? ClampTokenCount(cached) : reads, writes);
-        }
-
-        /// <summary>Reads legacy provider cache metrics when no typed MEAI value exists.</summary>
+        /// <summary>
+        /// Prompt-cache reads and writes, from the one place they travel: <c>AdditionalCounts</c>.
+        /// </summary>
+        /// <remarks>
+        /// WHY not <c>UsageDetails.CachedInputTokenCount</c>: that property arrives only in
+        /// Microsoft.Extensions.AI 10.x, and the framework must compile against the consumer's floor of
+        /// 9.10.2 (Unity 6 forces its own System.Text.Json 8.0.0.0, so the consumer cannot move up).
+        /// Cache WRITES have no typed field in any MEAI version anyway — Anthropic-style
+        /// <c>cache_creation_*</c> counters exist only as vendor keys — so a typed read would have
+        /// covered half the question and left this reader in place regardless. One reader, one carrier.
+        /// <para>
+        /// Every matching key is SUMMED. Providers name cache counters in one dialect at a time
+        /// (OpenAI/OpenRouter <c>prompt_tokens_details.cached_tokens</c>, DeepSeek
+        /// <c>prompt_cache_hit_tokens</c>, Anthropic-style <c>cache_read_input_tokens</c>), so summing
+        /// is right for a single response. A provider that reported the SAME number under two names
+        /// would be counted twice — if one ever shows up, fix it by naming that provider's dialect, not
+        /// by adding a second precedence path here.
+        /// </para>
+        /// </remarks>
         internal static (int CacheReadTokens, int CacheWriteTokens) ExtractCacheTokenCounts(
             MEAI.AdditionalPropertiesDictionary<long>? additionalCounts)
         {
@@ -1866,13 +1875,16 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// OpenAI-style streaming usually fills <see cref="MEAI.ChatResponseUpdate.Text"/>; some stacks only append
-        /// <see cref="MEAI.TextContent"/> to <see cref="MEAI.ChatResponseUpdate.Contents"/>.
-        /// </summary>
-        /// <summary>
         /// Concatenates every <see cref="MEAI.TextReasoningContent"/> the provider surfaced on the
         /// response (DeepSeek/Qwen <c>reasoning_content</c> and stripped inline <c>&lt;think&gt;</c>
         /// blocks) so <see cref="LlmCompletionResult.ReasoningContent"/> can feed a UI thinking section.
+        /// <para>
+        /// WHY hand-written: MEAI's own joins sit on the wrong side of this split. <c>ChatMessage.Text</c>
+        /// and <c>ChatResponse.Text</c> deliberately EXCLUDE reasoning (<c>TextReasoningContent</c> does
+        /// not derive from <c>TextContent</c>) — which is exactly what keeps the visible answer clean —
+        /// and <c>AIContentExtensions.ConcatText</c>, the only join taking arbitrary content, is internal
+        /// to the assembly in 9.10.2. No public MEAI call returns the reasoning parts on their own.
+        /// </para>
         /// </summary>
         private static string ConcatenateAssistantReasoningText(MEAI.ChatResponse response)
         {
@@ -1902,6 +1914,13 @@ namespace CoreAI.Infrastructure.Llm
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Visible prose of one streaming update. The concatenation itself is
+        /// <see cref="MEAI.ChatResponseUpdate.Text"/> — it already joins every
+        /// <see cref="MEAI.TextContent"/> of the update and excludes
+        /// <see cref="MEAI.TextReasoningContent"/>, which does not derive from it. All this adds is the
+        /// role gate: a tool or usage update carries no text the learner may see.
+        /// </summary>
         private static string GetStreamingUpdateText(MEAI.ChatResponseUpdate update)
         {
             if (update.Role.HasValue && update.Role.Value != MEAI.ChatRole.Assistant)
@@ -1909,25 +1928,7 @@ namespace CoreAI.Infrastructure.Llm
                 return string.Empty;
             }
 
-            if (!string.IsNullOrEmpty(update.Text))
-            {
-                return update.Text;
-            }
-
-            if (update.Contents == null || update.Contents.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            foreach (MEAI.AIContent c in update.Contents)
-            {
-                if (c is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
-                {
-                    return tc.Text;
-                }
-            }
-
-            return string.Empty;
+            return update.Text;
         }
 
         /// <summary>
@@ -2059,6 +2060,14 @@ namespace CoreAI.Infrastructure.Llm
         /// (top-level <c>"name"</c> string plus <c>"arguments"</c> object / <c>"arguments_json"</c>
         /// string), backtick/quote-cited spans and fenced ``` blocks skipped, and pseudo-syntax
         /// memory writes (e.g. Qwen: <c>Action=write content="..."</c>) picked up as fallback.
+        /// <para>
+        /// WHY MEAI does not replace this: MEAI reads calls off the native tool channel only. An
+        /// endpoint without that channel (llama.cpp behind LLMUnity, some local proxies) can express a
+        /// call ONLY by writing JSON into the reply text, so this is its single path to a tool. Deleting
+        /// it does not raise an error anywhere — every tool on those endpoints simply stops running,
+        /// silently. The gate that keeps it off native endpoints is
+        /// <see cref="InterpretsProseAsToolCalls"/>, not the absence of this parser.
+        /// </para>
         /// </summary>
         internal static bool TryExtractToolCallsFromText(
             string text,
@@ -2487,8 +2496,15 @@ namespace CoreAI.Infrastructure.Llm
             LlmToolCallTextExtractor.TryExtract(text, knownToolNames,
                 out List<LlmToolCallTextExtractor.Match> toolSpans, out _);
 
+            // WHY in place: this method runs once per streamed chunk whenever prose is being parsed for
+            // tool calls, and OrderBy allocated its iterator, key array and comparer every time just to
+            // order a handful of spans. The list is freshly built by TryExtract, so nobody else can
+            // observe the reordering, and (Start, Length) is a total order over the non-overlapping
+            // spans it produces, so the sequence is the one the stable LINQ sort produced.
+            toolSpans.Sort(ByStartThenLength);
+
             int cursor = 0;
-            foreach (LlmToolCallTextExtractor.Match span in toolSpans.OrderBy(match => match.Start))
+            foreach (LlmToolCallTextExtractor.Match span in toolSpans)
             {
                 if (span.Start >= holdBoundary)
                 {
@@ -2512,6 +2528,15 @@ namespace CoreAI.Infrastructure.Llm
             exclusiveSafeEnd = holdBoundary;
             return segments;
         }
+
+        /// <summary>
+        /// Ascending span order for <see cref="GetHybridSafeSegments"/>. One cached delegate: the sort
+        /// happens on a per-chunk path, so it must not allocate a comparer on every call.
+        /// </summary>
+        private static readonly Comparison<LlmToolCallTextExtractor.Match> ByStartThenLength =
+            (left, right) => left.Start != right.Start
+                ? left.Start.CompareTo(right.Start)
+                : left.Length.CompareTo(right.Length);
 
         /// <summary>
         /// Returns the index of the first still-open (unbalanced) <c>{</c> in <paramref name="search"/> — the
@@ -2692,25 +2717,30 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Returns a shallow copy of <paramref name="source"/> with <see cref="MEAI.ChatToolMode.Auto"/>.
+        /// Returns a copy of <paramref name="source"/> with <see cref="MEAI.ChatToolMode.Auto"/>.
         /// Used in the streaming loop after the first iteration so the model isn't forced
         /// to keep emitting tool calls after each tool result is fed back. The full tool set is
         /// restored from <paramref name="fullTools"/> because a first-iteration
         /// <see cref="LlmToolChoiceMode.RequireSpecific"/> narrows <c>source.Tools</c> to the single
         /// forced tool — later iterations must see every tool again.
+        /// <para>
+        /// The copy itself is the native <see cref="MEAI.ChatOptions.Clone"/>: it carries EVERY option
+        /// field over and hands back fresh <c>Tools</c>/<c>StopSequences</c>/<c>AdditionalProperties</c>
+        /// collections, so reassigning them here cannot reach the first iteration's object. A copy that
+        /// listed fields by hand would silently drop whatever a later request starts setting — and the
+        /// drop would show up as a model answering iteration two under different options than one.
+        /// </para>
         /// </summary>
         private static MEAI.ChatOptions CloneOptionsWithAutoToolMode(
             MEAI.ChatOptions source, IReadOnlyList<MEAI.AIFunction> fullTools)
         {
-            MEAI.ChatOptions clone = new()
+            MEAI.ChatOptions clone = source.Clone();
+            clone.ToolMode = MEAI.ChatToolMode.Auto;
+            if (fullTools != null && fullTools.Count > 0)
             {
-                Temperature = source.Temperature,
-                MaxOutputTokens = source.MaxOutputTokens,
-                Tools = fullTools != null && fullTools.Count > 0
-                    ? fullTools.Cast<MEAI.AITool>().ToList()
-                    : source.Tools,
-                ToolMode = MEAI.ChatToolMode.Auto
-            };
+                clone.Tools = fullTools.Cast<MEAI.AITool>().ToList();
+            }
+
             return clone;
         }
 

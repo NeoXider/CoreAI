@@ -444,6 +444,13 @@ namespace CoreAI.Features.Audit
         {
             ReportDroppedEntriesIfAny();
 
+            // WHY: the flush tick runs twice a second for the whole session (on WebGL on the main
+            // thread); an empty queue is the common case and must not allocate a batch list to find that out.
+            if (_queue.IsEmpty)
+            {
+                return;
+            }
+
             List<AuditEntry> batch = new();
             while (_queue.TryDequeue(out AuditEntry entry))
             {
