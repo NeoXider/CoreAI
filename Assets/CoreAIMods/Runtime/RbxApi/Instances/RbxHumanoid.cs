@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 
@@ -60,6 +60,53 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>True while the character stands on something.</summary>
         bool IsGrounded { get; }
+
+        /// <summary>Whether this motor can still drive its character.</summary>
+        /// <remarks>
+        /// WHY the pipeline has to ask: a script writing <c>Anchored</c> on the root part destroys
+        /// its body and clearing it builds a new one, so a motor holding the old body is dead and
+        /// has to be rebuilt. That check used to recognise only CoreAI's own motor by concrete type,
+        /// which left a host motor holding a destroyed body forever — the character simply stopped
+        /// moving, or threw on the next step. Default is true: a motor that cannot go stale, such as
+        /// one that resolves its body on every call, has nothing to answer.
+        /// </remarks>
+        bool IsAvailable => true;
+
+        /// <summary>
+        /// Advances an in-progress <see cref="MoveTo"/> by one fixed step, in seconds.
+        /// </summary>
+        /// <remarks>
+        /// WHY this is on the interface with a no-op default rather than left to the host: the
+        /// fixed-step pump used to advance only CoreAI's own motor, by concrete type, so a host
+        /// motor's MoveTo never progressed and the character stood still while the Humanoid waited
+        /// out its arrival timeout. A controller that drives itself from its own FixedUpdate can
+        /// leave this empty; one that wants CoreAI's step cadence implements it.
+        /// </remarks>
+        void Step(double deltaSeconds)
+        {
+        }
+
+        /// <summary>
+        /// Retires this motor. The pipeline that built it (through
+        /// <c>IRbxCharacterMotorProvider.TryCreate</c> or CoreAI's own factory) calls this exactly
+        /// once, on whichever path stops using the motor for good, and only after the Humanoid it
+        /// drove no longer points at it.
+        /// </summary>
+        /// <remarks>
+        /// WHY on the interface with a no-op default, the same pattern as <see cref="Step"/> and
+        /// <see cref="IsAvailable"/>, rather than requiring every implementer to be
+        /// <see cref="System.IDisposable"/>: nothing in the pipeline ever called Dispose on a motor
+        /// before this existed, so implementing IDisposable alone would have changed nothing —
+        /// the release point has to be a method something actually calls. CoreAI's own motor holds
+        /// only a Rigidbody Unity destroys anyway, so the default empty body is already correct for
+        /// it. A host motor overrides this to stop reading input on its own, drop whatever it
+        /// registered (a controller-registry slot, a subscription, an animation rig), and end its
+        /// own in-flight walk before its last reference goes away — stopping the character is part
+        /// of releasing it.
+        /// </remarks>
+        void Release()
+        {
+        }
     }
 
     /// <summary>A motor for a world with no character: it stands still and never lands.</summary>

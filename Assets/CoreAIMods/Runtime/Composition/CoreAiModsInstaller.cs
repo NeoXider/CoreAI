@@ -214,8 +214,13 @@ namespace CoreAI.Composition
                     // Humanoid in a real scene silently got the null motor — Position stuck at
                     // zero, so MoveTo reported arrival instantly and WalkSpeed moved nothing.
                     InstanceGameObjectBinder binder = rbxHost.Binder;
+                    // WHY resolved here and passed down: the host registers its provider in the
+                    // same container as everything else, and this is the only place that also
+                    // holds the binder and the world host the provider needs to be given.
+                    Mods.Rbx.Binding.IRbxCharacterMotorProvider motorProvider =
+                        c.ResolveOrDefault<Mods.Rbx.Binding.IRbxCharacterMotorProvider>();
                     rbxApi.AttachCharacterMotorFactory(humanoid =>
-                        CreateCharacterMotor(binder, humanoid, rbxHost));
+                        CreateCharacterMotor(binder, humanoid, rbxHost, motorProvider));
                 }
 
                 IInGameLlmChatServiceFactory chatFactory =
@@ -333,6 +338,8 @@ namespace CoreAI.Composition
                 InitialLuaWorldSession initial = c.Resolve<InitialLuaWorldSession>();
                 Mods.Rbx.Binding.RbxWorldHost sceneHost =
                     c.ResolveOrDefault<Mods.Rbx.Binding.RbxWorldHost>();
+                Mods.Rbx.Binding.IRbxCharacterMotorProvider stagedMotorProvider =
+                    c.ResolveOrDefault<Mods.Rbx.Binding.IRbxCharacterMotorProvider>();
                 IRbxWorldSessionHost sessionHost = sceneHost != null
                     ? new RbxWorldSessionHostAdapter(sceneHost)
                     : new HeadlessRbxWorldSessionHost(
@@ -376,7 +383,7 @@ namespace CoreAI.Composition
                         {
                             stagedApi.AttachCharacterMotorFactory(
                                 humanoid => CreateCharacterMotor(
-                                    stagedBinder, humanoid, sceneHost));
+                                    stagedBinder, humanoid, sceneHost, stagedMotorProvider));
                         }
 
                         // WHY the physics port is NOT attached here: at Stage time the only port that
@@ -681,7 +688,8 @@ namespace CoreAI.Composition
         private static IRbxCharacterMotor CreateCharacterMotor(
             InstanceGameObjectBinder binder,
             RbxHumanoid humanoid,
-            Mods.Rbx.Binding.RbxWorldHost physicsHost)
+            Mods.Rbx.Binding.RbxWorldHost physicsHost,
+            Mods.Rbx.Binding.IRbxCharacterMotorProvider hostProvider)
         {
             RbxInstance root = humanoid?.RootPart;
             if (binder == null || root == null || root.IsDestroyed)
@@ -706,12 +714,90 @@ namespace CoreAI.Composition
             // WHY gravity at all: these bodies have Rigidbody.useGravity off — the world's own
             // acceleration is applied by the port — so a height-based jump solved against
             // Physics.gravity reaches the wrong height and ignores Workspace.Gravity entirely.
+            System.Func<float> worldGravity = () =>
+                physicsHost?.PhysicsPort?.GravityMetresPerSecondSquared.magnitude
+                ?? Mods.Rbx.Spatial.RbxSpace.AccelerationToUnity(
+                    (float)RbxWorldPhysics.DefaultGravity);
+
+            // WHY the host is asked first and may decline: a game that already owns a character
+            // controller should drive its own bodies, and CoreAI's motor is the answer for
+            // everything it does not claim. Declining is a null return, decided with the body in
+            // hand — see IRbxCharacterMotorProvider.
+            IRbxCharacterMotor hostMotor = TryCreateHostMotor(
+                hostProvider, humanoid, body, worldGravity, physicsHost?.Registry);
+            if (hostMotor != null)
+            {
+                return hostMotor;
+            }
+
             return new UnityRbxCharacterMotor(
                 rigidbody,
-                worldGravityMetresPerSecondSquared: () =>
-                    physicsHost?.PhysicsPort?.GravityMetresPerSecondSquared.magnitude
-                    ?? Mods.Rbx.Spatial.RbxSpace.AccelerationToUnity(
-                        (float)RbxWorldPhysics.DefaultGravity));
+                worldGravityMetresPerSecondSquared: worldGravity);
+        }
+
+        /// <summary>
+        /// Asks the host provider for a motor, tolerating both a destroyed provider and one whose
+        /// decision throws.
+        /// </summary>
+        /// <remarks>
+        /// WHY this is not a plain <c>hostProvider?.TryCreate(...)</c>: <paramref name="hostProvider"/>
+        /// is held through the <c>IRbxCharacterMotorProvider</c> interface, not through
+        /// <see cref="UnityEngine.Object"/>, so C#'s null-conditional operator resolves to plain
+        /// reference equality — it never runs Unity's overloaded <c>==</c>, which is the only thing
+        /// that recognises a destroyed native object. A <c>RbxCharacterMotorProviderBehaviour</c>
+        /// whose scene unloaded while this lifetime scope survives it is invisible to <c>?.</c> for
+        /// exactly that reason, so the call reached into a destroyed MonoBehaviour and threw from
+        /// inside its own dead scene/controller references — with nothing here to catch it, character
+        /// creation failed outright instead of falling back.
+        /// <para>
+        /// WHY a destroyed or throwing provider falls back to CoreAI's own motor rather than
+        /// propagating: a Humanoid built with no motor gets <c>NullRbxCharacterMotor</c> — a
+        /// permanent no-op — which is strictly worse than CoreAI's default motor for every character
+        /// it would apply to. The host's provider is opt-in extra behaviour; losing it for one
+        /// character should cost that character CoreAI's own motor, not the ability to move at all.
+        /// </para>
+        /// <para>
+        /// WHY the failure still has to be visible: silently swallowing it would leave a host
+        /// debugging "why is my controller not driving this character" with no signal at all. It is
+        /// reported through the same <see cref="InstanceRegistry.Diagnostics"/> sink the character
+        /// pipeline already uses for its own composition faults — see <c>RbxPlayers.LogFailedAutoLoad</c>
+        /// for the identical pattern.
+        /// </para>
+        /// </remarks>
+        private static IRbxCharacterMotor TryCreateHostMotor(
+            Mods.Rbx.Binding.IRbxCharacterMotorProvider hostProvider,
+            RbxHumanoid humanoid,
+            GameObject body,
+            System.Func<float> worldGravity,
+            InstanceRegistry diagnosticsRegistry)
+        {
+            if (hostProvider == null)
+            {
+                return null;
+            }
+
+            if (hostProvider is UnityEngine.Object unityProvider && unityProvider == null)
+            {
+                diagnosticsRegistry?.Diagnostics?.Invoke(
+                    "[CoreAiMods] The registered IRbxCharacterMotorProvider for '" + humanoid.Name +
+                    "' is a destroyed Unity object (its scene likely unloaded while this lifetime " +
+                    "scope survived it) — falling back to CoreAI's own motor so the character can " +
+                    "still move.");
+                return null;
+            }
+
+            try
+            {
+                return hostProvider.TryCreate(humanoid, body, worldGravity);
+            }
+            catch (System.Exception exception)
+            {
+                diagnosticsRegistry?.Diagnostics?.Invoke(
+                    "[CoreAiMods] IRbxCharacterMotorProvider.TryCreate threw for '" + humanoid.Name +
+                    "' — falling back to CoreAI's own motor so the character can still move: " +
+                    exception);
+                return null;
+            }
         }
 
         private static LuaCsModStack CreateSessionStack(

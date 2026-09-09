@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Spatial;
@@ -146,6 +146,14 @@ namespace CoreAI.Mods.Rbx.Binding
                 _body.linearVelocity = stopped;
             }
         }
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// WHY the step length is ignored: this motor drives velocity rather than integrating a
+        /// position, so the physics step itself does the integrating. The parameter exists for
+        /// host motors that do integrate.
+        /// </remarks>
+        public void Step(double deltaSeconds) => Step();
 
         /// <summary>Advances the walk by one fixed step. Call from the fixed-step pump.</summary>
         public void Step()

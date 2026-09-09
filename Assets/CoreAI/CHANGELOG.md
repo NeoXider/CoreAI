@@ -1,5 +1,47 @@
 # Changelog
 
+## [7.38.0] - 2026-09-09
+
+### Added
+
+- **A game can now drive Rbx characters with its own character controller.** `Humanoid` movement
+  was always executed behind `IRbxCharacterMotor`, but the only way to supply a different one was to
+  reach into the bindings after composition had already run. A host now registers an
+  `IRbxCharacterMotorProvider`: every Humanoid that gets a body asks it first, and returning null
+  declines that character to CoreAI's own motor. The common case needs no composition code at all —
+  derive from `RbxCharacterMotorProviderBehaviour`, drop it in the scene, and hand it to the
+  lifetime scope's new inspector field, the same explicit serialized reference the world host
+  already uses. `Docs/CoreAIMods/CHARACTER_MOTOR_BRIDGE.md` is the guide, including the rule that
+  matters most: the Humanoid is the only thing allowed to say where a character goes, so a bridged
+  controller must stop reading input or the body is driven twice.
+
+### Fixed
+
+- **The fixed-step pump only advanced CoreAI's own motor.** It tested the concrete type, so a host
+  motor's `MoveTo` never progressed: the character stood still until the Humanoid's eight-second
+  arrival timeout. `IRbxCharacterMotor` gained `Step(deltaSeconds)` with a no-op default and the
+  pump now calls it on every motor.
+- **A stale motor was only ever rebuilt for CoreAI's own type.** Writing `Anchored` on a root part
+  destroys its body and clearing it builds a new one; the rebuild check recognised only the bundled
+  motor, so a host motor held a destroyed body forever. Availability is now part of the contract
+  (`IsAvailable`, default true) and asked through the interface.
+- **No motor was ever stopped or released.** Replacement, unregistration and disposal simply dropped
+  the reference. That is harmless for a motor holding a Rigidbody Unity destroys anyway, and a leak
+  for a host controller holding subscriptions, a rig, or a walk still in flight. `Release()` (no-op
+  default) is now called on every path that drops a motor, exactly once.
+- **A destroyed scene provider was still called.** The invocation used C#'s `?.`, which is reference
+  equality and not Unity's overloaded comparison, so a provider whose scene had unloaded was called
+  anyway and its throw killed character creation. Liveness is checked first, a throwing provider
+  falls back to CoreAI's own motor rather than leaving the character unable to move, and both
+  failures report through the registry diagnostics the character pipeline already uses.
+
+### Notes
+
+- Two contract limits are recorded in `TODO.md` rather than papered over, and they apply to CoreAI's
+  own motor exactly as much as to a bridged one: `Running(speed)` reports the configured
+  `WalkSpeed` once on entering the state rather than a measured speed, and `Jump` returns nothing,
+  so a controller that refuses a jump cannot say so.
+
 ## [7.37.0] - 2026-09-09
 
 ### Added

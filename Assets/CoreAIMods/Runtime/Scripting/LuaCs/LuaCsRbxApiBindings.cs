@@ -558,9 +558,20 @@ namespace CoreAI.Ai.LuaCs
             return part != null ? _partSink.GetLivePositionStuds(part.Id) : RbxVector3.Zero;
         }
 
+        // WHY this class releases every motor it hands to a Humanoid, not whoever supplied it:
+        // this is the one place a motor is built (the bundled factory closure or a registered
+        // IRbxCharacterMotorProvider.TryCreate, both reached only from here) and the one place
+        // every replacement, unregistration and disposal path already runs through — the pipeline
+        // that creates a motor is the pipeline that retires it.
         private void AttachCharacterMotor(RbxHumanoid humanoid)
         {
+            _characterMotors.TryGetValue(humanoid, out IRbxCharacterMotor previousMotor);
             humanoid.AttachHost(_scheduler, null, ResolveRootPart(humanoid));
+            // WHY released here, once the Humanoid no longer forwards to it, and before the
+            // factory builds a replacement: a host motor may hold a registration keyed by this
+            // character (a controller-registry slot, a rig instance) that a fresh TryCreate for
+            // the same body would collide with if the old one had not already let go.
+            previousMotor?.Release();
             IRbxCharacterMotor motor = _characterMotorFactory?.Invoke(humanoid);
             humanoid.AttachHost(_scheduler, motor, ResolveRootPart(humanoid));
             _characterMotors[humanoid] = motor;
@@ -678,7 +689,10 @@ namespace CoreAI.Ai.LuaCs
                 return _characterMotorFactory != null;
             }
 
-            return current is UnityRbxCharacterMotor unityMotor && !unityMotor.IsAvailable;
+            // WHY asked through the interface and not by concrete type: a host motor supplied
+            // through IRbxCharacterMotorProvider goes stale exactly the same way, and testing
+            // for CoreAI's own type left it holding a destroyed body with no rebuild.
+            return current is { IsAvailable: false };
         }
 
         /// <summary>
@@ -960,9 +974,10 @@ namespace CoreAI.Ai.LuaCs
             _registry.Unregistered -= OnInstanceUnregistered;
             _registry.Registered -= OnInstanceRegisteredForCharacter;
             _registry.SceneMembershipChanged -= OnCharacterSceneMembershipChanged;
-            foreach (RbxHumanoid humanoid in _characterMotors.Keys)
+            foreach (KeyValuePair<RbxHumanoid, IRbxCharacterMotor> pair in _characterMotors)
             {
-                humanoid.DetachHost();
+                pair.Key.DetachHost();
+                pair.Value?.Release();
             }
             _characterMotors.Clear();
             if (_debris != null)
@@ -1378,7 +1393,10 @@ namespace CoreAI.Ai.LuaCs
             if (record.Instance is RbxHumanoid humanoid)
             {
                 humanoid.DetachHost();
-                _characterMotors.Remove(humanoid);
+                if (_characterMotors.Remove(humanoid, out IRbxCharacterMotor motor))
+                {
+                    motor?.Release();
+                }
             }
         }
 
@@ -1619,10 +1637,11 @@ namespace CoreAI.Ai.LuaCs
                     continue;
                 }
 
-                if (pair.Value is UnityRbxCharacterMotor unityMotor)
-                {
-                    unityMotor.Step();
-                }
+                // WHY every motor is stepped and not only CoreAI's own: a host that supplies its
+                // own controller through IRbxCharacterMotorProvider gets the same fixed-step
+                // cadence. Testing the concrete type here left a host motor's MoveTo never
+                // advancing — the character stood still until the Humanoid's arrival timeout.
+                pair.Value?.Step(dt);
             }
         }
 

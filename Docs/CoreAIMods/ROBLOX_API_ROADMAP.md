@@ -155,8 +155,11 @@ Derived rules:
   Roblox proportions), and spawning game prefabs via our InsertService-analog keeps authored
   size. (3) The meter-authored character controller stays metric; the Humanoid adapter converts
   numbers (`WalkSpeed` studs/s → m/s, `JumpPower`, …); part mass/density scales by volume
-  (×0.28³). (4) Switching the scale config (0.28 ↔ 1:1) must require touching **zero assets** —
-  only the `RobloxSpace` constant (tested: §5.1.8).
+  (×0.28³). That adapter is now a supported extension point rather than a plan: a host registers an
+  `IRbxCharacterMotorProvider` and drives Rbx characters with its own controller, with CoreAI's own
+  motor answering for whatever the provider declines — see
+  [CHARACTER_MOTOR_BRIDGE.md](CHARACTER_MOTOR_BRIDGE.md). (4) Switching the scale config (0.28 ↔ 1:1)
+  must require touching **zero assets** — only the `RobloxSpace` constant (tested: §5.1.8).
 - **Host integration profile**: embedding CoreAI mods into an **existing meter-scale Unity
   game** is a first-class scenario. A per-project host profile (ScriptableObject: `RobloxSpace`
   scale [default 0.28], capability defaults, which host services/objects are bound, the

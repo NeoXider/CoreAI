@@ -164,6 +164,20 @@ Still open, recorded honestly:
       artefacts (from the optional, gitignored `Assets/Mirror` package being present locally) that
       must not be committed.
 
+### Character motor contract — known limits, not defects of the bridge seam
+
+Both apply equally to CoreAI's own motor, so they are `Humanoid` contract gaps rather than something
+the host-provider seam introduced. Recorded so a bridge author is not surprised by them.
+
+- [ ] `Running(speed)` reports the CONFIGURED `Humanoid.WalkSpeed`, not the character's measured
+      speed, and fires only on entering the Running state rather than whenever speed changes. A
+      controller accelerating from a standstill still reports the full walk speed, so animation and
+      footstep scripts driven off this signal get the wrong number. A motor has no way to report a
+      measured speed through `IRbxCharacterMotor` today.
+- [ ] `Jump` returns nothing, so a controller that refuses a jump — no clearance, mid-animation —
+      cannot say so, and the state machine enters Jumping anyway. Any airborne sample then reads as
+      Freefall, including while ascending.
+
 **Modularity proved by removal, not by argument**: with `Assets/Mirror` taken out of the project the
 tree compiles with **0 errors**, `CoreAI.Net.Mirror.dll` is not built at all, and EditMode runs
 **3588 / 0 failed** — exactly the Mirror-present total minus that package's own 19 gates. The Lua
