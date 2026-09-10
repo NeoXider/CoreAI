@@ -54,6 +54,35 @@
   that throws is only warned about, and the chat cap has to be sized against the fold window rather than
   against a single turn.
 
+## [7.40.1] - 2026-09-10
+
+### Fixed
+
+- **The full PlayMode run across every assembly no longer disappears whole.** It aborted with
+  "Playmode tests were aborted because the player was stopped" and wrote no results file at all, so
+  the task list carried "nobody knows whether this ever ran here". It did — except on machines with
+  Mirror installed locally. The package is optional and is not in the repository, so the scenes carry
+  no network identity; with Mirror present the shared character controller becomes a networked
+  component, Unity mints an identity on the fly with a zero id, and Mirror's handler responds by
+  leaving play mode. The player stops, and the runner loses the entire run rather than one test. The
+  demo-scene smoke test now hands such objects an id one order of execution before Mirror's handler.
+  That handler is found globally by the editor, so it is kept behind three locks: play mode only,
+  refusal during a player build, and armed for exactly one scene at a time. Domain reload is off in
+  this project, so statics outlive the session — hence it is also disarmed on leaving play mode.
+- **Tests that need graphics are marked skipped honestly.** Six failures the abort had been hiding
+  turned out to be environmental. Five need a loaded model and are deliberately left strict. The
+  sixth compared rendered pixels, and without a graphics device both samples return the same default
+  — that reads as "the edit never reached the shader" while proving nothing. An audit confirmed there
+  is no material-pipeline defect here.
+
+### Notes
+
+- Two rejected versions, so they are not tried again. Cancelling the stop from inside the test is not
+  possible: it was measured that Mirror's error arrives LATER than the test's own post-load code runs.
+  A list of problem scenes is the wrong shape — skipping one scene simply moves the stop to the next,
+  because the cause is the shared controller, not the scene.
+- Run on that tree: EditMode 4481 total / 4472 passed / 0 failed / 9 skipped; the full PlayMode run
+  across every assembly 149 / 135 / 4 / 10, with no abort. The remaining four need a live model.
 ## [7.40.0] - 2026-09-10
 
 ### Fixed

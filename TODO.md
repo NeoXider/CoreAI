@@ -305,10 +305,31 @@ Still open, recorded honestly:
       is stronger than the form that was failing. The same harness confirmed the `LongRunning`
       removal is not implicated: the notification loop waits on `SemaphoreSlim.WaitAsync` and
       async writes and holds no thread.
-- [ ] A full-assembly PlayMode sweep aborts in batch mode with "Playmode tests were aborted because
-      the player was stopped" after the built-in-roles harness. Earlier PlayMode evidence in this
-      repo comes from small filtered runs, so it is unproven whether a whole-assembly sweep ever
-      worked here.
+- [x] **The full-assembly PlayMode sweep — diagnosed and fixed 2026-09-10.** It was never a CoreAI
+      defect. `Assets/Mirror` is optional and gitignored, so a committed scene bakes no
+      `NetworkIdentity`; with Mirror installed the shared first-person controller in several demo
+      scenes becomes a `NetworkBehaviour` requiring one, Unity auto-creates it with sceneId 0 during
+      the load, and Mirror answers with an error and `EditorApplication.isPlaying = false`
+      (`Assets/Mirror/Editor/NetworkScenePostProcess.cs:77-78`). That ends the PLAYER, so the run
+      aborted and wrote NO results file — one optional local package cost the entire sweep, which is
+      why "did it ever work" looked unanswerable. It works; it cannot work on a Mirror machine
+      unrepaired. The demo smoke now normalises those auto-created identities at
+      `[PostProcessScene(0)]`, one order ahead of Mirror, gated on being in play mode, NOT building a
+      player, and armed for exactly one scene path at a time (domain reload is disabled in this
+      project, so the hook also disarms on `ExitingPlayMode` — static state outlives a play session).
+      Cancelling the stop from inside the test was tried and is impossible: measured, Mirror's error
+      is logged AFTER the test's post-load code runs. A named-scene skip list was tried and is the
+      wrong shape: skipping the Hub demo just moved the stop to MiniRpg.
+      **Evidence:** before — no XML, abort. After — `artifacts/testresults/pmall2.xml`, 149 total /
+      134 passed / 6 failed / 9 skipped, no abort. The 6 are environmental and were INVISIBLE while
+      the sweep aborted before reaching them: 5 need a loaded LLM (deliberately strict live tests),
+      1 needs a graphics device. All 6 now report honestly instead of hiding behind the abort.
+- [ ] **Neo's order-100 scene post-processor restores objects to active, not to their original
+      `activeSelf`.** Found by the 2026-09-10 audit of the Mirror repair and confirmed as a real
+      behaviour defect, not a test artefact: an object Mirror disables is re-enabled to `true` rather
+      than to whatever it was. On a Mirror machine a rig that shipped INACTIVE can therefore come up
+      active, which among other things could satisfy a scene smoke's camera assertion for the wrong
+      reason. No evidence it explains any current pass; recorded so it is not rediscovered.
 - [ ] `ProjectSettings/ProjectSettings.asset` and `CoreAI.slnx` carry Mirror-injected local
       artefacts (from the optional, gitignored `Assets/Mirror` package being present locally) that
       must not be committed.

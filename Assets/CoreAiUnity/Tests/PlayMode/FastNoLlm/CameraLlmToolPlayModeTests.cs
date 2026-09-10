@@ -12,9 +12,26 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class CameraLlmToolPlayModeTests
     {
+        /// <summary>Ends the test as ignored when the editor runs with no graphics device.</summary>
+        /// <remarks>
+        /// WHY: these capture the screen through a RenderTexture, and a batchmode run started with
+        /// -nographics has no device to create one on — "RenderTexture.Create failed" is then an
+        /// unhandled error and the test fails for the machine it ran on, not for the code. The failures
+        /// were invisible until 2026-09-10, because the whole PlayMode run used to abort before reaching
+        /// this fixture. A graphics-capable run still exercises everything below.
+        /// </remarks>
+        private static void IgnoreWithoutAGraphicsDevice()
+        {
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+            {
+                Assert.Ignore("No graphics device (batchmode -nographics): a RenderTexture cannot be created.");
+            }
+        }
+
         [Test]
         public void CaptureCameraJpeg_RendersValidJpegFrame()
         {
+            IgnoreWithoutAGraphicsDevice();
             GameObject camObj = new("VisionTestCam");
             Camera cam = camObj.AddComponent<Camera>();
             cam.clearFlags = CameraClearFlags.SolidColor;
@@ -39,6 +56,7 @@ namespace CoreAI.Tests.PlayMode
         [Test]
         public void CaptureCameraJpeg_ClampsResolutionAndDoesNotThrow()
         {
+            IgnoreWithoutAGraphicsDevice();
             GameObject camObj = new("VisionTestCamClamp");
             Camera cam = camObj.AddComponent<Camera>();
 
