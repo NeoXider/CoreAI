@@ -171,8 +171,14 @@ when shared memory/history is deliberate.
 - **Implemented:** on provider "context length exceeded" error, `AiOrchestrator.RunTaskAsync` and
   `AiOrchestrator.RunStreamingAsync` rebuild the request with a tighter `ContextRetryLevel` and retry up to
   `ICoreAISettings.MaxContextOverflowRetries` times (default 3, 0 disables). Each retry level applies a
-  `0.75^level` history-budget factor, dropping roughly 25% more of the oldest context per pass, then fails
-  normally after the bounded attempts. Streaming retries are limited to failures before any visible text chunk
+  `0.75^level` factor to the RECENT-TAIL budget, then fails normally after the bounded attempts.
+  **Corrected 7.40.2:** that factor alone was a no-op whenever the configured window was far larger than the
+  backend's real one (this project resolves "provider decides" to 16,777,216 tokens), because shrinking a
+  multimillion-token allowance still leaves a request no backend will take, and it never touched the summary
+  at all. A retry now bounds the request against the limit the BACKEND reported — llama.cpp returns `n_ctx`
+  in the refusal body, OpenAI states a maximum in prose — and remembers it per route so later turns are
+  budgeted correctly up front. With nothing reported, the retry shrinks the refused request's own measured
+  size instead of an allowance that was never the constraint. Streaming retries are limited to failures before any visible text chunk
   is emitted, so callers never receive mixed chunks from two attempts.
 
 ### 6. Persistent memory — incremental, versioned, boundary-consolidated

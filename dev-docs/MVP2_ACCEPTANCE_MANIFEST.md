@@ -10,7 +10,7 @@ a negative twin so that "did nothing" cannot pass.
 
 | Field | Value |
 |---|---|
-| CPU / RAM / GPU | **NOT MEASURED** — the Phase 3 reference measurement machine has not been frozen |
+| CPU / RAM / GPU | **NOT MEASURED** — the Phase 3 reference measurement machine has not been frozen, and no reference-machine measurement was ever taken (the one recorded machine below was the box a §8 research run happened to use, not a frozen gate machine) |
 | OS / Unity | Windows 11, Unity 6000.3.14f1 |
 | Power profile | high performance, on AC |
 | Runs | (a) editor batchmode, (b) Standalone Mono player |
@@ -286,5 +286,7 @@ production batch on that basis would repeat the invented-number mistake this doc
 prevent. Sequence: build the observability seam, re-measure on the 64-bit Standalone player, then set
 the batch and the frame gate together from that data.
 
-**Reference machine for the run above:** Windows 11 Pro build 26200, AMD engineering sample, 16 logical
+**Machine the run above happened to use (recorded, not frozen — the reference-machine
+measurement was never taken, so this box is not a gate):** Windows 11 Pro build 26200, AMD
+engineering sample, 16 logical
 processors, 39.3 GiB RAM, RTX 3050 Laptop, Unity 6000.3.14f1, Performance power plan.

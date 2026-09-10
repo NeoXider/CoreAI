@@ -45,6 +45,9 @@ namespace CoreAI.Ai
             // WHY: The persisted summary carries a machine-only fold marker as its final line; every
             // snapshot-facing path must see only the clean prose.
             string cleanStoredSummary = ConversationFoldMarker.Strip(storedSummary);
+            // WHY: The recent tail is bounded by its own budget whether or not a summary exists; the
+            // summary reserve is never lent to the tail, so an explicit recent-tail override keeps its
+            // meaning and the emitted request can never exceed tail budget plus summary reserve.
             int historyBudget = ConversationContextBudgetTokens.ResolveHistoryChatBudget(roleConfig, buildArgs);
             if (history.Length <= ResolveMessageLimit(roleConfig) &&
                 !ConversationContextBudgetTokens.ShouldPartitionForCompaction(
@@ -53,11 +56,14 @@ namespace CoreAI.Ai
                     historyBudget,
                     buildArgs))
             {
+                string storedOut = LimitSummaryToBudget(
+                    cleanStoredSummary, buildArgs, historyBudget, out int storedDropped);
                 return new ConversationContextSnapshot
                 {
-                    Summary = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs),
+                    Summary = storedOut,
                     RecentMessages = PruneIfEnabled(history, buildArgs),
-                    WasCompacted = false
+                    WasCompacted = false,
+                    SummaryTokensDropped = storedDropped
                 };
             }
 
@@ -66,12 +72,14 @@ namespace CoreAI.Ai
 
             if (splitExclusive <= 0)
             {
-                string summaryOut = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs);
+                string summaryOut = LimitSummaryToBudget(
+                    cleanStoredSummary, buildArgs, historyBudget, out int summaryDropped);
                 return new ConversationContextSnapshot
                 {
                     Summary = summaryOut,
                     RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs),
-                    WasCompacted = !string.IsNullOrWhiteSpace(summaryOut)
+                    WasCompacted = !string.IsNullOrWhiteSpace(summaryOut),
+                    SummaryTokensDropped = summaryDropped
                 };
             }
 
@@ -86,14 +94,17 @@ namespace CoreAI.Ai
                     LogTag.Llm);
             }
 
-            string compactedSummary = LimitSummaryIfNeeded(
+            string compactedSummary = LimitSummaryToBudget(
                 ConversationBulletSummary.Format(cleanStoredSummary, history, splitExclusive, foldStart),
-                buildArgs);
+                buildArgs,
+                historyBudget,
+                out int compactedDropped);
             ConversationContextSnapshot snapshot = new()
             {
                 Summary = compactedSummary,
                 RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs),
-                WasCompacted = true
+                WasCompacted = true,
+                SummaryTokensDropped = compactedDropped
             };
 
             if (foldStart < splitExclusive)
@@ -148,15 +159,49 @@ namespace CoreAI.Ai
             return (split, recent);
         }
 
-        private string LimitSummaryIfNeeded(string summary, ConversationContextBuildArgs buildArgs)
+        /// <summary>
+        /// Effective summary cap: the explicit <see cref="ConversationContextBuildArgs.MaxRolledSummaryTokens"/>
+        /// when set, never more than the request budget.
+        /// </summary>
+        internal static int ResolveSummaryTokenCap(ConversationContextBuildArgs buildArgs, int historyBudget)
         {
-            int cap = buildArgs?.MaxRolledSummaryTokens ?? 0;
-            if (cap <= 0)
+            int explicitCap = buildArgs?.MaxRolledSummaryTokens ?? 0;
+            int reserved = buildArgs?.SummaryTokenBudget ?? 0;
+            // WHY: An explicit cap of zero keeps its documented meaning (ICoreAISettings: "no cap") but is
+            // never "unbounded": a persisted summary that outgrew the window made every later turn fail
+            // against a healthy backend. The request budget applies regardless of the explicit cap, and
+            // without a reserved summary budget the recent-tail budget is the ceiling, so a raw caller can
+            // never emit more summary than it allows for live history.
+            int budgetCap = reserved > 0 ? reserved : Math.Max(1, historyBudget);
+            return explicitCap > 0 ? Math.Min(explicitCap, budgetCap) : budgetCap;
+        }
+
+        private string LimitSummaryToBudget(
+            string summary,
+            ConversationContextBuildArgs buildArgs,
+            int historyBudget,
+            out int droppedTokens)
+        {
+            droppedTokens = 0;
+            string text = summary ?? "";
+            if (string.IsNullOrWhiteSpace(text))
             {
-                return summary ?? "";
+                return text;
             }
 
-            return ConversationRolledSummaryLimiter.Apply(summary, _estimator, cap);
+            int cap = ResolveSummaryTokenCap(buildArgs, historyBudget);
+            string trimmed = text.Trim();
+            int before = _estimator.EstimateText(trimmed);
+            if (before <= cap)
+            {
+                return trimmed;
+            }
+
+            // WHY: The limiter fits the kept suffix alone and then prefixes an ellipsis, which can cost one
+            // more token; fitting the suffix one token short keeps the promise to the budget exact.
+            string limited = ConversationRolledSummaryLimiter.Apply(trimmed, _estimator, Math.Max(1, cap - 1));
+            droppedTokens = Math.Max(1, before - _estimator.EstimateText(limited));
+            return limited;
         }
 
         private static ChatMessage[] PruneIfEnabled(ChatMessage[] history, ConversationContextBuildArgs buildArgs)

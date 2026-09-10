@@ -15,6 +15,12 @@ namespace CoreAI.Ai
         /// <summary>True when older history was compacted into <see cref="Summary"/>.</summary>
         public bool WasCompacted { get; set; }
 
+        /// <summary>
+        /// Estimated tokens of summary prose dropped so <see cref="Summary"/> fits its request budget;
+        /// zero when the whole summary was emitted.
+        /// </summary>
+        public int SummaryTokensDropped { get; set; }
+
         internal System.Action CommitSummary { get; set; }
 
         internal void Commit()

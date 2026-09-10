@@ -1688,13 +1688,12 @@ namespace CoreAI.Tests.EditMode
                 "A mod forging the memory marker in its error text must still be quarantined on the error streak.");
         }
 
-        // NOTE: the runaway-handler quarantine case (a mod whose handler loops every call is quarantined after
-        // MaxErrorsBeforeQuarantine cuts) is covered transitively by LuaCs_ForgedMemoryMarker_IsChargedAndQuarantines
-        // (repeat-error → quarantine) and LuaCs_RunawayHandler_IsCutAndSurvivesOneTrip (a runaway IS cut and charged)
-        // plus the pre-existing LuaCs_OneOff_RunawayLoop_CutByInstructionBudget. A dedicated 8-cut variant is
-        // intentionally omitted: the guard cuts a TIGHT infinite loop only after ~8s (the instruction hook fires
-        // coarsely for a body-less/tight loop, so the sub-second step/time budgets are not enforced promptly),
-        // so 8 consecutive cuts take ~60s and freeze the interactive editor. See TODO(guard-tight-loop-latency).
+        // WHY no dedicated 8-cut variant: the runaway-handler quarantine case is covered transitively
+        // by LuaCs_ForgedMemoryMarker_IsChargedAndQuarantines (repeat-error → quarantine) and
+        // LuaCs_RunawayHandler_IsCutAndSurvivesOneTrip (a runaway IS cut and charged) plus the
+        // pre-existing LuaCs_OneOff_RunawayLoop_CutByInstructionBudget. The old "~8 s" cut figure is
+        // disproved: RbxHeartbeatBudgetKillEditModeTests measures the cut within the 500 ms
+        // DefaultResumeTimeoutMs wall-clock budget plus margin.
 
         // NOTE: there is intentionally NO "a mod that allocation-bombs every call is unloaded via a memory-trip
         // streak" test. The allocation guard reads GC.GetTotalMemory, which reports the COMMITTED heap high-water

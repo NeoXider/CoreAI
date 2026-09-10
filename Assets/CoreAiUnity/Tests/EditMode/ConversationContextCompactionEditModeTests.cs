@@ -783,6 +783,96 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("tail-only", snap.RecentMessages[^1].Content);
         }
 
+        /// <summary>
+        /// Audit 17 [1]: a ~272k-char persisted summary rode into every request untouched because the
+        /// summary was outside the history budget and the explicit cap was 0. The summary reserve must
+        /// bound it, deterministically (newest suffix kept), and the snapshot must say it happened.
+        /// </summary>
+        [Test]
+        public void DeterministicManager_StoredSummaryLargerThanWindow_IsBoundedBySummaryBudget()
+        {
+            InMemoryConversationSummaryStore store = new();
+            store.SaveSummary("roleC", "oldest line\n" + new string('s', 40_000) + "\nnewest line");
+            HeuristicTokenEstimator est = new();
+            DeterministicConversationContextManager mgr = new(store, est);
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "short question" },
+                new() { Role = "assistant", Content = "short answer" },
+                new() { Role = "user", Content = "follow-up" }
+            };
+            ConversationContextBuildArgs buildArgs = new()
+            {
+                HistoryTokenBudget = 300,
+                SummaryTokenBudget = 100,
+                MaxRolledSummaryTokens = 0
+            };
+
+            ConversationContextSnapshot snap = mgr.BuildSnapshot(
+                "roleC", history, new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 }, buildArgs);
+
+            Assert.LessOrEqual(est.EstimateText(snap.Summary), 100,
+                "The summary must fit its reserve even with no explicit cap.");
+            StringAssert.EndsWith("newest line", snap.Summary, "Bounding keeps the newest suffix.");
+            Assert.Greater(snap.SummaryTokensDropped, 9_000, "The caller must be told how much was dropped.");
+            Assert.AreEqual(3, snap.RecentMessages.Length, "Bounding the summary never touches the recent tail.");
+            int recentTokens = snap.RecentMessages.Sum(m => est.EstimateText(m.Content));
+            Assert.LessOrEqual(est.EstimateText(snap.Summary) + recentTokens,
+                buildArgs.HistoryTokenBudget + buildArgs.SummaryTokenBudget,
+                "Summary + recent tail must fit the whole conversation allowance.");
+        }
+
+        [Test]
+        public void DeterministicManager_ZeroSummaryCap_NeverMeansUnlimited()
+        {
+            // WHY: without a reserved summary budget the recent-tail budget is the ceiling; a raw caller
+            // with cap 0 must still never get more summary than it allows for live history.
+            InMemoryConversationSummaryStore store = new();
+            store.SaveSummary("roleD", new string('u', 4000));
+            HeuristicTokenEstimator est = new();
+            DeterministicConversationContextManager mgr = new(store, est);
+            ChatMessage[] history = { new() { Role = "user", Content = "tail" } };
+
+            ConversationContextSnapshot snap = mgr.BuildSnapshot(
+                "roleD", history, new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
+                new ConversationContextBuildArgs { HistoryTokenBudget = 50, MaxRolledSummaryTokens = 0 });
+
+            Assert.LessOrEqual(est.EstimateText(snap.Summary), 50);
+            Assert.Greater(snap.SummaryTokensDropped, 0);
+            Assert.AreEqual(50, DeterministicConversationContextManager.ResolveSummaryTokenCap(
+                new ConversationContextBuildArgs { HistoryTokenBudget = 50 }, 50));
+            Assert.AreEqual(20, DeterministicConversationContextManager.ResolveSummaryTokenCap(
+                new ConversationContextBuildArgs { HistoryTokenBudget = 50, SummaryTokenBudget = 20 }, 50));
+            Assert.AreEqual(8, DeterministicConversationContextManager.ResolveSummaryTokenCap(
+                new ConversationContextBuildArgs { SummaryTokenBudget = 20, MaxRolledSummaryTokens = 8 }, 50));
+        }
+
+        [Test]
+        public void DeterministicManager_SummaryReserve_NeverWidensTheRecentTail()
+        {
+            // WHY: the reserve is the summary's alone. Lending it to the tail while no summary exists
+            // would let a stored-nothing conversation exceed an explicit recent-tail budget (override),
+            // so the tail is bounded by HistoryTokenBudget in every case.
+            RecordingSummaryStore store = new();
+            DeterministicConversationContextManager mgr = new(store, new FlatTokenEstimator(10));
+            ChatMessage[] history = MakeHistory(7);
+            ConversationContextBuildArgs args = new()
+            {
+                HistoryTokenBudget = 50,
+                SummaryTokenBudget = 40,
+                CompactionTriggerRatio = 0.8f
+            };
+
+            ConversationContextSnapshot snap = mgr.BuildSnapshot(
+                "r", history, new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 }, args);
+
+            Assert.IsTrue(snap.WasCompacted, "70 tokens of history exceed the 50-token tail budget.");
+            Assert.LessOrEqual(snap.RecentMessages.Length, 5);
+            Assert.LessOrEqual(snap.RecentMessages.Length * 10, args.HistoryTokenBudget);
+            Assert.LessOrEqual(10, args.SummaryTokenBudget, "The flat-estimated summary fits its reserve.");
+            StringAssert.Contains("msg0", snap.Summary);
+        }
+
         [Test]
         public void FindFoldStart_WhitespaceMessage_NeverMatchesStoredBullets()
         {

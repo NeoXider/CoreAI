@@ -1419,9 +1419,17 @@ namespace CoreAI.Infrastructure.Llm
                 return LlmErrorCode.RateLimited;
             }
 
-            if (text.Contains("context_length_exceeded") || text.Contains("maximum context") ||
-                text.Contains("context window") || text.Contains("too many tokens") ||
-                text.Contains("token limit"))
+            // WHY: llama.cpp-family servers (llama-server, LM Studio, Jan) refuse an oversized prompt with
+            // HTTP 400, type "exceed_context_size_error" and the message "request (N tokens) exceeds the
+            // available context size (M tokens)". Neither is an OpenAI phrasing, so this 400 used to become
+            // a plain InvalidRequest and the orchestrator's overflow recovery never ran. Both the structured
+            // type and the human phrase are matched because proxies differ in which of the two survives.
+            if (text.Contains("context_length_exceeded") || text.Contains("exceed_context_size") ||
+                text.Contains("exceeds the available context size") ||
+                text.Contains("exceeds the context length") ||
+                text.Contains("maximum context") || text.Contains("context window") ||
+                text.Contains("too many tokens") || text.Contains("token limit") ||
+                text.Contains("prompt is too long") || text.Contains("input is too long"))
             {
                 return LlmErrorCode.ContextLengthExceeded;
             }

@@ -16,7 +16,15 @@ namespace CoreAI.Ai
         public bool UseLlmContextCompaction { get; set; }
 
         /// <summary>
-        /// When greater than zero, caps rolled summary text to roughly this many estimated tokens before persistence.
+        /// Estimated tokens reserved for the rolling summary in the outgoing request, on top of
+        /// <see cref="HistoryTokenBudget"/> (which bounds the recent tail only). Zero when the caller reserved
+        /// nothing; the manager then bounds the summary by <see cref="HistoryTokenBudget"/> instead.
+        /// </summary>
+        public int SummaryTokenBudget { get; set; }
+
+        /// <summary>
+        /// When greater than zero, an explicit cap on rolled summary text (estimated tokens) before persistence.
+        /// Zero means "no explicit cap"; the request budget (<see cref="SummaryTokenBudget"/>) still bounds it.
         /// </summary>
         public int MaxRolledSummaryTokens { get; set; }
 

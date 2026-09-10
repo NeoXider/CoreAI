@@ -1942,9 +1942,13 @@ namespace CoreAI.Tests.EditMode
             TestMemoryStore memory = new();
             AgentMemoryPolicy policy = new();
 
+            // WHY: Ten 1000-char turns under a 4096-token window: the recent tail keeps the newest five,
+            // the rest fold, and the summary reserve derived from the window holds the whole retelling.
+            // The former 60-token window floored the allowance at 32 tokens and only ever passed because
+            // the summary travelled outside every budget (audit 17 [1]).
             for (int i = 0; i < 10; i++)
             {
-                string content = $"old-context-{i}-".PadRight(90, 'x');
+                string content = $"old-context-{i}-".PadRight(1000, 'x');
                 memory.FakeHistory.Add(new Ai.ChatMessage
                 {
                     Role = i % 2 == 0 ? "user" : "assistant",
@@ -1952,7 +1956,7 @@ namespace CoreAI.Tests.EditMode
                 });
             }
 
-            policy.ConfigureChatHistory("test_role", true, 60, false, 50);
+            policy.ConfigureChatHistory("test_role", true, 4096, false, 50);
 
             TestSettings settings = new();
             AiOrchestrator orchestrator = new(
@@ -1966,6 +1970,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(llm.LastRequest);
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
             Assert.Less(llm.LastRequest.ChatHistory.Count, memory.FakeHistory.Count);
+            Assert.LessOrEqual(EstimateRequestTokens(llm.LastRequest), 4096,
+                "Summary + tail + fixed prompt must fit the window the role was configured with.");
             Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
             Microsoft.Extensions.AI.ChatMessage summary = llm.LastRequest.ChatHistory.Single(m =>
                 m.Role == ChatRole.User && (m.Text ?? "").Contains("## Conversation Summary"));
@@ -2444,10 +2450,265 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(recorder.LastBuildArgs);
             Assert.AreEqual(0, recorder.LastBuildArgs.MaxRolledSummaryTokens,
                 "Explicit 0 must reach the context manager as 0 (= unlimited), not the 2048 default.");
+            Assert.Greater(recorder.LastBuildArgs.SummaryTokenBudget, 0,
+                "Unlimited by cap is still bounded by the request: the summary reserve must travel alongside.");
+            Assert.LessOrEqual(
+                recorder.LastBuildArgs.SummaryTokenBudget + recorder.LastBuildArgs.HistoryTokenBudget,
+                recorder.LastBuildArgs.SourceBudget.Value.HistoryTokenBudget,
+                "Summary reserve + recent tail never exceed the policy's conversation allowance.");
 
             settings.ConversationRolledSummaryMaxTokens = 512;
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "hi" });
             Assert.AreEqual(512, recorder.LastBuildArgs.MaxRolledSummaryTokens);
+            Assert.LessOrEqual(recorder.LastBuildArgs.SummaryTokenBudget, 512);
+        }
+
+        private const string LlamaCppOverflowEvidence =
+            "HTTP error 400: HTTP 400 | Body: {\"error\":\"Engine protocol predict request returned 400: " +
+            "{\\\"error\\\":{\\\"code\\\":400,\\\"message\\\":\\\"request (61849 tokens) exceeds the available " +
+            "context size (4096 tokens), try increasing it\\\",\\\"type\\\":\\\"exceed_context_size_error\\\"," +
+            "\\\"n_prompt_tokens\\\":61849,\\\"n_ctx\\\":4096}}\"}";
+
+        private static int EstimateRequestTokens(LlmCompletionRequest request)
+        {
+            HeuristicTokenEstimator estimator = new();
+            int total = estimator.EstimateText(request.SystemPrompt ?? "") +
+                        estimator.EstimateText(request.UserPayload ?? "");
+            if (request.ChatHistory != null)
+            {
+                foreach (Microsoft.Extensions.AI.ChatMessage message in request.ChatHistory)
+                {
+                    total += estimator.EstimateText(message.Text ?? "");
+                }
+            }
+
+            return total;
+        }
+
+        private static AgentMemoryPolicy BuildSlimHistoryPolicy(string roleId, int contextTokens)
+        {
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory(roleId, true, contextTokens, false, 50);
+            policy.DisableMemoryTool(roleId);
+            policy.SetToolsForRole(roleId, Array.Empty<ILlmTool>());
+            return policy;
+        }
+
+        private static InMemoryConversationSummaryStore SeedOversizedSummary(string roleId)
+        {
+            InMemoryConversationSummaryStore store = new();
+            // WHY: ~50k estimated tokens, the shape of the ~272k-char summary from audit 17 [1].
+            store.SaveSummary(roleId, "oldest recap line\n" + new string('h', 200_000) + "\nnewest recap line");
+            return store;
+        }
+
+        [Test]
+        public void TryParseReportedContextTokens_ReadsTheLimitFromKnownRefusalShapes()
+        {
+            Assert.AreEqual(4096, AiOrchestrator.TryParseReportedContextTokens(LlamaCppOverflowEvidence),
+                "Escaped llama.cpp body inside an outer JSON string.");
+            Assert.AreEqual(40192, AiOrchestrator.TryParseReportedContextTokens(
+                "", "{\"error\":{\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":61849,\"n_ctx\":40192}}"));
+            Assert.AreEqual(40192, AiOrchestrator.TryParseReportedContextTokens(
+                "request (61849 tokens) exceeds the available context size (40192 tokens), try increasing it"));
+            Assert.AreEqual(8192, AiOrchestrator.TryParseReportedContextTokens(
+                "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens."));
+            Assert.AreEqual(0, AiOrchestrator.TryParseReportedContextTokens("context too long", null));
+        }
+
+        [Test]
+        public void BoundWindowForOverflowRetry_UsesTheReportedLimit_ThenTheRefusedRequestSize()
+        {
+            const int unlimited = CoreAISettings.UnlimitedContextWindowTokens;
+            Assert.AreEqual(4096, AiOrchestrator.BoundWindowForOverflowRetry(unlimited, 4096, unlimited, 61_849),
+                "A freshly reported limit wins outright over the configured window.");
+            Assert.AreEqual(3072, AiOrchestrator.BoundWindowForOverflowRetry(unlimited, 4096, 4096, 4096),
+                "A rebuild that already used the reported limit and still overflowed shrinks by its own size.");
+            Assert.AreEqual(46_386, AiOrchestrator.BoundWindowForOverflowRetry(unlimited, 0, unlimited, 61_849),
+                "No reported limit: the refused request's estimated size, shrunk by a quarter, is the ceiling.");
+            Assert.AreEqual(2048, AiOrchestrator.BoundWindowForOverflowRetry(2048, 40_192, unlimited, 61_849),
+                "A configured window smaller than a freshly reported limit is kept.");
+            Assert.AreEqual(375, AiOrchestrator.BoundWindowForOverflowRetry(2048, 40_192, 2048, 500),
+                "A request built under the reported limit that still overflowed shrinks by its own size.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_StoredSummaryLargerThanWindow_IsBoundedBeforeTheFirstSend()
+        {
+            // Audit 17 [1]: an ordinary short message must never leave with a summary the window cannot hold.
+            const int window = 4096;
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = "earlier question" });
+            memory.FakeHistory.Add(new Ai.ChatMessage { Role = "assistant", Content = "earlier answer" });
+            AgentMemoryPolicy policy = BuildSlimHistoryPolicy("test_role", window);
+            TestSettings settings = new() { ConversationRolledSummaryMaxTokens = 0 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(SeedOversizedSummary("test_role")));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "test_role",
+                Hint = "Give a short response about streaming chat."
+            });
+
+            Assert.IsNotNull(llm.LastRequest?.ChatHistory);
+            Microsoft.Extensions.AI.ChatMessage summary = llm.LastRequest.ChatHistory.Single(m =>
+                (m.Text ?? "").Contains(ConversationSummaryPromptProjection.Header));
+            StringAssert.Contains("newest recap line", summary.Text, "Bounding keeps the newest suffix.");
+            StringAssert.DoesNotContain("oldest recap line", summary.Text, "precondition: the summary was cut.");
+            Assert.LessOrEqual(EstimateRequestTokens(llm.LastRequest), window,
+                "System prompt + summary + history must fit the window before the request leaves.");
+            Assert.IsTrue(llm.LastRequest.ChatHistory.Any(m => (m.Text ?? "").Contains("earlier answer")),
+                "The recent tail keeps its own budget.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_OverflowWithReportedLimit_RetryFitsTheReportedWindow_AndLaterTurnsRemember()
+        {
+            // Audit 17 [1]/[3]: configured window "unlimited", backend n_ctx 4096. The retry must be built
+            // against the limit the backend just reported, and the next turn must not pay the refusal again.
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    ErrorCode = LlmErrorCode.ContextLengthExceeded,
+                    Error = LlamaCppOverflowEvidence,
+                    HttpStatus = 400
+                },
+                new LlmCompletionResult { Ok = true, Content = "ok" },
+                new LlmCompletionResult { Ok = true, Content = "ok again" });
+            TestMemoryStore memory = new();
+            memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = "earlier question" });
+            AgentMemoryPolicy policy = BuildSlimHistoryPolicy("test_role", CoreAISettings.UnlimitedContextWindowTokens);
+            TestSettings settings = new() { ConversationRolledSummaryMaxTokens = 0, MaxContextOverflowRetries = 3 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(SeedOversizedSummary("test_role")));
+
+            string first = await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "hi" });
+
+            Assert.AreEqual("ok", first);
+            Assert.AreEqual(2, llm.Requests.Count);
+            Assert.Greater(EstimateRequestTokens(llm.Requests[0]), 4096,
+                "precondition: the first pass trusted the unlimited window and overflowed.");
+            Assert.LessOrEqual(EstimateRequestTokens(llm.Requests[1]), 4096,
+                "The retry must fit the n_ctx the backend reported, not a 0.75-shrunk multimillion allowance.");
+            Assert.LessOrEqual(llm.Requests[1].ContextWindowTokens, 4096);
+
+            string second = await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "again" });
+
+            Assert.AreEqual("ok again", second);
+            Assert.AreEqual(3, llm.Requests.Count, "The learned limit spares the next turn a refused request.");
+            Assert.LessOrEqual(EstimateRequestTokens(llm.Requests[2]), 4096);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_OverflowWithoutReportedLimit_EachRetryShrinksTheRealTotal()
+        {
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult { Ok = false, ErrorCode = LlmErrorCode.ContextLengthExceeded, Error = "context too long" },
+                new LlmCompletionResult { Ok = false, ErrorCode = LlmErrorCode.ContextLengthExceeded, Error = "still too long" },
+                new LlmCompletionResult { Ok = true, Content = "ok" });
+            TestMemoryStore memory = new();
+            memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = "earlier question" });
+            AgentMemoryPolicy policy = BuildSlimHistoryPolicy("test_role", CoreAISettings.UnlimitedContextWindowTokens);
+            TestSettings settings = new() { ConversationRolledSummaryMaxTokens = 0, MaxContextOverflowRetries = 3 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(SeedOversizedSummary("test_role")));
+
+            string content = await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "hi" });
+
+            Assert.AreEqual("ok", content);
+            Assert.AreEqual(3, llm.Requests.Count);
+            int first = EstimateRequestTokens(llm.Requests[0]);
+            int second = EstimateRequestTokens(llm.Requests[1]);
+            int third = EstimateRequestTokens(llm.Requests[2]);
+            Assert.Less(second, first * 0.8,
+                "With nothing reported, the retry shrinks the request that actually overflowed - not a no-op on a huge allowance.");
+            Assert.Less(third, second * 0.8, "Every further retry keeps shrinking the real total.");
+        }
+
+        private sealed class StreamingOverflowThenOkLlm : ILlmClient
+        {
+            private readonly string _overflowError;
+
+            public StreamingOverflowThenOkLlm(string overflowError)
+            {
+                _overflowError = overflowError;
+            }
+
+            public List<LlmCompletionRequest> Requests { get; } = new();
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                Assert.Fail("Streaming overflow test must use CompleteStreamingAsync.");
+                return Task.FromResult<LlmCompletionResult>(null);
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                Requests.Add(request);
+                await Task.Yield();
+                if (Requests.Count == 1)
+                {
+                    yield return new LlmStreamChunk
+                    {
+                        IsDone = true,
+                        Error = _overflowError,
+                        ErrorCode = LlmErrorCode.ContextLengthExceeded,
+                        HttpStatus = 400
+                    };
+                    yield break;
+                }
+
+                yield return new LlmStreamChunk { Text = "streamed ok" };
+                yield return new LlmStreamChunk { IsDone = true };
+            }
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_OverflowWithReportedLimit_RetryFitsTheReportedWindow()
+        {
+            // The failing PlayMode scenario is a streaming turn; the chunk error carries the provider body.
+            StreamingOverflowThenOkLlm llm = new(LlamaCppOverflowEvidence);
+            TestMemoryStore memory = new();
+            memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = "earlier question" });
+            AgentMemoryPolicy policy = BuildSlimHistoryPolicy("test_role", CoreAISettings.UnlimitedContextWindowTokens);
+            TestSettings settings = new() { ConversationRolledSummaryMaxTokens = 0, MaxContextOverflowRetries = 3 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(SeedOversizedSummary("test_role")));
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "test_role", Hint = "Give a short response about streaming chat." }))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(2, llm.Requests.Count);
+            Assert.Greater(EstimateRequestTokens(llm.Requests[0]), 4096, "precondition: the first pass overflowed.");
+            Assert.LessOrEqual(EstimateRequestTokens(llm.Requests[1]), 4096,
+                "The streaming retry must fit the reported n_ctx.");
+            Assert.AreEqual("streamed ok", string.Concat(chunks.Select(c => c.Text ?? "")));
+            Assert.IsFalse(chunks.Any(c => c.ErrorCode == LlmErrorCode.ContextLengthExceeded),
+                "The refused first pass must not leak to the caller.");
         }
 
         [Test]
@@ -2503,9 +2764,11 @@ namespace CoreAI.Tests.EditMode
             TestMemoryStore memory = new();
             AgentMemoryPolicy policy = new();
 
+            // WHY: Same shape as RunTaskAsync_CompactsOldHistory_IntoTailSummary: a real-size window whose
+            // summary reserve holds the retelling of the five folded turns.
             for (int i = 0; i < 10; i++)
             {
-                string content = $"old-context-{i}-".PadRight(90, 'x');
+                string content = $"old-context-{i}-".PadRight(1000, 'x');
                 memory.FakeHistory.Add(new Ai.ChatMessage
                 {
                     Role = i % 2 == 0 ? "user" : "assistant",
@@ -2513,7 +2776,7 @@ namespace CoreAI.Tests.EditMode
                 });
             }
 
-            policy.ConfigureChatHistory("test_role", true, 60, false, 50);
+            policy.ConfigureChatHistory("test_role", true, 4096, false, 50);
 
             TestSettings settings = new();
             AiOrchestrator orchestrator = new(
@@ -2607,7 +2870,10 @@ namespace CoreAI.Tests.EditMode
                 });
             }
 
-            policy.ConfigureChatHistory("test_role", true, 60, false, 50);
+            // WHY: The override pins the recent tail to one turn; the window only has to be real enough
+            // for the summary reserve to hold the nine folded bullets (~230 tokens). The former 60-token
+            // window floored the allowance at 32 tokens and only passed while the summary was unbounded.
+            policy.ConfigureChatHistory("test_role", true, 4096, false, 50);
 
             TestSettings settings = new() { ConversationHistoryRecentTokenBudgetOverride = 32 };
             AiOrchestrator orchestrator = new(

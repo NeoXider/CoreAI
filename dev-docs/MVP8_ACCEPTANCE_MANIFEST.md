@@ -8,18 +8,20 @@ a number that moves with whatever the test source happens to say today; the clos
 Frozen 2026-09-06 against `main`. Every id below must exist on disk, be discovered by the catalog,
 and execute to its recorded classification — the directory count and the catalog count are
 cross-checked by `FrozenTierBCatalog_MatchesItsFilesAndIds` and
-`FrozenCatalog_HasTwentyUniqueFixturesAndCompleteClassificationMetadata`, so adding a file without
-adding it here fails the run.
+`FrozenCatalog_HasTwentyUniqueFixturesAndCompleteClassificationMetadata`, and the id list in
+this file is parsed back out of the markdown and compared to the catalog by
+`FrozenManifest_ListsExactlyTheCatalogIds`, so adding a file without adding it here — or
+editing either side without the other — fails the run.
 
 ## Tier A — 20 fixtures (MVP1/MVP2 surface)
 
 | id | id | id | id |
 |---|---|---|---|
 | `TAC-001-instance-parent-last` | `TAC-006-signal-wait` | `TAC-011-cframe-math` | `TAC-016-generic-for-descendants` |
-| `TAC-002-part-properties` | `TAC-007-task-scheduling` | `TAC-012-color` | `TAC-017-waitforchild-yield` |
+| `TAC-002-part-properties` | `TAC-007-task-scheduling` | `TAC-012-color3-math` | `TAC-017-waitforchild-yield` |
 | `TAC-003-attributes-change-signal` | `TAC-008-runservice-heartbeat-loop` | `TAC-013-getservice-identity` | `TAC-018-contextaction-bind` |
 | `TAC-004-signal-connect-disconnect` | `TAC-009-userinput-began` | `TAC-014-destroy-pcall-cleanup` | `TAC-019-tween-create` |
-| `TAC-005-signal-once` | `TAC-010-vector` | `TAC-015-script-parent-property-signal` | `TAC-020-players-localplayer` |
+| `TAC-005-signal-once` | `TAC-010-vector3-math` | `TAC-015-script-parent-property-signal` | `TAC-020-players-localplayer` |
 
 Tier-A threshold: **≥ 30 %** unmodified (`TierACorpusEditModeTests.MinimumUnmodifiedPercent`).
 Recorded result: **18 / 20 = 90 %** unmodified.

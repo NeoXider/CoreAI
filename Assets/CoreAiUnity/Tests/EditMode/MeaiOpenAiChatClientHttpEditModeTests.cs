@@ -643,6 +643,35 @@ namespace CoreAI.Tests.EditMode
                 MeaiOpenAiChatClient.MapHttpStatusForTests(401, "", ""));
         }
 
+        /// <summary>
+        /// Audit 17 [1]/[3]: the exact HTTP 400 body logged in artifacts/testresults/pmall3.log (LM Studio
+        /// re-escaping llama.cpp's refusal) mapped to InvalidRequest, so overflow recovery never ran.
+        /// </summary>
+        [Test]
+        public void MapHttpStatus_LlamaCppContextOverflow_IsContextLengthExceeded()
+        {
+            const string evidenceBody =
+                "{\"error\":\"Engine protocol predict request returned 400: {\\\"error\\\":{\\\"code\\\":400," +
+                "\\\"message\\\":\\\"request (61849 tokens) exceeds the available context size (40192 tokens), try increasing it\\\"," +
+                "\\\"type\\\":\\\"exceed_context_size_error\\\",\\\"n_prompt_tokens\\\":61849,\\\"n_ctx\\\":40192}}\"}";
+
+            Assert.AreEqual(LlmErrorCode.ContextLengthExceeded,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(400, evidenceBody, ""),
+                "The logged evidence body must classify as overflow.");
+            Assert.AreEqual(LlmErrorCode.ContextLengthExceeded,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(400,
+                    "{\"error\":{\"type\":\"exceed_context_size_error\"}}", ""),
+                "The structured type alone is enough.");
+            Assert.AreEqual(LlmErrorCode.ContextLengthExceeded,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(400, "",
+                    "request (61849 tokens) exceeds the available context size (40192 tokens)"),
+                "The human phrase alone is enough.");
+            Assert.AreEqual(LlmErrorCode.InvalidRequest,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(400,
+                    "{\"error\":{\"message\":\"unknown parameter: foo\"}}", ""),
+                "An unrelated 400 stays InvalidRequest.");
+        }
+
         private sealed class TestHttpSettings : IOpenAiHttpSettings
         {
             public static readonly TestHttpSettings Instance = new();

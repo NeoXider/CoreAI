@@ -191,6 +191,178 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0, inner.Calls, "A required unavailable tool is a local configuration failure.");
         }
 
+        /// <summary>
+        /// The defect this guards, seen live: an HTTP 200 stream of 126 deltas / 430 characters, all of
+        /// them fenced Lua TEXT describing what the model would run and not one tool call, on a request
+        /// that demanded execute_lua - and the turn was reported as a clean success while the game did
+        /// nothing. The non-streaming path already corrects and then refuses; streaming must match.
+        /// </summary>
+        [TestCase(LlmToolChoiceMode.RequireSpecific)]
+        [TestCase(LlmToolChoiceMode.RequireAny)]
+        public async Task CompleteStreamingAsync_RequiredTool_ProseWithoutCall_FailsAfterBoundedCorrections(
+            LlmToolChoiceMode mode)
+        {
+            CapturingChatClient inner = new()
+            {
+                ResponseText = "Here is what I would run:\n```lua\nworkspace.Part.Color = Color3.new(1, 0, 0)\n```"
+            };
+            StubCoreSettings settings = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings,
+                supportsNativeToolCalling: true);
+            LlmCompletionRequest request = RequireExecuteLuaRequest();
+            request.ForcedToolMode = mode;
+            request.RequiredToolName = mode == LlmToolChoiceMode.RequireSpecific ? "execute_lua" : "";
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+            {
+                chunks.Add(chunk);
+            }
+
+            LlmStreamChunk last = chunks.Last();
+            Assert.IsTrue(last.IsDone);
+            Assert.IsFalse(string.IsNullOrEmpty(last.Error),
+                "A required-tool turn that emitted zero tool calls must not complete as success.");
+            Assert.AreEqual(LlmErrorCode.EmptyResponse, last.ErrorCode);
+            StringAssert.Contains("Required tool call missing", last.Error);
+            Assert.IsTrue(chunks.All(chunk => chunk.ExecutedToolCalls == null || chunk.ExecutedToolCalls.Count == 0),
+                "Fenced code in prose is text, never a call: nothing may execute.");
+            Assert.AreEqual(1 + settings.MaxToolCallRetries, inner.Calls,
+                "One forced roundtrip plus MaxToolCallRetries corrections, then the turn fails.");
+            Assert.IsInstanceOf<MEAI.RequiredChatToolMode>(inner.LastOptions?.ToolMode,
+                "Corrections keep the forced mode; Auto would let the requirement evaporate.");
+            Assert.IsTrue(inner.LastMessages.Any(message => message.Role == MEAI.ChatRole.User &&
+                                                            (message.Text?.Contains("Tool-call contract violation") ?? false)),
+                "Each correction carries the same contract-violation instruction as the non-streaming path.");
+            Assert.IsTrue(inner.LastMessages.Any(message => message.Role == MEAI.ChatRole.Assistant &&
+                                                            (message.Text?.Contains("```lua") ?? false)),
+                "The violating prose goes back as history so the correction reads in context.");
+            if (mode == LlmToolChoiceMode.RequireSpecific)
+            {
+                Assert.AreEqual(1, inner.LastOptions.Tools.Count,
+                    "RequireSpecific stays narrowed to the forced tool across corrections.");
+                Assert.AreEqual("execute_lua", inner.LastOptions.Tools[0].Name);
+            }
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_RequiredTool_CallArrivesAfterCorrection_CompletesWithTheCall()
+        {
+            SequencedStreamingChatClient inner = new(
+                new[] { TextUpdate("Let me think about the colour first.") },
+                new[] { NativeCallUpdate("execute_lua", "call_1") },
+                new[] { TextUpdate("Done.") });
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(),
+                supportsNativeToolCalling: true);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(RequireExecuteLuaRequest()))
+            {
+                chunks.Add(chunk);
+            }
+
+            LlmStreamChunk last = chunks.Last();
+            Assert.IsTrue(last.IsDone);
+            Assert.IsTrue(string.IsNullOrEmpty(last.Error), $"Unexpected error: {last.Error}");
+            Assert.IsTrue(last.ExecutedToolCalls.Any(trace => trace.Name == "execute_lua" && trace.Success),
+                "The correction must lead to the real call, and that call is why the turn succeeds.");
+            Assert.AreEqual(3, inner.Calls);
+            Assert.IsInstanceOf<MEAI.RequiredChatToolMode>(inner.ObservedOptions[1].ToolMode,
+                "The correction roundtrip stays forced.");
+            Assert.AreEqual(1, inner.ObservedOptions[1].Tools.Count);
+            MEAI.ChatOptions afterCall = inner.ObservedOptions[2];
+            Assert.IsTrue(afterCall.ToolMode == null || afterCall.ToolMode is MEAI.AutoChatToolMode,
+                "After the required call the model may answer or use another tool.");
+            Assert.AreEqual(2, afterCall.Tools.Count, "The full tool set returns once the requirement is met.");
+            Assert.That(string.Concat(chunks.Select(chunk => chunk.Text)), Does.Contain("Done."));
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_RequiredTool_CallOnFirstRoundtrip_CompletesNormally()
+        {
+            SequencedStreamingChatClient inner = new(
+                new[] { TextUpdate("Painting it now."), NativeCallUpdate("execute_lua", "call_1") },
+                new[] { TextUpdate("Done.") });
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(),
+                supportsNativeToolCalling: true);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(RequireExecuteLuaRequest()))
+            {
+                chunks.Add(chunk);
+            }
+
+            LlmStreamChunk last = chunks.Last();
+            Assert.IsTrue(last.IsDone);
+            Assert.IsTrue(string.IsNullOrEmpty(last.Error), $"Unexpected error: {last.Error}");
+            Assert.IsTrue(last.ExecutedToolCalls.Any(trace => trace.Name == "execute_lua" && trace.Success));
+            Assert.AreEqual(2, inner.Calls, "A satisfied requirement never triggers a correction roundtrip.");
+            Assert.IsInstanceOf<MEAI.RequiredChatToolMode>(inner.ObservedOptions[0].ToolMode);
+            Assert.AreEqual(1, inner.ObservedOptions[0].Tools.Count);
+            MEAI.ChatOptions afterCall = inner.ObservedOptions[1];
+            Assert.IsTrue(afterCall.ToolMode == null || afterCall.ToolMode is MEAI.AutoChatToolMode);
+            Assert.AreEqual(2, afterCall.Tools.Count);
+            Assert.IsFalse(inner.ObservedMessages[1].Any(message =>
+                    message.Text?.Contains("Tool-call contract violation") ?? false),
+                "The happy path must never see the correction.");
+            string text = string.Concat(chunks.Select(chunk => chunk.Text));
+            Assert.That(text, Does.Contain("Painting it now."));
+            Assert.That(text, Does.Contain("Done."));
+        }
+
+        /// <summary>
+        /// Second exit of the same shape: at the roundtrip cap the loop runs a tools-disabled summary
+        /// turn whose prose ends the stream CLEAN, so a tight cap could still turn a required-tool turn
+        /// with zero calls into a success. The cap path must fail closed without that extra roundtrip.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_RequiredTool_RoundtripCapBeforeCall_FailsWithoutSummaryTurn()
+        {
+            CapturingChatClient inner = new() { ResponseText = "I would paint it red." };
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(),
+                supportsNativeToolCalling: true);
+            LlmCompletionRequest request = RequireExecuteLuaRequest();
+            request.MaxToolCallRoundtrips = 1;
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+            {
+                chunks.Add(chunk);
+            }
+
+            LlmStreamChunk last = chunks.Last();
+            Assert.IsTrue(last.IsDone);
+            Assert.IsFalse(string.IsNullOrEmpty(last.Error), "A capped required-tool turn without the call is a failure.");
+            StringAssert.Contains("Required tool call missing", last.Error);
+            Assert.AreEqual(LlmErrorCode.EmptyResponse, last.ErrorCode);
+            Assert.AreEqual(1, inner.Calls,
+                "No tools-disabled summary roundtrip may turn the missing call into a clean stop.");
+        }
+
+        private static LlmCompletionRequest RequireExecuteLuaRequest()
+        {
+            return new LlmCompletionRequest
+            {
+                AgentRoleId = "Builder",
+                UserPayload = "Paint the part red",
+                Tools = new List<ILlmTool> { new ExplicitFunctionTool("execute_lua"), new ExplicitFunctionTool("memory") },
+                ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                RequiredToolName = "execute_lua"
+            };
+        }
+
+        private static MEAI.ChatResponseUpdate TextUpdate(string text)
+        {
+            return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, text);
+        }
+
+        private static MEAI.ChatResponseUpdate NativeCallUpdate(string toolName, string callId)
+        {
+            MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, string.Empty);
+            update.Contents.Add(new MEAI.FunctionCallContent(callId, toolName, new Dictionary<string, object>()));
+            return update;
+        }
+
         [Test]
         public void CreateHttp_WithOpenAiSettings_ShouldNotThrow()
         {
@@ -1500,6 +1672,61 @@ namespace CoreAI.Tests.EditMode
                     "unsolicited", FunctionCallName, new Dictionary<string, object>()));
                 yield return update;
                 await Task.Yield();
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        /// <summary>
+        /// Streams one scripted update list per roundtrip, in order, and records the options and
+        /// messages every roundtrip received; running out of scripts is a test failure, not a stop.
+        /// </summary>
+        private sealed class SequencedStreamingChatClient : MEAI.IChatClient
+        {
+            private readonly Queue<MEAI.ChatResponseUpdate[]> _scripts;
+
+            public SequencedStreamingChatClient(params MEAI.ChatResponseUpdate[][] scripts)
+            {
+                _scripts = new Queue<MEAI.ChatResponseUpdate[]>(scripts ?? Array.Empty<MEAI.ChatResponseUpdate[]>());
+            }
+
+            public int Calls { get; private set; }
+            public List<MEAI.ChatOptions> ObservedOptions { get; } = new();
+            public List<List<MEAI.ChatMessage>> ObservedMessages { get; } = new();
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                Calls++;
+                ObservedOptions.Add(options);
+                ObservedMessages.Add(chatMessages.ToList());
+                if (_scripts.Count == 0)
+                {
+                    throw new InvalidOperationException("SequencedStreamingChatClient ran out of scripted roundtrips.");
+                }
+
+                foreach (MEAI.ChatResponseUpdate update in _scripts.Dequeue())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    yield return update;
+                    await Task.Yield();
+                }
             }
 
             public object GetService(Type serviceType, object serviceKey = null)

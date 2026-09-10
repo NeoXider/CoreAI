@@ -185,14 +185,15 @@ namespace CoreAI.Tests.EditMode
                 memory.AppendChatMessage(
                     Role,
                     i % 2 == 0 ? "user" : "assistant",
-                    $"old-lesson-{i}-".PadRight(90, 'x'),
+                    $"old-lesson-{i}-".PadRight(1000, 'x'),
                     true);
             }
 
             AgentMemoryPolicy policy = new();
-            // WHY: A 60-token role window over ten 90-char turns forces compaction on the first run, the
-            // same setup AiOrchestratorHistoryEditModeTests uses to produce a summary.
-            policy.ConfigureChatHistory(Role, true, 60, false, 50);
+            // WHY: A 4096-token role window over ten 1000-char turns forces compaction on the first run
+            // while its summary reserve still holds the retelling of the folded turns - the same setup
+            // AiOrchestratorHistoryEditModeTests uses to produce a summary.
+            policy.ConfigureChatHistory(Role, true, 4096, false, 50);
             TestSettings settings = new();
             TestLlmClient llm = new();
             AiOrchestrator orchestrator = new(

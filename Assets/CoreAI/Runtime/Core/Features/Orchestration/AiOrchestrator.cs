@@ -4,6 +4,7 @@ using System.Linq;
 using CoreAI.Logging;
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Audit;
@@ -45,6 +46,12 @@ namespace CoreAI.Ai
         private readonly ITokenEstimator _tokenEstimator;
         private readonly IConversationCompactionCoordinator _compactionCoordinator;
         private readonly IActorIdentityProvider _actorIdentityProvider;
+
+        // WHY: A context limit the backend reported once (llama.cpp "n_ctx") is remembered per route so
+        // later turns are budgeted against it up front, instead of paying a refused request every time
+        // the configured window (often the "unlimited, provider decides" sentinel) exceeds the real one.
+        private readonly Dictionary<string, int> _reportedContextWindowByRoute = new(StringComparer.Ordinal);
+        private readonly object _reportedContextWindowGate = new();
 
         /// <summary>Constructs orchestrator dependencies (usual registration path: DI container).</summary>
         public AiOrchestrator(
@@ -106,6 +113,7 @@ namespace CoreAI.Ai
         private async Task<RequestBundle> BuildRequestAsync(
             AiTaskRequest task,
             int contextRetryPass,
+            ContextOverflowEvidence overflowEvidence,
             CancellationToken cancellationToken)
         {
             string roleId = ResolveRoleId(task);
@@ -167,6 +175,18 @@ namespace CoreAI.Ai
                     : routedWindowTokens.Value;
             }
 
+            string routeWindowKey = BuildRouteWindowKey(roleId, task?.RoutingProfileId, routedWindowTokens);
+            int reportedWindowTokens = GetReportedContextWindow(routeWindowKey);
+            if (reportedWindowTokens > 0)
+            {
+                contextWindowTokens = Math.Min(contextWindowTokens, reportedWindowTokens);
+            }
+
+            if (contextRetryPass > 0)
+            {
+                contextWindowTokens = BoundWindowForOverflowRetry(contextWindowTokens, overflowEvidence);
+            }
+
             ConversationContextBuildArgs ctxBuildArgs = null;
             int? resolvedMaxOutput = ResolveMaxOutputTokens(task.MaxOutputTokens, roleConfig.MaxOutputTokens);
             ContextBudget budget = default;
@@ -182,10 +202,21 @@ namespace CoreAI.Ai
                     ContextRetryLevel = contextRetryPass
                 };
                 budget = _contextBudgetPolicy.Compute(budgetRequest, _tokenEstimator);
+                // WHY: The policy budget is the whole conversation allowance (everything after the fixed
+                // prompt). The rolling summary travels inside that allowance, so it gets its own reserve
+                // and the recent tail only the remainder. Before this split the summary was appended
+                // outside every budget, and a persisted summary that outgrew the window made a short chat
+                // message overflow a healthy backend on every turn.
+                int conversationBudget = budget.HistoryTokenBudget;
+                int summaryBudget = _settings.EnableConversationHistorySummarization
+                    ? DefaultContextBudgetPolicy.ResolveSummaryTokenBudget(
+                        conversationBudget, _settings.ConversationRolledSummaryMaxTokens)
+                    : 0;
+                int recentTailBudget = Math.Max(1, conversationBudget - summaryBudget);
                 // WHY: The recent tail is always bounded by the endpoint-derived policy budget
                 // (rolling truncation drops the oldest turns); summarization off only skips summary
                 // generation, it does not unbound the tail.
-                int historyBudget = budget.HistoryTokenBudget;
+                int historyBudget = recentTailBudget;
                 if (_settings.ConversationHistoryRecentTokenBudgetOverride > 0)
                 {
                     historyBudget = Math.Max(32, _settings.ConversationHistoryRecentTokenBudgetOverride);
@@ -199,7 +230,7 @@ namespace CoreAI.Ai
                 // disabled, where the retry drops the oldest turns without generating a summary.
                 if (contextRetryPass > 0)
                 {
-                    historyBudget = Math.Min(historyBudget, budget.HistoryTokenBudget);
+                    historyBudget = Math.Min(historyBudget, recentTailBudget);
                 }
 
                 float compactionTriggerRatio =
@@ -207,12 +238,13 @@ namespace CoreAI.Ai
                 ctxBuildArgs = new ConversationContextBuildArgs
                 {
                     HistoryTokenBudget = historyBudget,
+                    SummaryTokenBudget = summaryBudget,
                     SourceBudget = budget,
                     UseLlmContextCompaction =
                         _settings.EnableLlmContextCompaction && roleConfig.UseLlmContextCompaction,
-                    // WHY: 0 is the documented explicit opt-out (unlimited rolling summary); mapping 0 to
-                    // the 2048 default here silently truncated installs that chose 0. Fresh installs still
-                    // get the cap from the ICoreAISettings interface default (2048).
+                    // WHY: 0 is the documented explicit opt-out ("no explicit cap"); mapping 0 to the 2048
+                    // default here silently truncated installs that chose 0. The request reserve above
+                    // bounds the summary either way, so 0 never means unbounded.
                     MaxRolledSummaryTokens = _settings.ConversationRolledSummaryMaxTokens,
                     CompactionTriggerRatio = compactionTriggerRatio,
                     EnableContextPruning = _settings.EnableContextPruning,
@@ -264,9 +296,12 @@ namespace CoreAI.Ai
                 Task = task,
                 ContextWindowTokens = contextWindowTokens,
                 HistoryTokenBudget = ctxBuildArgs?.HistoryTokenBudget ?? 0,
+                SummaryTokenBudget = ctxBuildArgs?.SummaryTokenBudget ?? 0,
+                SummaryTokensDropped = contextSnapshot?.SummaryTokensDropped ?? 0,
                 ChatHistoryMessageCount = chatHistory?.Count ?? 0,
                 EstimatedPromptTokens = estimatedPromptTokens,
-                ContextSnapshot = contextSnapshot
+                ContextSnapshot = contextSnapshot,
+                RouteWindowKey = routeWindowKey
             };
         }
 
@@ -307,6 +342,7 @@ namespace CoreAI.Ai
             int contextPass = 0;
             int contextOverflowPasses = 0;
             int maxContextOverflowRetries = Math.Max(0, _settings.MaxContextOverflowRetries);
+            ContextOverflowEvidence overflowEvidence = default;
             UserTurnHistoryLatch userTurn = new();
             bool invocationSucceeded = false;
 
@@ -317,9 +353,10 @@ namespace CoreAI.Ai
                 while (true)
                 {
 #if UNITY_WEBGL && !UNITY_EDITOR
-                    bundle = await BuildRequestAsync(task, contextPass, cancellationToken);
+                    bundle = await BuildRequestAsync(task, contextPass, overflowEvidence, cancellationToken);
 #else
-                    bundle = await BuildRequestAsync(task, contextPass, cancellationToken).ConfigureAwait(false);
+                    bundle = await BuildRequestAsync(task, contextPass, overflowEvidence, cancellationToken)
+                        .ConfigureAwait(false);
 #endif
                     roleId = bundle.RoleId;
                     traceId = bundle.TraceId;
@@ -357,6 +394,7 @@ namespace CoreAI.Ai
                                                        maxContextOverflowRetries);
                     if (canRetryContextOverflow)
                     {
+                        overflowEvidence = DescribeContextOverflow(bundle, result);
                         contextOverflowPasses++;
                         contextPass = contextOverflowPasses;
                         continue;
@@ -532,10 +570,11 @@ namespace CoreAI.Ai
             int contextPass = 0;
             int contextOverflowPasses = 0;
             int maxContextOverflowRetries = Math.Max(0, _settings.MaxContextOverflowRetries);
+            ContextOverflowEvidence overflowEvidence = default;
 
             while (true)
             {
-                RequestBundle bundle = await BuildRequestAsync(task, contextPass, cancellationToken)
+                RequestBundle bundle = await BuildRequestAsync(task, contextPass, overflowEvidence, cancellationToken)
                     .ConfigureAwait(false);
                 // WHY: the teardown in RunStreamingAsync needs the role config of the LAST attempt to know
                 // where (and whether) the user turn is persisted.
@@ -574,6 +613,7 @@ namespace CoreAI.Ai
                 LlmErrorCode initErrorCode = LlmErrorCode.ProviderError;
                 int? initHttpStatus = null;
                 int? initRetryAfterSeconds = null;
+                string initProviderErrorBody = null;
                 try
                 {
                     enumerator = _llm.CompleteStreamingAsync(req, cancellationToken)
@@ -590,6 +630,7 @@ namespace CoreAI.Ai
                     initErrorCode = ex.ErrorCode;
                     initHttpStatus = ex.HttpStatus;
                     initRetryAfterSeconds = ex.RetryAfterSeconds;
+                    initProviderErrorBody = ex.ProviderErrorBody;
                 }
                 catch (Exception ex)
                 {
@@ -602,7 +643,8 @@ namespace CoreAI.Ai
                         initError,
                         initErrorCode,
                         initHttpStatus,
-                        initRetryAfterSeconds);
+                        initRetryAfterSeconds,
+                        initProviderErrorBody);
                     _metrics.RecordLlmCompletion(
                         bundle.ActorId,
                         bundle.RoleId,
@@ -615,6 +657,7 @@ namespace CoreAI.Ai
                         maxContextOverflowRetries);
                     if (canRetryInitOverflow)
                     {
+                        overflowEvidence = DescribeContextOverflow(bundle, initFailure);
                         contextOverflowPasses++;
                         contextPass = contextOverflowPasses;
                         continue;
@@ -892,6 +935,7 @@ namespace CoreAI.Ai
                         maxContextOverflowRetries);
                     if (canRetryContextOverflow)
                     {
+                        overflowEvidence = DescribeContextOverflow(bundle, contextOverflowFailure);
                         contextOverflowPasses++;
                         contextPass = contextOverflowPasses;
                         continue;
@@ -1277,9 +1321,38 @@ namespace CoreAI.Ai
             public AiTaskRequest Task;
             public int ContextWindowTokens;
             public int HistoryTokenBudget;
+            public int SummaryTokenBudget;
+            public int SummaryTokensDropped;
             public int ChatHistoryMessageCount;
             public int EstimatedPromptTokens;
             public ConversationContextSnapshot ContextSnapshot;
+            public string RouteWindowKey;
+        }
+
+        /// <summary>
+        /// What a context-overflow refusal taught the orchestrator about the request it just sent; the
+        /// next rebuild pass bounds itself by it rather than by a configured window the backend disagreed with.
+        /// </summary>
+        private readonly struct ContextOverflowEvidence
+        {
+            public ContextOverflowEvidence(
+                int reportedContextTokens,
+                int previousWindowTokens,
+                int previousEstimatedPromptTokens)
+            {
+                ReportedContextTokens = reportedContextTokens;
+                PreviousWindowTokens = previousWindowTokens;
+                PreviousEstimatedPromptTokens = previousEstimatedPromptTokens;
+            }
+
+            /// <summary>Context limit the backend named in its refusal; 0 when it named none.</summary>
+            public int ReportedContextTokens { get; }
+
+            /// <summary>Window the refused request was budgeted against.</summary>
+            public int PreviousWindowTokens { get; }
+
+            /// <summary>Estimated size of the refused request (fixed prompt plus conversation).</summary>
+            public int PreviousEstimatedPromptTokens { get; }
         }
 
         private async Task<(string systemPrompt, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool
@@ -1348,6 +1421,7 @@ namespace CoreAI.Ai
                 return (system, null, false, null);
             }
 
+            EnforceSummaryBudget(roleId, snapshot, buildArgs);
             string resultSystem = system;
             string summaryBlock = ConversationSummaryPromptProjection.BuildBlock(snapshot.Summary);
             bool hasSummary = summaryBlock.Length > 0;
@@ -2261,7 +2335,8 @@ namespace CoreAI.Ai
             string error,
             LlmErrorCode errorCode,
             int? httpStatus,
-            int? retryAfterSeconds)
+            int? retryAfterSeconds,
+            string providerErrorBody = null)
         {
             return new LlmCompletionResult
             {
@@ -2269,8 +2344,163 @@ namespace CoreAI.Ai
                 Error = error ?? "",
                 ErrorCode = errorCode,
                 HttpStatus = httpStatus,
-                RetryAfterSeconds = retryAfterSeconds
+                RetryAfterSeconds = retryAfterSeconds,
+                ProviderErrorBody = providerErrorBody ?? ""
             };
+        }
+
+        private const double OverflowRetryWindowShrinkFactor = 0.75d;
+
+        // WHY: Backends name their limit in different places: llama.cpp puts "n_ctx" in a JSON body
+        // that proxies often re-escape inside an outer string, and also spells it out in prose;
+        // OpenAI-compatible servers only spell it out. Digits are all that matters.
+        private static readonly Regex[] ReportedContextTokenPatterns =
+        {
+            new(@"n_ctx\\?""?\s*:\s*(\d+)", RegexOptions.CultureInvariant),
+            new(@"context size \((\d+) tokens\)", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase),
+            new(@"maximum context length is (\d+) tokens", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)
+        };
+
+        /// <summary>
+        /// Context limit a provider named in its overflow refusal (error text or raw body), or 0 when none.
+        /// </summary>
+        internal static int TryParseReportedContextTokens(params string[] texts)
+        {
+            if (texts == null)
+            {
+                return 0;
+            }
+
+            for (int t = 0; t < texts.Length; t++)
+            {
+                string text = texts[t];
+                if (string.IsNullOrEmpty(text))
+                {
+                    continue;
+                }
+
+                for (int p = 0; p < ReportedContextTokenPatterns.Length; p++)
+                {
+                    Match match = ReportedContextTokenPatterns[p].Match(text);
+                    if (match.Success &&
+                        int.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.None,
+                            System.Globalization.CultureInfo.InvariantCulture, out int tokens) &&
+                        tokens > 0)
+                    {
+                        return tokens;
+                    }
+                }
+            }
+
+            return 0;
+        }
+
+        /// <summary>
+        /// Window for an overflow rebuild: the limit the backend just reported wins outright; when it
+        /// reported none, or the refused request was already built against that limit (estimate drift),
+        /// the refused request's own size shrunk by a quarter becomes the ceiling. Either way the rebuild
+        /// is bounded by what actually overflowed, never by a configured window that may be far larger.
+        /// </summary>
+        internal static int BoundWindowForOverflowRetry(
+            int configuredWindowTokens,
+            int reportedContextTokens,
+            int previousWindowTokens,
+            int previousEstimatedPromptTokens)
+        {
+            int window = configuredWindowTokens;
+            if (reportedContextTokens > 0)
+            {
+                window = Math.Min(window, reportedContextTokens);
+            }
+
+            bool reportedLimitAlreadyUsed = reportedContextTokens > 0 &&
+                                            previousWindowTokens > 0 &&
+                                            previousWindowTokens <= reportedContextTokens;
+            if ((reportedContextTokens <= 0 || reportedLimitAlreadyUsed) && previousEstimatedPromptTokens > 0)
+            {
+                int shrunk = (int)Math.Floor(previousEstimatedPromptTokens * OverflowRetryWindowShrinkFactor);
+                window = Math.Min(window, shrunk);
+            }
+
+            return Math.Max(1, window);
+        }
+
+        private static int BoundWindowForOverflowRetry(int configuredWindowTokens, ContextOverflowEvidence evidence)
+        {
+            return BoundWindowForOverflowRetry(
+                configuredWindowTokens,
+                evidence.ReportedContextTokens,
+                evidence.PreviousWindowTokens,
+                evidence.PreviousEstimatedPromptTokens);
+        }
+
+        private ContextOverflowEvidence DescribeContextOverflow(RequestBundle bundle, LlmCompletionResult failure)
+        {
+            int reported = TryParseReportedContextTokens(failure?.Error, failure?.ProviderErrorBody);
+            if (reported > 0 && bundle != null)
+            {
+                RememberReportedContextWindow(bundle.RouteWindowKey, reported);
+            }
+
+            return new ContextOverflowEvidence(
+                reported,
+                bundle?.ContextWindowTokens ?? 0,
+                bundle?.EstimatedPromptTokens ?? 0);
+        }
+
+        // WHY: The routed window is part of the key so an endpoint switch that changes the declared
+        // window starts from a clean slate instead of inheriting the previous backend's limit.
+        private static string BuildRouteWindowKey(string roleId, string routingProfileId, int? routedWindowTokens)
+        {
+            return (roleId ?? "") + "|" + (routingProfileId ?? "") + "|" + (routedWindowTokens ?? 0);
+        }
+
+        private int GetReportedContextWindow(string routeWindowKey)
+        {
+            lock (_reportedContextWindowGate)
+            {
+                return _reportedContextWindowByRoute.TryGetValue(routeWindowKey ?? "", out int tokens) ? tokens : 0;
+            }
+        }
+
+        private void RememberReportedContextWindow(string routeWindowKey, int tokens)
+        {
+            lock (_reportedContextWindowGate)
+            {
+                _reportedContextWindowByRoute[routeWindowKey ?? ""] = tokens;
+            }
+        }
+
+        /// <summary>
+        /// Final bound on the summary before it enters the prompt. The reserve is the orchestrator's
+        /// promise to the backend, so it holds even for a context manager that did not honour it.
+        /// </summary>
+        private void EnforceSummaryBudget(
+            string roleId,
+            ConversationContextSnapshot snapshot,
+            ConversationContextBuildArgs buildArgs)
+        {
+            int reserve = buildArgs?.SummaryTokenBudget ?? 0;
+            if (reserve > 0 && !string.IsNullOrWhiteSpace(snapshot.Summary))
+            {
+                int estimate = _tokenEstimator.EstimateText(snapshot.Summary);
+                if (estimate > reserve)
+                {
+                    // WHY: The limiter fits the kept suffix alone and then prefixes an ellipsis, which can
+                    // cost one more token; fitting one token short keeps the bound exact.
+                    string bounded = ConversationRolledSummaryLimiter.Apply(
+                        snapshot.Summary, _tokenEstimator, Math.Max(1, reserve - 1));
+                    snapshot.SummaryTokensDropped += Math.Max(1, estimate - _tokenEstimator.EstimateText(bounded));
+                    snapshot.Summary = bounded;
+                }
+            }
+
+            if (snapshot.SummaryTokensDropped > 0)
+            {
+                Log.Instance.Warn(
+                    $"[AiOrchestrator] Rolling summary for role '{roleId}' trimmed by ~{snapshot.SummaryTokensDropped} tokens to fit its {reserve}-token request reserve.",
+                    LogTag.Llm);
+            }
         }
 
         /// <summary>

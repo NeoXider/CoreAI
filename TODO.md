@@ -1,6 +1,6 @@
 # TODO
 
-> Updated 2026-09-02. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-09-10. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
 > Released: 7.3.1 (2026-09-02, all six packages in lockstep — WebGL tool-turn fix); 7.3.0 (2026-09-02, lockstep — MVP2.5 persistence release); 7.2.0 (2026-09-02, `com.neoxider.coreai` + `.coreaiunity` only); 7.1.1 (2026-08-31, `com.neoxider.coreai` + `.coreaiunity`); 7.1.0 (2026-08-30, all six packages
 > in lockstep); 7.0.7 (2026-08-27); 7.0.0 (2026-08-01) added `McpServerInfo.Version`. The browser gate passed on 2026-09-02; see the section below.
@@ -37,11 +37,48 @@ the standard composition like every other demo, and the scene was regenerated.
 ## MVP2.5 rungs — status 2026-09-10
 
 Verified on the settled tree (Unity 6000.3.14f1 batchmode): full EditMode
-**4424 total / 4415 passed / 0 failed / 9 skipped** (`artifacts/testresults/final2.xml`), and
-PlayMode over the fixtures this wave touched — physics/character, the MCP server's residency, the
-Lua world module and the main-thread marshaler — **17 / 16 passed / 0 failed / 1 platform skip**
-(`artifacts/testresults/playmode1.xml`), with no abort in the editor log. The earlier figure on this
-line was 3694/3685 on 2026-09-06.
+**4481 total / 4472 passed / 0 failed / 9 skipped** (`artifacts/testresults/r17.xml`), and the
+full-assembly PlayMode sweep **149 total / 135 passed / 4 failed / 10 skipped**
+(`artifacts/testresults/pmall3.xml`) — the 4 failures are environmental (3 need a loaded live
+LLM, 1 needs a graphics device), the same rows that were invisible while the sweep aborted
+before reaching them. The earlier figure on this line was 4424/4415 on 2026-09-10
+(`final2.xml`).
+
+**MVP2.5 is MVP3 + MVP8 + MVP11 + MVP12** (`dev-docs/MVP25_ONLINE_PLAN.md` §3, one rung per
+release; `dev-docs/MVP25_BUILD_PLAN_2026-09-04.md` :3, "the three remaining MVP2.5 rungs (MVP8,
+MVP11, MVP12)"; entry gates P1–P5, with P4 a full pass of the MVP2 manifest). MVP3 shipped as
+the persistence release (7.3.0, see below); MVP8 is acceptance-manifested in the next item;
+**MVP11 and MVP12 are unimplemented as rungs** — concretely, verified against the tree:
+`INetworkBridge` has no `SendIntent`/`IntentReceived`/`SendDelta`/`DeltaReceived`, there is no
+`ReplicationPublisher` type, `LuaModManifest` has no context field (and no raise site checks a
+mod's script context — the two production `ContextViolation` raises guard an ownerless executor
+and an orphan signal owner, not server/client contexts), and nothing in `Assets/CoreAIMirror`
+calls `ExportSnapshot`/`Stage`/`Commit`. MVP2.5 is therefore half built, not nearly closed.
+
+**Two different bars, and they do not agree — read both before calling anything closed.**
+The paragraph above is the PLAN's bar: four rungs, the last two of which move world state over a
+socket. The OWNER's bar, stated 2026-09-10, is narrower and is the one that decides a release:
+MVP1, MVP2 and MVP2.5 exist so that **core Lua scripting works and the core FOUNDATION of
+multiplayer exists** — not so that a finished networked product ships.
+
+Against the owner's bar, verified against the tree on 2026-09-10:
+- **Lua scripting core: done.** Roblox-shaped API, sandbox, per-resume execution budgets,
+  scheduler, instance tree, save/load. 4481 EditMode tests, 0 failed.
+- **Multiplayer foundation: present, and not as stubs.** `MirrorNetworkBridge` is a real Mirror
+  implementation — connections, actor admission, request timeouts, packet/byte counters, server
+  clock offset — with `CoreAiMirrorSessionHost`, `CoreAiMirrorAuthenticator` and a message format
+  beside it. The authority model exists: `WorldAclAuthorizer`, `WriteGrantLedger`, `MutationIntent`,
+  `IntentGateway`, and `InstanceRegistry.Authority` separating server from replica. The replication
+  core exists with tests: `ReplicationDirtySet`, `ReplicationStream`, `ReplicationApplier`. And
+  RemoteEvent/RemoteFunction — the Roblox-facing multiplayer surface a mod author actually uses —
+  cross that bridge from PRODUCTION code, not only from tests.
+- **The one gap on this bar:** the replication layer and the transport are both real and are not
+  connected to each other. There is no publisher joining them, world state never crosses a socket,
+  and no two-process run has been done. Remotes replicate; world state does not.
+
+So on the plan's bar MVP2.5 is half built; on the owner's bar it is one seam short. Whichever bar a
+future reader uses, they should say WHICH — most of the disagreement in this file's history comes
+from two people silently using different ones.
 
 **MVP2.5 is NOT closed.** A three-rung closure audit (`dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md`)
 found that MVP8 — previously recorded here as "complete" — has gates whose positive column the code
@@ -83,9 +120,18 @@ Fixed on 2026-09-06 in response to the audit:
       fire time; the motor now steps from `LuaModRuntimeTickDriver.FixedUpdate`, not the render
       pump; and `BuiltInRbxApiSkillText` gained a `Players & Characters` section. See
       `Assets/CoreAI/CHANGELOG.md` [Unreleased] for detail.
-      **A third and final review round (2026-09-09, two independent reviewers) found and fixed
-      four more defects on this same landing, and leaves four open — see "Third review round"
-      below and `dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` §6 for the complete list.**
+       **A third and final review round (2026-09-09, two independent reviewers) found and fixed
+       four more defects on this same landing — see "Third review round" below and
+       `dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` §6 for the complete list. Genuinely left from
+       this landing: the false landing between a jump and the fall (recorded separately under
+       "Character motor contract" below), and the uncovered 1:1-smoke half of gate P8.2 (its own
+       unchecked item below). Every other line this bullet lists now has a green test in
+       `artifacts/testresults/r17.xml` (4481 total / 4472 passed / 0 failed / 9 skipped).**
+- [ ] **Gate P8.2's "1:1 smoke" half is NOT covered.** The only WalkSpeed measurement runs at the
+      default metres-per-stud (`Mvp8PhysicsPlayModeTests` measures 16 studs/s as 16 × 0.28 m/s);
+      nothing anywhere runs the 1:1 side — no PlayMode test calls `RbxSpace.Configure(1)` — so a
+      1:1 run that reported 0.28-scale speeds would still pass. The gate demands both halves
+      (`dev-docs/MVP25_BUILD_PLAN_2026-09-04.md` P8.2 row).
 - [x] **The MVP8 acceptance manifest.** Gate P8.5 cites frozen ids "listed in the MVP8 manifest" —
       `dev-docs/MVP8_ACCEPTANCE_MANIFEST.md` exists, frozen 2026-09-06 against `main` (commit
       `09469f77`): 20 Tier-A fixtures, cross-checked by `FrozenTierBCatalog_MatchesItsFilesAndIds` and
@@ -112,12 +158,17 @@ Fixed on 2026-09-06 in response to the audit:
       batch that carried it: an `ObjectValue` pointing at something the recipient cannot see becomes
       nil and the wanted id is forgotten, so moving that target into view later spawns the target but
       never repairs the reference. Both belong to the join-snapshot and transport work above; neither
-      can affect anyone today, because nothing in production constructs the replication types.
+       can affect anyone today, because nothing in production constructs
+       ReplicationStream/Applier/DirtySet/Filter — the one exception is `IntentGateway`, which the
+       shipped `OnlineAuthority` demo constructs without a dirty set, so it judges intents but feeds
+       no replication.
       **Both were implemented on 2026-09-10**: a Player now travels with its identity and is admitted
       into the service on the replica, and an unresolved reference is remembered and settled when its
-      target arrives. What is still open is the composition around them — `GetLocalPlayer` on a
-      client mints a Player through `EnsureNetworkActor`, so a script that asks before the seed
-      arrives makes the replicated Player for that actor a protocol violation. The client composition
+      target arrives. What is still open is the composition around them — a Player is minted
+      whenever ANY non-server mod context is created (`LuaCsRbxApiBindings` → `EnsureNetworkActor`
+      → `RbxPlayers.EnsureActor`, which never checks `registry.Authority`), so `GetLocalPlayer` on
+      a replica is only one trigger among several, and a script that asks before the seed arrives
+      makes the replicated Player for that actor a protocol violation. The client composition
       must stop minting Players on a replica; there is nothing to break today because the replica
       path is not wired.
 
@@ -261,9 +312,11 @@ Still open, recorded honestly:
       than to whatever it was. On a Mirror machine a rig that shipped INACTIVE can therefore come up
       active, which among other things could satisfy a scene smoke's camera assertion for the wrong
       reason. No evidence it explains any current pass; recorded so it is not rediscovered.
-- [ ] `ProjectSettings/ProjectSettings.asset` and `CoreAI.slnx` carry Mirror-injected local
-      artefacts (from the optional, gitignored `Assets/Mirror` package being present locally) that
-      must not be committed.
+- [x] `ProjectSettings/ProjectSettings.asset` and `CoreAI.slnx` carry **no** Mirror-injected
+      artefacts in HEAD (verified 2026-09-10: no MIRROR symbol in the committed settings, no
+      Mirror/kcp/Telepathy project in the committed solution — the item as written is closed).
+      The editor re-introduces them whenever Mirror is installed locally, which stays a live
+      hazard; the `tools/check_positive_module_opt_in.py` release gate now checks for it.
 
 ### Character motor contract — known limits, not defects of the bridge seam
 

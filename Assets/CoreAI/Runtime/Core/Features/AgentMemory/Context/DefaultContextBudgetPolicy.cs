@@ -4,8 +4,9 @@ using System.Collections.Generic;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Reserves completion headroom plus fixed prompt, assigns remaining tokens to chat history.
-    /// On each <see cref="ContextBudgetRequest.ContextRetryLevel"/>, drops roughly 25% more oldest history.
+    /// Reserves completion headroom plus fixed prompt, assigns remaining tokens to the conversation
+    /// (rolling summary plus recent chat history; <see cref="ResolveSummaryTokenBudget"/> splits the two).
+    /// On each <see cref="ContextBudgetRequest.ContextRetryLevel"/>, drops roughly 25% more of that allowance.
     /// </summary>
     public sealed class DefaultContextBudgetPolicy : IContextBudgetPolicy
     {
@@ -13,6 +14,18 @@ namespace CoreAI.Ai
         private const int MinCompletionReserve = 64;
         private const int SlackDefault = 64;
         private const double ContextRetryHistoryFactor = 0.75d;
+        private const int SummaryShareDivisor = 3;
+
+        /// <summary>
+        /// Splits the conversation allowance (<see cref="ContextBudget.HistoryTokenBudget"/>) into the part
+        /// reserved for the rolling summary; the remainder is the recent-tail budget, so summary and tail
+        /// together never exceed the allowance. The summary gets a third, or the explicit cap when smaller.
+        /// </summary>
+        public static int ResolveSummaryTokenBudget(int conversationTokenBudget, int explicitSummaryCap)
+        {
+            int share = Math.Max(0, conversationTokenBudget) / SummaryShareDivisor;
+            return explicitSummaryCap > 0 ? Math.Min(explicitSummaryCap, share) : share;
+        }
 
         /// <inheritdoc />
         public ContextBudget Compute(ContextBudgetRequest request, ITokenEstimator estimator)

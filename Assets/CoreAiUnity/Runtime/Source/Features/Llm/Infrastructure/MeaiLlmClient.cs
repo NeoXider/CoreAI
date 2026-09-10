@@ -532,6 +532,17 @@ namespace CoreAI.Infrastructure.Llm
             bool emittedAnyVisibleText = false;
             // One-shot guard for the reasoning-runaway rescue at the terminal path.
             bool emptyResponseNudgeSent = false;
+            // WHY: RequireAny / RequireSpecific promise the caller a tool call (AiTaskRequest.ForcedToolMode).
+            // The non-streaming path gets that postcondition from SmartToolCallingChatClient; this loop
+            // drives the provider directly, so it must enforce the same contract itself or a prose-only
+            // answer ends the turn as a clean success while no action happened.
+            bool requiredToolMode = request.ForcedToolMode == LlmToolChoiceMode.RequireAny ||
+                                    request.ForcedToolMode == LlmToolChoiceMode.RequireSpecific;
+            string? requiredToolName = request.ForcedToolMode == LlmToolChoiceMode.RequireSpecific
+                ? request.RequiredToolName?.Trim()
+                : null;
+            int missingRequiredToolResponses = 0;
+            bool anyToolCallEmittedInStream = false;
             // Граница между репликами внутри ОДНОГО потока. Цикл ниже — это несколько ходов модели
             // (после каждого раунда инструментов она говорит заново), а наружу они уезжают одним
             // непрерывным потоком чанков. Флаг взводится на входе в следующую итерацию и гаснет на
@@ -736,6 +747,17 @@ namespace CoreAI.Infrastructure.Llm
                 string streamModel = ResolveModelName();
                 if (maxToolIterations > 0 && toolIteration > maxToolIterations)
                 {
+                    if (requiredToolMode && !anyToolCallEmittedInStream)
+                    {
+                        // WHY: the tools-disabled summary turn below ends CLEAN whenever it yields prose,
+                        // which would report a required-tool turn as success although no call happened.
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            "MeaiLlmClient: Streaming roundtrip cap reached before the required tool call was emitted; failing the turn.");
+                        yield return BuildMissingRequiredToolChunk(
+                            policy, requiredToolName, turnUsage, streamModel, lastRoundtripUsage);
+                        yield break;
+                    }
+
                     IReadOnlyList<LlmToolCallTrace> executedToolCalls = policy.ExecutedTraces.ToList();
                     // Any successful tool call is enough for a clean completion — visible text must NOT be
                     // required here: a ToolsOnly agent (e.g. the G6 free-build) never emits visible text, so
@@ -779,12 +801,12 @@ namespace CoreAI.Infrastructure.Llm
                     yield break;
                 }
 
-                // ForcedToolMode applies ONLY to the first iteration.
-                // After we feed tool results back to the model, it must decide naturally
-                // tool-choice constraint would loop forever (model is forced to re-call a tool,
-                // we feed its result, model is forced again, ...).
+                // WHY: the forced mode is dropped after the first EMITTED tool call, not after the first
+                // iteration. Once tool results are fed back the model must decide naturally (a pinned
+                // constraint would loop forever: forced call, result, forced again), but a corrective
+                // retry after a text-only forced roundtrip must stay forced or the requirement evaporates.
                 MEAI.ChatOptions iterationOptions = chatOptions;
-                if (toolIteration > 1 && chatOptions.ToolMode != null &&
+                if (anyToolCallEmittedInStream && chatOptions.ToolMode != null &&
                     chatOptions.ToolMode is not MEAI.AutoChatToolMode)
                 {
                     iterationOptions = CloneOptionsWithAutoToolMode(chatOptions, aiTools);
@@ -1195,6 +1217,7 @@ namespace CoreAI.Infrastructure.Llm
                 // === Path 1: Native tool calls from SSE delta.tool_calls ===
                 if (nativeToolCalls.Count > 0 && aiTools.Count > 0)
                 {
+                    anyToolCallEmittedInStream = true;
                     if (!emittedToolProgressTypingHint)
                     {
                         emittedToolProgressTypingHint = true;
@@ -1355,6 +1378,7 @@ namespace CoreAI.Infrastructure.Llm
                         yield break;
                     }
 
+                    anyToolCallEmittedInStream = true;
                     if (_settings.LogMeaiToolCallingSteps)
                     {
                         _logger.LogInfo(GameLogFeature.Llm,
@@ -1498,6 +1522,7 @@ namespace CoreAI.Infrastructure.Llm
                         yield break;
                     }
 
+                    anyToolCallEmittedInStream = true;
                     if (!emittedToolProgressTypingHint)
                     {
                         emittedToolProgressTypingHint = true;
@@ -1605,6 +1630,37 @@ namespace CoreAI.Infrastructure.Llm
                         "Your previous response was empty - you likely spent the whole token budget on hidden reasoning. " +
                         "Act NOW: reply with the direct tool call or a short plain-text answer. Keep reasoning minimal."));
                     continue;
+                }
+
+                if (requiredToolMode && !anyToolCallEmittedInStream)
+                {
+                    int maxMissingRequiredToolResponses = Math.Max(1, _settings.MaxToolCallRetries);
+                    if (missingRequiredToolResponses < maxMissingRequiredToolResponses)
+                    {
+                        missingRequiredToolResponses++;
+                        // WHY: the prose goes back as history so the correction reads in context. It is a
+                        // contract violation, never a call: text that looks like a call is not parsed or
+                        // executed here, only answered with the same instruction the non-streaming path uses.
+                        if (!string.IsNullOrWhiteSpace(visibleText))
+                        {
+                            chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, visibleText));
+                        }
+
+                        chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
+                            BuildMissingRequiredToolInstruction(requiredToolName)));
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            "MeaiLlmClient: Streaming roundtrip ended without the required tool call " +
+                            $"(text length={visibleText.Length}); retrying with a contract-violation instruction " +
+                            $"({missingRequiredToolResponses}/{maxMissingRequiredToolResponses}).");
+                        continue;
+                    }
+
+                    _logger.LogWarning(GameLogFeature.Llm,
+                        $"MeaiLlmClient: Streaming model never emitted the required tool call after {missingRequiredToolResponses} correction(s); " +
+                        "failing the turn instead of reporting success.");
+                    yield return BuildMissingRequiredToolChunk(
+                        policy, requiredToolName, turnUsage, streamModel, lastRoundtripUsage);
+                    yield break;
                 }
 
                 LlmStreamChunk terminal = new()
@@ -1756,9 +1812,9 @@ namespace CoreAI.Infrastructure.Llm
         /// are ignored so a zero-emitting provider cannot pollute the calibration channel.
         /// </summary>
         private static void OverrideTerminalPromptTokensWithLastRoundtrip(
-            LlmStreamChunk chunk, MEAI.UsageDetails lastRoundtripUsage)
+            LlmStreamChunk chunk, MEAI.UsageDetails? lastRoundtripUsage)
         {
-            if (chunk == null || !(lastRoundtripUsage?.InputTokenCount > 0))
+            if (chunk == null || lastRoundtripUsage == null || !(lastRoundtripUsage.InputTokenCount > 0))
             {
                 return;
             }
@@ -1790,7 +1846,49 @@ namespace CoreAI.Infrastructure.Llm
             return chunk;
         }
 
-        private static void ApplyStreamingUsageFields(LlmStreamChunk chunk, MEAI.UsageDetails usage, string model)
+        /// <summary>
+        /// Correction fed back when a forced roundtrip ended without a tool call; same wording as the
+        /// non-streaming <see cref="SmartToolCallingChatClient"/> so both paths teach the model one rule.
+        /// </summary>
+        private static string BuildMissingRequiredToolInstruction(string? requiredToolName)
+        {
+            string target = string.IsNullOrWhiteSpace(requiredToolName)
+                ? "one of the available tools"
+                : $"the '{requiredToolName}' tool";
+            return "Tool-call contract violation: call " + target +
+                   " now with valid arguments. Do not answer with plain text.";
+        }
+
+        /// <summary>
+        /// Terminal chunk for a required-tool turn that ended without the call. The caller asked for a
+        /// guaranteed action, so the turn fails explicitly instead of completing as a text answer;
+        /// <see cref="LlmErrorCode.EmptyResponse"/> because nothing usable was produced and the retry
+        /// decorators already treat that code as a bounded, pre-commit-only replay.
+        /// </summary>
+        private static LlmStreamChunk BuildMissingRequiredToolChunk(
+            ToolExecutionPolicy policy,
+            string? requiredToolName,
+            MEAI.UsageDetails? turnUsage,
+            string streamModel,
+            MEAI.UsageDetails? lastRoundtripUsage)
+        {
+            string target = string.IsNullOrWhiteSpace(requiredToolName)
+                ? "a required tool"
+                : $"required tool '{requiredToolName}'";
+            LlmStreamChunk chunk = new()
+            {
+                IsDone = true,
+                Text = string.Empty,
+                Error = "Required tool call missing: " + target + ".",
+                ErrorCode = LlmErrorCode.EmptyResponse,
+                ExecutedToolCalls = policy.ExecutedTraces.ToList()
+            };
+            ApplyStreamingUsageFields(chunk, turnUsage, streamModel);
+            OverrideTerminalPromptTokensWithLastRoundtrip(chunk, lastRoundtripUsage);
+            return chunk;
+        }
+
+        private static void ApplyStreamingUsageFields(LlmStreamChunk chunk, MEAI.UsageDetails? usage, string model)
         {
             if (chunk == null || usage == null)
             {
@@ -2642,7 +2740,7 @@ namespace CoreAI.Infrastructure.Llm
         /// contains tools and an explicit forced-tool setting.
         /// <para>
         /// Multi-round streaming: the caller is responsible for resetting the mode to
-        /// <see cref="MEAI.ChatToolMode.Auto"/> after the first iteration via
+        /// <see cref="MEAI.ChatToolMode.Auto"/> once the first tool call has been emitted via
         /// <see cref="CloneOptionsWithAutoToolMode"/>; otherwise the model would be forced
         /// to keep emitting tool calls forever (it's pinned to "RequireAny" each turn).
         /// </para>
@@ -2676,8 +2774,8 @@ namespace CoreAI.Infrastructure.Llm
                     // llama.cpp / LM Studio servers reject {"type":"function","function":{"name":X}} with
                     // HTTP 400. "required" (RequireAny) + a tools list narrowed to just the target forces
                     // exactly that tool and is accepted by every OpenAI-compatible backend (cloud included).
-                    // The narrowing is undone for later tool-loop iterations (see CloneOptionsWithAutoToolMode,
-                    // which restores the full tool set), so only the first forced turn sees the single tool.
+                    // The narrowing is undone once a tool call has been emitted (see CloneOptionsWithAutoToolMode,
+                    // which restores the full tool set), so only the forced roundtrips see the single tool.
                     options.ToolMode = MEAI.ChatToolMode.RequireAny;
                     options.Tools = new List<MEAI.AITool> { targetTool };
                     return;
@@ -2716,7 +2814,7 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Returns a shallow copy of <paramref name="source"/> with <see cref="MEAI.ChatToolMode.Auto"/>.
-        /// Used in the streaming loop after the first iteration so the model isn't forced
+        /// Used in the streaming loop once a tool call has been emitted so the model isn't forced
         /// to keep emitting tool calls after each tool result is fed back. The full tool set is
         /// restored from <paramref name="fullTools"/> because a first-iteration
         /// <see cref="LlmToolChoiceMode.RequireSpecific"/> narrows <c>source.Tools</c> to the single

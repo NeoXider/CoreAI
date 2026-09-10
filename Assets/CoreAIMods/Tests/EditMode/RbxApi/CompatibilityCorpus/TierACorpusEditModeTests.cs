@@ -576,6 +576,76 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                 "The Tier-B fixture directory and the frozen catalog must agree.");
         }
 
+        /// <summary>
+        /// The MVP8 acceptance manifest must list exactly the frozen Tier-A and Tier-B fixture ids.
+        /// </summary>
+        [Test]
+        public void FrozenManifest_ListsExactlyTheCatalogIds()
+        {
+            // WHY the manifest is parsed instead of trusted: the frozen-id table drifted from the
+            // catalog unnoticed, because the cross-checks above compare the C# catalog to the
+            // files on disk and never read the markdown.
+            string manifestPath = Path.GetFullPath(Path.Combine(
+                Application.dataPath, "..", "dev-docs", "MVP8_ACCEPTANCE_MANIFEST.md"));
+            Assert.IsTrue(File.Exists(manifestPath),
+                "MVP8 acceptance manifest is missing: " + manifestPath);
+            HashSet<string> manifestIds = ParseFrozenIds(File.ReadAllText(manifestPath));
+            Dictionary<string, string> catalogIds = new(StringComparer.Ordinal);
+            foreach (TierAFixtureSpec fixture in TierACorpusCatalog.Fixtures)
+            {
+                catalogIds[fixture.Id] = "Tier-A";
+            }
+
+            foreach (TierAFixtureSpec fixture in TierBCorpusCatalog.Fixtures)
+            {
+                catalogIds[fixture.Id] = "Tier-B";
+            }
+
+            foreach (string id in manifestIds)
+            {
+                Assert.IsTrue(catalogIds.ContainsKey(id),
+                    "MVP8 manifest " + manifestPath + " lists unknown fixture id `" + id + "`.");
+            }
+
+            foreach (string id in catalogIds.Keys)
+            {
+                Assert.IsTrue(manifestIds.Contains(id),
+                    "MVP8 manifest " + manifestPath + " is missing catalog fixture id `" + id + "`.");
+            }
+
+            Assert.AreEqual(catalogIds.Count, manifestIds.Count,
+                "MVP8 manifest " + manifestPath + " id count drifted from the catalog.");
+        }
+
+        private static HashSet<string> ParseFrozenIds(string markdown)
+        {
+            HashSet<string> ids = new(StringComparer.Ordinal);
+            int searchFrom = 0;
+            while (true)
+            {
+                int open = markdown.IndexOf('`', searchFrom);
+                if (open < 0)
+                {
+                    return ids;
+                }
+
+                int close = markdown.IndexOf('`', open + 1);
+                if (close < 0)
+                {
+                    return ids;
+                }
+
+                string token = markdown.Substring(open + 1, close - open - 1);
+                if (token.StartsWith("TAC-", StringComparison.Ordinal)
+                    || token.StartsWith("TBC-", StringComparison.Ordinal))
+                {
+                    ids.Add(token);
+                }
+
+                searchFrom = close + 1;
+            }
+        }
+
         [Test]
         public void CombinedCorpus_MeetsTheMvp8UnmodifiedThreshold()
         {

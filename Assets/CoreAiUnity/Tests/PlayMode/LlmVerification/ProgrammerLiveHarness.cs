@@ -92,6 +92,11 @@ namespace CoreAI.Tests.PlayMode
             return builder.Build();
         });
 
+        // WHY: baseline, not a tool-name filter: an earlier live fixture in the same session can
+        // leave behind identically-named execute_lua/manage_mods events, which a name filter would
+        // still accept. A positional baseline rejects ANY pre-existing event regardless of name.
+        private static int s_toolCallBaselineCount;
+
         internal static Setup Build(PlayModeProductionLikeLlmHandle handle, int orchestratorTimeoutSeconds = 600)
         {
             Setup setup = new()
@@ -182,6 +187,11 @@ namespace CoreAI.Tests.PlayMode
                 setup.Settings,
                 actorIdentityProvider);
 
+            // WHY: the global tool-call history outlives a single fixture, so earlier tests' events
+            // are still present when this run starts. Counting them here means the assertion below
+            // only ever sees what THIS invocation caused.
+            s_toolCallBaselineCount = CoreAi.GetToolCallHistorySnapshot()?.Count ?? 0;
+
             return setup;
         }
 
@@ -201,14 +211,17 @@ namespace CoreAI.Tests.PlayMode
         /// </remarks>
         internal static void AssertModelActuallyCalledTools(string label)
         {
-            IReadOnlyList<LlmToolCallRecord> history = CoreAi.GetToolCallHistorySnapshot();
-            if (history != null && history.Count > 0)
+            List<LlmToolCallRecord> own = GetOwnWindowRecords();
+            if (own.Count > 0)
             {
                 return;
             }
 
+            IReadOnlyList<LlmToolCallRecord> history = CoreAi.GetToolCallHistorySnapshot();
+            int ignored = Math.Max(0, (history?.Count ?? 0) - own.Count);
             Assert.Fail(
-                $"[{label}] The model produced no tool calls at all, so nothing could have been built. " +
+                $"[{label}] The model produced no tool calls in this run (own-window tool calls: none; " +
+                $"{ignored} earlier history event(s) ignored), so nothing could have been built. " +
                 "This is a MODEL capability result, not a CoreAI defect: the scenario needs a backend " +
                 "that emits real function calls. Check the log for an assistant message that writes the " +
                 "call as prose (for example execute_lua('...')) — CoreAI does not parse prose into " +
@@ -216,22 +229,45 @@ namespace CoreAI.Tests.PlayMode
                 "CoreAI wiring defect and a different investigation.");
         }
 
+        /// <summary>History records added after <see cref="Build"/> captured its baseline.</summary>
+        private static List<LlmToolCallRecord> GetOwnWindowRecords()
+        {
+            IReadOnlyList<LlmToolCallRecord> history = CoreAi.GetToolCallHistorySnapshot();
+            List<LlmToolCallRecord> own = new List<LlmToolCallRecord>();
+            if (history == null)
+            {
+                return own;
+            }
+
+            // WHY: the bounded history can evict, or another fixture can clear, after the baseline
+            // was taken; a baseline past the end then means the window is unknowable, so fall back
+            // to the whole snapshot instead of skipping this run's own events.
+            int skip = s_toolCallBaselineCount;
+            if (skip < 0 || skip > history.Count)
+            {
+                skip = 0;
+            }
+
+            for (int i = skip; i < history.Count; i++)
+            {
+                if (history[i] != null)
+                {
+                    own.Add(history[i]);
+                }
+            }
+
+            return own;
+        }
+
         internal static void LogToolCallTranscript(string label)
         {
             IReadOnlyList<LlmToolCallRecord> history = CoreAi.GetToolCallHistorySnapshot();
-            TestContext.WriteLine($"[{label}] Tool calls recorded: {history?.Count ?? 0}");
-            if (history == null)
-            {
-                return;
-            }
+            List<LlmToolCallRecord> own = GetOwnWindowRecords();
+            int ignored = Math.Max(0, (history?.Count ?? 0) - own.Count);
+            TestContext.WriteLine($"[{label}] Tool calls this run: {own.Count} ({ignored} earlier event(s) ignored)");
 
-            foreach (LlmToolCallRecord record in history)
+            foreach (LlmToolCallRecord record in own)
             {
-                if (record == null)
-                {
-                    continue;
-                }
-
                 string args = record.Info.ArgumentsJson ?? "";
                 TestContext.WriteLine(
                     $"[{label}]   {record.Info.ToolName} [{record.Status}] " +
