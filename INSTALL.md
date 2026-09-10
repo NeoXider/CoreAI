@@ -89,6 +89,22 @@ CoreAI → Setup → Create Bare Scene (advanced)   (scope + settings, no demo U
 > provider-backed HTTP or LLMUnity execution. The required MEAI DLLs from section **2** remain part of
 > the Core contract in either mode. Add `COREAI_LLM` when you want concrete providers; see 2.3.
 
+### 1.4 If you build for the Web (WebGL)
+
+```
+CoreAI → Setup → Install WebGL Template
+```
+
+Browser storage is armed by one line in the web template —
+`config.autoSyncPersistentDataPath = true;` before `createUnityInstance(...)` — and Unity's stock
+templates ship it **commented out**. Without it, agent memory, skills, Lua mods, Lua version history
+and world packages live in the tab's in-memory filesystem and disappear on reload, so
+`CoreAIWebGlPersistentDataSyncBuildGuard` aborts the build. The menu item copies the template that
+ships inside `com.neoxider.coreaiunity` into `Assets/WebGLTemplates/CoreAI` and selects it; adding the
+line to your own template works equally well. A player that ships **without** CoreAI's persistent
+storage on purpose opts out with the scripting define symbol `COREAI_WEBGL_NO_PERSISTENCE` on the Web
+platform — the build then proceeds and logs one warning naming what is given up.
+
 ---
 
 ## 2. LLM module (Microsoft.Extensions.AI, via NuGet)
@@ -103,8 +119,22 @@ required by the base even when provider implementations are compiled out. They a
 Install [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity), then install a **single** package:
 
 ```
-Microsoft.Extensions.AI 10.9.0
+Microsoft.Extensions.AI 9.10.2
 ```
+
+**Take that version literally — it is a ceiling, not a starting point.** Unity ships its own
+`System.Text.Json` (assembly version **8.0.0.0**) in the editor's BCL extensions and substitutes it for
+any copy in your project. Every Microsoft.Extensions.AI **10.x** release is built against
+`System.Text.Json` **10.0.0.0**, so it cannot load under Unity — the game fails on the first call into
+MEAI rather than at compile time. 9.10.2 is the newest release built against the 8.0.0.0 line, which is
+why this package and its consumers are pinned there.
+
+CoreAI's own repository builds against that same version on purpose (`Assets/packages.config`,
+`Assets/Packages/`, `tools/portable/CoreAI.Core.csproj`). That is what makes the rule enforceable: an API
+that exists only in a newer MEAI fails to compile in CoreAI's own build — including the license-free
+`portable-core` CI job — instead of turning up days later as a `CS0234` inside a game. The pins are held
+together by `MeaiVersionFloorEditModeTests`; raising them is a deliberate act that starts with checking
+that the engine can load the newer assemblies.
 
 NuGetForUnity resolves the rest of the chain automatically as transitive dependencies
 (`Microsoft.Extensions.AI.Abstractions`, `Microsoft.Bcl.AsyncInterfaces`, `System.Text.Json`,

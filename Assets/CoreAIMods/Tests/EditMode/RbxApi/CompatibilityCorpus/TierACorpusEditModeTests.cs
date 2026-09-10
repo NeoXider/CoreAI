@@ -409,16 +409,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                 case TierAFixtureDriver.PumpThreeFrames:
                     for (int frame = 0; frame < 3; frame++)
                     {
-                        harness.RbxApi.PumpFrame(1f / 60f);
-                        harness.RbxApi.Scheduler.Advance(0d);
+                        // WHY Advance with a real frame delta and no extra PumpFrame: the
+                        // scheduler now pumps every phase once, and TAC-008 asserts dt > 0.
+                        harness.RbxApi.Scheduler.Advance(1d / 60d);
                     }
 
                     return;
                 case TierAFixtureDriver.PumpSixSeconds:
                     for (int frame = 0; frame < 360; frame++)
                     {
-                        harness.RbxApi.PumpFrame(1f / 60f);
-                        harness.RbxApi.Scheduler.Advance(0d);
+                        harness.RbxApi.Scheduler.Advance(1d / 60d);
                     }
 
                     return;
@@ -429,7 +429,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                     return;
                 case TierAFixtureDriver.PressE:
                     harness.Input.PressKey(KeyE);
-                    harness.RbxApi.PumpInput();
+                    // WHY no extra PumpInput: the scheduler's InputProcessing boundary pumps
+                    // input once per Advance, and Step diffs, so a manual pump would be redundant.
                     harness.RbxApi.Scheduler.Advance(0d);
                     harness.Input.ReleaseKey(KeyE);
                     return;

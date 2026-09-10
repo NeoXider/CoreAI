@@ -368,9 +368,10 @@ layer, and Lua stack are staged and published atomically. `ILuaModRuntime`, `Lua
 across the swap. An active mod that requests the `Full` capability is rejected before staging,
 because arbitrary Unity reflection cannot be transactionally isolated.
 
-On WebGL the durability boundary is `CoreAiWebGlPersistence.SyncAsync()`, which completes only from
-the matching `FS.syncfs` callback (a cancellation or 30-second timeout drops the pending call and a
-late callback is ignored). The browser player also refuses packages above 4 MiB, more than 4,096
+On WebGL the durability boundary is `CoreAiWebGlPersistence.SyncAsync()`, which returns immediately
+and reports whether the engine's automatic `persistentDataPath` persistence is armed for this page.
+It waits for nothing: Unity 6.3 deprecated the manual `FS.syncfs` channel and its completion callback
+never fired, so awaiting it parked every save until the caller's own timeout. The browser player also refuses packages above 4 MiB, more than 4,096
 instances, more than 32,768 collection items, or more than 2 MiB of text before entering unbounded
 work — those are WebGL execution limits, not format limits.
 

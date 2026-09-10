@@ -74,9 +74,19 @@ Example: `set_wave_modifier(id, value)` is easier to retry safely than
 
 CoreAI's resilience layer also guarantees retries never double-execute tools: a
 failed completion whose turn already **executed** a tool call is not replayed by
-the HTTP retry loop or the fallback provider chain. Rejected calls
-(duplicate-suppressed, parse errors, unknown tool names, argument-conversion
-failures) are treated as never-invoked and do not block retries.
+the HTTP retry loop or the fallback provider chain.
+
+Only calls the policy rejected **before** the invocation boundary count as
+never-invoked and stay retry-eligible: an echo-suppressed duplicate, unparseable
+argument JSON, an unknown tool name, a declared tool with no binding, and a
+missing required argument caught by schema validation. Everything that reached
+`AIFunction.InvokeAsync` is treated as invoked — **including a failure MEAI raised
+while binding the arguments**. That boundary cannot prove the body was never
+entered, and the previous attempt to prove it by reading the exception's stack
+frames is unusable on IL2CPP/WebGL, where frames can be stripped: a body exception
+then looked like a binding failure and the retry replayed a mutation that had
+already happened. The conservative verdict costs a retry; the precise one cost
+correctness.
 
 ## Result Envelope
 
@@ -105,6 +115,12 @@ For failures:
 This keeps prompts smaller and lets policies reason about tool results without
 parsing prose.
 
+Keep results inside `CoreAISettings.MaxToolResultChars` (8000 by default). A longer
+result is cut at that limit and the cut is marked for the model, but the tail is
+gone — page or summarize inside the tool instead of relying on the truncation. See
+[TOOL_CALL_SPEC.md](../../CoreAiUnity/Docs/TOOL_CALL_SPEC.md) for the two documented
+edits the policy makes to a result.
+
 ## Duplicate Calls
 
 Keep duplicate suppression on (`AllowDuplicates = false`, the default) for any tool
@@ -124,7 +140,7 @@ echoed or retried turn, while a legitimate retry is never blocked:
   {
     "ok": true,
     "duplicate": true,
-    "message": "Duplicate tool call 'world_command' with identical arguments: this exact call already succeeded ... the world was NOT changed again."
+    "message": "Duplicate tool call 'world_command' with identical arguments: this exact call already succeeded earlier in this request and was NOT executed again. Use its earlier result; do not repeat the call."
   }
   ```
 
@@ -135,6 +151,11 @@ echoed or retried turn, while a legitimate retry is never blocked:
   succeeds**. A transient failure — including the failed slot of a partially
   successful batch — is never registered, so retrying exactly that call with
   identical arguments is always allowed.
+- **An echoed turn is not a failed turn.** The no-op is `ok: true` and its trace is
+  a SUCCESS with `source=duplicate`; suppressed slots take no part in the
+  consecutive-error counter. A user asking "show that card again" three times in a
+  row therefore cannot trip the max-errors guard and get the turn aborted. A model
+  that echoes forever is bounded by the roundtrip cap, not by the error counter.
 
 You do NOT need a tool-side idempotency key just to get echo suppression; the policy
 provides it by signature. Keep an explicit request/action id (below) for
@@ -143,20 +164,32 @@ even across independent requests.
 
 ## Policy-Enforced Mutation Ordering
 
-Mutating built-ins (`world_command`, `component_command`, `execute_lua`,
-`manage_mods`, `manage_skills`, `memory`, and — conservatively — `call_skill_tool`)
-share ONE ordered serialization chain, so no two mutations ever overlap and they
-apply in original call order even when `MaxParallelToolCalls > 1`. Read-only tools
-still run fully in parallel.
+**Declare mutation on the tool.** A tool that writes to shared state — the world,
+memory, files, a registry, a server — sets `IsMutating => true` (`ILlmTool` /
+`LlmToolBase`), or `IsMutating = true` on a `DelegateLlmTool`. Every mutating call
+of a turn shares ONE ordered serialization chain, so no two mutations ever overlap
+and they apply in original call order even when `MaxParallelToolCalls > 1`.
+Read-only tools (the default, `IsMutating => false`) still run fully in parallel.
 
-In the **streaming** path these mutating calls are DEFERRED: they are buffered as
-they arrive and executed serially at turn finalization, after the cross-turn echo
-check. This means an echoed streamed mutation is suppressed with the no-op above
-**before** any side effect — it does not re-apply and then get noticed. Read-only
-streamed calls keep executing the moment they arrive.
+The built-in names `world_command`, `component_command`, `execute_lua`,
+`manage_mods`, `manage_skills`, `memory` and — conservatively — `call_skill_tool`
+are recognized by name as well, so a host that registered them keeps the guarantee
+without changing anything. That name list is **backward compatibility only**: it is
+not an extension point, and a host must never patch the package source to add a
+name to it. Your own mutating tool is invisible to the name list and will run
+concurrently until it declares the flag.
 
-If you add a new state-mutating built-in, add its name to
-`ToolExecutionPolicy.SerializedMutatingToolNames` and leave `AllowDuplicates = false`.
+In the **streaming** path a call executes the moment it ARRIVES, mutating or not.
+The echo check runs synchronously at arrival and therefore **before any side
+effect**: a per-call signature needs no knowledge of the rest of the turn, so an
+echoed streamed mutation is answered with the no-op above without re-applying
+anything. Mutating arrivals still join the turn's serialization chain and never
+overlap each other; read-only arrivals run gate-bounded in parallel.
+
+Leave `AllowDuplicates = false` on mutating tools. The two flags are independent:
+`IsMutating` decides *ordering*, `AllowDuplicates` decides *echo suppression*, and
+a tool that sets `AllowDuplicates = true` is exempt from the echo check even when
+its name is one of the built-in mutating names above.
 
 ## Error Rules
 

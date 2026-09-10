@@ -116,5 +116,22 @@ namespace CoreAI.Ai
             _inner.ClearSummary(scoped);
             return Task.CompletedTask;
         }
+
+        /// <summary>
+        /// Captures one effective storage key for a complete async read/modify/write operation.
+        /// Managers retain this binding across awaits and deferred commits; later host scope changes
+        /// cannot move a summary into another user's partition.
+        /// </summary>
+        internal IAsyncConversationSummaryStore BindAsync(string roleId, out string boundRoleId)
+        {
+            boundRoleId = AgentMemoryScopeKey.Resolve(_scopeProvider, roleId);
+            if (_inner is ScopedConversationSummaryStoreDecorator nested)
+                return nested.BindAsync(boundRoleId, out boundRoleId);
+            if (_inner is IAsyncConversationSummaryStore asyncInner) return asyncInner;
+            if (_allowBlockingSyncFallback) return new BlockingSyncSummaryStoreAsyncAdapter(_inner);
+            throw new NotSupportedException(
+                "[ScopedConversationSummaryStore] Inner store does not implement IAsyncConversationSummaryStore; " +
+                "wrap it in BlockingSyncSummaryStoreAsyncAdapter or explicitly enable blocking fallback.");
+        }
     }
 }

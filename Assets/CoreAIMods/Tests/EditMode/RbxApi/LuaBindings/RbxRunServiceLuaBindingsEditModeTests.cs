@@ -120,20 +120,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     store_set('dt', tostring(dt))
                 end)");
 
-            // WHY: drive the same path the host uses each frame — PumpFrame runs the split
-            // scheduler-phase pumps; RunService.Step is the standalone equivalent nothing calls.
-            roblox.PumpFrame(0.25f);
-            roblox.Scheduler.Advance(0d);
+            // WHY Advance with the frame delta: the production scheduler runs the split
+            // scheduler-phase pumps once per frame; RunService.Step is the standalone
+            // equivalent nothing calls.
+            roblox.Scheduler.Advance(0.25d);
             Assert.AreEqual("1", store.Get("m", "n"));
             Assert.AreEqual("true", store.Get("m", "dt_is_number"), "Heartbeat handler must receive a numeric dt");
             Assert.AreEqual("0.25", store.Get("m", "dt"));
 
-            roblox.PumpFrame(0.25f);
-            roblox.Scheduler.Advance(0d);
-            roblox.PumpFrame(0.25f);
-            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0.25d);
+            roblox.Scheduler.Advance(0.25d);
 
-            // WHY: one fire per frame — three pumps deliver exactly three Heartbeat invocations.
+            // WHY: one fire per frame — three frames deliver exactly three Heartbeat invocations.
             Assert.AreEqual("3", store.Get("m", "n"));
         }
 
@@ -164,12 +162,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 lastDelta = (float)args[0];
             }));
 
-            roblox.PumpFrame(0.5f);
-            roblox.Scheduler.Advance(0d);
-            roblox.PumpFrame(0.5f);
-            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0.5d);
+            roblox.Scheduler.Advance(0.5d);
 
-            Assert.AreEqual(2, count, "Heartbeat fires once per pump");
+            Assert.AreEqual(2, count, "Heartbeat fires once per frame");
             Assert.AreEqual(0.5f, lastDelta, "Heartbeat carries the frame delta");
         }
     }

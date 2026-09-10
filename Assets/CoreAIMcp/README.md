@@ -1,16 +1,70 @@
 # CoreAI MCP Server (`com.neoxider.coreaimcp`)
 
 An optional [Model Context Protocol](https://modelcontextprotocol.io) server that runs **inside a live
-CoreAI game session** (play mode in the Editor, or a shipped build) so an external agent — Claude Code,
-Codex CLI, opencode, LM Studio, or any MCP client — can drive the running game over a standard protocol.
-It is the in-game Command Bar surfaced over MCP: the same `execute_lua` / `manage_mods` / `get_mod_logs`
-tools the on-board agent uses, plus `screenshot`, `world_command` when that service exists, and
-`read_skill` to pull the exact Lua/Rbx API reference the game ships.
+CoreAI game session** — Editor play mode or a shipped build — so an external agent drives the *running*
+game over a standard protocol instead of editing files and restarting.
 
-Use it for AI-in-the-loop testing, live repair, and CI: connect a Claude Code session to the running
-game and let it spawn objects, load mods, read logs, and see the result.
+It is the in-game Command Bar surfaced over MCP: `execute_lua`, `get_mod_logs`, `screenshot`,
+`read_skill`, plus `world_command` and `manage_mods` when the host composes them.
 
-## Security model — read this first
+## Who this is for
+
+- **AI-in-the-loop testing** — point a Claude Code / Codex / opencode session at the running game and
+  let it spawn objects, load a mod, read the logs, and look at the result.
+- **Live repair and iteration** — change behaviour without leaving play mode.
+- **CI and reproduction** — script a session against a build over loopback HTTP.
+
+## Quick start
+
+Install `com.neoxider.coreaimcp` (it depends on `com.neoxider.coreaimods` and
+`com.neoxider.coreaiunity`), then either add a **CoreAI MCP Server** component to a scene that also has
+a `CoreAILifetimeScope`, or start it from code:
+
+```csharp
+using CoreAI.Mcp.Server;
+
+CoreAiMcpServer server = CoreAiMcpServer.StartServer(port: 8590); // DontDestroyOnLoad host if none exists
+string url = server.Url;          // http://127.0.0.1:8590/mcp
+string token = server.AuthToken;  // null only when auth is disabled
+```
+
+```bash
+claude mcp add --transport http coreai http://127.0.0.1:8590/mcp \
+  --header "Authorization: Bearer $COREAI_MCP_TOKEN"
+```
+
+`StartServer` collects tools from the CoreAI composition, so it needs a built `CoreAILifetimeScope` in
+the scene; without one it logs `No built CoreAI LifetimeScope; server not started.` and does nothing.
+To run with **your own** catalog and no CoreAI composition at all:
+
+```csharp
+CoreAiMcpServer server = new GameObject("Mcp").AddComponent<CoreAiMcpServer>();
+McpToolRegistry registry = new(new IMcpTool[] { myTool });   // or new McpToolRegistry(null) to start empty
+server.StartListening(registry, listenPort: 8590);
+```
+
+> **Before you leave this port open:** an MCP port is full control of the game. Read
+> [Security model](#security-model) — loopback alone is not a boundary, and the bearer token is the
+> layer that stops another local process.
+
+## Scope and boundaries — read this before designing around it
+
+- **This package is a server, not a client.** There is no outbound MCP client in it: no stdio spawn, no
+  remote-server connector. CoreAI agents inside the game reach *their* capabilities through `ILlmTool`
+  and skills, not through MCP. If you want the in-game agent to consume an *external* MCP server, you
+  write that bridge yourself — this package will not do it for you.
+- **HTTP only, loopback only.** One `HttpListener` bound to `127.0.0.1`. No stdio and no WebSocket
+  transport; stdio-only clients go through an external bridge such as `npx mcp-remote`.
+- **Not available in a WebGL player.** `CoreAiMcpServer.IsWebGlPlayer` short-circuits `StartListening`
+  with a warning. The typed live catalog (`McpToolRegistry`) itself needs neither Unity nor sockets.
+- **The catalog is per-composition.** A tool appears only when its backing service resolves, so
+  `tools/list` describes *this* game, not the package. `manage_mods` additionally requires explicit
+  host-admin configuration (below) and is **absent by default**.
+- **MCP surface is tools-only.** `initialize`, `notifications/initialized`, `tools/list`, `tools/call`,
+  `ping`, and the server-sent `notifications/tools/list_changed`. No `resources/*`, `prompts/*`,
+  `logging/*` or `completion/*`.
+
+## Security model
 
 An open MCP port is **full control of the game**: `execute_lua` runs arbitrary sandboxed Lua,
 `manage_mods load` writes a mod that survives a restart, and `screenshot` returns the player's screen.
@@ -102,6 +156,8 @@ the client forever.
   client version. The client decides whether the supported version is compatible with its implementation.
 - Errors: unknown method → `-32601`, unknown/absent tool name → `-32602`, malformed JSON → `-32700`,
   non-object JSON → `-32600`, a stalled main thread → `-32603` (message names the cause).
+- Request parsing preserves JSON strings exactly, including timestamp-shaped request ids, tool names,
+  and arguments. It does not infer dates or change their formatting; trailing content is rejected.
 - Transport rejections: `401` — token, `403` — foreign Origin/Host or non-local address,
   `413` — body size exceeded in **UTF-8 bytes**, including chunked requests, `415` — not JSON,
   `408` — body not received in time, `503` — all 64 request-processing slots busy.
@@ -130,6 +186,19 @@ catalog.Replace(new IMcpTool[] { sharedTool, nextStageTool });
 publishes a complete new set in one operation. You can start from an empty catalog and add tools
 later: `server.StartListening(new McpToolRegistry(null), listenPort: 8590)`. The standard
 `StartListening()` still collects the available tools from the CoreAI composition.
+
+Without Unity at all, assemble the same stack by hand — this is what the engine-free EditMode tests do:
+
+```csharp
+McpToolRegistry registry = new(new IMcpTool[] { myTool });
+McpRpcDispatcher dispatcher = new(registry, new McpSessionStore(), new InlineMainThreadDispatcher());
+McpHttpServer http = new(port, dispatcher, log, logError, authToken);
+http.Start();
+```
+
+An `IMcpTool` is `Name` / `Description` / `InputSchemaJson` (must parse to `{"type":"object"}`) plus
+`Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)`; build results
+with `McpToolResult.Text(...)` or `McpToolResult.Failure(...)`.
 
 Each publication is atomic. Names, descriptions and schemas are frozen until the next registration;
 changing the properties of the passed object alone does not change the declared schema. An invalid schema,
@@ -205,13 +274,48 @@ Tools are registered **only when their backing service resolves** in the current
 | Tool | Present when | What it does |
 |------|--------------|--------------|
 | `execute_lua` | the Lua mod stack is installed | Runs a one-off snippet in the sandboxed Lua 5.2 VM. |
-| `manage_mods` | the mod runtime resolves | list / get_source / load / reload / unload / export / import / forget / versions / revert / diagnostics on persistent mods. |
+| `manage_mods` | the mod runtime resolves **and** host-admin authority is configured (see below) — **absent by default** | list / get_source / load / reload / unload / export / import / forget / versions / revert / diagnostics on persistent mods. |
 | `get_mod_logs` | an `ILuaLogService` resolves | Reads mod `print`/`warn`/`error`/runtime-error output, independent of the Unity console. |
 | `read_skill` | the Programmer role has skills | Returns the full text of a registered skill (e.g. `Lua Modding`, `Rbx API`) — the same reference the on-board agent reads. |
 | `world_command` | a world-command executor resolves | Spawn / move / edit scene objects (meters; Euler degrees). |
 | `screenshot` | always | Captures the main camera to a PNG (base64), downscaled to `max_resolution` (default 1024). Missing camera / capture failure is reported per call, with the real reason. |
 
 Each tool ships a real JSON Schema in `tools/list` so clients validate arguments before calling.
+
+### `manage_mods` and host-admin authority
+
+`manage_mods` writes mods that survive a restart, so it is not published to an anonymous caller.
+`CoreAiMcpToolProvider` registers it only when **all** of the following hold, and logs a distinct
+warning naming the reason whenever one does not:
+
+1. **Enable Host Admin Mod Management** is ticked (or `ConfigureHostAdminModManagement(...)` was called
+   before the server started — it throws while `IsRunning`);
+2. **Host Admin Actor Id** is non-blank;
+3. host composition supplies an `IActorIdentityProvider`;
+4. that provider's `Programmer` actor is `IsTrusted` **and** `Grants.IsUnrestricted`;
+5. its `ActorId` matches the configured **Host Admin Actor Id** exactly.
+
+```csharp
+server.ConfigureHostAdminModManagement("studio-host");            // explicit id
+server.ConfigureHostAdminModManagement(actorIdentityProvider);    // id taken from the composed actor
+```
+
+Turning it on logs a warning for the whole session, and the warning is the accurate description of the
+risk: **every client holding the MCP bearer token receives this authority.**
+
+### Tool residency: what the model pays for
+
+`McpToolResidency` decides where a tool is *advertised*, not whether it works. `Native` tools appear in
+`tools/list`; `Dynamic` tools are reached through the `coreai_tools` broker (`list` / `describe` /
+`call`). Both stay callable by direct name while they are in the catalog.
+
+The default policy is `McpToolResidencyPolicies.Default` (everything Native).
+`McpToolResidencyPolicies.LeanDefault` keeps only the discovery tools resident —
+`McpToolResidencyPolicies.DiscoveryToolNames` is `{ "read_skill", "memory" }` — and routes the rest
+through the broker; the source records the measurement behind that choice on the real six-tool
+composition: **9,324 B all-Native versus 768 B lean**. Operators can move individual tools without
+recompiling through the environment variables `COREAI_MCP_DYNAMIC` and `COREAI_MCP_NATIVE`
+(comma-separated tool names, read at composition time; Native wins).
 
 ## How external agents learn the API
 
@@ -297,13 +401,23 @@ curl -s http://127.0.0.1:8590/mcp \
 A `401` means the token is wrong or missing; a `403` means the request carried a foreign `Origin`/`Host`
 (you are going through a proxy or a browser — connect to `127.0.0.1` directly).
 
-**Checks:** EditMode covers JSON/SSE HTTP round trips, version negotiation, live add/remove/replace,
-notification reconnects, request limits, the UTF-8 byte cap, and the incomplete request body.
-PlayMode verifies catalog changes through one running `CoreAiMcpServer` with real loopback
-requests, a single session, and execution on the game thread; separately — a remote call in the queue. The Claude Code, Codex, opencode, and
-LM Studio **config snippets** follow each tool's published configuration format and target this server's
-standard streamable-HTTP endpoint; the header syntax in particular varies between client versions — check
-yours if the connection returns `401`.
+**Checks.** The behaviour this README claims is covered by named tests, not by assertion:
+
+| Claim | Test |
+|---|---|
+| The catalog changes on a running server, over one live session, and the client is notified | `CoreAiMcpServerResidencyPlayModeTests.LiveCatalog_AddRemoveReplace_OverOneRunningHttpServerAndSession` (real `CoreAiMcpServer`, real loopback `HttpClient`, one session id throughout) |
+| `list_changed` reaches the same session and a reconnect sees the current revision | `McpHttpServerIntegrationEditModeTests.LiveCatalogChanges_NotifySameSession_AndReconnectGetsCurrentRevision` |
+| Publication is atomic; an invalid or duplicate schema rejects the whole update | `McpToolRegistryEditModeTests.InvalidSchemaUpdate_IsRejectedAtomically`, `Registry_DuplicateNamesAreRejected_WithoutChangingPublishedSet` |
+| A catalog change between admission and execution cannot redirect old arguments | `McpToolRegistryEditModeTests.AdmittedInvocation_AfterReplacement_UsesOnlyCapturedBodyAndArguments`, `InvocationChangedBeforeAdmission_DoesNotAdmitOldOrReplacementBody`, `McpRpcDispatcherEditModeTests.QueuedCall_RejectsRemovedOrReplacedBinding` |
+| A tool removed before its frame does not run | `CoreAiMcpServerResidencyPlayModeTests.QueuedCall_RemovedBeforeGameFrame_DoesNotRunOldOrReplacementBody` |
+| Transport rejections (`401`/`403`/`413`/`415`), Host/Origin checks, UTF-8 byte cap, incomplete body | `McpHttpServerSecurityEditModeTests`, `McpRequestGuardEditModeTests` |
+| The main-thread queue honours its budget, capacity and timeout | `CoreAiMcpServerMainThreadEditModeTests` |
+| `serverInfo.version` never drifts from `package.json` | `McpPackageVersionEditModeTests` |
+| The protocol core stays engine-free | `McpArchitectureFitnessEditModeTests` |
+
+The Claude Code, Codex, opencode, and LM Studio **config snippets** follow each tool's published
+configuration format and target this server's standard streamable-HTTP endpoint; the header syntax in
+particular varies between client versions — check yours if the connection returns `401`.
 
 ## Worked example session
 

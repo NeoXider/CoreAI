@@ -55,7 +55,7 @@ world state, mods, memories, (soon) UI — is versioned, persisted, revertible, 
 
 ## 2. Package map
 
-Six UPM packages, released in lockstep (all currently 7.40.2):
+Seven UPM packages, released in lockstep (all currently 7.41.1):
 
 | Package | What it is |
 |---|---|
@@ -247,10 +247,11 @@ WebGL as solo/pure-client, dedicated headless server. Budgets bound every mod: p
 step/time/allocation guards, coroutine resume guards, Lua generation rate limits.
 
 **Current state.** Lua-CSharp is managed and AOT/WebGL-safe; sandbox budgets and the coroutine
-guard are shipped and adversarially audited; WebGL persistence syncs through
-`CoreAiWebGlPersistence`, whose `SyncAsync()` completes only from the matching `FS.syncfs`
-success/error callback (a cancellation or 30-second timeout drops the pending call and a late
-callback is ignored), so a durability result is a real one; local GGUF models are unavailable in a
+guard are shipped and adversarially audited; WebGL persistence is the engine's own automatic
+`persistentDataPath` synchronization, and `CoreAiWebGlPersistence` reports immediately whether it is
+armed for this page instead of awaiting an `FS.syncfs` callback Unity 6.3 no longer delivers — so a
+durability answer is a real one and no caller can hang on a confirmation that never arrives
+(`CoreAIWebGlPersistentDataSyncBuildGuard` fails a build whose web template does not arm it); local GGUF models are unavailable in a
 browser player and return a documented limitation message instead of failing obscurely
 ([KNOWN_ISSUES.md](../Assets/CoreAiUnity/Docs/KNOWN_ISSUES.md)); the benchmark package (G1–G8,
 six-dimension scoring, role fitness, model leaderboard) is the standing conformance/quality

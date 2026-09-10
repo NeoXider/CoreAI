@@ -97,7 +97,7 @@ namespace CoreAI.Infrastructure.Llm
                 return GetToolsDisabledResponseAsync(chatMessages, options, cancellationToken);
             }
 #if UNITY_WEBGL && !UNITY_EDITOR
-            // WHY: MEAI 10.9's function processor resumes with ConfigureAwait(false). Keep the proven
+            // WHY: MEAI's function processor resumes with ConfigureAwait(false). Keep the proven
             // host-context loop on threadless WebGL until asynchronous browser execution is verified.
             return GetWebGlResponseAsync(chatMessages, options, cancellationToken);
 #else
@@ -135,7 +135,6 @@ namespace CoreAI.Infrastructure.Llm
                 AllowConcurrentInvocation = false,
                 MaximumIterationsPerRequest = int.MaxValue,
                 MaximumConsecutiveErrorsPerRequest = int.MaxValue,
-                AdditionalTools = boundary.FailureBindings,
                 FunctionInvoker = boundary.InvokeAsync
             };
             try
@@ -169,9 +168,7 @@ namespace CoreAI.Infrastructure.Llm
                     // belongs in this completion, otherwise earlier prose and tool output repeat in UI.
                     List<MEAI.ChatMessage> visibleMessages = boundary.LastAssistantMessages;
                     HashSet<MEAI.AIContent> visibleContents = new(visibleMessages.SelectMany(message => message.Contents));
-                    List<MEAI.AIContent> approvals = response.Messages.SelectMany(message => message.Contents)
-                        .OfType<MEAI.ToolApprovalRequestContent>()
-                        .Where(approval => !visibleContents.Contains(approval)).Cast<MEAI.AIContent>().ToList();
+                    List<MEAI.AIContent> approvals = CollectPendingApprovalRequests(response, visibleContents);
                     if (approvals.Count > 0)
                     {
                         // WHY: MEAI manufactures approval requests after the provider boundary returns.
@@ -196,13 +193,56 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
+        /// <summary>
+        /// Detached snapshot of one roundtrip's usage. Goes through the shared
+        /// <see cref="LlmUsageAccumulator"/> so a copy and a sum are the same native
+        /// <c>UsageDetails.Add</c> in both loops, and the provider's own instance stays unmutated.
+        /// </summary>
         private static MEAI.UsageDetails CopyUsage(MEAI.UsageDetails usage)
         {
-            if (usage == null) return null;
-            MEAI.UsageDetails copy = new();
-            copy.Add(usage);
-            return copy;
+            return LlmUsageAccumulator.Accumulate(null, usage);
         }
+
+        // MEAI001 is MEAI's own "evaluation purposes only" marker on its user-approval API
+        // (ApprovalRequiredAIFunction / FunctionApprovalRequestContent). It is suppressed HERE, around
+        // the two members that carry it, and nowhere else: a file- or project-wide suppression would
+        // also hide the next experimental API someone reaches for. Approval is a security control -
+        // if MEAI changes its shape, this package must fail to compile and be ported deliberately.
+        //
+        // WHY the Function* spelling: this package is built against Microsoft.Extensions.AI 9.10.2 -
+        // the version the Unity consumer can actually load - and 9.10.2 names the type
+        // FunctionApprovalRequestContent (10.x merged it with the MCP variant and renamed the pair to
+        // ToolApprovalRequestContent). Do NOT "restore" the 10.x names: they compile nowhere in this
+        // repository and fail only in the consumer. The pin lives in Assets/packages.config and
+        // tools/portable/CoreAI.Core.csproj, and MeaiVersionFloorEditModeTests holds them together.
+#pragma warning disable MEAI001
+
+        /// <summary>
+        /// Whether the tool bound to <paramref name="call"/> was registered as approval-required, so
+        /// CoreAI policy must NOT execute it. Such a call belongs to MEAI's approval flow: MEAI turns
+        /// it into a <see cref="MEAI.FunctionApprovalRequestContent"/> for the caller and only invokes
+        /// it after the matching <c>FunctionApprovalResponseContent</c> comes back.
+        /// </summary>
+        private static bool RequiresUserApproval(MEAI.ChatOptions options, MEAI.FunctionCallContent call)
+        {
+            return options?.Tools?.FirstOrDefault(tool => tool.Name == call.Name)
+                ?.GetService(typeof(MEAI.ApprovalRequiredAIFunction)) != null;
+        }
+
+        /// <summary>
+        /// Approval requests MEAI manufactured for this turn that the visible assistant messages do
+        /// not already carry. Without them the caller would never see that a tool is waiting for a
+        /// decision, and the turn would look like the model simply said nothing.
+        /// </summary>
+        private static List<MEAI.AIContent> CollectPendingApprovalRequests(MEAI.ChatResponse response,
+            HashSet<MEAI.AIContent> visibleContents)
+        {
+            return response.Messages.SelectMany(message => message.Contents)
+                .OfType<MEAI.FunctionApprovalRequestContent>()
+                .Where(approval => !visibleContents.Contains(approval)).Cast<MEAI.AIContent>().ToList();
+        }
+
+#pragma warning restore MEAI001
 
         /// <summary>CoreAI policy hooks around MEAI's native history, invocation and usage loop.</summary>
         private sealed class NativePolicyClient : MEAI.DelegatingChatClient
@@ -221,7 +261,16 @@ namespace CoreAI.Infrastructure.Llm
             private bool _previousAllFailed;
             private bool _removeFailedFeedback;
             private ToolExecutionPolicy.StreamedTurn _approvalTurn;
-            public List<MEAI.AITool> FailureBindings { get; } = new();
+
+            /// <summary>
+            /// Answers this boundary owes MEAI for calls CoreAI policy deliberately did NOT execute,
+            /// keyed by call id. Today that is the set the SERVICE already resolved: the provider sent
+            /// the result together with the call, so re-running the tool would repeat its side effect.
+            /// MEAI still invokes such a call (it only looks at the tool name), so the boundary has to
+            /// hand back the service's own answer instead of a policy slot that does not exist.
+            /// </summary>
+            private readonly Dictionary<string, object> _serviceAnswers = new(StringComparer.Ordinal);
+
             public List<MEAI.ChatMessage> LastAssistantMessages { get; private set; } = new();
 
             public NativePolicyClient(SmartToolCallingChatClient owner, ToolExecutionPolicy policy)
@@ -256,7 +305,7 @@ namespace CoreAI.Infrastructure.Llm
                         await CompleteApprovalsAsync(cancellationToken);
                         context.Terminate = _policy.TurnEndingToolSucceeded || _policy.IsMaxErrorsReached;
                     }
-                    return immediate.Value.Result;
+                    return ToolPayloadOf(immediate.Value.Result);
                 }
                 if (!_batchReady)
                 {
@@ -270,7 +319,106 @@ namespace CoreAI.Infrastructure.Llm
                 // WHY: Finish the MEAI result pairing for this batch before terminating its loop.
                 context.Terminate = context.FunctionCallIndex == context.FunctionCount - 1 &&
                                     (_policy.TurnEndingToolSucceeded || _policy.IsMaxErrorsReached);
-                return _batch.Results[context.FunctionCallIndex];
+                return PayloadForCall(context.CallContent);
+            }
+
+            /// <summary>
+            /// The answer for the call MEAI is invoking, found by CALL ID.
+            /// <para>
+            /// NOT by <see cref="MEAI.FunctionInvocationContext.FunctionCallIndex"/>: that index counts
+            /// EVERY call in the model's message, while the policy batch holds only the calls policy was
+            /// asked to execute. The two lists differ the moment one call is answered elsewhere - a
+            /// result the service already delivered with the call - so a positional lookup returns a
+            /// NEIGHBOUR's result, or runs off the end and reaches the model as "Function failed" for a
+            /// tool that had in fact run successfully. Every result carries the id of the call it
+            /// answers, and that is the only mapping filtering cannot break.
+            /// </para>
+            /// </summary>
+            private object PayloadForCall(MEAI.FunctionCallContent call)
+            {
+                string callId = call?.CallId ?? "";
+                if (_batch.Results != null)
+                {
+                    foreach (MEAI.AIContent content in _batch.Results)
+                    {
+                        if (content is MEAI.FunctionResultContent result &&
+                            string.Equals(result.CallId ?? "", callId, StringComparison.Ordinal))
+                        {
+                            return ToolPayloadOf(result);
+                        }
+                    }
+                }
+
+                if (_serviceAnswers.TryGetValue(callId, out object served))
+                {
+                    return served;
+                }
+
+                // Reaching here means MEAI invoked a call this boundary never planned an answer for.
+                // Say so instead of handing over a neighbour's result: a wrong answer attributed to the
+                // right tool is indistinguishable from a real one and corrupts the whole conversation.
+                _owner._logger.Warn(
+                    $"[SmartToolCall] No CoreAI result for tool call '{call?.Name}' (id '{callId}').",
+                    LogTag.Llm);
+                return $"Error: CoreAI produced no result for tool call '{call?.Name}'.";
+            }
+
+            /// <summary>
+            /// The value MEAI must put inside the <see cref="MEAI.FunctionResultContent"/> it pairs with
+            /// the call. CoreAI policy already produces a whole result content, but MEAI wraps whatever
+            /// the invoker hands back into a result content of its own, so returning the container makes
+            /// the model read the type name instead of the tool's answer. Return the payload and let
+            /// MEAI own the pairing - the call id it uses is the one from the original call anyway.
+            /// </summary>
+            private static object ToolPayloadOf(MEAI.AIContent result)
+            {
+                return result is MEAI.FunctionResultContent content ? content.Result : result;
+            }
+
+            /// <summary>Whether MEAI can bind <paramref name="call"/> to a function it is able to invoke.</summary>
+            private static bool IsBound(MEAI.ChatOptions options, MEAI.FunctionCallContent call)
+            {
+                return options?.Tools?.OfType<MEAI.AIFunction>()
+                    .Any(function => function.Name == call.Name) == true;
+            }
+
+            /// <summary>
+            /// Drops the given content instances from <paramref name="response"/>, and any message left
+            /// with nothing in it. Identity, not value: the caller holds the very objects the response is
+            /// built from, and two calls of one tool with identical arguments are legitimately equal by
+            /// value while being separate operations.
+            /// </summary>
+            private static void RemoveContents(MEAI.ChatResponse response,
+                IReadOnlyList<MEAI.AIContent> removed)
+            {
+                if (removed.Count == 0)
+                {
+                    return;
+                }
+
+                List<MEAI.ChatMessage> kept = new(response.Messages.Count);
+                foreach (MEAI.ChatMessage message in response.Messages)
+                {
+                    for (int i = message.Contents.Count - 1; i >= 0; i--)
+                    {
+                        MEAI.AIContent content = message.Contents[i];
+                        for (int j = 0; j < removed.Count; j++)
+                        {
+                            if (ReferenceEquals(removed[j], content))
+                            {
+                                message.Contents.RemoveAt(i);
+                                break;
+                            }
+                        }
+                    }
+
+                    if (message.Contents.Count > 0)
+                    {
+                        kept.Add(message);
+                    }
+                }
+
+                response.Messages = kept;
             }
 
             public async Task CompleteApprovalsAsync(CancellationToken cancellationToken)
@@ -342,13 +490,36 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     retryUsage = LlmUsageAccumulator.Accumulate(retryUsage, response.Usage);
                     string text = ConcatenateAssistantTextContents(response);
-                    HashSet<string> serverHandled = response.Messages.SelectMany(message => message.Contents)
-                        .OfType<MEAI.FunctionResultContent>().Select(result => result.CallId).ToHashSet(StringComparer.Ordinal);
+                    List<MEAI.FunctionCallContent> assistantCalls = FlattenAssistantContents(response)
+                        .OfType<MEAI.FunctionCallContent>().ToList();
+                    _serviceAnswers.Clear();
+                    List<MEAI.AIContent> reEmitted = new();
+                    foreach (MEAI.FunctionResultContent handled in response.Messages
+                                 .SelectMany(message => message.Contents).OfType<MEAI.FunctionResultContent>())
+                    {
+                        _serviceAnswers[handled.CallId ?? ""] = handled.Result;
+                        // WHY the result leaves the response: MEAI invokes every call whose NAME it can
+                        // bind, including one the service already answered, and pairs its own result with
+                        // it. Left in place, that call id ends up with TWO tool results in the history -
+                        // a shape providers reject. The payload is not lost: this boundary hands the very
+                        // same value back from _serviceAnswers, so MEAI owns exactly one pairing.
+                        if (assistantCalls.Any(call => IsBound(requestOptions, call) &&
+                                string.Equals(call.CallId ?? "", handled.CallId ?? "", StringComparison.Ordinal)))
+                        {
+                            reEmitted.Add(handled);
+                        }
+                    }
+
+                    RemoveContents(response, reEmitted);
+                    HashSet<string> serverHandled = new(_serviceAnswers.Keys, StringComparer.Ordinal);
                     bool hasNativeCalls = FlattenAssistantContents(response).OfType<MEAI.FunctionCallContent>().Any();
+                    // WHY no "informational only" filter: that flag does not exist in the MEAI version
+                    // this package targets, so nothing can ever set it and a check on it would exclude
+                    // no call - a dead condition, not a guard. Calls the service already resolved are
+                    // still skipped, by their paired FunctionResultContent (serverHandled) above.
                     _calls = FlattenAssistantContents(response).OfType<MEAI.FunctionCallContent>()
-                        .Where(call => !call.InformationalOnly && !serverHandled.Contains(call.CallId) &&
-                            requestOptions?.Tools?.FirstOrDefault(tool => tool.Name == call.Name)
-                                ?.GetService(typeof(MEAI.ApprovalRequiredAIFunction)) == null).ToList();
+                        .Where(call => !serverHandled.Contains(call.CallId) &&
+                            !RequiresUserApproval(requestOptions, call)).ToList();
                     if (_owner._allowTextShapedToolCalls && _calls.Count == 0 && !finalSummary &&
                         (requestOptions?.Tools?.Count ?? 0) > 0 &&
                         TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> extracted,
@@ -388,16 +559,56 @@ namespace CoreAI.Infrastructure.Llm
                             "continue with the next tool call now. If it is finished, reply with a short summary."));
                         continue;
                     }
-                    FailureBindings.Clear();
-                    foreach (MEAI.FunctionCallContent call in _calls)
+                    List<MEAI.FunctionCallContent> unbound =
+                        _calls.Where(call => !IsBound(requestOptions, call)).ToList();
+                    if (unbound.Count > 0)
                     {
-                        if (requestOptions?.Tools?.OfType<MEAI.AIFunction>().Any(f => f.Name == call.Name) != true &&
-                            !FailureBindings.Any(f => f.Name == call.Name))
+                        // WHY here and not through MEAI: MEAI decides ONCE per request - before the first
+                        // provider call - which functions it is able to invoke, so a binding registered
+                        // after the model named an unknown tool is never consulted. MEAI then answers
+                        // "function not found" itself, CoreAI policy never sees the failure, and a model
+                        // that keeps inventing a tool name loops until the roundtrip budget runs out
+                        // instead of stopping at maxConsecutiveErrors. The name is only knowable here,
+                        // so the failure is counted, traced and answered here - without ever binding the
+                        // invented name to any tool authority.
+                        //
+                        // The invented call then LEAVES this turn: whether it stood alone or beside real
+                        // calls, the model reads CoreAI's own answer for it (the one that lists the tools
+                        // that DO exist) and nothing else, and the failure is on the policy counter. That
+                        // uniformity is the point - the two shapes used to diverge, and the mixed one was
+                        // the broken half.
+                        ToolExecutionPolicy.BatchToolCallResult unboundBatch =
+                            await _policy.ExecuteBatchAsync(unbound, requestOptions, cancellationToken);
+                        _calls = _calls.Where(call => !unbound.Contains(call)).ToList();
+                        // CoreAI's answer goes straight into the history as its own assistant/tool pair.
+                        // It has to be a pair: a tool result whose call is not in the history is rejected
+                        // by providers, so the invented call travels together with the answer to it.
+                        messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                            unbound.Cast<MEAI.AIContent>().ToList()));
+                        messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, unboundBatch.Results));
+                        if (_calls.Count == 0)
                         {
-                            // WHY: MEAI normally bypasses FunctionInvoker for unknown names. This local
-                            // dispatch marker routes the error through policy without granting any tool authority.
-                            FailureBindings.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() => "Error: unbound tool"),
-                                new MEAI.AIFunctionFactoryOptions { Name = call.Name }));
+                            if (!_policy.IsMaxErrorsReached && !_policy.TurnEndingToolSucceeded)
+                            {
+                                // Nothing executable was left in the turn, so the correction IS the turn:
+                                // ask the model again right here, with the answer already in history.
+                                continue;
+                            }
+
+                            // Guard tripped: hand MEAI a call-free response so its loop ends here and the
+                            // outer client reaches its single tools-disabled summary turn.
+                            response.Messages = new List<MEAI.ChatMessage>
+                                { new(MEAI.ChatRole.Assistant, text ?? string.Empty) };
+                        }
+                        else
+                        {
+                            // MIXED batch: real calls stay with MEAI for this same turn, so the invented
+                            // one must leave the RESPONSE too. Left in it, MEAI would answer it a second
+                            // time with its own terse "function not found", the call id would carry two
+                            // tool results (a shape providers reject), and the answer naming the tools
+                            // that exist would be drowned out. Its own assistant/tool pair was appended
+                            // above, ahead of the pair MEAI is about to append for the real calls.
+                            RemoveContents(response, unbound.Cast<MEAI.AIContent>().ToList());
                         }
                     }
                     _callOptions = requestOptions;
@@ -654,8 +865,8 @@ namespace CoreAI.Infrastructure.Llm
                             .ConfigureAwait(false);
 #endif
                     executedToolCallInRequest = true;
-                    // Ход из одних no-op'ов эха — не успех: ничего не исполнялось, и «подтолкнуть»
-                    // модель после пустого ответа на его основании нельзя.
+                    // A turn made up of nothing but echo no-ops is not a success: nothing ran, so it is no
+                    // grounds for nudging the model after an empty answer.
                     if (!batch.AllFailed && !batch.AllDuplicates)
                     {
                         anyToolCallSucceeded = true;
@@ -753,8 +964,8 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     else if (!batch.AnyFailed && !batch.AllDuplicates && pendingErrorFeedback.Count > 0)
                     {
-                        // Только РЕАЛЬНЫЙ успех делает прежние ошибки устаревшими; эхо-ход ничего не
-                        // исполнял и не отвечает на них.
+                        // Only a REAL success makes the earlier errors stale; an echo turn executed nothing
+                        // and answers none of them.
                         int removedFeedback =
                             ToolCallHistoryTrimmer.RemoveResolvedErrorFeedback(messages, pendingErrorFeedback);
                         if (removedFeedback > 0 && _settings.LogMeaiToolCallingSteps)

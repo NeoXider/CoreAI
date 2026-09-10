@@ -18,13 +18,16 @@ namespace CoreAI.Ai
         /// <summary>
         /// Estimated tokens reserved for the rolling summary in the outgoing request, on top of
         /// <see cref="HistoryTokenBudget"/> (which bounds the recent tail only). Zero when the caller reserved
-        /// nothing; the manager then bounds the summary by <see cref="HistoryTokenBudget"/> instead.
+        /// nothing. WHY the manager does NOT apply this: it bounds what is STORED, and the store must keep
+        /// the whole retelling; the ORCHESTRATOR applies this reserve to the copy it sends.
         /// </summary>
         public int SummaryTokenBudget { get; set; }
 
         /// <summary>
         /// When greater than zero, an explicit cap on rolled summary text (estimated tokens) before persistence.
-        /// Zero means "no explicit cap"; the request budget (<see cref="SummaryTokenBudget"/>) still bounds it.
+        /// Zero means "no explicit cap" for the STORED summary, and the manager honours that literally.
+        /// It does not mean the request is unbounded: the orchestrator bounds the copy it sends to
+        /// <see cref="SummaryTokenBudget"/>, leaving the stored text whole.
         /// </summary>
         public int MaxRolledSummaryTokens { get; set; }
 
@@ -48,7 +51,10 @@ namespace CoreAI.Ai
         /// </summary>
         public int MaxRetainedToolResultMessages { get; set; }
 
-        /// <summary>Defers durable summary persistence until the owning LLM request succeeds.</summary>
+        /// <summary>
+        /// Defers summary persistence to the snapshot owner. The owner must commit old-history summaries
+        /// before provider dispatch or any history mutation that could discard their source messages.
+        /// </summary>
         public bool DeferSummaryPersistence { get; set; }
     }
 }

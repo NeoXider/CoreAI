@@ -10,6 +10,62 @@
 
 **AgentBuilder** is a fluent API for quickly creating custom agents with unique tools, prompts, and operating modes. It makes it easy to add new NPCs to a game without changing the CoreAI core.
 
+## Asynchronous skill readiness
+
+Use `BuildAsync(cancellationToken)` when a registered host policy should be ready before the
+builder returns. To prepare configuration without publishing it, use `BuildDetached()` followed by
+`await config.ApplyToPolicyAsync(policy, cancellationToken)`. `BuildAsync` also returns a detached
+configuration when no global policy has been initialized.
+
+```csharp
+AgentConfig merchant = await new AgentBuilder("Merchant", settings)
+    .WithSystemPrompt("Help the player trade using the available skills.")
+    .WithSkill(tradingSkill)
+    .WithSkillAuthoring(skillStore, versionStore)
+    .WithAsyncMarshaler(hostMarshaler)
+    .BuildAsync(cancellationToken);
+
+await merchant.AskAsync("Which trades are available?", cancellationToken: cancellationToken);
+```
+
+The async paths require stores implementing `IAsyncSkillStore` and, when configured,
+`IAsyncLuaScriptVersionStore`. Built-in stores provide these capabilities. A legacy custom store can
+use the explicit `InlineAsyncSkillStoreAdapter` or `InlineAsyncLuaScriptVersionStoreAdapter` only
+when its implementation is already fast and nonblocking. These adapters execute inline; they do
+not make filesystem or network work asynchronous. `Build()` and `ApplyToPolicy()` remain synchronous
+compatibility paths and may perform inline storage work.
+
+`WithAsyncMarshaler` supplies the existing host callback boundary for hydration and publication.
+When omitted, the builder uses `settings.ToolInvocationMarshaler`, then the portable passthrough
+marshaler. Unity hosts must supply their initialized host settings or marshaler; passthrough does
+not dispatch callbacks to the player loop.
+
+Skill hydration builds a private catalog before publishing the role's tools, prompt, and memory
+settings together. An error or cancellation before publication preserves the previously ready role.
+Policy skill lookup, dynamic skill additions, and the agent's `read_skill`/`call_skill_tool` proxies
+then share the same live catalog. Multi-file skills retain their main document and named references:
+the agent reads the complete main document first and can request individual references or all parts.
+
+Concurrent first `AskAsync` calls share one hydration and cannot dispatch before it finishes. Canceling
+any waiter, including the first caller, stops only that wait; the remaining callers can still finish.
+Failed hydration is retryable. A ready role takes the existing readiness path without rebuilding
+its catalog or rereading storage. Two configurations for the same role therefore keep the first-ready
+behavior on `AskAsync`; use explicit `ApplyToPolicyAsync` to replace a role. Explicit replacements
+serialize, and canceling a waiting replacement does not release the active owner's registration.
+
+An explicit skill configuration or authoring store defines the replacement catalog; it does not
+silently copy skills or tool permissions from the old generation. A legacy configuration with no
+skills and no authoring preserves already registered skill proxies. Role registration follows the
+policy's trimmed, case-sensitive role IDs. Use one consistent role spelling throughout a host.
+
+Async readiness removes waiting on storage from the caller's thread; it is not a guarantee that
+arbitrary custom store work or unbounded parsing is cheap. WebGL persistence and frame-time checks
+remain host responsibilities. A skill mutation that has already reached storage must settle its
+durability/publication outcome: `SkillStoreDurabilityException` means local data was committed but
+durability is unconfirmed, while `SkillStorePublicationException` means the committed data was not
+published successfully. Neither outcome permits blindly replaying the edit. Revision recording can
+fail separately after a skill commits; inspect the existing authoring result's revision warning.
+
 ### Capabilities
 
 - ✅ **Unique tools** — any `ILlmTool` for a specific agent
@@ -82,6 +138,12 @@ live inside a `SkillSet`; the model still calls it through `call_skill_tool`. Vo
 JSON contract, implement `IJsonInvocableLlmTool`; the skill proxy invokes that interface directly instead of using
 manual reflection.
 
+A `DelegateLlmTool` carries the same per-tool contract flags as a tool class, as settable properties:
+`AllowDuplicates`, `EndsTurn`, `ToolTimeoutMsOverride`, and `IsMutating`. Set `IsMutating = true` on any
+delegate with a side effect (spawn, save, server write) so the policy never runs it concurrently with another
+mutating call — the default `false` means "read-only, safe to overlap". See
+[TOOL_AUTHORING_GUIDE.md](../../CoreAiUnity/Docs/TOOL_AUTHORING_GUIDE.md) for the full semantics.
+
 ### From file
 
 ```csharp
@@ -144,7 +206,7 @@ Relative paths preserve directories: `examples/api.md` and `references/api.md` a
 Absolute paths, `..`, and duplicate names after normalization are rejected when the skill is created.
 
 ```csharp
-SkillSet skill = SkillSet.FromFiles("Crafting", "Создание предметов", skillRoot,
+SkillSet skill = SkillSet.FromFiles("Crafting", "Item crafting", skillRoot,
     new[] { "SKILL.md", "references/api.md", "examples/api.md" }, craftTool);
 ```
 
@@ -162,7 +224,10 @@ still needs to know what it may call, and hiding that would only cost it another
 `MutableSkillCatalog` updates already created read and call tools without re-registration:
 additions, replacements, and removals are visible to the next request. A narrowed permission list is not widened
 by a catalog update. Different implementations of one tool name are rejected before publication:
-the schema read by the agent must match the invoked implementation.
+the schema read by the agent must match the invoked implementation. The catalog carries a change
+counter (`Version`); the tool map behind `call_skill_tool` and the index behind `read_skill` are derived
+from it once per version, so a call on an unchanged catalog does not re-create the skill tools'
+MEAI functions or re-serialize their schemas.
 
 ### Tools do not depend on reading the skill
 
@@ -333,10 +398,12 @@ revision-store instance; on catalog load, keys are read in one batched snapshot.
 `ListSkills` takes one batched store snapshot per call and merges only live-catalog records.
 
 On WebGL, the synchronous `FileSkillStore` acknowledges the write to the virtual file system and calls
-`CoreAiWebGlPersistence.Sync()`, which only queues IndexedDB synchronization. This is **not**
-a durability ack for an immediate tab close. For such an ack, the host separately
-awaits `CoreAiWebGlPersistence.SyncAsync` after the locks are released. A synchronous `ISkillStore`
-does not promise to wait for a browser callback; a busy lock on WebGL fails explicitly without blocking the thread.
+`CoreAiWebGlPersistence.Sync()`, which reports whether the engine's automatic `persistentDataPath`
+persistence is armed for this page. `true` means the write has been handed to it; it is **not** a
+claim that the IndexedDB transaction has committed, because Unity exposes no such signal. `false`
+means the page never armed that persistence, so the write dies with the tab — the store surfaces that
+as a visible failure. Nothing here waits: `SyncAsync` returns the same answer immediately, and a busy
+lock on WebGL fails explicitly without blocking the thread.
 
 ### Registration and execution
 
@@ -505,8 +572,9 @@ await orch.RunTaskAsync(new AiTaskRequest
 });
 
 // Or via a manual LLM client (for tests / custom pipeline):
-// supportsNativeToolCalling берётся из явной настройки или пробы выбранного endpoint.
-// Для LLMUnity нельзя без проверки подставлять true.
+// supportsNativeToolCalling comes from an explicit setting or from probing the chosen endpoint.
+// Never assume true for LLMUnity without checking: whether the native tool_calls channel is open
+// depends on the llama.cpp build behind it, and assuming it when it is closed loses every call.
 MeaiLlmClient client = MeaiLlmClient.CreateHttp(coreAiSettings, logger,
     supportsNativeToolCalling: supportsNativeToolCalling, memoryStore: memoryStore);
 LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
@@ -938,7 +1006,7 @@ There are **three** layers, evaluated from broadest to narrowest:
 |------|------|------|------|
 | Global | `CoreAISettings.AllowDuplicateToolCalls` | `false` (reject) | Baseline for every agent that does not override |
 | Per-role | `AgentBuilder.WithAllowDuplicateToolCalls(bool)` | unset → falls back to global | Wins over the global setting |
-| Per-tool | `ILlmTool.AllowDuplicates` | `false` | If `true`, that *specific* tool is exempt regardless of role/global setting (used by tools like `world_command` and `execute_lua`) |
+| Per-tool | `ILlmTool.AllowDuplicates` | `false` | If `true`, that *specific* tool is exempt from the echo check — regardless of the role/global setting, and regardless of whether its name is one of the built-in mutating ones. Built-ins that set it: `game_state`, `manage_skills`, `read_skill`, `wait` |
 
 Examples:
 
@@ -955,20 +1023,29 @@ var planner = new AgentBuilder("Programmer")
     .Build();
 ```
 
-When a duplicate is rejected, the policy returns a synthetic tool result of:
+Suppression is per **call**, not per turn, and only against calls that **succeeded in an earlier turn of the same request**. Identical calls emitted together in ONE turn all execute, and a call that failed stays repeatable with the same arguments.
 
-> `Error: You just executed this exact same tool call with the exact same arguments on the previous step. Do not repeat identical steps. Proceed to the NEXT step or provide a final text response.`
+A suppressed call is a **no-op, not an error**. The tool is not executed and the model receives:
 
-The trace surfaces it as `source=duplicate` in the per-call diagnostic line:
+```json
+{
+  "ok": true,
+  "duplicate": true,
+  "message": "Duplicate tool call 'memory' with identical arguments: this exact call already succeeded earlier in this request and was NOT executed again. Use its earlier result; do not repeat the call."
+}
+```
+
+The trace surfaces it as a SUCCESS with `source=duplicate` in the completion's compact tool summary. There is no `[ToolCall]` line for it: that line is emitted per *executed* call, and this one was never executed.
 
 ```
-[ToolCall] traceId=… role=… tool=memory status=FAIL dur=0ms …
-LLM ◀ … | tools=[memory(fail,0ms,duplicate)]
+LLM ◀ … | tools=[memory(ok,0ms,duplicate)]
 ```
+
+Suppressed slots take no part in the consecutive-error counter, so a turn made only of echoes moves the agent neither forward nor toward the max-errors abort. That matters for an ordinary user request: "show me that again" with identical arguments used to be counted as a failed iteration, and three of them in a row ended the turn with an abort message. A model that echoes endlessly is bounded by the roundtrip cap instead.
 
 If you see this line repeatedly, that's the signal to either (a) flip `WithAllowDuplicateToolCalls(true)` for that agent, (b) mark the specific tool with `AllowDuplicates = true`, or (c) tighten the system prompt to stop the model retrying.
 
-> 💡 *Note: For some tools (e.g. `world_command` → `play_animation` or `execute_lua`), duplicates are always allowed at the tool level.*
+> 💡 *Note: `AllowDuplicates = true` wins everywhere, including for the built-in mutating names (`memory`, `manage_mods`, `manage_skills`, `world_command`, `component_command`, `execute_lua`, `call_skill_tool`) — the flag is the author's decision and nothing overrides it silently. It is not set on `world_command` or `execute_lua`: re-running the same spawn or the same chunk would duplicate the effect, so both keep the default `false` on purpose.*
 
 #### Forced tool choice (`ForcedToolMode`)
 

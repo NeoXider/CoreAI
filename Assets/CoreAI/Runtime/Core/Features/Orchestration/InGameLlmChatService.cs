@@ -9,25 +9,28 @@ using Microsoft.Extensions.AI;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Чат-сервис, который держит историю разговора игрока вокруг запросов к LLM.
+    /// A chat service that keeps the player's conversation history around LLM requests.
     /// <para>
-    /// Отказы всегда типизированы (<see cref="LlmCompletionResult.ErrorCode"/>): пустое сообщение —
-    /// <see cref="LlmErrorCode.InvalidRequest"/>, скользящее окно лимита — <see cref="LlmErrorCode.RateLimited"/>
-    /// с <see cref="LlmCompletionResult.RetryAfterSeconds"/>, пустой ответ модели —
-    /// <see cref="LlmErrorCode.EmptyResponse"/>, истёкший таймаут — <see cref="LlmErrorCode.Timeout"/>.
-    /// Потребитель без кода не мог отличить отказ от ответа модели и показывал текст отказа как реплику.
+    /// Refusals are always typed (<see cref="LlmCompletionResult.ErrorCode"/>): an empty message is
+    /// <see cref="LlmErrorCode.InvalidRequest"/>, the sliding rate window is
+    /// <see cref="LlmErrorCode.RateLimited"/> with <see cref="LlmCompletionResult.RetryAfterSeconds"/>, an
+    /// empty model answer is <see cref="LlmErrorCode.EmptyResponse"/>, and an expired timeout is
+    /// <see cref="LlmErrorCode.Timeout"/>. Without a code the consumer could not tell a refusal from the
+    /// model's answer and displayed the refusal text as a reply.
     /// </para>
     /// <para>
-    /// Слот скользящего окна занимается только на время попытки и ВОЗВРАЩАЕТСЯ, если попытка не удалась
-    /// (ошибка, пустой ответ, таймаут, отмена): после сбоя бэкенда игрок не «добирает» лимит ошибками.
-    /// Резервируется он уже ПОСЛЕ ожидания гейта — заявка, снятая в очереди и отменённая до старта,
-    /// раньше сгорала впустую; быстрый отказ без ожидания даёт предварительная проверка окна.
+    /// A sliding-window slot is held only for the duration of the attempt and is GIVEN BACK if the attempt
+    /// failed (an error, an empty answer, a timeout, cancellation): after a backend failure the player does
+    /// not burn their allowance on errors. The slot is reserved AFTER waiting on the gate - a request that
+    /// queued up and was cancelled before it started used to burn its slot for nothing; a fast refusal
+    /// without waiting comes from the preliminary window check.
     /// </para>
     /// <para>
-    /// Таймаут — по желанию хоста: с <c>requestTimeoutSecondsProvider</c> клиент оборачивается в
-    /// <see cref="TimeoutLlmClientDecorator"/>, и зависший запрос не держит гейт бесконечно. В Unity-конвейере
-    /// клиент уже ограничен внешним декоратором, и провайдер передавать НЕ нужно — иначе будет два одинаковых
-    /// таймера; провайдер нужен портативному хосту, который подаёт сюда собственный <see cref="ILlmClient"/>.
+    /// The timeout is up to the host: with <c>requestTimeoutSecondsProvider</c> the client is wrapped in a
+    /// <see cref="TimeoutLlmClientDecorator"/>, so a hung request does not hold the gate forever. In the
+    /// Unity pipeline the client is already bounded by an outer decorator and the provider must NOT be
+    /// passed - otherwise there would be two identical timers; the provider is for a portable host that
+    /// supplies its own <see cref="ILlmClient"/> here.
     /// </para>
     /// </summary>
     public sealed class InGameLlmChatService : IInGameLlmChatService
@@ -39,9 +42,9 @@ namespace CoreAI.Ai
         private readonly object _historyLock = new();
         private readonly object _rateLock = new();
 
-        // ПОЧЕМУ: запросы внахлёст гонялись: второй снимок истории мог не увидеть первый ход, а дописывания
-        // перемешивались. Гейт сериализует «снимок → LLM → дописать», и каждый запрос видит все
-        // предыдущие завершённые ходы по порядку.
+        // WHY: overlapping requests raced: the second snapshot of the history could miss the first turn,
+        // and the appends interleaved. The gate serializes "snapshot -> LLM -> append", so every request
+        // sees all previously completed turns in order.
         private readonly SemaphoreSlim _requestGate = new(1, 1);
 
         private readonly int _maxRequestsPerWindow;
@@ -50,18 +53,18 @@ namespace CoreAI.Ai
         private long _totalRejected;
 
         /// <summary>
-        /// Создаёт чат-сервис.
+        /// Creates the chat service.
         /// </summary>
-        /// <param name="llm">LLM-клиент.</param>
-        /// <param name="systemPrompts">Поставщик системных промптов.</param>
-        /// <param name="maxMessages">Сколько сообщений (реплик, не пар) хранить в истории.</param>
-        /// <param name="maxRequestsPerWindow">Потолок успешных запросов в скользящем окне; 0 — без лимита.</param>
-        /// <param name="rateLimitWindowSeconds">Длина скользящего окна в секундах.</param>
+        /// <param name="llm">The LLM client.</param>
+        /// <param name="systemPrompts">The system prompt provider.</param>
+        /// <param name="maxMessages">How many messages (individual turns, not pairs) to keep in history.</param>
+        /// <param name="maxRequestsPerWindow">Cap of successful requests per sliding window; 0 means no limit.</param>
+        /// <param name="rateLimitWindowSeconds">Length of the sliding window in seconds.</param>
         /// <param name="requestTimeoutSecondsProvider">
-        /// Таймаут одного запроса в секундах, читается на каждый вызов; null или значение &lt;= 0 — без
-        /// собственного таймаута (клиент ограничен снаружи либо не ограничен вовсе).
+        /// The timeout of a single request in seconds, re-read on every call; null or a value &lt;= 0 means
+        /// no timeout of its own (the client is bounded from the outside, or not bounded at all).
         /// </param>
-        /// <param name="asyncMarshaler">Планировщик задержек хоста для таймаута; null — управляемая задержка.</param>
+        /// <param name="asyncMarshaler">The host's delay scheduler for the timeout; null means a managed delay.</param>
         public InGameLlmChatService(
             ILlmClient llm,
             IAgentSystemPromptProvider systemPrompts,
@@ -116,7 +119,7 @@ namespace CoreAI.Ai
                 };
             }
 
-            // Быстрый отказ: не ждать в очереди за чужим ответом модели, если окно уже полно.
+            // Fast refusal: do not queue behind somebody else's model answer when the window is already full.
             if (IsRateWindowFull(out int retryAfterSeconds))
             {
                 return RateLimited(retryAfterSeconds);
@@ -132,10 +135,11 @@ namespace CoreAI.Ai
                 ? baseSystem
                 : prefix.TrimEnd() + "\n" + baseSystem;
 
-            // ПОЧЕМУ: _historyLock охраняет лишь отдельные чтения/записи (HistoryPairCount / ClearHistory),
-            // а не последовательность «снимок → LLM → дописать». _requestGate сериализует её целиком, чтобы
-            // параллельный запрос не снял снимок без предыдущего хода и не вклинился дописыванием.
-            await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            // WHY: _historyLock guards only individual reads/writes (HistoryPairCount / ClearHistory), not
+            // the "snapshot -> LLM -> append" sequence. _requestGate serializes that sequence as a whole so
+            // that a concurrent request cannot take a snapshot missing the previous turn or wedge its own
+            // append in between.
+            await _requestGate.WaitAsync(cancellationToken);
             try
             {
                 if (!TryAcquireRateSlot(out DateTime stamp, out retryAfterSeconds))
@@ -172,12 +176,12 @@ namespace CoreAI.Ai
                                 ChatHistory = history,
                                 TraceId = Guid.NewGuid().ToString("N")
                             },
-                            cancellationToken).ConfigureAwait(false);
+                            cancellationToken);
                     }
                     catch (LlmOperationTimeoutException)
                     {
-                        // Таймаут библиотеки при живом токене вызывающего: контракт сервиса — результат,
-                        // а не исключение. Настоящая отмена вызывающим проходит наружу как есть.
+                        // A library timeout while the caller's token is still alive: the service's contract
+                        // is a result, not an exception. A genuine caller cancellation passes out as it is.
                         result = Failed(LlmErrorCode.Timeout);
                     }
 
@@ -187,8 +191,8 @@ namespace CoreAI.Ai
                     }
                     else if (result.Ok && string.IsNullOrEmpty(result.Content))
                     {
-                        // ПОЧЕМУ: «успех» без текста для игрока — не ответ. Раньше такой результат уходил
-                        // потребителю как Ok, и панель печатала пустую реплику.
+                        // WHY: a "success" with no text for the player is not an answer. Such a result used
+                        // to reach the consumer as Ok, and the panel printed an empty reply.
                         result = Failed(LlmErrorCode.EmptyResponse);
                     }
 
@@ -227,7 +231,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Снимок состояния ограничителя для диагностики / UI.
+        /// A snapshot of the rate limiter's state for diagnostics / UI.
         /// </summary>
         public RateLimiterMetrics GetRateLimiterMetrics()
         {
@@ -263,7 +267,7 @@ namespace CoreAI.Ai
             };
         }
 
-        /// <summary>Полно ли окно прямо сейчас (без резервирования). Отказ засчитывается в метрики.</summary>
+        /// <summary>Whether the window is full right now (without reserving). A refusal is counted in the metrics.</summary>
         private bool IsRateWindowFull(out int retryAfterSeconds)
         {
             retryAfterSeconds = 0;
@@ -288,8 +292,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Пытается занять один слот скользящего окна. Слот помечен временем, чтобы его можно было
-        /// вернуть, если попытка не удалась.
+        /// Tries to take one sliding-window slot. The slot is stamped with a time so that it can be given
+        /// back if the attempt fails.
         /// </summary>
         private bool TryAcquireRateSlot(out DateTime stamp, out int retryAfterSeconds)
         {
@@ -317,7 +321,7 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Возвращает слот неудавшейся попытки: снимается последняя отметка с этим временем.</summary>
+        /// <summary>Gives back the slot of a failed attempt: the last stamp with this time is removed.</summary>
         private void ReleaseRateSlot(DateTime stamp)
         {
             if (_maxRequestsPerWindow <= 0)
@@ -338,7 +342,7 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Вызывать под <see cref="_rateLock"/>.</summary>
+        /// <summary>Call under <see cref="_rateLock"/>.</summary>
         private void PruneExpired(DateTime now)
         {
             DateTime cutoff = now - _rateLimitWindow;
@@ -354,7 +358,7 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Через сколько секунд освободится самый старый слот окна. Вызывать под <see cref="_rateLock"/>.</summary>
+        /// <summary>In how many seconds the oldest slot of the window frees up. Call under <see cref="_rateLock"/>.</summary>
         private int RetryAfterSeconds(DateTime now)
         {
             if (_acceptedStamps.Count == 0)

@@ -284,7 +284,7 @@ def verify_current_release_docs() -> None:
             fail(f"{relative.as_posix()} does not document both positive module symbols")
 
     roadmap = (ROOT / "Docs/ROADMAP.md").read_text(encoding="utf-8-sig")
-    if f"Six UPM packages, released in lockstep (all currently {expected_version}):" not in roadmap:
+    if f"Seven UPM packages, released in lockstep (all currently {expected_version}):" not in roadmap:
         fail(f"roadmap package count/version is stale (expected {expected_version})")
     if "Five UPM packages" in roadmap or "CoreAI 5.9 uses" in roadmap:
         fail("roadmap still contains a stale current release statement")

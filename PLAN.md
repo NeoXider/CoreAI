@@ -1,0 +1,15 @@
+# CoreAI fix release and RedoSchool integration
+
+Checkpoint: 2026-09-08. Active branch `fix`, base `main` e8d07e80, fetched tip 243f8cf0 (41 files). Earlier completion reports do not verify this branch.
+
+- [ ] Review every changed Core/MCP/persistence/CI and Mods/Lua file independently; fix confirmed findings with behavior regressions.
+- [ ] Run portable baseline and full Unity EditMode, inspect failures and test counts, then relevant live Spark PlayMode and WebGL gates.
+- [ ] Verify modular builds, package versions, README/TODO/changelogs, and final independent audit before release.
+- [ ] Publish verified changes to `main` and an annotated release tag; verify remote hashes. Preserve all unrelated untracked assets.
+- [ ] Upgrade RedoSchool CoreAI pins only after the release, resolve MEAI/STJ compatibility, run full checks.
+- [ ] Complete Redo briefing durability, retry, chat deduplication and teacher feedback; run lesson 1 with restart midway, completion, memory verification and another reentry.
+
+Checkpoint 21:46: portable reconnect 1121/1121; independently accepted retry 23/23 and MCP 44/44; generated CoreAI.Tests build has zero errors. Muse found production scheduler never drives the character motor; repair underway. Async summary managers/store integration is underway, orchestrator integration follows. Redo notifier Unity RED 4/13 -> GREEN 13/13; outcome workflow 22/25, remaining failures and memory synchronization being fixed. CoreAI 75%, Redo 25%, total 50% (work estimates). Root owns Unity and git; CoreAI MCP session and final release gates remain pending.
+
+Checkpoint 22:36: summary A+B+C focused suite 110/110 after post-durability cancellation and scoped-key binding regressions; final independent review/Unity integration pending. Retry follow-up is 33/33 (its initial independent audit covered 23 cases). Metadata repair preserves all 232 GUIDs; isolated Unity import no longer reports their YAML errors. Redo backend note/memory targeted suite: 37 passed, 1 PostgreSQL-only skip, no failures; no full backend result yet. CodePlayground task-tab actions/input layout are being implemented. Estimates remain 75% / 25% / 50%; nothing has been released from this wave.
+Checkpoint 22:54: estimates CoreAI 76%, RedoSchool 30%, combined 53%. Mods real Unity gate is 121/122; one admission-quota case records the same THREAD_CAP error twice and remains under diagnosis. The motor regression itself is GREEN after natural RED. Redo source checkpoint has 17/17 harness cases and a zero-error test build, but Unity still loaded 14 older cases; forced recompilation exposed a CodeStation test syntax error in the active worker's diff. No stale assembly result counts as final verification. Full backend checks are running with a durable exit receipt; typed chat admission/outcome is being designed to prevent ambiguous null/string retries.

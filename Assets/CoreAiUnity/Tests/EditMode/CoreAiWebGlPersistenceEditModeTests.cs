@@ -7,6 +7,16 @@ using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
 {
+    /// <summary>
+    /// Regression coverage for the durability answer CoreAI gives its file-backed stores.
+    /// <para>
+    /// The defect these tests exist for: the old implementation awaited an <c>FS.syncfs</c> completion
+    /// callback that Unity 6.3 never delivers, so a store's "is my write durable?" question had no
+    /// answer at all and every caller sat until its own timeout - <c>memory action=write</c> reported a
+    /// false failure after 30 s for data that was in fact on disk. The contract is now: answer
+    /// immediately, and answer truthfully.
+    /// </para>
+    /// </summary>
     public sealed class CoreAiWebGlPersistenceEditModeTests
     {
         private SynchronizationContext _previousSynchronizationContext;
@@ -31,52 +41,44 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task SyncAsync_InEditor_CompletesAsDurableNoOp()
+        public void SyncAsync_AnswersImmediately_AndNeverParksOnACallback()
         {
-            bool completed = await CoreAiWebGlPersistence.SyncAsync();
+            UniTask<bool> pending = CoreAiWebGlPersistence.SyncAsync();
 
-            Assert.IsTrue(completed);
+            Assert.AreEqual(UniTaskStatus.Succeeded, pending.Status,
+                "Durability must be answered synchronously. A pending task here means a caller can " +
+                "again wait forever on a confirmation channel that does not deliver.");
         }
 
         [Test]
-        public async Task WaitForCompletion_LostCallback_EndsAtFiniteTimeoutBranch()
+        public async Task SyncAsync_OffWebGl_ReportsTheWriteAsDurable()
         {
-            UniTaskCompletionSource<bool> callback = new();
+            bool durable = await CoreAiWebGlPersistence.SyncAsync();
 
-            CoreAiWebGlPersistence.CompletionWaitResult result =
-                await CoreAiWebGlPersistence.WaitForCompletionAsync(
-                    callback.Task,
-                    UniTask.CompletedTask);
-
-            Assert.IsFalse(result.Completed);
-            Assert.IsFalse(result.Succeeded);
+            Assert.IsTrue(durable, "Off WebGL the OS filesystem is durable once the write call returns.");
         }
 
         [Test]
-        public async Task WaitForCompletion_CallbackWinsWithoutWaitingForTimeout()
+        public void Sync_OffWebGl_ReportsTheWriteAsDurable()
         {
-            UniTaskCompletionSource<bool> timeout = new();
-
-            CoreAiWebGlPersistence.CompletionWaitResult result =
-                await CoreAiWebGlPersistence.WaitForCompletionAsync(
-                    UniTask.FromResult(true),
-                    timeout.Task);
-
-            Assert.IsTrue(result.Completed);
-            Assert.IsTrue(result.Succeeded);
+            Assert.IsTrue(CoreAiWebGlPersistence.Sync());
         }
 
         [Test]
-        public void WaitForCompletion_CancellationDoesNotBecomeSuccess()
+        public void IsAutoSyncEnabled_OffWebGl_IsTrue()
+        {
+            Assert.IsTrue(CoreAiWebGlPersistence.IsAutoSyncEnabled,
+                "Only a browser page can lack durable storage; every other platform always has it.");
+        }
+
+        [Test]
+        public void SyncAsync_CancellationIsNotReportedAsDurability()
         {
             using CancellationTokenSource cancellation = new();
             cancellation.Cancel();
-            UniTaskCompletionSource<bool> callback = new();
 
-            Assert.CatchAsync<OperationCanceledException>(async () =>
-                await CoreAiWebGlPersistence.WaitForCompletionAsync(
-                    callback.Task,
-                    UniTask.FromCanceled(cancellation.Token)));
+            Assert.Catch<OperationCanceledException>(
+                () => CoreAiWebGlPersistence.SyncAsync(cancellation.Token));
         }
     }
 }

@@ -335,21 +335,26 @@ Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
 
 The active arrangement is:
 - `AiOrchestrator` **passes `cancellationToken` through** without adding a timer.
-- `CoreAiChatService.SendMessageAsync` and `SendMessageStreamingAsync` create a linked `CancellationTokenSource` with **`CancelAfterSlim(TimeSpan)`** from `Cysharp.Threading.Tasks` (UniTask).
+- `CoreAiChatService.SendMessageAsync` and `SendMessageStreamingAsync` create a linked `CancellationTokenSource` guarded by an **idle watchdog** (`CoreAiChatService.IdleTimeoutDeadline`): one `UniTask.Delay(DelayType.Realtime)` per idle window, driven by the PlayerLoop. Every streamed chunk and every tool-call start/finish/failure for the turn's role **re-arms** it with a single timestamp write (no allocation, safe from any thread), so a multi-step turn is cancelled only after a real stall of `LlmRequestTimeoutSeconds`, never because its steps add up. The vision path (`AskWithCameraAsync`) still uses a plain `CancelAfterSlim` because it is a single provider call.
 - `TimeoutLlmClientDecorator` provides the portable pipeline bound; `LlmPipelineInstaller` injects `UnityMainThreadLlmAsyncMarshaler`, whose `DelayAsync` is also UniTask PlayerLoop-driven.
 - `LoggingLlmClientDecorator` and `RetryingStreamingLlmClientDecorator` use that same injected delay for retry backoff.
 - The timeout value comes from `ICoreAISettings.LlmRequestTimeoutSeconds` (default: 300s).
 
 ```csharp
-// Inside CoreAiChatService.SendMessageAsync (simplified)
+// Inside CoreAiChatService.SendMessageStreamingAsync (simplified)
 float timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
 if (timeoutSec > 0)
 {
-    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-    timeoutCts.CancelAfterSlim(TimeSpan.FromSeconds(timeoutSec)); // UniTask PlayerLoop
+    deadlineCts = new CancellationTokenSource();
+    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, deadlineCts.Token);
+    deadline = new IdleTimeoutDeadline(deadlineCts, timeoutSec); // one PlayerLoop watchdog per turn
     effectiveCt = timeoutCts.Token;
 }
-string result = await _orchestrator.RunTaskAsync(request, effectiveCt);
+await foreach (LlmStreamChunk chunk in _orchestrator.RunStreamingAsync(request, effectiveCt))
+{
+    deadline?.Rearm(); // timestamp write, allocation-free
+    yield return chunk;
+}
 ```
 
 ### Retry centralization

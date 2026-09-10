@@ -173,6 +173,14 @@ namespace CoreAI.Ai.LuaCs
         public Func<ActorContext> LocalActorResolver { get; set; }
 
         /// <summary>
+        /// Host frame port for the one-shot chunk path. When set, a chunk that runs longer than a few
+        /// milliseconds releases the frame instead of freezing the player until its wall-clock budget
+        /// cuts it (a runaway was measured freezing a WebGL page for ~6 s). Null keeps the previous
+        /// blocking behaviour, so nothing changes for hosts that do not supply one.
+        /// </summary>
+        public IScriptFrameYielder FrameYielder { get; set; }
+
+        /// <summary>
         /// Raised after <c>execute_lua</c> successfully runs a chunk. Mirrors
         /// <see cref="CoreAI.Infrastructure.Lua.GameLuaToolExecutor.LuaExecutedSuccessfully"/> so scene
         /// demos can persist their own game-specific Lua changes without the generic executor owning
@@ -259,10 +267,10 @@ namespace CoreAI.Ai.LuaCs
             try
             {
                 return await ExecuteWithBackupAsync(
-                    token => Task.FromResult(ExecuteCore(
+                    token => ExecuteCoreAsync(
                         code,
                         token,
-                        _bindings.RegisterGameplayApis)),
+                        _bindings.RegisterGameplayApis),
                     cancellationToken);
             }
             catch (Exception ex)
@@ -385,16 +393,19 @@ namespace CoreAI.Ai.LuaCs
                 cancellationToken);
         }
 
+        // WHY: still synchronous, and still the path used by the two mutation-envelope overloads above.
+        // WHY: InstanceRegistry.ApplyMutation runs its operation inside `lock (_mutationGate)` and under
+        // WHY: an ambient MutationEnvelopeScope held in a registry FIELD. Awaiting inside a monitor is not
+        // WHY: expressible in C#, and releasing the frame while that ambient scope is pushed would let
+        // WHY: whatever else runs in the yielded frame (mod handlers) mutate under THIS actor's envelope.
+        // WHY: Yielding those two paths therefore needs an execution-scoped envelope plus an async
+        // WHY: mutation protocol, not a signature change here.
         private LuaTool.LuaResult ExecuteCore(string code, CancellationToken cancellationToken,
             Action<LuaCsApiRegistry> registerGameplayApis)
         {
             if (!IsSupported)
             {
-                return new LuaTool.LuaResult
-                {
-                    Success = false,
-                    Error = "CoreAI Lua execution is disabled on this platform."
-                };
+                return UnsupportedPlatformResult();
             }
 
             // WHY: The world bindings are a shared singleton: a prior chunk that died between
@@ -404,20 +415,12 @@ namespace CoreAI.Ai.LuaCs
             (_bindings as ILuaTransactionScope)?.ResetTransactions();
             try
             {
-                LuaCsApiRegistry registry = new();
-                registerGameplayApis(registry);
-                IScriptState state = _engine.CreateState();
-                registry.ApplyTo(state);
-
-                // WHY: Downlevel Luau -> Lua 5.2 before compiling so one-shot scripts accept the same
-                // WHY: Luau syntax mods do; a downlevel Error is thrown here and caught below as the exec
-                // WHY: failure (never a silent raw fallback). Chunk name is stable so diagnostics are legible.
-                string compileCode = LuauSourceGate.ToLua52(code, "execute_lua");
-                object[] results = _engine.RunChunk(state, compileCode, cancellationToken: cancellationToken);
-                string summary = Truncate(Summarize(results), LuaCsAiEnvelopeProcessor.MaxResultSummaryLength);
-                _observer.OnLuaSuccess(summary);
-                LuaExecutedSuccessfully?.Invoke(code ?? "");
-                return new LuaTool.LuaResult { Success = true, Output = summary };
+                IScriptState state = PrepareState(registerGameplayApis);
+                object[] results = _engine.RunChunk(
+                    state,
+                    CompileChunk(code),
+                    cancellationToken: cancellationToken);
+                return ReportSuccess(code, results);
             }
             catch (Exception ex)
             {
@@ -427,6 +430,74 @@ namespace CoreAI.Ai.LuaCs
             {
                 (_bindings as ILuaTransactionScope)?.ResetTransactions();
             }
+        }
+
+        /// <summary>
+        /// The one-shot chunk path that does not hold the host frame: identical to
+        /// <see cref="ExecuteCore"/> except that the guard may release the frame while the chunk runs
+        /// (see <see cref="FrameYielder"/>).
+        /// </summary>
+        private async Task<LuaTool.LuaResult> ExecuteCoreAsync(string code, CancellationToken cancellationToken,
+            Action<LuaCsApiRegistry> registerGameplayApis)
+        {
+            if (!IsSupported)
+            {
+                return UnsupportedPlatformResult();
+            }
+
+            (_bindings as ILuaTransactionScope)?.ResetTransactions();
+            try
+            {
+                IScriptState state = PrepareState(registerGameplayApis);
+                object[] results = await _engine.RunChunkAsync(
+                    state,
+                    CompileChunk(code),
+                    frameYielder: FrameYielder,
+                    cancellationToken: cancellationToken);
+                return ReportSuccess(code, results);
+            }
+            catch (Exception ex)
+            {
+                return CreateFailure(ex.Message);
+            }
+            finally
+            {
+                (_bindings as ILuaTransactionScope)?.ResetTransactions();
+            }
+        }
+
+        private static LuaTool.LuaResult UnsupportedPlatformResult()
+        {
+            return new LuaTool.LuaResult
+            {
+                Success = false,
+                Error = "CoreAI Lua execution is disabled on this platform."
+            };
+        }
+
+        private IScriptState PrepareState(Action<LuaCsApiRegistry> registerGameplayApis)
+        {
+            LuaCsApiRegistry registry = new();
+            registerGameplayApis(registry);
+            IScriptState state = _engine.CreateState();
+            registry.ApplyTo(state);
+            return state;
+        }
+
+        // WHY: Downlevel Luau -> Lua 5.2 before compiling so one-shot scripts accept the same
+        // WHY: Luau syntax mods do; a downlevel Error is thrown here and caught by the caller as the exec
+        // WHY: failure (never a silent raw fallback). Chunk name is stable so diagnostics are legible.
+        private static string CompileChunk(string code)
+        {
+            return LuauSourceGate.ToLua52(code, "execute_lua");
+        }
+
+        private LuaTool.LuaResult ReportSuccess(string code, object[] results)
+        {
+            string summary = Truncate(Summarize(results), LuaCsAiEnvelopeProcessor.MaxResultSummaryLength);
+            _observer.OnLuaSuccess(summary);
+            LuaExecutedSuccessfully?.Invoke(code ?? "");
+            return new LuaTool.LuaResult { Success = true, Output = summary };
         }
 
         private LuaTool.LuaResult CreateFailure(string message)

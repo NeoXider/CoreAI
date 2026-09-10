@@ -7,13 +7,13 @@ namespace CoreAI.Ai
     /// <summary>
     /// Decorates an existing memory store and maps role ids to scoped keys.
     /// <para>
-    /// Также это единственное место, где «сбросить историю» дотягивается до свёрнутого summary.
-    /// Rolling summary — производная от истории: он хранится в отдельном
-    /// <see cref="IConversationSummaryStore"/>, но существует только как пересказ ТЕХ реплик, которые
-    /// лежали в истории. Потребитель, который зовёт <see cref="ClearChatHistory"/> (новая миссия в
-    /// RedoSchool, кнопка «очистить чат»), про второй стор не знает и знать не должен; когда он об этом
-    /// забывал, оба менеджера контекста отдавали summary прошлого урока в КАЖДЫЙ ход нового — ещё до
-    /// всякой компакции, — а при первой компакции старый пересказ сливался с новым.
+    /// This is also the only place where "clear the history" reaches the folded summary. A rolling
+    /// summary is derived from the history: it lives in a separate <see cref="IConversationSummaryStore"/>,
+    /// yet it exists only as a recap of THOSE messages that were in the history. The consumer calling
+    /// <see cref="ClearChatHistory"/> (a new mission in RedoSchool, a "clear chat" button) does not know
+    /// about the second store and must not have to; when it forgot about it, both context managers fed
+    /// the previous lesson's summary into EVERY turn of the new one - before any compaction at all - and
+    /// on the first compaction the old recap was merged into the new one.
     /// </para>
     /// </summary>
     public sealed class ScopedAgentMemoryStoreDecorator : IAgentMemoryStore, IAgentMemoryLoadDiagnostics,
@@ -29,10 +29,11 @@ namespace CoreAI.Ai
         /// <param name="inner">Backing store; keys it receives are already scoped.</param>
         /// <param name="scopeProvider">Scope provider shared with every other scoped decorator of this host.</param>
         /// <param name="conversationSummaries">
-        /// Стор summary, зарегистрированный в этом же скоупе как <see cref="IConversationSummaryStore"/>
-        /// (то есть уже обёрнутый в <see cref="ScopedConversationSummaryStoreDecorator"/> с тем же
-        /// <paramref name="scopeProvider"/>): ему передаётся сырой role id, ключ он выводит сам, и выводит
-        /// тот же. <c>null</c> — у хоста нет rolling summary, чистить нечего.
+        /// The summary store registered in this same scope as <see cref="IConversationSummaryStore"/>
+        /// (that is, already wrapped in <see cref="ScopedConversationSummaryStoreDecorator"/> with the
+        /// same <paramref name="scopeProvider"/>): it is handed the raw role id, derives the key itself,
+        /// and derives the same one. <c>null</c> means the host has no rolling summary and there is
+        /// nothing to clear.
         /// </param>
         public ScopedAgentMemoryStoreDecorator(
             IAgentMemoryStore inner,
@@ -82,10 +83,10 @@ namespace CoreAI.Ai
         public void ClearChatHistory(string roleId)
         {
             _inner.ClearChatHistory(ToScopedKey(roleId));
-            // WHY: Summary без истории, из которой он свёрнут, — не память, а чужой урок в промпте.
-            // Сценария «сбросить историю, но оставить её пересказ» в коде нет ни у одного вызывающего
-            // (CoreAi.ClearContext, CoreAiChatService.ClearHistory, AgentConfig.ClearMemory, сброс миссии в
-            // RedoSchool), поэтому и флага-исключения нет.
+            // WHY: A summary without the history it was folded from is not memory - it is somebody else's
+            // lesson sitting in the prompt. Not one caller in the code has a "clear the history but keep
+            // its recap" scenario (CoreAi.ClearContext, CoreAiChatService.ClearHistory,
+            // AgentConfig.ClearMemory, the RedoSchool mission reset), so there is no opt-out flag either.
             _conversationSummaries?.ClearSummary(roleId);
         }
 

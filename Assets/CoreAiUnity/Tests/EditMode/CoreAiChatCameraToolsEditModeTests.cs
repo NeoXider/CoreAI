@@ -37,7 +37,7 @@ namespace CoreAI.Tests.EditMode
             bool attached =
                 CoreAiChatCameraTools.TryAttachCameraTool(policy, camera, BuiltInAgentRoleIds.SmartChat, true);
 
-            Assert.IsTrue(attached, "камера должна прикрепиться при включённом тумблере");
+            Assert.IsTrue(attached, "the camera must be attached when the toggle is on");
             Assert.IsTrue(RoleHasCameraTool(policy, BuiltInAgentRoleIds.SmartChat));
         }
 
@@ -50,7 +50,7 @@ namespace CoreAI.Tests.EditMode
             bool attached =
                 CoreAiChatCameraTools.TryAttachCameraTool(policy, camera, BuiltInAgentRoleIds.SmartChat, false);
 
-            Assert.IsFalse(attached, "при выключенном тумблере камера не прикрепляется");
+            Assert.IsFalse(attached, "the camera is not attached when the toggle is off");
             Assert.IsFalse(RoleHasCameraTool(policy, BuiltInAgentRoleIds.SmartChat));
         }
 
@@ -62,7 +62,7 @@ namespace CoreAI.Tests.EditMode
             bool attached =
                 CoreAiChatCameraTools.TryAttachCameraTool(policy, null, BuiltInAgentRoleIds.SmartChat, true);
 
-            Assert.IsFalse(attached, "без сервиса зрения инструмент молча пропускается");
+            Assert.IsFalse(attached, "without a vision service the tool is skipped silently");
             Assert.IsFalse(RoleHasCameraTool(policy, BuiltInAgentRoleIds.SmartChat));
         }
 
@@ -76,7 +76,7 @@ namespace CoreAI.Tests.EditMode
                 CoreAiChatCameraTools.TryAttachCameraTool(policy, camera, BuiltInAgentRoleIds.SmartChat, true));
             Assert.IsFalse(
                 CoreAiChatCameraTools.TryAttachCameraTool(policy, camera, BuiltInAgentRoleIds.SmartChat, true),
-                "повторный вызов не должен дублировать инструмент");
+                "a repeated call must not duplicate the tool");
 
             int cameraCount = 0;
             foreach (ILlmTool tool in policy.GetToolsForRole(BuiltInAgentRoleIds.SmartChat))

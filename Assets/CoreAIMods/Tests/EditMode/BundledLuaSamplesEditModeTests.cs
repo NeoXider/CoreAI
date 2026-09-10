@@ -9,7 +9,6 @@ using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
-using CoreAI.Mods.Rbx.Instances.Scheduling;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -154,7 +153,6 @@ namespace CoreAI.Tests.EditMode
                     RbxApi = RbxApi,
                     RegisterWorldEditBuildBindings = false
                 });
-                RbxApi.Scheduler.PhaseReached += PumpSchedulerPhase;
             }
 
             public InMemoryInputSource Input { get; }
@@ -163,26 +161,13 @@ namespace CoreAI.Tests.EditMode
             public MemoryStore Store { get; }
             public LuaCsModStack Stack { get; }
 
+            /// <summary>
+            /// Advances one production frame. Phase pumps ride the scheduler now, so no
+            /// extra manual pumping here — one Advance is exactly one firing per signal.
+            /// </summary>
             public void AdvanceFrame(float deltaSeconds)
             {
                 RbxApi.Scheduler.Advance(deltaSeconds);
-            }
-
-            private void PumpSchedulerPhase(SchedulerPhase phase, double deltaSeconds)
-            {
-                float frameDelta = (float)deltaSeconds;
-                switch (phase)
-                {
-                    case SchedulerPhase.PreSimulation:
-                        RbxApi.PumpPreSimulation(frameDelta);
-                        return;
-                    case SchedulerPhase.Heartbeat:
-                        RbxApi.PumpHeartbeat(frameDelta);
-                        return;
-                    case SchedulerPhase.PreRender:
-                        RbxApi.PumpPreRender(frameDelta);
-                        return;
-                }
             }
         }
 

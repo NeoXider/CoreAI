@@ -59,10 +59,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     end)
                 end");
 
-            roblox.PumpFrame(0.25f);
-            roblox.Scheduler.Advance(0d);
-            roblox.PumpFrame(0.25f);
-            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0.25d);
+            roblox.Scheduler.Advance(0.25d);
 
             foreach (string name in new[]
                      { "PreAnimation", "PreSimulation", "PostSimulation", "PreRender" })
@@ -103,8 +101,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 rs.PreRender:Connect(note('R'))
                 rs.RenderStepped:Connect(note('r'))");
 
-            roblox.PumpFrame(0.016f);
-            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0.016d);
 
             Assert.AreEqual("APsOHRr", store.Get("m", "order"),
                 "The frame must run PreAnimation, PreSimulation (+ legacy Stepped), PostSimulation, "
@@ -132,10 +129,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     store_set('pre_extra', tostring(extra))
                 end)");
 
-            roblox.PumpFrame(0.5f);
-            roblox.Scheduler.Advance(0d);
-            roblox.PumpFrame(0.25f);
-            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0.5d);
+            roblox.Scheduler.Advance(0.25d);
 
             Assert.AreEqual("0.75", store.Get("m", "stepped_run"),
                 "Stepped's first argument is the accumulated run time.");
@@ -163,10 +158,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 rs.PreRender:Connect(function() render = render + 1; store_set('render', tostring(render)) end)
                 rs.RenderStepped:Connect(function() render = render + 1; store_set('render', tostring(render)) end)");
 
-            roblox.PumpFrame(0.016f);
-            roblox.Scheduler.Advance(0d);
-            roblox.PumpFrame(0.016f);
-            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0.016d);
+            roblox.Scheduler.Advance(0.016d);
 
             Assert.AreEqual("4", store.Get("m", "sim"),
                 "A dedicated server still simulates: PostSimulation and Heartbeat must keep firing.");
@@ -192,8 +185,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 local rs = game:GetService('RunService')
                 rs.PreRender:Connect(function() store_set('rendered', 'yes') end)");
 
-            roblox.PumpFrame(0.016f);
-            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0.016d);
 
             Assert.AreEqual("yes", store.Get("m", "rendered"));
         }

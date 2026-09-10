@@ -129,17 +129,20 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         /// <summary>
-        /// Fires Heartbeat, then drains the queued invocation via <see cref="ModScheduler.Advance"/> —
-        /// mirrors the production frame driver's split pump/advance and the sibling reuse fixture's
-        /// <c>PumpFrame</c> helper. <paramref name="scaledDt"/> is passed separately from
-        /// <paramref name="dt"/> so a caller can simulate <c>timeScale = 0</c> (scaled delta 0) while
-        /// still firing the signal with a normal per-frame <paramref name="dt"/> argument, exactly as
-        /// the scaled-time fixture's header comment documents: "a scale is simulated ... by halving
-        /// the real per-frame delta before calling Advance."
+        /// Runs one host frame exactly as production does: a single <see cref="ModScheduler.Advance"/>.
+        /// The scheduler walks its phase pipeline and <c>LuaCsRbxApiBindings</c> fires Heartbeat from
+        /// the Heartbeat phase, so the signal fires once and its queued invocation drains in the same
+        /// call. <paramref name="scaledDt"/> is the SCALED per-frame delta, so passing 0 simulates
+        /// <c>timeScale = 0</c> — a paused world whose clock never advances.
         /// </summary>
-        private static void PumpHeartbeat(LuaCsRbxApiBindings roblox, float dt, double scaledDt)
+        /// <remarks>
+        /// WHY not <c>roblox.PumpHeartbeat(dt)</c> followed by <c>Advance(scaledDt)</c>, as this helper
+        /// used to do: that was the pre-merge host shape, when the bindings routed only the input phase.
+        /// The bindings now route every phase, so pumping as well runs the frame TWICE — the runaway
+        /// handler below was cut once per copy and every "exactly once" assertion saw 2.
+        /// </remarks>
+        private static void PumpHeartbeat(LuaCsRbxApiBindings roblox, double scaledDt)
         {
-            roblox.PumpHeartbeat(dt);
             roblox.Scheduler.Advance(scaledDt);
         }
 
@@ -153,7 +156,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             stack.Runtime.ModHandlerErrored += (modId, message, streak) => errors.Add((modId, message));
             stack.Runtime.LoadMod("looper", InfiniteLoopModSource);
 
-            PumpHeartbeat(roblox, 0.1f, 0.1d);
+            PumpHeartbeat(roblox, 0.1d);
 
             Assert.AreEqual(1, errors.Count,
                 "a genuine while-true-do-end handler must be cut exactly once by the guard, not hang " +
@@ -194,7 +197,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             roblox.Scheduler.ThreadFaulted += (modId, error) => faults.Add((modId, error));
             stack.Runtime.LoadMod("looper", InfiniteLoopModSource);
 
-            PumpHeartbeat(roblox, 0.1f, 0.1d);
+            PumpHeartbeat(roblox, 0.1d);
 
             Assert.AreEqual(1, faults.Count,
                 "the runaway handler must fault its scheduler thread exactly once");
@@ -221,7 +224,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     store_set('n', tostring(n))
                 end)");
 
-            PumpHeartbeat(roblox, 0.1f, 0.1d);
+            PumpHeartbeat(roblox, 0.1d);
 
             Assert.AreEqual("1", store.Get("good", "n"),
                 "the well-behaved mod's handler must still run — and complete — in the SAME frame the " +
@@ -244,7 +247,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             // of which reads the scheduler's scaled clock at all, so this call proves that rather than
             // assuming it: if the guard were instead driven by scaled time, this Advance(0d) would never
             // cut the loop and this test would hang the whole run.
-            PumpHeartbeat(roblox, 0f, 0d);
+            PumpHeartbeat(roblox, 0d);
 
             Assert.AreEqual(1, errors.Count,
                 "the per-resume guard is wall-clock + instruction based, not scaled-time based, so it " +
@@ -263,7 +266,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             stack.Runtime.LoadMod("looper", InfiniteLoopModSource);
 
             Stopwatch stopwatch = Stopwatch.StartNew();
-            PumpHeartbeat(roblox, 0.1f, 0.1d);
+            PumpHeartbeat(roblox, 0.1d);
             stopwatch.Stop();
 
             Assert.AreEqual(1, errorCount);
@@ -307,7 +310,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             stack.Runtime.LoadMod("looper", InfiniteLoopModSource);
 
             Stopwatch stopwatch = Stopwatch.StartNew();
-            PumpHeartbeat(roblox, 0.1f, 0.1d);
+            PumpHeartbeat(roblox, 0.1d);
             stopwatch.Stop();
 
             Assert.AreEqual(1, errors.Count);

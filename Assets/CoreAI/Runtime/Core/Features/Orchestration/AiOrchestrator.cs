@@ -20,7 +20,7 @@ namespace CoreAI.Ai
     /// Orchestration pipeline: prompts, memory, <see cref="ILlmClient"/> invocation,
     /// optional structured-output retry via <see cref="IRoleStructuredResponsePolicy"/>, command publication.
     /// </summary>
-    public sealed class AiOrchestrator : IAiOrchestrationService, IAiActorContextResolver, IUnstartedAiTurnRecorder
+    public sealed class AiOrchestrator : IAiOrchestrationService, IAiTaskResultService, IAiActorContextResolver, IUnstartedAiTurnRecorder
     {
         /// <summary>
         /// Legacy sentinel for "no history cap". The orchestrator no longer uses it: even with
@@ -255,8 +255,7 @@ namespace CoreAI.Ai
 
             (string updatedSystem, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool wasCompacted,
                     ConversationContextSnapshot contextSnapshot) =
-                await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId, cancellationToken)
-                    .ConfigureAwait(false);
+                await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId, cancellationToken);
             system = updatedSystem;
             bool shouldConsolidateMemorySnapshot = wasCompacted || contextRetryPass > 0;
             if (shouldConsolidateMemorySnapshot &&
@@ -273,9 +272,7 @@ namespace CoreAI.Ai
             AppendMemoryTailMessage(ref chatHistory, memoryParts.TailBlock);
             AppendSystemTailMessage(ref chatHistory, toolAvailability);
             AppendSystemTailMessage(ref chatHistory, worldStateInstructions);
-            string promptText = (system ?? "") + "\n" + (user ?? "") + "\n" + string.Join("\n",
-                (System.Collections.IEnumerable)chatHistory ?? Array.Empty<object>());
-            AuditContext.SetPromptHash(traceId, AuditHash.Compute(promptText));
+            AuditContext.SetPromptHash(traceId, ComputePromptHash(system, user, chatHistory));
             int estimatedPromptTokens =
                 _tokenEstimator.EstimateText(system ?? "") +
                 _tokenEstimator.EstimateText(user ?? "") +
@@ -308,9 +305,17 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public async Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
         {
+            if (task == null) return null;
+            LlmCompletionResult result = await RunTaskResultAsync(task, cancellationToken);
+            return result?.Ok == true ? result.Content : UserFacingChatFailureOrNull(task, result?.Error);
+        }
+
+        /// <inheritdoc />
+        public async Task<LlmCompletionResult> RunTaskResultAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+        {
             if (task == null)
             {
-                return null;
+                return BuildFailureResult("Task is required.", LlmErrorCode.InvalidRequest, null, null);
             }
 
             ResolveActorContext(task);
@@ -320,13 +325,7 @@ namespace CoreAI.Ai
                 // WHY: the chat already rendered this user turn. Authority denial is a terminal orchestration
                 // outcome just like provider rejection, so it must not bypass the history teardown boundary.
                 EnsureUserTurnRecorded(null, task, new UserTurnHistoryLatch(), true);
-                string denied = UserFacingChatFailureOrNull(task, "AI execution disabled.");
-                if (denied != null)
-                {
-                    return denied;
-                }
-
-                return null;
+                return BuildFailureResult("AI execution disabled.", LlmErrorCode.InvalidRequest, null, null);
             }
 
             RequestBundle bundle = null;
@@ -352,12 +351,10 @@ namespace CoreAI.Ai
             {
                 while (true)
                 {
-#if UNITY_WEBGL && !UNITY_EDITOR
+                    // WHY the platform fork is gone: its two branches differed only by
+                    // ConfigureAwait(false) off WebGL. Resuming on the host context is now the rule on
+                    // every platform, so the fork was trap surface with no behaviour behind it.
                     bundle = await BuildRequestAsync(task, contextPass, overflowEvidence, cancellationToken);
-#else
-                    bundle = await BuildRequestAsync(task, contextPass, overflowEvidence, cancellationToken)
-                        .ConfigureAwait(false);
-#endif
                     roleId = bundle.RoleId;
                     traceId = bundle.TraceId;
                     system = bundle.SystemPrompt;
@@ -388,6 +385,8 @@ namespace CoreAI.Ai
                     bool isContextOverflow = result != null &&
                                              result.ErrorCode == LlmErrorCode.ContextLengthExceeded;
                     bool canRetryContextOverflow = isContextOverflow &&
+                                                   (result.ExecutedToolCalls == null || result.ExecutedToolCalls.Count == 0) &&
+                                                   string.IsNullOrEmpty(result.Content) &&
                                                    _compactionCoordinator.ShouldRetryAfterContextOverflow(
                                                        result,
                                                        contextOverflowPasses,
@@ -403,23 +402,11 @@ namespace CoreAI.Ai
                     if (contextOverflowPasses > 0 && isContextOverflow)
                     {
                         RecordTrace(bundle, result, null, result?.Error ?? "empty response");
-                        string compactionFail = UserFacingChatFailureOrNull(task, result?.Error ?? "empty response");
-                        if (compactionFail != null)
-                        {
-                            return compactionFail;
-                        }
-
-                        return null;
+                        return NormalizeTaskFailure(result, "empty response");
                     }
 
                     RecordTrace(bundle, result, null, result?.Error ?? "empty response");
-                    string emptyFail = UserFacingChatFailureOrNull(task, result?.Error ?? "empty response");
-                    if (emptyFail != null)
-                    {
-                        return emptyFail;
-                    }
-
-                    return null;
+                    return NormalizeTaskFailure(result, "empty response");
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -438,13 +425,15 @@ namespace CoreAI.Ai
             {
                 Log.Instance.Error($"[AiOrchestrator] Task execution failed: {ex.Message}", LogTag.Llm);
                 RecordTrace(bundle, result, null, ex.Message);
-                string thrown = UserFacingChatFailureOrNull(task, ex.Message);
-                if (thrown != null)
+                LlmCompletionResult failure = NormalizeTaskFailure(result, ex.Message);
+                if (ex is LlmClientException typed)
                 {
-                    return thrown;
+                    failure.ErrorCode = typed.ErrorCode;
+                    failure.HttpStatus = typed.HttpStatus;
+                    failure.RetryAfterSeconds = typed.RetryAfterSeconds;
+                    failure.ProviderErrorBody = typed.ProviderErrorBody;
                 }
-
-                return null;
+                return failure;
             }
             finally
             {
@@ -462,6 +451,13 @@ namespace CoreAI.Ai
             if (_structuredPolicy.ShouldValidate(roleId) &&
                 !_structuredPolicy.TryValidate(roleId, content, out string failReason))
             {
+                if (result.ExecutedToolCalls != null && result.ExecutedToolCalls.Count > 0)
+                {
+                    LlmCompletionResult invalid = NormalizeTaskFailure(result, "Structured response validation failed after tool execution.");
+                    invalid.ErrorCode = LlmErrorCode.InvalidRequest;
+                    RecordTrace(bundle, invalid, content, invalid.Error);
+                    return invalid;
+                }
                 _metrics.RecordStructuredRetry(bundle.ActorId, roleId, traceId, failReason ?? "");
                 AiTaskRequest retryTask = CloneTaskWithStructuredHint(task, failReason);
                 string userRetry = _promptComposer.BuildUserPayload(bundle.Snapshot, retryTask);
@@ -474,14 +470,7 @@ namespace CoreAI.Ai
                 if (second == null || !second.Ok || string.IsNullOrEmpty(second.Content))
                 {
                     RecordTrace(bundle, second, null, second?.Error ?? "structured retry failed");
-                    string retryFail =
-                        UserFacingChatFailureOrNull(task, second?.Error ?? "structured retry failed");
-                    if (retryFail != null)
-                    {
-                        return retryFail;
-                    }
-
-                    return null;
+                    return NormalizeTaskFailure(second, "structured retry failed");
                 }
 
                 content = second.Content;
@@ -489,22 +478,61 @@ namespace CoreAI.Ai
                 {
                     RecordTrace(bundle, second, content, "structured validation failed");
                     RecordTokenObservation(bundle, second);
-                    string validFail =
-                        UserFacingChatFailureOrNull(task, "Structured response validation failed.");
-                    if (validFail != null)
-                    {
-                        return validFail;
-                    }
-
-                    return null;
+                    LlmCompletionResult invalid = NormalizeTaskFailure(second, "Structured response validation failed.");
+                    invalid.ErrorCode = LlmErrorCode.InvalidRequest;
+                    return invalid;
                 }
 
                 result = second;
             }
 
             content = SanitizeAndPublish(bundle, task, content, user, result);
-            bundle.ContextSnapshot?.Commit();
-            return content;
+            result.Content = content;
+            return result;
+        }
+
+        /// <summary>
+        /// Audit fingerprint of the request the model will see: system prompt, user payload and the text
+        /// of every chat history message, in that order, newline-separated.
+        /// <para>
+        /// WHY it is spelled out part by part: the previous form joined the history with
+        /// <c>string.Join("\n", (System.Collections.IEnumerable)chatHistory)</c>. A non-generic
+        /// <c>IEnumerable</c> binds to the <c>params object[]</c> overload, so <c>Join</c> received ONE
+        /// element and hashed <c>List&lt;ChatMessage&gt;.ToString()</c> - the type name - in place of the
+        /// conversation. Two turns with the same system prompt and user text but a different history
+        /// carried the same "prompt hash" in the audit log. The hash now covers the content, and it is
+        /// computed incrementally so the prompt is never copied into one string just to be hashed.
+        /// </para>
+        /// </summary>
+        internal static string ComputePromptHash(
+            string system,
+            string user,
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> chatHistory)
+        {
+            int count = chatHistory?.Count ?? 0;
+            List<string> parts = new(4 + count * 2) { system ?? "", "\n", user ?? "", "\n" };
+            for (int i = 0; i < count; i++)
+            {
+                if (i > 0)
+                {
+                    parts.Add("\n");
+                }
+
+                parts.Add(chatHistory[i]?.Text ?? "");
+            }
+
+            return AuditHash.ComputeParts(parts);
+        }
+
+        private static LlmCompletionResult NormalizeTaskFailure(LlmCompletionResult result, string fallback)
+        {
+            result ??= new LlmCompletionResult();
+            bool emptySuccess = result.Ok;
+            result.Ok = false;
+            if (string.IsNullOrWhiteSpace(result.Error)) result.Error = fallback;
+            if (result.ErrorCode == LlmErrorCode.None)
+                result.ErrorCode = emptySuccess ? LlmErrorCode.EmptyResponse : LlmErrorCode.ProviderError;
+            return result;
         }
 
         /// <summary>
@@ -574,8 +602,7 @@ namespace CoreAI.Ai
 
             while (true)
             {
-                RequestBundle bundle = await BuildRequestAsync(task, contextPass, overflowEvidence, cancellationToken)
-                    .ConfigureAwait(false);
+                RequestBundle bundle = await BuildRequestAsync(task, contextPass, overflowEvidence, cancellationToken);
                 // WHY: the teardown in RunStreamingAsync needs the role config of the LAST attempt to know
                 // where (and whether) the user turn is persisted.
                 turn.Bundle = bundle;
@@ -600,6 +627,14 @@ namespace CoreAI.Ai
                 int cacheReadTokens = 0;
                 int cacheWriteTokens = 0;
                 LlmCompletionResult contextOverflowFailure = null;
+                string model = "";
+                LlmStreamChunk Terminal(string error, LlmErrorCode code, int? status = null, int? retry = null) => new()
+                {
+                    IsDone = true, Error = error, ErrorCode = code, HttpStatus = status, RetryAfterSeconds = retry,
+                    Model = model, ExecutedToolCalls = executedToolCalls, PromptTokens = promptTokens,
+                    LastRoundtripPromptTokens = lastRoundtripPromptTokens, CompletionTokens = completionTokens,
+                    TotalTokens = totalTokens, CacheReadTokens = cacheReadTokens, CacheWriteTokens = cacheWriteTokens
+                };
 
                 // WHY: Timeout is enforced by the Unity-aware caller (CoreAiChatService)
 
@@ -720,12 +755,7 @@ namespace CoreAI.Ai
 
                         if (wasCancelled)
                         {
-                            yield return new LlmStreamChunk
-                            {
-                                IsDone = true,
-                                Error = terminalError,
-                                ErrorCode = terminalErrorCode
-                            };
+                            yield return Terminal(terminalError, terminalErrorCode);
                             yield break;
                         }
 
@@ -735,7 +765,7 @@ namespace CoreAI.Ai
                             terminalErrorCode = exceptionCode;
                             terminalHttpStatus = exceptionHttpStatus;
                             terminalRetryAfterSeconds = exceptionRetryAfterSeconds;
-                            if (exceptionCode == LlmErrorCode.ContextLengthExceeded && chunkCount == 0)
+                            if (exceptionCode == LlmErrorCode.ContextLengthExceeded && chunkCount == 0 && executedToolCalls.Count == 0)
                             {
                                 contextOverflowFailure = BuildFailureResult(
                                     exceptionMessage,
@@ -745,14 +775,7 @@ namespace CoreAI.Ai
                                 break;
                             }
 
-                            yield return new LlmStreamChunk
-                            {
-                                IsDone = true,
-                                Error = exceptionMessage,
-                                ErrorCode = exceptionCode,
-                                HttpStatus = exceptionHttpStatus,
-                                RetryAfterSeconds = exceptionRetryAfterSeconds
-                            };
+                            yield return Terminal(exceptionMessage, exceptionCode, exceptionHttpStatus, exceptionRetryAfterSeconds);
                             yield break;
                         }
 
@@ -804,7 +827,7 @@ namespace CoreAI.Ai
                                 // boundary between two assistant replies in one stream, and the consumer
                                 // reacts to it exactly once - on a chunk that now carries no text it is
                                 // simply lost, and the next reply gets glued onto the previous one
-                                // ("Проверь себя:**Ход завершён…**"). Carry it to the next visible chunk.
+                                // ("Check yourself:**Turn complete...**"). Carry it to the next visible chunk.
                                 carriedStartsNewMessage |= current.StartsNewMessage;
                             }
                             else
@@ -820,13 +843,13 @@ namespace CoreAI.Ai
                             }
                         }
 
-                        if (current != null && !string.IsNullOrEmpty(current.Error))
+                        if (current != null && (!string.IsNullOrEmpty(current.Error) || current.ErrorCode != LlmErrorCode.None))
                         {
-                            terminalError = current.Error;
+                            terminalError = string.IsNullOrWhiteSpace(current.Error) ? "Streaming completion failed." : current.Error;
                             terminalErrorCode = current.ErrorCode;
                             terminalHttpStatus = current.HttpStatus;
                             terminalRetryAfterSeconds = current.RetryAfterSeconds;
-                            if (current.ErrorCode == LlmErrorCode.ContextLengthExceeded && chunkCount == 0)
+                            if (current.ErrorCode == LlmErrorCode.ContextLengthExceeded && chunkCount == 0 && executedToolCalls.Count == 0 && (current.ExecutedToolCalls == null || current.ExecutedToolCalls.Count == 0))
                             {
                                 contextOverflowFailure = BuildFailureResult(
                                     current.Error,
@@ -875,8 +898,21 @@ namespace CoreAI.Ai
                             }
                         }
 
+                        if (!string.IsNullOrEmpty(current?.Model)) model = current.Model;
+                        if (current != null && current.IsDone)
+                        {
+                            current.ExecutedToolCalls = executedToolCalls;
+                            current.PromptTokens = promptTokens;
+                            current.LastRoundtripPromptTokens = lastRoundtripPromptTokens;
+                            current.CompletionTokens = completionTokens;
+                            current.TotalTokens = totalTokens;
+                            current.CacheReadTokens = cacheReadTokens;
+                            current.CacheWriteTokens = cacheWriteTokens;
+                            current.Model = model;
+                        }
                         if (current != null &&
                             current.IsDone &&
+                            current.ErrorCode == LlmErrorCode.None &&
                             string.IsNullOrEmpty(current.Error) &&
                             string.IsNullOrWhiteSpace(current.Text) &&
                             current.ExecutedToolCalls != null &&
@@ -991,11 +1027,7 @@ namespace CoreAI.Ai
                     {
                         _metrics.RecordStructuredRetry(
                             bundle.ActorId, bundle.RoleId, bundle.TraceId, failReason ?? "");
-                        yield return new LlmStreamChunk
-                        {
-                            IsDone = true,
-                            Error = "structured validation failed: " + (failReason ?? "")
-                        };
+                        yield return Terminal("structured validation failed: " + (failReason ?? ""), LlmErrorCode.InvalidRequest);
                         yield break;
                     }
 
@@ -1017,7 +1049,6 @@ namespace CoreAI.Ai
                     EnsureUserTurnRecorded(bundle, task, turn.UserTurn);
                     content = SanitizeAndPublish(
                         bundle, task, content, bundle.UserPayload, streamResult);
-                    bundle.ContextSnapshot?.Commit();
                 }
                 else if (!string.IsNullOrEmpty(terminalError))
                 {
@@ -1026,6 +1057,15 @@ namespace CoreAI.Ai
                         terminalErrorCode,
                         terminalHttpStatus,
                         terminalRetryAfterSeconds);
+                    failure.Content = content;
+                    failure.Model = model;
+                    failure.ExecutedToolCalls = executedToolCalls;
+                    failure.PromptTokens = promptTokens;
+                    failure.LastRoundtripPromptTokens = lastRoundtripPromptTokens;
+                    failure.CompletionTokens = completionTokens;
+                    failure.TotalTokens = totalTokens;
+                    failure.CacheReadTokens = cacheReadTokens;
+                    failure.CacheWriteTokens = cacheWriteTokens;
                     RecordTrace(bundle, failure, null, terminalError);
                 }
                 else
@@ -1147,15 +1187,15 @@ namespace CoreAI.Ai
         {
             if (!_settings.EnableStreaming)
             {
-#if UNITY_WEBGL && !UNITY_EDITOR
+                // WHY no platform fork: see BuildRequestAsync above — the branches differed only by
+                // ConfigureAwait(false), which is now forbidden on every platform.
                 return await _llm.CompleteAsync(req, cancellationToken);
-#else
-                return await _llm.CompleteAsync(req, cancellationToken).ConfigureAwait(false);
-#endif
             }
 
             StringBuilder accumulated = new();
             string terminalError = null;
+            string model = "";
+            string providerErrorBody = null;
             LlmErrorCode terminalErrorCode = LlmErrorCode.None;
             int? terminalHttpStatus = null;
             int? terminalRetryAfterSeconds = null;
@@ -1173,9 +1213,12 @@ namespace CoreAI.Ai
                 enumerator = _llm.CompleteStreamingAsync(req, cancellationToken)
                     .GetAsyncEnumerator(cancellationToken);
             }
+            catch (OperationCanceledException) { throw; }
             catch (LlmClientException ex)
             {
-                return BuildFailureResult(ex.Message, ex.ErrorCode, ex.HttpStatus, ex.RetryAfterSeconds);
+                LlmCompletionResult failed = BuildFailureResult(ex.Message, ex.ErrorCode, ex.HttpStatus, ex.RetryAfterSeconds);
+                failed.ProviderErrorBody = ex.ProviderErrorBody;
+                return failed;
             }
             catch (Exception ex)
             {
@@ -1210,6 +1253,7 @@ namespace CoreAI.Ai
                         terminalErrorCode = ex.ErrorCode;
                         terminalHttpStatus = ex.HttpStatus;
                         terminalRetryAfterSeconds = ex.RetryAfterSeconds;
+                        providerErrorBody = ex.ProviderErrorBody;
                         break;
                     }
                     catch (Exception ex)
@@ -1229,9 +1273,10 @@ namespace CoreAI.Ai
                         StreamedMessageJoiner.Append(accumulated, current);
                     }
 
-                    if (!string.IsNullOrEmpty(current.Error))
+                    if (!string.IsNullOrEmpty(current.Model)) model = current.Model;
+                    if (!string.IsNullOrEmpty(current.Error) || current.ErrorCode != LlmErrorCode.None)
                     {
-                        terminalError = current.Error;
+                        terminalError = string.IsNullOrWhiteSpace(current.Error) ? "Streaming completion failed." : current.Error;
                         terminalErrorCode = current.ErrorCode;
                         terminalHttpStatus = current.HttpStatus;
                         terminalRetryAfterSeconds = current.RetryAfterSeconds;
@@ -1289,6 +1334,15 @@ namespace CoreAI.Ai
             {
                 LlmCompletionResult failure = BuildFailureResult(
                     terminalError, terminalErrorCode, terminalHttpStatus, terminalRetryAfterSeconds);
+                failure.Content = accumulated.ToString();
+                failure.Model = model;
+                failure.ProviderErrorBody = providerErrorBody;
+                failure.PromptTokens = promptTokens;
+                failure.LastRoundtripPromptTokens = lastRoundtripPromptTokens;
+                failure.CompletionTokens = completionTokens;
+                failure.TotalTokens = totalTokens;
+                failure.CacheReadTokens = cacheReadTokens;
+                failure.CacheWriteTokens = cacheWriteTokens;
                 failure.ExecutedToolCalls = executedToolCalls;
                 return failure;
             }
@@ -1297,6 +1351,7 @@ namespace CoreAI.Ai
             {
                 Ok = true,
                 Content = accumulated.ToString(),
+                Model = model,
                 PromptTokens = promptTokens,
                 LastRoundtripPromptTokens = lastRoundtripPromptTokens,
                 CompletionTokens = completionTokens,
@@ -1412,7 +1467,6 @@ namespace CoreAI.Ai
                 snapshot = _contextManager is IAsyncConversationContextManager asyncCtx
                     ? await asyncCtx
                         .BuildSnapshotAsync(roleId, history, roleConfig, buildArgs, traceId, cancellationToken)
-                        .ConfigureAwait(false)
                     : _contextManager.BuildSnapshot(roleId, history, roleConfig, buildArgs);
             }
 
@@ -1421,9 +1475,29 @@ namespace CoreAI.Ai
                 return (system, null, false, null);
             }
 
-            EnforceSummaryBudget(roleId, snapshot, buildArgs);
+            // This summary describes old messages: preserve it before any provider/tool side effect
+            // or bounded history append, even when the forthcoming model request later fails.
+            // WHY it cannot wait for success: every terminal path of a turn appends the user message
+            // (see EnsureUserTurnRecorded), and on a bounded store an append evicts the oldest
+            // message. Committing here is what makes that eviction safe - the evicted source is
+            // already retold. A summary is a retelling of messages the store still holds, so writing
+            // one for a turn that later fails costs a rolled summary, not a lost message.
+            await snapshot.CommitAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // WHY the budget is enforced AFTER the commit, not before: EnforceSummaryBudget MUTATES
+            // snapshot.Summary, so running it first would persist the truncated text and lose the
+            // older half of the retelling for good. Committing first keeps the store whole and bounds
+            // only what this request carries, which is the half that has to fit the backend.
+            // WHY the bounded text is a LOCAL and snapshot.Summary is left alone: the store's copy is
+            // what makes the teardown append safe — an append may evict the oldest message only
+            // because that message is already retold there. Mutating the snapshot let the truncation
+            // reach the store on a retry pass, and the oldest source was lost for good; a test that
+            // reads the store caught it. The request is the only thing that has to fit the backend,
+            // so only the request's copy is bounded.
+            string budgetedSummary = EnforceSummaryBudget(roleId, snapshot, buildArgs);
             string resultSystem = system;
-            string summaryBlock = ConversationSummaryPromptProjection.BuildBlock(snapshot.Summary);
+            string summaryBlock = ConversationSummaryPromptProjection.BuildBlock(budgetedSummary);
             bool hasSummary = summaryBlock.Length > 0;
 
             ChatMessage[] recent = snapshot.RecentMessages ?? Array.Empty<ChatMessage>();
@@ -1616,7 +1690,17 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Writes the user turn into role chat history once per turn.
+        /// Writes the user turn into role chat history exactly once per turn, on every terminal path.
+        /// <para>
+        /// WHY there is no second condition: the learner's own words are the one thing in the store that
+        /// cannot be reconstructed from anything else, and the chat has already rendered them. 7.40.0 added
+        /// a "summary preflight still pending" gate here, so a turn that broke while conversation context
+        /// was being built - a cancelled build, an unreadable summary file - recorded nothing at all: the
+        /// question stayed on screen while the model's history never learned it was asked. The eviction that
+        /// gate was defending against is handled where it happens, by committing the rolling summary before
+        /// this append (see BuildChatHistoryAsync); skipping the append cannot protect old source, because
+        /// the very next turn appends anyway.
+        /// </para>
         /// </summary>
         private void EnsureUserTurnRecorded(
             RequestBundle bundle,
@@ -2234,6 +2318,18 @@ namespace CoreAI.Ai
             return null;
         }
 
+        /// <summary>
+        /// Gives a chat-source request short-term history even for a role that keeps history off
+        /// (the Programmer), without mutating global policy.
+        /// </summary>
+        // WHY: PersistChatHistory stays FALSE here on purpose, and this is the answer to "why does my
+        // conversation start empty after a page reload / app restart?" - it is designed behaviour, not a
+        // lost write. A chat-source run borrows history for the current process only; writing it to disk
+        // is a per-role decision the host makes with WithChatHistory(persistBetweenSessions: true), and
+        // the built-in PlainChat / SmartChat roles do exactly that. Silently persisting here would put
+        // every ad-hoc Programmer conversation on the player's disk and re-inject it into later,
+        // unrelated sessions. Pinned by AiOrchestratorHistoryEditModeTests
+        // .RunTaskAsync_ChatSource_EnablesShortTermHistory_ForProgrammer.
         private static AgentMemoryPolicy.RoleMemoryConfig ResolveRoleConfigForRequest(
             AgentMemoryPolicy.RoleMemoryConfig roleConfig,
             AiTaskRequest task)
@@ -2301,7 +2397,7 @@ namespace CoreAI.Ai
                 : "Tool calls completed: " + string.Join(", ", succeeded) + ".";
         }
 
-        private static string ExtractToolTraceMessage(string detail)
+        internal static string ExtractToolTraceMessage(string detail)
         {
             if (string.IsNullOrWhiteSpace(detail))
             {
@@ -2309,22 +2405,29 @@ namespace CoreAI.Ai
             }
 
             string trimmed = detail.Trim();
-            try
+            // WHY the first-character gate: plain-text tool results are the common case, and letting
+            // JObject.Parse reject them by throwing made every such result cost a thrown-and-caught
+            // exception per tool call - dear on a platform where throw/catch is expensive. Newtonsoft
+            // parses an object here only from '{' or from a leading comment ('/'); anything else threw.
+            if (trimmed.Length > 0 && (trimmed[0] == '{' || trimmed[0] == '/'))
             {
-                JObject json = JObject.Parse(trimmed);
-                JToken token = json["message"] ?? json["Message"] ?? json["error"] ?? json["Error"];
-                if (token != null)
+                try
                 {
-                    string message = token.Type == JTokenType.String ? token.Value<string>() : token.ToString();
-                    if (!string.IsNullOrWhiteSpace(message))
+                    JObject json = JObject.Parse(trimmed);
+                    JToken token = json["message"] ?? json["Message"] ?? json["error"] ?? json["Error"];
+                    if (token != null)
                     {
-                        return message.Trim();
+                        string message = token.Type == JTokenType.String ? token.Value<string>() : token.ToString();
+                        if (!string.IsNullOrWhiteSpace(message))
+                        {
+                            return message.Trim();
+                        }
                     }
                 }
-            }
-            catch
-            {
-                // WHY: Plain-text tool results are expected.
+                catch
+                {
+                    // WHY: Plain-text tool results are expected.
+                }
             }
 
             const int maxChars = 240;
@@ -2472,14 +2575,18 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Final bound on the summary before it enters the prompt. The reserve is the orchestrator's
-        /// promise to the backend, so it holds even for a context manager that did not honour it.
+        /// Returns the summary text this REQUEST may carry, bounded to its reserve. The snapshot's own
+        /// <see cref="ConversationContextSnapshot.Summary"/> is deliberately NOT changed: the store's copy
+        /// must stay whole, because a teardown append may evict the oldest message only while that message
+        /// is still retold there. The reserve is the orchestrator's promise to the backend, so it holds
+        /// even for a context manager that did not honour it.
         /// </summary>
-        private void EnforceSummaryBudget(
+        private string EnforceSummaryBudget(
             string roleId,
             ConversationContextSnapshot snapshot,
             ConversationContextBuildArgs buildArgs)
         {
+            string carried = snapshot.Summary;
             int reserve = buildArgs?.SummaryTokenBudget ?? 0;
             if (reserve > 0 && !string.IsNullOrWhiteSpace(snapshot.Summary))
             {
@@ -2491,7 +2598,7 @@ namespace CoreAI.Ai
                     string bounded = ConversationRolledSummaryLimiter.Apply(
                         snapshot.Summary, _tokenEstimator, Math.Max(1, reserve - 1));
                     snapshot.SummaryTokensDropped += Math.Max(1, estimate - _tokenEstimator.EstimateText(bounded));
-                    snapshot.Summary = bounded;
+                    carried = bounded;
                 }
             }
 
@@ -2501,6 +2608,8 @@ namespace CoreAI.Ai
                     $"[AiOrchestrator] Rolling summary for role '{roleId}' trimmed by ~{snapshot.SummaryTokensDropped} tokens to fit its {reserve}-token request reserve.",
                     LogTag.Llm);
             }
+
+            return carried;
         }
 
         /// <summary>

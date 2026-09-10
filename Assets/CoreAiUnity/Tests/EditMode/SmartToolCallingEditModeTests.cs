@@ -69,7 +69,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task DuplicateProtection_ResetsOnNewRequest()
         {
-            // Убеждаемся, что разные независимые вызовы (новые реквесты) могут использовать один и тот же инструмент.
+            // Make sure that separate independent calls (new requests) may use one and the same tool.
             MockChatClient mockInner = new();
             SmartToolCallingChatClient smartClient = new(
                 mockInner, NullLog.Instance, _settings, false, new[] { _dummyLlmTool }, "TestRole"
@@ -82,26 +82,26 @@ namespace CoreAI.Tests.EditMode
             ChatResponse r1 =
                 await smartClient.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Call 1") }, options);
 
-            // Запрос должен был успешно закончиться (mockInner возвращает Text "Stop" на 2-й итерации)
+            // The request should have finished successfully (mockInner returns Text "Stop" on the 2nd iteration)
             Assert.AreEqual("Stop", r1.Text);
 
-            // Request 2 (Новый внешний запрос)
-            // Мы вызываем ТОТ ЖЕ самый инструмент, это НЕ дубликат, т.к. это уже новый GetResponseAsync.
+            // Request 2 (a new outer request)
+            // We call THE VERY SAME tool; this is NOT a duplicate, because this is already a new GetResponseAsync.
             mockInner.Responses.Enqueue(CreateResponseWithToolCall("dummy_tool"));
             ChatResponse r2 =
                 await smartClient.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Call 2") }, options);
 
-            // Если бы защита не сбросилась, r2 завершился бы ошибкой duplicate tool. 
-            // Но мы ожидаем, что будет Text "Stop", так как цикл пройдёт успешно.
+            // If the protection had not been reset, r2 would have ended with a duplicate tool error.
+            // Instead we expect Text "Stop", because the loop runs through successfully.
             Assert.AreEqual("Stop", r2.Text,
-                "Защита дубликатов должна сбрасываться при новом вызове GetResponseAsync.");
+                "Duplicate protection must reset on a new GetResponseAsync call.");
         }
 
         [Test]
         public async Task DuplicateProtection_BlocksInSameRequestLoop()
         {
-            // Убеждаемся, что если модель внутри ОДНОГО цикла (т.е. LLM решил снова вызвать тот же тул после ошибки или успеха), 
-            // это будет заблокировано внутри SmartToolCallingChatClient.
+            // Make sure that when the model calls the same tool again inside ONE loop (that is, the LLM decided to call
+            // that tool once more after a failure or a success), it is blocked inside SmartToolCallingChatClient.
             MockChatClient mockInner = new();
             SmartToolCallingChatClient smartClient = new(
                 mockInner, NullLog.Instance, _settings, false, new[] { _dummyLlmTool }, "TestRole", 2
@@ -109,25 +109,25 @@ namespace CoreAI.Tests.EditMode
 
             ChatOptions options = new() { Tools = new[] { _dummyFunc } };
 
-            // Модель вызывает тул на первой итерации
+            // The model calls the tool on the first iteration
             mockInner.Responses.Enqueue(CreateResponseWithToolCall("dummy_tool"));
-            // И затем СРАЗУ же вызывает его снова на второй итерации (внутри того же GetResponseAsync!)
+            // and then calls it AGAIN right away on the second iteration (inside the same GetResponseAsync!)
             mockInner.Responses.Enqueue(CreateResponseWithToolCall("dummy_tool"));
-            // Третий - чтобы завершиться текстом и выйти, если не упадет
+            // The third one is there to finish with text and exit, if it does not blow up
             mockInner.Responses.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Stop")));
 
             // Request
             ChatResponse result =
                 await smartClient.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Do loop") }, options);
 
-            // Первый тул проходит, второй блокируется (isDuplicate = true). 
-            // Блокировка делает anyFailed = true -> consecutiveErrors = 1. Если maxConsecutiveErrors = 2, он прокрутит еще и на 3-й выйдет "Stop".
-            // Однако в истории переписок мы увидим сообщение от тула об ошибке "Error: You just executed this exact same tool call...".
+            // The first tool goes through, the second is blocked (isDuplicate = true).
+            // Blocking makes anyFailed = true -> consecutiveErrors = 1. With maxConsecutiveErrors = 2 it spins once more and exits with "Stop" on the 3rd.
+            // In the message history, though, we will see the tool error message "Error: You just executed this exact same tool call...".
 
-            // Давайте убедимся, что duplicate был заблокирован, запрашивая _any_ failed tool call block behavior. 
-            // К счастью, SmartToolCallingChatClient возвращает финальный message (или падает по max errors).
-            // Поскольку max errors (2) не был превышен до завершения, мы просто проверим историю, если это возможно, либо поведение.
-            Assert.AreEqual("Stop", result.Text); // Если бы он застрял, выпала бы ошибка. Застрял он не стал.
+            // Let us confirm the duplicate was blocked by asking for _any_ failed tool call block behaviour.
+            // Luckily, SmartToolCallingChatClient returns the final message (or fails on max errors).
+            // Since max errors (2) was not exceeded before completion, we simply check the history if we can, or the behaviour.
+            Assert.AreEqual("Stop", result.Text); // Had it got stuck, an error would have surfaced. It did not get stuck.
         }
 
         private ChatResponse CreateResponseWithToolCall(string toolName)

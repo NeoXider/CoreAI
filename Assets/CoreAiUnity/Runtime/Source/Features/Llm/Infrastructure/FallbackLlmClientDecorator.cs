@@ -177,10 +177,10 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     LlmStreamChunk chunk = enumerator.Current;
-                    // WHY: Ошибочный чанк, несущий ExecutedToolCalls, — это ход, в котором инструмент уже
-                    // сработал; запуск на secondary исполнил бы его второй раз. Проверка идёт до кода
-                    // ошибки, а не после: иначе она держится на том, что производитель чанка оставил
-                    // ErrorCode = None, то есть на чужом упущении, а не на контракте.
+                    // WHY: A failing chunk that carries ExecutedToolCalls is a turn in which the tool has
+                    // already fired; a run on the secondary would execute it a second time. The check comes
+                    // before the error code rather than after it: otherwise it rests on the chunk's producer
+                    // having left ErrorCode = None - on somebody else's omission, not on a contract.
                     if (!string.IsNullOrEmpty(chunk.Error) &&
                         IsRetryableError(chunk.ErrorCode) &&
                         !HasExecutedToolCalls(chunk))
@@ -253,9 +253,9 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Потоковый аналог <see cref="HasExecutedToolCalls(LlmCompletionResult)"/>, но строже: любой трейс
-        /// считается исполнением. У чанка нет отдельного результата, по которому можно было бы отделить
-        /// отклонённый вызов от сработавшего, поэтому здесь безопаснее не переигрывать вовсе.
+        /// The streaming counterpart of <see cref="HasExecutedToolCalls(LlmCompletionResult)"/>, but
+        /// stricter: any trace counts as an execution. A chunk has no separate result that would let a
+        /// rejected call be told apart from one that fired, so here it is safer not to replay at all.
         /// </summary>
         private static bool HasExecutedToolCalls(LlmStreamChunk chunk)
         {

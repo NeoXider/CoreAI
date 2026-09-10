@@ -82,14 +82,16 @@ namespace CoreAI.Tests.EditMode
                 }
             }
 
-            Assert.AreEqual(2, hits.Count,
-                "only the non-WebGL #else poll and the HostDelayAsync fallback may call Task.Delay; " +
+            // WHY exactly one: the second call used to space out artificially re-cut stream pieces by
+            // 15 ms, to make a batching provider look like per-token streaming. That smoothing is gone
+            // on purpose — a delta now reaches the consumer exactly as the provider sent it — so a
+            // reappearing Task.Delay here means manufactured streaming came back, or a real delay
+            // landed on the critical path. Only the host-marshaler fallback may block.
+            Assert.AreEqual(1, hits.Count,
+                "only the HostDelayAsync fallback may call Task.Delay; " +
                 "hits at lines " + string.Join(", ", hits.ConvertAll(i => (i + 1).ToString())));
-            Assert.IsTrue(EnclosedBy(lines, hits[0], "#else") || EnclosedBy(lines, hits[1], "#else"),
-                "one Task.Delay must live in the non-WebGL #else branch");
-            Assert.IsTrue(EnclosedBy(lines, hits[0], "HostDelayAsync(") ||
-                          EnclosedBy(lines, hits[1], "HostDelayAsync("),
-                "one Task.Delay must be the HostDelayAsync fallback");
+            Assert.IsTrue(EnclosedBy(lines, hits[0], "HostDelayAsync("),
+                "the only Task.Delay must be the HostDelayAsync fallback");
         }
 
         private static bool EnclosedBy(string[] lines, int index, string marker)

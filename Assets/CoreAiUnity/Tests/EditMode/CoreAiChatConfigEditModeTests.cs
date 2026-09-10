@@ -33,30 +33,30 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(CoreAiChatOptions.DefaultOpenChatWithHotkeyTooltipFormat,
                 config.OpenChatWithHotkeyTooltipFormat);
             Assert.AreEqual(CoreAiChatOptions.DefaultFabFallbackText, config.FabFallbackText);
-            Assert.IsTrue(config.EnableStreaming, "стриминг по умолчанию включён");
+            Assert.IsTrue(config.EnableStreaming, "streaming is on by default");
             Assert.AreEqual(string.Empty, config.TypingIndicatorText,
-                "префикс пуст → анимация индикатора показывает только точки \"...\"");
+                "an empty prefix means the indicator animation shows nothing but the dots \"...\"");
             Assert.AreEqual(650, config.ChatWidth);
             Assert.AreEqual(910, config.ChatHeight);
-            Assert.IsFalse(config.UseFullscreenChat, "по умолчанию не на весь экран");
+            Assert.IsFalse(config.UseFullscreenChat, "not fullscreen by default");
             Assert.IsFalse(config.SendOnShiftEnter,
-                "по умолчанию Enter отправляет, Shift+Enter вставляет перенос строки");
+                "by default Enter sends and Shift+Enter inserts a line break");
             Assert.AreEqual(2000, config.MaxMessageLength);
             Assert.IsFalse(string.IsNullOrEmpty(config.ErrorMessagePrefix));
             Assert.IsFalse(string.IsNullOrEmpty(config.TimeoutMessage));
             Assert.IsFalse(string.IsNullOrEmpty(config.NoResponseMessage));
-            Assert.IsTrue(config.LoadPersistedChatOnStartup, "по умолчанию подгружаем сохранённую историю в UI");
+            Assert.IsTrue(config.LoadPersistedChatOnStartup, "by default the saved history is loaded into the UI");
             Assert.IsTrue(config.LongRequestHintFormat.Contains("{elapsed}"),
-                "шаблон подсказки должен содержать {elapsed} для подстановки секунд");
+                "the hint template must contain {elapsed} so the seconds can be substituted");
             Assert.IsFalse(string.IsNullOrWhiteSpace(config.StreamingToolProgressHint),
-                "короткая подсказка при вызове инструмента / буфере не должна быть пустой по умолчанию");
-            Assert.IsFalse(config.ShowToolCallsInChat, "по умолчанию tool-call строки в чате не показываем");
-            Assert.IsTrue(config.EnableStopGeneration, "по умолчанию пользователь может остановить генерацию");
-            Assert.IsTrue(config.ShowClearButton, "по умолчанию кнопка очистки доступна");
+                "the short hint for a tool call / buffering must not be empty by default");
+            Assert.IsFalse(config.ShowToolCallsInChat, "by default tool-call lines are not shown in the chat");
+            Assert.IsTrue(config.EnableStopGeneration, "by default the user can stop the generation");
+            Assert.IsTrue(config.ShowClearButton, "the clear button is available by default");
             Assert.IsTrue(config.ChatRequiresVisibleCursor,
-                "по умолчанию чат реагирует на хоткеи только при видимом курсоре");
+                "by default the chat reacts to hotkeys only while the cursor is visible");
             Assert.IsTrue(config.EnableCameraTool,
-                "по умолчанию агентам чата выдаётся камера-инструмент");
+                "by default chat agents are given the camera tool");
 
             Object.DestroyImmediate(config);
         }

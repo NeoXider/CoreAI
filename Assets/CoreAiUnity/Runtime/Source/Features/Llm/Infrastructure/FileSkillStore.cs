@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Security.Cryptography;
 using System.Text;
 using CoreAI.Ai;
@@ -10,6 +11,7 @@ using CoreAI.Infrastructure;
 using CoreAI.Logging;
 using Newtonsoft.Json;
 using UnityEngine;
+using Cysharp.Threading.Tasks;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -17,9 +19,17 @@ namespace CoreAI.Infrastructure.Llm
     /// Atomic skill storage. All instances serialize writes and publication through the same canonical
     /// directory gate, including discovery and migration of legacy filenames. Existing unreadable records
     /// are never treated as missing during mutation. Logical ids are case-insensitive on every platform.
-    /// WebGL Sync queues browser persistence; synchronous success is not an IndexedDB completion receipt.
+    /// On WebGL a successful write means the engine's automatic <c>persistentDataPath</c> persistence has
+    /// taken it; no IndexedDB completion receipt exists to wait for (<see cref="CoreAiWebGlPersistence"/>).
+    /// <para>
+    /// <b>What "serialize" means for a synchronous caller</b> (see <see cref="Enter"/>): it waits out
+    /// another SYNCHRONOUS operation and then runs - two writers both succeed, one after the other, and
+    /// neither loses its edit. It is refused at once, with "busy; retry", while an ASYNCHRONOUS operation
+    /// holds the gate, because that one releases from a continuation which may need the very thread the
+    /// wait would park.
+    /// </para>
     /// </summary>
-    public sealed class FileSkillStore : ISkillStore, ICommittedSkillStore, IDisposable
+    public sealed class FileSkillStore : ISkillStore, ICommittedSkillStore, IAsyncSkillStore, IDisposable
     {
         private static readonly JsonSerializerSettings JsonSettings = new() { Formatting = Formatting.Indented };
         private static readonly StringComparer PathComparer = Path.DirectorySeparatorChar == '\\'
@@ -27,13 +37,34 @@ namespace CoreAI.Infrastructure.Llm
         private static readonly StringComparison PathComparison = Path.DirectorySeparatorChar == '\\'
             ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         // WHY: never evict a live path gate; a waiter may still hold its instance.
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks = new(PathComparer);
+        private static readonly ConcurrentDictionary<string, DirectoryState> MutationLocks = new(PathComparer);
+        /// <summary>Maximum encoded size of one persisted skill document; oversized input fails without truncation.</summary>
+        public const int MaxRecordBytes = 1024 * 1024;
+        private sealed class DirectoryState
+        {
+            internal readonly SemaphoreSlim Gate = new(1, 1);
+            internal Func<Task> PendingConfirmation;
+            internal long Generation;
+            /// <summary>
+            /// Asynchronous operations on this directory that are queued for <see cref="Gate"/> or
+            /// already holding it. Read by <see cref="FileSkillStore.Enter"/> to tell the two kinds of
+            /// holder apart; a synchronous caller may wait for a synchronous one and never for one of
+            /// these. Written with <see cref="Interlocked"/> only.
+            /// </summary>
+            internal int AsyncUsers;
+        }
+        private static readonly AsyncLocal<DirectoryState> Confirming = new();
+        private readonly DirectoryState _state;
+        private readonly ILlmAsyncMarshaler _host;
+        private readonly Func<CancellationToken, Task<bool>> _confirm;
+        private readonly bool _customConfirmation;
         private readonly string _dir;
         private readonly ILog _log;
         private readonly SemaphoreSlim _gate;
         private bool _disposed;
 
-        public FileSkillStore(string rootDirectory = null, ILog log = null)
+        public FileSkillStore(string rootDirectory = null, ILog log = null,
+            ILlmAsyncMarshaler host = null, Func<CancellationToken, Task<bool>> confirmDurabilityAsync = null)
         {
             _dir = Path.GetFullPath(!string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
@@ -41,8 +72,12 @@ namespace CoreAI.Infrastructure.Llm
                     CoreAiPersistentPaths.Skills));
             if (_dir.Length > Path.GetPathRoot(_dir).Length)
                 _dir = _dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            _gate = MutationLocks.GetOrAdd(_dir, _ => new SemaphoreSlim(1, 1));
+            _state = MutationLocks.GetOrAdd(_dir, _ => new DirectoryState());
+            _gate = _state.Gate;
             _log = log;
+            _host = host ?? UnityMainThreadLlmAsyncMarshaler.Instance;
+            _customConfirmation = confirmDurabilityAsync != null;
+            _confirm = confirmDurabilityAsync ?? (token => CoreAiWebGlPersistence.SyncAsync(token).AsTask());
         }
 
         public void Save(SkillRecord record)
@@ -77,6 +112,7 @@ namespace CoreAI.Infrastructure.Llm
             Enter(_gate);
             try
             {
+                RequireConfirmed();
                 SkillRecord current = FindRecord(skillId, out string existingPath);
                 string stableId = current?.Id ?? skillId;
                 string path = GetSkillPath(stableId);
@@ -89,7 +125,7 @@ namespace CoreAI.Infrastructure.Llm
                     if (current != null)
                     {
                         File.Delete(path);
-                        CoreAiWebGlPersistence.Sync();
+                        QueueDurability();
                     }
                 }
                 else if (mutation.Save)
@@ -123,7 +159,7 @@ namespace CoreAI.Infrastructure.Llm
             if (snapshot.Version < 0) throw new InvalidDataException("Skill version must not be negative.");
             Directory.CreateDirectory(_dir);
             AtomicWriteAllText(path, JsonConvert.SerializeObject(snapshot, JsonSettings));
-            CoreAiWebGlPersistence.Sync();
+            QueueDurability();
         }
 
         public bool TryLoad(string id, out SkillRecord record)
@@ -136,16 +172,18 @@ namespace CoreAI.Infrastructure.Llm
             Enter(_gate);
             try
             {
+                RequireConfirmed();
                 record = FindRecord(skillId, out string existingPath);
                 if (record != null)
                 {
                     string path = GetSkillPath(record.Id);
                     _ = ReadRecordStrict(path, record.Id);
                     MigrateRecord(existingPath, path);
+                    RequireConfirmed();
                 }
                 return record != null;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is InvalidOperationException))
             {
                 record = null;
                 _log?.Error($"[FileSkillStore] Load failed for {skillId}: {ex}");
@@ -163,6 +201,7 @@ namespace CoreAI.Infrastructure.Llm
             Enter(_gate);
             try
             {
+                RequireConfirmed();
                 Dictionary<string, SkillRecord> unique = new(StringComparer.OrdinalIgnoreCase);
                 HashSet<string> ambiguous = new(StringComparer.OrdinalIgnoreCase);
                 foreach (string path in GetRecordPaths())
@@ -229,19 +268,21 @@ namespace CoreAI.Infrastructure.Llm
             throw new InvalidDataException("Existing skill filename does not match its identity; preserved without changes.");
         }
 
-        private static void MigrateRecord(string existingPath, string canonicalPath)
+        private void MigrateRecord(string existingPath, string canonicalPath)
         {
             if (PathComparer.Equals(Path.GetFullPath(existingPath), canonicalPath)) return;
             // WHY: one same-directory rename preserves the complete old bytes if the later content write fails.
             // File.Move refuses an occupied destination; migration never chooses a winning duplicate.
             File.Move(existingPath, canonicalPath);
-            CoreAiWebGlPersistence.Sync();
+            QueueDurability();
         }
         private static SkillRecord ReadRecordStrict(string path, string expectedId)
         {
             string json;
             try
             {
+                if (new FileInfo(path).Length > MaxRecordBytes)
+                    throw new InvalidDataException($"Skill record exceeds the {MaxRecordBytes}-byte limit.");
                 json = File.ReadAllText(path);
             }
             catch (FileNotFoundException)
@@ -312,12 +353,15 @@ namespace CoreAI.Infrastructure.Llm
             foreach (char c in id) hash = unchecked((hash ^ c) * 16777619u);
             return $"{safe}_{hash:x8}";
         }
-        private void AtomicWriteAllText(string path, string contents)
+        private void AtomicWriteAllText(string path, string contents, CancellationToken cancellationToken = default)
         {
+            if (Encoding.UTF8.GetByteCount(contents) > MaxRecordBytes)
+                throw new InvalidDataException($"Skill record exceeds the {MaxRecordBytes}-byte limit.");
             string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 File.WriteAllText(temporary, contents);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (File.Exists(path)) File.Replace(temporary, path, null);
                 else File.Move(temporary, path);
             }
@@ -327,21 +371,268 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     if (File.Exists(temporary)) File.Delete(temporary);
                 }
-                catch (Exception ex)
-                {
-                    _log?.Error($"[FileSkillStore] Temporary file cleanup failed: {ex}");
-                }
+                catch (Exception failure) when (failure is IOException || failure is UnauthorizedAccessException || failure is System.Security.SecurityException) { }
             }
         }
 
-        private static void Enter(SemaphoreSlim gate)
+        /// <summary>
+        /// Takes the directory gate for a SYNCHRONOUS operation. The free gate is the common case and
+        /// costs one non-blocking probe; the two busy cases are deliberately different.
+        /// <para>
+        /// The platform fork arrived with these tests in 7.36.0 and was lost in the publication wave of
+        /// 7.39.0, which left the WebGL half running everywhere. On a desktop or editor thread that
+        /// turned "wait your turn" into "Skill store is busy" for a caller that had no way to know a
+        /// turn was even needed: two mods (or two coordinators over one folder) saving a skill in the
+        /// same moment produced one saved skill and one thrown exception, and the synchronous API -
+        /// which is what SkillAuthoringCoordinator, AgentBuilder and Save/Delete/Mutate all use - has no
+        /// retry of its own, so the second edit was simply lost. It now waits and then runs, as before.
+        /// </para>
+        /// </summary>
+        private void Enter(SemaphoreSlim gate)
         {
             SkillStoreCallbackContext.ThrowIfActive();
+            ThrowIfConfirming();
+            if (gate.Wait(0)) return;
 #if UNITY_WEBGL && !UNITY_EDITOR
-            if (!gate.Wait(0)) throw new InvalidOperationException("Skill store is busy; retry after the current operation.");
+            // A WebGL player has ONE thread. Parking it parks the code that would release the gate, so
+            // the wait could never end: a busy store answers immediately and the caller retries.
+            throw new InvalidOperationException("Skill store is busy; retry after the current operation.");
 #else
+            // An ASYNCHRONOUS holder releases the gate from a continuation, and that continuation may be
+            // owed to the very thread a wait here would park (an await in this file captures the caller's
+            // SynchronizationContext). That is refused, not awaited - it is the deadlock
+            // FileAgentMemoryStore still carries, and FileSkillStoreAsyncEditModeTests pins the refusal
+            // ("WithoutBlockingSyncCaller"). A SYNCHRONOUS holder releases on its own thread, so waiting
+            // it out is safe and is the whole point of a store that serializes.
+            if (Volatile.Read(ref _state.AsyncUsers) > 0)
+                throw new InvalidOperationException("Skill store is busy; retry after the current operation.");
             gate.Wait();
 #endif
+        }
+
+        /// <summary>
+        /// Takes the directory gate for an ASYNCHRONOUS operation and marks it in flight for as long as
+        /// it is queued or holding, so <see cref="Enter"/> can refuse to park a thread behind it. The
+        /// mark is raised before the wait on purpose: a queued async operation can win the gate the
+        /// instant it is released, and a synchronous caller must not be parked behind that either.
+        /// </summary>
+        private async Task<AsyncLease> EnterAsync(CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _state.AsyncUsers);
+            try
+            {
+                await _gate.WaitAsync(cancellationToken);
+            }
+            catch
+            {
+                Interlocked.Decrement(ref _state.AsyncUsers);
+                throw;
+            }
+
+            return new AsyncLease(this);
+        }
+
+        private readonly struct AsyncLease : IDisposable
+        {
+            private readonly FileSkillStore _store;
+            internal AsyncLease(FileSkillStore store) => _store = store;
+
+            public void Dispose()
+            {
+                _store._gate.Release();
+                Interlocked.Decrement(ref _store._state.AsyncUsers);
+            }
+        }
+
+        private void ThrowIfConfirming()
+        {
+            if (Confirming.Value != null)
+                throw new InvalidOperationException("A skill durability callback cannot reenter skill storage.");
+        }
+
+        private void RequireConfirmed()
+        {
+            if (_state.PendingConfirmation != null)
+                throw new InvalidOperationException("Skill durability is unconfirmed; await an async read before using stored records.");
+        }
+
+        private void QueueDurability()
+        {
+            // WHY: Only a caller-supplied confirmation hook is asynchronous, so only it can leave an
+            // unresolved confirmation behind. Durability on WebGL is answered synchronously by the
+            // engine (CoreAiWebGlPersistence.Sync), so this path must NOT park a pending confirmation
+            // of its own: it used to do that unconditionally under "#if UNITY_WEBGL && !UNITY_EDITOR",
+            // and every production caller reaching here is synchronous (SkillAuthoringCoordinator,
+            // AgentBuilder, Save/Delete/Mutate) - nothing ever cleared it. The first skill written in
+            // the browser poisoned the store, and every later synchronous call threw "Skill durability
+            // is unconfirmed". Reading poisoned it too: MigrateRecord runs from TryLoad, so a single
+            // skill file left under a legacy name turned a plain read into an exception the read's own
+            // catch deliberately lets through.
+            // The same correction is in FileLuaScriptVersionStore.Mutate; the two must stay in step.
+            if (_customConfirmation) RecordPending(_host);
+            if (!CoreAiWebGlPersistence.Sync()) throw new SkillStoreDurabilityException("store");
+        }
+
+        private void RecordPending(ILlmAsyncMarshaler host)
+        {
+            _state.Generation++;
+            _state.PendingConfirmation = async () =>
+            {
+                await host.InvokeAsync(async () =>
+                {
+                    DirectoryState previous = Confirming.Value;
+                    Confirming.Value = _state;
+                    try
+                    {
+                        if (!await _confirm(CancellationToken.None)) throw new IOException("Skill durability confirmation failed.");
+                        return true;
+                    }
+                    finally { Confirming.Value = previous; }
+                }, CancellationToken.None);
+            };
+        }
+
+        private async Task ConfirmPendingAsync(string id)
+        {
+            Func<Task> pending = _state.PendingConfirmation;
+            if (pending == null) return;
+            long generation = _state.Generation;
+            try { await pending(); }
+            catch (Exception ex) { throw new SkillStoreDurabilityException(id, ex); }
+            if (_state.Generation == generation) _state.PendingConfirmation = null;
+        }
+
+        private Task<T> FileWorkAsync<T>(Func<T> work, CancellationToken token)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return _host.InvokeAsync(() => { token.ThrowIfCancellationRequested(); return Task.FromResult(work()); }, token);
+#else
+            return Task.Run(() => { token.ThrowIfCancellationRequested(); return work(); }, token);
+#endif
+        }
+
+        private async Task<List<(SkillRecord Record, string Path)>> ReadRecordsAsync(CancellationToken token)
+        {
+            string[] paths = await FileWorkAsync(GetRecordPaths, token);
+            List<(SkillRecord Record, string Path)> records = new(paths.Length);
+            HashSet<string> ids = new(StringComparer.OrdinalIgnoreCase);
+            foreach (string path in paths)
+            {
+                SkillRecord record = await FileWorkAsync(() =>
+                {
+                    SkillRecord loaded = ReadRecordStrict(path, null);
+                    if (loaded != null) ValidateRecordPath(path, loaded.Id);
+                    return loaded;
+                }, token);
+                if (record == null) continue;
+                if (!ids.Add(Normalize(record.Id))) throw new InvalidDataException("Ambiguous skill identity; all files preserved.");
+                records.Add((record, path));
+#if UNITY_WEBGL && !UNITY_EDITOR
+                await _host.DelayAsync(1, token);
+#endif
+            }
+            return records;
+        }
+
+        /// <inheritdoc />
+        public async Task<SkillRecord> LoadAsync(string id, CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            SkillStoreCallbackContext.ThrowIfActive();
+            ThrowIfConfirming();
+            string key = Normalize(id);
+            if (key.Length == 0) return null;
+            using (await EnterAsync(cancellationToken))
+            {
+                await ConfirmPendingAsync(key);
+                List<(SkillRecord Record, string Path)> records = await ReadRecordsAsync(cancellationToken);
+                foreach ((SkillRecord record, string path) in records)
+                {
+                    if (!string.Equals(Normalize(record.Id), key, StringComparison.OrdinalIgnoreCase)) continue;
+                    string canonical = await FileWorkAsync(() => GetSkillPath(record.Id), cancellationToken);
+                    if (!PathComparer.Equals(Path.GetFullPath(path), canonical))
+                    {
+                        await FileWorkAsync(() => { cancellationToken.ThrowIfCancellationRequested(); File.Move(path, canonical); return true; }, cancellationToken);
+                        RecordPending(_host);
+                        await ConfirmPendingAsync(key);
+                    }
+                    return record;
+                }
+                return null;
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task<IReadOnlyList<SkillRecord>> ListAsync(CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            SkillStoreCallbackContext.ThrowIfActive();
+            ThrowIfConfirming();
+            using (await EnterAsync(cancellationToken))
+            {
+                await ConfirmPendingAsync("store");
+                List<(SkillRecord Record, string Path)> entries = await ReadRecordsAsync(cancellationToken);
+                List<SkillRecord> records = new(entries.Count);
+                foreach ((SkillRecord record, string path) in entries) records.Add(record);
+                records.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Id, right.Id));
+                return records.AsReadOnly();
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task<TResult> MutateAndPublishAsync<TResult>(string id,
+            Func<SkillRecord, SkillStoreMutation<TResult>> prepare,
+            Func<TResult, CancellationToken, Task> publish, ILlmAsyncMarshaler callbackContext,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            SkillStoreCallbackContext.ThrowIfActive();
+            ThrowIfConfirming();
+            if (prepare == null) throw new ArgumentNullException(nameof(prepare));
+            if (callbackContext == null) throw new ArgumentNullException(nameof(callbackContext));
+            string key = Normalize(id);
+            if (key.Length == 0) throw new ArgumentException("Skill id must not be empty.", nameof(id));
+            using (await EnterAsync(cancellationToken))
+            {
+                await ConfirmPendingAsync(key);
+                List<(SkillRecord Record, string Path)> entries = await ReadRecordsAsync(cancellationToken);
+                SkillRecord current = null;
+                string existingPath = null;
+                foreach ((SkillRecord record, string path) in entries)
+                    if (string.Equals(Normalize(record.Id), key, StringComparison.OrdinalIgnoreCase)) { current = record; existingPath = path; }
+                string stableId = current?.Id ?? key;
+                // An existing legacy file is replaced atomically in place; read-time migration can happen later.
+                string target = existingPath ?? await FileWorkAsync(() => GetSkillPath(stableId), cancellationToken);
+                SkillStoreMutation<TResult> mutation = await callbackContext.InvokeAsync(
+                    () => Task.FromResult(SkillStoreCallbackContext.Run(() => prepare(current))), cancellationToken)
+                    ?? throw new InvalidOperationException("Skill store mutator returned null.");
+                string json = null;
+                if (mutation.Save)
+                {
+                    if (mutation.Record == null || !string.Equals(Normalize(mutation.Record.Id), key, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("A skill mutation cannot write a different key.");
+                    SkillRecord snapshot = new(stableId, mutation.Record.Description, mutation.Record.Instructions,
+                        mutation.Record.ToolNames, mutation.Record.Version, mutation.Record.Sections);
+                    if (snapshot.Version < 0) throw new InvalidDataException("Skill version must not be negative.");
+                    json = await FileWorkAsync(() => JsonConvert.SerializeObject(snapshot, JsonSettings), cancellationToken);
+                }
+                bool changed = mutation.Save || (mutation.Delete && current != null);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (changed)
+                {
+                    await FileWorkAsync(() =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (mutation.Delete) File.Delete(target);
+                        else { Directory.CreateDirectory(_dir); AtomicWriteAllText(target, json, cancellationToken); }
+                        return true;
+                    }, cancellationToken);
+                    RecordPending(callbackContext);
+                    await ConfirmPendingAsync(key);
+                }
+                await SkillStoreCallbackContext.PublishAsync(key, mutation.Result, publish, callbackContext);
+                return mutation.Result;
+            }
         }
 
         private void ThrowIfDisposed()

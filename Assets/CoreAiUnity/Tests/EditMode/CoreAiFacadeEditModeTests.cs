@@ -53,7 +53,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void IsReady_WithoutLifetimeScope_ReturnsFalse()
         {
-            Assert.IsFalse(CoreAi.IsReady, "Без CoreAILifetimeScope в сцене фасад не должен считаться готовым");
+            Assert.IsFalse(CoreAi.IsReady, "Without a CoreAILifetimeScope in the scene the facade must not report itself ready");
         }
 
         [Test]
@@ -110,7 +110,7 @@ namespace CoreAI.Tests.EditMode
         {
             ICoreAISettings settings = CoreAi.GetSettings();
             Assert.IsNull(settings,
-                "Без scope GetSettings возвращает null (caller должен сам использовать CoreAISettings.Instance)");
+                "Without a scope GetSettings returns null (the caller is expected to use CoreAISettings.Instance itself)");
         }
 
         [Test]
@@ -118,14 +118,14 @@ namespace CoreAI.Tests.EditMode
         {
             InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => CoreAi.GetChatService());
             StringAssert.Contains("CoreAILifetimeScope", ex.Message,
-                "Исключение должно подсказывать, где искать проблему");
+                "The exception must point at where to look for the problem");
         }
 
         [Test]
         public void TryGetChatService_WithoutLifetimeScope_ReturnsFalse()
         {
             Assert.IsFalse(CoreAi.TryGetChatService(out _),
-                "Без scope TryGet не бросает исключение и возвращает false");
+                "Without a scope TryGet does not throw and returns false");
         }
 
         [Test]
@@ -133,7 +133,7 @@ namespace CoreAI.Tests.EditMode
         {
             InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => CoreAi.GetOrchestrator());
             StringAssert.Contains("IAiOrchestrationService", ex.Message,
-                "Исключение должно объяснять, что не зарегистрирован оркестратор");
+                "The exception must explain that no orchestrator is registered");
         }
 
         [Test]

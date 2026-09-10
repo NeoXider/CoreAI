@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Composition;
@@ -23,14 +24,11 @@ namespace CoreAI.Tests.EditMode
     public sealed class CoreAILifetimeScopeConversationStoreEditModeTests
     {
         /// <summary>
-        /// Раньше тест фиксировал КОНСТАНТУ (<c>UsesPersistentFileConversationSummaryStore</c> = false под
-        /// <c>UNITY_WEBGL</c>), то есть узаконивал поведение, при котором на целевой платформе сводка жила
-        /// только в памяти процесса: после перезагрузки вкладки всё старше окна истории исчезало, а следующая
-        /// компакция суммировала тот же префикс заново за деньги. Теперь проверяется поведение: в режиме
-        /// Persistent сводка файловая и переживает новый контейнер — без <c>#if</c> по платформе.
+        /// Persistent summaries must survive container replacement on every platform. A platform constant
+        /// cannot prove this behavior: a memory-only WebGL backing loses the compacted prefix on reload.
         /// </summary>
         [Test]
-        public void PersistentMode_ConversationSummary_IsFileBacked_AndSurvivesANewContainer()
+        public async Task PersistentMode_ConversationSummary_IsFileBacked_AndSurvivesANewContainer()
         {
             string roleId = "persistent-summary-" + Guid.NewGuid().ToString("N");
             const string summaryText = "lesson so far: variables, print, first loop";
@@ -44,15 +42,19 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsInstanceOf<FileConversationSummaryStore>(first.Resolve<FileConversationSummaryStore>(),
                     "Persistent mode must back the summary with a file on every player, WebGL included.");
                 Assert.IsInstanceOf<ScopedConversationSummaryStoreDecorator>(first.Resolve<IConversationSummaryStore>());
-                first.Resolve<IConversationSummaryStore>().SaveSummary(roleId, summaryText);
+                IAsyncConversationSummaryStore firstStore =
+                    (IAsyncConversationSummaryStore)first.Resolve<IConversationSummaryStore>();
+                await firstStore.SaveSummaryAsync(roleId, summaryText);
                 DisposeContainer(first);
                 first = null;
 
                 second = BuildPersistentContainer(out secondSettings);
-                Assert.AreEqual(summaryText, second.Resolve<IConversationSummaryStore>().LoadSummary(roleId),
+                IAsyncConversationSummaryStore secondStore =
+                    (IAsyncConversationSummaryStore)second.Resolve<IConversationSummaryStore>();
+                Assert.AreEqual(summaryText, await secondStore.LoadSummaryAsync(roleId),
                     "A summary written by one process must be readable by the next one: it IS the memory of " +
                     "everything older than the history window.");
-                second.Resolve<IConversationSummaryStore>().ClearSummary(roleId);
+                await secondStore.ClearSummaryAsync(roleId);
             }
             finally
             {
@@ -83,7 +85,7 @@ namespace CoreAI.Tests.EditMode
             FileAgentMemoryStore backing = container.Resolve<FileAgentMemoryStore>();
 
             Assert.AreEqual(7, backing.MaxChatHistoryMessages,
-                "Раньше 500/2000 были зашиты в регистрацию и потребитель не мог их поменять.");
+                "The host's configured caps must reach the backing store instead of fixed registration defaults.");
             Assert.AreEqual(11, backing.MaxTranscriptEntries);
         }
 

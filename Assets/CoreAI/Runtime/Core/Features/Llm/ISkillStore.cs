@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Threading.Tasks;
+using System.IO;
 
 namespace CoreAI.Ai
 {
@@ -42,6 +44,175 @@ namespace CoreAI.Ai
         void Delete(string id);
     }
 
+
+    /// <summary>Awaitable persistence; prepare and publication run on the supplied host context.</summary>
+    public interface IAsyncSkillStore
+    {
+        Task<SkillRecord> LoadAsync(string id, CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<SkillRecord>> ListAsync(CancellationToken cancellationToken = default);
+        Task<TResult> MutateAndPublishAsync<TResult>(string id,
+            Func<SkillRecord, SkillStoreMutation<TResult>> prepare,
+            Func<TResult, CancellationToken, Task> publish, ILlmAsyncMarshaler callbackContext,
+            CancellationToken cancellationToken = default);
+    }
+
+    /// <summary>A local write completed, but durability was not confirmed and this call did not publish it.</summary>
+    public sealed class SkillStoreDurabilityException : IOException
+    {
+        public SkillStoreDurabilityException(string id, Exception innerException = null)
+            : base($"Skill '{id}' was stored locally, but durability is unconfirmed and this call did not publish it. " +
+                "Do not replay the edit; confirm storage before rehydrating. The write may not survive a restart.", innerException) { }
+        public bool Committed => true;
+        public bool Durable => false;
+        public bool Published => false;
+        public bool Retryable => false;
+    }
+
+    /// <summary>
+    /// Explicit opt-in for fast, nonblocking legacy stores. All access must use adapters over the same
+    /// store instance; direct access to the underlying store bypasses this adapter's ordering boundary.
+    /// </summary>
+    public sealed class InlineAsyncSkillStoreAdapter : ISkillStore, IAsyncSkillStore
+    {
+        private static readonly ConditionalWeakTable<ISkillStore, SkillOperationGate> Gates = new();
+        private readonly ISkillStore _store;
+        private readonly SkillOperationGate _gate;
+        public InlineAsyncSkillStoreAdapter(ISkillStore store)
+        {
+            _store = store ?? throw new ArgumentNullException(nameof(store));
+            _gate = Gates.GetValue(store, _ => new SkillOperationGate());
+        }
+        public void Save(SkillRecord record) { SkillStoreCallbackContext.ThrowIfActive(); using (_gate.EnterSync()) _store.Save(record); }
+        public void Delete(string id) { SkillStoreCallbackContext.ThrowIfActive(); using (_gate.EnterSync()) _store.Delete(id); }
+        public bool TryLoad(string id, out SkillRecord record)
+        { SkillStoreCallbackContext.ThrowIfActive(); using (_gate.EnterSync()) return _store.TryLoad(id, out record); }
+        public IReadOnlyList<SkillRecord> List()
+        { SkillStoreCallbackContext.ThrowIfActive(); using (_gate.EnterSync()) return _store.List(); }
+        public async Task<SkillRecord> LoadAsync(string id, CancellationToken cancellationToken = default)
+        {
+            SkillStoreCallbackContext.ThrowIfActive();
+            using (await _gate.EnterAsync(cancellationToken))
+                return _store.TryLoad(id, out SkillRecord record) ? Copy(record) : null;
+        }
+        public async Task<IReadOnlyList<SkillRecord>> ListAsync(CancellationToken cancellationToken = default)
+        {
+            SkillStoreCallbackContext.ThrowIfActive();
+            using (await _gate.EnterAsync(cancellationToken))
+            {
+                List<SkillRecord> result = new();
+                foreach (SkillRecord record in _store.List()) { cancellationToken.ThrowIfCancellationRequested(); result.Add(Copy(record)); }
+                return result.AsReadOnly();
+            }
+        }
+        public async Task<TResult> MutateAndPublishAsync<TResult>(string id,
+            Func<SkillRecord, SkillStoreMutation<TResult>> prepare,
+            Func<TResult, CancellationToken, Task> publish, ILlmAsyncMarshaler callbackContext,
+            CancellationToken cancellationToken = default)
+        {
+            SkillStoreCallbackContext.ThrowIfActive();
+            if (prepare == null) throw new ArgumentNullException(nameof(prepare));
+            if (callbackContext == null) throw new ArgumentNullException(nameof(callbackContext));
+            string key = (id ?? "").Trim();
+            if (key.Length == 0) throw new ArgumentException("Skill id must not be empty.", nameof(id));
+            using (await _gate.EnterAsync(cancellationToken))
+            {
+                _store.TryLoad(key, out SkillRecord current);
+                SkillStoreMutation<TResult> mutation = await callbackContext.InvokeAsync(
+                    () => Task.FromResult(SkillStoreCallbackContext.Run(() => prepare(Copy(current)))), cancellationToken)
+                    ?? throw new InvalidOperationException("Skill store mutator returned null.");
+                cancellationToken.ThrowIfCancellationRequested();
+                if (mutation.Save)
+                {
+                    if (mutation.Record == null || !string.Equals(key, mutation.Record.Id?.Trim(), StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("A skill mutation cannot write a different key.");
+                    _store.Save(Copy(mutation.Record));
+                }
+                else if (mutation.Delete) _store.Delete(key);
+                await SkillStoreCallbackContext.PublishAsync(key, mutation.Result, publish, callbackContext);
+                return mutation.Result;
+            }
+        }
+        private static SkillRecord Copy(SkillRecord record) => record == null ? null : new SkillRecord(
+            record.Id, record.Description, record.Instructions, record.ToolNames, record.Version, record.Sections);
+    }
+
+    /// <summary>Serializes legacy callers; synchronous calls fail promptly while async work is pending.</summary>
+    internal sealed class SkillOperationGate
+    {
+        private readonly object _state = new();
+        private readonly Queue<TaskCompletionSource<IDisposable>> _waiters = new();
+        private bool _occupied;
+        private int _asyncUsers;
+        private int _syncOwnerThread;
+        private int _syncDepth;
+        internal IDisposable EnterSync()
+        {
+            lock (_state)
+            {
+                if (_occupied && _syncOwnerThread == Environment.CurrentManagedThreadId)
+                { _syncDepth++; return new Lease(this, false); }
+                while (_occupied)
+                {
+                    if (_asyncUsers > 0) throw new InvalidOperationException("Skill operation is busy; await the current operation.");
+                    Monitor.Wait(_state);
+                }
+                _occupied = true;
+                _syncOwnerThread = Environment.CurrentManagedThreadId;
+                _syncDepth = 1;
+                return new Lease(this, false);
+            }
+        }
+        internal Task<IDisposable> EnterAsync(CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            lock (_state)
+            {
+                _asyncUsers++;
+                if (!_occupied) { _occupied = true; return Task.FromResult<IDisposable>(new Lease(this, true)); }
+                TaskCompletionSource<IDisposable> waiter = new(TaskCreationOptions.None);
+                _waiters.Enqueue(waiter);
+                return AwaitLeaseAsync(waiter, token);
+            }
+        }
+        private async Task<IDisposable> AwaitLeaseAsync(TaskCompletionSource<IDisposable> waiter, CancellationToken token)
+        {
+            using CancellationTokenRegistration registration = token.Register(() => waiter.TrySetCanceled(token));
+            try { return await waiter.Task; }
+            catch { lock (_state) { _asyncUsers--; Monitor.PulseAll(_state); } throw; }
+        }
+        private void Release(bool asynchronous)
+        {
+            TaskCompletionSource<IDisposable> next = null;
+            lock (_state)
+            {
+                if (!asynchronous && _syncDepth > 0)
+                {
+                    if (--_syncDepth > 0) return;
+                    _syncOwnerThread = 0;
+                }
+                if (asynchronous) _asyncUsers--;
+                _occupied = false;
+                while (_waiters.Count > 0)
+                {
+                    TaskCompletionSource<IDisposable> candidate = _waiters.Dequeue();
+                    if (candidate.Task.IsCompleted) continue;
+                    next = candidate;
+                    _occupied = true;
+                    break;
+                }
+                Monitor.PulseAll(_state);
+            }
+            if (next != null && !next.TrySetResult(new Lease(this, true))) Release(false);
+        }
+        private sealed class Lease : IDisposable
+        {
+            private SkillOperationGate _owner;
+            private readonly bool _asynchronous;
+            internal Lease(SkillOperationGate owner, bool asynchronous) { _owner = owner; _asynchronous = asynchronous; }
+            public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Release(_asynchronous);
+        }
+    }
+
     /// <summary>Optional store capability for atomic skill read/modify/write transactions.</summary>
     public interface IAtomicSkillStore
     {
@@ -75,10 +246,11 @@ namespace CoreAI.Ai
     internal static class SkillStoreCallbackContext
     {
         [ThreadStatic] private static bool _active;
+        private static readonly AsyncLocal<bool> AsyncActive = new();
 
         internal static void ThrowIfActive()
         {
-            if (_active) throw new InvalidOperationException("Skill store callbacks must not re-enter skill stores or coordinators.");
+            if (_active || AsyncActive.Value) throw new InvalidOperationException("Skill store callbacks must not re-enter skill stores or coordinators.");
         }
 
         internal static TResult Run<TResult>(Func<TResult> callback)
@@ -87,6 +259,23 @@ namespace CoreAI.Ai
             _active = true;
             try { return callback(); }
             finally { _active = false; }
+        }
+
+        internal static async Task PublishAsync<TResult>(string id, TResult result,
+            Func<TResult, CancellationToken, Task> publish, ILlmAsyncMarshaler context)
+        {
+            if (publish == null) return;
+            try
+            {
+                await context.InvokeAsync(async () =>
+                {
+                    ThrowIfActive();
+                    AsyncActive.Value = true;
+                    try { await publish(result, CancellationToken.None); return true; }
+                    finally { AsyncActive.Value = false; }
+                }, CancellationToken.None);
+            }
+            catch (Exception ex) { throw new SkillStorePublicationException(id, ex); }
         }
 
         internal static void Publish<TResult>(string id, TResult result, Action<TResult> publish)

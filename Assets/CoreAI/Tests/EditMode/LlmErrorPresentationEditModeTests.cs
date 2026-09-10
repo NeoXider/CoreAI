@@ -5,10 +5,10 @@ using NUnit.Framework;
 namespace CoreAI.Core.Tests.EditMode
 {
     /// <summary>
-    /// Сторожит разделение между строкой, которую читает ИГРОК, и строкой, которую хранит ЛОГ
-    /// (<see cref="LlmErrorPresentation"/>): фраза, написанная НАШИМ бэкендом для игрока, доходит до
-    /// пузыря чата; текст провайдера, JSON, трассы стека и traceback'и — нет; тело 401 никогда не
-    /// покидает лог, потому что может вернуть только что отправленный ключ.
+    /// Guards the split between the string the PLAYER reads and the string the LOG keeps
+    /// (<see cref="LlmErrorPresentation"/>): a phrase OUR backend wrote for the player reaches the chat
+    /// bubble; provider text, JSON, stack traces and tracebacks do not; the body of a 401 never leaves the
+    /// log, because it may echo the key that was just sent.
     /// </summary>
     public sealed class LlmErrorPresentationEditModeTests
     {
@@ -31,7 +31,7 @@ namespace CoreAI.Core.Tests.EditMode
             Assert.AreNotEqual(LlmErrorPresentation.ForErrorCode(LlmErrorCode.Cancelled), message);
         }
 
-        // Канонический конверт бэкенда: error_code + message + details + request_id, зеркало error.{code,message}.
+        // The canonical backend envelope: error_code + message + details + request_id, plus the error.{code,message} mirror.
         private const string BackendEnvelope =
             "{\"error_code\":\"ai_upstream_error\"," +
             "\"message\":\"Алена сейчас недоступна: сервис ИИ ответил ошибкой.\"," +
@@ -67,8 +67,9 @@ namespace CoreAI.Core.Tests.EditMode
         }
 
         /// <summary>
-        /// Игрок видел «You exceeded your current quota, please check your plan and billing details…»
-        /// — текст OpenAI на языке провайдера со ссылкой на биллинг. Его никто не писал для игрока.
+        /// The player used to see "You exceeded your current quota, please check your plan and billing
+        /// details..." - OpenAI's text, in the provider's own language, with a billing link. Nobody wrote
+        /// it for the player.
         /// </summary>
         [Test]
         public void UserMessage_ProviderErrorMessage_IsNotShownVerbatim()
@@ -113,8 +114,8 @@ namespace CoreAI.Core.Tests.EditMode
         }
 
         /// <summary>
-        /// Раньше «Upstream gateway is down.» из сообщения исключения показывалось игроку как есть:
-        /// сообщение исключения — транспортный текст адаптера, авторства у него нет.
+        /// "Upstream gateway is down." from the exception message used to be shown to the player as-is:
+        /// an exception message is the adapter's transport text and has no authorship.
         /// </summary>
         [Test]
         public void UserMessage_ExceptionMessageWithoutBackendEnvelope_FallsBackToTypedPhrase()
@@ -147,12 +148,12 @@ namespace CoreAI.Core.Tests.EditMode
             StringAssert.DoesNotContain("{", message);
         }
 
-        // ---- Диагностика, просочившаяся в сообщение бэкенда, в ленту не попадает ----
+        // ---- Diagnostics that leaked into the backend's message never reach the feed ----
 
         [Test]
         public void UserMessage_DotNetStackTraceInBackendMessage_IsNotShown()
         {
-            // Настоящий фрейм .NET: «\r\n» + ТРИ пробела + «at ». Старая проверка искала «\n at » с одним.
+            // A real .NET frame: "\r\n" + THREE spaces + "at ". The old check looked for "\n at " with one.
             string trace =
                 "Object reference not set to an instance of an object.\r\n" +
                 "   at CoreAI.Ai.MeaiOpenAiChatClient.SendAsync(LlmCompletionRequest request)\r\n" +
@@ -202,9 +203,9 @@ namespace CoreAI.Core.Tests.EditMode
         {
             Assert.IsTrue(LlmErrorPresentation.IsPresentableToPlayer("Попробуй ещё раз через минуту."));
             Assert.IsTrue(LlmErrorPresentation.IsPresentableToPlayer("Error: try again in a minute."),
-                "Слово «Error» в обычной фразе — не строка исключения.");
+                "The word \"Error\" inside an ordinary sentence is not an exception line.");
             Assert.IsTrue(LlmErrorPresentation.IsPresentableToPlayer("We are at capacity right now."),
-                "«at» внутри предложения — не фрейм стека.");
+                "An \"at\" inside a sentence is not a stack frame.");
             Assert.IsFalse(LlmErrorPresentation.IsPresentableToPlayer("boom\n    at fetch (app.js:12:3)"));
             Assert.IsFalse(LlmErrorPresentation.IsPresentableToPlayer("{\"error\":1}"));
             Assert.IsFalse(LlmErrorPresentation.IsPresentableToPlayer(new string('x', LlmErrorPresentation.MaxUserMessageLength + 1)));
@@ -212,12 +213,12 @@ namespace CoreAI.Core.Tests.EditMode
             Assert.IsFalse(LlmErrorPresentation.IsPresentableToPlayer(null));
         }
 
-        // ---- 401: каждый признак по отдельности ----
+        // ---- 401: each marker on its own ----
 
         [Test]
         public void UserMessage_AuthByStatusAlone_NeverEchoesBody()
         {
-            // Адаптер передал статус 401, но классифицировал под другим кодом.
+            // The adapter passed status 401 but classified it under a different code.
             LlmClientException exception = new(
                 "HTTP error 401: invalid api key sk-secret-value",
                 LlmErrorCode.PermanentProviderError,
@@ -234,7 +235,7 @@ namespace CoreAI.Core.Tests.EditMode
         [Test]
         public void UserMessage_AuthByCodeAlone_NeverEchoesBody()
         {
-            // Код AuthExpired без HTTP-статуса (например, из потока или из локальной классификации).
+            // The AuthExpired code without an HTTP status (e.g. from a stream or from local classification).
             LlmClientException exception = new(
                 "token expired sk-secret-value",
                 LlmErrorCode.AuthExpired,
@@ -318,7 +319,7 @@ namespace CoreAI.Core.Tests.EditMode
         public void ExtractBackendAuthoredMessage_RequiresTheWholeEnvelope()
         {
             Assert.AreEqual("", LlmErrorPresentation.ExtractBackendAuthoredMessage(
-                "{\"error\":{\"message\":\"provider text\"}}"), "Голый error.message — форма любого провайдера.");
+                "{\"error\":{\"message\":\"provider text\"}}"), "A bare error.message is the shape any provider uses.");
             Assert.AreEqual("", LlmErrorPresentation.ExtractBackendAuthoredMessage(
                 "{\"error_code\":\"x\",\"message\":\"no request id\"}"));
             Assert.AreEqual("", LlmErrorPresentation.ExtractBackendAuthoredMessage(

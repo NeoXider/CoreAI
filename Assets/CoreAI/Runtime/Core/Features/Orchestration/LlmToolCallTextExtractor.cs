@@ -10,12 +10,13 @@ namespace CoreAI.Ai
     /// <summary>
     /// Extracts tool-call text payloads from model responses.
     /// <para>
-    /// Распознаются четыре формы (все — только на запасном канале, см. <c>STREAMING_ARCHITECTURE.md</c>):
-    /// JSON <c>{"name":…,"arguments":…}</c>, XML Hermes/Qwen <c>&lt;function=…&gt;</c>,
-    /// вызов-функция <c>ident(...)</c> целым ответом и псевдозапись памяти <c>Action=write content="…"</c>.
-    /// Формы различаются силой улики: у JSON и XML есть структура, которую в уроке никто не пишет случайно;
-    /// у <c>ident(...)</c> улики нет вовсе — это обычная строка кода. Поэтому вызов-функция принимается
-    /// ТОЛЬКО при переданном реестре имён и только для объявленного инструмента.
+    /// Four forms are recognised (all of them on the fallback channel only, see
+    /// <c>STREAMING_ARCHITECTURE.md</c>): JSON <c>{"name":...,"arguments":...}</c>, Hermes/Qwen XML
+    /// <c>&lt;function=...&gt;</c>, a function call <c>ident(...)</c> as the whole answer, and the memory
+    /// pseudo-write <c>Action=write content="..."</c>. The forms differ in how strong the evidence is:
+    /// JSON and XML have structure that nobody writes by accident in a lesson; <c>ident(...)</c> has no
+    /// evidence at all - it is an ordinary line of code. That is why a function call is accepted ONLY when
+    /// a registry of names was supplied, and only for a declared tool.
     /// </para>
     /// </summary>
     public static class LlmToolCallTextExtractor
@@ -59,10 +60,11 @@ namespace CoreAI.Ai
         /// <paramref name="cleanedText"/> equals the input. JSON inside <c>```...```</c> blocks
         /// is ignored.
         /// <para>
-        /// Перегрузка БЕЗ реестра имён: вызывающий не сказал, какие инструменты объявлены. JSON, XML и
-        /// псевдозапись памяти разбираются по форме; форма <c>ident(...)</c> не разбирается никогда —
-        /// без реестра <c>read_skill("x")</c> и <c>print("x")</c> неотличимы, а второе учитель Python
-        /// пишет каждым ответом. Чтобы вызов-функция работал, передайте имена через перегрузку
+        /// The overload WITHOUT a registry of names: the caller did not say which tools are declared. JSON,
+        /// XML and the memory pseudo-write are parsed by shape; the <c>ident(...)</c> form is never parsed -
+        /// without a registry <c>read_skill("x")</c> and <c>print("x")</c> are indistinguishable, and a
+        /// Python teacher writes the latter in every answer. To make function calls work, pass the names
+        /// through the overload
         /// <c>TryExtract(text, knownToolNames, out matches, out cleanedText)</c>.
         /// </para>
         /// </summary>
@@ -72,15 +74,16 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// То же, что перегрузка без реестра, но с реестром объявленных инструментов. Инвариант: <b>вызов — это обращение к объявленному инструменту</b>.
-        /// Имя вне реестра ни в одной форме не считается вызовом и остаётся видимым текстом: исполнить
-        /// его нельзя, а спрятать — значит отнять у ученика строку урока ради защиты от того, чего не
-        /// случится. Только с реестром включается форма <c>ident(...)</c>.
+        /// The same as the registry-less overload, but with a registry of declared tools. The invariant:
+        /// <b>a call is an invocation of a declared tool</b>. A name outside the registry is not treated as
+        /// a call in any form and stays visible text: it cannot be executed, and hiding it would take a
+        /// line of the lesson away from the learner to guard against something that will not happen. The
+        /// <c>ident(...)</c> form is enabled only with a registry.
         /// </summary>
         /// <param name="knownToolNames">
-        /// Имена объявленных инструментов (<c>ILlmTool.Name</c>). <c>null</c> — реестра нет (поведение
-        /// перегрузки без реестра). Пустая коллекция — реестр есть и в нём ничего нет: ни одна форма не
-        /// распознаётся.
+        /// The names of the declared tools (<c>ILlmTool.Name</c>). <c>null</c> means there is no registry
+        /// (the behaviour of the registry-less overload). An empty collection means there is a registry and
+        /// it holds nothing: no form is recognised.
         /// </param>
         public static bool TryExtract(string text, IReadOnlyCollection<string> knownToolNames,
             out List<Match> matches, out string cleanedText)
@@ -134,9 +137,9 @@ namespace CoreAI.Ai
                         continue;
                     }
 
-                    // ПОЧЕМУ: при известном реестре JSON с чужим именем — пример из объяснения или
-                    // галлюцинация; исполнить его всё равно нельзя, а вырезать — значит показать
-                    // ученику пустоту вместо текста.
+                    // WHY: with a known registry, JSON carrying a foreign name is either an example from an
+                    // explanation or a hallucination; it cannot be executed anyway, and cutting it out
+                    // would show the learner emptiness instead of text.
                     if (!IsDeclaredTool(name, knownToolNames))
                     {
                         continue;
@@ -169,7 +172,7 @@ namespace CoreAI.Ai
 
             if (matches.Count == 0)
             {
-                // Все JSON-кандидаты отвергнуты (цитата, чужое имя) — остальные формы всё ещё возможны.
+                // Every JSON candidate was rejected (a quotation, a foreign name) - the other forms are still possible.
                 return TryExtractNonJsonForms(text, searchText, knownToolNames, out matches, out cleanedText);
             }
 
@@ -183,8 +186,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Формы, которые пробуются, когда JSON-вызова в тексте нет: XML, затем <c>ident(...)</c>,
-        /// затем псевдозапись памяти. Порядок — по силе улики.
+        /// The forms tried when the text holds no JSON call: XML, then <c>ident(...)</c>, then the memory
+        /// pseudo-write. The order follows the strength of the evidence.
         /// </summary>
         private static bool TryExtractNonJsonForms(string text, string searchText,
             IReadOnlyCollection<string> knownToolNames, out List<Match> matches, out string cleanedText)
@@ -210,8 +213,9 @@ namespace CoreAI.Ai
         /// string stays intact for tools like <c>call_skill_tool</c>). The wrapping
         /// <c>&lt;tool_call&gt;</c> tags are stripped from the cleaned reply.
         /// <para>
-        /// Ищем по <paramref name="searchText"/> — копии без code-fence той же длины, — а подстроки берём
-        /// из <paramref name="text"/>: XML-пример внутри <c>```...```</c> в объяснении не исполняется.
+        /// The search runs over <paramref name="searchText"/> - a copy of equal length with the code fences
+        /// blanked out - while the substrings are taken from <paramref name="text"/>: an XML example inside
+        /// <c>```...```</c> in an explanation is not executed.
         /// </para>
         /// </summary>
         private static bool TryExtractXmlToolCallSyntax(string text, string searchText,
@@ -280,8 +284,8 @@ namespace CoreAI.Ai
         {
             matches = new List<Match>();
             cleanedText = text ?? string.Empty;
-            // ПОЧЕМУ: псевдозапись синтезирует вызов ИМЕННО инструмента memory; если его не объявляли,
-            // синтезировать нечего.
+            // WHY: the pseudo-write synthesizes a call to the memory tool SPECIFICALLY; if it was not
+            // declared, there is nothing to synthesize.
             if (string.IsNullOrWhiteSpace(text) || !IsDeclaredTool(MemoryToolName, knownToolNames))
             {
                 return false;
@@ -372,8 +376,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// То же, что <c>StripForDisplay(text)</c>, но с реестром объявленных инструментов — семантика
-        /// реестра описана у <c>TryExtract(text, knownToolNames, …)</c>.
+        /// The same as <c>StripForDisplay(text)</c>, but with a registry of declared tools - the semantics
+        /// of the registry are described on <c>TryExtract(text, knownToolNames, ...)</c>.
         /// </summary>
         public static string StripForDisplay(string assistantText, IReadOnlyCollection<string> knownToolNames)
         {
@@ -389,10 +393,10 @@ namespace CoreAI.Ai
         private const string CodeFence = "```";
 
         /// <summary>
-        /// Принадлежит ли имя реестру объявленных инструментов. Без реестра (<c>null</c>) ответ «да»:
-        /// вызывающий не дал списка, и решать за него по форме — единственное, что остаётся.
-        /// Сравнение ординальное: исполнитель ищет инструмент по точному имени, и «почти то» имя всё
-        /// равно закончилось бы «Unknown tool».
+        /// Whether the name belongs to the registry of declared tools. Without a registry (<c>null</c>) the
+        /// answer is "yes": the caller gave no list, and deciding by shape on their behalf is all that is
+        /// left. The comparison is ordinal: the executor looks the tool up by its exact name, and a
+        /// "nearly right" name would end in "Unknown tool" anyway.
         /// </summary>
         private static bool IsDeclaredTool(string name, IReadOnlyCollection<string> knownToolNames)
         {
@@ -421,10 +425,10 @@ namespace CoreAI.Ai
         /// Replaces fenced code blocks with whitespace of equal length so they are excluded
         /// from extraction without shifting the offsets of the remaining text.
         /// <para>
-        /// Незакрытая последняя ограда тоже считается блоком кода до конца текста. ПОЧЕМУ: ответ,
-        /// обрезанный лимитом токенов посреди <c>```json</c>-примера, оставлял пример без закрывающей
-        /// ограды, и он исполнялся как вызов. Цена: вызов после одинокой сломанной ограды будет пропущен;
-        /// пропущенный вызов модель может повторить, исполненный пример — уже нет.
+        /// An unclosed final fence also counts as a code block running to the end of the text. WHY: an
+        /// answer cut off by the token limit in the middle of a <c>```json</c> example left that example
+        /// without its closing fence, and it got executed as a call. The price: a call following a lone
+        /// broken fence will be missed; a missed call the model can repeat, an executed example it cannot.
         /// </para>
         /// </summary>
         public static string StripCodeBlocks(string text)
@@ -595,12 +599,12 @@ namespace CoreAI.Ai
         /// <c>read_skill("Alchemy")</c> or <c>read_skill(Crafting)</c> or
         /// <c>call_skill_tool("get_recipes", "{\"item\":\"sword\"}")</c>
         /// <para>
-        /// Единственная форма без собственной улики: <c>read_skill("Alchemy")</c> и
-        /// <c>print("Привет, мир!")</c> — одна и та же строка кода, и второе учитель Python отдаёт
-        /// ребёнку целым ответом. Раньше такой ответ становился вызовом инструмента <c>print</c>:
-        /// модель получала «Unknown tool», ребёнок — пустой пузырь. Поэтому ветка работает ТОЛЬКО при
-        /// переданном реестре и только для объявленного имени; списка стоп-слов вроде
-        /// print/input/len здесь нет намеренно — он кончился бы на первом новом уроке.
+        /// The only form with no evidence of its own: <c>read_skill("Alchemy")</c> and
+        /// <c>print("Hello, world!")</c> are the same line of code, and a Python teacher hands the latter
+        /// to the child as an entire answer. Such an answer used to become a call to a <c>print</c> tool:
+        /// the model got "Unknown tool", the child got an empty bubble. That is why this branch works ONLY
+        /// when a registry was supplied and only for a declared name; there is deliberately no stop-word
+        /// list like print/input/len here - it would run out on the first new lesson.
         /// </para>
         /// </summary>
         private static readonly Regex FunctionCallHeadRegex = new(

@@ -4,6 +4,7 @@ using CoreAI.Composition;
 using CoreAI.Messaging;
 using MessagePipe;
 using UnityEngine;
+using VContainer;
 
 namespace CoreAI.Diagnostics
 {
@@ -80,66 +81,30 @@ namespace CoreAI.Diagnostics
                 return;
             }
 
-            try
+            // WHY TryResolve: a scene whose scope registers none of these used to pay a thrown-and-caught
+            // VContainerException per service per second for the whole session (four throws a second
+            // under IL2CPP/WebGL, where a throw is a stack unwind through native frames), and a missing
+            // registration is the expected outcome here, not an error.
+            IObjectResolver container = _scope.Container;
+            ChatService = container.TryResolve(out IInGameLlmChatService chatService) ? chatService : null;
+            Settings = container.TryResolve(out ICoreAISettings settings) ? settings : null;
+
+            if (_usageSubscription == null &&
+                container.TryResolve(out ISubscriber<LlmUsageReported> usage))
             {
-                ChatService = (IInGameLlmChatService)_scope.Container.Resolve(typeof(IInGameLlmChatService));
-            }
-            catch (Exception)
-            {
-                ChatService = null;
+                _usageSubscription = usage.Subscribe(OnUsageReported);
             }
 
-            try
+            if (_toolCompletedSubscription == null &&
+                container.TryResolve(out ISubscriber<LlmToolCallCompleted> completed))
             {
-                Settings = (ICoreAISettings)_scope.Container.Resolve(typeof(ICoreAISettings));
-            }
-            catch (Exception)
-            {
-                Settings = null;
+                _toolCompletedSubscription = completed.Subscribe(_ => Calculator.RecordToolCall(true));
             }
 
-            if (_usageSubscription == null)
+            if (_toolFailedSubscription == null &&
+                container.TryResolve(out ISubscriber<LlmToolCallFailed> failed))
             {
-                try
-                {
-                    ISubscriber<LlmUsageReported> usage =
-                        (ISubscriber<LlmUsageReported>)_scope.Container.Resolve(typeof(ISubscriber<LlmUsageReported>));
-                    _usageSubscription = usage.Subscribe(OnUsageReported);
-                }
-                catch (Exception)
-                {
-                    _usageSubscription = null;
-                }
-            }
-
-            if (_toolCompletedSubscription == null)
-            {
-                try
-                {
-                    ISubscriber<LlmToolCallCompleted> completed =
-                        (ISubscriber<LlmToolCallCompleted>)_scope.Container.Resolve(
-                            typeof(ISubscriber<LlmToolCallCompleted>));
-                    _toolCompletedSubscription = completed.Subscribe(_ => Calculator.RecordToolCall(true));
-                }
-                catch (Exception)
-                {
-                    _toolCompletedSubscription = null;
-                }
-            }
-
-            if (_toolFailedSubscription == null)
-            {
-                try
-                {
-                    ISubscriber<LlmToolCallFailed> failed =
-                        (ISubscriber<LlmToolCallFailed>)_scope.Container.Resolve(
-                            typeof(ISubscriber<LlmToolCallFailed>));
-                    _toolFailedSubscription = failed.Subscribe(_ => Calculator.RecordToolCall(false));
-                }
-                catch (Exception)
-                {
-                    _toolFailedSubscription = null;
-                }
+                _toolFailedSubscription = failed.Subscribe(_ => Calculator.RecordToolCall(false));
             }
 
             IsResolved = ChatService != null || Settings != null || _usageSubscription != null;

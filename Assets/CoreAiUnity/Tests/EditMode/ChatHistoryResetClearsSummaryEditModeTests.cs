@@ -13,11 +13,11 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Дефект: <c>IAgentMemoryStore.ClearChatHistory</c> чистил только историю, а свёрнутый summary жил в
-    /// отдельном сторе и переживал сброс. Оба менеджера контекста отдают сохранённый summary в КАЖДЫЙ ход,
-    /// ещё до всякой компакции, — поэтому после «сбросить историю» на старте новой миссии ученик получал
-    /// учителя, который в каждой реплике держит в голове прошлый урок. Здесь «сбросить историю» означает
-    /// «сбросить историю»: и хвост, и всё, что из него свёрнуто.
+    /// Defect: <c>IAgentMemoryStore.ClearChatHistory</c> wiped only the history, while the rolled-up summary
+    /// lived in a separate store and survived the reset. Both context managers hand the stored summary to EVERY
+    /// turn, before any compaction at all, so after a "reset the history" at the start of a new mission the
+    /// learner got a teacher who still carried the previous lesson in mind in every reply. Here "reset the
+    /// history" means reset the history: the tail, and everything that was rolled up out of it.
     /// </summary>
     [TestFixture]
     public sealed class ChatHistoryResetClearsSummaryEditModeTests
@@ -171,9 +171,9 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Сквозной сценарий RedoSchool: прошлый урок свернулся в summary; новая миссия зовёт
-        /// <c>memoryStore.ClearChatHistory</c> и ничего не знает про стор summary. В промпт первого хода
-        /// нового урока не должно попасть ни строки прошлого пересказа.
+        /// End-to-end RedoSchool scenario: the previous lesson was rolled up into a summary; the new mission
+        /// calls <c>memoryStore.ClearChatHistory</c> and knows nothing about the summary store. Not one line of
+        /// the previous recap may reach the prompt of the first turn of the new lesson.
         /// </summary>
         [Test]
         public async Task RunTaskAsync_AfterClearChatHistory_NextTurnCarriesNoLineOfThePreviousLesson()

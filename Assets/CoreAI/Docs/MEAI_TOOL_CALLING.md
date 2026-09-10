@@ -6,6 +6,27 @@
 
 ---
 
+## 📌 The MEAI version is fixed at 9.10.2
+
+CoreAI is written against **Microsoft.Extensions.AI 9.10.2** and builds against it here, in its own repository. That is not a stale pin waiting to be bumped — it is the version the Unity consumer can actually load:
+
+- Unity ships its **own `System.Text.Json`** (assembly version `8.0.0.0`) in the editor's BCL extensions and substitutes it for whatever copy the project restored.
+- Every MEAI **10.x** assembly is built against `System.Text.Json 10.0.0.0`. Under Unity it therefore fails to load — at the first call into MEAI, not at compile time.
+- 9.10.2 is the newest release on the `8.0.0.0` line.
+
+**The rule:** what CoreAI compiles against equals what the consumer can load. Keeping them equal is what turns "the consumer cannot upgrade" into a build failure here — on `dotnet build tools/portable/CoreAI.Core.csproj` and in the license-free `portable-core` CI job — instead of a surprise during integration. Three places state the version: `Assets/packages.config`, the vendored `Assets/Packages/Microsoft.Extensions.AI*` folders, and `tools/portable/CoreAI.Core.csproj`. `MeaiVersionFloorEditModeTests` fails as soon as any of them disagrees.
+
+Four consequences worth knowing before porting code from a MEAI 10.x sample:
+
+- The user-approval content type is **`FunctionApprovalRequestContent`** (10.x merged it with the MCP variant under the name `ToolApprovalRequestContent`), and it — like `ApprovalRequiredAIFunction` — is marked `[Experimental("MEAI001")]`. `SmartToolCallingChatClient` suppresses `MEAI001` around exactly those uses, never file-wide.
+- `FunctionCallContent.InformationalOnly` does not exist. Calls the service already resolved are recognised by their paired `FunctionResultContent` instead.
+- **`FunctionInvoker` results are wrapped, not passed through.** Whatever the delegate returns becomes the *value inside* the `FunctionResultContent` MEAI builds. Returning a ready-made `FunctionResultContent` (10.x unwraps it) would show the model the string `Microsoft.Extensions.AI.FunctionResultContent`. `SmartToolCallingChatClient` returns the payload and lets MEAI own the pairing.
+- **`AdditionalTools` is read once per request**, before the first provider call, so a tool registered after the model names it is never consulted — MEAI answers `Requested function "…" not found.` itself and CoreAI policy never sees the failure. Unknown names are therefore resolved inside `NativePolicyClient`, where the name is first known, so they still count towards `maxConsecutiveErrors`.
+
+Raising the version is allowed only once the engine can load the newer assemblies: change the pins together, then update the game.
+
+---
+
 ## 📐 Architecture
 
 ```
@@ -212,12 +233,12 @@ LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
 ```
 
 CoreAI binds `ILlmTool` to `AIFunction` via typed interfaces. In a regular non-streaming
-response on .NET/desktop, the native loop is driven by MEAI `FunctionInvokingChatClient` 10.9, while the shared
+response on .NET/desktop, the native loop is driven by MEAI `FunctionInvokingChatClient` (MEAI 9.10.2), while the shared
 `ToolExecutionPolicy` applies host rules: timeouts, retries, mutation serialization, and `EndsTurn`.
 MEAI also keeps its native approval roundtrip.
 
 The streaming path preserves early execution of completed calls: after the first
-`FunctionCallContent`, MEAI 10.9 buffers the continuation until the end of the stream, so the shared
+`FunctionCallContent`, MEAI buffers the continuation until the end of the stream, so the shared
 CoreAI policy with its own streaming adapter is used here. A narrow non-streaming fallback remains for WebGL;
 replacing it with the MEAI loop requires separate in-browser verification of continuation behavior.
 These are composition limits, not different formats or separate tool implementations.

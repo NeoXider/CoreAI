@@ -144,8 +144,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             LuaModRuntimeTickDriver driver = driverObject.AddComponent<LuaModRuntimeTickDriver>();
             ActorContext actorContext = CoreServicesInstaller.DefaultLocalHostIdentityProvider
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
-            driver.Initialize(stack.Runtime, actorContext, roblox.Scheduler,
-                roblox.PumpPreSimulation, roblox.PumpHeartbeat, roblox.PumpPreRender);
+            // WHY the driver gets the scheduler and no per-phase pumps: the bindings that own this
+            // scheduler already fire every phase from PhaseReached. Handing the driver the same
+            // Pump* methods made it a SECOND subscriber, so each phase fired twice per frame.
+            driver.Initialize(stack.Runtime, actorContext, roblox.Scheduler);
             return driver;
         }
 
@@ -330,12 +332,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     store_set('n', tostring(n))
                 end)");
 
-            roblox.PumpFrame(0.1f);
-            roblox.Scheduler.Advance(0d);
-            roblox.PumpFrame(0.1f);
-            roblox.Scheduler.Advance(0d);
-            roblox.PumpFrame(0.1f);
-            roblox.Scheduler.Advance(0d);
+            // WHY one Advance per frame and no separate PumpFrame: the scheduler walks the phase
+            // pipeline and the bindings fire Heartbeat from PhaseReached, so a frame is exactly one
+            // Advance. Pumping as well would fire the handler twice per frame.
+            roblox.Scheduler.Advance(0.1d);
+            roblox.Scheduler.Advance(0.1d);
+            roblox.Scheduler.Advance(0.1d);
             Assert.AreEqual("3", store.Get("m", "n"), "connected Heartbeat handler runs once per frame");
             Assert.IsTrue(roblox.RunService.Heartbeat.HasConnections,
                 "the mod's Heartbeat connection is live while loaded");
@@ -345,10 +347,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.IsFalse(roblox.RunService.Heartbeat.HasConnections,
                 "unloading the mod disconnects its Heartbeat connection");
 
-            roblox.PumpFrame(0.1f);
-            roblox.Scheduler.Advance(0d);
-            roblox.PumpFrame(0.1f);
-            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0.1d);
+            roblox.Scheduler.Advance(0.1d);
 
             Assert.AreEqual("3", store.Get("m", "n"),
                 "Heartbeat must not fire after the mod is unloaded");
@@ -372,10 +372,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             // WHY: generation 1 — the outgoing chunk. Its Heartbeat handler must be gone after reload.
             stack.Runtime.LoadMod("m", bump);
 
-            roblox.PumpFrame(0.1f);
-            roblox.Scheduler.Advance(0d);
-            roblox.PumpFrame(0.1f);
-            roblox.Scheduler.Advance(0d);
+            // WHY one Advance per frame: see the sibling unload fixture — the bindings fire Heartbeat
+            // from the scheduler's own phase, so an extra PumpFrame would double every count below.
+            roblox.Scheduler.Advance(0.1d);
+            roblox.Scheduler.Advance(0.1d);
             Assert.AreEqual("2", store.Get("m", "n"), "gen-1 handler fires once per frame while loaded");
 
             // WHY: reload with a chunk that ALSO connects Heartbeat (generation 2). The reload teardown
@@ -385,10 +385,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.IsTrue(roblox.RunService.Heartbeat.HasConnections,
                 "the reloaded chunk's Heartbeat connection survives the reload teardown");
 
-            roblox.PumpFrame(0.1f);
-            roblox.Scheduler.Advance(0d);
-            roblox.PumpFrame(0.1f);
-            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0.1d);
+            roblox.Scheduler.Advance(0.1d);
 
             // WHY: n grows by exactly one per frame after reload — the reloaded connection STILL fires
             // (would stay at 2 if the fix disconnected the new chunk's own connection), and the old
@@ -400,8 +398,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.IsFalse(roblox.RunService.Heartbeat.HasConnections,
                 "unloading after a reload disconnects the surviving connection too");
 
-            roblox.PumpFrame(0.1f);
-            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0.1d);
             Assert.AreEqual("4", store.Get("m", "n"), "no Heartbeat fires after the final unload");
         }
     }

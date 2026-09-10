@@ -25,7 +25,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ThreeConsecutiveErrors_StopsAgent()
         {
-            // Модель каждый раз вызывает тулзу "my_tool", тулза всегда возвращает failure
+            // The model calls the "my_tool" tool every time, and the tool always returns a failure
             int callCount = 0;
             ScriptedChatClient fakeInner = new(iteration =>
             {
@@ -272,7 +272,7 @@ namespace CoreAI.Tests.EditMode
         public async Task SuccessResetsCounter_ThenThreeErrorsStop()
         {
             int callCount = 0;
-            // Последовательность: fail, fail, success, fail, fail, fail → stop
+            // Sequence: fail, fail, success, fail, fail, fail -> stop
             bool[] sequence = new[] { false, false, true, false, false, false };
 
             ScriptedChatClient fakeInner = new(iteration =>
@@ -313,13 +313,13 @@ namespace CoreAI.Tests.EditMode
         public async Task SuccessOnThirdAttempt_ResetsAndContinues()
         {
             int callCount = 0;
-            // fail, fail, success, fail, fail, text (модель отвечает текстом)
+            // fail, fail, success, fail, fail, text (the model answers with text)
             bool[] sequence = new[] { false, false, true, false, false };
 
             ScriptedChatClient fakeInner = new(iteration =>
             {
                 callCount++;
-                // После 5 тулзовых вызовов модель отвечает текстом
+                // After 5 tool calls the model answers with text
                 if (callCount > sequence.Length)
                 {
                     return MakeTextResponse("Done");
@@ -347,9 +347,9 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatResponse response =
                 await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
-            // 5 тулзовых итераций + 1 текстовый ответ = 6 вызовов innerClient
+            // 5 tool iterations + 1 text response = 6 innerClient calls
             Assert.AreEqual(6, callCount, "Expected 6 iterations: 5 tool calls + 1 text response");
-            // Последний ответ должен быть текстовым "Done", а не аварийный break
+            // The last response must be the text "Done", not an emergency break
             string lastText = response.Messages?.LastOrDefault()?.Text;
             Assert.IsTrue(lastText?.Contains("Done") == true, "Agent should have finished normally with text response");
         }
@@ -440,7 +440,7 @@ namespace CoreAI.Tests.EditMode
                 callCount++;
                 if (callCount <= 2)
                 {
-                    // Одинаковый tool call с одинаковыми args
+                    // The same tool call with the same args
                     return MakeToolCallResponse("my_tool", "call_" + callCount,
                         new Dictionary<string, object> { { "x", 42 } });
                 }
@@ -459,15 +459,15 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
             await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
-            // Ожидаем 3 итерации: 1) успешный tool call, 2) дубликат (отклонён), 3) текст
+            // We expect 3 iterations: 1) a successful tool call, 2) a duplicate (rejected), 3) text
             Assert.AreEqual(3, callCount,
-                "После обнаружения дубликата должен сработать rejection, модель переходит к текстовому ответу");
+                "Once a duplicate is detected the rejection must fire and the model must move on to a text response");
         }
 
         /// <summary>
-        /// Дефект: эхо считалось провальной итерацией, и три повтора подряд («покажи карточку ещё раз»)
-        /// упирались в предел ошибок и обрывали ход сообщением об аборте. Эхо — структурированный no-op:
-        /// модель получает <c>ok:true, duplicate:true</c>, счётчик сбоев не двигается, ход продолжается.
+        /// Defect: an echo counted as a failed iteration, so three repeats in a row ("show me the card again")
+        /// hit the error limit and cut the turn short with an abort message. An echo is a structured no-op: the
+        /// model receives <c>ok:true, duplicate:true</c>, the failure counter does not move, the turn continues.
         /// </summary>
         [Test]
         public async Task RepeatedEchoes_AreNoOps_AndNeverAbortTheTurn()
@@ -513,8 +513,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Дефект: когда предел ошибок достигнут и сводочный ход текста не дал, наружу уходил сырой
-        /// служебный JSON <c>{"error":"Agent aborted …"}</c> как реплика ассистента.
+        /// Defect: once the error limit was reached and the summarising turn produced no text, the raw internal
+        /// JSON <c>{"error":"Agent aborted ..."}</c> went out as the assistant's reply.
         /// </summary>
         [Test]
         public async Task MaxErrorsWithoutSummaryText_ReturnsPlainProse_NotRawJson()
@@ -574,7 +574,7 @@ namespace CoreAI.Tests.EditMode
             await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(4, callCount,
-                "Три разных аргумента + текстовый ответ = 4 итерации, блокировки не должно быть");
+                "Three different argument sets + a text response = 4 iterations, and nothing may be blocked");
         }
 
         /// <summary>
@@ -608,7 +608,7 @@ namespace CoreAI.Tests.EditMode
             await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(4, callCount,
-                "Инструмент с AllowDuplicates=true не триггерит rejection");
+                "A tool with AllowDuplicates=true does not trigger the rejection");
         }
 
         // ===================== Edge Cases =====================
@@ -628,7 +628,7 @@ namespace CoreAI.Tests.EditMode
 
             SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 new CoreAISettingsOptions(),
-                true, // отключаем дубликаты, чтобы увидеть именно not-found
+                true, // duplicates off, so we see the not-found case itself
                 new List<Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool>() };
@@ -922,6 +922,11 @@ namespace CoreAI.Tests.EditMode
             Assert.IsEmpty(disabled.LastExecutedToolCalls);
         }
 
+        // The user-approval API is marked MEAI001 ("evaluation purposes only") by MEAI itself.
+        // The suppression covers exactly the three approval fixtures below and is restored right
+        // after them, so any other experimental API in this file still fails the build.
+#pragma warning disable MEAI001
+
         [Test]
         public async Task NoneToolMode_DoesNotExecutePreviouslyApprovedCall()
         {
@@ -938,8 +943,8 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatOptions options = new()
                 { Tools = new List<MEAI.AITool> { new MEAI.ApprovalRequiredAIFunction(function) } };
             MEAI.ChatResponse pending = await client.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(), options);
-            MEAI.ToolApprovalRequestContent approval = pending.Messages.SelectMany(message => message.Contents)
-                .OfType<MEAI.ToolApprovalRequestContent>().Single();
+            MEAI.FunctionApprovalRequestContent approval = pending.Messages.SelectMany(message => message.Contents)
+                .OfType<MEAI.FunctionApprovalRequestContent>().Single();
             List<MEAI.ChatMessage> history = pending.Messages.ToList();
             history.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
                 new List<MEAI.AIContent> { approval.CreateResponse(true) }));
@@ -972,9 +977,9 @@ namespace CoreAI.Tests.EditMode
                 { Tools = new List<MEAI.AITool> { new MEAI.ApprovalRequiredAIFunction(function) }, ToolMode = MEAI.ChatToolMode.RequireAny };
 
             MEAI.ChatResponse pending = await client.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(), options);
-            MEAI.ToolApprovalRequestContent request = pending.Messages.SelectMany(message => message.Contents)
-                .OfType<MEAI.ToolApprovalRequestContent>().Single();
-            Assert.AreEqual("approval_call", request.ToolCall.CallId);
+            MEAI.FunctionApprovalRequestContent request = pending.Messages.SelectMany(message => message.Contents)
+                .OfType<MEAI.FunctionApprovalRequestContent>().Single();
+            Assert.AreEqual("approval_call", request.FunctionCall.CallId);
             Assert.AreEqual(0, invocations, "Describing an approval-required function must not execute it.");
             Assert.AreEqual(1, provider.ObservedMessages.Count, "A valid approval request is not a missing-tool retry.");
 
@@ -989,9 +994,9 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(2, provider.ObservedMessages.Count);
             MEAI.FunctionResultContent result = provider.ObservedMessages[1].SelectMany(message => message.Contents)
                 .OfType<MEAI.FunctionResultContent>().Single();
-            Assert.AreEqual(request.ToolCall.CallId, result.CallId, "MEAI must pair the approval outcome with its original call.");
+            Assert.AreEqual(request.FunctionCall.CallId, result.CallId, "MEAI must pair the approval outcome with its original call.");
             Assert.IsFalse(completed.Messages.SelectMany(message => message.Contents)
-                .OfType<MEAI.ToolApprovalRequestContent>().Any());
+                .OfType<MEAI.FunctionApprovalRequestContent>().Any());
         }
 
         [Test]
@@ -1016,7 +1021,7 @@ namespace CoreAI.Tests.EditMode
                 { Tools = new List<MEAI.AITool> { new MEAI.ApprovalRequiredAIFunction(tool.CreateAIFunction()) } };
             MEAI.ChatResponse pending = await client.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(), options);
             List<MEAI.AIContent> approvals = pending.Messages.SelectMany(message => message.Contents)
-                .OfType<MEAI.ToolApprovalRequestContent>().Select(request => (MEAI.AIContent)request.CreateResponse(true)).ToList();
+                .OfType<MEAI.FunctionApprovalRequestContent>().Select(request => (MEAI.AIContent)request.CreateResponse(true)).ToList();
             Assert.AreEqual(2, approvals.Count);
             List<MEAI.ChatMessage> history = pending.Messages.ToList();
             history.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, approvals));
@@ -1026,6 +1031,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(client.LastTurnEndedByTool);
             Assert.AreEqual("", completed.Text);
         }
+
+#pragma warning restore MEAI001
 
         [TestCase(false)]
         [TestCase(true)]
@@ -1073,6 +1080,53 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3, result.Usage.OutputTokenCount);
             Assert.AreEqual(20, client.LastRoundtripUsage.InputTokenCount);
             Assert.IsFalse(client.LastTurnEndedByTool);
+        }
+
+        /// <summary>
+        /// Whole-turn accumulation and the last-roundtrip snapshot both go through the shared
+        /// <c>LlmUsageAccumulator</c> (native <c>UsageDetails.Add</c>), so vendor counters in
+        /// <c>AdditionalCounts</c> — where prompt-cache reads and writes travel — are summed key by key
+        /// across roundtrips, and the provider's own usage objects are never mutated in place.
+        /// </summary>
+        [Test]
+        public async Task NativeLoop_SumsAdditionalCountsAcrossRoundtrips_WithoutMutatingProviderUsage()
+        {
+            List<MEAI.UsageDetails> reported = new();
+            ScriptedChatClient inner = new(iteration =>
+            {
+                MEAI.ChatResponse response = iteration == 1
+                    ? MakeToolCallResponseWithText("lookup", "one", "Working")
+                    : MakeTextResponse("Finished");
+                response.Usage = new MEAI.UsageDetails
+                {
+                    InputTokenCount = 10,
+                    OutputTokenCount = 1,
+                    AdditionalCounts = new MEAI.AdditionalPropertiesDictionary<long>
+                    {
+                        ["prompt_tokens_details.cached_tokens"] = iteration * 4,
+                        ["cache_creation_input_tokens"] = 3
+                    }
+                };
+                reported.Add(response.Usage);
+                return response;
+            });
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance,
+                new CoreAISettingsOptions(), true,
+                new List<Ai.ILlmTool>(), "test");
+            MEAI.ChatResponse result = await client.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(),
+                new MEAI.ChatOptions { Tools = new List<MEAI.AITool>
+                    { MakeAIFunction("lookup", _ => Task.FromResult<object>("payload")) } });
+
+            Assert.AreEqual(2, reported.Count);
+            Assert.AreEqual(12L, result.Usage.AdditionalCounts["prompt_tokens_details.cached_tokens"],
+                "4 + 8 across two roundtrips.");
+            Assert.AreEqual(6L, result.Usage.AdditionalCounts["cache_creation_input_tokens"],
+                "3 + 3 across two roundtrips.");
+            Assert.AreEqual(4L, reported[0].AdditionalCounts["prompt_tokens_details.cached_tokens"],
+                "The first roundtrip's own usage object must stay as the provider reported it.");
+            Assert.AreEqual(8L, client.LastRoundtripUsage.AdditionalCounts["prompt_tokens_details.cached_tokens"],
+                "The last-roundtrip snapshot is a detached copy of the final roundtrip only.");
+            Assert.AreNotSame(reported[1], client.LastRoundtripUsage);
         }
 
         [Test]
@@ -1128,13 +1182,22 @@ namespace CoreAI.Tests.EditMode
                 new List<Ai.ILlmTool>(), "test");
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool>
             {
-                MakeAIFunction("already_done", _ => { serverInvocations++; return Task.FromResult<object>("ok"); }),
-                MakeAIFunction("local_work", _ => { localInvocations++; return Task.FromResult<object>("ok"); })
+                MakeAIFunction("already_done", _ => { serverInvocations++; return Task.FromResult<object>("SERVER_RAN"); }),
+                MakeAIFunction("local_work", _ => { localInvocations++; return Task.FromResult<object>("LOCAL_RESULT"); })
             } };
             MEAI.ChatResponse result = await client.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(), options);
             Assert.AreEqual(0, serverInvocations, "A server-delivered result proves that call is already handled.");
             Assert.AreEqual(1, localInvocations);
             Assert.AreEqual("Finished", result.Text);
+            // The service's own answer and the local tool's answer must reach the model paired with the
+            // call each of them belongs to. A positional hand-off swapped them here: MEAI numbers its
+            // invocations over BOTH calls while policy executed only the local one.
+            MEAI.FunctionResultContent local = ResultForCall(inner.ObservedMessages[1], "local");
+            MEAI.FunctionResultContent server = ResultForCall(inner.ObservedMessages[1], "server");
+            StringAssert.Contains("LOCAL_RESULT", local.Result?.ToString() ?? "",
+                "The local tool's own answer belongs to the local call.");
+            StringAssert.Contains("ok", server.Result?.ToString() ?? "",
+                "The service's own answer belongs to the call the service resolved.");
         }
 
         [Test]
@@ -1153,6 +1216,230 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("Next request", next.Text);
             Assert.IsFalse(client.LastTurnEndedByTool);
         }
+
+        // ============ Mixed batches: a call policy does NOT execute next to one it does ============
+        // Every test below issues ONE model turn containing two calls, where exactly one of them is
+        // handed to CoreAI policy. The other is answered elsewhere - by policy itself (an invented
+        // name) or by MEAI's approval flow - and therefore never reaches the function invoker. MEAI
+        // still numbers its invocations over the WHOLE message, so anything that maps a policy result
+        // by position drifts as soon as such a neighbour exists.
+
+        /// <summary>
+        /// An invented name in front of a real call must not corrupt the real call's answer: the real
+        /// tool runs once and the model reads THAT tool's output, not an invocation failure.
+        /// </summary>
+        [Test]
+        public async Task MixedBatch_InventedNameBeforeRealCall_ModelReadsTheRealToolResult()
+        {
+            int invocations = 0;
+            Ai.DelegateLlmTool real = new("real_tool", "real tool", (Func<string>)(() =>
+            {
+                invocations++;
+                return "REAL_RESULT";
+            }));
+            ScriptedChatClient provider = new(iteration => iteration == 1
+                ? MakeMultiToolCallResponse(("invented_tool", "call_invented"), ("real_tool", "call_real"))
+                : MakeTextResponse("Finished"));
+            SmartToolCallingChatClient client = new(provider, NullLog.Instance,
+                new CoreAISettingsOptions(), false,
+                new List<Ai.ILlmTool> { real }, "test", 3);
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { real.CreateAIFunction() } };
+
+            MEAI.ChatResponse response = await client.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(), options);
+
+            Assert.AreEqual(1, invocations, "The bound tool runs exactly once.");
+            Assert.AreEqual(2, provider.ObservedMessages.Count, "One tool roundtrip, then the model's answer.");
+            string results = ToolResultTextOf(provider.ObservedMessages[1]);
+            StringAssert.Contains("REAL_RESULT", results,
+                "The model must be told what the tool actually returned.");
+            Assert.IsFalse(results.Contains("Function failed"),
+                "A tool that ran successfully must never be reported to the model as an invocation failure.");
+            // Exactly one answer per call id: the invented call gets CoreAI's own answer - the one that
+            // names the tools that DO exist - and not, on top of it, MEAI's terse "function not found".
+            MEAI.FunctionResultContent invented = ResultForCall(provider.ObservedMessages[1], "call_invented");
+            StringAssert.Contains("real_tool", invented.Result?.ToString() ?? "",
+                "CoreAI's unknown-tool answer names the tools that do exist.");
+            ResultForCall(provider.ObservedMessages[1], "call_real");
+            Assert.AreEqual("Finished", response.Text);
+        }
+
+        /// <summary>
+        /// The same mixed batch with the invented name LAST: a successful turn-ending tool still has to
+        /// close the turn without one more model request.
+        /// </summary>
+        [Test]
+        public async Task MixedBatch_InventedNameAfterTurnEndingCall_StillClosesTheTurn()
+        {
+            int invocations = 0;
+            Ai.DelegateLlmTool show = new("show", "shows a card", (Func<string>)(() =>
+            {
+                invocations++;
+                return "ok";
+            })) { EndsTurn = true };
+            ScriptedChatClient provider = new(_ =>
+                MakeMultiToolCallResponse(("show", "call_show"), ("invented_tool", "call_invented")));
+            SmartToolCallingChatClient client = new(provider, NullLog.Instance,
+                new CoreAISettingsOptions(), false,
+                new List<Ai.ILlmTool> { show }, "test", 3);
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { show.CreateAIFunction() } };
+
+            await client.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(), options);
+
+            Assert.AreEqual(1, invocations, "The turn-ending tool runs exactly once.");
+            Assert.IsTrue(client.LastTurnEndedByTool, "A successful EndsTurn tool ends the turn.");
+            Assert.AreEqual(1, provider.ObservedMessages.Count,
+                "An invented name standing after the turn-ending call must not buy the model another turn.");
+        }
+
+        /// <summary>
+        /// A model that keeps repeating the same mixed batch is stopped by the consecutive-error guard.
+        /// The roundtrip budget (20 by default) is the wrong stopper here: it costs a full twenty
+        /// provider requests, and the repeated real call is echo-suppressed rather than re-executed.
+        /// </summary>
+        [Test]
+        public async Task MixedBatch_RepeatedInventedName_StopsOnErrorGuardNotRoundtripBudget()
+        {
+            int invocations = 0;
+            Ai.DelegateLlmTool real = new("real_tool", "real tool", (Func<string>)(() =>
+            {
+                invocations++;
+                return "REAL_RESULT";
+            }));
+            ScriptedChatClient provider = new(iteration =>
+                MakeMultiToolCallResponse(("invented_tool", "call_invented_" + iteration),
+                    ("real_tool", "call_real_" + iteration)));
+            SmartToolCallingChatClient client = new(provider, NullLog.Instance,
+                new CoreAISettingsOptions(), false,
+                new List<Ai.ILlmTool> { real }, "test", 3);
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { real.CreateAIFunction() } };
+
+            MEAI.ChatResponse response = await client.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(), options);
+
+            Assert.AreEqual(1, invocations,
+                "The identical real call is echo-suppressed after the first turn, not executed again.");
+            // Turn 1 pairs a failure with a real success (progress, counter reset); turns 2-4 pair the
+            // failure with an echo no-op, so the counter climbs 1-2-3 and trips on turn 4. One final
+            // tools-disabled summary roundtrip follows, which this scripted model answers with tool
+            // calls again - so the canned max-errors prose is what the caller gets.
+            Assert.AreEqual(5, provider.ObservedMessages.Count,
+                "The error guard must end the run long before the 20-roundtrip budget.");
+            StringAssert.Contains("tool calls in a row failed", response.Text,
+                "The run must end through the consecutive-error guard, not the roundtrip cap.");
+        }
+
+        // The user-approval API is marked MEAI001 ("evaluation purposes only") by MEAI itself.
+#pragma warning disable MEAI001
+
+        /// <summary>
+        /// An approval-required call is withheld from CoreAI policy the same way an invented name is,
+        /// so the mixed shape needs its own coverage. MEAI 9.10.2 settles it atomically: one guarded
+        /// call turns the WHOLE batch into approval requests, so nothing runs behind the user's back -
+        /// and once the user says yes, each call must reach the model with its OWN result.
+        /// </summary>
+        [Test]
+        public async Task MixedBatch_ApprovalRequiredBesideOrdinaryCall_AsksForBothThenDeliversBothResults()
+        {
+            int ordinaryInvocations = 0;
+            int guardedInvocations = 0;
+            Ai.DelegateLlmTool guarded = new("guarded_tool", "needs approval", (Func<string>)(() =>
+            {
+                guardedInvocations++;
+                return "GUARDED_RESULT";
+            }));
+            Ai.DelegateLlmTool ordinary = new("ordinary_tool", "ordinary tool", (Func<string>)(() =>
+            {
+                ordinaryInvocations++;
+                return "ORDINARY_RESULT";
+            }));
+            ScriptedChatClient provider = new(iteration => iteration == 1
+                ? MakeMultiToolCallResponse(("guarded_tool", "call_guarded"), ("ordinary_tool", "call_ordinary"))
+                : MakeTextResponse("Finished"));
+            SmartToolCallingChatClient client = new(provider, NullLog.Instance,
+                new CoreAISettingsOptions(), false,
+                new List<Ai.ILlmTool> { guarded, ordinary }, "test", 3);
+            MEAI.ChatOptions options = new()
+            {
+                Tools = new List<MEAI.AITool>
+                {
+                    new MEAI.ApprovalRequiredAIFunction(guarded.CreateAIFunction()),
+                    ordinary.CreateAIFunction()
+                }
+            };
+
+            MEAI.ChatResponse pending = await client.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(), options);
+
+            Assert.AreEqual(0, guardedInvocations, "An approval-required call must not execute unapproved.");
+            Assert.AreEqual(0, ordinaryInvocations,
+                "Its neighbour must not run either: the user is answering about the whole batch.");
+            List<MEAI.FunctionApprovalRequestContent> requests = pending.Messages
+                .SelectMany(message => message.Contents)
+                .OfType<MEAI.FunctionApprovalRequestContent>().ToList();
+            CollectionAssert.AreEquivalent(new[] { "call_guarded", "call_ordinary" },
+                requests.Select(request => request.FunctionCall.CallId).ToList(),
+                "Every call of the batch must reach the caller as its own approval request.");
+            Assert.AreEqual(1, provider.ObservedMessages.Count, "A pending approval is not a retry.");
+
+            List<MEAI.ChatMessage> history = pending.Messages.ToList();
+            history.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
+                requests.Select(request => (MEAI.AIContent)request.CreateResponse(true)).ToList()));
+            MEAI.ChatResponse completed = await client.GetResponseAsync(history, options);
+
+            Assert.AreEqual(1, guardedInvocations, "The approved guarded tool runs exactly once.");
+            Assert.AreEqual(1, ordinaryInvocations, "The approved ordinary tool runs exactly once.");
+            Assert.AreEqual("Finished", completed.Text);
+            string results = ToolResultTextOf(provider.ObservedMessages[1]);
+            StringAssert.Contains("GUARDED_RESULT", results, "Each approved call must carry its own answer.");
+            StringAssert.Contains("ORDINARY_RESULT", results, "Each approved call must carry its own answer.");
+            Assert.IsFalse(results.Contains("Function failed"),
+                "A tool that ran successfully must never be reported to the model as an invocation failure.");
+        }
+
+        /// <summary>
+        /// Approval-required call standing AFTER a turn-ending one: once approved, the successful
+        /// turn-ending tool still closes the turn instead of buying the model another request.
+        /// </summary>
+        [Test]
+        public async Task MixedBatch_ApprovalRequiredAfterTurnEndingCall_ClosesTheTurnOnceApproved()
+        {
+            int invocations = 0;
+            Ai.DelegateLlmTool guarded = new("guarded_tool", "needs approval", (Func<string>)(() => "guarded"));
+            Ai.DelegateLlmTool show = new("show", "shows a card", (Func<string>)(() =>
+            {
+                invocations++;
+                return "ok";
+            })) { EndsTurn = true };
+            ScriptedChatClient provider = new(_ =>
+                MakeMultiToolCallResponse(("show", "call_show"), ("guarded_tool", "call_guarded")));
+            SmartToolCallingChatClient client = new(provider, NullLog.Instance,
+                new CoreAISettingsOptions(), false,
+                new List<Ai.ILlmTool> { show, guarded }, "test", 3);
+            MEAI.ChatOptions options = new()
+            {
+                Tools = new List<MEAI.AITool>
+                {
+                    show.CreateAIFunction(),
+                    new MEAI.ApprovalRequiredAIFunction(guarded.CreateAIFunction())
+                }
+            };
+
+            MEAI.ChatResponse pending = await client.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(), options);
+            Assert.AreEqual(0, invocations, "Nothing runs while the batch waits for a decision.");
+            List<MEAI.AIContent> approvals = pending.Messages.SelectMany(message => message.Contents)
+                .OfType<MEAI.FunctionApprovalRequestContent>()
+                .Select(request => (MEAI.AIContent)request.CreateResponse(true)).ToList();
+            Assert.AreEqual(2, approvals.Count);
+
+            List<MEAI.ChatMessage> history = pending.Messages.ToList();
+            history.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, approvals));
+            await client.GetResponseAsync(history, options);
+
+            Assert.AreEqual(1, invocations, "The turn-ending tool runs exactly once.");
+            Assert.IsTrue(client.LastTurnEndedByTool, "A successful EndsTurn tool ends the turn.");
+            Assert.AreEqual(1, provider.ObservedMessages.Count,
+                "An approved batch whose turn-ending tool succeeded must not ask the model again.");
+        }
+
+#pragma warning restore MEAI001
 
         /// <summary>
         /// Simple <see cref="ILlmTool"/> implementation with duplicate calls explicitly allowed.
@@ -1220,6 +1507,42 @@ namespace CoreAI.Tests.EditMode
                 new MEAI.TextContent(text)
             });
             return new MEAI.ChatResponse(msg);
+        }
+
+        /// <summary>
+        /// Creates one assistant turn carrying several tool calls in the given order.
+        /// </summary>
+        private static MEAI.ChatResponse MakeMultiToolCallResponse(params (string ToolName, string CallId)[] calls)
+        {
+            List<MEAI.AIContent> contents = calls
+                .Select(call => (MEAI.AIContent)new MEAI.FunctionCallContent(call.CallId, call.ToolName,
+                    new Dictionary<string, object>()))
+                .ToList();
+            return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, contents));
+        }
+
+        /// <summary>
+        /// The single tool result answering <paramref name="callId"/> in one provider request.
+        /// Fails the test when the call is unanswered or answered twice - both break provider pairing.
+        /// </summary>
+        private static MEAI.FunctionResultContent ResultForCall(IEnumerable<MEAI.ChatMessage> request,
+            string callId)
+        {
+            List<MEAI.FunctionResultContent> matches = request.SelectMany(message => message.Contents)
+                .OfType<MEAI.FunctionResultContent>()
+                .Where(result => result.CallId == callId).ToList();
+            Assert.AreEqual(1, matches.Count, $"Call '{callId}' must be answered exactly once.");
+            return matches[0];
+        }
+
+        /// <summary>
+        /// Every tool result the model would read in one provider request, joined for assertion.
+        /// </summary>
+        private static string ToolResultTextOf(IEnumerable<MEAI.ChatMessage> request)
+        {
+            return string.Join("\n", request.SelectMany(message => message.Contents)
+                .OfType<MEAI.FunctionResultContent>()
+                .Select(result => result.Result?.ToString() ?? ""));
         }
 
         /// <summary>

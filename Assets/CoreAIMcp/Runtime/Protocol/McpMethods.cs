@@ -32,7 +32,7 @@ namespace CoreAI.Mcp.Protocol
         /// Advertised server version. MUST equal the <c>version</c> field of the package manifest;
         /// <c>McpPackageVersionEditModeTests</c> fails the build when the two drift apart.
         /// </summary>
-        public const string Version = "7.40.2";
+        public const string Version = "7.41.1";
 
         /// <summary>
         /// Supported protocol version returned during negotiation, including when a client requests an unsupported version.

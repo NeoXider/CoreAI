@@ -992,10 +992,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Один поток несёт НЕСКОЛЬКО реплик — после каждого раунда инструментов модель говорит
-        /// заново. Накопитель обязан разделять их пустой строкой: на проде он склеивал их встык, и
-        /// ученик читал «Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**» — эта же
-        /// склейка уезжала в историю роли и в <c>ApplyAiGameCommand</c>.
+        /// One stream carries SEVERAL replies: after every tool round the model starts speaking again. The
+        /// accumulator must separate them with a blank line; in production it glued them together and the learner
+        /// read "Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**" - and that same glued string
+        /// travelled into the role history and into <c>ApplyAiGameCommand</c>.
         /// </summary>
         [Test]
         public async Task RunStreamingAsync_ChunkStartsNewMessage_SeparatesMessagesInAccumulatedTurn()
@@ -1014,13 +1014,13 @@ namespace CoreAI.Tests.EditMode
 
             string assistant = memory.Appended.Single(m => m.MessageRole == "assistant").Content;
             Assert.That(assistant, Does.Not.Contain("себя:**Ход"),
-                "Две реплики учителя не имеют права слипнуться встык.");
+                "Two replies from the teacher have no right to be glued together.");
             Assert.That(assistant, Does.Contain("Проверь себя:\n\n**Ход завершён.**"));
         }
 
         /// <summary>
-        /// Без признака границы накопитель ведёт себя ровно как раньше: обычные дельты одной реплики
-        /// склеиваются вплотную, разделитель не появляется сам собой.
+        /// Without a boundary flag the accumulator behaves exactly as before: ordinary deltas of one reply are
+        /// concatenated tightly, and a separator never appears by itself.
         /// </summary>
         [Test]
         public async Task RunStreamingAsync_WithoutNewMessageFlag_KeepsPlainConcatenation()
@@ -1042,8 +1042,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Клиент, отдающий заранее заданные чанки: даёт тесту прямой контроль над признаком границы
-        /// сообщения, который в бою ставит <c>MeaiLlmClient</c> на первом видимом чанке новой итерации.
+        /// A client that emits pre-scripted chunks: it gives the test direct control over the message boundary flag,
+        /// which in production is set by <c>MeaiLlmClient</c> on the first visible chunk of a new iteration.
         /// </summary>
         private sealed class SegmentedStreamLlmClient : ILlmClient
         {
@@ -1870,7 +1870,7 @@ namespace CoreAI.Tests.EditMode
                 memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = $"Short msg {i}" });
             }
 
-            // Настраиваем агента с лимитом в 15 сообщений
+            // Configure the agent with a limit of 15 messages
             int maxMessages = 15;
             string[] sourceTranscript = memory.FakeHistory.Select(message => message.Content).ToArray();
             policy.ConfigureChatHistory("test_role", true, 8192, false, maxMessages);
@@ -2566,6 +2566,59 @@ namespace CoreAI.Tests.EditMode
                 "The recent tail keeps its own budget.");
         }
 
+        /// <summary>
+        /// The contract between two layers whose invariants once collided. The context manager bounds what
+        /// is STORED by the user's explicit cap only, so the durable retelling stays whole and the teardown
+        /// append may evict the oldest message it retells. The orchestrator bounds what is SENT to the
+        /// summary reserve, so a short message still fits the window. One turn has to show both at once:
+        /// a single bound shared by the two jobs breaks one side or the other.
+        /// </summary>
+        [Test]
+        public async Task RunTaskAsync_OversizedStoredSummary_StaysWholeInTheStore_AndReachesTheModelBounded()
+        {
+            const int window = 4096;
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            // WHY: ~3000 tokens against a ~2000-token tail budget, so this turn folds the oldest messages
+            // and rewrites the store; a turn that writes nothing would prove nothing about the store.
+            for (int i = 0; i < 10; i++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = $"old-context-{i}-".PadRight(1200, 'x')
+                });
+            }
+
+            InMemoryConversationSummaryStore summaryStore = SeedOversizedSummary("test_role");
+            string seeded = summaryStore.LoadSummary("test_role");
+            AgentMemoryPolicy policy = BuildSlimHistoryPolicy("test_role", window);
+            TestSettings settings = new() { ConversationRolledSummaryMaxTokens = 0 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(summaryStore));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "hi" });
+
+            string persisted = summaryStore.LoadSummary("test_role");
+            StringAssert.Contains("[fold:v1:", persisted, "precondition: this turn folded history and rewrote the store.");
+            StringAssert.Contains("old-context-0", persisted, "precondition: the fold retells the oldest message.");
+            StringAssert.StartsWith(seeded, persisted,
+                "Stored side: the whole seeded retelling survives the write, oldest line first. The reserve never reaches the store.");
+
+            Assert.IsNotNull(llm.LastRequest?.ChatHistory);
+            Microsoft.Extensions.AI.ChatMessage sent = llm.LastRequest.ChatHistory.Single(m =>
+                (m.Text ?? "").Contains(ConversationSummaryPromptProjection.Header));
+            StringAssert.DoesNotContain("oldest recap line", sent.Text,
+                "Sent side: the same turn's request carries only the newest suffix of that retelling.");
+            StringAssert.Contains("old-context-0", sent.Text, "The newest part, this turn's fold, is what the model sees.");
+            Assert.Less(sent.Text.Length, seeded.Length / 10, "precondition: the sent copy was cut, not merely reformatted.");
+            Assert.LessOrEqual(EstimateRequestTokens(llm.LastRequest), window,
+                "System prompt + bounded summary + recent tail fit the window.");
+        }
+
         [Test]
         public async Task RunTaskAsync_OverflowWithReportedLimit_RetryFitsTheReportedWindow_AndLaterTurnsRemember()
         {
@@ -2711,8 +2764,19 @@ namespace CoreAI.Tests.EditMode
                 "The refused first pass must not leak to the caller.");
         }
 
+        /// <summary>
+        /// WHY the expectation flipped: this test was written when the rolling summary was committed only
+        /// after the owning request succeeded, so a turn that never got an answer left the summary store
+        /// untouched. That ordering had a hole - every terminal path of a turn, failure included, appends
+        /// the learner's message, and on a bounded store an append evicts the oldest message. Committing
+        /// only on success meant a failed turn could evict source that nothing retold yet. Since 7.40.0 the
+        /// fold is committed before the request is dispatched, which is what makes the teardown append safe,
+        /// and the price is exactly this: a turn that dies in context-overflow retries leaves behind the
+        /// summary it prepared. That is a retelling of messages the store still holds, not new content, so
+        /// the trade is a rolled summary against a lost message.
+        /// </summary>
         [Test]
-        public async Task RunTaskAsync_ContextOverflowRetriesFail_DoesNotPersistAttemptSummaries()
+        public async Task RunTaskAsync_ContextOverflowRetriesFail_StillCommitsTheSummaryTheAppendReliesOn()
         {
             ToolTraceLlmClient llm = new(
                 new LlmCompletionResult
@@ -2750,7 +2814,11 @@ namespace CoreAI.Tests.EditMode
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "retry" });
 
             Assert.AreEqual(2, llm.Requests.Count);
-            Assert.AreEqual("", summaryStore.LoadSummary("test_role"));
+            CollectionAssert.AreEqual(new[] { "user" }, memory.Appended.Select(m => m.Role).ToArray(),
+                "A turn that exhausted its retries still records the learner's message once.");
+            Assert.AreEqual("retry", memory.Appended[0].Content);
+            StringAssert.Contains("old-context-0", summaryStore.LoadSummary("test_role"),
+                "The oldest source the teardown append can evict must already be retold in the summary.");
         }
 
         [Test]

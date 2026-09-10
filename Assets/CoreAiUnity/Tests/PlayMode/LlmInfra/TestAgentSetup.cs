@@ -49,7 +49,7 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         public IEnumerator Initialize()
         {
-            // Чтобы ToolExecutionPolicy публиковал LlmToolCall* и тесты могли подписаться через GlobalMessagePipe.
+            // So that ToolExecutionPolicy publishes LlmToolCall* events and tests can subscribe to them through GlobalMessagePipe.
             GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
 
             CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
@@ -195,7 +195,7 @@ namespace CoreAI.Tests.PlayMode
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
 
-            // Тот же CoreAISettingsAsset, что и у HTTP/Auto клиента — таймауты и флаги логирования LLM совпадают с Instance.
+            // The same CoreAISettingsAsset the HTTP/Auto client uses, so LLM timeouts and logging flags match Instance.
             CoreAISettingsAsset orchestratorSettings = CoreAISettingsAsset.Instance;
             if (orchestratorSettings == null)
             {

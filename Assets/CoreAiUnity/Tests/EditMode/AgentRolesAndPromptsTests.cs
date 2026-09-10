@@ -41,7 +41,7 @@ namespace CoreAI.Tests.EditMode
                 texts.Add(sys.Trim());
             }
 
-            Assert.AreEqual(texts.Count, texts.Distinct().Count(), "Промпты ролей должны различаться.");
+            Assert.AreEqual(texts.Count, texts.Distinct().Count(), "Role prompts must all differ from one another.");
         }
 
         [Test]

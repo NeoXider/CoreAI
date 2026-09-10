@@ -8,27 +8,29 @@ using CoreAI.Ai;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Локальные клиентские ограничения перед обращением к внутреннему LLM-клиенту: потолок запросов на
-    /// сессию и потолок размера промпта.
+    /// Local client-side limits applied before reaching the inner LLM client: a per-session request cap
+    /// and a prompt size cap.
     /// <para>
-    /// Оба отказа — <see cref="LlmErrorCode.ClientLimitExceeded"/>: это решение САМОГО клиента, бэкенд не
-    /// спрашивали. Раньше отдавался <see cref="LlmErrorCode.QuotaExceeded"/>, и презентация говорила игроку
-    /// «квота аккаунта исчерпана», хотя кончился лишь локальный счётчик сессии.
+    /// Both refusals are <see cref="LlmErrorCode.ClientLimitExceeded"/>: this is the CLIENT's own decision,
+    /// the backend was never asked. <see cref="LlmErrorCode.QuotaExceeded"/> used to be returned instead,
+    /// and the presentation told the player "your account quota is exhausted" when all that ran out was a
+    /// local session counter.
     /// </para>
     /// <para>
-    /// Слот сессии резервируется на время запроса и ВОЗВРАЩАЕТСЯ, если запрос не удался (результат с
-    /// ошибкой, терминальный чанк с ошибкой, исключение, отмена): неуспешная попытка лимит не съедает.
-    /// Резерв, а не подсчёт постфактум, — чтобы параллельные запросы не проскочили потолок вдвоём.
-    /// Поток, который потребитель бросил после части ответа, слот удерживает: бэкенд работу выполнил.
-    /// Счётчик живёт столько же, сколько экземпляр, — это и есть «сессия».
+    /// A session slot is reserved for the duration of the request and GIVEN BACK if the request failed
+    /// (an error result, a terminal error chunk, an exception, cancellation): an unsuccessful attempt does
+    /// not eat the limit. It is a reservation rather than an after-the-fact count so that concurrent
+    /// requests cannot slip past the cap two at a time. A stream the consumer abandoned after part of the
+    /// answer keeps the slot: the backend did the work. The counter lives exactly as long as the instance
+    /// does - that is what "session" means here.
     /// </para>
     /// </summary>
     public sealed class ClientLimitedLlmClientDecorator : ILlmClient
     {
-        /// <summary>Текст отказа при исчерпании потолка запросов сессии (диагностика, не текст для игрока).</summary>
+        /// <summary>Refusal text for an exhausted session request cap (diagnostics, not player-facing copy).</summary>
         public const string RequestLimitError = "ClientLimited request limit exceeded";
 
-        /// <summary>Текст отказа при превышении потолка размера промпта (диагностика, не текст для игрока).</summary>
+        /// <summary>Refusal text for an exceeded prompt size cap (diagnostics, not player-facing copy).</summary>
         public const string PromptLimitError = "ClientLimited prompt character limit exceeded";
 
         /// <summary>Exception.Data key containing a secondary stream cleanup exception when the request already failed.</summary>
@@ -40,7 +42,7 @@ namespace CoreAI.Infrastructure.Llm
         private int _reservedRequests;
 
         /// <summary>
-        /// Создаёт локальный клиентский ограничитель для одного разрешённого LLM-клиента.
+        /// Creates a local client-side limiter around a single permitted LLM client.
         /// </summary>
         public ClientLimitedLlmClientDecorator(ILlmClient inner, int maxRequestsPerSession, int maxPromptChars)
         {
@@ -50,7 +52,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Обёрнутый клиент, к которому уходят запросы, прошедшие локальные ограничения.
+        /// The wrapped client that requests passing the local limits are forwarded to.
         /// </summary>
         public ILlmClient Inner => _inner;
 
@@ -82,7 +84,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Проверяет локальные ограничения и делегирует нестриминговый запрос.
+        /// Checks the local limits and delegates the non-streaming request.
         /// </summary>
         public async Task<LlmCompletionResult> CompleteAsync(
             LlmCompletionRequest request,
@@ -114,7 +116,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Проверяет локальные ограничения и делегирует стриминговый запрос.
+        /// Checks the local limits and delegates the streaming request.
         /// </summary>
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
@@ -187,7 +189,7 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <summary>Причина отказа либо null, если слот зарезервирован (или потолки выключены).</summary>
+        /// <summary>The refusal reason, or null once a slot is reserved (or the caps are disabled).</summary>
         private string TryReserve(LlmCompletionRequest request)
         {
             if (_maxPromptChars > 0 && EstimatePromptChars(request) > _maxPromptChars)

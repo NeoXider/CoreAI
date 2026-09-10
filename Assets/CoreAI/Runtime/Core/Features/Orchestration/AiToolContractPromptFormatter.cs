@@ -34,12 +34,13 @@ namespace CoreAI.Ai
         /// <summary>
         /// Appends the deterministic, role-wide tool contract used by the cacheable provider prefix.
         /// <para>
-        /// На нативном канале блок определений (имена, описания, <c>schema:</c> из
-        /// <see cref="ILlmTool.ParametersSchema"/>) НЕ печатается: определения уходят провайдеру в списке
-        /// инструментов запроса, сгенерированные из сигнатуры делегата. Второй, рукописный экземпляр в
-        /// системном префиксе расходился с ним и оплачивался токенами на каждом запросе — то же правило,
-        /// по которому диагностический <see cref="AppendToolContract"/> давно пропускает блок. Префикс
-        /// остаётся байт-стабильным: он зависит только от инструментов роли и от канала, а не от запроса.
+        /// On the native channel the definitions block (names, descriptions, <c>schema:</c> from
+        /// <see cref="ILlmTool.ParametersSchema"/>) is NOT printed: the definitions go to the provider in
+        /// the request's tool list, generated from the delegate's signature. A second, hand-written copy in
+        /// the system prefix drifted away from it and was paid for in tokens on every request - the same
+        /// rule under which the diagnostic <see cref="AppendToolContract"/> has long skipped the block. The
+        /// prefix stays byte-stable: it depends only on the role's tools and on the channel, not on the
+        /// request.
         /// </para>
         /// </summary>
         public static string AppendStableRoleToolContract(
@@ -309,6 +310,23 @@ namespace CoreAI.Ai
             return normalized;
         }
 
+        /// <summary>Upper bound on memoized canonical schemas; the table is cleared when reached.</summary>
+        private const int CanonicalSchemaCacheCapacity = 256;
+
+        private static readonly object CanonicalSchemaGate = new();
+
+        private static readonly Dictionary<string, string> CanonicalSchemaCache =
+            new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Key-sorted compact JSON of a tool schema, memoized by the schema text.
+        /// <para>
+        /// WHY: on a text-shaped endpoint the role tool contract is rebuilt for every request, and each
+        /// rebuild parsed, sorted and re-serialized the schema of every tool - the same few dozen constant
+        /// strings, request after request. The canonical form is a pure function of the text, so the
+        /// table (strings only, bounded) returns it without a parse.
+        /// </para>
+        /// </summary>
         internal static string CanonicalizeSchemaOrRaw(string schema)
         {
             if (string.IsNullOrWhiteSpace(schema))
@@ -316,6 +334,30 @@ namespace CoreAI.Ai
                 return schema ?? "";
             }
 
+            lock (CanonicalSchemaGate)
+            {
+                if (CanonicalSchemaCache.TryGetValue(schema, out string cached))
+                {
+                    return cached;
+                }
+            }
+
+            string canonical = CanonicalizeSchemaOrRawUncached(schema);
+            lock (CanonicalSchemaGate)
+            {
+                if (CanonicalSchemaCache.Count >= CanonicalSchemaCacheCapacity)
+                {
+                    CanonicalSchemaCache.Clear();
+                }
+
+                CanonicalSchemaCache[schema] = canonical;
+            }
+
+            return canonical;
+        }
+
+        private static string CanonicalizeSchemaOrRawUncached(string schema)
+        {
             try
             {
                 JToken token = JToken.Parse(schema);

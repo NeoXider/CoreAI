@@ -22,6 +22,7 @@
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/ActorContextEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/ActorContextEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/ClientLimitedLlmClientDecoratorEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/ClientLimitedLlmClientDecoratorEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/CoreAuditFindingsEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/CoreAuditFindingsEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAI/Tests/EditMode/CoreHotPathAuditEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/CoreHotPathAuditEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/CorePackageIsolationSmokeEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/CorePackageIsolationSmokeEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/InMemoryAgentMemoryStoreEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/InMemoryAgentMemoryStoreEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/InMemoryAiOrchestrationMetricsEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/InMemoryAiOrchestrationMetricsEditModeTests.cs" />
@@ -31,7 +32,9 @@
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/LlmToolArgumentNormalizerEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/LlmToolArgumentNormalizerEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/LlmToolChannelPolicyEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/LlmToolChannelPolicyEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/MeaiToolTaskBridgeEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/MeaiToolTaskBridgeEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAI/Tests/EditMode/MeaiVersionFloorEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/MeaiVersionFloorEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/OrchestrationResilienceEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/OrchestrationResilienceEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAI/Tests/EditMode/StreamedMessageJoinerEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/StreamedMessageJoinerEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/AgentBuilderEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/AgentBuilderEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/AgentMemoryActorScopeKeyEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/AgentMemoryActorScopeKeyEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/AgentSkillInjectionEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/AgentSkillInjectionEditModeTests.cs" />
@@ -71,6 +74,7 @@
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/LoggingLlmClientDecoratorEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/LoggingLlmClientDecoratorEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiChatClientErrorRedactionEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiChatClientErrorRedactionEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiChatClientSseEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiChatClientSseEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiChatClientStreamHotPathEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiChatClientStreamHotPathEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiChatClientTransportHeadersEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiChatClientTransportHeadersEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiChatClientWebGlDelayEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiChatClientWebGlDelayEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiWebGlTransportEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/MeaiOpenAiWebGlTransportEditModeTests.cs" />
@@ -80,6 +84,7 @@
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/RetryingStreamingLlmClientDecoratorEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/RetryingStreamingLlmClientDecoratorEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/RoleIdEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/RoleIdEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/RoleStructuredResponsePolicyEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/RoleStructuredResponsePolicyEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/SkillLiveAvailabilityEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/SkillLiveAvailabilityEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/SkillSectionDisclosureEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/SkillSectionDisclosureEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/SkillSetEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/SkillSetEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/SkillToolAvailabilityEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/SkillToolAvailabilityEditModeTests.cs" />
@@ -89,6 +94,9 @@
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/TimeoutLlmClientDecoratorEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/TimeoutLlmClientDecoratorEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/TokenBudgetCalculatorEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/TokenBudgetCalculatorEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/TokenBudgetTextFormatterEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/TokenBudgetTextFormatterEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ToolContractPromisesEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ToolContractPromisesEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ToolContractPromisesStreamedEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ToolContractPromisesStreamedEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ToolDocsPolicyReferenceEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ToolDocsPolicyReferenceEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ToolExecutionPolicyEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ToolExecutionPolicyEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ToolResultRegisterEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ToolResultRegisterEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/TransportTimeoutClassificationEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/TransportTimeoutClassificationEditModeTests.cs" />

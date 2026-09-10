@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace CoreAI.Ai
 {
@@ -21,11 +22,26 @@ namespace CoreAI.Ai
         private readonly object _lock = new();
         private readonly List<SkillSet> _skills = new();
         private readonly Dictionary<string, int> _indexByName = new(StringComparer.OrdinalIgnoreCase);
+        private long _version;
 
         /// <summary>Creates an empty catalog.</summary>
         public MutableSkillCatalog()
         {
         }
+
+        /// <summary>
+        /// Monotonic change counter: advances on every successful <see cref="AddOrReplace"/> and
+        /// <see cref="Remove"/>. Readers that derive something expensive from the catalog (the
+        /// <c>call_skill_tool</c> tool map, the <c>read_skill</c> index) cache it under the version they
+        /// built it from and rebuild only when this moves.
+        /// <para>
+        /// WHY: the live proxies used to rebuild on EVERY call - every <c>call_skill_tool</c> invocation
+        /// and every per-request allowlist check re-created the MEAI function of every skill tool by
+        /// reflection and re-serialized every JSON schema, for a catalog that changes only when the model
+        /// authors a skill. The counter makes "has it changed" a single read.
+        /// </para>
+        /// </summary>
+        public long Version => Volatile.Read(ref _version);
 
         /// <summary>Creates a catalog seeded with the supplied skills (host-registered ones).</summary>
         public MutableSkillCatalog(IEnumerable<SkillSet> initial)
@@ -64,11 +80,13 @@ namespace CoreAI.Ai
                 if (_indexByName.TryGetValue(skill.Name, out int existing))
                 {
                     _skills[existing] = skill;
+                    Interlocked.Increment(ref _version);
                     return;
                 }
 
                 _indexByName[skill.Name] = _skills.Count;
                 _skills.Add(skill);
+                Interlocked.Increment(ref _version);
             }
         }
 
@@ -89,6 +107,7 @@ namespace CoreAI.Ai
 
                 _skills.RemoveAt(index);
                 RebuildIndex();
+                Interlocked.Increment(ref _version);
                 return true;
             }
         }

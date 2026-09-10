@@ -1,3 +1,4 @@
+using System.IO;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -84,7 +85,11 @@ namespace CoreAI.Mcp.Protocol
 
             try
             {
-                JToken token = JToken.Parse(body);
+                using StringReader input = new(body);
+                using JsonTextReader reader = new(input) { DateParseHandling = DateParseHandling.None };
+                JToken token = JToken.Load(reader);
+                // WHY: Preserve arbitrary JSON strings and reject trailing content as the previous parser did.
+                if (reader.Read()) throw new JsonReaderException("Additional text encountered after the JSON request.");
                 if (token is not JObject obj)
                 {
                     // WHY: Batch arrays and bare scalars are not supported by this minimal server; the

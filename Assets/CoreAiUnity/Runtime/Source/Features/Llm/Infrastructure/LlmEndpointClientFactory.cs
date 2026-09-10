@@ -59,9 +59,9 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <param name="toolChannelProbe">
-        /// Проба канала инструментов для HTTP и локального llama.cpp под LLMUnity; <c>null</c> — штатный
-        /// <see cref="UnityWebRequestToolChannelProbe"/>. Тесты подставляют двойник, чтобы проверить
-        /// решение фабрики без сервера.
+        /// The tool-channel probe for HTTP and for the local llama.cpp under LLMUnity; <c>null</c> means the
+        /// standard <see cref="UnityWebRequestToolChannelProbe"/>. Tests substitute a double to check the
+        /// factory's decision without a server.
         /// </param>
         public LlmEndpointClientFactory(
             ICoreAISettings settings,
@@ -154,9 +154,10 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Решение о канале HTTP-эндпойнта после готовности сервера. Явная настройка — без запроса; <c>Auto</c> —
-        /// одна проба с объявленным инструментом. Проба НЕ ломает активацию: исключение транспорта
-        /// превращается в неубедительный исход и консервативный текстовый канал; только отмена уходит наверх.
+        /// The channel decision for an HTTP endpoint once the server is ready. An explicit setting costs no
+        /// request; <c>Auto</c> costs a single probe with a declared tool. The probe does NOT break
+        /// activation: a transport exception turns into an inconclusive outcome and the conservative text
+        /// channel; only cancellation propagates upwards.
         /// </summary>
         internal static async Task<LlmToolChannelDecision> DecideToolChannelAsync(
             LlmToolChannel setting,
@@ -391,15 +392,16 @@ namespace CoreAI.Infrastructure.Llm
                     throw;
                 }
 
-                // WHY: канал инструментов у llama.cpp ЕСТЬ — нативные tool_calls на его OpenAI-маршруте,
-                // если сервер запущен с jinja-шаблоном; без jinja сервер отвергает `tools` ошибкой
-                // «tools param requires --jinja flag». Компонент LLM у LLMUnity стартует сервер как
-                // StartServer(host, port, apiKey) — аргументов не передать, — поэтому ответ зависит от
-                // сборки LlamaLib, а не от нас: v2.0.5 из комплекта LLMUnity 3.0.3 включает jinja по
-                // умолчанию (проверено живым прогоном 2026-09-06). Раньше здесь стояла константа `false`
-                // с комментарием «у llama.cpp нет канала» — и локальный эндпойнт молча получал разбор
-                // прозы вместо нативного канала. Теперь канал объявляет конфигурация, а при Auto его
-                // устанавливает проба; результат и причина пишутся в лог ниже.
+                // WHY: llama.cpp DOES have a tool channel - native tool_calls on its OpenAI route, provided
+                // the server was started with a jinja template; without jinja the server rejects `tools`
+                // with the error "tools param requires --jinja flag". LLMUnity's LLM component starts the
+                // server as StartServer(host, port, apiKey) - no arguments can be passed - so the answer
+                // depends on the LlamaLib build rather than on us: v2.0.5, bundled with LLMUnity 3.0.3,
+                // turns jinja on by default (verified by a live run on 2026-09-06). This used to be a
+                // hardcoded `false` with the comment "llama.cpp has no channel" - and the local endpoint
+                // silently got prose parsing instead of the native channel. Now the configuration declares
+                // the channel, and under Auto the probe establishes it; the result and the reason are
+                // written to the log below.
                 LlmToolChannelDecision toolChannel = await DecideToolChannelAsync(
                     descriptor.ToolChannel,
                     _toolChannelProbe,
@@ -746,7 +748,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
 #if COREAI_LLM
-        /// <summary>Выбранный канал инструментов и причина выбора — той же строкой, что и остальные фазы.</summary>
+        /// <summary>The chosen tool channel and the reason for it - in the same line format as the other phases.</summary>
         public static string ToolChannel(LlmUnityActivationLogContext context, LlmToolChannelDecision decision)
         {
             return Format("tool_channel", decision.ChannelName, context, null, null) +

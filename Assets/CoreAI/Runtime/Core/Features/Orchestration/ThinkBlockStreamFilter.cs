@@ -15,14 +15,14 @@ namespace CoreAI.Ai
         private bool _insideThink;
 
         /// <summary>
-        /// Показан ли уже хоть один видимый символ этого потока.
+        /// Whether at least one visible character of this stream has already been shown.
         /// <para>
-        /// Одиночный <c>&lt;/think&gt;</c> без открывающего тега прячет текст перед собой только ДО
-        /// первого видимого вывода: модели, которые стримят рассуждение без <c>&lt;think&gt;</c>,
-        /// делают это в начале ответа. После того как текст уже на экране, прятать нечего — и
-        /// удержанный остаток чанка тоже прятать нельзя, иначе результат зависит от того, где
-        /// провайдер порезал поток: «Ответ: да.» + « Ещё &lt;» + «/think&gt;» терял « Ещё », а
-        /// та же строка одним чанком — нет.
+        /// A lone <c>&lt;/think&gt;</c> with no opening tag hides the text in front of it only BEFORE the
+        /// first visible output: models that stream their reasoning without a <c>&lt;think&gt;</c> do so at
+        /// the start of the answer. Once text is already on screen there is nothing to hide - and the held
+        /// remainder of a chunk must not be hidden either, otherwise the result depends on where the
+        /// provider cut the stream: "Answer: yes." + " More &lt;" + "/think&gt;" lost the " More ", while
+        /// the very same string delivered as one chunk did not.
         /// </para>
         /// </summary>
         private bool _visibleShown;
@@ -57,8 +57,9 @@ namespace CoreAI.Ai
         /// <remarks>
         /// The filter preserves partial <c>&lt;think&gt;</c> and <c>&lt;/think&gt;</c> tags across
         /// chunk boundaries so hidden reasoning is not leaked when providers split tokens mid-tag.
-        /// Удержанный хвост, который так и не стал тегом, отдаёт <see cref="Flush"/> — вызывать его
-        /// в конце потока обязательно, иначе ответ «оператор сравнения: &lt;» теряет последний символ.
+        /// A held tail that never turned into a tag is released by <see cref="Flush"/> - calling it at the
+        /// end of the stream is mandatory, otherwise the answer "the comparison operator: &lt;" loses its
+        /// last character.
         /// </remarks>
         public string ProcessChunk(string chunk)
         {
@@ -101,8 +102,8 @@ namespace CoreAI.Ai
                         string beforeClose = buf.Substring(0, closeIdx);
                         if (_visibleShown || visible.Length > 0)
                         {
-                            // WHY: видимый текст уже пошёл ученику, значит это не рассуждение, а
-                            // залётный тег: сам тег убираем, текст вокруг него — обычный ответ.
+                            // WHY: visible text has already gone to the learner, so this is not reasoning
+                            // but a stray tag: drop the tag itself, the text around it is a normal answer.
                             visible.Append(beforeClose);
                         }
                         else
@@ -138,8 +139,8 @@ namespace CoreAI.Ai
                             bool mayBecomeOpen = IsPrefixOf(possibleTag, OpenTag);
                             if (mayBecomeClose && !_visibleShown && visible.Length == 0)
                             {
-                                // WHY: ничего ещё не показано, и весь накопленный текст может оказаться
-                                // рассуждением перед одиночным </think> — удерживаем его целиком.
+                                // WHY: nothing has been shown yet, and all the accumulated text may turn
+                                // out to be reasoning in front of a lone </think> - hold all of it.
                                 _buffer.Clear();
                                 _buffer.Append(buf);
                                 return string.Empty;
@@ -172,9 +173,10 @@ namespace CoreAI.Ai
         /// Returns any buffered visible tail at the end of a stream.
         /// </summary>
         /// <remarks>
-        /// Хвост удерживался лишь потому, что МОГ стать тегом. Поток закончился — не стал, значит это
-        /// обычный текст ответа: «2 &lt;» на конце реплики учителя Python ничем не хуже «2 &lt; 3».
-        /// Прятать его как «недописанный тег» — терять законный символ ради случая, которого не было.
+        /// The tail was held only because it COULD have become a tag. The stream ended and it did not, so
+        /// it is ordinary answer text: a "2 &lt;" at the end of a Python teacher's reply is no worse than
+        /// "2 &lt; 3". Hiding it as an "unfinished tag" means losing a legitimate character for the sake of
+        /// a case that never happened.
         /// </remarks>
         public string Flush()
         {
@@ -197,7 +199,7 @@ namespace CoreAI.Ai
             return tail;
         }
 
-        /// <summary>Отдаёт накопленный видимый текст и запоминает, что ученик его уже увидел.</summary>
+        /// <summary>Releases the accumulated visible text and records that the learner has now seen it.</summary>
         private string Publish(StringBuilder visible)
         {
             if (visible.Length > 0)

@@ -27,8 +27,9 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <param name="supportsNativeToolCalling">
-        /// Канал эндпойнта после пробы или явной настройки. Синхронный конструктор не проверяет сервер:
-        /// передавайте решение runtime-фабрики либо известную возможность конкретного адаптера.
+        /// The endpoint's channel after a probe or an explicit setting. This synchronous constructor does
+        /// not check the server: pass the runtime factory's decision, or a capability known for the
+        /// specific adapter.
         /// </param>
         public OpenAiChatLlmClient(IOpenAiHttpSettings settings, ICoreAISettings coreSettings, IGameLogger logger,
             bool supportsNativeToolCalling, IAgentMemoryStore? memoryStore = null)

@@ -79,7 +79,10 @@ namespace CoreAI.Ai
             // the FULL history. Pruning first would drop superseded tool results before they are
             // summarized and they would vanish from every future prompt without a trace. Pruning
             // still applies, but only to the emitted recent tail (prompt-level noise control).
-            string storedSummary = _summaryStore.LoadSummary(roleId) ?? "";
+            string summaryRoleId = roleId;
+            IAsyncConversationSummaryStore asyncStore = DeterministicConversationContextManager.RequireAsyncStore(_summaryStore, ref summaryRoleId);
+            string storedSummary = await asyncStore.LoadSummaryAsync(summaryRoleId, cancellationToken) ?? "";
+            cancellationToken.ThrowIfCancellationRequested();
             // WHY: The persisted summary carries a machine-only fold marker as its final line; every
             // snapshot/LLM-facing path must see only the clean prose.
             string cleanStoredSummary = ConversationFoldMarker.Strip(storedSummary);
@@ -143,7 +146,7 @@ namespace CoreAI.Ai
                     splitExclusive,
                     foldStart,
                     orchestrationTraceId ?? "t",
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -178,14 +181,9 @@ namespace CoreAI.Ai
                 WasCompacted = true
             };
 
-            if (buildArgs?.DeferSummaryPersistence == true)
-            {
-                snapshot.CommitSummary = () => _summaryStore.SaveSummary(roleId, persistedSummary);
-            }
-            else
-            {
-                _summaryStore.SaveSummary(roleId, persistedSummary);
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            snapshot.CommitSummaryAsync = token => asyncStore.SaveSummaryAsync(summaryRoleId, persistedSummary, token);
+            if (buildArgs?.DeferSummaryPersistence != true) await snapshot.CommitAsync(cancellationToken);
 
             return snapshot;
         }
@@ -245,11 +243,12 @@ namespace CoreAI.Ai
             for (int i = Math.Max(0, startInclusive); i < splitExclusive; i++)
             {
                 string role = string.IsNullOrWhiteSpace(history[i].Role) ? "unknown" : history[i].Role.Trim();
-                // WHY: Суммаризатор видит tool-сообщения через ТУ ЖЕ проекцию, что и основной промпт.
-                // Без неё сырой durable-блок «## Tool Results» с JSON-хвостами уезжал в компактор, тот
-                // по инструкции «сохраняй идентификаторы и числа» переносил его в summary, а summary
-                // возвращался в промпт уже мимо ToolResultPromptProjection — и модель снова повторяла
-                // ребёнку служебный регистр, который проекция как раз убирала.
+                // WHY: The summarizer sees tool messages through THE SAME projection as the main prompt.
+                // Without it the raw durable "## Tool Results" block with its JSON tails went into the
+                // compactor, which - following its "preserve identifiers and numbers" instruction -
+                // carried it into the summary, and the summary came back into the prompt bypassing
+                // ToolResultPromptProjection - so the model again echoed to the child the machine register
+                // the projection exists to strip.
                 string content = ToolResultPromptProjection.ForPrompt(history[i].Role, history[i].Content ?? "");
                 if (content.Length > maxPerMsg)
                 {

@@ -10,6 +10,75 @@
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
+## Idle-timeout watchdog: our allocation-free variant was dropped, on purpose (2026-09-10)
+
+The hot-path wave replaced `CoreAiChatService.IdleTimeoutDeadline` with a single watchdog task per
+turn: `Rearm()` became two writes (a timestamp and a counter) instead of disposing a scheduled handle
+and creating a new one for every chunk. At 30-60 tokens a second that difference is the whole point
+of the wave.
+
+It was **dropped in the merge with main anyway**, and the reason is worth keeping. `main` had grown a
+virtual-clock test suite around the timer shape (`SchedulerOverride`, ~10 tests that advance a fake
+clock), while our watchdog measured real time and its own fixture had never once run green in the
+editor - the assembly it lives in was hanging. Shipping the unverified variant and deleting the
+tested one, on nothing but a plausible allocation argument, would have been trading a measured
+property for an unmeasured one.
+
+**To redo it properly:** keep the watchdog, but route its sleep through the same injectable seam the
+timer variant exposes, so the virtual-clock tests keep working against it. Then measure - a Profiler
+capture of a real streamed turn, before and after - and let the number decide. Without that number
+this is a preference, not an optimisation.
+
+## One frame, one driver — the trap that cost sixteen tests is still armed (2026-09-10)
+
+**Fixed:** the merge of `fix` and `main` left two frame drivers in the tree. `LuaModRuntimeTickDriver`
+subscribed to `Scheduler.PhaseReached` while `LuaCsRbxApiBindings.PumpSchedulerPhase` had just been
+widened from input-only to all six phases, so every phase ran twice: `SDHIR` came out as `SSDHHIRR`,
+"fires exactly once" became two, sixteen tests failed at once. The driver's subscription is gone; a
+frame is one `Scheduler.Advance()`, the same call the shipping host makes.
+
+**Still open, and it is a trap rather than a defect:** the public per-phase surface (`PumpInput`,
+`PumpPreAnimation`, `PumpPreSimulation`, `PumpPostSimulation`, `PumpHeartbeat`, `PumpPreRender`,
+`PumpFrame`) is still there, and seven fixtures still call one of them next to `Advance`. They are
+green only because nothing they assert counts occurrences — which is exactly what makes it a trap:
+the shape survived the wave that was cleaning it up, and the next person to copy one of those
+fixtures as a template re-arms it.
+
+**The fix is to make `Advance` the only entry point** and delete the public `Pump*` surface, moving
+the twelve call sites over. That is the real change; it was left out of the 7.40.0 wave deliberately,
+to keep a defect fix from turning into an API change under time pressure.
+
+**A text guard was tried and rejected**, and the reason is worth keeping so nobody re-tries it: a
+check for "one method that both pumps and advances" fires 31 times on the current tree, and a large
+share of those are legitimate — `Mvp8PlayersCompletionEditModeTests` deliberately asserts that the
+character motor does NOT move on the render pump, which requires calling both in one test. Telling
+intent apart needs more than a regex, and a guard shipped with a 31-entry allowlist would be worse
+than none: it teaches people to add entries.
+
+## WebGL storage gate shipped with its fix (2026-09-09) — closes a 7.37.0 pre-publication blocker
+
+`CoreAIWebGlPersistentDataSyncBuildGuard` travelled inside `com.neoxider.coreaiunity` while the
+template satisfying it lived in CoreAI's own `Assets/WebGLTemplates`, outside both packages: a
+consumer got an unconditional build failure pointing at a path that does not exist in their project.
+Confirmed on RedoSchool, whose own template lacked the line.
+
+- [x] The template ships in the package as `Assets/CoreAiUnity/WebGLTemplates~/CoreAI`. Unity builds
+      the template list from `Application.dataPath/WebGLTemplates` plus the editor installation
+      (`WebGLTemplateManager` / `WebGlBuildPostprocessor.UpdateHTMLTemplatePath`), so a package cannot
+      publish a selectable template — `CoreAIWebGlTemplateInstaller` + `CoreAI/Setup/Install WebGL
+      Template` copy it into `Assets/WebGLTemplates/CoreAI` and select it.
+- [x] Every failure message names project-local actions: the exact line, the menu item, the opt-out.
+- [x] `COREAI_WEBGL_NO_PERSISTENCE` (Web platform scripting define) stands the gate down and logs one
+      warning per build; the warning says the symbol is redundant when the template arms storage anyway.
+- [x] Tests: 20 for the guard, 6 for the installer, including a drift check between the packaged
+      template and the copy installed in this repository. Verified with 13 planted defects, each caught
+      by the intended test, executed outside Unity against the real sources.
+- [ ] **Verification gate (next editor session):** run
+      `CoreAIWebGlPersistentDataSyncBuildGuardEditModeTests` and
+      `CoreAIWebGlTemplateInstallerEditModeTests` in the Unity Test Runner — the editor was held by a
+      full EditMode run, so only `dotnet build` (CoreAI.Editor, CoreAI.Tests) and the portable suite
+      (1317/1317) were used as gates here.
+
 ### Demo scene smoke — cause found and fixed, 2026-09-06
 
 `CoreAiDemoScenesSmokePlayModeTests` did not "hang since 2026-08-30". Three separate causes, two of
@@ -1666,3 +1735,10 @@ Open:
   Also Hermes/Qwen-Agent XML tool-call parsing.
 - 4.12.1 — memory instruction now reaches native tool-calling roles (`AiToolContractPromptFormatter` early-return bug).
 - 4.12.0 — live streaming through tool calls, partial-SSE accumulation, WebGL Lua AOT hardening, stale-`<think>` prune, Lua mod versioning + diagnostics, vision host send path + gate + lift, P3 nits.
+
+## Active release gates — 2026-09-08
+
+- [ ] Root + memory-boundary owner: remove blocking memory/history I/O from async turns end to end, including scoped capabilities and append/rejected-turn paths; verify cold reads and contention with a responsive host. A flush-held-lock deadlock has not been demonstrated: the current file store releases gates before confirmation.
+- [ ] Root + skills owners: integrate async persistence/readiness, preserve both meta tools, prove first-waiter cancellation and replacement recovery, complete independent audit and real Unity/WebGL checks.
+- [ ] Root + typed-chat owner: preserve admitted turn identity and explicit failure/tool metadata through queue/service/panel; update Redo only after verified release.
+- [ ] Root: diagnose the stalled summary Unity run, settle the Mods signal-quota fixture with real event evidence, then rerun the complete release suites against frozen sources.

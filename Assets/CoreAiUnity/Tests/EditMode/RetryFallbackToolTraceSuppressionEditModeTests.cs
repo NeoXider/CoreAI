@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI;
@@ -9,6 +12,7 @@ using CoreAI.Logging;
 using MEAI = Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -54,8 +58,8 @@ namespace CoreAI.Tests.EditMode
 
         private static LlmToolCallTrace RejectedDuplicateTrace()
         {
-            // Эхо — успешный no-op (ok:true, duplicate:true), но тело НЕ исполнялось: для ретрая это
-            // всё равно «ничего не вызывалось», решает источник трассы, а не её Success.
+            // An echo is a successful no-op (ok:true, duplicate:true), but the body did NOT run: for a retry
+            // that still counts as "nothing was invoked", and the trace source decides that, not its Success.
             return new LlmToolCallTrace("spawn", true, 0d, "duplicate",
                 "{\"ok\":true,\"duplicate\":true,\"message\":\"Duplicate tool call 'spawn' with identical arguments: not executed again.\"}");
         }
@@ -149,8 +153,21 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("native", policy.ExecutedTraces[0].Source);
         }
 
+        /// <summary>
+        /// An unconvertible argument is rejected BEFORE the body, so nothing was mutated and the trace says
+        /// never-invoked: a retryable provider failure in the same turn stays retry- and fallback-eligible.
+        /// <para>
+        /// WHY this test previously expected the opposite (<c>native</c>, "invoked") and that was wrong: the
+        /// verdict used to be guessed by looking for the delegate's method in the exception stack, which
+        /// IL2CPP/WebGL strips - so an exception FROM THE BODY was read as a binding failure and the retry
+        /// decorators replayed a turn that had already changed the world. Deleting that guess was right; but
+        /// the distinction did not stay deleted. <c>TryBindArgumentsStructurally</c> now runs MEAI's own
+        /// coercion standalone BEFORE the invocation boundary, so the rejection is proof, not inference, and
+        /// the conservative reading has nothing left to protect against here.
+        /// </para>
+        /// </summary>
         [Test]
-        public async Task DelegateLlmTool_ArgumentCoercionFailure_RecordsArgConversionWithoutInvokingBody()
+        public async Task DelegateLlmTool_ArgumentCoercionFailure_IsRejectedBeforeInvocation()
         {
             int sideEffects = 0;
             Func<int, string> body = count =>
@@ -174,10 +191,13 @@ namespace CoreAI.Tests.EditMode
             ToolExecutionPolicy.ToolCallResult result =
                 await policy.ExecuteSingleAsync(call, options, CancellationToken.None);
 
-            Assert.AreEqual(0, sideEffects);
+            Assert.AreEqual(0, sideEffects, "The argument must still be rejected before the body runs");
             Assert.IsFalse(result.Succeeded);
             Assert.AreEqual(1, policy.ExecutedTraces.Count);
             Assert.AreEqual("arg-conversion", policy.ExecutedTraces[0].Source);
+            Assert.IsFalse(
+                LoggingLlmClientDecorator.TraceIndicatesInvocation(policy.ExecutedTraces[0]),
+                "Only a call that crossed the invocation boundary may suppress retry/fallback replay");
         }
 
         private enum StubColor
@@ -381,9 +401,9 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Дефект: потоковый fallback проверял ретраебельность кода раньше, чем наличие ExecutedToolCalls на
-        /// ошибочном чанке. Чанк «инструмент сработал, потом 503» переключал ход на secondary, и инструмент
-        /// исполнялся второй раз.
+        /// Defect: the streaming fallback checked whether the code was retryable before it checked for
+        /// ExecutedToolCalls on the failing chunk. A "tool ran, then 503" chunk moved the turn to the
+        /// secondary, and the tool was executed a second time.
         /// </summary>
         [Test]
         [Timeout(20_000)]
@@ -442,6 +462,68 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, secondary.CompleteCallCount);
         }
 
+
+        /// <summary>
+        /// Every trace source production actually emits must be classified ON PURPOSE by
+        /// <see cref="LoggingLlmClientDecorator.TraceIndicatesInvocation"/>, i.e. named in the
+        /// classifier test below.
+        /// <para>
+        /// WHY this exists rather than trust review: the same defect has now landed three times, each
+        /// time through the same door. The classifier's <c>default</c> branch fails safe ("assume the
+        /// tool ran"), which is right for an unknown source but silent for a KNOWN one - a source that
+        /// simply nobody added to the list behaves as if a tool executed, and the only visible symptom
+        /// is a lesson turn lost to a 429 that could have been retried. "arg-conversion" was removed as
+        /// dead and had to come back; "tools-disabled" was never added at all. This test makes the
+        /// omission loud at the moment it happens instead of at the moment a learner loses a turn.
+        /// </para>
+        /// </summary>
+        [Test]
+        public void EveryEmittedTraceSource_IsClassifiedOnPurpose()
+        {
+            string policy = Path.Combine(
+                Application.dataPath,
+                "CoreAI/Runtime/Core/Features/Llm/ToolExecutionPolicy.cs");
+            Assert.IsTrue(File.Exists(policy), "ToolExecutionPolicy.cs moved: this guard needs its new path.");
+
+            // Sources are recorded as a string argument to RecordSyntheticTrace(name, ok, ms, "<source>", ...).
+            HashSet<string> emitted = Regex
+                .Matches(File.ReadAllText(policy), @"RecordSyntheticTrace\([^;]*?""(?<source>[a-z][a-z-]*)""")
+                .Select(match => match.Groups["source"].Value)
+                .ToHashSet(StringComparer.Ordinal);
+            Assert.IsNotEmpty(emitted, "No trace sources found - the recording call was renamed and this guard went blind.");
+
+            string classifierTest = File.ReadAllText(Path.Combine(
+                Application.dataPath,
+                "CoreAiUnity/Tests/EditMode/RetryFallbackToolTraceSuppressionEditModeTests.cs"));
+            // WHY the newline and the indent are part of the needle: the method name also appears in
+            // this guard's summary, in its failure message, AND in this very constant - all of which
+            // sit ABOVE the real declaration in the file. The first version searched for the bare
+            // declaration text and matched the constant holding it, sliced an empty body, and
+            // reported every source as unclassified. A guard that cannot find what it guards is
+            // worse than none: it fails loudly for the wrong reason. Only a real declaration starts
+            // a line at method indentation.
+            const string declaration = "\n        public void TraceIndicatesInvocation_ClassifiesSourcesCorrectly()";
+            int pinned = classifierTest.IndexOf(declaration, StringComparison.Ordinal);
+            Assert.Greater(pinned, -1, "The classifier test was renamed: this guard cannot find what it checks.");
+            int nextTest = classifierTest.IndexOf("[Test]", pinned, StringComparison.Ordinal);
+            string pinnedBody = nextTest < 0
+                ? classifierTest.Substring(pinned)
+                : classifierTest.Substring(pinned, nextTest - pinned);
+
+            List<string> unclassified = emitted
+                .Where(source => !pinnedBody.Contains("\"" + source + "\"", StringComparison.Ordinal))
+                .OrderBy(source => source, StringComparer.Ordinal)
+                .ToList();
+
+            Assert.IsEmpty(
+                unclassified,
+                "These trace sources are emitted by ToolExecutionPolicy but never pinned in " +
+                "TraceIndicatesInvocation_ClassifiesSourcesCorrectly, so they silently fall to the " +
+                "fail-safe default of \"a tool ran\" - which suppresses retry and failover for a turn " +
+                "that may have executed nothing. Decide for each, and pin it with the reason: " +
+                string.Join(", ", unclassified));
+        }
+
         [Test]
         public void TraceIndicatesInvocation_ClassifiesSourcesCorrectly()
         {
@@ -457,11 +539,25 @@ namespace CoreAI.Tests.EditMode
                 new LlmToolCallTrace("t", false, 0d, "unbound-native")));
             Assert.IsFalse(LoggingLlmClientDecorator.TraceIndicatesInvocation(
                 new LlmToolCallTrace("t", false, 0d, "schema-validation")));
+            // WHY this one is pinned explicitly: it was once removed from the classifier as a dead branch,
+            // because the source had stopped being emitted. The structural argument preflight emits it
+            // again, and without this assertion the branch reads as dead a second time - while deleting it
+            // now silently costs a retry/failover for a turn that provably executed nothing.
             Assert.IsFalse(LoggingLlmClientDecorator.TraceIndicatesInvocation(
                 new LlmToolCallTrace("t", false, 0d, "arg-conversion")));
+            // WHY: ToolMode = None means the policy refused the call before reaching the function,
+            // so nothing ran and the surrounding request stays retry/failover eligible.
+            Assert.IsFalse(LoggingLlmClientDecorator.TraceIndicatesInvocation(
+                new LlmToolCallTrace("t", false, 0d, "tools-disabled")));
 
             Assert.IsTrue(LoggingLlmClientDecorator.TraceIndicatesInvocation(
                 new LlmToolCallTrace("t", true, 5d, "native")));
+            // WHY "blocked" is TRUE while every other refusal is false: it is recorded when an
+            // EARLIER invocation in the same turn did not observe its deadline, so that body may
+            // still be running. Replaying the turn could execute it twice. A lost turn is cheaper
+            // than a mutation applied twice - this is a decision, not a gap in the list.
+            Assert.IsTrue(LoggingLlmClientDecorator.TraceIndicatesInvocation(
+                new LlmToolCallTrace("t", false, 0d, "blocked")));
             Assert.IsTrue(LoggingLlmClientDecorator.TraceIndicatesInvocation(
                 new LlmToolCallTrace("t", false, 5d, "native")));
             Assert.IsTrue(LoggingLlmClientDecorator.TraceIndicatesInvocation(

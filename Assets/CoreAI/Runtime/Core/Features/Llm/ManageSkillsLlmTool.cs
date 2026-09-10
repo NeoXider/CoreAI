@@ -86,45 +86,63 @@ namespace CoreAI.Ai
             string tool_names = null,
             CancellationToken cancellationToken = default)
         {
+            return MeaiToolTaskBridge.Publish(ExecuteCoreAsync(action, name, description, instructions, tool_names, cancellationToken));
+        }
+
+        private async Task<string> ExecuteCoreAsync(string action, string name, string description, string instructions,
+            string toolNames, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             string normalized = (action ?? "").Trim().ToLowerInvariant();
             string result;
             try
             {
                 result = normalized switch
                 {
-                    "create" => Create(name, description, instructions, tool_names),
-                    "update" => Update(name, description, instructions, tool_names),
-                    "list" => ListSkills(),
-                    "get" => GetSkill(name),
-                    "delete" => Delete(name),
+                    "create" => await CreateAsync(name, description, instructions, toolNames, cancellationToken),
+                    "update" => await UpdateAsync(name, description, instructions, toolNames, cancellationToken),
+                    "list" => await ListSkillsAsync(cancellationToken),
+                    "get" => await GetSkillAsync(name, cancellationToken),
+                    "delete" => await DeleteAsync(name, cancellationToken),
                     _ => Fail($"Unknown action '{normalized}'. Valid: create, update, list, get, delete.")
                 };
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SkillStoreDurabilityException ex)
+            {
+                result = JsonConvert.SerializeObject(new { success = false, message = ex.Message,
+                    committed = ex.Committed, durable = ex.Durable, published = ex.Published, retryable = ex.Retryable });
+            }
+            catch (SkillStorePublicationException ex)
+            {
+                result = JsonConvert.SerializeObject(new { success = false, message = ex.Message,
+                    committed = true, durable = true, published = false, retryable = false });
             }
             catch (Exception ex)
             {
                 result = Fail($"manage_skills '{normalized}' failed: {ex.Message}");
             }
 
-            return Task.FromResult(result);
+            return result;
         }
 
-        private string Create(string name, string description, string instructions, string toolNames)
+        private async Task<string> CreateAsync(string name, string description, string instructions, string toolNames, CancellationToken cancellationToken)
         {
-            SkillAuthoringResult r = _coordinator.Create(name, description, instructions, ParseToolNames(toolNames));
+            SkillAuthoringResult r = await _coordinator.CreateAsync(name, description, instructions, ParseToolNames(toolNames), cancellationToken);
             return FromResult(r);
         }
 
-        private string Update(string name, string description, string instructions, string toolNames)
+        private async Task<string> UpdateAsync(string name, string description, string instructions, string toolNames, CancellationToken cancellationToken)
         {
             // For update, only a supplied tool_names replaces the allowlist; null leaves it unchanged.
             List<string> parsed = toolNames == null ? null : ParseToolNames(toolNames);
-            SkillAuthoringResult r = _coordinator.Update(name, description, instructions, parsed);
+            SkillAuthoringResult r = await _coordinator.UpdateAsync(name, description, instructions, parsed, cancellationToken);
             return FromResult(r);
         }
 
-        private string ListSkills()
+        private async Task<string> ListSkillsAsync(CancellationToken cancellationToken)
         {
-            IReadOnlyList<SkillRecord> skills = _coordinator.ListSkills();
+            IReadOnlyList<SkillRecord> skills = await _coordinator.ListSkillsAsync(cancellationToken);
             List<object> items = new(skills.Count);
             foreach (SkillRecord s in skills)
             {
@@ -140,20 +158,20 @@ namespace CoreAI.Ai
             return Ok($"{items.Count} skill(s).", items);
         }
 
-        private string GetSkill(string name)
+        private async Task<string> GetSkillAsync(string name, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(name))
             {
                 return Fail("get: 'name' is required.");
             }
 
-            SkillRecord record = _coordinator.GetSkill(name);
+            SkillRecord record = await _coordinator.GetSkillAsync(name, cancellationToken);
             if (record == null)
             {
                 return Fail($"get: skill '{name.Trim()}' not found.");
             }
 
-            IReadOnlyList<LuaScriptRevision> revisions = _coordinator.ListRevisions(record.Id);
+            IReadOnlyList<LuaScriptRevision> revisions = await _coordinator.ListRevisionsAsync(record.Id, cancellationToken);
             return Ok($"Skill '{record.Id}' (version {record.Version}).", new
             {
                 name = record.Id,
@@ -166,9 +184,9 @@ namespace CoreAI.Ai
             });
         }
 
-        private string Delete(string name)
+        private async Task<string> DeleteAsync(string name, CancellationToken cancellationToken)
         {
-            SkillAuthoringResult r = _coordinator.Delete(name);
+            SkillAuthoringResult r = await _coordinator.DeleteAsync(name, cancellationToken);
             return FromResult(r);
         }
 

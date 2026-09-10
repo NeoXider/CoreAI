@@ -72,6 +72,16 @@ namespace CoreAI.Mods.Rbx.Instances
 
             _runTime += deltaSeconds;
 
+            // WHY the early exit: the line below BOXES a float, and it used to run every frame whether
+            // or not any mod listened. The per-signal HasConnections gates sat underneath it, so this
+            // class's promise ("an unlistened signal boxes nothing") held for the object[] args but not
+            // for the delta itself — one guaranteed allocation per frame in a scene with no handlers at
+            // all, which is the ordinary case.
+            if (!HasAnyFrameListener())
+            {
+                return;
+            }
+
             // WHY: the delta is passed as a boxed number so MarshalSignalArg wraps it into a Lua
             // number, exactly as the input pump boxes its InputObject/bool payloads for dispatch.
             object delta = deltaSeconds;
@@ -113,6 +123,15 @@ namespace CoreAI.Mods.Rbx.Instances
             {
                 signal.Fire(delta);
             }
+        }
+
+        /// <summary>Has any frame signal a listener at all? Asked before the delta is boxed.</summary>
+        private bool HasAnyFrameListener()
+        {
+            return PreAnimation.HasConnections || PreSimulation.HasConnections ||
+                   Stepped.HasConnections || PostSimulation.HasConnections ||
+                   Heartbeat.HasConnections || PreRender.HasConnections ||
+                   RenderStepped.HasConnections;
         }
     }
 }

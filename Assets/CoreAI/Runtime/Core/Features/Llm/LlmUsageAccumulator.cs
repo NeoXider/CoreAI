@@ -19,11 +19,13 @@ namespace CoreAI.Infrastructure.Llm
         /// accumulator object - the provider's own <see cref="MEAI.UsageDetails"/> is never mutated.
         /// </summary>
         /// <remarks>
-        /// Само сложение делает штатный <c>UsageDetails.Add</c>: он суммирует ВСЕ типизированные
-        /// поля (включая <c>CachedInputTokenCount</c> и <c>ReasoningTokenCount</c>) и сливает
-        /// <c>AdditionalCounts</c> ключ-к-ключу. Прежняя ручная версия складывала только
-        /// input/output/total и словарь, из-за чего чтение промпт-кэша, пришедшее штатным полем,
-        /// терялось на каждом многораундовом ходе с инструментами.
+        /// The addition itself is the native <c>UsageDetails.Add</c>: it sums every typed counter the
+        /// running MEAI version has and merges <c>AdditionalCounts</c> key by key, adding the values of
+        /// keys present on both sides. That merge is what carries prompt-cache reads and writes and
+        /// every other vendor counter through a multi-roundtrip tool turn — CoreAI keeps them there
+        /// rather than in the typed 10.x-only properties, because it must compile against the
+        /// consumer's 9.10.2 floor. The only thing left for this wrapper is the copy: <c>Add</c> mutates
+        /// its receiver, and the provider's own <see cref="MEAI.UsageDetails"/> must not be touched.
         /// </remarks>
         public static MEAI.UsageDetails Accumulate(MEAI.UsageDetails total, MEAI.UsageDetails add)
         {

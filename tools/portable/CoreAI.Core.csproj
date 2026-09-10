@@ -11,8 +11,17 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Assets/CoreAI/Runtime/Core/**/*.cs" />
-    <PackageReference Include="Microsoft.Extensions.AI" Version="10.9.0" />
+    <!--
+      WHY these exact versions: they are the FLOOR the Unity consumer can offer, not a preference.
+      Unity 6000.x ships its own System.Text.Json (assembly version 8.0.0.0) in
+      Editor/Data/BCLExtensions and substitutes it for any project copy, so a Microsoft.Extensions.AI
+      built against System.Text.Json 10.0.0.0 fails to load there. Building the core against the same
+      floor turns "the consumer cannot upgrade" into a compile error HERE instead of a link error in
+      the game. Keep in lockstep with Assets/packages.config; MeaiVersionFloorEditModeTests fails when
+      the two drift apart.
+    -->
+    <PackageReference Include="Microsoft.Extensions.AI" Version="9.10.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="System.Text.Json" Version="10.0.11" />
+    <PackageReference Include="System.Text.Json" Version="8.0.6" />
   </ItemGroup>
 </Project>

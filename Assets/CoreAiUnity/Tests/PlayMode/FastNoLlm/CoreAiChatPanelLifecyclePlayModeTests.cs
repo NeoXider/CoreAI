@@ -21,6 +21,103 @@ namespace CoreAI.Tests.PlayMode
     public sealed class CoreAiChatPanelLifecyclePlayModeTests
     {
         [UnityTest]
+        public IEnumerator TypedStream_PartialFailureRetainsReceiptWithoutSuccessBubbleOrReplay()
+        {
+            using LifecyclePanelCtx ctx = NewLifecyclePanel(true);
+            InitializeLifecyclePanel(ctx);
+            TypedLifecycleOrchestrator provider = new() { Fail = true };
+            ctx.Panel.ChatService = new CoreAiChatService(provider, settings: new StubSettings { EnableStreaming = true });
+            int completions = 0;
+            ctx.Panel.OnAiResponseCompleted += _ => completions++;
+            ScrollView scroll = ctx.Document.rootVisualElement.Q<ScrollView>("coreai-chat-scroll");
+            LogAssert.ignoreFailingMessages = true;
+            try
+            {
+                Task<CoreAiChatExternalSubmitResult> task = ctx.Panel.SubmitMessageFromExternalResultAsync("help",
+                    new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+                yield return WaitForTask(task, "typed partial failure");
+                CoreAiChatExternalSubmitResult result = task.Result;
+                Assert.IsTrue(result.Admitted);
+                Assert.IsFalse(result.Completion.Ok);
+                Assert.AreEqual(LlmErrorCode.RateLimited, result.Completion.ErrorCode);
+                Assert.AreEqual("partial tail", result.Completion.Content);
+                Assert.AreEqual(429, result.Completion.HttpStatus);
+                Assert.AreEqual(7, result.Completion.RetryAfterSeconds);
+                Assert.AreEqual(29, result.Completion.TotalTokens);
+                Assert.AreEqual(1, result.Completion.ExecutedToolCalls.Count);
+                Assert.AreEqual(1, provider.Calls);
+                Assert.AreEqual(0, completions);
+                Assert.IsFalse(ctx.Panel.IsBusy);
+                Assert.IsFalse(scroll.Query<Label>().ToList().Exists(label => label.text.Contains("rate limited")),
+                    "A delivery failure is returned to the caller and must not become assistant dialogue.");
+            }
+            finally { LogAssert.ignoreFailingMessages = false; }
+        }
+
+        [UnityTest]
+        public IEnumerator TypedStream_BusyRejectionDoesNotStealGenerationAndCancelledTurnKeepsOwnReceipt()
+        {
+            using LifecyclePanelCtx ctx = NewLifecyclePanel(true);
+            InitializeLifecyclePanel(ctx);
+            TypedLifecycleOrchestrator provider = new() { Gate = new TaskCompletionSource<bool>() };
+            ctx.Panel.ChatService = new CoreAiChatService(provider, settings: new StubSettings { EnableStreaming = true });
+            using CancellationTokenSource cancellation = new();
+            Task<CoreAiChatExternalSubmitResult> first = ctx.Panel.SubmitMessageFromExternalResultAsync("first",
+                new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false }, cancellation.Token);
+            try
+            {
+                yield return WaitForTask(provider.Entered.Task, "first admitted stream");
+                int firstGeneration = ctx.Panel.CurrentTurnGeneration;
+                Task<CoreAiChatExternalSubmitResult> rejected = ctx.Panel.SubmitMessageFromExternalResultAsync("second");
+                yield return WaitForTask(rejected, "busy rejection");
+                Assert.IsFalse(rejected.Result.Admitted);
+                Assert.AreEqual(CoreAiChatExternalSubmitRejection.Busy, rejected.Result.Rejection);
+                Assert.AreEqual(firstGeneration, ctx.Panel.CurrentTurnGeneration);
+                Assert.IsTrue(ctx.Panel.IsBusy);
+                cancellation.Cancel();
+                ctx.Go.SetActive(false);
+                ctx.Go.SetActive(true);
+                ctx.ReplaceChatTree();
+                int successorGeneration = ctx.Panel.CurrentTurnGeneration;
+                provider.Gate.TrySetResult(true);
+                yield return WaitForTask(first, "cancelled admitted turn");
+                Assert.IsTrue(first.Result.Admitted);
+                Assert.AreEqual(firstGeneration, first.Result.TurnGeneration);
+                Assert.IsFalse(first.Result.Completion.Ok);
+                Assert.AreEqual(LlmErrorCode.Cancelled, first.Result.Completion.ErrorCode);
+                Assert.AreEqual(successorGeneration, ctx.Panel.CurrentTurnGeneration);
+                Assert.AreEqual(1, provider.Calls);
+            }
+            finally { provider.Gate.TrySetResult(true); }
+        }
+
+        private sealed class TypedLifecycleOrchestrator : IAiOrchestrationService, IAiTaskResultService
+        {
+            public bool Fail;
+            public int Calls;
+            public TaskCompletionSource<bool> Gate;
+            public readonly TaskCompletionSource<bool> Entered = new();
+            public Task<LlmCompletionResult> RunTaskResultAsync(AiTaskRequest task, CancellationToken token = default) =>
+                Task.FromResult(new LlmCompletionResult { Ok = true, Content = "buffered" });
+            public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken token = default) =>
+                throw new System.InvalidOperationException("The typed path must not execute legacy send.");
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(AiTaskRequest task,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token = default)
+            {
+                Calls++;
+                yield return new LlmStreamChunk { Text = "partial", TotalTokens = 29,
+                    ExecutedToolCalls = new[] { new LlmToolCallTrace("lesson_tool", true, 1, "test") } };
+                Entered.TrySetResult(true);
+                if (Gate != null) await Gate.Task;
+                token.ThrowIfCancellationRequested();
+                yield return new LlmStreamChunk { IsDone = true, Text = Fail ? " tail" : "", Error = Fail ? "rate limited" : null,
+                    ErrorCode = Fail ? LlmErrorCode.RateLimited : LlmErrorCode.None,
+                    HttpStatus = Fail ? 429 : 200, RetryAfterSeconds = Fail ? 7 : null };
+            }
+            public void CancelTasks(string scope) { }
+        }
+
+        [UnityTest]
         public IEnumerator DisabledPanel_ReleasesStreamingClassBeforeDroppingUiReferences()
         {
             using LifecyclePanelCtx ctx = NewLifecyclePanel(true);
@@ -563,8 +660,8 @@ namespace CoreAI.Tests.PlayMode
             // WHY: drive real OnDisable/OnEnable callbacks after attaching the synthetic tree.
             ctx.Panel.enabled = false;
             ctx.Panel.enabled = true;
-            Assert.IsNotNull(CurrentMessageScroll(ctx.Panel),
-                "CoreAiChatPanel did not bind the synthetic message scroll");
+            Assert.IsNotNull(ctx.Document.rootVisualElement.Q<ScrollView>("coreai-chat-scroll"),
+                "The lifecycle test tree must expose its message scroll.");
         }
 
         private static VisualElement BuildLifecycleChatTree()

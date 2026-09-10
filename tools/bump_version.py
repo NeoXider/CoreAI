@@ -38,7 +38,7 @@ MCP_VERSION_CONST = re.compile(r'(public const string Version = ")[^"]*(";)')
 # build when either drifts, so a bump has to rewrite them or the next run of that gate goes red.
 VERSIONED_DOCS = (
     ("Docs/ROADMAP.md",
-     re.compile(r"(Six UPM packages, released in lockstep \(all currently )[^)]*(\):)")),
+     re.compile(r"(Seven UPM packages, released in lockstep \(all currently )[^)]*(\):)")),
     ("Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md",
      re.compile(r"(\*\*Version of this guide:\*\* )\d+\.\d+\.\d+ \(\d{4}-\d{2}-\d{2}(\))")),
 )
@@ -157,8 +157,19 @@ def main(argv):
     print(f"bumped {len(files)} packages to {version} ({total_pins} internal pins)")
     print(f"  {MCP_VERSION_FILE}: McpServerInfo.Version x{bump_mcp_const(version)}")
     release_date = datetime.date.today().isoformat()
+    # WHY a zero count is fatal and not a shrug: these prose lines are hard-coded patterns, so an
+    # edit to the sentence around them (the package count went from Six to Seven) makes the rewrite
+    # match nothing and the file keeps the OLD version. This used to pass silently here and fail
+    # later in the opt-in gate, which named the document but not the cause. Fail where it happened.
+    missed = []
     for path, n in bump_versioned_docs(version, release_date):
         print(f"  {path}: release line x{n}")
+        if n == 0 and os.path.exists(path):
+            missed.append(path)
+    if missed:
+        print("BUMP FAILED: the release line was not found in " + ", ".join(missed)
+              + " - the prose changed and the pattern in VERSIONED_DOCS no longer matches it.")
+        return 1
 
     if not check():
         print("LOCKSTEP CHECK FAILED after bump")

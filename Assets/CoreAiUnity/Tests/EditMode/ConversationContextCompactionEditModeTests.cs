@@ -111,6 +111,209 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class AsyncOnlySummaryStore : IConversationSummaryStore, IAsyncConversationSummaryStore
+        {
+            internal readonly TaskCompletionSource<string> LoadGate = new();
+            internal readonly TaskCompletionSource<bool> SaveGate = new();
+            internal readonly TaskCompletionSource<bool> SaveEntered = new();
+            internal int Loads;
+            internal int Saves;
+            internal int SyncCalls;
+            internal bool FailNextSave;
+            internal string Saved;
+            internal string LoadedRoleId;
+            internal string SavedRoleId;
+
+            public string LoadSummary(string roleId) { SyncCalls++; throw new InvalidOperationException("Synchronous read was called."); }
+            public void SaveSummary(string roleId, string summary) { SyncCalls++; throw new InvalidOperationException("Synchronous write was called."); }
+            public void ClearSummary(string roleId) { SyncCalls++; throw new InvalidOperationException("Synchronous clear was called."); }
+            public async Task<string> LoadSummaryAsync(string roleId, CancellationToken cancellationToken = default)
+            {
+                Loads++;
+                LoadedRoleId = roleId;
+                cancellationToken.ThrowIfCancellationRequested();
+                return await LoadGate.Task;
+            }
+            public async Task SaveSummaryAsync(string roleId, string summary, CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Saves++;
+                SavedRoleId = roleId;
+                SaveEntered.TrySetResult(true);
+                await SaveGate.Task;
+                if (FailNextSave)
+                {
+                    FailNextSave = false;
+                    throw new System.IO.IOException("Durability confirmation failed.");
+                }
+                Saved = summary;
+            }
+            public Task ClearSummaryAsync(string roleId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        }
+
+        private static IAsyncConversationContextManager AsyncManager(IConversationSummaryStore store, bool useLlm, RecordingLlmClient llm)
+            => useLlm ? new LlmAssistedConversationContextManager(store, new FlatTokenEstimator(1), llm)
+                : new DeterministicConversationContextManager(store, new FlatTokenEstimator(1));
+
+        private static Task<ConversationContextSnapshot> BuildAsync(IAsyncConversationContextManager manager, bool defer)
+            => manager.BuildSnapshotAsync("role", new[] { new ChatMessage("user", "old fact"), new ChatMessage("assistant", "recent fact") },
+                new AgentMemoryPolicy.RoleMemoryConfig { MaxChatHistoryMessages = 1 },
+                new ConversationContextBuildArgs { HistoryTokenBudget = 1000, DeferSummaryPersistence = defer }, "trace", CancellationToken.None);
+
+        private static async Task<Exception> CaptureFailure(Task operation)
+        {
+            try { await operation; return null; }
+            catch (Exception exception) { return exception; }
+        }
+
+        private sealed class MutableSummaryScope : IAgentMemoryScopeProvider
+        {
+            internal string UserId = "first-user";
+            public AgentMemoryScope GetScope(string roleId) => new("tenant", UserId, "lesson", "topic");
+        }
+
+        [TestCase(false, false)]
+        [TestCase(false, true)]
+        [TestCase(true, false)]
+        [TestCase(true, true)]
+        public async Task AsyncManager_ScopeChangeCannotRedirectLoadedHistoryOrDeferredSummary(bool useLlm, bool defer)
+        {
+            AsyncOnlySummaryStore store = new();
+            MutableSummaryScope scope = new();
+            ScopedConversationSummaryStoreDecorator scoped = new(store, scope);
+            Task<ConversationContextSnapshot> build = BuildAsync(AsyncManager(scoped, useLlm, new RecordingLlmClient()), defer);
+            Assert.AreEqual(1, store.Loads);
+            scope.UserId = "second-user";
+            store.SaveGate.SetResult(true);
+            store.LoadGate.SetResult("");
+            ConversationContextSnapshot snapshot = await build;
+            if (defer)
+            {
+                Assert.AreEqual(0, store.Saves);
+                scope.UserId = "third-user";
+                await snapshot.CommitAsync();
+            }
+            Assert.AreEqual(store.LoadedRoleId, store.SavedRoleId,
+                "A summary must be saved to the same effective user partition that supplied its old history.");
+            Assert.IsNotEmpty(store.Saved);
+            Assert.AreEqual(1, store.Saves);
+            Assert.AreEqual(0, store.SyncCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_BoundScopePreservesExplicitBlockingBackendOptIn(bool useLlm)
+        {
+            RecordingSummaryStore store = new();
+            MutableSummaryScope scope = new();
+            ScopedConversationSummaryStoreDecorator strict = new(store, scope);
+            Assert.That(await CaptureFailure(BuildAsync(AsyncManager(strict, useLlm, new RecordingLlmClient()), false)),
+                Is.InstanceOf<NotSupportedException>());
+            ScopedConversationSummaryStoreDecorator explicitBridge = new(store, scope, allowBlockingSyncFallback: true);
+            ConversationContextSnapshot snapshot = await BuildAsync(AsyncManager(explicitBridge, useLlm, new RecordingLlmClient()), false);
+            Assert.IsTrue(snapshot.WasCompacted);
+            Assert.AreEqual(1, store.SaveSummaryCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_AwaitsLoadAndDurableSaveWithoutCallingSyncBackend(bool useLlm)
+        {
+            AsyncOnlySummaryStore store = new();
+            RecordingLlmClient llm = new();
+            Task<ConversationContextSnapshot> build = BuildAsync(AsyncManager(store, useLlm, llm), false);
+            Assert.AreEqual(1, store.Loads);
+            Assert.IsFalse(build.IsCompleted);
+            Assert.AreEqual(0, llm.CompleteCallCount);
+            store.LoadGate.SetResult("");
+            Assert.AreSame(store.SaveEntered.Task, await Task.WhenAny(store.SaveEntered.Task, Task.Delay(3000)));
+            Assert.IsFalse(build.IsCompleted);
+            Assert.IsNull(store.Saved);
+            store.SaveGate.SetResult(true);
+            ConversationContextSnapshot snapshot = await build;
+            Assert.IsTrue(snapshot.WasCompacted);
+            Assert.IsNotEmpty(store.Saved);
+            Assert.AreEqual(0, store.SyncCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_DeferredCommitIsAwaitedAndConcurrentConsumersWriteOnce(bool useLlm)
+        {
+            AsyncOnlySummaryStore store = new();
+            store.LoadGate.SetResult("");
+            ConversationContextSnapshot snapshot = await BuildAsync(AsyncManager(store, useLlm, new RecordingLlmClient()), true);
+            Assert.AreEqual(0, store.Saves);
+            Task first = snapshot.CommitAsync();
+            Task second = snapshot.CommitAsync();
+            try
+            {
+                Assert.IsFalse(first.IsCompleted);
+                Assert.IsFalse(second.IsCompleted);
+                Assert.Throws<InvalidOperationException>(() => snapshot.Commit());
+                using CancellationTokenSource cancellation = new();
+                Task cancelledWaiter = snapshot.CommitAsync(cancellation.Token);
+                cancellation.Cancel();
+                Assert.That(await CaptureFailure(cancelledWaiter), Is.InstanceOf<OperationCanceledException>());
+                Assert.AreEqual(1, store.Saves);
+            }
+            finally
+            {
+                store.SaveGate.TrySetResult(true);
+                await Task.WhenAll(first, second);
+            }
+            await snapshot.CommitAsync();
+            Assert.AreEqual(1, store.Saves);
+            Assert.AreEqual(0, store.SyncCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_FailedCommitRetainsTheSummaryForRetry(bool useLlm)
+        {
+            AsyncOnlySummaryStore store = new() { FailNextSave = true };
+            store.LoadGate.SetResult("");
+            store.SaveGate.SetResult(true);
+            ConversationContextSnapshot snapshot = await BuildAsync(AsyncManager(store, useLlm, new RecordingLlmClient()), true);
+            Assert.That(await CaptureFailure(snapshot.CommitAsync()), Is.InstanceOf<System.IO.IOException>());
+            Assert.IsNull(store.Saved);
+            await snapshot.CommitAsync();
+            await snapshot.CommitAsync();
+            Assert.AreEqual(2, store.Saves);
+            Assert.IsNotEmpty(store.Saved);
+            Assert.AreEqual(0, store.SyncCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_CancelledCommitDoesNotWriteAndRemainsRetryable(bool useLlm)
+        {
+            AsyncOnlySummaryStore store = new();
+            store.LoadGate.SetResult("");
+            store.SaveGate.SetResult(true);
+            ConversationContextSnapshot snapshot = await BuildAsync(AsyncManager(store, useLlm, new RecordingLlmClient()), true);
+            using CancellationTokenSource cancellation = new();
+            cancellation.Cancel();
+            Assert.That(await CaptureFailure(snapshot.CommitAsync(cancellation.Token)), Is.InstanceOf<OperationCanceledException>());
+            Assert.AreEqual(0, store.Saves);
+            await snapshot.CommitAsync();
+            Assert.AreEqual(1, store.Saves);
+            Assert.AreEqual(0, store.SyncCalls);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncManager_SyncOnlyBackendRequiresExplicitAdapter(bool useLlm)
+        {
+            RecordingSummaryStore store = new();
+            Assert.That(await CaptureFailure(BuildAsync(AsyncManager(store, useLlm, new RecordingLlmClient()), false)),
+                Is.InstanceOf<NotSupportedException>());
+            ConversationContextSnapshot snapshot = await BuildAsync(AsyncManager(new BlockingSyncSummaryStoreAsyncAdapter(store), useLlm,
+                new RecordingLlmClient()), false);
+            Assert.IsTrue(snapshot.WasCompacted);
+            Assert.AreEqual(1, store.SaveSummaryCalls);
+        }
+
         [TestCase(false)]
         [TestCase(true)]
         public async Task MessageCountOverflow_FoldsOldPrefixEvenBelowTokenTrigger(bool useLlm)
@@ -118,8 +321,8 @@ namespace CoreAI.Tests.EditMode
             RecordingSummaryStore store = new();
             RecordingLlmClient llm = new();
             IAsyncConversationContextManager manager = useLlm
-                ? new LlmAssistedConversationContextManager(store, new FlatTokenEstimator(1), llm)
-                : new DeterministicConversationContextManager(store, new FlatTokenEstimator(1));
+                ? new LlmAssistedConversationContextManager(new BlockingSyncSummaryStoreAsyncAdapter(store), new FlatTokenEstimator(1), llm)
+                : new DeterministicConversationContextManager(new BlockingSyncSummaryStoreAsyncAdapter(store), new FlatTokenEstimator(1));
             ChatMessage[] history = Enumerable.Range(0, 6)
                 .Select(i => new ChatMessage("user", "fact-" + i)).ToArray();
             AgentMemoryPolicy.RoleMemoryConfig config = new() { MaxChatHistoryMessages = 2 };
@@ -155,57 +358,6 @@ namespace CoreAI.Tests.EditMode
 
             Assert.That(store.LoadSummary("r"), Does.Contain("old fact"));
             Assert.AreEqual(2, store.SaveSummaryCalls, "Only the failed attempt and one successful commit may write.");
-        }
-
-        [Test]
-        public async Task DeferredCommit_ConcurrentConsumersPublishOnlyOnce()
-        {
-            RecordingSummaryStore store = new();
-            TaskCompletionSource<bool> firstEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            TaskCompletionSource<bool> secondEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            TaskCompletionSource<bool> secondStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            using ManualResetEventSlim release = new(false);
-            int entries = 0;
-            store.OnSaving = () =>
-            {
-                if (Interlocked.Increment(ref entries) == 1)
-                {
-                    firstEntered.TrySetResult(true);
-                    if (!release.Wait(TimeSpan.FromSeconds(5)))
-                    {
-                        throw new TimeoutException("test failed to release durable write");
-                    }
-                }
-                else
-                {
-                    secondEntered.TrySetResult(true);
-                }
-            };
-            ConversationContextSnapshot snapshot = new DeterministicConversationContextManager(store)
-                .BuildSnapshot("r", new[] { new ChatMessage("user", "old"), new ChatMessage("user", "new") },
-                    new AgentMemoryPolicy.RoleMemoryConfig { MaxChatHistoryMessages = 1 },
-                    new ConversationContextBuildArgs { HistoryTokenBudget = 1000, DeferSummaryPersistence = true });
-            Task first = Task.Run(() => snapshot.Commit());
-            Task second = null;
-            try
-            {
-                Assert.AreSame(firstEntered.Task, await Task.WhenAny(firstEntered.Task, Task.Delay(3000)));
-                second = Task.Run(() => { secondStarted.TrySetResult(true); snapshot.Commit(); });
-                Assert.AreSame(secondStarted.Task, await Task.WhenAny(secondStarted.Task, Task.Delay(3000)));
-                Assert.AreNotSame(secondEntered.Task, await Task.WhenAny(secondEntered.Task, Task.Delay(250)),
-                    "A second writer cannot enter while the first durable commit is blocked.");
-            }
-            finally
-            {
-                release.Set();
-                await first;
-                if (second != null)
-                {
-                    await second;
-                }
-            }
-            Assert.AreEqual(1, store.SaveSummaryCalls);
-            Assert.That(store.LoadSummary("r"), Does.Contain("old"));
         }
 
         [Test]
@@ -784,15 +936,19 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Audit 17 [1]: a ~272k-char persisted summary rode into every request untouched because the
-        /// summary was outside the history budget and the explicit cap was 0. The summary reserve must
-        /// bound it, deterministically (newest suffix kept), and the snapshot must say it happened.
+        /// Audit 17 [1]: a ~272k-char persisted summary rode into every request. Bounding what is SENT is
+        /// the orchestrator's job (AiOrchestratorHistoryEditModeTests
+        /// .RunTaskAsync_StoredSummaryLargerThanWindow_IsBoundedBeforeTheFirstSend). This manager owns
+        /// what is STORED, and with no explicit cap that must be the whole retelling: the text it emits is
+        /// the text it persists, and a store truncated to the request reserve loses the oldest source that
+        /// the next bounded-history append is allowed to evict.
         /// </summary>
         [Test]
-        public void DeterministicManager_StoredSummaryLargerThanWindow_IsBoundedBySummaryBudget()
+        public void DeterministicManager_StoredSummaryLargerThanReserve_IsPersistedWholeWithoutExplicitCap()
         {
             InMemoryConversationSummaryStore store = new();
-            store.SaveSummary("roleC", "oldest line\n" + new string('s', 40_000) + "\nnewest line");
+            string seeded = "oldest line\n" + new string('s', 40_000) + "\nnewest line";
+            store.SaveSummary("roleC", seeded);
             HeuristicTokenEstimator est = new();
             DeterministicConversationContextManager mgr = new(store, est);
             ChatMessage[] history =
@@ -803,7 +959,7 @@ namespace CoreAI.Tests.EditMode
             };
             ConversationContextBuildArgs buildArgs = new()
             {
-                HistoryTokenBudget = 300,
+                HistoryTokenBudget = 8,
                 SummaryTokenBudget = 100,
                 MaxRolledSummaryTokens = 0
             };
@@ -811,48 +967,65 @@ namespace CoreAI.Tests.EditMode
             ConversationContextSnapshot snap = mgr.BuildSnapshot(
                 "roleC", history, new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 }, buildArgs);
 
-            Assert.LessOrEqual(est.EstimateText(snap.Summary), 100,
-                "The summary must fit its reserve even with no explicit cap.");
-            StringAssert.EndsWith("newest line", snap.Summary, "Bounding keeps the newest suffix.");
-            Assert.Greater(snap.SummaryTokensDropped, 9_000, "The caller must be told how much was dropped.");
-            Assert.AreEqual(3, snap.RecentMessages.Length, "Bounding the summary never touches the recent tail.");
-            int recentTokens = snap.RecentMessages.Sum(m => est.EstimateText(m.Content));
-            Assert.LessOrEqual(est.EstimateText(snap.Summary) + recentTokens,
-                buildArgs.HistoryTokenBudget + buildArgs.SummaryTokenBudget,
-                "Summary + recent tail must fit the whole conversation allowance.");
+            Assert.IsTrue(snap.WasCompacted, "precondition: the 8-token tail budget folds the oldest turn.");
+            Assert.AreEqual(2, snap.RecentMessages.Length, "The stored summary never touches the recent tail.");
+            StringAssert.StartsWith(seeded, snap.Summary,
+                "No explicit cap: the emitted summary is the whole seeded retelling with this fold appended.");
+            StringAssert.Contains("- user: short question", snap.Summary);
+            Assert.AreEqual(0, snap.SummaryTokensDropped, "Nothing was dropped at this layer, so nothing is reported.");
+            string persisted = store.LoadSummary("roleC");
+            StringAssert.Contains("[fold:v1:", persisted, "precondition: this build rewrote the store.");
+            Assert.AreEqual(snap.Summary, ConversationFoldMarker.Strip(persisted),
+                "The store receives exactly the emitted text; the 100-token reserve never reaches it.");
+            Assert.Greater(est.EstimateText(persisted), 10_000, "The oldest line survives the write, 100x the reserve.");
         }
 
         [Test]
-        public void DeterministicManager_ZeroSummaryCap_NeverMeansUnlimited()
+        public void DeterministicManager_SummaryCap_IsTheExplicitCapAlone()
         {
-            // WHY: without a reserved summary budget the recent-tail budget is the ceiling; a raw caller
-            // with cap 0 must still never get more summary than it allows for live history.
+            // WHY: the request budgets travel in the same build args, and folding them into this cap is
+            // exactly what truncated the store once. Zero stays "no cap", and an explicit cap is applied as
+            // given whether the reserve is smaller or larger; the reserve bounds the request elsewhere.
+            Assert.AreEqual(0, DeterministicConversationContextManager.ResolveSummaryTokenCap(null));
+            Assert.AreEqual(0, DeterministicConversationContextManager.ResolveSummaryTokenCap(
+                new ConversationContextBuildArgs { HistoryTokenBudget = 50 }));
+            Assert.AreEqual(0, DeterministicConversationContextManager.ResolveSummaryTokenCap(
+                new ConversationContextBuildArgs { HistoryTokenBudget = 50, SummaryTokenBudget = 20 }));
+            Assert.AreEqual(8, DeterministicConversationContextManager.ResolveSummaryTokenCap(
+                new ConversationContextBuildArgs { SummaryTokenBudget = 20, MaxRolledSummaryTokens = 8 }));
+            Assert.AreEqual(200, DeterministicConversationContextManager.ResolveSummaryTokenCap(
+                new ConversationContextBuildArgs { HistoryTokenBudget = 50, SummaryTokenBudget = 20, MaxRolledSummaryTokens = 200 }));
+
             InMemoryConversationSummaryStore store = new();
             store.SaveSummary("roleD", new string('u', 4000));
             HeuristicTokenEstimator est = new();
             DeterministicConversationContextManager mgr = new(store, est);
             ChatMessage[] history = { new() { Role = "user", Content = "tail" } };
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig = new() { ContextTokens = 8192 };
 
-            ConversationContextSnapshot snap = mgr.BuildSnapshot(
-                "roleD", history, new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
-                new ConversationContextBuildArgs { HistoryTokenBudget = 50, MaxRolledSummaryTokens = 0 });
+            ConversationContextSnapshot uncapped = mgr.BuildSnapshot("roleD", history, roleConfig,
+                new ConversationContextBuildArgs { HistoryTokenBudget = 50, SummaryTokenBudget = 20, MaxRolledSummaryTokens = 0 });
 
-            Assert.LessOrEqual(est.EstimateText(snap.Summary), 50);
-            Assert.Greater(snap.SummaryTokensDropped, 0);
-            Assert.AreEqual(50, DeterministicConversationContextManager.ResolveSummaryTokenCap(
-                new ConversationContextBuildArgs { HistoryTokenBudget = 50 }, 50));
-            Assert.AreEqual(20, DeterministicConversationContextManager.ResolveSummaryTokenCap(
-                new ConversationContextBuildArgs { HistoryTokenBudget = 50, SummaryTokenBudget = 20 }, 50));
-            Assert.AreEqual(8, DeterministicConversationContextManager.ResolveSummaryTokenCap(
-                new ConversationContextBuildArgs { SummaryTokenBudget = 20, MaxRolledSummaryTokens = 8 }, 50));
+            Assert.AreEqual(1000, est.EstimateText(uncapped.Summary),
+                "Cap 0 leaves the stored text whole although it is 20x the tail budget and 50x the reserve.");
+            Assert.AreEqual(0, uncapped.SummaryTokensDropped);
+
+            ConversationContextSnapshot capped = mgr.BuildSnapshot("roleD", history, roleConfig,
+                new ConversationContextBuildArgs { HistoryTokenBudget = 50, SummaryTokenBudget = 20, MaxRolledSummaryTokens = 8 });
+
+            Assert.LessOrEqual(est.EstimateText(capped.Summary), 8, "An explicit cap is honoured as given.");
+            Assert.IsTrue(capped.Summary.StartsWith("…"), "The explicit cap keeps the newest suffix.");
+            Assert.AreEqual(1000 - est.EstimateText(capped.Summary), capped.SummaryTokensDropped,
+                "The reported drop is exactly what the explicit cap removed.");
         }
 
         [Test]
         public void DeterministicManager_SummaryReserve_NeverWidensTheRecentTail()
         {
-            // WHY: the reserve is the summary's alone. Lending it to the tail while no summary exists
-            // would let a stored-nothing conversation exceed an explicit recent-tail budget (override),
-            // so the tail is bounded by HistoryTokenBudget in every case.
+            // WHY: the reserve is the summary's alone, and it is the orchestrator's bound on the request.
+            // Lending it to the tail while no summary exists would let a stored-nothing conversation exceed
+            // an explicit recent-tail budget (override), so the tail is bounded by HistoryTokenBudget in
+            // every case; applying it to the summary here would truncate the store, so it is not applied.
             RecordingSummaryStore store = new();
             DeterministicConversationContextManager mgr = new(store, new FlatTokenEstimator(10));
             ChatMessage[] history = MakeHistory(7);
@@ -867,10 +1040,14 @@ namespace CoreAI.Tests.EditMode
                 "r", history, new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 }, args);
 
             Assert.IsTrue(snap.WasCompacted, "70 tokens of history exceed the 50-token tail budget.");
-            Assert.LessOrEqual(snap.RecentMessages.Length, 5);
-            Assert.LessOrEqual(snap.RecentMessages.Length * 10, args.HistoryTokenBudget);
-            Assert.LessOrEqual(10, args.SummaryTokenBudget, "The flat-estimated summary fits its reserve.");
+            Assert.AreEqual(5, snap.RecentMessages.Length,
+                "Five 10-token messages fill the 50-token tail budget; the 40-token reserve is not lent to the tail.");
+            Assert.AreEqual("msg2", snap.RecentMessages[0].Content);
             StringAssert.Contains("msg0", snap.Summary);
+            StringAssert.Contains("msg1", snap.Summary);
+            Assert.AreEqual(0, snap.SummaryTokensDropped, "The reserve is not applied to the summary at this layer.");
+            Assert.AreEqual(snap.Summary, ConversationFoldMarker.Strip(store.LastSavedSummary),
+                "What was emitted is what was stored.");
         }
 
         [Test]
@@ -1548,9 +1725,9 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// История, где второе сообщение — durable-блок результата инструмента в том виде, в каком его
-        /// пишет оркестратор. С FlatTokenEstimator(10) и бюджетом 25 сворачиваются первые три сообщения,
-        /// то есть tool-блок точно попадает в компакцию.
+        /// A history whose second message is a durable tool result block, exactly as the orchestrator writes it.
+        /// With FlatTokenEstimator(10) and a budget of 25 the first three messages are folded, so the tool block
+        /// certainly lands in the compaction.
         /// </summary>
         private static ChatMessage[] HistoryWithFoldedToolBlock()
         {
@@ -1569,10 +1746,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Дефект: сырой блок «## Tool Results» уезжал в компактор, тот по инструкции «сохраняй
-        /// идентификаторы и числа» переносил его в summary, а summary возвращался в промпт уже мимо
-        /// проекции — и ребёнок снова читал служебный регистр в ответе учителя. Суммаризатор обязан
-        /// видеть tool-сообщения через ту же проекцию, что и основной промпт.
+        /// Defect: the raw "## Tool Results" block travelled into the compactor, which - following its "keep
+        /// identifiers and numbers" instruction - carried it into the summary, and the summary came back into the
+        /// prompt bypassing the projection, so the child read the internal register inside the teacher's answer
+        /// again. The summarizer must see tool messages through the same projection as the live prompt.
         /// </summary>
         [Test]
         public async Task LlmAssisted_CompactionPayload_ShowsToolResultsInTheMachineRegister_NotTheRawBlock()
@@ -1594,8 +1771,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Детерминированный путь пишет summary сам, без LLM, — и он же служит запасным при любой
-        /// ошибке компактора. Его bullet-строки обязаны быть спроецированы так же.
+        /// The deterministic path writes the summary itself, without an LLM, and it also serves as the fallback for
+        /// any compactor failure. Its bullet lines have to be projected the same way.
         /// </summary>
         [Test]
         public void DeterministicManager_BulletSummary_ProjectsToolResults_NotTheRawBlock()
@@ -1631,11 +1808,11 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Порядок «сначала компакция, потом прунинг»: старый tool-блок дословно повторён новым (поэтому
-        /// прунер выкинул бы его из хвоста), но сводка обязана его увидеть — иначе он исчезнет из всех
-        /// будущих промптов бесследно. Мутация для проверки: свернуть <c>history</c> через
-        /// <c>PruneIfEnabled</c> до партиции в <c>DeterministicConversationContextManager.BuildSnapshot</c> —
-        /// маркер из summary пропадёт.
+        /// The order is "compact first, prune second": an old tool block is repeated verbatim by a newer one (so the
+        /// pruner would drop it from the tail), yet the summary must still see it, otherwise it vanishes from every
+        /// future prompt without a trace. Mutation to check this: fold <c>history</c> through <c>PruneIfEnabled</c>
+        /// before the partition in <c>DeterministicConversationContextManager.BuildSnapshot</c> and the marker
+        /// disappears from the summary.
         /// </summary>
         [Test]
         public void DeterministicManager_CompactionFoldsPrefix_BeforePruningDiscardsIt()
@@ -1676,8 +1853,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Флаг <c>EnableContextPruning</c> действует и на LLM-пути: хвост с дословно повторённым
-        /// tool-блоком выходит без старшей копии. До правки async-путь игнорировал флаг молча.
+        /// The <c>EnableContextPruning</c> flag applies to the LLM path too: a tail with a verbatim repeated tool
+        /// block comes out without the older copy. Before the fix the async path ignored the flag silently.
         /// </summary>
         [Test]
         public async Task LlmAssisted_EnableContextPruning_PrunesEmittedTail()

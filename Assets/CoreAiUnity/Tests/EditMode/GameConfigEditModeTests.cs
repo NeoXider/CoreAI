@@ -157,29 +157,29 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ConfigTool_ReadModifyWrite_RoundTrip()
         {
-            // Начальный конфиг
+            // Initial config
             _store.TrySave("session", "{\"difficulty\":1,\"enemy_hp_mult\":1.0,\"max_enemies\":50}");
             _policy.GrantFullAccess("Creator");
             _policy.SetKnownKeys(new[] { "session" });
 
             GameConfigTool tool = new(_store, _policy, "Creator");
 
-            // Шаг 1: Читаем
+            // Step 1: read
             GameConfigTool.GameConfigResult readResult =
                 JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("read").Result);
             Assert.IsTrue(readResult.Success);
             StringAssert.Contains("difficulty", readResult.ConfigJson);
 
-            // Шаг 2: Модифицируем (имитация что AI изменил JSON)
+            // Step 2: modify (simulating the AI editing the JSON)
             string modifiedJson = "{\"difficulty\":2,\"enemy_hp_mult\":1.5,\"max_enemies\":80}";
 
-            // Шаг 3: Сохраняем
+            // Step 3: save
             GameConfigTool.GameConfigResult writeResult =
                 JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("update", modifiedJson)
                     .Result);
             Assert.IsTrue(writeResult.Success);
 
-            // Шаг 4: Проверяем что сохранилось
+            // Step 4: check what was persisted
             _store.TryLoad("session", out string finalJson);
             StringAssert.Contains("difficulty", finalJson);
             StringAssert.Contains("2", finalJson);
@@ -189,7 +189,7 @@ namespace CoreAI.Tests.EditMode
 
         #endregion
 
-        #region InMemory Config Store (для тестов)
+        #region InMemory Config Store (for tests)
 
         private sealed class InMemoryConfigStore : IGameConfigStore
         {

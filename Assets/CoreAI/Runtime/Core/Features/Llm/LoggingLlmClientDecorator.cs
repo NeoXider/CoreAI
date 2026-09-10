@@ -141,23 +141,27 @@ namespace CoreAI.Infrastructure.Llm
                 ? _backendLabel
                 : $"{_backendLabel}->{request.RoutingProfileId.Trim()}";
 
+            // WHY once per request: the budget line scans the whole system prompt and every tool schema;
+            // it depends only on the request, so the completion log line reuses this instance.
+            string promptBudgetLine = FormatPromptBudgetLine(system, user, request.Tools);
             _logger.Info(
                 $"LLM > traceId={trace} role={role} backend={backendLine}\n" +
                 $"  system ({system.Length} chars): {PromptPreview(system, SystemPreviewChars)}\n" +
                 $"  user ({user.Length} chars): {PromptPreview(user, UserPreviewChars)}\n" +
-                $"  {FormatPromptBudgetLine(system, user, request.Tools)}", LogTag.Llm);
+                $"  {promptBudgetLine}", LogTag.Llm);
 
             Stopwatch sw = Stopwatch.StartNew();
             LlmCompletionResult result = null;
             // Timeout is now enforced by the Unity-aware caller (CoreAiChatService)
             // This decorator only handles logging and HTTP 429/5xx retries.
             //
-            // WHY: Ретраебельный сбой хранится в ОДНОЙ из двух форм — брошенное исключение либо
-            // результат с Ok=false — и обе крутятся одним циклом с одним бюджетом. Раньше было два
-            // цикла: по исключению и по результату, каждый со своим полным бюджетом. Адаптер, который
-            // на первой попытке бросил 429, а на второй вернул 429 результатом, переводил запрос из
-            // первого цикла во второй с обнулённым счётчиком — до 2N+1 вызовов и до минуты ожидания при
-            // N=3, всё это время ученик смотрел на индикатор набора.
+            // WHY: A retryable failure is held in ONE of two forms - a thrown exception or a result with
+            // Ok=false - and both are driven by a single loop with a single budget. There used to be two
+            // loops, one for exceptions and one for results, each with its own full budget. An adapter
+            // that threw a 429 on the first attempt and returned a 429 as a result on the second moved
+            // the request from the first loop into the second with a reset counter - up to 2N+1 calls and
+            // up to a minute of waiting at N=3, all of it spent with the learner staring at a typing
+            // indicator.
             LlmClientException retryableException = null;
             int retryAfterSeconds = 0;
             try
@@ -220,9 +224,9 @@ namespace CoreAI.Infrastructure.Llm
                     // next call returned a non-retryable 400, or an unexpected error). Stop retrying and
                     // return it as a structured failure instead of letting a raw exception escape past
                     // the unified error path.
-                    // WHY: Код ошибки кладётся в ПОЛЕ, а не только в строку: потребитель выбирает
-                    // плашку по ErrorCode, и потерянный код превращал плашку «учитель недоступен» в сырой
-                    // английский текст в пузыре чата.
+                    // WHY: The error code goes into a FIELD, not only into the string: the consumer picks
+                    // its banner by ErrorCode, and a lost code turned the "teacher unavailable" banner
+                    // into raw English text inside the chat bubble.
                     sw.Stop();
                     LlmCompletionResult failure = BuildThrownFailure(nonRetryEx);
                     _logger.Warn(
@@ -239,8 +243,8 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.Warn(
                     $"LLM x traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | result is null",
                     LogTag.Llm);
-                // WHY: Отсутствие результата — это «провайдер ничего не отдал», и код обязан это сказать:
-                // None не входит ни в один список категорий недоступности у потребителей.
+                // WHY: A missing result means "the provider handed back nothing", and the code has to say
+                // so: None is on no consumer's list of unavailability categories.
                 return new LlmCompletionResult
                 {
                     Ok = false,
@@ -258,7 +262,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             string content = result.Content ?? "";
-            string tokLine = FormatTokenLine(result, wallMs, content.Length, system, user, request.Tools);
+            string tokLine = FormatTokenLine(result, wallMs, content.Length, promptBudgetLine);
             string toolsLine = FormatExecutedTools(result.ExecutedToolCalls);
             _logger.Info(
                 $"LLM < traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}{toolsLine}\n" +
@@ -351,8 +355,8 @@ namespace CoreAI.Infrastructure.Llm
         /// Whether a trace represents a tool call whose tool body was actually invoked - including
         /// invoked-but-failed calls (timeouts, thrown exceptions), which may already have mutated
         /// game state. Rejected/never-invoked traces (cross-turn duplicate, unparseable arguments,
-        /// unknown/missing/unbound tool, schema validation) executed nothing, so they must not
-        /// suppress retry or fallback of the surrounding request.
+        /// unknown/missing/unbound tool, schema validation, structural argument binding) executed
+        /// nothing, so they must not suppress retry or fallback of the surrounding request.
         /// </summary>
         public static bool TraceIndicatesInvocation(LlmToolCallTrace trace)
         {
@@ -364,12 +368,37 @@ namespace CoreAI.Infrastructure.Llm
                 case "missing":
                 case "unbound-native":
                 case "schema-validation":
+                // WHY "arg-conversion" is here, after once being deleted from this list as dead: the
+                // source has changed meaning. It used to be guessed from the exception's stack shape,
+                // which IL2CPP/WebGL strips - so a body exception could be misread as a binding failure
+                // and a mutated turn replayed. That classification was removed, nothing emitted the
+                // source, and this branch went with it. It is emitted again now, but only by
+                // ToolExecutionPolicy.TryBindArgumentsStructurally, which runs MEAI's own coercion
+                // standalone BEFORE function.InvokeAsync - a rejection there proves the body was never
+                // entered rather than guessing it. Leaving it on the fail-safe default cost the opposite
+                // mistake to the original one: a turn where the model merely mistyped one argument was
+                // reported as "a tool ran", and a later 429/5xx could then neither be retried here nor
+                // failed over by FallbackLlmClientDecorator - a lesson turn lost with nothing executed.
                 case "arg-conversion":
+                // WHY "tools-disabled": the request arrived with ToolMode = None, so the policy
+                // refused the call before reaching the function at all. Same shape as
+                // "arg-conversion" - a refusal with nothing executed - and it sat on the fail-safe
+                // default only because nobody had enumerated the sources against this list. The cost
+                // was the same too: a turn that ran nothing was reported as "a tool ran", so a 429
+                // arriving alongside it could be neither retried here nor failed over.
+                case "tools-disabled":
                     return false;
                 default:
                     // WHY: fail safe - any unknown/new trace source counts as an invocation so the
                     // double-execution protection (never retry a turn whose tool body ran) holds
                     // even if a new trace source is added without updating this list.
+                    //
+                    // "blocked" stays on this default ON PURPOSE - a decision, not an oversight. It
+                    // is recorded when an EARLIER invocation in the same turn did not observe its
+                    // deadline, so that invocation's body may still be running. The refusal itself
+                    // executed nothing, but replaying the turn could run the abandoned body a second
+                    // time, which is exactly what this gate exists to prevent. A lost turn is cheaper
+                    // than a mutation applied twice.
                     return true;
             }
         }
@@ -405,9 +434,9 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Один вызов внутреннего клиента с правильным для хоста режимом продолжения. Ветка WebGL держит
-        /// продолжение на Unity SynchronizationContext: браузерный стек без него подвешивал цепочку await
-        /// после завершения HTTP, и чат замирал.
+        /// A single call into the inner client with the continuation mode that is correct for the host.
+        /// The WebGL branch keeps the continuation on the Unity SynchronizationContext: without it the
+        /// browser stack stalled the await chain after the HTTP call completed, and the chat froze.
         /// </summary>
         private ConfiguredTaskAwaitable<LlmCompletionResult> CompleteInner(
             LlmCompletionRequest request,
@@ -421,9 +450,9 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Структурный отказ после исчерпания бюджета. Типизация берётся из той формы, в которой пришёл
-        /// последний сбой (исключение или результат) — код, HTTP-статус и подсказка retry-after
-        /// доезжают до потребителя одинаково, независимо от способа, которым адаптер о них сообщил.
+        /// The structured failure returned once the budget is exhausted. The typing is taken from whichever
+        /// form the last failure arrived in (exception or result) - the code, the HTTP status and the
+        /// retry-after hint reach the consumer identically, regardless of how the adapter reported them.
         /// </summary>
         private LlmCompletionResult BuildRetriesExhaustedFailure(
             LlmClientException thrown,
@@ -454,7 +483,7 @@ namespace CoreAI.Infrastructure.Llm
             };
         }
 
-        /// <summary>Структурный отказ из исключения, брошенного на повторной попытке.</summary>
+        /// <summary>A structured failure built from an exception thrown during a retry attempt.</summary>
         private static LlmCompletionResult BuildThrownFailure(Exception exception)
         {
             LlmClientException typed = exception as LlmClientException;
@@ -509,11 +538,13 @@ namespace CoreAI.Infrastructure.Llm
             string streamUser = request.UserPayload ?? "";
             IReadOnlyList<ILlmTool> streamTools = request.Tools;
 
+            // WHY once per request: see CompleteAsync - the completion line reuses the same text.
+            string promptBudgetLine = FormatPromptBudgetLine(streamSystem, streamUser, streamTools);
             _logger.Info(
                 $"LLM > (stream) traceId={trace} role={role} backend={backendLine}\n" +
                 $"  system ({streamSystem.Length} chars): {PromptPreview(request.SystemPrompt, SystemPreviewChars)}\n" +
                 $"  user ({streamUser.Length} chars): {PromptPreview(request.UserPayload, UserPreviewChars)}\n" +
-                $"  {FormatPromptBudgetLine(streamSystem, streamUser, streamTools)}", LogTag.Llm);
+                $"  {promptBudgetLine}", LogTag.Llm);
 
             Stopwatch sw = Stopwatch.StartNew();
             StringBuilder accumulated = new();
@@ -696,8 +727,7 @@ namespace CoreAI.Infrastructure.Llm
                     Error = terminalError ?? "",
                     ExecutedToolCalls = executedTools
                 };
-                string tokLine = FormatTokenLine(synthetic, wallMs, content.Length, streamSystem, streamUser,
-                    streamTools);
+                string tokLine = FormatTokenLine(synthetic, wallMs, content.Length, promptBudgetLine);
                 string toolsLine = FormatExecutedTools(executedTools);
 
                 if (!string.IsNullOrEmpty(terminalError))
@@ -762,11 +792,9 @@ namespace CoreAI.Infrastructure.Llm
             LlmCompletionResult result,
             double wallMs,
             int outChars,
-            string systemPrompt,
-            string userPayload,
-            IReadOnlyList<ILlmTool> tools)
+            string promptBudgetLine)
         {
-            string budgetSuffix = " | " + FormatPromptBudgetLine(systemPrompt ?? "", userPayload ?? "", tools);
+            string budgetSuffix = " | " + promptBudgetLine;
             string outWordsPart = outChars > 0
                 ? $" | outWords~{CountWords(result.Content ?? "")}"
                 : "";
@@ -847,7 +875,7 @@ namespace CoreAI.Infrastructure.Llm
             int chatTok = EstimateTokensRough(userPayload);
             int coreWords = CountWords(core);
             int memWords = CountWords(mem);
-            int toolsWords = CountWords(BuildToolsCatalogBlobForWordCount(tools));
+            int toolsWords = CountToolsCatalogWords(tools);
             int chatWords = CountWords(userPayload);
 
             int sysTokFromParts = coreTok + memTok;
@@ -896,14 +924,20 @@ namespace CoreAI.Infrastructure.Llm
             "3. DO NOT output conversational text if you call a tool. ONLY output the JSON block.\n\nAVAILABLE TOOLS:\n"
                 .Length;
 
-        private static string BuildToolsCatalogBlobForWordCount(IReadOnlyList<ILlmTool> tools)
+        /// <summary>
+        /// Word count of the tool catalog as if name, description and schema of every tool were joined
+        /// with single spaces. Counting each field on its own gives the same number - a space always
+        /// separates the fields, so no word can straddle two of them - without materializing the
+        /// catalog (tens of kilobytes of schema text) twice per request just to count it.
+        /// </summary>
+        internal static int CountToolsCatalogWords(IReadOnlyList<ILlmTool> tools)
         {
             if (tools == null || tools.Count == 0)
             {
-                return "";
+                return 0;
             }
 
-            StringBuilder sb = new();
+            int words = 0;
             foreach (ILlmTool t in tools)
             {
                 if (t == null)
@@ -911,15 +945,12 @@ namespace CoreAI.Infrastructure.Llm
                     continue;
                 }
 
-                sb.Append(t.Name);
-                sb.Append(' ');
-                sb.Append(t.Description);
-                sb.Append(' ');
-                sb.Append(t.ParametersSchema);
-                sb.Append(' ');
+                words += CountWords(t.Name);
+                words += CountWords(t.Description);
+                words += CountWords(t.ParametersSchema);
             }
 
-            return sb.ToString();
+            return words;
         }
 
         private static int EstimateTokensRoughFromCharCount(int charCount)
@@ -972,8 +1003,8 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Maps a thrown fault to a stable <see cref="LlmErrorCode"/> so consumers never receive a
         /// terminal chunk or a failed result that reports a failure with <see cref="LlmErrorCode.None"/>.
-        /// Одна таблица для потокового и непотокового пути: категория ошибки не должна зависеть от того,
-        /// каким из двух путей о ней сообщили.
+        /// One table for the streaming and the non-streaming path: the error category must not depend on
+        /// which of the two paths reported it.
         /// </summary>
         private static LlmErrorCode ResolveErrorCode(Exception ex)
         {
@@ -993,13 +1024,27 @@ namespace CoreAI.Infrastructure.Llm
                 return "(empty)";
             }
 
-            string t = text.Trim();
-            if (t.Length <= maxChars)
+            // WHY trim by bounds: Trim() copies the whole prompt when it merely ends in a newline, and the
+            // preview then copied it a second time. One copy of at most the preview length is enough.
+            int start = 0;
+            int end = text.Length - 1;
+            while (start <= end && char.IsWhiteSpace(text[start]))
             {
-                return t;
+                start++;
             }
 
-            return t.Substring(0, maxChars) + $"... [+{t.Length - maxChars} chars]";
+            while (end >= start && char.IsWhiteSpace(text[end]))
+            {
+                end--;
+            }
+
+            int length = end - start + 1;
+            if (length <= maxChars)
+            {
+                return length == text.Length ? text : text.Substring(start, length);
+            }
+
+            return text.Substring(start, maxChars) + $"... [+{length - maxChars} chars]";
         }
     }
 }

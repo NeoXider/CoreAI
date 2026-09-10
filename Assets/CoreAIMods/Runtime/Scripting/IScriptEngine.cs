@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace CoreAI.Scripting
 {
@@ -40,5 +41,22 @@ namespace CoreAI.Scripting
             string source,
             IScriptExecutionGuard guard = null,
             CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Same contract as <see cref="RunChunk"/>, but the execution may release the host frame through
+        /// <paramref name="frameYielder"/> instead of blocking the calling loop for its whole run. This
+        /// is the entry for one-shot chunks (tool-driven <c>execute_lua</c>), which can legitimately run
+        /// for seconds; short handler calls keep using <see cref="RunChunk"/>.
+        /// </summary>
+        // WHY: a default implementation, not a second required member — an engine that has no
+        // asynchronous entry (or a test double) stays valid and simply runs the chunk synchronously,
+        // which is exactly what happened before this member existed.
+        Task<object[]> RunChunkAsync(
+            IScriptState state,
+            string source,
+            IScriptExecutionGuard guard = null,
+            IScriptFrameYielder frameYielder = null,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(RunChunk(state, source, guard, cancellationToken));
     }
 }

@@ -49,8 +49,8 @@ namespace CoreAI.Features.Audit
             RotateNow();
         }
 
-        // WHY [Inject]: без атрибута VContainer.SourceGenerator выбирает конструктор с максимумом
-        // параметров — internal AuditLogWriter(string) — и падает на резолве System.String.
+        // WHY [Inject]: without the attribute VContainer.SourceGenerator picks the constructor with the
+        // most parameters - internal AuditLogWriter(string) - and then fails resolving System.String.
         [Inject]
         public AuditLogWriter()
             : this(Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName, "Audit"))
@@ -443,6 +443,13 @@ namespace CoreAI.Features.Audit
         private void FlushBatchCore()
         {
             ReportDroppedEntriesIfAny();
+
+            // WHY: the flush tick runs twice a second for the whole session (on WebGL on the main
+            // thread); an empty queue is the common case and must not allocate a batch list to find that out.
+            if (_queue.IsEmpty)
+            {
+                return;
+            }
 
             List<AuditEntry> batch = new();
             while (_queue.TryDequeue(out AuditEntry entry))

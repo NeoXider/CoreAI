@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -71,10 +72,10 @@ namespace CoreAI.Ai
                     return ResolveFromProvider(scopeProvider, roleId);
                 }
 
-                // WHY: у именованного актора scope тоже берётся из хода, а когда ход его не принёс —
-                // из провайдера хоста. Иначе тот же класс расхождения, что чинили для "local": внутри
-                // хода ключ считался без scope, снаружи — со scope провайдера, и одна и та же память
-                // читалась под двумя разными ключами.
+                // WHY: a named actor takes its scope from the turn as well, and falls back to the host
+                // provider when the turn carried none. Otherwise the same class of divergence we fixed
+                // for "local" comes back: inside the turn the key was computed without a scope, outside
+                // it with the provider's scope, and one and the same memory was read under two keys.
                 AgentMemoryScope effectiveScope = IsEmptyScope(captured)
                     ? ScopeFromProvider(scopeProvider, roleId)
                     : captured;
@@ -113,7 +114,7 @@ namespace CoreAI.Ai
             AppendCanonicalPart(canonical, scope.SessionId);
             AppendCanonicalPart(canonical, scope.TopicId);
             AppendCanonicalPart(canonical, roleId);
-            return ScopedKeyPrefix + Sha256Hex(canonical.ToString());
+            return PrefixedDigest(ScopedKeyPrefix, ScopedKeys, canonical.ToString());
         }
 
         private static string ResolveActorId(string actorId, AgentMemoryScope scope, string roleId)
@@ -127,12 +128,13 @@ namespace CoreAI.Ai
                 return Resolve(scope, roleId);
             }
 
-            // WHY: ActorContext.MemoryScope обещан как «tenant, user, session и topic, которыми пользуется
-            // персистентность памяти». Раньше для именованного актора эти поля ОТБРАСЫВАЛИСЬ: два урока
-            // (topic) или две сессии одного актора делили один файл, а два арендатора с одинаковым id
-            // актора — тем более. Пустой scope кодируется по-старому (две части), чтобы файлы уже
-            // существующих именованных акторов без scope не осиротели; непустой добавляет четыре части.
-            // Кодирование с префиксом длины остаётся инъективным: число частей восстанавливается однозначно.
+            // WHY: ActorContext.MemoryScope is promised to be "the tenant, user, session and topic that
+            // memory persistence uses". A named actor used to DISCARD those fields: two lessons (topic)
+            // or two sessions of the same actor shared one file, and two tenants holding the same actor
+            // id all the more so. An empty scope is still encoded the old way (two parts) so that files
+            // of already existing named actors without a scope are not orphaned; a non-empty one appends
+            // four more parts. The length-prefixed encoding stays injective: the number of parts is
+            // recovered unambiguously.
             StringBuilder canonical = new(160);
             AppendCanonicalPart(canonical, actorId);
             if (!IsEmptyScope(scope))
@@ -144,7 +146,7 @@ namespace CoreAI.Ai
             }
 
             AppendCanonicalPart(canonical, roleId);
-            return ActorKeyPrefix + Sha256Hex(canonical.ToString());
+            return PrefixedDigest(ActorKeyPrefix, ActorKeys, canonical.ToString());
         }
 
         /// <summary>
@@ -181,46 +183,78 @@ namespace CoreAI.Ai
             sb.Append(raw.Length).Append(':').Append(raw).Append(';');
         }
 
-        private static string Sha256Hex(string value)
+        /// <summary>Upper bound on memoized keys per prefix; a table is cleared when it reaches this.</summary>
+        private const int KeyCacheCapacity = 512;
+
+        private static readonly object KeyCacheGate = new();
+        private static readonly Dictionary<string, string> ScopedKeys = new(StringComparer.Ordinal);
+        private static readonly Dictionary<string, string> ActorKeys = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// <c>prefix + SHA-256 hex of the canonical tuple</c>, memoized by the tuple text.
+        /// <para>
+        /// WHY: every memory-store call of a scoped host - each history append, each history read, each
+        /// memory load and save, several per turn - derived its storage key by hashing the same handful
+        /// of (scope, actor, role) tuples again: a fresh <see cref="SHA256"/> instance, the UTF-8 bytes,
+        /// thirty-two formatted strings for the hex and the prefixed concatenation. A process sees only
+        /// a few distinct tuples, and the key is a pure function of the text, so remembering it is exact;
+        /// the tables are small and hold strings only, so they survive domain reloads harmlessly.
+        /// </para>
+        /// </summary>
+        private static string PrefixedDigest(string prefix, Dictionary<string, string> cache, string canonical)
         {
-            byte[] digest;
-            using (SHA256 sha = SHA256.Create())
+            lock (KeyCacheGate)
             {
-                digest = sha.ComputeHash(Encoding.UTF8.GetBytes(value));
+                if (cache.TryGetValue(canonical, out string cached))
+                {
+                    return cached;
+                }
             }
 
-            StringBuilder sb = new(digest.Length * 2);
-            for (int i = 0; i < digest.Length; i++)
+            string key = prefix + ComputeSha256Hex(canonical);
+            lock (KeyCacheGate)
             {
-                sb.Append(digest[i].ToString("x2"));
+                if (cache.Count >= KeyCacheCapacity)
+                {
+                    cache.Clear();
+                }
+
+                cache[canonical] = key;
             }
 
-            return sb.ToString();
+            return key;
+        }
+
+        private static string ComputeSha256Hex(string value)
+        {
+            using SHA256 sha = SHA256.Create();
+            return CoreAI.Audit.AuditHash.ByteArrayToHex(sha.ComputeHash(Encoding.UTF8.GetBytes(value)));
         }
     }
 
     /// <summary>
-    /// Публичный вход для доступа к памяти ОТ ИМЕНИ актора вне хода оркестратора.
+    /// Public entry point for touching memory ON BEHALF OF an actor outside an orchestrator turn.
     /// <para>
-    /// Внутри хода очередь сама поднимает контекст актора, и все scoped-декораторы считают ключ по нему.
-    /// Снаружи (гидрация истории для UI, сброс контекста при отключении соединения, миграция) актора
-    /// никто не поднимает, и ключ считается только по <see cref="IAgentMemoryScopeProvider"/> — то есть
-    /// хост с именованными акторами читал и чистил НЕ ТОТ файл, что писал ход. Обёртка кода в
-    /// <c>using (AgentMemoryActorScope.Enter(actorContext))</c> даёт тот же ключ, что и внутри хода.
-    /// Контекст обязан быть выдан провайдером личности (<see cref="ActorContext.IsTrusted"/>): собранный
-    /// вручную не принимается, чтобы нельзя было «войти» в чужую память подделкой структуры.
+    /// Inside a turn the queue pushes the actor context itself, and every scoped decorator derives the
+    /// key from it. Outside (hydrating history for the UI, dropping context when a connection is lost,
+    /// migration) nobody pushes an actor, and the key is derived from <see cref="IAgentMemoryScopeProvider"/>
+    /// alone - so a host with named actors read and cleared THE WRONG file, not the one the turn wrote.
+    /// Wrapping the code in <c>using (AgentMemoryActorScope.Enter(actorContext))</c> yields the same key
+    /// as inside the turn. The context must have been issued by an identity provider
+    /// (<see cref="ActorContext.IsTrusted"/>): a hand-built one is rejected, so nobody can "enter"
+    /// somebody else's memory by forging the struct.
     /// </para>
     /// </summary>
     public static class AgentMemoryActorScope
     {
-        /// <summary>Делает <paramref name="actorContext"/> текущим для памяти до <c>Dispose()</c>.</summary>
-        /// <exception cref="InvalidOperationException">Контекст не выдан провайдером личности.</exception>
+        /// <summary>Makes <paramref name="actorContext"/> current for memory until <c>Dispose()</c>.</summary>
+        /// <exception cref="InvalidOperationException">The context was not issued by an identity provider.</exception>
         public static IDisposable Enter(ActorContext actorContext)
         {
             return AgentMemoryScopeExecutionContext.Push(actorContext);
         }
 
-        /// <summary>Делает <paramref name="scope"/> текущим для памяти до <c>Dispose()</c> (без актора).</summary>
+        /// <summary>Makes <paramref name="scope"/> current for memory until <c>Dispose()</c> (no actor).</summary>
         public static IDisposable Enter(AgentMemoryScope scope)
         {
             return AgentMemoryScopeExecutionContext.Push(scope);

@@ -1,6 +1,8 @@
 using System;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
+using CoreAI.Scripting;
 using Lua;
 using Lua.Runtime;
 using Lua.Standard;
@@ -204,11 +206,13 @@ namespace CoreAI.Sandbox.LuaCs
                 // allocation-avoidance reason as LuaCsExecutionGuard.GuardHook (see that type for detail).
                 long startTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
                 long timeoutTicks = timeoutMs * System.Diagnostics.Stopwatch.Frequency / 1000;
-                // WHY: Mirrors LuaCsExecutionGuard's allocation backstop on the coroutine's child state —
-                // step/time caps do not catch a doubling concat bomb, which is ordinary VM opcodes with no
-                // library call site to cap (see LuaCsExecutionGuard.GuardHook.Hook for the full rationale).
-                long maxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
-                long allocBaseline = maxAllocatedBytes > 0 ? GC.GetTotalMemory(false) : 0;
+                // WHY: the SAME allocation backstop the execution guard uses, on the coroutine's child
+                // state - step/time caps do not catch a doubling concat bomb, which is ordinary VM opcodes
+                // with no library call site to cap. Shared as one type rather than a second hand-copied
+                // check, because the copy here kept its own broken rule after the guard's was fixed: see
+                // LuaCsAllocationBudget for why a sampled reading may only raise a suspicion.
+                LuaCsAllocationBudget allocation = default;
+                allocation.Reset(LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget);
 
                 LuaFunction hook = new("coreai_coroutine_guard", (hctx, hct) =>
                 {
@@ -230,14 +234,14 @@ namespace CoreAI.Sandbox.LuaCs
                             $"Lua coroutine resume exceeded {timeoutMs} ms.");
                     }
 
-                    if (maxAllocatedBytes > 0)
+                    if (allocation.IsExceeded())
                     {
-                        long allocated = GC.GetTotalMemory(false) - allocBaseline;
-                        if (allocated > maxAllocatedBytes)
-                        {
-                            throw LuaCsCoroutineHandle.CreateBudgetTrip(hctx.State,
-                                $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} ({maxAllocatedBytes} bytes)");
-                        }
+                        // WHY CreateBudgetTrip and not a dedicated exception type: the native resume this
+                        // hook cuts is protected, so the mod's `ok, err = coroutine.resume(co)` receives the
+                        // exception's ErrorObject, which the (LuaState, Exception) overload leaves nil - the
+                        // trip arrived as `false, nil`. Only the marker text survives that boundary.
+                        throw LuaCsCoroutineHandle.CreateBudgetTrip(hctx.State,
+                            $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} ({allocation.BudgetBytes} bytes)");
                     }
 
                     return new System.Threading.Tasks.ValueTask<int>(hctx.Return());
@@ -289,6 +293,31 @@ namespace CoreAI.Sandbox.LuaCs
             LuaClosure closure = state.Load(luaCode, "sandbox_chunk");
             guard ??= new LuaCsExecutionGuard(maxSteps: OneShotHardLimitSteps);
             return guard.Execute(state, closure, cancellationToken);
+        }
+
+        /// <summary>
+        /// Loads and runs Lua code inside a secured state without holding the host frame: the guard hook
+        /// awaits <paramref name="frameYielder"/> every few milliseconds, so a chunk that runs for
+        /// seconds still lets the player draw. A null yielder behaves exactly like
+        /// <see cref="RunChunk"/>, only asynchronously.
+        /// </summary>
+        public Task<LuaValue[]> RunChunkAsync(
+            LuaState state,
+            string luaCode,
+            LuaCsExecutionGuard guard = null,
+            IScriptFrameYielder frameYielder = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (state == null)
+            {
+                throw new ArgumentNullException(nameof(state));
+            }
+
+            // WHY: compilation stays synchronous — Load has no yield points and a chunk's source is
+            // bounded by the tool's own input cap, so it cannot be the thing that holds the frame.
+            LuaClosure closure = state.Load(luaCode, "sandbox_chunk");
+            guard ??= new LuaCsExecutionGuard(maxSteps: OneShotHardLimitSteps);
+            return guard.ExecuteAsync(state, closure, frameYielder, cancellationToken);
         }
 
         private static void StripRiskyGlobals(LuaState state)

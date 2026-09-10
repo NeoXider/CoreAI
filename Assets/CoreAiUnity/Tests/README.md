@@ -187,7 +187,7 @@ physics, real timing, or anything requiring `isPlaying`.
 
 ---
 
-## B3. WebGL: save queue and IndexedDB acknowledgement
+## B3. WebGL: is durable storage armed
 
 The JavaScript boundary check runs without Unity:
 
@@ -195,24 +195,22 @@ The JavaScript boundary check runs without Unity:
 node Assets/CoreAiUnity/Tests/Node~/persist_fs_jslib_test.js
 ```
 
-The test loads the real `CoreAiPersistFs.jslib`; only `FS.syncfs`, the scheduler,
-clocks, and the Emscripten pointer call are stubbed. It checks distinct callback pointers, acknowledgement
-ordering, errors, cancellation in every state, and the memory cap. This is a bridge-contract
-check, **not proof of a write into a real browser's IndexedDB**.
+The test loads the real `CoreAiPersistFs.jslib`; only the Emscripten `Module` object is a stand-in.
+CoreAI no longer drives `FS.syncfs` by hand — Unity 6.3 deprecated that path and its completion
+callback never fired, so the whole manual queue, its acknowledgements, cancellation and cap are
+deleted, not disabled. The jslib exports one function, and the test covers exactly it:
+`CoreAi_PersistFsAutoSyncEnabled` reads the mount Unity created (`Module.__unityIdbfsMount`, whose
+`opts.autoPersist` is the flag the engine acts on), falls back to the raw
+`Module.autoSyncPersistentDataPath` only when a host replaced that mount, and answers "not armed"
+instead of throwing when the module is missing or hostile. The test also fails when a jslib export
+has no C# `[DllImport]` or a C# import has no export — a WebGL build is a costly place to discover it.
 
-`CoreAiWebGlPersistence.Sync()` reports only request acceptance; `false` means the request
-was refused queueing or a flush could not start. `SyncAsync()` is required to confirm persistence.
-A physical flush error is published once, including requests with no pending callback.
-
-One flush runs at a time and one next-flush intent is stored. At most 64 requests await
-acknowledgement: `PendingRequestCount` also counts callbacks
-already picked by the scheduler but not yet started. Cancellation frees their slots and
-suppresses the late callback while keeping the flush itself and the intent to write data.
-`PendingFlushCount` shows 0, 1, or 2 required flushes.
-
-One scheduler task invokes at most 8 callbacks and checks the 2 ms budget between them.
-A callback itself is never interrupted; acknowledgements it enqueues are handled by the next task.
-Without an async scheduler the request is rejected; there is no synchronous recursive walk.
+`CoreAiWebGlPersistence.Sync()` / `SyncAsync()` return that same answer and wait for nothing: `true`
+means the completed write has been handed to the engine's automatic persistence, `false` means the
+page never armed it and the write dies with the tab. Neither claims an IndexedDB transaction has
+committed — Unity exposes no signal for that. A build cannot ship without the flag:
+`CoreAIWebGlPersistentDataSyncBuildGuard` fails the WebGL build whose web template does not set
+`config.autoSyncPersistentDataPath = true`.
 
 # Part C — PlayMode
 

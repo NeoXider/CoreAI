@@ -519,10 +519,12 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(10L, r.Usage.InputTokenCount);
             Assert.AreEqual(7L, r.Usage.OutputTokenCount);
             Assert.AreEqual(17L, r.Usage.TotalTokenCount);
-            Assert.AreEqual(4L, r.Usage.CachedInputTokenCount);
-            Assert.IsFalse(r.Usage.AdditionalCounts.ContainsKey("prompt_tokens_details.cached_tokens"));
-            Assert.IsFalse(r.Usage.AdditionalCounts.ContainsKey("completion_tokens_details.reasoning_tokens"));
-            Assert.AreEqual(5L, r.Usage.ReasoningTokenCount);
+            // Everything outside the three counters MEAI types keeps its dotted wire path in
+            // AdditionalCounts - one carrier for cache, reasoning, audio and vendor extensions alike.
+            // The typed CachedInputTokenCount/ReasoningTokenCount properties are deliberately not used:
+            // they exist only in Microsoft.Extensions.AI 10.x, above the consumer's 9.10.2 floor.
+            Assert.AreEqual(4L, r.Usage.AdditionalCounts["prompt_tokens_details.cached_tokens"]);
+            Assert.AreEqual(5L, r.Usage.AdditionalCounts["completion_tokens_details.reasoning_tokens"]);
             Assert.AreEqual(1L, r.Usage.AdditionalCounts["prompt_tokens_details.audio_tokens"]);
             Assert.AreEqual(2L, r.Usage.AdditionalCounts["completion_tokens_details.audio_tokens"]);
         }

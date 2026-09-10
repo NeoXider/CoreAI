@@ -4,7 +4,100 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
-## [7.37.0] - 2026-09-09
+## [7.41.0] - 2026-09-10
+
+### Changed
+
+- **The summary-preflight EditMode scenarios say what a broken turn actually leaves behind.** Core
+  removed `UserTurnHistoryLatch.SummaryPreflightPending`, so a turn that dies while building its
+  conversation context now records the learner's message instead of dropping it (see the core changelog
+  for why). The host fixtures that pinned the old behaviour moved with it: `AssertOldSourceRetained`
+  split into `AssertPreparationInFlight` and `AssertUndispatchedTurnKeptUserIntent`, the latter now also
+  asserting the resulting bounded window — the append lands last and the oldest message is what pays for
+  it, which is the cost the old helper's name denied. A third helper,
+  `AssertRetryAfterUndispatchedTurnPublished`, asserts the full append sequence of the retry that follows
+  such a turn, including the second copy of the learner's message that a per-invocation latch cannot
+  prevent. Without it those retry sites asserted only the provider call and the summary, and a swallowed
+  or tripled user turn would have passed. Ordinary, streaming and queued mirrors share the three helpers.
+- **`Docs/MEMORY_STORE_CUSTOM_BACKENDS.md` describes the preflight the orchestrator actually runs.** It
+  no longer promises that a failed preflight suppresses the user append, and it now names what a custom
+  backend has to plan for: write-once is per orchestrator invocation rather than per learner message, an
+  `AppendChatMessage` that throws during failure teardown is warned about rather than retried, and a chat
+  cap has to be sized against the fold window (the shipped stores trim at 500 while folding starts around
+  thirty) rather than against a single turn.
+- **Russian release notes in `Assets/CoreAI/CHANGELOG.md` are translated.** The 7.40.0 mods section was
+  written in Russian, and `EnglishOnlyProseEditModeTests` only scans `*.cs`, so nothing caught it —
+  the English-prose rule in `AGENTS.md` covers package docs and changelogs too.
+
+## [7.40.0] - 2026-09-10
+
+### Changed
+
+- **All prose in the shipped packages is English, and a guard now says so.** The rule had lived in
+  `AGENTS.md` from the start with no check, and ended with an escape hatch ("migrate legacy text
+  gradually, never as a standalone wave"). That hatch is why 99 source files still carried Russian
+  comments - including the load-bearing WHYs on the memory store and the streaming client, which are
+  exactly the ones a consumer needs to read. `EnglishOnlyProseEditModeTests` scans every package and
+  names the file and line. Non-Latin text that is QUOTED - a test's input data, or a verbatim sample
+  of observed model output cited as evidence - stays, listed with a written reason; the excuse is
+  mechanical and per line, so an ordinary Russian comment in those files still fails.
+
+### Fixed
+
+- **Two skills saved at the same moment: one saved, the other refused - and the refused edit was
+  gone.** `FileSkillStore` guards its directory with one gate, and taking that gate had always been
+  forked by platform: a WebGL player has a single thread, so a busy store answers "busy; retry" at
+  once (parking that thread would park the code that must release the gate), while every other
+  platform waits its turn and then runs. The publication wave of 7.39.0 collapsed the fork and left
+  the WebGL half everywhere. In the editor and in a desktop build the synchronous API - which is what
+  `SkillAuthoringCoordinator`, `AgentBuilder` and `Save`/`Delete`/`Mutate` all use, and which has no
+  retry of its own - began throwing `InvalidOperationException` whenever another operation happened to
+  hold the gate: two mods, or two coordinators over one skills folder, produced one saved skill and
+  one exception, and the second author's edit was simply lost. The fork is restored, so concurrent
+  writers serialize and every one of them commits, in order.
+- **The refusal that still matters is now told apart from the wait that never did.** A synchronous
+  caller must never park behind an ASYNCHRONOUS holder: that one releases the gate from a
+  continuation, and the continuation may be owed to the very thread the wait would park - the
+  deadlock `FileAgentMemoryStore` still carries. `FileSkillStore` therefore counts its in-flight
+  asynchronous operations and keeps refusing that case immediately, on every platform, while waiting
+  out an ordinary synchronous holder. `FileSkillStoreEditModeTests` (cross-instance ordering) and
+  `FileSkillStoreAsyncEditModeTests` (the non-blocking refusal) pin the two halves against each other.
+
+### Tests
+
+- **One MEAI test scripted a single model answer where the code legitimately asks for two.**
+  `MeaiLlmClientEditModeTests.CompleteAsync_FinalAssistantMessage_ConcatenatesTextPartsAndDropsNonText`
+  used a `FunctionCallContent` as an inert decoy while its request carried no tools at all, so the call
+  was an invented name bound to nothing - and since 7.39.0 that is not inert: CoreAI answers the
+  invented call itself with the list of tools that do exist, writes its own assistant/tool pair into
+  the history and asks the model again, because an answer nobody reads corrects nothing. The test now
+  scripts that correction turn, with deliberately different text and reasoning in the discarded first
+  answer, so the assertions also show that nothing from it leaks into the visible reply. No production
+  behaviour changed.
+- **`QueuedAiOrchestratorEditModeTests` broke the engine-free build.** A newly declared
+  `LogAssert.Expect` brought `using UnityEngine;` into a fixture that `tools/portable/Tests` also
+  compiles, and that project has no Unity assemblies - the whole portable gate stopped building. The
+  Unity-only expectation and its usings are gated behind `UNITY_5_3_OR_NEWER`, the way
+  `SkillSetEditModeTests` already does it.
+
+## [7.39.0] - 2026-09-10
+
+### Fixed
+
+- **The EditMode run stopped hanging on `ClientLimitedLlmClientDecoratorEditModeTests`.** The fixture
+  blocks on `Task.Result` to prove the concurrency cap holds while a request is still in flight, and
+  the decorator deliberately keeps its continuations on the captured context (WebGL has no thread pool
+  to post them to). On Unity's SynchronizationContext those two facts meet: the continuation is posted
+  to the very thread the block is holding, and the editor sits idle forever with no results file.
+  Found by running the assembly one fixture at a time under a hard time limit — it was the only one of
+  eighteen that never came back.
+- **The gate awaits in `FileAgentMemoryStore` got their `ConfigureAwait(false)` back.** Removing them
+  on 2026-09-09 was a wrong call made while chasing a different bug: without the flag the continuation
+  that RELEASES the gate is marshalled to the caller's context, while a synchronous
+  `Save`/`TryLoad`/`GetTranscriptEntries` on that same thread takes the same gate with a blocking
+  `Wait()`. That is the same deadlock as above and it reproduces in the editor, not only in a browser.
+
+## [7.38.0] - 2026-09-09
 
 ### Fixed
 
@@ -25,9 +118,294 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   `FileConversationSummaryStore` logged every other storage failure; the directory case was outside
   the try that logs.
 
-## [7.36.0] - Unreleased
+## [7.36.0] - 2026-09-09
 
-> Release preparation after merging with the published 7.35.0. This version is not released yet. Before the merge, the Core, Source, Tests, MCP and MCP.Tests assemblies compiled without errors; the full EditMode/PlayMode run and the final audit of the merged tree are still to be done. The 7.35.0 verification results below apply only to the published version.
+WebGL durability was rewritten around the engine's own persistence, because the channel CoreAI had been
+driving turned out to be dead. Verification state, stated plainly: the evidence below comes from a served
+WebGL player built on 2026-09-09 and from the portable .NET leg; the full Unity EditMode/PlayMode run was
+not part of this release's gate.
+
+### Breaking
+
+- **A WebGL build now fails unless the selected web template arms browser storage.**
+  `CoreAIWebGlPersistentDataSyncBuildGuard` is an unconditional `IPreprocessBuildWithReport`: the first
+  WebGL build after updating to 7.37.0 aborts in **every existing project** whose template does not pass
+  `config.autoSyncPersistentDataPath = true` to `createUnityInstance()` — which is every project built
+  on Unity's stock templates, where that line ships **commented out**.
+
+  *Why a build failure and not a warning.* Since Unity 6.3 that flag is the only channel carrying
+  `Application.persistentDataPath` into IndexedDB: the manual `FS.syncfs` path is deprecated and its
+  completion callback never fires, so CoreAI stopped driving it. Without the flag, agent memory, skills,
+  Lua mods, Lua version history and world packages are written into the tab's in-memory filesystem and
+  are gone on reload — silently, because every write reports success. That is exactly what the
+  2026-09-09 player shipped with, and a warning would have been read the same way it was read then.
+
+  *Migration — one minute, pick one:*
+  1. Run the menu item **`CoreAI/Setup/Install WebGL Template`**. It copies the template that ships
+     inside `com.neoxider.coreaiunity` into `Assets/WebGLTemplates/CoreAI` and selects it in
+     Project Settings → Player → Web → Resolution and Presentation → WebGL Template.
+  2. Or add `config.autoSyncPersistentDataPath = true;` to **your own** template, next to the other
+     `config.` assignments and before `createUnityInstance(canvas, config, ...)`.
+  3. Or, if this player ships without CoreAI's persistent storage on purpose, add the scripting define
+     symbol **`COREAI_WEBGL_NO_PERSISTENCE`** to Project Settings → Player → Web → Other Settings →
+     Scripting Define Symbols. The build then proceeds and CoreAI logs one warning per build naming
+     what is given up — the refusal is stated, never silent.
+
+  Closed inside this release, before publication: the gate first travelled **without** the fix it
+  demanded. The template that satisfies it lived in CoreAI's own `Assets/WebGLTemplates`, outside both
+  packages, so a consumer received the gate, never received the template, and read an error message
+  pointing at a path that does not exist in their project — verified on RedoSchool, whose own template
+  lacked the line. The template now ships inside the package, the installer puts it where Unity looks
+  for it, every message names project-local actions, and the gate is refusable.
+
+### Fixed
+
+- **The Node boundary test stopped testing a channel that no longer exists.**
+  `Tests/Node~/persist_fs_jslib_test.js` loaded the real `CoreAiPersistFs.jslib` and called five exports
+  deleted with the manual `FS.syncfs` queue (`CoreAi_PersistFsSync`, `…SyncAsync`, `…CancelWaiter`,
+  `…PendingRequestCount`, `…PendingFlushCount`), so it failed on its first call — while
+  `Tests/README.md` still prescribed running it and described the removed contract as current. Rewritten
+  against the one export that remains, because it answers the one question C# cannot: whether the
+  engine's automatic `persistentDataPath` persistence is armed for this page. Nine checks cover the
+  mount Unity creates (`opts.autoPersist` outranks a raw config that claims otherwise), the fallback to
+  `Module.autoSyncPersistentDataPath` when a host replaced that mount, and "not armed" — never a throw
+  into the player — for a missing or hostile module. The last check fails when a jslib export has no C#
+  `[DllImport]` or an import has no export, which is exactly the orphan this wave left behind and which
+  otherwise surfaces only as a link failure in a WebGL build.
+- **The fallback backend no longer loses `extraBodyJson`.** `SecondarySettingsAdapter` forwarded every
+  provider knob from the asset — temperature, max tokens, reasoning mode, thinking budget, timeout — and
+  returned `""` for the raw provider body alone. That field is where the fields that decide sampling,
+  routing and thinking live, so a failover answered with different model behaviour than the primary while
+  the settings screen kept showing one configuration: nothing on screen, in logs or in the asset said the
+  value had been dropped. Only the endpoint identity (URL, key, model) is secondary now; everything else is
+  the configuration the operator set. Guard:
+  `LlmPipelineInstallerEditModeTests.SecondaryAdapter_ForwardsProviderBodyJson_AndKeepsOnlyTheEndpointIdentitySecondary`.
+- **`memory action=write` reported failure in the browser for data that was already durable.** Every async
+  write ended in a durability confirmation that awaited the `FS.syncfs` completion callback. On a served
+  player that callback **never arrives** — not once, not after minutes — so the `memory` tool body never
+  returned and `ToolExecutionPolicy` killed it at the 30 s tool timeout. The model was then told the write
+  had failed, while a later page reload read the value straight back (`status=OK dur=5ms`). Evidence:
+  `artifacts/testresults/g11-browser-console-run2-after-fix.log`, Unity 6000.3.14f1. Confirmation is now
+  synchronous and honest (see the durability rewrite below), and `FileAgentMemoryStore`'s error text was
+  retargeted at the only real failure left: the write reached the in-memory filesystem, but this page has
+  no durable storage armed.
+- **A scheduled agent that failed on every tick failed silently for the whole session.**
+  `AiScheduledTaskTrigger` fired the orchestrator with `_ = orch.RunTaskAsync(...)`, and Unity does not
+  surface unobserved task exceptions — the designer saw a timer that "does nothing". The task is now
+  observed: cancellation is logged at debug, anything else as a warning.
+- **Cancelling a wait for endpoint activation parked the caller forever in a WebGL player.** Two
+  `TaskCompletionSource`s in `LlmClientRegistry` were created with `RunContinuationsAsynchronously` and
+  consumed by `Task.WhenAny`, whose internal continuation captures no synchronization context — so the
+  resumption was handed to a thread pool the browser does not have. This is exactly the path the old
+  guard allowlist had written off as "not reproduced in production, so left alone".
+- **The Lua version store and the skill store poisoned themselves in the browser.** Both queued a pending
+  durability confirmation unconditionally under `#if UNITY_WEBGL && !UNITY_EDITOR`, while every production
+  caller reaching that code is synchronous and only the async entry points clear the mark. The first mod
+  that recorded a revision, and the first skill written, made every later synchronous call throw
+  ("Version durability is unconfirmed" / "Skill durability is unconfirmed") for the rest of the session —
+  two red errors per mod load. Reading poisoned the skill store too, because the legacy-name migration
+  runs from `TryLoad`. The mark is now parked only when a caller actually supplied a confirmation hook.
+  **Both defects were introduced and found inside this wave** — they never reached a published release —
+  but they reached a real built player, which is why they are guarded rather than quietly fixed:
+  `DurabilityMark_IsNeverParkedFromAWebGlOnlyBranch_InEitherFileBackedStore` parses both files,
+  tracks `#if`/`#else`/`#endif` nesting, and fails if a `RecordPending(` ever reappears inside a
+  WebGL-only branch.
+- **Two unconditional blocking waits removed from `FileLuaScriptVersionStore`.** `MutateOnDisk` and
+  `ReadFromDisk` called `gate.Wait()` on the WebGL-reachable path — a deadlock on a single thread.
+  Contention is now answered promptly ("Version store is busy; retry after the current operation")
+  instead of blocking. The equivalent wait in `FileSkillStore` went away with its move to a real async
+  gate.
+- **A failed WebGL flush left a conversation summary readable as durable by the next store instance.**
+  History was then folded against a summary that would not survive a reload, so after the reload both
+  were gone. `FileConversationSummaryStore` now carries a per-path generation with the pending
+  confirmation, so a stale callback cannot acknowledge a newer write and an unconfirmed write cannot be
+  read as committed. The test that asserted the old behaviour was flipped.
+- **A terminal failure chunk carrying visible text no longer discards that text** in `CoreAiChatPanel`.
+
+### Changed
+
+- **WebGL durability now rides the engine, and CoreAI stopped pretending it can confirm it.** The
+  hand-written completion channel is gone (see Removed). What replaces it is Unity's own IDBFS
+  auto-persist, armed by `config.autoSyncPersistentDataPath = true` in the web template: Unity mounts
+  IDBFS with `autoPersist` and queues an IndexedDB write from the filesystem hooks on every write, close,
+  rename, unlink, mkdir and rmdir. `CoreAiWebGlPersistence.Sync()` now answers a question it can actually
+  answer — *is durable storage armed on this page* — by reading the mount options through the one
+  remaining jslib export. It explicitly does **not** claim the IndexedDB transaction committed; Unity
+  exposes no signal for that, and inventing one is what this class stopped doing. A page without the flag
+  gets one loud error naming the fix, and every write keeps failing visibly rather than lying.
+  `WorldStateManager.ConfirmDurability` was restated on the same terms.
+- **`CoreAiChatService` can return the whole completion, not just a string.** New `SupportsTaskResults`
+  and `SendMessageResultAsync` preserve the terminal status, partial content, executed tools and provider
+  metadata; a legacy orchestrator is refused with `NotSupportedException` rather than having a success
+  invented for it. `CoreAiChatPanel.SubmitMessageFromExternalAsync` correspondingly returns the new
+  `CoreAiChatExternalSubmitResult` instead of `string?` — **a breaking signature change**, and a
+  deliberate one: admission is not success, and an admitted failure may already have executed tools, so
+  a caller must be able to see the difference before deciding to retry. `CoreAiChatExternalSubmitRejection`
+  names why a message never entered a turn (busy, inactive, empty, filtered, cancelled, service
+  unavailable, typed results unavailable).
+- **The idle turn deadline is one watchdog instead of a timer per re-arm.** `IdleTimeoutDeadline` used to
+  dispose the running `CancelAfterSlim` handle and schedule a fresh one on **every** sign of progress —
+  and streaming re-arms on every chunk, i.e. a new `PlayerLoopTimer` plus a player-loop registration per
+  token, on WebGL's single thread, while the model is still speaking. `Rearm` is now a single volatile
+  timestamp write that allocates nothing and is no longer best-effort (it was previously swallowing
+  failures from off-main-thread callers); one realtime delay sleeps the window and, on waking, either
+  cancels or sleeps for exactly what is left. The cancellation moment is unchanged.
+- **Conversation summaries stay file-backed on WebGL, for a stated reason.** The old objection
+  ("synchronous file IO on WebGL goes to IndexedDB and stalls the loop") does not match the platform:
+  `persistentDataPath` there is the tab's in-memory filesystem and the engine carries it to IndexedDB
+  itself. A session-only store meant an empty summary after a tab reload — the start of the lesson gone,
+  and the next compaction paying an LLM call to re-summarize the same prefix.
+
+### Removed
+
+- **The manual `FS.syncfs` channel — 199 of 235 lines of `CoreAiPersistFs.jslib`, and half of
+  `CoreAiWebGlPersistence`.** The single-flight queue, its 64-waiter cap, the delivery scheduler
+  (8 callbacks / 2 ms budget), the five `DllImport`s, the `[MonoPInvokeCallback]` completion, the 30 s
+  timeout, `PendingRequestCount` / `PendingFlushCount` and the `timeout` parameter of `SyncAsync` are all
+  gone. It was not merely redundant, it was **dead**: Unity deprecated `JS_FileSystem_Sync()` and the
+  callback never fires, so `SyncWebGlAsync` never resumed — not even through its own escape hatch. It is
+  removed rather than kept "for later", because a confirmation channel that never confirms is worse than
+  none: callers report a false failure for data that is in fact durable.
+
+### Added
+
+- **A WebGL template that arms storage — shipped inside the package — an installer that puts it in the
+  consuming project, and a build guard that refuses to ship without it.** The template lives at
+  `WebGLTemplates~/CoreAI` in `com.neoxider.coreaiunity` and sets
+  `config.autoSyncPersistentDataPath = true` before `createUnityInstance()`; Unity's stock templates
+  ship that line **commented out**, which is exactly what the 2026-09-09 build shipped on.
+  A package cannot publish a *selectable* template — Unity builds the template list from
+  `WebGLTemplateManager.customTemplatesFolder` (`Application.dataPath/WebGLTemplates`) plus the editor
+  installation, and the build resolves `PROJECT:Name` against the same folder — so
+  `CoreAIWebGlTemplateInstaller` and the menu item `CoreAI/Setup/Install WebGL Template` copy it into
+  `Assets/WebGLTemplates/CoreAI` and select it. Copying is the mechanism, not a workaround. The `~`
+  suffix keeps Unity from importing the packaged copy, so it needs no `.meta` files and cannot be
+  mistaken for a project template, and UPM delivers it exactly as it delivers `Samples~`.
+  `CoreAIWebGlPersistentDataSyncBuildGuard` resolves the selected template's `index.html` at build
+  preprocess, strips comments, and aborts the build if the flag is not really set. Each message names
+  what is lost (agent memory, skills, Lua mods, Lua version history, world packages), the exact line to
+  add, the menu item that installs the ready one, and the opt-out symbol — three actions, all of them
+  inside the reader's own project. `COREAI_WEBGL_NO_PERSISTENCE` on the Web platform stands the gate
+  down and logs one warning per build; when the selected template turns out to arm storage anyway, that
+  warning says the symbol is now redundant, so a stale opt-out cannot quietly outlive the defect it was
+  added for. The define is *read* from player settings rather than compiled in, because a `#if` would
+  make the escape hatch untestable and would answer for the editor's platform instead of the Web one.
+  Twenty-six tests cover this, and — deliberately — **through the real `OnPreprocessBuild`, not only
+  through the pure parsing helpers**: a helpers-only fixture would let the class stop implementing
+  `IPreprocessBuildWithReport` (that interface *is* the registration with Unity's build pipeline) and
+  stay green while builds shipped again with storage disarmed. So one test asserts the interface is
+  still implemented; four drive the real preprocess against a template fixture (stock commented-out flag
+  raises `BuildFailedException`, an unreadable template raises it too, an armed template passes, and
+  `OnPreprocessBuild_ProjectsOwnWebGlTemplate_PassesItsOwnGate` puts this project's own selected template
+  through its own gate); one drives it through the constructor Unity itself calls, so the default define
+  reader is exercised too; three cover the opt-out (build proceeds, warning is emitted and names the
+  loss, redundant opt-out says so); two assert the failure messages carry the line, the menu item and
+  the symbol; and five cover the installer — the packaged template exists, it passes the gate it exists
+  to satisfy, it installs where Unity resolves `PROJECT:` templates, a reinstall replaces rather than
+  merges, and the copy in this repository still matches the packaged source byte for byte. The parser
+  cases (object-literal entry accepted, block-commented assignment rejected, trailing comment still
+  accepted) remain. Test fixtures live in `~`-suffixed folders so Unity never imports them, and the
+  selected template is saved and restored per test.
+
+### Guards
+
+- **The WebGL unsafe-primitive scanner grew from 5 banned primitives to 13 and learned to distrust its
+  own exception list.** New bans cover the whole blocking-wait family: `.Wait()`, `.Wait(timeout)`,
+  `Monitor.Wait`, `.WaitOne`, `Thread.Sleep`, `Task.WaitAll/WaitAny`, `.GetAwaiter().GetResult()` and
+  `.Result` (`Wait(0)`, the non-blocking probe, stays legal). It now also scans `Assets/CoreAIMods/Runtime`,
+  a blind spot until this wave. **Every allowlist entry must now carry a claim, not prose**, and most
+  claims are checked mechanically: "not constructed in production" is falsified by searching for the
+  constructor, "continuations resume on the host context" is falsified by finding a
+  `ConfigureAwait(false)` or a `Task.WhenAny` in the same file, "pinned by a test" must name a test type
+  that still exists, and an accepted risk must start its reason with the literal `NOT PROVEN SAFE:`.
+  This exists because prose rots quietly: the entries for the timeout and streaming-retry decorators said
+  "not on the browser-verified path" while `LlmPipelineInstaller` wrapped the routing client in exactly
+  those two decorators, so every WebGL chat request went through them. The scanner also proves itself —
+  all 13 primitives must be found in seeded synthetic code, decoys must not fire, and one test pins the
+  very type whose false claim started this.
+- **62 `ConfigureAwait(false)` calls were removed from production runtime** (12 re-added inside off-WebGL
+  branches), because a detached continuation in a browser player is a continuation that never runs.
+  Worth recording honestly: 17 of them were removed from `FileAgentMemoryStore` while chasing the hung
+  `memory action=write`, and a rebuilt player proved that was **not** the cause. The rule stays because
+  the hazard it prevents is real, not because it fixed that bug.
+
+### Performance
+
+- **The chat panel stopped copying the whole answer on every token.** `fullResponse` and the rendered
+  segment grew by `string +=` per visible chunk — quadratic in the answer length, on WebGL's single
+  thread, while the model is still speaking. Both are `StringBuilder` now, materialized once at turn end;
+  the message-boundary rule was not duplicated but delegated to `StreamedMessageJoiner`'s existing builder
+  overload, with one reused scratch chunk so the fix does not trade an O(n²) copy for a per-token
+  allocation. `StreamedMessageJoinerEditModeTests` pins the two overloads' agreement at every boundary
+  position. Also: the outcome's content is written once in `finally` instead of on every chunk, and the
+  long-request hint is rebuilt once a second instead of every frame (120 strings a second for one visible
+  change at 60 fps).
+- **`AiDashboardPresenter` rebuilt its overlay text on every repaint** — a fresh `StringBuilder`, up to 48
+  lines, several times a frame — although the content changes only when a command is routed. Now built on
+  demand and reused; permission flags are compared by value so a flag flipped on the same asset still
+  shows.
+- **The two diagnostics overlays reformatted their hotkey hint on every repaint**, boxing the `KeyCode`
+  each time. Cached against the key.
+- **`TokenBudgetRuntimeSource` paid four thrown-and-caught `VContainerException`s per second** for the
+  whole session in a scene that registers none of those services — under IL2CPP/WebGL a throw is a stack
+  unwind through native frames. Replaced with `TryResolve`.
+- **`CoreAiWebGlLlmUnitySceneGuard` built a fresh `AssemblyName` per component**, for every enabled
+  behaviour, on ten consecutive frames after each scene load, in the browser. The verdict is now cached
+  per assembly; the guard test asserts a rescan allocates nothing.
+- **`WorldStateManager.ReadColor` allocated a native-backed `MaterialPropertyBlock` per tracked object per
+  save** (default every 60 s, plus every quit). One scratch block is reused, cleared before each read; the
+  transform read went from 9 native property hits to 3.
+- **`AuditLogWriter`'s flush tick allocated a batch list twice a second for the whole session**, on the
+  main thread on WebGL, with an empty queue almost every time. Guarded by two allocation tests.
+- **`ConversationHistoryPartition` created a fresh `SHA256` per message** and hashed the whole history per
+  request; now one instance per pass, with hex built into a `char[]`.
+
+### Docs
+
+- **The documents that still described the deleted manual durability channel now describe what runs.**
+  `Assets/CoreAiUnity/README.md`, `Docs/ARCHITECTURE.md`, `Docs/DGF_SPEC.md`, `Docs/WORLD_COMMANDS.md`,
+  `Runtime/Source/Features/Chat/README_CHAT.md`, `Tests/README.md`, `Assets/CoreAI/Docs/RBX_API.md`,
+  `Assets/CoreAI/Docs/AGENT_BUILDER.md`, `Docs/ROADMAP.md`, `Docs/CoreAIMods/WORLD_PACKAGE.md` and
+  `AGENTS.md` promised `CoreAi_PersistFsSync`, an `FS.syncfs` completion callback, a 30-second
+  durability wait and "queues IndexedDB synchronization". None of that exists: the engine persists,
+  `CoreAiWebGlPersistence.Sync()` / `SyncAsync()` return immediately with whether that persistence is
+  armed, and `CoreAIWebGlPersistentDataSyncBuildGuard` stops a build that would ship without it. The
+  `AGENTS.md` rule now states the behaviour to implement instead of naming a function to call.
+- **`ServerManagedCoreSettingsAdapter.ExtraBodyJson` stays empty on purpose, and now says why.** It looked
+  like the same omission as the secondary adapter's and was one edit away from being "fixed" into a
+  regression. Under `ServerManagedApi` the proxy owns the request body — it overrides
+  model/temperature/reasoning and caps the token ceiling, so the knobs that adapter does forward cannot
+  reach the provider unchecked. Raw `extraBodyJson` has no such owner: its keys pass straight to whichever
+  provider the operator selected today, a strict OpenAI-compatible implementation answers 400 to an unknown
+  parameter, and the field cannot be changed without shipping a new build. Pinned by
+  `LlmPipelineInstallerEditModeTests.ServerManagedAdapter_WithholdsProviderBodyJson_ButStillForwardsServerOwnedKnobs`,
+  which also checks the withholding stays scoped to the raw body.
+- **`README.md` rewritten** on the same shape as the other package READMEs: who this is for, quick start,
+  what is in the package, properties that each name the test backing them, an explicit **Limits and
+  non-goals** section, tests, documentation. "Never blocks the frame" is deliberately not among the
+  claims.
+- **`WEBGL_BUILD_TROUBLESHOOTING.md`** gained the build-abort message and why it is a real error rather
+  than a nag; `DEVELOPER_GUIDE.md`, `TROUBLESHOOTING.md`, `WORLD_COMMANDS.md` and `AUDIT_LOG.md` were
+  rewritten around `config.autoSyncPersistentDataPath = true` instead of the removed
+  `CoreAi_PersistFsSync` path.
+- **`STREAMING_ARCHITECTURE.md`, `TROUBLESHOOTING.md` and `COREAI_SETTINGS.md`** now describe the idle
+  watchdog — re-armed by every streamed chunk and every tool-call event — instead of the flat
+  `CancelAfterSlim` budget it replaced.
+- **`TOOL_CALL_SPEC.md` and `TOOL_AUTHORING_GUIDE.md`** were corrected against the real policy contract
+  (duplicate suppression is a success no-op, not an error; streaming mutations execute on arrival, not at
+  turn finalization; tool results are edited in exactly two documented ways). The new
+  `ToolDocsPolicyReferenceEditModeTests` resolves every `ToolExecutionPolicy.<member>` these documents
+  name, so the next such drift goes red instead of quiet.
+- **`MemorySystem.md`** gained a troubleshooting section for "the conversation is empty after a page
+  reload" — expected behaviour, not a lost write: `MemoryTool` facts always persist, the transcript only
+  with `PersistChatHistory`, and a chat-source request against a history-off role borrows short-term
+  history for that run only.
+- **`ARCHITECTURE.md` and `DEVELOPER_GUIDE.md`** gained "what this is / what this is not / find your
+  task" navigation tables.
+
+## [7.36.0] - 2026-09-08
+
+> Prepared by merging with the published 7.35.0. At merge time the Core, Source, Tests, MCP and MCP.Tests assemblies compiled without errors; the full EditMode/PlayMode run and the audit of the merged tree were not part of this release's gate. The 7.35.0 verification results below apply only to that version.
 
 ### Recovery 2026-09-07
 

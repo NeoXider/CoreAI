@@ -103,6 +103,8 @@ namespace CoreAI.Infrastructure.Llm
 #if COREAI_HAS_LLMUNITY
 namespace CoreAI.WebGl
 {
+    using System.Collections.Generic;
+    using System.Reflection;
     using CoreAI.Infrastructure.Llm;
 
     /// <summary>Installs the runtime containment pass for local-model components on unsupported players.</summary>
@@ -228,8 +230,7 @@ namespace CoreAI.WebGl
                     continue;
                 }
 
-                string assemblyName = behaviour.GetType().Assembly.GetName().Name;
-                if (!string.Equals(assemblyName, "undream.llmunity.Runtime", System.StringComparison.Ordinal))
+                if (!IsLlmUnityAssembly(behaviour.GetType().Assembly))
                 {
                     continue;
                 }
@@ -239,6 +240,33 @@ namespace CoreAI.WebGl
             }
 
             return disabled;
+        }
+
+        private const string LlmUnityRuntimeAssemblyName = "undream.llmunity.Runtime";
+
+        /// <summary>
+        /// Verdict per assembly, main-thread only (every caller is a Unity callback).
+        /// <para>
+        /// WHY: the sweep asked <c>Assembly.GetName().Name</c> for EVERY enabled behaviour it visited -
+        /// a fresh <see cref="System.Reflection.AssemblyName"/> plus its name string per component, ten
+        /// consecutive frames after each scene load and every rescan after that, in the browser player.
+        /// A scene has a handful of assemblies, so the answer is asked once per assembly and then read
+        /// by reference.
+        /// </para>
+        /// </summary>
+        private static readonly Dictionary<Assembly, bool> LlmUnityAssemblyVerdicts = new();
+
+        private static bool IsLlmUnityAssembly(Assembly assembly)
+        {
+            if (LlmUnityAssemblyVerdicts.TryGetValue(assembly, out bool isLlmUnity))
+            {
+                return isLlmUnity;
+            }
+
+            isLlmUnity = string.Equals(
+                assembly.GetName().Name, LlmUnityRuntimeAssemblyName, System.StringComparison.Ordinal);
+            LlmUnityAssemblyVerdicts[assembly] = isLlmUnity;
+            return isLlmUnity;
         }
     }
 }

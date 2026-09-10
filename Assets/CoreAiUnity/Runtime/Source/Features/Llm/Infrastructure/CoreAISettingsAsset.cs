@@ -801,10 +801,10 @@ namespace CoreAI.Infrastructure.Llm
         public int LlmUnityServerPort => llmUnityServerPort is < 1024 or > 65535 ? 13333 : llmUnityServerPort;
 
         /// <summary>
-        /// Канал вызовов инструментов у встроенного сервера LLMUnity для legacy-пути (клиент строится до
-        /// старта сервера, пробы там нет). <see cref="LlmToolChannel.Auto"/> = нативный: так ведёт себя
-        /// LlamaLib v2.0.5 из комплекта LLMUnity 3.0.3. <see cref="LlmToolChannel.Text"/> — для сборки,
-        /// отвергающей <c>tools</c> (llama.cpp без <c>--jinja</c>).
+        /// The tool-call channel of the built-in LLMUnity server on the legacy path (the client is built
+        /// before the server starts, so there is no probe there). <see cref="LlmToolChannel.Auto"/> = native:
+        /// that is how LlamaLib v2.0.5, bundled with LLMUnity 3.0.3, behaves. <see cref="LlmToolChannel.Text"/>
+        /// is for a build that rejects <c>tools</c> (llama.cpp without <c>--jinja</c>).
         /// </summary>
         public LlmToolChannel LlmUnityToolChannel => llmUnityToolChannel;
 

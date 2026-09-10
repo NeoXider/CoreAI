@@ -75,6 +75,38 @@ Often appears alongside **FileSystemWatcher** stacks while Unity or the OS enume
 
 Comes from **`CoreAIWebGlStreamingAssetsGuard`** (Editor preprocess). It intentionally skips certain StreamingAssets folders for WebGL so the build stays valid. **Informational**, not an error.
 
+## `[CoreAI] Build aborted: the WebGL template … never sets config.autoSyncPersistentDataPath = true`
+
+Comes from **`CoreAIWebGlPersistentDataSyncBuildGuard`** (Editor preprocess), and it is a real error,
+not a nag.
+
+Since Unity 6.3 the manual `JS_FileSystem_Sync()` path is deprecated and its `FS.syncfs` completion
+callback does not fire, so CoreAI stopped driving it: `config.autoSyncPersistentDataPath = true` in
+`createUnityInstance()` is now the **only** thing that carries `Application.persistentDataPath` into
+IndexedDB. Without it, agent memory, skills, Lua mods, Lua version history and world packages are
+written into the tab's in-memory filesystem and vanish on reload — silently, because every write
+"succeeds".
+
+Unity's stock templates contain the line **commented out**. Fix it in **your** project, in one of
+three ways:
+
+1. Add `config.autoSyncPersistentDataPath = true;` next to the other `config.` assignments in your own
+   template, before `createUnityInstance(canvas, config, ...)`.
+2. Run the menu item **`CoreAI/Setup/Install WebGL Template`**. It copies the template shipped inside
+   `com.neoxider.coreaiunity` (`WebGLTemplates~/CoreAI`, a `~` folder Unity does not import) into
+   `Assets/WebGLTemplates/CoreAI` and selects it in **Project Settings → Player → Web → Resolution and
+   Presentation → WebGL Template**. Unity only lists templates from `Assets/WebGLTemplates` and from
+   the editor installation, so a package cannot publish a selectable template — the copy is the
+   mechanism, not a workaround.
+3. If this player deliberately ships **without** CoreAI's persistent storage, add the scripting define
+   symbol **`COREAI_WEBGL_NO_PERSISTENCE`** to **Project Settings → Player → Web → Other Settings →
+   Scripting Define Symbols**. The build then proceeds and CoreAI logs one warning per build naming
+   what is given up; it is a stated decision, not a silent one.
+
+At runtime the same misconfiguration is reported once as
+`[CoreAiWebGlPersistence] This page did not enable automatic persistentDataPath synchronization…`,
+and every store write then fails visibly instead of claiming a durability it does not have.
+
 ## Invalid folder `.meta` GUID
 
 Unity requires **`guid:`** to be **exactly 32 hexadecimal characters**. A typo (33rd character) makes Unity ignore the folder asset and log **“does not have a valid GUID”**. Fix the line or delete the `.meta` and let Unity regenerate it.

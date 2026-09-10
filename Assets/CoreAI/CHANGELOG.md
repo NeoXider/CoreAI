@@ -1,6 +1,6 @@
 # Changelog
 
-## [7.40.2] - 2026-09-10
+## [7.41.1] - 2026-09-10
 
 ### Fixed
 
@@ -34,6 +34,21 @@
 
 ### Changed
 
+- **Хранение и передача пересказа разведены.** Слияние с параллельной линией столкнуло два
+  законных инварианта: их тест требует, чтобы ХРАНИЛИЩЕ держало пересказ целиком (вытеснение
+  старейшего сообщения безопасно только потому, что оно уже пересказано), а моя правка ограничивала
+  пересказ, чтобы запрос влезал в бэкенд. Конфликт был в конструкции: у менеджера одно поле
+  обслуживало и хранилище, и запрос. Теперь менеджер ограничивает сохраняемое только явным лимитом
+  пользователя и держит текст целым, а оркестратор ограничивает КОПИЮ, которая уходит в запрос, не
+  трогая снимок. Добавлен тест ровно на это противоречие, чтобы два бюджета нельзя было снова слить
+  в один.
+- **Инструмент подъёма версии перестал молча пропускать документы.** Он переписывает строку релиза
+  по жёстко заданным шаблонам, а количество пакетов в прозе изменилось с шести на семь — шаблон
+  перестал совпадать, строка осталась со старой версией, и падал уже релизный шлюз, называя файл, но
+  не причину. Оба места исправлены на семь, а ненайденная строка теперь останавливает подъём версии
+  там, где проблема возникла. Проверено намеренной поломкой прозы.
+
+
 - **Запись о закрытии MVP приведена в соответствие с кодом.** Манифест приёмки MVP8 перечислял
   замороженные идентификаторы, которых на диске нет, а существующая перекрёстная проверка сверяла
   каталог с файлами и markdown не читала — поэтому манифест мог врать сколько угодно; добавлена
@@ -48,110 +63,246 @@
   149 / 134 / 5 / 10, без обрыва. Ошибок переполнения контекста в логе не осталось ни одной.
   Пять оставшихся падений требуют живой модели: три таймаута ожидания и прямое «модель выгружена».
 
+## [7.41.0] - 2026-09-10
+
+### Fixed
+
+- **A turn that broke while building its context threw the learner's message away.** 7.40.0 introduced
+  `UserTurnHistoryLatch.SummaryPreflightPending`: raised as soon as conversation context building began,
+  lowered only once the rolling summary had been durably written, and while raised it made
+  `EnsureUserTurnRecorded` return without writing anything. Everything that can go wrong in that window
+  landed on the learner: the caller cancelling, a summary file that will not read, an LLM-assisted
+  compaction that is itself a network call and takes seconds. The question stayed on screen in the chat
+  while the model's history never learned it had been asked, and the next turn answered a conversation
+  with a hole in it. The gate is removed; the write-once user turn is unconditional again on every
+  terminal path — which is what the surrounding design already assumed, in `IUnstartedAiTurnRecorder`
+  and in the authority-denial branch of `RunTaskResultAsync` that exists purely so a refused turn cannot
+  bypass the same boundary.
+- **The gate could not have protected what it was defending, either.** Its stated purpose was to stop a
+  bounded store from evicting old messages that a still-unconfirmed summary retells. Skipping one append
+  does not save those messages: the next turn appends and evicts them just the same, so the guard bought
+  one turn of delay for the oldest message by destroying the newest one outright. Eviction safety is
+  owned where the eviction happens — the fold is committed before dispatch, so by the time any append
+  runs, whatever it can evict is already retold. In the shipped stores the two thresholds are not even
+  close: `FileAgentMemoryStore` and `InMemoryAgentMemoryStore` trim at 500 messages while folding is
+  driven by the context budget and starts around thirty, so the gate would have had to sit through
+  hundreds of consecutive failing turns — dropping a message each time — before it protected anything.
+- **The price of the fix, stated plainly: a resubmitted turn now records the learner's message twice.**
+  The latch is per orchestrator invocation, not per message — nothing in the store identifies a message
+  as the one already written — so a host that retries a request that died during context building
+  appends the same intent again. Under the removed gate that retry produced exactly one copy, because
+  the first attempt had written nothing. This is the trade being made and not a side effect that was
+  overlooked: a duplicated question is a conversation the model can still read, a missing one is not.
+  The retry scenarios in `AiOrchestratorRefactorEditModeTests`, its streaming mirror and its queued
+  mirror assert the full append sequence, so the count cannot drift back to a swallowed turn or on to a
+  third copy without a test saying so.
+
+### Changed
+
+- **A failed turn leaves the summary it prepared, and the test now says so.**
+  `RunTaskAsync_ContextOverflowRetriesFail_DoesNotPersistAttemptSummaries` was written against the
+  pre-7.40.0 ordering, where the summary was committed only after the owning request had succeeded, and
+  had been red since that ordering changed. It is renamed `…_StillCommitsTheSummaryTheAppendReliesOn`
+  and asserts what the new ordering requires: the fold covering the oldest source is committed, because
+  the teardown append relies on it, and the turn records the learner's message once. This is a retelling
+  of messages the store still holds, not new content, so the cost of a failed turn is a rolled summary
+  rather than a lost message.
+- **The summary-preflight tests assert the boundary they actually guard.** `AssertOldSourceRetained` split
+  into `AssertPreparationInFlight` (nothing dispatched, published, or appended while context is being
+  prepared) and `AssertUndispatchedTurnKeptUserIntent` (a turn that never reached the provider still holds
+  the learner's message exactly once, and the bounded window shows the append landing last). The ordinary,
+  streaming, and queued mirrors of that scenario were updated together, and `MEMORY_STORE_CUSTOM_BACKENDS.md`
+  no longer promises that a failed preflight suppresses the user append — it now spells out the three
+  consequences a custom backend has to plan for instead: write-once is per invocation, a teardown append
+  that throws is only warned about, and the chat cap has to be sized against the fold window rather than
+  against a single turn.
+
 ## [7.40.1] - 2026-09-10
 
 ### Fixed
 
-- **Полный прогон PlayMode по всем сборкам больше не теряется целиком.** Он обрывался с
-  «Playmode tests were aborted because the player was stopped» и НЕ писал файл результатов вообще,
-  из-за чего в задачах стояло «неизвестно, работал ли он здесь когда-нибудь». Ответ: работал, кроме
-  машин с локально установленным Mirror. Пакет необязательный и в репозиторий не входит, поэтому
-  сцены не хранят сетевой идентификатор; когда Mirror установлен, общий контроллер персонажа
-  становится сетевым компонентом, Unity создаёт идентификатор на лету с нулевым номером, а
-  обработчик Mirror на это выключает режим игры. Игрок останавливается, и исполнитель тестов теряет
-  весь прогон, а не один тест. Дым-тест демо-сцен теперь выдаёт таким объектам номер на порядок
-  раньше обработчика Mirror. Обработчик находится редактором глобально, поэтому он закрыт тремя
-  замками: работает только в режиме игры, отказывается работать при сборке игры и взведён ровно на
-  одну сцену за раз. Перезагрузка домена в проекте отключена, то есть статика переживает сессию, —
-  поэтому он снимается ещё и при выходе из режима игры.
-- **Тесты, которым нужна графика, честно помечаются пропущенными.** Шесть падений, которые обрыв
-  прятал, оказались средовыми. Пять требуют загруженной модели и оставлены строгими намеренно.
-  Шестое сравнивало отрисованные пиксели, а без графического устройства оба замера дают одно и то же
-  значение по умолчанию — это читается как «правка не дошла до шейдера», но не доказывает ничего.
-  Аудит подтвердил, что дефекта конвейера материалов здесь нет.
+- **The full PlayMode run across every assembly no longer disappears whole.** It aborted with
+  "Playmode tests were aborted because the player was stopped" and wrote no results file at all, so
+  the task list carried "nobody knows whether this ever ran here". It did — except on machines with
+  Mirror installed locally. The package is optional and is not in the repository, so the scenes carry
+  no network identity; with Mirror present the shared character controller becomes a networked
+  component, Unity mints an identity on the fly with a zero id, and Mirror's handler responds by
+  leaving play mode. The player stops, and the runner loses the entire run rather than one test. The
+  demo-scene smoke test now hands such objects an id one order of execution before Mirror's handler.
+  That handler is found globally by the editor, so it is kept behind three locks: play mode only,
+  refusal during a player build, and armed for exactly one scene at a time. Domain reload is off in
+  this project, so statics outlive the session — hence it is also disarmed on leaving play mode.
+- **Tests that need graphics are marked skipped honestly.** Six failures the abort had been hiding
+  turned out to be environmental. Five need a loaded model and are deliberately left strict. The
+  sixth compared rendered pixels, and without a graphics device both samples return the same default
+  — that reads as "the edit never reached the shader" while proving nothing. An audit confirmed there
+  is no material-pipeline defect here.
 
 ### Notes
 
-- Две отвергнутые версии, чтобы их не пробовали снова. Отменить остановку изнутри теста нельзя:
-  измерено, что ошибка Mirror приходит ПОЗЖЕ, чем отрабатывает код теста после загрузки. Список
-  проблемных сцен — неверная форма: пропуск одной сцены просто переносит остановку на следующую,
-  потому что дело в общем контроллере, а не в сцене.
-- Прогон на этом дереве: EditMode 4481 / 4472 прошли / 0 упали / 9 пропущено; полный PlayMode по
-  всем сборкам 149 / 135 / 4 / 10, без обрыва. Оставшиеся четыре требуют живой модели.
-
+- Two rejected versions, so they are not tried again. Cancelling the stop from inside the test is not
+  possible: it was measured that Mirror's error arrives LATER than the test's own post-load code runs.
+  A list of problem scenes is the wrong shape — skipping one scene simply moves the stop to the next,
+  because the cause is the shared controller, not the scene.
+- Run on that tree: EditMode 4481 total / 4472 passed / 0 failed / 9 skipped; the full PlayMode run
+  across every assembly 149 / 135 / 4 / 10, with no abort. The remaining four need a live model.
 ## [7.40.0] - 2026-09-10
-
-### Added
-
-- **Свой контроллер персонажа может сообщать измеренную скорость и отказывать в прыжке.**
-  `IRbxCharacterMotor` получил `double? MeasuredSpeed` и `bool TryJump(...)` — оба с реализацией
-  по умолчанию, поэтому чужой мотор, написанный до этой версии, продолжает собираться и ведёт себя
-  как раньше. Зачем: `Humanoid.Running` умножал ЕДИНИЧНЫЙ `MoveDirection` на `WalkSpeed`, то есть
-  мог отдать только ноль или полную скорость, и срабатывал один раз при входе в состояние. Зеркало
-  говорит другое: сигнал срабатывает, когда скорость бега МЕНЯЕТСЯ, и отдаёт ноль при остановке.
-  Теперь так и есть, а `UnityRbxCharacterMotor` отдаёт скорость, разрешённую солвером, так что
-  персонаж, упирающийся в стену, читается как стоящий, хотя заданная скорость не менялась.
-  **Порядок сигналов теперь часть контракта:** выход из состояния бега сообщает остановку ПЕРЕД
-  сменой состояния, то есть до `FreeFalling` или `Jumping`, а вход в бег сообщает скорость ВСЕГДА,
-  даже если значение не изменилось. Без первого правила обработчик, выбирающий позу покоя по нулю,
-  побеждал обработчик падения в том же кадре, и персонаж стоял в воздухе. Без второго приземление
-  в покое не сообщалось вовсе, и скрипт никогда не выходил из позы падения. Скобка стоит в самом
-  переходе состояний, поэтому покрывает все три выхода из бега — полёт, прыжок и смерть.
-  Мотор с уничтоженным телом отдаёт `null`, а не ноль: исчезнувшее тело не остановившийся персонаж.
 
 ### Fixed
 
-- **Падение чужого кода при выключении мира больше не оставляет мир недоразобранным.**
-  `IRbxCharacterMotor.Release` — это код игры, и он вызывался незащищённым в трёх местах. Хуже
-  всего было при `Dispose`: флаг «уже уничтожен» ставился раньше, поэтому одно исключение обрывало
-  весь остальной демонтаж навсегда — планировщик продолжал звать уничтоженный объект, соединения и
-  потоки оставались жить, а повторная попытка сразу выходила. Теперь владение мотором снимается
-  ДО вызова чужого кода, каждый вызов изолирован, а отказ уходит в диагностику реестра.
-- **`ScriptContext:SetTimeout` больше не превращает большое значение в маленькое.** Проверка
-  ловила бесконечность, но не диапазон, а приведение слишком большого числа к целому не определено
-  и на x64 даёт минимальное целое — которое читалось назад как короткое значение по умолчанию.
-  Потолок теперь назван явно (2147483.647 с, около 24.8 суток), всё выше отклоняется с внятной
-  причиной вместо тихой подмены.
-- **Смерть персонажа сообщает нулевую скорость.** Обработчик отказывается считать мёртвого, поэтому
-  скрипт анимации оставался с последним ненулевым значением навсегда при выключенном автовозрождении.
-  Ноль отправляется один раз, до сигнала смерти, чтобы обработчик смерти не догоняло запоздалое
-  указание вернуться в покой.
-- **Дрожание на границе остановки больше не шлёт событие каждый кадр.** Вместо одного порога —
-  гистерезис: идущий останавливается ниже 0.1 стад/с, стоящий должен набрать 0.2, чтобы снова
-  считаться идущим. Полоса равна ровно одному шагу разрешения, поэтому изменение меньше того, о
-  котором вообще сообщают, не может перебрасывать состояние туда-сюда.
-- **Ядро репликации: три дефекта.** Диагностика на путях восстановления шла мимо обёртки, гасящей
-  бросающий приёмник, — упавший логгер срывал запрос ресинхронизации после частично применённой
-  пачки, и реплика оставалась рассогласованной. Первичное создание игрока переносило отображаемое
-  имя и ссылку на персонажа мимо списка разрешённых полей, так что фильтр честно защищал правки, но
-  протекал на первом снимке. Пустое отображаемое имя подменялось логином, хотя сериализатор его
-  явно разрешает и сохраняет дословно; профильное значение теперь выбирается в момент допуска
-  игрока, а восстановление и реплика получают сохранённое дословно.
+- **Every RunService signal fired twice per frame, because the merge left two frame authorities in
+  the tree.** The publication wave had made `LuaCsRbxApiBindings.PumpSchedulerPhase` route all six
+  scheduler phases instead of only input processing — a real production fix, since the shipped host
+  (`LuaModRuntimeTickDriver` → `RbxWorldRuntimeSessionController.PumpFrame`) advances the scheduler and
+  does nothing else, so any phase not routed there never fires its signals in a built player at all.
+  7.39.0 branched before that change and kept the older host shape, in which the caller fires the
+  signals itself through the public `Pump*` methods and then advances the scheduler to drain them.
+  Merging the two took the routing and inherited the older callers, so each frame ran twice: `Stepped`,
+  `Heartbeat` and `RenderStepped` fired once from the scheduler phase and again from the pump beside it.
+  A mod's per-frame counter doubled, a Heartbeat handler cut for a runaway loop was cut a second time in
+  the same frame (`ModHandlerErrored` and `ThreadFaulted` each raised twice for one offence), and the
+  observable phase order came out `SSDHHIRR` where the contract is `SDHIR`.
+- **The scheduler is now the single frame authority, and the duplicate route is gone rather than
+  filtered.** `ModScheduler.Advance` walks the phase pipeline and the bindings that own both that
+  scheduler and the RunService instance fire each phase exactly once from `PhaseReached`.
+  `LuaModRuntimeTickDriver` no longer subscribes to `PhaseReached` and no longer accepts the three
+  per-phase pump delegates it used to re-invoke; one frame is one `Advance`, and the reasoning is
+  recorded in the driver, in `CoreAiModsInstaller` and on `LuaCsRbxApiBindings.PumpFrame` so the second
+  route cannot quietly return. The affected EditMode fixtures emulate the host the same way — one
+  `Advance` per frame — instead of pumping and advancing; their expectations were already correct and
+  are untouched.
+- **A cancelled `LuaCsExecutionGuard.ExecuteAsync` was pinned to an exception type Unity never
+  delivers.** `AsyncExecute_HonoursCancellation` demanded Lua-CSharp's `LuaCanceledException`. The VM
+  does raise exactly that — measured against `Lua.dll` directly, for a token cancelled before the run
+  and for one cancelled mid-loop, with and without the guard hook installed — but it cannot survive the
+  trip out: `ExecuteAsync` is an `async Task`, a cancellation escaping one completes the Task as
+  *canceled* rather than faulted, and Unity's runtime drops the original exception at that transition
+  (desktop .NET 8 keeps it, which is why the expectation reads as correct). Both types are
+  `OperationCanceledException`, and that is the contract CoreAI can actually keep: it is what a host
+  needs to tell "the run was cancelled" from "the mod's script failed", and nothing in the codebase
+  switched on the subtype. The guarantee is now written on `ExecuteAsync` and the test asserts it; the
+  test's real subject — the state stays usable, because the guard hook is restored either way — is
+  unchanged.
+- **A mistyped tool argument cost the learner the whole turn.** `arg-conversion` is emitted again — by
+  the structural preflight `ToolExecutionPolicy.TryBindArgumentsStructurally`, which runs MEAI's own
+  coercion standalone *before* `function.InvokeAsync` — but `LoggingLlmClientDecorator.TraceIndicatesInvocation`
+  was never told, so the source fell through to the fail-safe `default` and counted as "a tool ran".
+  The consequence was the exact inverse of the danger that default exists for: a turn in which the model
+  merely typed `"many"` where an `int` was declared, and in which **nothing executed at all**, was
+  reported as having mutated the world — so a 429 or 5xx arriving in that same turn could neither be
+  retried by the decorator's own loop nor failed over by `FallbackLlmClientDecorator`, and the student
+  got a hard error instead of an answer. The branch is restored, and the reasoning now sits in the code:
+  this source is *proof* of non-invocation, not an inference from a stack shape.
+- **The branch had been deleted as dead, correctly, and then the source came back without it.** 7.39.0
+  removed `arg-conversion` from the classifier because nothing emitted it any more — argument failures
+  had stopped being classified from stack frames (IL2CPP/WebGL strips them) and were all traced `native`.
+  That removal even predicted the failure mode, warning that the string's "future reuse" would be
+  silently misclassified; the reuse arrived with the structural preflight in the same wave, and the
+  prediction came true in the opposite direction. `TraceIndicatesInvocation_ClassifiesSourcesCorrectly`
+  now pins the case explicitly, with the history written next to it, so it cannot read as dead a third
+  time.
+- **A third source had the same defect and had simply never been looked at.** `tools-disabled` is
+  recorded when the request arrives with `ToolMode = None` and the policy refuses the call before
+  reaching the function - the same shape as `arg-conversion`, nothing executed - yet it sat on the
+  fail-safe `default` and suppressed retry and failover exactly as the other one did. Fixed. The
+  neighbouring `blocked` is now documented as a deliberate `true` rather than a fourth oversight: it
+  marks a turn in which an EARLIER invocation stopped observing its deadline, so that body may still
+  be running and replaying the turn could execute it twice. A lost turn is cheaper than a mutation
+  applied twice.
+- **The door this defect keeps arriving through is now guarded.** Three times the classifier's
+  `default` branch - right for an unknown source, silent for a known one - has swallowed a source
+  nobody added to the list, and each time the only symptom was a lesson turn lost to an error that
+  could have been retried. `EveryEmittedTraceSource_IsClassifiedOnPurpose` reads the sources
+  `ToolExecutionPolicy` actually emits and fails if any of them is not pinned by name in the
+  classifier test. An omission is now loud where it happens, not where a learner feels it.
 
 ### Changed
 
-- **Бенчмарк создания игр: версия набора 1.7 → 1.8.** Разбор группы G6 нашёл несколько ран,
-  нанесённых самим бенчмарком. Промпт обещал модели обратный отсчёт времени, которого на этой
-  сборке не было, и модель строила вслепую до отсечки. На инструмент стоял лимит в 20 вызовов за
-  минуту при том, что промпт требует звать его до тысячи раз, а каждый отказ засчитывался как
-  провал вызова и стоил очков. Совет «задавай цвет, держи оттенки натуральными» прямо вредил:
-  шейдер собирает цвет как текстура × цвет детали, множитель никогда не больше единицы, поэтому
-  любой заданный цвет только затемняет — пример из самого промпта давал три четверти яркости камня.
-  Промпт переписан по измеренной формуле, размер секции снижен до 10-20 частей, а цена одного сбоя
-  названа честно. Отсчёт времени пришлось чинить дважды: первая попытка правила результат, только
-  если он строка, а библиотека отдаёт разобранный JSON, поэтому нота не появлялась вообще — это
-  доказано отдельной программой против той самой сборки библиотеки, что лежит в проекте. Во всех
-  группах пакетный спавн теперь записывается как N отдельных спавнов с именами как в продакшене;
-  раньше пакет был одной непрозрачной командой — невидимой для оценки спавна и нарушением в группе,
-  где разрешён только он. Числа G6 в таблице лидеров получены на СТАРОМ инструменте (таблица последний раз
-  обновлялась 2026-07-11, G6 переехал на Roblox API 2026-09-03) и не переносятся на текущий набор.
+- **Two tests that pinned the interim "the distinction is gone entirely" state were corrected, not
+  deleted.** `DelegateLlmTool_ArgumentCoercionFailure_IsTracedAsInvoked` (in both
+  `ToolContractPromisesEditModeTests` and `RetryFallbackToolTraceSuppressionEditModeTests`) asserted
+  `native`/invoked for a coercion failure — right for the window in which the argument-vs-body
+  distinction had been deleted outright, wrong once it returned as a structural proof. Both are renamed
+  to `…_IsRejectedBeforeInvocation` and carry a WHY recording why the previous expectation was correct
+  when written and is not now; this supersedes the 7.39.0 note "An argument-coercion failure is traced
+  as invoked, not as never-invoked", whose reasoning still holds only for failures thrown *across* the
+  invocation boundary. The delegate case is kept rather than folded into the raw-function one because it
+  is the only guard that the preflight still sees `UnderlyingMethod` through
+  `DelegateExceptionBoundaryAIFunction`'s `DelegatingAIFunction` wrapper — were that forwarding ever to
+  stop, the preflight would silently degrade to the conservative verdict with no other test noticing.
+
+### Added
+
+- **A custom character controller can report a measured speed and refuse a jump.**
+  `IRbxCharacterMotor` gained `double? MeasuredSpeed` and `bool TryJump(...)`, both with a default
+  implementation, so a third-party motor written before this version still compiles and behaves the way
+  it did. Why: `Humanoid.Running` multiplied the UNIT `MoveDirection` by `WalkSpeed`, so it could only
+  report zero or full speed, and it fired once on entering the state. The mirror says something else:
+  the signal fires when running speed CHANGES, and reports zero on stopping. It now does, and
+  `UnityRbxCharacterMotor` reports the speed the solver allowed, so a character pressed against a wall
+  reads as standing even though its requested speed never changed.
+  **Signal order is now part of the contract:** leaving the running state reports the stop BEFORE the
+  state changes — that is, before `FreeFalling` or `Jumping` — while entering a run ALWAYS reports the
+  speed, even when the value did not change. Without the first rule, a handler that picks the idle pose
+  from a zero beat the falling handler in the same frame and the character stood in mid-air. Without
+  the second, landing at rest was never reported at all and the script never left the falling pose. The
+  bracket sits in the state transition itself, so it covers all three exits from running — flight, jump
+  and death. A motor whose body has been destroyed returns `null` rather than zero: a body that is gone
+  is not a character that stopped.
+
+### Fixed
+
+- **Foreign code throwing during world shutdown no longer leaves the world half torn down.**
+  `IRbxCharacterMotor.Release` is game code, and it was called unguarded in three places. `Dispose` was
+  the worst: the "already destroyed" flag was set first, so one exception aborted the rest of the
+  teardown forever — the scheduler kept calling the destroyed object, connections and threads stayed
+  alive, and a second attempt returned immediately. Motor ownership is now released BEFORE the foreign
+  call, each call is isolated, and a failure goes to the registry diagnostics.
+- **`ScriptContext:SetTimeout` no longer turns a large value into a small one.** The check caught
+  infinity but not range, and casting an out-of-range number to an integer is undefined — on x64 it
+  yields the minimum integer, which read back as the short default. The ceiling is now named explicitly
+  (2147483.647 s, about 24.8 days), and anything above it is rejected with a stated reason instead of
+  being silently replaced.
+- **A character's death reports zero speed.** The handler refuses to measure a dead character, so with
+  auto-respawn off the animation script kept its last non-zero value forever. Zero is sent once, before
+  the death signal, so no late "return to idle" instruction can arrive after the death handler.
+- **Jitter at the stopping threshold no longer sends an event every frame.** Instead of a single
+  threshold there is hysteresis: a walker stops below 0.1 studs/s, and a standing character has to reach
+  0.2 to count as walking again. The band is exactly one resolution step wide, so a change smaller than
+  the smallest one ever reported cannot flip the state back and forth.
+- **Replication core: three defects.** Diagnostics on the recovery paths went around the wrapper that
+  absorbs a throwing receiver — a failing logger aborted the resync request after a partially applied
+  batch, and the replica stayed out of sync. Initial player creation carried the display name and the
+  character reference past the allowed-field list, so the filter honestly protected edits but leaked on
+  the first snapshot. An empty display name was replaced by the login even though the serializer
+  explicitly permits it and stores it verbatim; the profile value is now chosen at the moment the player
+  is admitted, and both recovery and the replica receive what was stored verbatim.
+
+### Changed
+
+- **Game-creation benchmark: suite version 1.7 → 1.8.** A review of group G6 found several wounds the
+  benchmark had inflicted on itself. The prompt promised the model a countdown that this build did not
+  have, so the model built blind until the cut-off. The tool carried a limit of 20 calls per minute
+  while the prompt requires calling it up to a thousand times, and every refusal counted as a failed
+  call and cost points. The advice "set a colour, keep the shades natural" was actively harmful: the
+  shader builds colour as texture × part colour, the multiplier is never above one, so any colour set
+  only darkens — the example in the prompt itself produced three quarters of stone's brightness. The
+  prompt is rewritten around the measured formula, section size is lowered to 10-20 parts, and the cost
+  of a single failure is stated honestly. The countdown had to be fixed twice: the first attempt
+  corrected the result only when it was a string, while the library returns parsed JSON, so the note
+  never appeared at all — proven by a separate program run against the very build of the library that
+  sits in this project. In every group a batch spawn is now recorded as N separate spawns with
+  production names; a batch used to be one opaque command — invisible to spawn scoring, and a violation
+  in the group where only spawning is allowed. The G6 numbers on the leaderboard were produced on the
+  OLD tool (the table was last updated 2026-07-11, G6 moved to the Roblox API 2026-09-03) and do not
+  carry over to the current suite.
 
 ### Notes
 
-- Предположение, что большие секции не влезают в бюджет корутины (10 000 шагов), ПРОВЕРЕНО И
-  ОПРОВЕРГНУТО замером: одиночный `execute_lua` идёт под собственным пределом в 50 000 000 шагов и
-  10 с, а одна деталь стоит около 50 инструкций. Реальный потолок — ограничение Lua в 200 локальных
-  переменных.
+- The assumption that large sections do not fit the coroutine budget (10 000 steps) was TESTED AND
+  DISPROVED by measurement: a single `execute_lua` runs under its own limit of 50 000 000 steps and
+  10 s, and one part costs about 50 instructions. The real ceiling is Lua's limit of 200 local
+  variables.
 
 ## [7.39.0] - 2026-09-10
 
@@ -329,6 +480,358 @@
   slot, outside any mod's dispatch `try`/`catch`. An instance cap or a refused parent there used to
   propagate out of `Advance` and end the frame for every mod in the world; both are now contained
   and reported through the registry's diagnostics.
+
+## [7.37.0] - 2026-09-09
+
+The release that puts CoreAI back on the Microsoft.Extensions.AI version a Unity consumer can actually
+load, and fixes what that move uncovered. Verification state, stated plainly: the portable .NET leg
+(`dotnet test tools/portable/Tests/CoreAI.Portable.Tests.csproj`) is green; the full Unity
+EditMode/PlayMode run was not part of this release's gate, and the browser evidence quoted below comes
+from a served WebGL player built on 2026-09-09, not from an automated suite.
+
+### Changed
+
+- **Microsoft.Extensions.AI is pinned to 9.10.2 — a ceiling, not a preference.** Unity 6000.x ships its
+  own `System.Text.Json` (assembly version **8.0.0.0**) in `Editor/Data/BCLExtensions` and substitutes it
+  for any copy a project vendors. Every MEAI **10.x** assembly is built against `System.Text.Json`
+  10.0.0.0, so under Unity it does not fail to compile — it fails to **load**, at the first call into
+  MEAI, in the running game. 9.10.2 is the newest release built against the 8.0.0.0 line. The pin is now
+  stated in one place per consumer and held together mechanically:
+  - `Assets/packages.config` — `Microsoft.Extensions.AI` and `.Abstractions` 10.9.0 → **9.10.2**; the
+    transitive set follows the same floor (`System.Text.Json` 10.0.11 → **8.0.6**,
+    `System.Threading.Channels`, `Microsoft.Bcl.AsyncInterfaces`, `Microsoft.Extensions.Primitives`,
+    `Microsoft.Extensions.Caching.Abstractions`, `…DependencyInjection.Abstractions`,
+    `…Logging.Abstractions`, `System.Text.Encodings.Web` → 8.x; `Microsoft.Bcl.Numerics`,
+    `System.Numerics.Tensors` → 9.0.10; `System.Diagnostics.DiagnosticSource` → 8.0.1;
+    `System.IO.Pipelines` dropped, nothing referenced it).
+  - `tools/portable/CoreAI.Core.csproj`, `tools/G10Harness*`, `tools/ScaleHarness` and
+    `Assets/CoreAI/package.json` (`nugetRefs`) now name the same version. Building the core against the
+    consumer's floor turns "the game cannot load this" into a **compile error here** instead of a
+    `CS0234` or a link failure days later inside someone's project.
+  - **New guard `MeaiVersionFloorEditModeTests`** (6 tests). It reflects the loaded
+    `Microsoft.Extensions.AI.Abstractions` version (never older than the floor anywhere; exactly the
+    floor inside this checkout), requires `Assets/Packages` to hold exactly the two 9.10.2 folders and
+    nothing else (a leftover second vendored copy makes the assembly Unity compiles against a coin
+    flip), and re-reads `packages.config` and `tools/portable/CoreAI.Core.csproj` so the pins cannot
+    drift apart silently. Outside a CoreAI checkout it ignores itself instead of failing a consuming
+    game. It does **not** cover `package.json` `nugetRefs`, `INSTALL.md` or the harness `HintPath`s —
+    those are still manual.
+  - Source consequence, written down so nobody "modernizes" it back: the approval type is
+    `FunctionApprovalRequestContent` (not 10.x's `ToolApprovalRequestContent`),
+    `FunctionCallContent.InformationalOnly` does not exist, and `FunctionInvoker` **wraps** what the
+    invoker returns. `MEAI_TOOL_CALLING.md` has the full list.
+- **Cached-prompt and reasoning token counters travel in `UsageDetails.AdditionalCounts`**, under their
+  dotted wire keys, instead of the typed `CachedInputTokenCount` / `ReasoningTokenCount` properties —
+  those exist only in MEAI 10.x. `LlmUsageAccumulator.Accumulate` delegates the addition to the native
+  `UsageDetails.Add`, which merges `AdditionalCounts` key by key, so vendor counters survive a
+  multi-roundtrip tool turn. **A consumer reading the typed properties now gets null.**
+- **`AiOrchestrator` and `QueuedAiOrchestrator` expose typed task results** through the new
+  `IAiTaskResultService` (`SupportsTaskResults`, `RunTaskResultAsync`). `RunTaskAsync` became a thin
+  wrapper over it. The reason is a correctness one: a legacy `string` result cannot distinguish "the
+  model answered nothing" from "the provider failed", and the streaming fallback used to infer failure
+  from emptiness. Terminal chunks and failure results now carry the model id, every token counter and
+  the executed tool calls. `SupportsTaskResults` is false when the inner orchestrator is a legacy
+  decorator, and `RunTaskResultAsync` then throws rather than inventing a success.
+- **A context-overflow retry is refused once the failed turn already executed tools or produced
+  content**, and a structured-output validation failure after tool execution returns an `InvalidRequest`
+  failure instead of retrying. Retrying past a side effect re-applies it.
+- **Conversation-summary preflight is committed before any provider or tool side effect**, and
+  `UserTurnHistoryLatch.SummaryPreflightPending` blocks user-turn appends until the write is
+  acknowledged — bounded history can no longer evict the messages a still-unconfirmed summary retells.
+  *Half of this is superseded by 7.41.0: the commit-before-side-effect ordering stands and is what
+  eviction safety now rests on, but `SummaryPreflightPending` is removed — it dropped the learner's
+  message whenever a turn broke during context building. This pointer is here because the symbol is
+  gone from the code, so a reader who finds only this entry would take a removed API for a current one.*
+- **Async context building requires an async summary store.** `BuildSnapshotAsync` used to call the
+  synchronous `LoadSummary`; against `FileConversationSummaryStore` that API is fail-fast while the file
+  gate is busy, so an overlapping async operation turned an ordinary compaction into an
+  `InvalidOperationException`. A sync-only custom backend must now be wrapped explicitly
+  (`BlockingSyncSummaryStoreAsyncAdapter`, or `allowBlockingSyncFallback: true`) — the
+  `NotSupportedException` says so by name. `ConversationContextSnapshot.Commit()` likewise rejects
+  snapshots built by the async path, and `CommitAsync` rejects sync-path snapshots.
+- **Role skill catalogs are case-sensitive and role ids are trimmed.** `_roleSkillCatalogs` moved from
+  `OrdinalIgnoreCase` to `Ordinal`, matching every other role dictionary: `"Merchant"` and `"merchant"`
+  used to share one skill catalog while holding separate tool lists. `ApplyToPolicy(null)` throws
+  `ArgumentNullException` instead of `NullReferenceException`; a blank role id throws
+  `ArgumentException`.
+- **`AskAsync` no longer replaces a role.** Two configurations for the same role keep first-ready
+  behaviour; replacement is `ApplyToPolicyAsync`.
+
+### Fixed
+
+- **The model was shown a type name instead of the tool's answer.** `SmartToolCallingChatClient`'s
+  native invoker returned `ToolCallResult.Result` — a `MEAI.FunctionResultContent` — and MEAI wraps
+  whatever the invoker returns into a result content of its own. The model therefore received the
+  rendered container, i.e. the literal string `Microsoft.Extensions.AI.FunctionResultContent`. The tool
+  ran, the game state changed, and the model answered as if the tool had produced garbage. The invoker
+  now unwraps the payload (`ToolPayloadOf`) and lets MEAI own the pairing. Pinned by
+  `MixedBatch_InventedNameBeforeRealCall_ModelReadsTheRealToolResult` and the strengthened
+  `NativeLoop_ServerHandledCallBesideLocalCall_IsNotInvokedAgain`, which assert on the result text.
+- **An invented tool name burned the whole roundtrip budget instead of stopping on the error counter.**
+  Unknown names were answered through bindings registered into `ChatOptions.AdditionalTools` *after* the
+  model had already named the tool — but MEAI resolves `AdditionalTools` **once per request, before the
+  first provider call**, so the binding was never consulted. MEAI answered "Requested function … not
+  found" itself, `ToolExecutionPolicy` never saw a failure, `_consecutiveErrors` stayed at 0, and the
+  loop ran to `MaxToolCallRoundtrips` (**20 full provider requests** of latency, tokens and money) for a
+  model that was simply hallucinating a name. Unbound calls are now resolved inside the loop, through
+  the policy, where the error counts: the model gets `Error: Unknown tool 'X'. Available tools: […]` and
+  the turn ends on `IsMaxErrorsReached` (3 in a row). Pinned by
+  `MixedBatch_RepeatedInventedName_StopsOnErrorGuardNotRoundtripBudget`.
+- **A mixed batch of known and unknown calls desynchronized its indexes, so a tool that succeeded was
+  reported as failed — and could run up to twenty times.** The invoker looked its result up by
+  `context.FunctionCallIndex`, MEAI's index over **every** call in the model's message, while
+  `_batch.Results` held only the calls the policy was asked to execute — server-handled,
+  approval-required and invented neighbours are filtered out. One such neighbour and the lookup returned
+  the wrong call's result or ran past the end; the `IndexOutOfRange` reached the model as an invocation
+  failure for a call that had in fact succeeded, so the model reissued it, and with varied arguments the
+  echo guard does not suppress the repeat. Results are now matched by **call id**, never by position,
+  and service-answered calls are looked up separately. Covered by the five new `MixedBatch_*` tests,
+  which also assert exactly one result per call id (two is a shape providers reject).
+- **The audit log's prompt hash did not cover the conversation.** `AuditContext.SetPromptHash` hashed
+  `string.Join("\n", (System.Collections.IEnumerable)chatHistory)` — cast to the non-generic
+  `IEnumerable`, that binds to `string.Join(string, params object[])`, so `Join` received a one-element
+  array holding the list and called `ToString()` on it. What went into the digest was the constant text
+  `System.Collections.Generic.List\`1[Microsoft.Extensions.AI.ChatMessage]`. Two entirely different
+  conversations produced the **same** `promptHash` whenever the system prompt and user text matched, so
+  the field could neither distinguish nor reconstruct the context a model actually answered on. Replaced
+  by `AiOrchestrator.ComputePromptHash`, which hashes system, user and every history message in order.
+  Pinned by `PromptHash_CoversTheConversationHistory`.
+- **The streaming queue reader could drop the terminal chunk.** `AsyncChunkQueue.Write` enqueues into a
+  lock-free queue *before* signalling, so the reader's "empty, then completed" pair of looks had a hole:
+  producer enqueues the `IsDone` chunk, marks the queue complete, reader reads `_completed` and stops
+  with the chunk still queued. That chunk is the only carrier of the token counters, the executed tool
+  call list and — on the failure paths — the error itself, so a turn could end reporting nothing at all.
+  The reader now takes one more look after observing completion; completion is set after the write, so
+  a single extra dequeue is exact. Pinned by
+  `QueueReader_CompletionObservedRightAfterAnEmptyLook_StillDeliversTheLastChunk`, which scripts the
+  interleaving instead of hoping for it.
+- **A streaming chunk that carries only an error code is a failure, and is now pinned as one.**
+  `RetryingStreamingLlmClientDecorator` matched a failing chunk on its error *text*, so a provider that
+  set `ErrorCode = RateLimited` (or `Timeout`) with no message rode through as a benign hint: the
+  category was dropped, whatever followed the failure was forwarded as if it belonged to the answer, and
+  the turn ended as `EmptyResponse`. The decorator now uses the same predicate the orchestrator uses to
+  end a turn — error text **or** a non-`None` code — which is what it already did for `IsDone` chunks and
+  now also does mid-stream. Three tests hold it: a transient code without text is retried, a permanent
+  one (`PaymentRequired`) ends the stream with its own classification, and a chunk with neither text nor
+  code stays a forwarded hint. In the same decorator: a failure after the retry budget keeps its real
+  classification instead of collapsing to `ProviderError`/"stream failed after retries"; null control
+  chunks no longer end the stream; the provider stream is opened lazily and the token is checked at
+  entry, per attempt and before each retry, so a pre-cancelled or mid-retry-cancelled request never
+  opens (or re-opens) the provider; and a `DisposeAsync` failure is attached to the real outcome instead
+  of replacing it.
+- **The comment guarding the double-execution check is back.** The order "retryable **and** not already
+  committing" is not stylistic: deciding on the error code alone would leave the protection resting on
+  producers happening to leave `ErrorCode = None` on a chunk that carries `ExecutedToolCalls`. Label such
+  a chunk `Timeout`/`BackendUnavailable` honestly and `spawn_quiz` runs a second time while memory is
+  written twice. Covered by `ErrorChunkAfterToolExecution_IsNeverRetried_EvenWithRetryableCode`
+  (verified: removing the `!IsCommittingChunk` term turns it red).
+- **An argument-coercion failure is traced as invoked, not as never-invoked.** The old classification
+  read the stack frames, which IL2CPP/WebGL strips — so a failure thrown by the **tool body** looked
+  like a binding failure and the retry decorators replayed a mutation that had already been applied.
+  Pinned by `DelegateLlmTool_ArgumentCoercionFailure_IsTracedAsInvoked`.
+- **`AgentBuilder` published a half-configured role.** `ApplyToPolicy` mutated the policy step by step
+  and read persisted skills from storage in the middle, so a racing ask — or a store read that threw
+  partway — left the role registered with tools but without its `read_skill` / `call_skill_tool`
+  proxies, its extra system prompt or its streaming override. The role is now assembled detached and
+  published under one lock; a failed hydration leaves the previously ready role untouched.
+- **A role without skill authoring got no live catalog**, so later catalog changes were invisible to its
+  `read_skill` / `call_skill_tool` and the policy's view of skills could disagree with the agent's.
+  Re-applying a config also used to silently strip or duplicate the skill proxies; both directions are
+  now explicit.
+- **`AskWithCallback` never fired its callback on WebGL** — it awaited with `ConfigureAwait(false)`,
+  and a detached continuation in a browser player is a continuation that never runs. The request looked
+  like a hang with no error.
+- **A host scope change mid-request could write one user's summary into another user's partition.** The
+  context managers resolved the storage key twice — once to load, once to save, possibly deferred. The
+  binding is now pinned for the life of the snapshot (`ScopedConversationSummaryStoreDecorator.BindAsync`).
+
+### Removed
+
+- **The artificial slicing of the model's stream.** Every text-only SSE delta longer than 24 characters
+  was thrown away and replaced by manufactured pieces of ~6 characters (`SplitForSmoothStreaming`), with
+  a 15 ms `Task.Delay` between them (`DelayBetweenSyntheticStreamPiecesAsync`). On editor and standalone
+  that meant the answer was rendered **slower than it actually arrived** — a 300-character delta became
+  30–50 pieces, half a second to three quarters of pure invented latency, per delta. On WebGL there was
+  no delay, but the delta was still shredded into per-piece allocations on the single thread. And
+  everywhere it hid the truth: a provider that batches tokens looked smooth, so nobody could see the
+  batching, let alone fix it. The provider delta is now passed through exactly as it arrives. The test
+  that pinned the old behaviour (`…_SplitSmoothing_PropagatesNativeContracts`, which asserted the delta
+  **must** be split) was replaced with `GetStreamingResponseAsync_LargeTextDelta_ReachesTheConsumerWhole`.
+  **Cost worth knowing:** a consumer that paced its display per chunk will now see the provider's real
+  chunking.
+- **Hand-rolled code that duplicated Microsoft.Extensions.AI.** Each of these was a private
+  reimplementation of something the library already does, and each had drifted from it: the
+  `DelegatingChatClient` that stripped the native tool channel for text-only endpoints (now the native
+  `ConfigureOptionsChatClient`); the hand-built `UsageDetails` summation that added only input/output/total
+  and the dictionary, silently dropping every typed counter (now `UsageDetails.Add`, which is what carries
+  prompt-cache reads through a multi-roundtrip tool turn); `ReadUsageInt64` and `EnumerableContents`; the
+  hand-concatenated streaming text and final-assistant text (now `update.Text` / `message.Text` — note
+  `ChatResponse.Text` must never be used, it concatenates **every** message and pastes the tool transcript
+  into the reply); the `AdditionalTools` failure-binding trick for unknown tool names, which MEAI resolves
+  once per request and therefore never consulted; and `BuildToolsCatalogBlobForWordCount`, which
+  materialized the whole tool catalog just to count its words.
+- **The dead `arg-conversion` branch in `LoggingLlmClientDecorator.TraceIndicatesInvocation`.** Nothing
+  emits that trace source any more — tool-argument coercion failures stopped being classified from stack
+  frames (IL2CPP/WebGL strips them) and are traced as `native`, i.e. as having crossed the invocation
+  boundary. The branch only made a future reuse of that string silently retry-eligible; without it the
+  fail-safe `default` counts an unknown source as invoked. Its assertion in
+  `RetryFallbackToolTraceSuppressionEditModeTests.TraceIndicatesInvocation_ClassifiesSourcesCorrectly`
+  went with it; the `some-future-source` case still covers the fail-safe.
+
+### Performance
+
+Measured on the portable .NET harness (`CoreHotPathAuditEditModeTests`, 4000 chunks, single-threaded
+pump that mimics WebGL). The executable guard is a budget of **≤192 bytes per chunk over the inner
+stream**, not the individual figures below; the allocation assertions run on the portable leg only and
+`Assert.Ignore` under Unity.
+
+- **`TimeoutLlmClientDecorator`: 512 → 128 bytes per streamed chunk.** The per-chunk wait was
+  `MoveNextAsync().AsTask()` + an async helper + `Task.WhenAny` — five or six heap objects for every
+  token a learner reads. Replaced by one `IValueTaskSource<bool>` race object per **request**, with a
+  reusable core, one cached callback and one cancellation registration; a synchronously completed move
+  now allocates nothing.
+- **`QueuedAiOrchestrator`: 289 → 96 bytes per chunk.** The reader parked on a `TaskCompletionSource`
+  that was replaced on every signal. The queue is now its own `IValueTaskSource<bool>`; a write with no
+  parked reader costs nothing.
+- **`AuditHash.ComputeParts`** hashes the UTF-8 bytes of a concatenation without building it, through
+  pooled buffers and a stateful encoder (a surrogate pair split across parts encodes identically). The
+  orchestrator fingerprints the whole prompt every turn; joining first cost a copy of the prompt plus
+  its encoding — hundreds of kilobytes on a long lesson — purely to feed the hash. Equality with the
+  single-string form is pinned across surrogate and chunk-boundary cases.
+- **`AuditContext` retention is bounded** (`MaxTrackedTraces = 256`). The only caller of `Cleanup` is the
+  Unity audit interceptor, so a headless or portable host leaked one prompt hash and model name per
+  request for the life of the process.
+- **Skills over a live catalog stop rebuilding themselves.** `call_skill_tool` and `read_skill` rebuilt
+  their whole tool map / skill index on **every call and every per-request allowlist probe** —
+  re-creating each skill's MEAI function by reflection and re-serializing every JSON schema — for a
+  catalog that changes only when the model authors a skill. Both now cache against a new monotonic
+  `MutableSkillCatalog.Version`. `ReadSkillLlmTool.ParametersSchema` is computed once instead of on
+  every read, and a skill call's argument JSON is parsed once instead of three times.
+- **`AgentMemoryScope` memoizes storage keys** (bounded, 512 entries). Every scoped memory or history
+  operation — several per turn — used to build a fresh `SHA256`, encode, and format 32 hex strings. The
+  test asserts the memoized key is still byte-identical to the digest that was persisted before.
+- **`AiToolContractPromptFormatter`** memoizes canonicalized tool schemas (bounded, 256), so the
+  text-shaped tool contract is not re-parsed and re-sorted per request.
+- **`LoggingLlmClientDecorator`** computes its prompt-budget line once per request instead of twice, and
+  counts the tool catalog's words per field instead of materializing tens of kilobytes of schema text to
+  count them; the prompt preview no longer copies the whole prompt just to trim it.
+- **`ExtractToolTraceMessage` gained a first-character gate.** A plain-text tool result used to cost a
+  thrown-and-caught `JObject.Parse` exception on every tool call.
+- **SSE parsing** frames `data:` lines without copies and decides tool-argument completeness
+  incrementally; the old code called `StringBuilder.ToString()` and re-scanned everything accumulated so
+  far on every line, i.e. quadratically in the argument length. Pinned by measurable claims: a 42-delta
+  tool call materializes its buffer **once**, a text-only stream **zero** times.
+
+### Added
+
+- **An asynchronous, cancellable surface for the stores that sit inside an LLM turn.** New
+  `IAsyncSkillStore` (`LoadAsync` / `ListAsync` / `MutateAndPublishAsync`), `IAsyncLuaScriptVersionStore`,
+  their `InlineAsync…Adapter` opt-ins for stores that really are fast and non-blocking,
+  `SkillStoreDurabilityException` (committed, not durable, not published, **do not replay**) and a
+  `SkillOperationGate` that fails a synchronous caller **promptly** instead of blocking while async work
+  is pending. `SkillAuthoringCoordinator` gained async twins of every operation, sharing one
+  `Prepare*` implementation with the sync path so the "an update rewrites only the entry document,
+  reference documents pass through" rule has exactly one owner. `manage_skills` is now genuinely async,
+  honours its cancellation token, and reports durability and publication failures as typed envelopes.
+  Before this, every `manage_skills` action did file IO inside the turn — on a single-threaded player
+  that is a freeze, not a stall.
+- **`AgentBuilder.BuildAsync` / `ApplyToPolicyAsync` / `WithAsyncMarshaler`,** and a shared registration
+  gate: the first `AskAsync` now hydrates persisted skills before dispatching, concurrent first asks
+  share one hydration, a ready role skips the storage read, and a cancelled waiter does not poison the
+  others. Documented in `Docs/AGENT_BUILDER.md` → "Asynchronous skill readiness".
+- **A licence-free CI gate for the core.** New `tools/portable/Tests/CoreAI.Portable.Tests.csproj` runs
+  the existing engine-free EditMode fixtures against the real `netstandard2.1` `CoreAI.Core` assembly on
+  plain .NET 8 — no Unity, no editor symbols, no licence — and a new `portable-core` job in
+  `.github/workflows/ci.yml` runs it first with coverage. Fixtures are linked **file by file, not by
+  glob**: a new engine-free test must be added to the project explicitly or it never runs in this leg.
+  This is also what makes the MEAI floor enforceable — an API that exists only in a newer MEAI now fails
+  here rather than in someone's game.
+
+### Mods / Rbx API
+
+- **`Player:LoadCharacterAsync()`, `LoadCharacter()`, `DistanceFromCharacter()`, `CharacterAdded`,
+  `CharacterRemoving`** are implemented; they were loud "planned" stubs. `Players.CharacterAutoLoads`
+  now actually spawns a character (a `Model` with a `Humanoid` and a `HumanoidRootPart`). The new
+  `RbxCharacterFactory` parents the model **last**, so a `ChildAdded` handler never observes a half-built
+  character, and destroys the partial character if anything throws.
+- **A disconnect used to leave a ghost character standing in the world** — `RemoveActor` now unloads it
+  before destroying the `Player`. Auto-load runs **after** `PlayerAdded` fires, so a handler reading
+  `Character` with auto-load off sees `nil` rather than a race.
+- **`MoveTo` reported instant arrival and `WalkSpeed` moved nothing in real scenes**: composition never
+  supplied an `IRbxCharacterMotor` factory, so every `Humanoid` silently got the null motor with its
+  position pinned at zero. **`Humanoid.RootPart` returned the character `Model`** — the wrong object of
+  the wrong class, with no error. **In a built player no frame signal fired at all**, because the
+  production driver advanced the scheduler for a single phase only.
+- **`RunService.Step` boxed its delta before checking for handlers** — one guaranteed allocation per
+  frame in a scene with zero connections.
+- **`Clone` lost external `BasePart` state** (size, CFrame, colour, anchored came out default on
+  non-Lua clones) and could leave an orphan partial subtree on failure. The registry gained a
+  `CopyBackingState` seam so the engine-free side can trigger the copy without knowing the Unity sink's
+  type.
+- **New `LuaCsAllocationBudget` (256 MB) closes the concatenation bomb.** `s = s .. s` is plain VM
+  opcodes with no library call site to cap, and it outruns the step and time budgets. It samples the
+  cheap `GC.GetTotalMemory(false)` every 4 instructions and confirms a crossing with **one** collecting
+  read, re-baselining when the growth turns out to be garbage — so a mod cannot force collections, and
+  cannot forge the trip either: it is classified by exception type, not by a text marker. This also
+  replaced a hand-copied, already divergent second copy of the rule in `LuaCsSecureEnvironment`.
+  The documented mechanism was wrong before, too: the docs claimed a 64 MB budget policed by
+  `GC.GetAllocatedBytesForCurrentThread()` on every instruction, and **Unity's Mono returns 0 from that
+  API unconditionally**.
+- **New `IScriptFrameYielder` / `PlayerLoopScriptFrameYielder`:** a legitimate long `execute_lua` chunk
+  used to freeze a single-threaded player — a measured runaway held the browser main thread for ~6 s
+  inside its ~10 s wall-clock budget. The async path now releases the frame every 6 ms and subtracts the
+  yielded time so the budget still measures executed work. Deliberately **not** armed on the synchronous
+  `Execute` overloads (a blocked caller awaiting from inside the hook is a guaranteed deadlock on the
+  single WebGL thread), nor on the actor-scoped and mutation-envelope `execute_lua` overloads, which run
+  under a monitor with an ambient mutation envelope; that limitation is stated in
+  `LUA_SANDBOX_SECURITY.md` rather than papered over.
+- **`HttpService:JSONEncode/JSONDecode` and the network codec are not the same serializer**, contrary to
+  the MVP2 acceptance text. The new `RbxJsonContractEditModeTests` pins each one's actual behaviour and
+  compares them differentially: empty tables, JSON `null` inside arrays, mixed key types, sparse arrays,
+  whole numbers, `NaN`/`Infinity` and cross-decoding all diverge, and now that divergence is written down
+  instead of assumed away.
+- The MVP1 conversion lint no longer misses an **aliased** `MetersPerStud` (`float s = …;` used lines
+  later), and it now scans the demos and the Unity layer, not only `Runtime/`.
+
+### MCP
+
+- **A JSON-RPC `id`, tool name or string argument that looked like a timestamp was silently rewritten.**
+  `JToken.Parse` applies Newtonsoft's default `DateParseHandling`, which coerces date-shaped **strings**
+  into `DateTime` tokens — so a client using timestamp ids could not match its own responses. Parsing now
+  runs through an explicit reader with `DateParseHandling.None`, and still rejects trailing content.
+- **The dispatcher validated nothing before dispatching.** A *number* was accepted as a method name
+  (`42` → `"42"`), an `initialize` with no `jsonrpc` created a real session, and `{"name": 123}` invoked
+  a tool registered as `"123"`. The envelope is now checked (`jsonrpc == "2.0"`, string `method`,
+  scalar-or-null `id`, object-or-array `params`) and `tools/call` reads `name` only when the token is a
+  string; a malformed `id` is echoed back as `null`. Ten `[TestCase]`s plus round-trip pins for
+  date-shaped ids, names and arguments.
+- `McpServerInfo.Version` is bumped by `tools/bump_version.py` together with the manifests, and
+  `McpPackageVersionEditModeTests` fails when they drift.
+
+### Docs
+
+- **Three entry points for three audiences.** The repository `README.md` was rewritten (−666/+326) from
+  "LLM agents that play your game" to "a C# agent runtime you embed in your own application" — games
+  first, Unity no longer the only door — and `Assets/CoreAI/README.md` is **new**: until now the core
+  package had no README at all. Every "properties worth knowing" claim names the test that backs it, and
+  each README ends with an explicit **Limits and non-goals** section (no MCP client; no provider
+  abstraction beyond OpenAI-compatible HTTP; the tool loop does not run while streaming; "never blocks
+  the frame" is deliberately **not** claimed; `netstandard2.1` is not .NET Framework).
+- **The tool-calling docs were describing an API that does not exist, and behaviour that is the
+  opposite of the truth.** They told hosts to add a name to `ToolExecutionPolicy.SerializedMutatingToolNames`
+  (no such member — the extension point is `ILlmTool.IsMutating`) and cited `CheckDuplicate` and hard
+  line numbers. They described duplicate suppression as an **error** feeding the consecutive-error
+  counter, when it is a success no-op (`{"ok":true,"duplicate":true,…}`) that takes no part in that
+  counter — so "show me that again" three times used to look, in the docs, like a turn abort. They
+  described mutating streaming calls as deferred to turn finalization when they execute on arrival, and
+  they promised tool results reach the model verbatim when the policy makes exactly two documented edits
+  (truncation at `MaxToolResultChars` with a marker, and the empty-result envelope). All corrected.
+- **New guard `ToolDocsPolicyReferenceEditModeTests` compiles the prose.** It extracts every
+  `ToolExecutionPolicy.<member>` mention from the four tool-calling documents and resolves it by
+  reflection, and it asserts the docs quote the **exact** duplicate no-op payload the code emits. It
+  fails on a broken reference, not on a mention, and it runs on the portable leg too.
+
+## [7.36.0] - 2026-09-08
 
 ### Changed
 

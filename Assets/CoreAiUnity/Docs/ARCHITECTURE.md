@@ -1,5 +1,34 @@
 # CoreAI Unity Architecture
 
+**What this is.** The binding contracts of the Unity host: where a layer boundary runs, which execution
+path is the default, how events cross the DI seam, how memory keys are derived, and which rules a
+change must not break. It is written for someone modifying CoreAI or integrating it deeply — not for a
+first scene.
+
+**If you are starting out, this is the wrong door.** Go to
+[QUICK_START](QUICK_START.md) → [the Unity package README](../README.md) →
+[AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md). Come back when you need to know *why* something is
+wired the way it is.
+
+**Neighbouring documents.** [DGF_SPEC](DGF_SPEC.md) holds the normative spec (DI, threads, authority);
+[DEVELOPER_GUIDE](DEVELOPER_GUIDE.md) is the practical code map; [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md)
+and [HTTP_TRANSPORT_SPEC](HTTP_TRANSPORT_SPEC.md) go deeper on the transport. Full map:
+[DOCS_INDEX](DOCS_INDEX.md).
+
+| Section | Answers |
+|---|---|
+| [Layers](#layers) | What belongs in `CoreAI.Core` versus `CoreAI.Source`, and what game code may depend on |
+| [Streaming Is The Default Execution Path](#streaming-is-the-default-execution-path) | Why headless task execution also streams, and how parallel tool calls are bounded |
+| [LLM Mode Flow](#llm-mode-flow) | The decorator chain from `IAiOrchestrationService` down to a backend |
+| [Single-Mode And Multi-Mode Setup](#single-mode-and-multi-mode-setup) | Choosing one global mode versus per-role routing profiles |
+| [MessagePipe Boundary](#messagepipe-boundary) | Which events exist, who publishes them, and the child-scope trap that silently drops them |
+| [Runtime Context And Memory Scope](#runtime-context-and-memory-scope) | Per-request context, and exactly how a memory key is derived and isolated |
+| [Timeout & Retry Rule](#timeout--retry-rule-v151) | Who owns timeouts, who owns retries, and how errors reach player versus log |
+| [Test Integrity Rule](#test-integrity-rule) | What a test here is allowed to assert and what counts as rescuing the implementation |
+| [WebGL Rule](#webgl-rule) | Browser constraints on local models, HTTP, Lua, IL2CPP and async continuations |
+| [Audit Log](#audit-log) | The hash-chained record of requests, tool calls and world mutations |
+| [Source code documentation and comments](#source-code-documentation-and-comments) | Comment and XML-doc conventions for this package |
+
 ## Layers
 
 `CoreAI.Core` is portable C# and owns orchestration contracts, agent policies, Lua safety, memory contracts, and message contracts. It does not reference UnityEngine, VContainer, or MessagePipe.
@@ -76,7 +105,9 @@ If the game adds a **child** `LifetimeScope` (VContainer parent = `CoreAILifetim
 
 `IAgentMemoryScopeProvider` defines the tenant/user/session/topic boundary. One canonical key transformer serves memory/flat chat, structured transcript, compacted summary, and the queue cancellation scope. Any non-empty scope is encoded as `scope-v1-<64 lowercase hex>` from the full SHA-256 over an injective length-prefixed tuple. Neither tenant/user/session/topic nor the role id lands in the scoped filename or the storage-error log; a case-only difference yields different lowercase hashes and does not collide on Windows/macOS. An empty `AgentMemoryScope.Empty` preserves the previous bare role key byte-for-byte for backward compatibility only. The scoped facade does not pick up that shared legacy key automatically: the host explicitly chooses the identity recipient of the migration.
 
-**Actor vs scope priority.** Inside a turn the key comes from the ambient context (`ActorContext`, pinned by the queue); outside it comes from `IAgentMemoryScopeProvider`. A named actor beats the scope: its durable key (`actor-v1-…`) does not change on reconnect, even if the host supplied a different scope. The default anonymous local actor (`"local"`, issued by `DefaultLocalHostIdentityProvider` with an empty scope) identifies nobody and therefore **does not override the host-declared scope**: with an empty ambient scope the key is computed from the provider, with a non-empty one from the `ActorContext` scope itself, and only when there is no scope anywhere does the legacy bare role key remain. Previously `"local"` unconditionally returned the bare role id, so records written INSIDE a turn went to the shared `<Role>.json` while hydration and reads went to the student's `scope-v1-…`: lesson dialogue never reached the student's history, while the shared file accumulated other people's lessons.
+**Actor and durable scope.** Inside a turn the queue pins the ambient `ActorContext`. A named actor's durable key (`actor-v1-…`) includes its actor id, role, and non-empty tenant/user/session/topic memory scope. The actor's declared scope wins; if it is empty, the host's `IAgentMemoryScopeProvider` supplies the scope. Changing the transport connection (`ActorContext.SessionId`) preserves memory when the actor id, role, and durable scope stay the same. Changing any durable scope field deliberately isolates the history, including for the same actor id. Keep `AgentMemoryScope.SessionId` stable across reconnects when resuming one lesson; it identifies the memory partition, not the network connection. An empty scope everywhere preserves existing named-actor keys. Outside a turn, wrap named-actor history reads and resets in `using (AgentMemoryActorScope.Enter(actorContext))` with the same host scope provider to select the same partition.
+
+The default anonymous local actor (`"local"`, issued by `DefaultLocalHostIdentityProvider` with an empty scope) identifies nobody and therefore **does not override the host-declared scope**: with an empty ambient scope the key is computed from the provider, with a non-empty one from the `ActorContext` scope itself, and only when there is no scope anywhere does the legacy bare role key remain. Previously `"local"` unconditionally returned the bare role id, so records written inside a turn went to the shared `<Role>.json` while hydration and reads went to the student's `scope-v1-…`: lesson dialogue never reached the student's history, while the shared file accumulated other people's lessons.
 
 `CoreAILifetimeScope` accepts the provider in two ways **before the container is built**: a component inheriting `AgentMemoryScopeProviderBehaviour` is assigned in the inspector field **Agent Memory Scope Provider**, or code calls `SetAgentMemoryScopeProvider(IAgentMemoryScopeProvider)` on an inactive GameObject and then activates the scope. In the same place the host can call `SetAgentMemoryPersistenceMode(AgentMemoryPersistenceMode.SessionOnly)`. Both setters throw `InvalidOperationException` after build: silently changing the key space or backing store in the middle of requests is forbidden. `CorePortableInstaller` adds `DefaultAgentMemoryScopeProvider` only if the host has not registered its own provider yet, so the host instance always wins over the default.
 
@@ -107,7 +138,7 @@ scopeGameObject.SetActive(true);
 
 `IConversationContextManager` prepares long chat history before each LLM call. The default `DeterministicConversationContextManager` keeps recent messages in `ChatHistory` and compacts older turns into a `## Conversation Summary` system section using `IConversationSummaryStore`. **`RegisterCorePortable`** registers **`InMemoryConversationSummaryStore`** by default so summaries accumulate across turns for each role for the process lifetime. **`IContextBudgetPolicy`** (`DefaultContextBudgetPolicy`) plus **`ITokenEstimator`** (`HeuristicTokenEstimator`) allocate a **`HistoryTokenBudget`** from the role/context window minus reserved completion headroom and an estimate of system + user + tool-contract text — this replaces the legacy fixed `ContextTokens/2` split.
 
-`CoreAILifetimeScope` registers backing stores separately from the public contracts. `Persistent` mode stays the backward-compatible default: the private `FileAgentMemoryStore` serves desktop and WebGL (`persistentDataPath` + `CoreAi_PersistFsSync`), desktop uses the private `FileConversationSummaryStore`, while WebGL uses `InMemoryConversationSummaryStore` for summaries. `SessionOnly` mode replaces both private backings with `InMemoryAgentMemoryStore` and `InMemoryConversationSummaryStore`: the memory document, flat chat, structured transcript, and compacted summary live only until the process ends and create no files. In both modes the same scoped memory/transcript/summary decorators are exposed outward, and `RegisterCorePortable(... suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)` does not add competing defaults. Backing stores keep their own locking and atomic-mutation semantics; `ScopedAgentMemoryStoreDecorator` also proxies `IAtomicAgentMemoryStore` onto the already computed scoped key and uses a safe per-key fallback when an arbitrary inner store lacks native atomic capability.
+`CoreAILifetimeScope` registers backing stores separately from the public contracts. `Persistent` mode stays the backward-compatible default: the private `FileAgentMemoryStore` serves desktop and WebGL (`persistentDataPath`; on WebGL the engine's own automatic persistence flushes it to IndexedDB and `CoreAiWebGlPersistence` reports whether that persistence is armed), desktop uses the private `FileConversationSummaryStore`, while WebGL uses `InMemoryConversationSummaryStore` for summaries. `SessionOnly` mode replaces both private backings with `InMemoryAgentMemoryStore` and `InMemoryConversationSummaryStore`: the memory document, flat chat, structured transcript, and compacted summary live only until the process ends and create no files. In both modes the same scoped memory/transcript/summary decorators are exposed outward, and `RegisterCorePortable(... suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)` does not add competing defaults. Backing stores keep their own locking and atomic-mutation semantics; `ScopedAgentMemoryStoreDecorator` also proxies `IAtomicAgentMemoryStore` onto the already computed scoped key and uses a safe per-key fallback when an arbitrary inner store lacks native atomic capability.
 
 If the backend reports **`LlmErrorCode.ContextLengthExceeded`** (`MeaiOpenAiChatClient` maps HTTP 413 and common overload bodies/messages), **`AiOrchestrator`** may retry **bounded** rebuilds up to **`ICoreAISettings.MaxContextOverflowRetries`** (default `3`, `0` disables). Each retry increments **`ContextRetryLevel`**, and **`DefaultContextBudgetPolicy`** applies a **`0.75^level`** history-budget factor so older history is dropped progressively. Coordinating interface: **`IConversationCompactionCoordinator`** (default **`DefaultConversationCompactionCoordinator`**).
 

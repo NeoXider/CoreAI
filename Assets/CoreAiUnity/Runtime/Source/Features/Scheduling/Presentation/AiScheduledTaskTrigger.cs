@@ -1,3 +1,5 @@
+using System;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Composition;
@@ -125,7 +127,7 @@ namespace CoreAI.Presentation
                 : agentRoleId.Trim();
             ActorContext actorContext = actorIdentityProvider.GetActorContext(roleId);
 
-            _ = orch.RunTaskAsync(new AiTaskRequest
+            AiTaskRequest request = new()
             {
                 RoleId = roleId,
                 Hint = taskHint ?? "",
@@ -133,7 +135,40 @@ namespace CoreAI.Presentation
                 SourceTag = string.IsNullOrWhiteSpace(sourceTag) ? "scheduled_timer" : sourceTag.Trim(),
                 ActorContext = actorContext,
                 CancellationScope = string.IsNullOrWhiteSpace(cancellationScope) ? "" : actorContext.SessionId
-            });
+            };
+            _ = RunObservedAsync(orch, request, log);
+        }
+
+        /// <summary>
+        /// Runs the scheduled task and reports its outcome instead of discarding it.
+        /// <para>
+        /// WHY: the timer used to drop the task with <c>_ = orch.RunTaskAsync(...)</c>. A faulted task
+        /// nobody awaits is never observed - Unity does not surface unobserved task exceptions - so a
+        /// scheduled agent that failed on every tick (bad role id, provider down, tool exception)
+        /// failed silently for the whole session and the designer saw a timer that "does nothing".
+        /// Cancellation is the normal end of a superseded task and is logged at debug level only.
+        /// Internal so a test can drive it with a failing orchestrator.
+        /// </para>
+        /// </summary>
+        internal static async Task RunObservedAsync(
+            IAiOrchestrationService orchestrator,
+            AiTaskRequest request,
+            IGameLogger log)
+        {
+            try
+            {
+                await orchestrator.RunTaskAsync(request);
+            }
+            catch (OperationCanceledException)
+            {
+                log.LogDebug(GameLogFeature.Composition,
+                    $"AiScheduledTaskTrigger: scheduled task '{request.SourceTag}' for role '{request.RoleId}' was cancelled.");
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(GameLogFeature.Composition,
+                    $"AiScheduledTaskTrigger: scheduled task '{request.SourceTag}' for role '{request.RoleId}' failed: {ex.Message}");
+            }
         }
 
         /// <summary>Pauses the scheduled task countdown without clearing elapsed state.</summary>

@@ -104,10 +104,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             });
         }
 
-        /// <summary>Drives one host frame: fire the phase signals, then drain and advance scaled time.</summary>
+        /// <summary>
+        /// Drives one host frame the way production does: a single scheduler Advance. The scheduler
+        /// walks its phase pipeline, the bindings fire each phase's signals from PhaseReached, and the
+        /// queued handler threads drain in the same call.
+        /// </summary>
+        /// <remarks>
+        /// WHY not <c>roblox.PumpFrame(dt)</c> followed by <c>Advance(dt)</c>, as this helper used to
+        /// do: the bindings route every phase now, so pumping as well runs the frame twice — every
+        /// handler fired twice and the per-frame counts below doubled.
+        /// </remarks>
         private static void PumpFrame(LuaCsRbxApiBindings roblox, float dt)
         {
-            roblox.PumpFrame(dt);
             roblox.Scheduler.Advance(dt);
         }
 

@@ -11,6 +11,7 @@ using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Mods.WorldPackages;
+using CoreAI.Scripting;
 using Newtonsoft.Json;
 using UnityEngine;
 using VContainer;
@@ -272,6 +273,10 @@ namespace CoreAI.Composition
                         .GetActorContext(BuiltInAgentRoleIds.Programmer),
                     Capabilities = scriptCapabilities,
                     OneOffCapabilities = oneOffCapabilities,
+                    // WHY: a one-shot chunk may run for seconds under its wall-clock budget; on a
+                    // single-threaded player that would freeze the whole page (measured: ~6 s on WebGL).
+                    // The player-loop yielder lets the guard hand a frame back while the chunk runs.
+                    FrameYielder = PlayerLoopScriptFrameYielder.Instance,
                     // WHY: one shared Roblox world too — persistent mods and one-off execute_lua resolve
                     // the same InstanceRegistry/game/workspace, so an instance a mod creates is the one the
                     // console navigates (roadmap §5.1.3). Opt-in per stack; wired here for production.
@@ -543,8 +548,12 @@ namespace CoreAI.Composition
                             runtime.RehydrateFromStore(scriptCapabilities,
                                 (scriptCapabilities & LuaCapabilities.Full) != 0);
 
-                            // WHY: phase-specific pumps preserve Stepped -> delayed work -> input ->
-                            // Heartbeat -> RenderStepped before the runtime tick each scaled frame.
+                            // WHY the driver gets the session controller and nothing else: one scaled
+                            // frame is one ModScheduler.Advance on the PUBLISHED session. The scheduler
+                            // walks the phase pipeline (Stepped -> delayed work -> input -> Heartbeat ->
+                            // RenderStepped) and the bindings that own that scheduler fire each phase's
+                            // signals, so the driver must carry no per-phase pumps of its own — a second
+                            // route fires every RunService signal twice per frame.
                             LuaModRuntimeTickDriver tickDriver =
                                 tickerGo.AddComponent<LuaModRuntimeTickDriver>();
                             tickDriver.Initialize(sessionController, hostActor);
@@ -857,6 +866,7 @@ namespace CoreAI.Composition
                     .GetActorContext(BuiltInAgentRoleIds.Programmer),
                 Capabilities = scriptCapabilities,
                 OneOffCapabilities = oneOffCapabilities,
+                FrameYielder = PlayerLoopScriptFrameYielder.Instance,
                 RbxApi = rbxApi,
                 // WHY rbxApi.CoroutineResumeBudget and not a fresh resolve: this session's rbxApi already
                 // settled on one live budget instance (see the LuaCsRbxApiBindings constructions above);

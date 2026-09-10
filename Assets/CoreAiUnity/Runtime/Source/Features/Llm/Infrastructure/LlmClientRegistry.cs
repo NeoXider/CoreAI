@@ -161,8 +161,14 @@ namespace CoreAI.Infrastructure.Llm
                 if (cancellationToken.CanBeCanceled && !activation.IsCompleted)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    TaskCompletionSource<bool> cancelled = new(
-                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    // WHY no RunContinuationsAsynchronously: this source is consumed by Task.WhenAny,
+                    // whose internal continuation captures no synchronization context. With the flag,
+                    // cancelling handed that continuation to the thread pool - which a WebGL player does
+                    // not have - so cancelling a wait for endpoint activation parked the caller forever
+                    // instead of throwing. Inline completion is safe here: the registration only
+                    // completes a promise, and our own await (no ConfigureAwait(false)) posts back to
+                    // the host loop.
+                    TaskCompletionSource<bool> cancelled = new();
                     using CancellationTokenRegistration registration =
                         cancellationToken.Register(() => cancelled.TrySetResult(true));
                     await Task.WhenAny(activation, cancelled.Task);
@@ -1470,8 +1476,11 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            TaskCompletionSource<bool> cancelled = new(
-                TaskCreationOptions.RunContinuationsAsynchronously);
+            // WHY no RunContinuationsAsynchronously: see AwaitWithoutCancellingSharedActivation. The
+            // flag combined with Task.WhenAny is exactly the pair that dies in a WebGL player, and this
+            // is the endpoint-activation cancellation path the old guard allowlist described as "not
+            // reproduced in production, so left alone".
+            TaskCompletionSource<bool> cancelled = new();
             using CancellationTokenRegistration registration =
                 cancellationToken.Register(() => cancelled.TrySetResult(true));
             Task completed = await Task.WhenAny(activation, cancelled.Task);
@@ -1741,12 +1750,13 @@ namespace CoreAI.Infrastructure.Llm
 
                     LlmUnityServerHttpSettings adapter = new(
                         llmUnityAssetSettings, llmUnityAssetSettings.LlmUnityServerPort, modelName, "");
-                    // WHY: канал у llama.cpp есть (нативные tool_calls при jinja-шаблоне), и сервер
-                    // LlamaLib v2.0.5 из комплекта LLMUnity включает jinja по умолчанию — проверено
-                    // живым прогоном 2026-09-06. Профиль строит клиент синхронно, до старта сервера, —
-                    // пробы нет, канал берётся из настройки ассета (Auto = нативный по установленному
-                    // факту, Text — для сборки без jinja). Прежняя константа `false` «у сервера нет
-                    // канала» была ложью и молча переводила профиль на разбор прозы.
+                    // WHY: llama.cpp DOES have the channel (native tool_calls with a jinja template), and
+                    // the LlamaLib v2.0.5 server bundled with LLMUnity turns jinja on by default - verified
+                    // by a live run on 2026-09-06. The profile builds its client synchronously, before the
+                    // server starts, so there is no probe and the channel comes from the asset setting
+                    // (Auto = native, on that established fact; Text = for a build without jinja). The old
+                    // hardcoded `false` with its "the server has no channel" note was a lie, and it
+                    // silently downgraded the profile to prose parsing.
                     LlmToolChannelDecision toolChannel = LlmToolChannelResolution.ResolveWithoutProbe(
                         llmUnityAssetSettings.LlmUnityToolChannel,
                         LlmToolChannelResolution.BundledLlamaLibReason);

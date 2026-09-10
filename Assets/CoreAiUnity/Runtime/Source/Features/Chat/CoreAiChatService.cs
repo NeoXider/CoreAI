@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -21,6 +21,8 @@ namespace CoreAI.Chat
     /// </summary>
     public class CoreAiChatService
     {
+        /// <summary>Whether buffered and streaming results come from a truthful typed task implementation.</summary>
+        public bool SupportsTaskResults => _orchestrator is IAiTaskResultService typed && typed.SupportsTaskResults;
         private readonly IAiOrchestrationService _orchestrator;
         private readonly AgentMemoryPolicy _memoryPolicy;
         private readonly ICoreAISettings _settings;
@@ -185,7 +187,20 @@ namespace CoreAI.Chat
         /// </remarks>
         public async System.Threading.Tasks.Task<string> SendMessageAsync(
             AiTaskRequest request,
-            CancellationToken ct = default)
+            CancellationToken ct = default) =>
+            await SendMessageCoreAsync(request, token => _orchestrator.RunTaskAsync(request, token), ct) ?? "";
+
+        /// <summary>Preserves typed task completion; a legacy string-only orchestrator is explicitly unsupported.</summary>
+        public System.Threading.Tasks.Task<LlmCompletionResult> SendMessageResultAsync(
+            AiTaskRequest request, CancellationToken ct = default)
+        {
+            if (_orchestrator is not IAiTaskResultService typed || !typed.SupportsTaskResults)
+                throw new NotSupportedException("The orchestrator does not expose typed task results.");
+            return SendMessageCoreAsync(request, token => typed.RunTaskResultAsync(request, token), ct);
+        }
+
+        private async System.Threading.Tasks.Task<TResult> SendMessageCoreAsync<TResult>(AiTaskRequest request,
+            Func<CancellationToken, System.Threading.Tasks.Task<TResult>> send, CancellationToken ct)
         {
             if (request == null)
             {
@@ -250,11 +265,11 @@ namespace CoreAI.Chat
                     CoreAi.OnToolCallFailed += onToolFailed;
                 }
 
-                string result = await _orchestrator.RunTaskAsync(request, effectiveCt);
+                TResult result = await send(effectiveCt);
                 // Orchestrator + LLM stack use ConfigureAwait(false); marshal to player loop for UI.
                 // WebGL player: see CoreAiWebGlUiThreadMarshaling (Editor WebGL keeps full switch).
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
-                return result ?? "";
+                return result;
             }
             catch (OperationCanceledException) when (
                 deadlineCts != null &&
@@ -853,16 +868,26 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// An idle/no-progress deadline on <paramref name="cts"/>: re-arming disposes the previous
-        /// <c>CancelAfterSlim</c> handle and schedules a fresh one, so callers can push the cancellation
-        /// point out on every sign of progress (a streamed chunk, a tool-call start/finish) instead of
-        /// covering a whole multi-step turn with one fixed budget.
+        /// An idle/no-progress deadline on <paramref name="cts"/>: callers push the cancellation point
+        /// out on every sign of progress (a streamed chunk, a tool-call start/finish) instead of covering
+        /// a whole multi-step turn with one fixed budget. The source is cancelled once no
+        /// <see cref="Rearm"/> has arrived for a full <c>timeoutSec</c> window.
         /// </summary>
         /// <remarks>
-        /// <see cref="Rearm"/> is best-effort: <c>CancelAfterSlim</c> registers on the UniTask PlayerLoop
-        /// and re-arming may run off the main thread (tool-call events and stream continuations can arrive
-        /// on a threadpool thread), so failures are swallowed — worst case the previous deadline stands,
-        /// which is still correct, just less generous.
+        /// WHY one watchdog instead of a timer per re-arm: the previous shape disposed the running
+        /// <c>CancelAfterSlim</c> and started a fresh one on EVERY re-arm, and streaming re-arms on every
+        /// chunk - a new <c>PlayerLoopTimer</c> plus a player-loop registration per token, on WebGL's
+        /// single thread, while the model is still speaking. Now <see cref="Rearm"/> is one timestamp
+        /// write and allocates nothing; a single realtime delay sleeps for the window and, on waking,
+        /// either cancels (idle for the whole window) or goes back to sleep for exactly the remaining
+        /// time. The cancellation moment is the same: the first instant the turn has been idle for
+        /// <c>timeoutSec</c>.
+        /// <para>
+        /// <see cref="Rearm"/> may run off the main thread (tool-call events and stream continuations can
+        /// arrive on a threadpool thread) - a volatile write is safe from anywhere, so the re-arm is no
+        /// longer best-effort. A re-arm after <see cref="Dispose"/> is a harmless write; the previous shape
+        /// would have started a timer against a source the caller was about to dispose.
+        /// </para>
         /// </remarks>
         internal sealed class IdleTimeoutDeadline : IDisposable
         {

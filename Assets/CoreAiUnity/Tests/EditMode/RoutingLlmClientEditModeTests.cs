@@ -306,10 +306,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Streaming_RoutesToInnerClient_ForRole()
         {
-            // Инвариант issue 2: если streaming override'а нет — default-реализация
-            // интерфейса делает fallback к CompleteAsync и склеивает весь ответ
-            // в один chunk, и стриминг не виден в UI. Этот тест проверяет что
-            // RoutingLlmClient использует именно стриминговый путь.
+            // Invariant for issue 2: with no streaming override, the interface's
+            // default implementation falls back to CompleteAsync and glues the whole
+            // answer into one chunk, so streaming is never visible in the UI. This test
+            // pins that RoutingLlmClient really takes the streaming path.
             StreamingMockLlm fastClient = new("Hel", "lo");
             StreamingMockLlm defaultClient = new("De", "fault");
 
@@ -325,11 +325,11 @@ namespace CoreAI.Tests.EditMode
                 chunks.Add(chunk);
             }
 
-            Assert.AreEqual(1, fastClient.StreamingCalls, "Роутер должен вызвать стриминг внутреннего клиента");
-            Assert.AreEqual(0, fastClient.CompleteAsyncCalls, "Не должно быть вызова CompleteAsync");
-            Assert.AreEqual(0, defaultClient.StreamingCalls, "Fallback клиент не должен быть задействован");
+            Assert.AreEqual(1, fastClient.StreamingCalls, "The router must call streaming on the inner client");
+            Assert.AreEqual(0, fastClient.CompleteAsyncCalls, "CompleteAsync must not be called");
+            Assert.AreEqual(0, defaultClient.StreamingCalls, "The fallback client must not be involved");
 
-            // 2 текстовых + 1 терминальный
+            // 2 text chunks + 1 terminal
             Assert.AreEqual(3, chunks.Count);
             Assert.AreEqual("Hel", chunks[0].Text);
             Assert.AreEqual("lo", chunks[1].Text);
@@ -352,7 +352,7 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.AreEqual(1, fallback.StreamingCalls);
-            Assert.AreEqual(4, chunks.Count, "3 текстовых + 1 терминальный");
+            Assert.AreEqual(4, chunks.Count, "3 text chunks + 1 terminal");
         }
 
         [Test]
@@ -371,7 +371,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, chunks.Count);
             Assert.IsTrue(chunks[0].IsDone);
             StringAssert.Contains("null", chunks[0].Error);
-            Assert.AreEqual(0, fallback.StreamingCalls, "При null-запросе не должен вызывать внутренний клиент");
+            Assert.AreEqual(0, fallback.StreamingCalls, "A null request must not reach the inner client");
         }
 
         [Test]

@@ -209,6 +209,15 @@ namespace CoreAI.Ai.LuaCs
         /// resolved LAZILY (at call time) if the backing scene object is not ready at scope-build. Null = none.
         /// </summary>
         public Action<LuaCsApiRegistry, LuaCapabilities> AdditionalGameplayBindings;
+
+        /// <summary>
+        /// Host frame port for the one-off <c>execute_lua</c> path. A chunk may legitimately run for
+        /// seconds before its wall-clock budget cuts it; on a single-threaded player that is the whole
+        /// page, so the guard releases the frame every few milliseconds through this port. Null (the
+        /// default) keeps the previous blocking behaviour, which is what a headless or Edit Mode fixture
+        /// with no running loop wants.
+        /// </summary>
+        public IScriptFrameYielder FrameYielder;
     }
 
     /// <summary>
@@ -370,6 +379,7 @@ namespace CoreAI.Ai.LuaCs
                 options.WorldMutationGate,
                 engine.CoroutineResumeBudget);
             executor.LocalActorResolver = options.LocalActorResolver;
+            executor.FrameYielder = options.FrameYielder;
 
             return new LuaCsModStack(runtime, executor, bindings);
         }

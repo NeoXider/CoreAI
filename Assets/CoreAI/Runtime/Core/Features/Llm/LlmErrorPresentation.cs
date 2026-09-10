@@ -5,48 +5,50 @@ using Newtonsoft.Json.Linq;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Превращает сбой LLM в две разные строки: одну для ИГРОКА, другую для ЛОГА.
+    /// Turns an LLM failure into two different strings: one for the PLAYER, one for the LOG.
     ///
-    /// ПОЧЕМУ: чат-UI когда-то вставлял <c>exception.Message</c> прямо в ленту, и игрок видел
-    /// <c>HTTP error 403: {"error":{"message":"..."}}</c> — технично, часто обрезано и бесполезно, —
-    /// а лог получал ту же короткую строку и терял тело ответа провайдера. Этот тип разводит аудитории:
+    /// WHY: the chat UI once pasted <c>exception.Message</c> straight into the feed, and the player saw
+    /// <c>HTTP error 403: {"error":{"message":"..."}}</c> - technical, usually truncated and useless -
+    /// while the log got the same short string and lost the provider's response body. This type splits
+    /// the two audiences:
     /// <list type="bullet">
-    /// <item><see cref="ToUserMessage(Exception, string)"/> — одно читаемое предложение. Побеждает фраза,
-    ///   которую НАШ бэкенд написал для игрока (шлюз, уже сказавший «учитель недоступен, попробуй через
-    ///   минуту», знает продукт лучше библиотеки); иначе — фраза по <see cref="LlmErrorCode"/>.</item>
-    /// <item><see cref="ToDiagnosticText"/> — всё, что стоит сохранить: код ошибки, HTTP-статус,
-    ///   подсказка о повторе и сырое тело ответа провайдера.</item>
+    /// <item><see cref="ToUserMessage(Exception, string)"/> - one readable sentence. The phrase OUR
+    ///   backend wrote for the player wins (a gateway that already said "the teacher is unavailable, try
+    ///   again in a minute" knows the product better than a library does); otherwise the built-in phrase
+    ///   for the <see cref="LlmErrorCode"/>.</item>
+    /// <item><see cref="ToDiagnosticText"/> - everything worth keeping: the error code, the HTTP status,
+    ///   the retry hint and the raw provider response body.</item>
     /// </list>
     /// <para>
-    /// <b>Авторство проверяется, а не предполагается.</b> Текст показывается игроку только когда тело
-    /// ошибки несёт канонический конверт бэкенда — строковые поля верхнего уровня <c>error_code</c>,
-    /// <c>request_id</c> и <c>message</c> (зеркало <c>error.message</c> принимается как носитель текста).
-    /// Сырой провайдер (OpenAI, Anthropic, Groq, OpenRouter, HTML-страница прокси) такой конверт не
-    /// эмитит, поэтому его <c>error.message</c> — на языке провайдера, с именами моделей, id организаций
-    /// и ссылками на биллинг — никогда не принимается за фразу для игрока. Голое
-    /// <c>HTTP error 503: …</c> из сообщения исключения — транспортный текст, он тоже не показывается.
-    /// Даже сообщение из конверта проходит фильтр шума (<see cref="IsPresentableToPlayer"/>): трасса
-    /// стека или traceback, просочившиеся в сообщение бэкенда, в ленту не попадают.
+    /// <b>Authorship is verified, not assumed.</b> Text is shown to the player only when the error body
+    /// carries the canonical backend envelope - the top-level string fields <c>error_code</c>,
+    /// <c>request_id</c> and <c>message</c> (the <c>error.message</c> mirror is accepted as the carrier of
+    /// the text). A raw provider (OpenAI, Anthropic, Groq, OpenRouter, a proxy's HTML page) does not emit
+    /// such an envelope, so its <c>error.message</c> - in the provider's language, with model names,
+    /// organisation ids and billing links - is never mistaken for a player-facing phrase. A bare
+    /// <c>HTTP error 503: ...</c> from an exception message is transport text and is not shown either.
+    /// Even a message from the envelope passes through the noise filter
+    /// (<see cref="IsPresentableToPlayer"/>): a stack trace or traceback that leaked into the backend's
+    /// message never reaches the feed.
     /// </para>
-    /// Портативное ядро: без типов Unity, одно и то же отображение доступно любому хосту и headless-тесту.
+    /// Portable core: no Unity types, so the same presentation is available to any host and headless test.
     /// </summary>
     public static class LlmErrorPresentation
     {
-        /// <summary>Запасная фраза, когда ничего конкретнее не известно.</summary>
+        /// <summary>Fallback phrase used when nothing more specific is known.</summary>
         public const string DefaultUserMessage =
             "The assistant is unavailable right now. Please try again in a moment.";
 
-        /// <summary>Самое длинное сообщение бэкенда, которое показывается игроку как есть.</summary>
+        /// <summary>The longest backend message that is shown to the player as-is.</summary>
         public const int MaxUserMessageLength = 400;
 
-        // ПОЧЕМУ: настоящая диагностика приходит в нескольких форматах, и ни один из них не «\n at »
-        // с одним пробелом:
-        //  - фреймы .NET — «\r\n   at Namespace.Type.Method(...)», ТРИ пробела после перевода строки;
-        //  - фреймы JavaScript — «\n    at fn (file.js:12:3)»;
-        //  - Python-traceback — «Traceback (most recent call last):» и «File "x.py", line 3»;
-        //  - сама строка исключения — «ValueError: …», «TypeError: Failed to fetch»,
-        //    «System.Net.Http.HttpRequestException: …».
-        // Любой из этих признаков означает, что текст написан для инженера, а не для игрока.
+        // WHY: real diagnostics arrive in several shapes, and none of them is a single-space "\n at ":
+        //  - .NET frames: "\r\n   at Namespace.Type.Method(...)", THREE spaces after the line break;
+        //  - JavaScript frames: "\n    at fn (file.js:12:3)";
+        //  - Python tracebacks: "Traceback (most recent call last):" and 'File "x.py", line 3';
+        //  - the exception line itself: "ValueError: ...", "TypeError: Failed to fetch",
+        //    "System.Net.Http.HttpRequestException: ...".
+        // Any of these markers means the text was written for an engineer, not for the player.
         private static readonly Regex StackFramePattern = new(
             @"(?:^|[\r\n])[ \t]*at[ \t]+\S",
             RegexOptions.CultureInvariant);
@@ -59,7 +61,7 @@ namespace CoreAI.Ai
             @"(?:^|[\s(\[])[A-Za-z_][\w.]*(?:Exception|Error)\s*:",
             RegexOptions.CultureInvariant);
 
-        /// <summary>Одно читаемое предложение для пузыря чата. Никогда не возвращает null или пустоту.</summary>
+        /// <summary>One readable sentence for the chat bubble. Never returns null or empty.</summary>
         public static string ToUserMessage(Exception exception, string fallback = null)
         {
             if (exception is LlmClientException llmException)
@@ -80,7 +82,7 @@ namespace CoreAI.Ai
             return Coalesce(fallback, DefaultUserMessage);
         }
 
-        /// <summary>Одно читаемое предложение для пузыря чата из типизированного сбоя LLM.</summary>
+        /// <summary>One readable sentence for the chat bubble, from a typed LLM failure.</summary>
         public static string ToUserMessage(LlmClientException exception, string fallback = null)
         {
             if (exception == null)
@@ -88,15 +90,15 @@ namespace CoreAI.Ai
                 return Coalesce(fallback, DefaultUserMessage);
             }
 
-            // ПОЧЕМУ: тело 401 может вернуть отправленный ключ/токен обратно (провайдеры так делают),
-            // поэтому его текст в ленту не попадает — игрок получает фразу «войдите заново».
-            // То же правило, что и редактирование в HTTP-адаптерах; см. MeaiOpenAiChatClient.BuildHttpException.
+            // WHY: the body of a 401 can echo the key/token that was sent back to us (providers do that),
+            // so its text never reaches the feed - the player gets the "please sign in again" phrase.
+            // Same rule as the redaction in the HTTP adapters; see MeaiOpenAiChatClient.BuildHttpException.
             if (IsAuthFailure(exception))
             {
                 return Coalesce(fallback, ForErrorCode(LlmErrorCode.AuthExpired));
             }
 
-            // Победить встроенную фразу может только предложение, которое наш бэкенд написал для игрока.
+            // Only a sentence our backend wrote for the player may beat the built-in phrase.
             string authored = ExtractBackendAuthoredMessage(exception.ProviderErrorBody);
             if (IsPresentableToPlayer(authored))
             {
@@ -106,7 +108,7 @@ namespace CoreAI.Ai
             return Coalesce(fallback, ForErrorCode(exception.ErrorCode, exception.RetryAfterSeconds));
         }
 
-        /// <summary>Встроенная фраза для категории сбоя; используется, когда никто не написал лучше.</summary>
+        /// <summary>Built-in phrase for a failure category; used when nobody wrote a better one.</summary>
         public static string ForErrorCode(LlmErrorCode errorCode, int? retryAfterSeconds = null)
         {
             string retryHint = retryAfterSeconds.HasValue && retryAfterSeconds.Value > 0
@@ -147,8 +149,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Всё, что стоит записать в лог: категория, HTTP-статус, подсказка о повторе и сырое тело
-        /// ответа провайдера. Логировать ВМЕСТЕ с самим исключением (у него трасса стека).
+        /// Everything worth writing to the log: the category, the HTTP status, the retry hint and the raw
+        /// provider response body. Log it TOGETHER with the exception itself (that is where the stack is).
         /// </summary>
         public static string ToDiagnosticText(Exception exception)
         {
@@ -161,8 +163,8 @@ namespace CoreAI.Ai
             string retry = llmException.RetryAfterSeconds.HasValue
                 ? $" retryAfter={llmException.RetryAfterSeconds.Value}s"
                 : "";
-            // То же правило редактирования, что в HTTP-адаптерах: тело auth-ошибки может содержать
-            // только что отправленный ключ, а логи уезжают дальше процесса.
+            // Same redaction rule as in the HTTP adapters: the body of an auth error may contain the key
+            // that was just sent, and logs travel beyond this process.
             string body;
             if (string.IsNullOrWhiteSpace(llmException.ProviderErrorBody))
             {
@@ -182,12 +184,11 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Предложение, которое наш бэкенд написал для игрока, либо "" — когда тело не является
-        /// каноническим конвертом бэкенда. Конверт узнаётся по строковым полям верхнего уровня
-        /// <c>error_code</c>, <c>request_id</c> и <c>message</c> (OpenAI-подобное зеркало
-        /// <c>error.message</c> тоже принимается как носитель текста). Голое
-        /// <c>{"error":{"message":…}}</c> возвращает любой провайдер и об авторстве не говорит ничего —
-        /// для него результат "".
+        /// The sentence our backend wrote for the player, or "" when the body is not the canonical backend
+        /// envelope. The envelope is recognised by the top-level string fields <c>error_code</c>,
+        /// <c>request_id</c> and <c>message</c> (the OpenAI-like <c>error.message</c> mirror is accepted as
+        /// the carrier of the text too). A bare <c>{"error":{"message":...}}</c> is returned by any
+        /// provider and says nothing about authorship - for it the result is "".
         /// </summary>
         public static string ExtractBackendAuthoredMessage(string providerErrorBody)
         {
@@ -214,15 +215,15 @@ namespace CoreAI.Ai
             }
             catch (Exception)
             {
-                // Не JSON (HTML-страница ошибки, текст прокси, обрезанное тело): для игрока никто
-                // ничего не писал, а сбой разбора не должен всплыть второй ошибкой.
+                // Not JSON (an HTML error page, proxy text, a truncated body): nobody wrote anything for
+                // the player, and a parse failure must not surface as a second error.
                 return "";
             }
         }
 
         /// <summary>
-        /// Снимает префикс <c>HTTP error 403: </c>, который HTTP-адаптеры ставят перед текстом
-        /// провайдера. Диагностический помощник: остаток — текст провайдера, сам по себе он не для игрока.
+        /// Strips the <c>HTTP error 403: </c> prefix that the HTTP adapters put in front of the provider's
+        /// text. A diagnostic helper: what remains is provider text and is not player-facing on its own.
         /// </summary>
         public static string StripHttpErrorPrefix(string message)
         {
@@ -244,9 +245,9 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Можно ли это показать игроку? JSON-дампы, трассы стека, traceback'и, строки исключений и
-        /// тела размером с повесть — диагностика, а не текст UI; для них берётся встроенная фраза.
-        /// Публичный, чтобы хосты с собственным рендером ошибок применяли тот же фильтр.
+        /// May this be shown to the player? JSON dumps, stack traces, tracebacks, exception lines and
+        /// novel-sized bodies are diagnostics, not UI copy; for those the built-in phrase is used.
+        /// Public so that hosts rendering errors themselves apply the same filter.
         /// </summary>
         public static bool IsPresentableToPlayer(string message)
         {
@@ -268,9 +269,9 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Сбой класса 401: его тело везде считается носителем секрета. Достаточно ЛЮБОГО из двух
-        /// признаков — адаптер может классифицировать 401 как <see cref="LlmErrorCode.AuthExpired"/>
-        /// без статуса или передать статус под другим кодом.
+        /// A 401-class failure: its body is treated everywhere as carrying a secret. EITHER of the two
+        /// markers is enough - an adapter may classify a 401 as <see cref="LlmErrorCode.AuthExpired"/>
+        /// without a status, or pass the status along under a different code.
         /// </summary>
         private static bool IsAuthFailure(LlmClientException exception)
         {

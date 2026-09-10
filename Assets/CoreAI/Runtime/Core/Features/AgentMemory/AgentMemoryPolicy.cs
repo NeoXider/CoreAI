@@ -15,10 +15,122 @@ namespace CoreAI.Ai
         private readonly Dictionary<string, List<ILlmTool>> _customTools = new();
 
         private readonly Dictionary<string, MutableSkillCatalog> _roleSkillCatalogs =
-            new(StringComparer.OrdinalIgnoreCase);
+            new(StringComparer.Ordinal);
 
         private readonly Dictionary<string, IAgentRuntimeContextProvider> _runtimeContextProviders = new();
         private static readonly MemoryLlmTool _memoryToolInstance = new();
+
+        /// <summary>
+        /// Detached, fully validated role publication unit built by <see cref="AgentConfig"/>.
+        /// Applied atomically by <see cref="ApplyPreparedRole"/>; a role is never partially visible.
+        /// </summary>
+        internal sealed class PreparedAgentRole
+        {
+            public string RoleId;
+            public List<ILlmTool> Tools;
+            public MemoryToolAction MemoryDefaultAction;
+            public bool? AllowDuplicateToolCalls;
+            public bool HasMemoryTool;
+            public bool WithChatHistory;
+            public int ContextWindowTokens;
+            public bool PersistChatHistory;
+            public int MaxChatHistoryMessages;
+            public bool UseLlmContextCompaction;
+            public int? MaxOutputTokens;
+            public int? MaxToolCallRoundtrips;
+            public float? Temperature;
+            public ToolResultMemoryPolicy ToolResultMemory;
+            public float? CompactionTriggerRatio;
+            public bool OverrideUniversalPrefix;
+            public bool? StreamingOverride;
+            public string AdditionalPrompt;
+            public MutableSkillCatalog LiveCatalog;
+        }
+
+        /// <summary>
+        /// Atomically publishes a prepared role: tool list, role config, prompt overlay, streaming
+        /// override, and skill catalog registration happen under a single lock with no awaits or
+        /// callbacks inside. The same live catalog instance backs role lookup and agent proxies;
+        /// unrelated runtime context providers are left untouched.
+        /// </summary>
+        internal void ApplyPreparedRole(PreparedAgentRole prepared)
+        {
+            if (prepared == null)
+            {
+                throw new ArgumentNullException(nameof(prepared));
+            }
+
+            string roleId = (prepared.RoleId ?? "").Trim();
+            if (roleId.Length == 0)
+            {
+                throw new ArgumentException("Role id is missing.", nameof(prepared));
+            }
+
+            lock (_lock)
+            {
+                if (prepared.LiveCatalog != null)
+                {
+                    _roleSkillCatalogs[roleId] = prepared.LiveCatalog;
+                }
+
+                if (prepared.Tools == null || prepared.Tools.Count == 0)
+                {
+                    _customTools.Remove(roleId);
+                }
+                else
+                {
+                    _customTools[roleId] = prepared.Tools;
+                }
+
+                ConfigureRole(roleId, useMemoryTool: null,
+                    defaultAction: prepared.MemoryDefaultAction,
+                    allowDuplicateToolCalls: prepared.AllowDuplicateToolCalls);
+                if (prepared.Tools == null || prepared.Tools.Count == 0 || !prepared.HasMemoryTool)
+                {
+                    DisableMemoryTool(roleId);
+                }
+
+                ConfigureChatHistory(roleId, prepared.WithChatHistory,
+                    prepared.ContextWindowTokens, prepared.PersistChatHistory,
+                    prepared.MaxChatHistoryMessages);
+                ConfigureLlmContextCompaction(roleId, prepared.UseLlmContextCompaction);
+                SetMaxOutputTokens(roleId, prepared.MaxOutputTokens);
+                SetMaxToolCallRoundtrips(roleId, prepared.MaxToolCallRoundtrips);
+                SetTemperature(roleId, prepared.Temperature);
+                SetToolResultMemoryPolicy(roleId, prepared.ToolResultMemory);
+                SetCompactionTriggerRatio(roleId, prepared.CompactionTriggerRatio);
+
+                if (prepared.OverrideUniversalPrefix)
+                {
+                    _overrideUniversalPrefix.Add(roleId);
+                }
+
+                if (prepared.StreamingOverride.HasValue)
+                {
+                    _streamingOverrides[roleId] = prepared.StreamingOverride.Value;
+                }
+                else
+                {
+                    _streamingOverrides.Remove(roleId);
+                }
+
+                if (!string.IsNullOrWhiteSpace(prepared.AdditionalPrompt))
+                {
+                    _additionalSystemPrompts[roleId] = prepared.AdditionalPrompt.Trim();
+                }
+            }
+        }
+
+        /// <summary>Copies direct tool references without invoking user tool metadata.</summary>
+        internal IReadOnlyList<ILlmTool> SnapshotCustomToolsForPreparation(string roleId)
+        {
+            lock (_lock)
+            {
+                return _customTools.TryGetValue(roleId.Trim(), out List<ILlmTool> tools)
+                    ? new List<ILlmTool>(tools)
+                    : Array.Empty<ILlmTool>();
+            }
+        }
 
         /// <summary>
         /// Replaces the direct tool list for a role; pass an empty list to clear custom tools.

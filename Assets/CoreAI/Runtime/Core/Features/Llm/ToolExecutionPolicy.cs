@@ -21,39 +21,43 @@ namespace CoreAI.Infrastructure.Llm
     /// Used by both <see cref="SmartToolCallingChatClient"/> (non-streaming)
     /// and the streaming path to keep behavior consistent.
     /// <para>
-    /// <b>Ни одного <c>ConfigureAwait(false)</c> в этом файле — это требование, а не стиль.</b>
-    /// В Unity WebGL-плеере пула потоков нет, а <c>SynchronizationContext.Current</c> есть
-    /// (<c>UnitySynchronizationContext</c>). Из-за этого продолжение <c>await x.ConfigureAwait(false)</c>
-    /// признаётся «неинлайнимым» (<c>SynchronizationContext</c> не базового типа) и ставится в очередь
-    /// пула — то есть НЕ ВЫПОЛНЯЕТСЯ НИКОГДА. Отказ безмолвный: не исключение, а вечное ожидание.
-    /// Пока каждый инструмент завершался синхронно, суспенда не было и дефект не проявлялся; первый
-    /// же ОЖИДАЮЩИЙ инструмент (карточка квиза, которая ждёт ответа ученика) вешал ход учителя
-    /// навсегда — ученик оставался с вечным индикатором «печатает» и заблокированным вводом.
-    /// Тот же вывод уже записан в <c>MeaiOpenAiChatClient</c>, <c>AiOrchestrator</c>,
-    /// <c>QueuedAiOrchestrator</c>, <c>LoggingLlmClientDecorator</c> и <c>FetchSseOpenAiTransport</c>;
-    /// этот файл был последним на пути LLM, где правило не соблюдалось.
+    /// <b>Not a single <c>ConfigureAwait(false)</c> in this file - that is a requirement, not a style.</b>
+    /// The Unity WebGL player has no thread pool, yet it does have a <c>SynchronizationContext.Current</c>
+    /// (<c>UnitySynchronizationContext</c>). Because of that, the continuation of
+    /// <c>await x.ConfigureAwait(false)</c> is deemed "non-inlineable" (the <c>SynchronizationContext</c>
+    /// is not the base type) and gets queued to the pool - that is, IT NEVER RUNS. The failure is silent:
+    /// not an exception, but an eternal wait. As long as every tool completed synchronously there was no
+    /// suspension and the defect never showed; the very first AWAITING tool (a quiz card waiting for the
+    /// learner's answer) hung the teacher's turn forever - the learner was left with a permanent "typing"
+    /// indicator and a locked input box. The same conclusion is already recorded in
+    /// <c>MeaiOpenAiChatClient</c>, <c>AiOrchestrator</c>, <c>QueuedAiOrchestrator</c>,
+    /// <c>LoggingLlmClientDecorator</c> and <c>FetchSseOpenAiTransport</c>; this file was the last one on
+    /// the LLM path where the rule was not observed.
     /// </para>
     /// <para>
-    /// Практическое следствие: продолжения возвращаются на цикл хоста (в Unity — на player loop).
-    /// Для переносимых хостов без <c>SynchronizationContext</c> поведение не меняется вовсе — там
-    /// захватывать нечего, и продолжение резюмируется ровно так же, как с <c>ConfigureAwait(false)</c>.
+    /// The practical consequence: continuations come back on the host's loop (in Unity, on the player
+    /// loop). For portable hosts without a <c>SynchronizationContext</c> the behaviour does not change at
+    /// all - there is nothing to capture there, and the continuation resumes exactly as it would with
+    /// <c>ConfigureAwait(false)</c>.
     /// </para>
     /// </summary>
     public sealed class ToolExecutionPolicy
     {
         /// <summary>
-        /// Что видит модель вместо ПУСТОГО результата инструмента. Пустое tool-сообщение провайдеры
-        /// отвергают, а молчаливая подмена на «успех» скрывала бы, что инструменту нечего было сказать —
-        /// поэтому конверт честный: <c>empty:true</c> отличает «данных нет» от настоящего ответа, а
-        /// <c>ok:true</c> ровно повторяет вердикт <see cref="IsToolResultSuccess"/> для пустой строки.
+        /// What the model sees in place of an EMPTY tool result. Providers reject an empty tool message,
+        /// and silently substituting a plain "success" would hide the fact that the tool had nothing to
+        /// say - so the envelope is honest: <c>empty:true</c> distinguishes "no data" from a real answer,
+        /// and <c>ok:true</c> repeats exactly the verdict <see cref="IsToolResultSuccess"/> gives for an
+        /// empty string.
         /// </summary>
         internal const string EmptyToolResultPayload =
             "{\"ok\":true,\"empty\":true,\"message\":\"The tool returned an empty result. It counts as completed; there is no data to read from it.\"}";
 
         /// <summary>
-        /// Пометка, которой заканчивается обрезанный по <see cref="ICoreAISettings.MaxToolResultChars"/>
-        /// результат. Обрезка обязана быть видна модели явно — иначе она дочитывает оборванный JSON как
-        /// полный и строит ответ на половине данных.
+        /// The marker that terminates a result truncated at
+        /// <see cref="ICoreAISettings.MaxToolResultChars"/>. The truncation must be explicitly visible to
+        /// the model - otherwise it reads the cut-off JSON as complete and builds its answer on half the
+        /// data.
         /// </summary>
         internal const string TruncatedResultMarker = "...[truncated: ";
 
@@ -87,12 +91,12 @@ namespace CoreAI.Infrastructure.Llm
         private int _turnEndingToolSucceeded;
 
         /// <summary>
-        /// Сигнатуры <c>имя(канонизированные аргументы)</c> ОТДЕЛЬНЫХ вызовов, которые УСПЕШНО
-        /// выполнились в предыдущих ходах этого запроса. Ключ per-call, а не по батчу: батчевая
-        /// сигнатура пропускала эхо, если модель добавляла или убирала соседний вызов
-        /// (ход 1 = [A], ход 2 = [A, B] → A исполнялся второй раз), и обещание доков «свой ключ
-        /// идемпотентности не нужен» не выполнялось ровно там, где автор инструмента на него положился.
-        /// Регистрируется только успех: упавший вызов обязан оставаться повторяемым с теми же аргументами.
+        /// <c>name(canonicalized arguments)</c> signatures of INDIVIDUAL calls that completed
+        /// SUCCESSFULLY in earlier turns of this request. The key is per-call rather than per-batch: a
+        /// batch signature let echoes through whenever the model added or removed a neighbouring call
+        /// (turn 1 = [A], turn 2 = [A, B] -> A ran a second time), and the docs' promise that "you do not
+        /// need your own idempotency key" was broken exactly where a tool author relied on it. Only
+        /// success is registered: a failed call must stay repeatable with the same arguments.
         /// </summary>
         private readonly HashSet<string> _succeededCallSignatures = new();
 
@@ -224,8 +228,8 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// План одного батча: какие слоты — эхо уже успевшего вызова (заполнены no-op'ом заранее), какие
-        /// исполняются, и какая per-call сигнатура регистрируется у слота ПОСЛЕ его успеха.
+        /// The plan for one batch: which slots are echoes of an already succeeded call (pre-filled with a
+        /// no-op), which ones execute, and which per-call signature a slot registers AFTER it succeeds.
         /// </summary>
         private sealed class DuplicatePlan
         {
@@ -284,9 +288,10 @@ namespace CoreAI.Infrastructure.Llm
                 return plan;
             }
 
-            // Сравнение только с ПРЕДЫДУЩИМИ ходами: три одинаковых «spawn tree» в одном ходе — законная
-            // просьба, и все три исполняются (паритет с Claude/Cursor). Повтор из следующего хода —
-            // эхо, и оно гасится по своему ключу независимо от того, что ещё пришло рядом с ним.
+            // Compared against PREVIOUS turns only: three identical "spawn tree" calls within one turn are
+            // a legitimate request and all three execute (parity with Claude/Cursor). A repeat coming from
+            // the next turn is an echo, and it is suppressed by its own key regardless of what else
+            // arrived alongside it.
             bool anyExecutable = false;
             for (int i = 0; i < count; i++)
             {
@@ -309,10 +314,11 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Структурированный no-op для эха: модель получает <c>ok:true, duplicate:true</c> и объяснение, что
-        /// вызов уже выполнялся и не повторён. Это НЕ ошибка — ни для модели, ни для счётчика подряд идущих
-        /// сбоев: «покажи карточку ещё раз» с теми же аргументами не должно засчитываться как провал хода
-        /// и через три повтора обрывать ход сообщением об аборте.
+        /// A structured no-op for an echo: the model gets <c>ok:true, duplicate:true</c> plus an
+        /// explanation that the call already ran and was not repeated. This is NOT an error - neither for
+        /// the model nor for the consecutive-failure counter: "show the card again" with the same
+        /// arguments must not count as a failed turn and abort the run with an abort message after three
+        /// repeats.
         /// </summary>
         private ToolCallResult CreateDuplicateNoOp(MEAI.FunctionCallContent fc)
         {
@@ -325,7 +331,7 @@ namespace CoreAI.Infrastructure.Llm
             };
         }
 
-        /// <summary>Текст no-op'а для эха; вынесен, чтобы потоковый и батчевый пути отдавали одно и то же.</summary>
+        /// <summary>The echo no-op payload; extracted so the streaming and batch paths return the same text.</summary>
         internal static string BuildDuplicateNoOpPayload(string toolName)
         {
             return JsonConvert.SerializeObject(new
@@ -340,10 +346,11 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Per-call сигнатура <c>имя(канонизированные аргументы)</c> или <c>false</c>, если инструмент
-        /// исключён из проверки. Исключение — целиком по флагу автора: <see cref="ILlmTool.AllowDuplicates"/>
-        /// означает «повторный идентичный вызов осмыслен» (перезапустить тот же код, перечитать состояние),
-        /// и молча отменять это для «особых» имён нельзя — автор строит поведение на обещании доков.
+        /// The per-call <c>name(canonicalized arguments)</c> signature, or <c>false</c> when the tool is
+        /// exempt from the check. The exemption comes entirely from the author's flag:
+        /// <see cref="ILlmTool.AllowDuplicates"/> means "a repeated identical call is meaningful" (re-run
+        /// the same code, re-read the state), and silently overriding that for "special" names is not
+        /// allowed - the author builds behaviour on the promise the docs make.
         /// </summary>
         private bool TryBuildDuplicateSignature(ResolvedCall resolved, out string signature)
         {
@@ -550,9 +557,9 @@ namespace CoreAI.Infrastructure.Llm
                 // Name not found even after case-insensitive search
                 string unknown =
                     $"Error: Unknown tool '{fc.Name}'. Available tools: [{string.Join(", ", _originalTools.Select(t => t.Name))}]";
-                // Событие сбоя публикуется и для выдуманного моделью имени: подписчик, который ждёт
-                // LlmToolCallFailed «в том числе для отсутствующего инструмента», иначе его не увидит,
-                // хотя соседняя ветка (имя известно, привязки нет) публикует.
+                // The failure event is published for a model-invented name too: a subscriber expecting
+                // LlmToolCallFailed "including for a missing tool" would otherwise never see it, even
+                // though the neighbouring branch (name known, no binding) does publish one.
                 _eventPublisher.PublishFailed(BuildInfo(fc), unknown, 0d);
                 RecordSyntheticTrace(fc.Name ?? "", false, 0d, "unknown-tool", unknown);
                 LogCallLine(fc, false, 0d, $"Tool '{fc.Name}' not found (no repair match)");
@@ -760,8 +767,9 @@ namespace CoreAI.Infrastructure.Llm
                 if (maxResultChars > 0 && resultText.Length > maxResultChars)
                 {
                     int originalLen = resultText.Length;
-                    // Обрезка видна модели явной пометкой, а не молча: оборванный JSON без неё дочитывается
-                    // как полный. Вердикт успех/сбой уже снят с ПОЛНОГО текста выше.
+                    // Truncation is made visible to the model with an explicit marker rather than silently:
+                    // without it the cut-off JSON reads as complete. The success/failure verdict was
+                    // already taken from the FULL text above.
                     resultText = resultText.Substring(0, maxResultChars) +
                                  $"\n{TruncatedResultMarker}{originalLen} chars total -> {maxResultChars} shown]";
                     _logger.Info(
@@ -823,9 +831,9 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                // Подсказка со схемой добавляется по ФОРМЕ исключения — это только текст для модели,
-                // чтобы она перевыпустила аргументы, а не гадала по непрозрачному сообщению. Не влияет на
-                // источник трассы ниже — см. LooksLikeArgumentConversionError.
+                // The schema hint is appended based on the SHAPE of the exception - it is text for the
+                // model only, so that it re-issues the arguments instead of guessing from an opaque
+                // message. It does not affect the trace source below - see LooksLikeArgumentConversionError.
                 string errorMessage = ex.Message;
                 if (LooksLikeArgumentConversionError(ex))
                 {
@@ -943,10 +951,11 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Похоже ли исключение вызова на сбой преобразования аргументов. Используется ТОЛЬКО для текста
-        /// подсказки со схемой; на источник трассы и retry-безопасность не влияет — это решает
-        /// консервативная классификация границы вызова. Проверяется вся цепочка: MEAI часто
-        /// заворачивает настоящую JsonException/FormatException во внешнюю InvalidOperationException.
+        /// Whether an invocation exception looks like an argument-conversion failure. Used ONLY for the
+        /// text of the schema hint; it affects neither the trace source nor retry safety - those are
+        /// decided by the conservative classification at the invocation boundary. The whole chain is
+        /// inspected: MEAI often wraps the real JsonException/FormatException in an outer
+        /// InvalidOperationException.
         /// </summary>
         internal static bool LooksLikeArgumentConversionError(Exception ex)
         {
@@ -1215,11 +1224,11 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Встроенные мутирующие инструменты, которые политика узнаёт ПО ИМЕНИ даже без
-        /// <see cref="ILlmTool.IsMutating"/> у их класса: они пишут в общее хранилище (память, реестр
-        /// Lua-модов, реестр навыков, мир), и гонка двух таких вызовов теряет записи. Список — только
-        /// обратная совместимость для встроенных имён; расширение делается флагом у инструмента, а не
-        /// правкой этого файла. Сравнение без учёта регистра, по (возможно исправленному) имени.
+        /// Built-in mutating tools that the policy recognises BY NAME even when their class does not set
+        /// <see cref="ILlmTool.IsMutating"/>: they write to a shared store (memory, the Lua mod registry,
+        /// the skill registry, the world), and a race between two such calls loses writes. The list is
+        /// backwards compatibility for the built-in names only; extending it is done with the flag on the
+        /// tool, not by editing this file. Comparison is case-insensitive, on the (possibly repaired) name.
         /// </summary>
         private static readonly HashSet<string> BuiltInMutatingToolNames = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -1233,11 +1242,11 @@ namespace CoreAI.Infrastructure.Llm
         };
 
         /// <summary>
-        /// Обязан ли вызов идти в общей цепочке сериализации мутаций. Правило: инструмент объявил
-        /// <see cref="ILlmTool.IsMutating"/> (разрешение по имени из списка роли, как у таймаутов) ИЛИ
-        /// его имя — встроенное мутирующее. Все мутирующие вызовы хода делят ОДНУ упорядоченную цепочку,
-        /// так что два разных мутирующих инструмента тоже не перекрываются; остальные идут параллельно
-        /// под лимитом <see cref="ICoreAISettings.MaxParallelToolCalls"/>.
+        /// Whether the call must join the shared mutation serialization chain. The rule: the tool declared
+        /// <see cref="ILlmTool.IsMutating"/> (resolved by name from the role's list, just like timeouts)
+        /// OR its name is a built-in mutating one. All mutating calls of a turn share ONE ordered chain, so
+        /// two different mutating tools do not overlap either; the rest run in parallel under the
+        /// <see cref="ICoreAISettings.MaxParallelToolCalls"/> limit.
         /// </summary>
         private bool IsMutatingTool(MEAI.FunctionCallContent fc)
         {
@@ -1271,11 +1280,11 @@ namespace CoreAI.Infrastructure.Llm
         /// Outer cancellation cancels all in-flight calls and propagates as <see cref="OperationCanceledException"/>.
         /// </para>
         /// <para>
-        /// Эхо (вызов, чья per-call сигнатура уже успела раньше в этом запросе) не исполняется и получает
-        /// структурированный no-op с <c>ok:true</c>. Учёт хода ведётся ТОЛЬКО по исполненным слотам:
-        /// no-op — не успех и не сбой, а отсутствие движения. Ход из одних no-op'ов не двигает счётчик
-        /// подряд идущих сбоев ни в какую сторону; от модели, которая эхо-ит бесконечно, защищает
-        /// лимит roundtrip'ов, а не счётчик ошибок.
+        /// An echo (a call whose per-call signature already succeeded earlier in this request) is not
+        /// executed and receives a structured no-op with <c>ok:true</c>. Turn accounting is done ONLY over
+        /// executed slots: a no-op is neither a success nor a failure, it is the absence of movement. A
+        /// turn made up of nothing but no-ops moves the consecutive-failure counter in neither direction;
+        /// what protects against a model that echoes forever is the roundtrip limit, not the error counter.
         /// </para>
         /// </summary>
         public async Task<BatchToolCallResult> ExecuteBatchAsync(
@@ -1288,7 +1297,7 @@ namespace CoreAI.Infrastructure.Llm
                 return new BatchToolCallResult { Results = new List<MEAI.AIContent>() };
             }
 
-            // 1. Эхо решается по слотам, чтобы смешанный батч исполнил всё, что не эхо.
+            // 1. Echoes are decided per slot, so that a mixed batch still executes everything that is not one.
             DuplicatePlan duplicatePlan = BuildDuplicatePlan(toolCalls, chatOptions);
             if (!duplicatePlan.HasExecutable)
             {
@@ -1394,10 +1403,11 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Общий хвост батча: результаты в исходном порядке вызовов, ОДНА запись в счётчик подряд идущих
-        /// сбоев и регистрация per-call сигнатур успевших слотов. Частичный успех — движение вперёд: к
-        /// аборту ведёт только батч, где упал КАЖДЫЙ исполненный вызов, иначе три батча «4 из 5 удались»
-        /// подряд убивали бы прогон, который на глазах строит сцену. Слоты-эхо в учёте не участвуют.
+        /// The shared tail of a batch: results in the original call order, ONE entry into the
+        /// consecutive-failure counter, and registration of the per-call signatures of the slots that
+        /// succeeded. Partial success is forward movement: only a batch in which EVERY executed call
+        /// failed leads to an abort, otherwise three consecutive "4 out of 5 succeeded" batches would kill
+        /// a run that is visibly building the scene. Echo slots take no part in the accounting.
         /// </summary>
         private BatchToolCallResult CollateBatch(DuplicatePlan plan)
         {
@@ -1435,9 +1445,9 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Одна запись в счётчик за ход: все исполненные упали — сбой; хоть один удался — успех (сброс);
-        /// исполненных нет (ход из одних no-op'ов эха) — счётчик не трогается вовсе, потому что не было
-        /// ни ошибки, ни движения.
+        /// One counter entry per turn: every executed call failed - a failure; at least one succeeded - a
+        /// success (reset); nothing was executed (a turn of nothing but echo no-ops) - the counter is not
+        /// touched at all, because there was neither an error nor any movement.
         /// </summary>
         private void RecordTurnOutcome(int executed, int executedFailed)
         {
@@ -1486,12 +1496,12 @@ namespace CoreAI.Infrastructure.Llm
             internal readonly List<StreamedSlot> Slots = new();
 
             /// <summary>
-            /// Per-call сигнатура каждого слота (<c>null</c> — инструмент исключён из проверки эха),
-            /// параллельно <see cref="Slots"/>. Регистрируется при финализации только у успевших слотов.
+            /// The per-call signature of every slot (<c>null</c> means the tool is exempt from the echo
+            /// check), parallel to <see cref="Slots"/>. At finalization only the succeeded slots register.
             /// </summary>
             internal readonly List<string> SlotSignatures = new();
 
-            /// <summary>Слоты, заполненные no-op'ом эха: в учёте хода они не участвуют.</summary>
+            /// <summary>Slots filled with an echo no-op: they take no part in the turn accounting.</summary>
             internal readonly HashSet<StreamedSlot> DuplicateSlots = new();
 
             /// <summary>Scheduled (parallel-mode) call tasks, drained at turn completion.</summary>
@@ -1934,10 +1944,10 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Терминальный ответ, когда предел подряд идущих сбоев достигнут, а сводочный ход без
-        /// инструментов текста не дал. Это текст ассистента, который увидит ПОЛЬЗОВАТЕЛЬ, — поэтому
-        /// обычная фраза с причиной, а не служебный JSON: раньше наружу уходило
-        /// <c>{"error":"Agent aborted …"}</c> как реплика, и ученик читал сырой объект.
+        /// The terminal response for when the consecutive-failure limit is reached and the tool-free
+        /// wrap-up turn produced no text. This is assistant text the USER will see - hence a plain
+        /// sentence stating the reason rather than machine JSON: what used to go out as the reply was
+        /// <c>{"error":"Agent aborted ..."}</c>, and the learner read a raw object.
         /// </summary>
         public MEAI.ChatResponse BuildMaxErrorsResponse()
         {

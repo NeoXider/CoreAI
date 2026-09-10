@@ -235,8 +235,8 @@ namespace CoreAI.Tests.PlayMode
 
 #if COREAI_LLM
         /// <summary>
-        /// Двойник пробы канала инструментов: решение фабрики выполняется без сети, а готовность
-        /// по-прежнему идёт настоящим запросом на фейковый сервер.
+        /// Double for the tool channel probe: the factory decision runs without the network, while readiness
+        /// still goes out as a real request to the fake server.
         /// </summary>
         private sealed class ScriptedToolChannelProbe : ILlmToolChannelProbe
         {
@@ -450,9 +450,9 @@ namespace CoreAI.Tests.PlayMode
         {
             CoreAISettingsAsset settings = CreateSettings();
 #if COREAI_LLM
-            // WHY: готовность идёт настоящим запросом на фейк, а решение о канале — двойником:
-            // настоящий UnityWebRequestToolChannelProbe слал бы POST /chat/completions, который
-            // одноразовый LocalHttpServer не обслуживает, и активация висела бы до таймаута пробы (15с).
+            // WHY: readiness goes out as a real request to the fake, while the channel decision is a double:
+            // the real UnityWebRequestToolChannelProbe would POST /chat/completions, which the one-shot
+            // LocalHttpServer does not serve, and activation would hang until the probe timeout (15s).
             ScriptedToolChannelProbe toolProbe = new();
             LlmEndpointClientFactory factory = new(
                 settings, GameLoggerUnscopedFallback.Instance, null, null, toolProbe);
@@ -499,8 +499,8 @@ namespace CoreAI.Tests.PlayMode
         {
             CoreAISettingsAsset settings = CreateSettings();
 #if COREAI_LLM
-            // WHY: тот же двойник, что и выше: FallbackHttpServer обслуживает только readiness-маршруты
-            // (GET /models, POST /completions), а проба канала шла бы третьим запросом в никуда.
+            // WHY: the same double as above: FallbackHttpServer serves only the readiness routes
+            // (GET /models, POST /completions), and the channel probe would be a third request into nowhere.
             ScriptedToolChannelProbe toolProbe = new();
             LlmEndpointClientFactory factory = new(
                 settings, GameLoggerUnscopedFallback.Instance, null, null, toolProbe);
