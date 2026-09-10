@@ -387,6 +387,25 @@ Still open, recorded honestly:
       The editor re-introduces them whenever Mirror is installed locally, which stays a live
       hazard; the `tools/check_positive_module_opt_in.py` release gate now checks for it.
 
+- [x] **The live PlayMode tests are NOT blocked on LM Studio — proven 2026-09-10.** They were
+      recorded as needing a live model, and LM Studio could not load the configured one ("Failed to
+      load model qwen2.5-vl-3b-instruct"), so the suite showed 6 failures. Pointing them at a local
+      OpenAI-compatible bridge instead (`agent.sh openai-server -e opencode -m muse -p 8801`, then
+      `COREAI_PLAYMODE_LLM_BACKEND=http`, `COREAI_TEST_BASE_URL=http://127.0.0.1:8801/v1`,
+      `COREAI_TEST_MODEL=opencode/muse`) takes the full sweep from 136 passed / 6 failed to
+      **140 passed / 2 failed** (`artifacts/testresults/pmbridge1.xml` vs `pmall5.xml`). Everything
+      that needed a model passes when a model answers — the nine built-in roles, the castle build,
+      the crafting-memory chain, the runtime backend switch. Recipe and its limits are written up in
+      the agents skill's AGENTS.md; the bridge is slow (one CLI process per call, serialized) and
+      emulates tool-calling through prompting, so it proves the path works and does not replace a
+      run against a real provider.
+- [ ] **One live test ignores the test env vars and always goes to LM Studio.**
+      `CoreAiChatDemoRealModelWebGlPlayModeTests.CoreAiChatDemo_RealModel_StreamsStopAndRecovers`
+      reads the project's `CoreAISettingsAsset` instead of `COREAI_TEST_BASE_URL`/`COREAI_TEST_MODEL`,
+      so it is the one live test the bridge above cannot help: it still fails with LM Studio's
+      "Failed to load model". Either give it the same env-var path the other live fixtures use, or
+      record deliberately that it is an asset-configured smoke and must be skipped when the asset's
+      backend is unavailable.
 - [ ] **A PlayMode test fails on `main` and it is not the merge's doing — proven.**
       `CoreAiChatPanelNonStreamingPlayModeTests.TypedBufferedFailure_IsAdmittedWithoutCompletionEventOrLegacyExecution`
       fails with an unhandled log message: "[CoreAI] [Core] [CoreAiChatPanel] UIDocument component not
