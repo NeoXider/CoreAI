@@ -8,6 +8,7 @@ using CoreAI.Composition;
 using NUnit.Framework;
 using CoreAI.Infrastructure.Llm;
 using UnityEditor;
+using UnityEditor.Callbacks;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -68,6 +69,8 @@ namespace CoreAI.Tests.PlayMode
 
             List<string> unexpectedErrors = new();
             List<string> skippedModelScenes = new();
+            List<string> mirrorAutoIdentityScenes = new();
+            string mirrorIdentityScriptGuid = FindMirrorNetworkIdentityScriptGuid();
             string currentScene = "(startup)";
             Application.LogCallback capture = (condition, stackTrace, type) =>
             {
@@ -111,7 +114,9 @@ namespace CoreAI.Tests.PlayMode
             foreach (string scenePath in FrozenDemoScenePaths)
             {
                 currentScene = scenePath;
-                AssertSerializedAssetReferencesResolve(scenePath);
+                string sceneYaml = File.ReadAllText(Path.GetFullPath(scenePath));
+                AssertSerializedAssetReferencesResolve(scenePath, sceneYaml);
+                MirrorAutoIdentityPatch.Arm(scenePath);
                 Scene scene = EditorSceneManager.LoadSceneInPlayMode(
                     scenePath,
                     new LoadSceneParameters(LoadSceneMode.Single));
@@ -120,6 +125,26 @@ namespace CoreAI.Tests.PlayMode
                 // Allow Awake/Start plus one player loop for runtime-created demo visuals.
                 yield return null;
                 yield return null;
+
+                foreach (string patchedObject in MirrorAutoIdentityPatch.TakePatchedObjects(scenePath))
+                {
+                    // WHY: a scene that bakes NetworkIdentities and still shipped one without a sceneId is
+                    // the defect Mirror's error describes; only an identity absent from the scene file is
+                    // the optional-package artefact the patch exists for.
+                    if (mirrorIdentityScriptGuid != null
+                        && sceneYaml.Contains("guid: " + mirrorIdentityScriptGuid))
+                    {
+                        unexpectedErrors.Add(
+                            $"{scenePath}: baked NetworkIdentity on '{patchedObject}' has no sceneId; " +
+                            "open and resave the scene with Mirror installed.");
+                    }
+                    else if (!mirrorAutoIdentityScenes.Contains(scenePath))
+                    {
+                        mirrorAutoIdentityScenes.Add(scenePath);
+                    }
+                }
+
+                MirrorAutoIdentityPatch.Disarm();
 
                 Assert.IsNotNull(Object.FindFirstObjectByType<CoreAILifetimeScope>(),
                     $"Demo scene must contain CoreAILifetimeScope: {scenePath}");
@@ -151,6 +176,7 @@ namespace CoreAI.Tests.PlayMode
                 }
             }
 
+            MirrorAutoIdentityPatch.Disarm();
             CleanupLogCapture();
             Assert.IsEmpty(unexpectedErrors,
                 "Published demos emitted unexpected errors:\n" + string.Join("\n\n", unexpectedErrors));
@@ -160,6 +186,167 @@ namespace CoreAI.Tests.PlayMode
                     "[CoreAI] Demo smoke skipped model-backed scenes with no local model file: " +
                     string.Join(", ", skippedModelScenes));
             }
+
+            if (mirrorAutoIdentityScenes.Count > 0)
+            {
+                Debug.LogWarning(
+                    "[CoreAI] Demo smoke: the locally installed Mirror auto-created a NetworkIdentity on a " +
+                    "scene object; the smoke gave it a sceneId ahead of Mirror's post-processor so the run " +
+                    "could continue (committed scenes ship Mirror-free): " +
+                    string.Join(", ", mirrorAutoIdentityScenes));
+            }
+        }
+
+        /// <summary>
+        /// Gives a sceneId to the NetworkIdentities that the optional Mirror package auto-creates while a
+        /// demo scene loads in play mode, ahead of Mirror's own scene post-processor.
+        /// </summary>
+        /// <remarks>
+        /// WHY: Mirror is a gitignored local install, so committed scenes bake no NetworkIdentity. With it
+        /// installed, Neo movement controllers are NetworkBehaviours with [RequireComponent(NetworkIdentity)];
+        /// Unity creates the identity (sceneId 0) during the load, and Mirror's NetworkScenePostProcess
+        /// (callback order 1) answers with EditorApplication.isPlaying = false. The editor honours that stop
+        /// before the test coroutine resumes, so nothing in the test body can see or cancel it: the Test
+        /// Framework aborts the whole run and writes no results file. Running at order 0, a non-zero
+        /// sceneId puts the object on the path a scene saved under Mirror takes — Mirror disables it and
+        /// Neo's order-100 post-processor re-enables objects that opt out of networking. Mirror is reached
+        /// by reflection because this assembly must compile without it, and the patch is armed only while
+        /// the smoke runs, so builds and manual play mode are untouched.
+        /// </remarks>
+        private static class MirrorAutoIdentityPatch
+        {
+            private static readonly List<(string ScenePath, string ObjectName)> Patched = new();
+            private static string _armedScenePath;
+            private static ulong _nextSceneId;
+
+            // WHY a static constructor and not a [SetUp] subscription: this project disables domain
+            // reload on entering play mode (ProjectSettings/EditorSettings.asset,
+            // m_EnterPlayModeOptions), so static state OUTLIVES a play session. A forced stop while the
+            // smoke is suspended would otherwise skip TearDown and leave the hook armed into whatever the
+            // editor does next. Registering once here, and disarming when play mode exits, closes that.
+            static MirrorAutoIdentityPatch()
+            {
+                EditorApplication.playModeStateChanged += state =>
+                {
+                    if (state == PlayModeStateChange.ExitingPlayMode)
+                    {
+                        _armedScenePath = null;
+                    }
+                };
+            }
+
+            /// <summary>Arms the hook for ONE scene path, so no other load can be mutated.</summary>
+            public static void Arm(string scenePath)
+            {
+                _armedScenePath = scenePath;
+            }
+
+            /// <summary>
+            /// Stops the hook acting. Deliberately does NOT clear <see cref="Patched"/>: the records are
+            /// the smoke's evidence and are consumed by TakePatchedObjects, so clearing here would erase
+            /// them before they are read and silently weaken the test.
+            /// </summary>
+            public static void Disarm()
+            {
+                _armedScenePath = null;
+            }
+
+            /// <summary>
+            /// Names of the objects patched in <paramref name="scenePath"/>; clears the whole record, so
+            /// identities that belonged to the scene being unloaded are dropped with it.
+            /// </summary>
+            public static List<string> TakePatchedObjects(string scenePath)
+            {
+                List<string> names = new();
+                for (int index = 0; index < Patched.Count; index++)
+                {
+                    if (Patched[index].ScenePath == scenePath)
+                    {
+                        names.Add(Patched[index].ObjectName);
+                    }
+                }
+
+                Patched.Clear();
+                return names;
+            }
+
+            [PostProcessScene(0)]
+            public static void OnPostProcessScene()
+            {
+                // WHY three gates and not one flag: [PostProcessScene] is discovered GLOBALLY, so this
+                // runs for a player build too. Mutating scene objects during a build would ship whatever
+                // this invents. isPlaying keeps it to a play session, isBuildingPlayer is the explicit
+                // build exclusion, and the armed path keeps it to the one scene the smoke is loading.
+                if (_armedScenePath == null
+                    || !EditorApplication.isPlaying
+                    || BuildPipeline.isBuildingPlayer)
+                {
+                    return;
+                }
+
+                System.Type identityType = FindLoadedType("Mirror.NetworkIdentity");
+                System.Reflection.FieldInfo sceneIdField = identityType?.GetField(
+                    "sceneId",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                if (sceneIdField == null)
+                {
+                    return;
+                }
+
+                foreach (Object candidate in Resources.FindObjectsOfTypeAll(identityType))
+                {
+                    Component identity = (Component)candidate;
+                    string scenePath = identity.gameObject.scene.path;
+                    // WHY the candidate's own path and not the active scene: an additive load elsewhere
+                    // must not be mutated just because this hook happens to be armed.
+                    if (!string.Equals(scenePath, _armedScenePath, System.StringComparison.Ordinal)
+                        || (ulong)sceneIdField.GetValue(identity) != 0)
+                    {
+                        continue;
+                    }
+
+                    sceneIdField.SetValue(identity, ++_nextSceneId);
+                    Patched.Add((scenePath, identity.gameObject.name));
+                }
+            }
+        }
+
+        /// <summary>
+        /// GUID of Mirror's <c>NetworkIdentity</c> script when the optional package is installed
+        /// locally; null when it is not.
+        /// </summary>
+        private static string FindMirrorNetworkIdentityScriptGuid()
+        {
+            foreach (string guid in AssetDatabase.FindAssets("NetworkIdentity t:MonoScript"))
+            {
+                MonoScript script = AssetDatabase.LoadAssetAtPath<MonoScript>(
+                    AssetDatabase.GUIDToAssetPath(guid));
+                if (script != null && script.GetClass()?.FullName == "Mirror.NetworkIdentity")
+                {
+                    return guid;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Resolves a type by full name across the loaded assemblies: the FastNoLlm test assembly
+        /// deliberately references neither CoreAI.Editor nor the optional Mirror package.
+        /// </summary>
+        private static System.Type FindLoadedType(string fullName)
+        {
+            foreach (System.Reflection.Assembly assembly in
+                     System.AppDomain.CurrentDomain.GetAssemblies())
+            {
+                System.Type type = assembly.GetType(fullName, false);
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -239,24 +426,13 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Reads the build matrix from <c>CoreAIG11WebGlBuild</c> by reflection: the FastNoLlm test
-        /// assembly deliberately does not reference CoreAI.Editor, and an asmdef reference just to read a
-        /// string array is not worth the coupling.
+        /// Reads the build matrix from <c>CoreAIG11WebGlBuild</c> by reflection: an asmdef reference to
+        /// CoreAI.Editor just to read a string array is not worth the coupling.
         /// </summary>
         private static string[] ReadBuildEntryPointFrozenScenePaths()
         {
             const string typeName = "CoreAI.Editor.CoreAIG11WebGlBuild";
-            System.Type buildType = null;
-            foreach (System.Reflection.Assembly assembly in
-                     System.AppDomain.CurrentDomain.GetAssemblies())
-            {
-                buildType = assembly.GetType(typeName, false);
-                if (buildType != null)
-                {
-                    break;
-                }
-            }
-
+            System.Type buildType = FindLoadedType(typeName);
             Assert.IsNotNull(buildType, $"{typeName} was not found; the G11 WebGL build entry point moved.");
             System.Reflection.MethodInfo method = buildType.GetMethod(
                 "GetFrozenScenePaths",
@@ -287,9 +463,8 @@ namespace CoreAI.Tests.PlayMode
             return scenePaths;
         }
 
-        private static void AssertSerializedAssetReferencesResolve(string scenePath)
+        private static void AssertSerializedAssetReferencesResolve(string scenePath, string yaml)
         {
-            string yaml = File.ReadAllText(Path.GetFullPath(scenePath));
             MatchCollection matches = Regex.Matches(
                 yaml,
                 @"guid:\s*([0-9a-fA-F]{32}),\s*type:\s*3");
@@ -327,6 +502,7 @@ namespace CoreAI.Tests.PlayMode
         [TearDown]
         public void TearDown()
         {
+            MirrorAutoIdentityPatch.Disarm();
             CleanupLogCapture();
             RestoreSharedSettings();
         }

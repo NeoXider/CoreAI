@@ -35,6 +35,18 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator ScriptAuthoredVariant_RepaintsThePartOnScreen()
         {
+            // WHY the device check comes first: this test proves the variant REPAINTS the part, and it
+            // proves it by rendering into a RenderTexture and reading pixels back. On a batchmode run
+            // started with -nographics there is no device, RenderTexture.Create fails, and BOTH readbacks
+            // return the same default colour — which reads exactly like "the override never reached the
+            // shader" while proving nothing about the material pipeline. This failure was invisible until
+            // 2026-09-10, because the whole PlayMode run aborted before reaching this fixture.
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+            {
+                Assert.Ignore("No graphics device (batchmode -nographics): a RenderTexture cannot be created, "
+                    + "so a rendered-pixel comparison cannot say anything about the variant.");
+            }
+
             LogAssert.ignoreFailingMessages = true;
 
             GameObject rig = BuildRig();
