@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
@@ -199,6 +200,61 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual("true", store.Get("m", "ok"));
             Assert.AreEqual(50, roblox.CoroutineResumeBudget.ResumeTimeoutMs,
                 "SetTimeout(0.05) must move the live wall-clock half to 50 ms (seconds -> ms)");
+        }
+
+        [Test]
+        public void ScriptContext_SetTimeout_AcceptsTheLargestRepresentableValueForTheHost()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+            // WHY exactly 2147483.647: that is int.MaxValue milliseconds — the last request the
+            // whole-millisecond store can hold, so it is the strongest "still works" point right below
+            // the ceiling the refusal test next door asserts on.
+            stack.Runtime.LoadMod("m", @"
+                local ok, err = pcall(function()
+                    game:GetService('ScriptContext'):SetTimeout(2147483.647)
+                end)
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))");
+
+            Assert.AreEqual("true", store.Get("m", "ok"),
+                "the ceiling itself must be accepted — error was: " + store.Get("m", "err"));
+            Assert.AreEqual(int.MaxValue, roblox.CoroutineResumeBudget.ResumeTimeoutMs,
+                "SetTimeout(2147483.647) must move the live wall-clock half to int.MaxValue ms exactly");
+        }
+
+        [TestCase(1e9)]
+        [TestCase(2147483.648)]
+        [TestCase(1e300)]
+        public void ScriptContext_SetTimeout_RefusesAFiniteValueTooLargeForTheMillisecondStore(double seconds)
+        {
+            // WHY arm 0.05 first: before the range check an oversized request cast to int.MinValue and
+            // READ BACK as the 500 ms default through the non-positive fallback, so "still the default
+            // afterwards" could not tell a refusal from that silent wrap. With a non-default value armed
+            // first, "untouched" means untouched.
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+            stack.Runtime.LoadMod("m", @"
+                local sc = game:GetService('ScriptContext')
+                sc:SetTimeout(0.05)
+                local ok, err = pcall(function()
+                    sc:SetTimeout(" + seconds.ToString("R", CultureInfo.InvariantCulture) + @")
+                end)
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))");
+
+            Assert.AreEqual("false", store.Get("m", "ok"),
+                "a finite request whose millisecond value does not fit an int must be refused, not wrapped");
+            string message = store.Get("m", "err");
+            StringAssert.Contains("BAD_ARGUMENT", message);
+            StringAssert.Contains("ScriptContext:SetTimeout", message);
+            StringAssert.Contains("2147483.647", message,
+                "the refusal must name the ceiling so the host can fix its call — message was: " + message);
+            Assert.AreEqual(50, roblox.CoroutineResumeBudget.ResumeTimeoutMs,
+                "refused before any effect: the 50 ms armed just before must survive, and must NOT have "
+                + "become the 500 ms default through an int.MinValue wrap");
         }
 
         [Test]

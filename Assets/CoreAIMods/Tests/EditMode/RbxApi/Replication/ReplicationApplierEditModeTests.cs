@@ -228,6 +228,90 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
         }
 
         [Test]
+        public void Negative_ADiagnosticsSinkThatThrows_DoesNotStopRecovery_AfterAPartiallyAppliedBatch()
+        {
+            // WHY a half-applied batch: the first spawn lands, the second throws, and the report of
+            // that exception is written before the resync is requested — the one place a logger
+            // that throws could leave a replica inconsistent with nobody ever asking for the world.
+            _applier.Apply(Join(), _state);
+            _replica.Diagnostics = _ => throw new InvalidOperationException("the host's logger is down");
+            _state.Add(Node(9UL, WorkspaceId, "Folder", "Landed"));
+            InstanceSnapshot counter = Node(10UL, WorkspaceId, "IntValue", "Counter");
+            counter.Value = new ValueSnapshot { StringValue = "not-a-number" };
+            _state.Add(counter);
+
+            ReplicationApplyResult result = null;
+            Assert.DoesNotThrow(() => result = _applier.Apply(Batch(2L,
+                Spawn(9UL, 1L), Spawn(10UL, 1L, ReplicationMembers.Name, ReplicationMembers.Value)), _state));
+
+            Assert.AreEqual(ReplicationApplyStatus.ProtocolViolation, result.Status);
+            Assert.AreEqual(1, result.Spawned, "the first spawn landed before the second threw: the batch is half-applied");
+            Assert.IsTrue(_replica.TryGet(new InstanceId(9UL), out _));
+            Assert.IsTrue(_applier.NeedsResync,
+                "a half-applied batch must leave the replica asking for the world again, whatever the logger does");
+            Assert.AreEqual(1, _resyncs.Count, "ResyncRequested still reaches its subscribers");
+            Assert.IsFalse(_replica.IsApplyingReplication);
+            Assert.AreEqual(2L, _applier.ExpectedSequence, "a refused batch does not advance");
+            Assert.AreEqual(2, _replica.DiagnosticsFaults,
+                "the exception report and the resync report were both refused by the sink, and both counted");
+            Assert.AreEqual(ReplicationApplyStatus.AwaitingResync, _applier.Apply(Batch(3L), _state).Status,
+                "nothing further is applied until the world arrives");
+        }
+
+        [Test]
+        public void Negative_ADiagnosticsSinkThatThrows_DoesNotStopResyncRequested_FromReachingItsSubscribers()
+        {
+            _applier.Apply(Join(), _state);
+            _replica.Diagnostics = _ => throw new InvalidOperationException("the host's logger is down");
+
+            ReplicationApplyResult result = null;
+            Assert.DoesNotThrow(() => result = _applier.Apply(Batch(3L), _state));
+
+            Assert.AreEqual(ReplicationApplyStatus.GapDetected, result.Status);
+            Assert.IsTrue(_applier.NeedsResync);
+            CollectionAssert.AreEqual(new[] { result.Detail }, _resyncs,
+                "the recovery event carries the reason to whoever fetches the world, logger or no logger");
+            Assert.AreEqual(1, _replica.DiagnosticsFaults, "the refused report is counted, not lost");
+        }
+
+        [Test]
+        public void ADiagnosticsSinkThatThrows_OnASkippedMemberReport_LeavesTheBatchApplied()
+        {
+            _applier.Apply(Join(), _state);
+            _replica.Diagnostics = _ => throw new InvalidOperationException("the host's logger is down");
+            _state.Add(Node(9UL, WorkspaceId, "Part", "Crate"));
+
+            ReplicationApplyResult result = null;
+            Assert.DoesNotThrow(() => result = _applier.Apply(
+                Batch(2L, Spawn(9UL, 1L, ReplicationMembers.Name, "Size")), _state));
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, result.Status, result.Detail);
+            Assert.IsTrue(_replica.TryGet(new InstanceId(9UL), out _));
+            Assert.IsFalse(_applier.NeedsResync, "a report the sink refused is not a fault in the batch");
+            Assert.IsEmpty(_resyncs);
+            Assert.AreEqual(1, _replica.DiagnosticsFaults);
+        }
+
+        [Test]
+        public void ADiagnosticsSinkThatThrows_OnAStrayPlayerReport_LeavesTheBatchApplied()
+        {
+            _applier.Apply(Join(), _state);
+            _replica.Diagnostics = _ => throw new InvalidOperationException("the host's logger is down");
+            InstanceSnapshot stray = Node(9UL, WorkspaceId, "Player", "Stray");
+            stray.Player = new PlayerSnapshot { ActorId = "stray", UserId = 7L, DisplayName = "Stray", CharacterId = 0UL };
+            _state.Add(stray);
+
+            ReplicationApplyResult result = null;
+            Assert.DoesNotThrow(() => result = _applier.Apply(Batch(2L, Spawn(9UL, 1L)), _state));
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, result.Status, result.Detail);
+            Assert.IsTrue(_replica.TryGet(new InstanceId(9UL), out RbxInstance player));
+            Assert.AreSame(Get(WorkspaceId), player.Parent, "the tree is mirrored as the server sent it");
+            Assert.IsFalse(_applier.NeedsResync);
+            Assert.AreEqual(1, _replica.DiagnosticsFaults);
+        }
+
+        [Test]
         public void APatch_GoesThroughTheOrdinarySetters_SoTheClientsSignalsFire()
         {
             _applier.Apply(Join(), _state);

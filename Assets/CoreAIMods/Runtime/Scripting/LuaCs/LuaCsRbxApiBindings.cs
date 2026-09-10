@@ -588,16 +588,49 @@ namespace CoreAI.Ai.LuaCs
         // that creates a motor is the pipeline that retires it.
         private void AttachCharacterMotor(RbxHumanoid humanoid)
         {
-            _characterMotors.TryGetValue(humanoid, out IRbxCharacterMotor previousMotor);
+            // WHY: ownership is dropped before the host's Release can run, so a Release that
+            // throws leaves nothing behind for a later attach to find and release a second time.
+            _characterMotors.Remove(humanoid, out IRbxCharacterMotor previousMotor);
             humanoid.AttachHost(_scheduler, null, ResolveRootPart(humanoid));
             // WHY released here, once the Humanoid no longer forwards to it, and before the
             // factory builds a replacement: a host motor may hold a registration keyed by this
             // character (a controller-registry slot, a rig instance) that a fresh TryCreate for
             // the same body would collide with if the old one had not already let go.
-            previousMotor?.Release();
+            ReleaseMotorContained(humanoid, previousMotor);
             IRbxCharacterMotor motor = _characterMotorFactory?.Invoke(humanoid);
             humanoid.AttachHost(_scheduler, motor, ResolveRootPart(humanoid));
             _characterMotors[humanoid] = motor;
+        }
+
+        /// <summary>
+        /// Retires a motor this pipeline has already stopped owning, so a host <c>Release</c> that
+        /// throws costs that one motor and nothing else.
+        /// </summary>
+        /// <remarks>
+        /// WHY contained instead of propagated: <see cref="IRbxCharacterMotor"/> is a public seam
+        /// and Release is the host's code. Escaping from Dispose used to abort the rest of the
+        /// teardown permanently (the disposed flag was already set), leaving every other motor
+        /// unreleased and the scheduler pumping a disposed object; escaping from a rebuild left
+        /// the dead motor owned and released again on the next attach. The failure goes through
+        /// the registry's diagnostics route because a sink that throws is contained there too.
+        /// </remarks>
+        private void ReleaseMotorContained(RbxHumanoid humanoid, IRbxCharacterMotor motor)
+        {
+            if (motor == null)
+            {
+                return;
+            }
+
+            try
+            {
+                motor.Release();
+            }
+            catch (Exception exception)
+            {
+                _registry.ReportDiagnostic("[CoreAI.RbxApi] IRbxCharacterMotor.Release threw for '"
+                    + humanoid.Name + "' and was contained; the motor is no longer owned by the "
+                    + "character pipeline and will not be released again: " + exception);
+            }
         }
 
         private void OnCharacterSceneMembershipChanged(RbxInstance instance, bool entered)
@@ -1006,12 +1039,15 @@ namespace CoreAI.Ai.LuaCs
             _registry.Unregistered -= OnInstanceUnregistered;
             _registry.Registered -= OnInstanceRegisteredForCharacter;
             _registry.SceneMembershipChanged -= OnCharacterSceneMembershipChanged;
-            foreach (KeyValuePair<RbxHumanoid, IRbxCharacterMotor> pair in _characterMotors)
-            {
-                pair.Key.DetachHost();
-                pair.Value?.Release();
-            }
+            // WHY: the motors leave this class's ownership before any host Release runs, so a
+            // Release that throws is contained per motor and every later teardown step still runs.
+            List<KeyValuePair<RbxHumanoid, IRbxCharacterMotor>> motors = new(_characterMotors);
             _characterMotors.Clear();
+            for (int index = 0; index < motors.Count; index++)
+            {
+                motors[index].Key.DetachHost();
+                ReleaseMotorContained(motors[index].Key, motors[index].Value);
+            }
             if (_debris != null)
             {
                 _debris.DetachHost();
@@ -1427,7 +1463,7 @@ namespace CoreAI.Ai.LuaCs
                 humanoid.DetachHost();
                 if (_characterMotors.Remove(humanoid, out IRbxCharacterMotor motor))
                 {
-                    motor?.Release();
+                    ReleaseMotorContained(humanoid, motor);
                 }
             }
         }

@@ -10,6 +10,25 @@
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
+## Idle-timeout watchdog: our allocation-free variant was dropped, on purpose (2026-09-10)
+
+The hot-path wave replaced `CoreAiChatService.IdleTimeoutDeadline` with a single watchdog task per
+turn: `Rearm()` became two writes (a timestamp and a counter) instead of disposing a scheduled handle
+and creating a new one for every chunk. At 30-60 tokens a second that difference is the whole point
+of the wave.
+
+It was **dropped in the merge with main anyway**, and the reason is worth keeping. `main` had grown a
+virtual-clock test suite around the timer shape (`SchedulerOverride`, ~10 tests that advance a fake
+clock), while our watchdog measured real time and its own fixture had never once run green in the
+editor - the assembly it lives in was hanging. Shipping the unverified variant and deleting the
+tested one, on nothing but a plausible allocation argument, would have been trading a measured
+property for an unmeasured one.
+
+**To redo it properly:** keep the watchdog, but route its sleep through the same injectable seam the
+timer variant exposes, so the virtual-clock tests keep working against it. Then measure - a Profiler
+capture of a real streamed turn, before and after - and let the number decide. Without that number
+this is a preference, not an optimisation.
+
 ## One frame, one driver — the trap that cost sixteen tests is still armed (2026-09-10)
 
 **Fixed:** the merge of `fix` and `main` left two frame drivers in the tree. `LuaModRuntimeTickDriver`
@@ -274,10 +293,18 @@ Closed after that list was written, in the same session:
 
 Still open, recorded honestly:
 
-- [ ] `Assets/CoreAIMcp`: with one notification stream open at capacity, the next ordinary POST
-      times out (`NotificationCapacity_IsBounded_AndPostContinuesWorking`). The test arrived with
-      the branch commit and has never passed; reproduced on an idle machine running that fixture
-      alone.
+- [x] `Assets/CoreAIMcp`: **this entry was wrong and is now closed.** It claimed
+      `NotificationCapacity_IsBounded_AndPostContinuesWorking` had never passed; it was written
+      before the fix that made it pass, and two recorded Unity runs since then show it Passed in
+      0.25 s (`artifacts/testresults/mcp3.xml` 17:34Z and `final4.xml` 21:34Z, both 2026-09-09).
+      A headless harness on the editor's own Mono then established what the failure had been, and
+      it was never the server: the client allows two connections per origin, the open notification
+      stream and the unread 409 took both, and the POST never left the machine — measured, with a
+      raw socket answered by the same server in 1 ms during the stall. The test now states that
+      budget on its own loopback endpoint and holds BOTH responses open while the POST runs, which
+      is stronger than the form that was failing. The same harness confirmed the `LongRunning`
+      removal is not implicated: the notification loop waits on `SemaphoreSlim.WaitAsync` and
+      async writes and holds no thread.
 - [ ] A full-assembly PlayMode sweep aborts in batch mode with "Playmode tests were aborted because
       the player was stopped" after the built-in-roles harness. Earlier PlayMode evidence in this
       repo comes from small filtered runs, so it is unproven whether a whole-assembly sweep ever
@@ -288,17 +315,35 @@ Still open, recorded honestly:
 
 ### Character motor contract — known limits, not defects of the bridge seam
 
+- [ ] **A false landing between a jump and the fall.** With a real motor, on the first fixed step
+      after a jump the ground probe (0.12 m) still reports contact, so the machine walks
+      `Jumping -> Landed -> Running -> Freefall` and a Lua listener sees a momentary landing and a
+      speed report that did not happen. Pre-existing behaviour of the `Jumping -> Landed`
+      transition, found while fixing the signal ORDER on 2026-09-10 and recorded rather than
+      folded into that change. The fix is a probe or a grace window that knows a jump just started.
+
 Both apply equally to CoreAI's own motor, so they are `Humanoid` contract gaps rather than something
 the host-provider seam introduced. Recorded so a bridge author is not surprised by them.
 
-- [ ] `Running(speed)` reports the CONFIGURED `Humanoid.WalkSpeed`, not the character's measured
-      speed, and fires only on entering the Running state rather than whenever speed changes. A
-      controller accelerating from a standstill still reports the full walk speed, so animation and
-      footstep scripts driven off this signal get the wrong number. A motor has no way to report a
-      measured speed through `IRbxCharacterMotor` today.
-- [ ] `Jump` returns nothing, so a controller that refuses a jump — no clearance, mid-animation —
-      cannot say so, and the state machine enters Jumping anyway. Any airborne sample then reads as
-      Freefall, including while ascending.
+- [x] `Running(speed)` — **closed 2026-09-10.** It reported the CONFIGURED `WalkSpeed` (the old
+      expression multiplied a UNIT `MoveDirection` by it, so it could only ever be 0 or full speed)
+      and fired only on entering the Running state. `IRbxCharacterMotor` gained `double?
+      MeasuredSpeed` as a DEFAULT interface member, so an external motor keeps compiling and falls
+      back to the derived value; `UnityRbxCharacterMotor` reports the solver-resolved planar
+      velocity, so a body walking into a wall reads 0 while its commanded WalkSpeed is unchanged.
+      `Running` now fires whenever the speed changes, and fires 0 when the character stops — which
+      is what the mirror says (`Humanoid.yaml`: "Fires when the speed at which a Humanoid is running
+      changes", and "with a speed of 0" on stopping). Death reports that 0 once, before `Died`, so a
+      walk cycle driven by this signal alone cannot keep running forever with auto-respawn off.
+      Hysteresis, not one epsilon: a moving character stops below 0.1 stud/s, a stopped one must
+      reach 0.2 to move again, so a body hovering at the boundary no longer emits an event per step.
+- [x] `Jump` — **closed 2026-09-10.** `IRbxCharacterMotor.TryJump` (also a default interface member,
+      so existing implementers are unaffected) lets a controller refuse — no clearance, mid-animation
+      — and a refusal now leaves the state machine where it was instead of entering Jumping and
+      reading as Freefall on the way up. `NullRbxCharacterMotor` deliberately still ACCEPTS: nothing
+      is there to refuse, and the frozen Tier-A fixture `TBC-010-gravity-low-jump.lua` pins that a
+      bodyless Humanoid still fires `Jumping`. A round-13 audit proposed changing that; it was
+      declined for this reason.
 
 **Modularity proved by removal, not by argument**: with `Assets/Mirror` taken out of the project the
 tree compiles with **0 errors**, `CoreAI.Net.Mirror.dll` is not built at all, and EditMode runs

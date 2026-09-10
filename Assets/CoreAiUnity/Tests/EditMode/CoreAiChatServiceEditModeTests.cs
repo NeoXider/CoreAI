@@ -20,56 +20,18 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class CoreAiChatServiceEditModeTests
     {
-        [Test]
-        public async Task TypedSend_PreservesFailureAndClearsCancellationOwnership()
-        {
-            TypedChatOrchestrator orchestrator = new();
-            CoreAiChatService service = new(orchestrator);
-            AiTaskRequest request = new() { RoleId = "Teacher", Hint = "help" };
-            LlmCompletionResult result = await service.SendMessageResultAsync(request);
-            Assert.IsFalse(result.Ok);
-            Assert.AreEqual(LlmErrorCode.RateLimited, result.ErrorCode);
-            Assert.AreEqual(429, result.HttpStatus);
-            Assert.AreEqual(5, result.RetryAfterSeconds);
-            Assert.AreEqual(23, result.TotalTokens);
-            Assert.AreEqual("partial", result.Content);
-            Assert.AreEqual(1, orchestrator.TypedCalls);
-            Assert.AreEqual(0, orchestrator.LegacyCalls);
-            Assert.IsFalse(request.DeadlineCancellationToken.CanBeCanceled);
-        }
-
-        [Test]
-        public void TypedSend_RejectsLegacyAndNestedLegacyQueueBeforeExecution()
-        {
-            using QueuedAiOrchestrator queue = new(new FakeAiOrchestrator("looks successful"), new AiOrchestrationQueueOptions());
-            CoreAiChatService service = new(queue);
-            Assert.IsFalse(service.SupportsTaskResults);
-            Assert.Throws<NotSupportedException>(() => service.SendMessageResultAsync(new AiTaskRequest()));
-        }
-
-        private sealed class TypedChatOrchestrator : IAiOrchestrationService, IAiTaskResultService
-        {
-            public int TypedCalls;
-            public int LegacyCalls;
-            public Task<LlmCompletionResult> RunTaskResultAsync(AiTaskRequest request, CancellationToken token = default)
-            {
-                TypedCalls++;
-                return Task.FromResult(new LlmCompletionResult { Ok = false, Content = "partial", Error = "limited",
-                    ErrorCode = LlmErrorCode.RateLimited, HttpStatus = 429, RetryAfterSeconds = 5, TotalTokens = 23 });
-            }
-            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken token = default)
-            {
-                LegacyCalls++;
-                return Task.FromResult("legacy failure text");
-            }
-            public void CancelTasks(string scope) { }
-        }
+        /// <summary>
+        /// Upper bound on real time a virtual-clock test waits for an async hop to land; only a hang guard,
+        /// never a timing assertion.
+        /// </summary>
+        private const float HangGuardSeconds = 15f;
 
         [SetUp]
         public void SetUp()
         {
             CoreAISettings.ResetOverrides();
             CoreAISettings.Instance = null;
+            CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride = null;
         }
 
         [TearDown]
@@ -77,6 +39,7 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAISettings.ResetOverrides();
             CoreAISettings.Instance = null;
+            CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride = null;
         }
 
         // ===================== Persisted chat (session restore for UI) =====================
@@ -197,7 +160,7 @@ namespace CoreAI.Tests.EditMode
                 policy,
                 settings);
 
-            // The UI layer turned streaming off -> everything else is ignored
+            // UI слой выключил стриминг → всё остальное игнорируется
             Assert.IsFalse(service.IsStreamingEnabled("Role", uiOverride: false));
         }
 
@@ -209,7 +172,7 @@ namespace CoreAI.Tests.EditMode
                 null,
                 settings);
 
-            // bool? overload: false turns it off, true/null fall back to the usual resolution
+            // Перегрузка bool?: false выключает, true/null — обычное разрешение
             Assert.IsFalse(service.IsStreamingEnabled("Role", (bool?)false));
             Assert.IsTrue(service.IsStreamingEnabled("Role", (bool?)true));
             Assert.IsTrue(service.IsStreamingEnabled("Role", (bool?)null));
@@ -324,7 +287,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, orchestrator.CompleteCallCount);
             Assert.AreEqual(0, orchestrator.StreamingCallCount);
 
-            // onChunk must fire on the non-streaming path too: 1 chunk with the text + the final one
+            // onChunk должен быть вызван даже в non-streaming пути: 1 чанк с текстом + финал
             Assert.AreEqual(1, chunks.Count);
             Assert.AreEqual("Full response text", chunks[0]);
         }
@@ -366,7 +329,7 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"));
 
-            // EditMode has no CoreAILifetimeScope, so StopAgent must do its work silently (graceful degradation).
+            // В EditMode нет CoreAILifetimeScope — StopAgent должен отработать молча (graceful degradation).
             Assert.DoesNotThrow(() => service.StopAgent("Role"));
         }
 
@@ -475,15 +438,24 @@ namespace CoreAI.Tests.EditMode
         [Timeout(20000)]
         public IEnumerator SendMessageStreamingAsync_SteadyChunksExceedingTotalWindow_DoesNotTimeOut()
         {
-            float previousTimeScale = Time.timeScale;
-            Time.timeScale = 0f;
+            // WHY a virtual clock: the idle window is measured on the clock the test advances, not on wall
+            // time. The earlier wall-clock version (6 x 80 ms against 300 ms) looked like a 3.75x margin but
+            // really ran at 200-275 ms per chunk in EditMode — every chunk crosses the Unity sync context
+            // three times and each hop waits for an editor tick — and it timed out under load. Do not
+            // replace the gates with Task.Delay again.
+            string[] chunks = { "a", "b", "c", "d", "e", "f" };
+            TimeSpan window = TimeSpan.FromMilliseconds(300);
+            TimeSpan gap = TimeSpan.FromMilliseconds(80);
+            Assert.Less(gap, window, "shape: no single gap may reach the idle window");
+            Assert.Greater(TimeSpan.FromTicks(gap.Ticks * chunks.Length), window,
+                "shape: the gaps must add up past the idle window, or the whole-turn regression is invisible");
+
+            VirtualIdleClock clock = new();
+            CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride = clock.Schedule;
             try
             {
-                // 6 chunks * 80ms = ~480ms total, well past the 300ms idle window — but no single gap
-                // between chunks exceeds it, so the turn must complete without LlmOperationTimeoutException.
-                DelayedChunkOrchestrator orchestrator = new(
-                    new[] { "a", "b", "c", "d", "e", "f" }, TimeSpan.FromMilliseconds(80));
-                StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = 0.3f };
+                GatedChunkOrchestrator orchestrator = new(chunks);
+                StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = (float)window.TotalSeconds };
                 CoreAiChatService service = new(orchestrator, settings: settings);
 
                 List<string> received = new();
@@ -509,19 +481,37 @@ namespace CoreAI.Tests.EditMode
 
                 Task drive = DriveAsync();
 
-                float deadline = Time.realtimeSinceStartup + 15f;
-                while (!drive.IsCompleted && Time.realtimeSinceStartup < deadline)
+                for (int i = 0; i < chunks.Length; i++)
+                {
+                    orchestrator.Release(i);
+                    float guard = Time.realtimeSinceStartup + HangGuardSeconds;
+                    while (received.Count <= i && !drive.IsCompleted && Time.realtimeSinceStartup < guard)
+                    {
+                        yield return null;
+                    }
+
+                    Assert.AreEqual(i + 1, received.Count, $"chunk {i} never arrived; failure: {failure}");
+                    Assert.AreEqual(clock.Now + window, clock.PendingDeadline,
+                        $"chunk {i} must re-arm the idle deadline to one full window from now");
+                    clock.Advance(gap);
+                }
+
+                orchestrator.Release(chunks.Length);
+                float finalGuard = Time.realtimeSinceStartup + HangGuardSeconds;
+                while (!drive.IsCompleted && Time.realtimeSinceStartup < finalGuard)
                 {
                     yield return null;
                 }
 
-                Assert.IsTrue(drive.IsCompleted, "streaming should finish in real time while the game is paused.");
+                Assert.IsTrue(drive.IsCompleted, "streaming never finished after the last chunk was released");
                 Assert.IsNull(failure, $"expected no timeout, got: {failure}");
-                CollectionAssert.AreEqual(new[] { "a", "b", "c", "d", "e", "f" }, received);
+                CollectionAssert.AreEqual(chunks, received);
+                Assert.Greater(clock.Now, window, "the turn as a whole must have outlived the idle window");
+                Assert.IsNull(clock.PendingDeadline, "a finished turn must leave no deadline armed");
             }
             finally
             {
-                Time.timeScale = previousTimeScale;
+                CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride = null;
             }
         }
 
@@ -583,14 +573,21 @@ namespace CoreAI.Tests.EditMode
         [Timeout(20000)]
         public IEnumerator SendMessageAsync_ToolCallProgressExceedingTotalWindow_DoesNotTimeOut()
         {
-            float previousTimeScale = Time.timeScale;
-            Time.timeScale = 0f;
+            // WHY a virtual clock: same hazard as the streaming test above — the wall-clock version
+            // (4 x 100 ms against 250 ms) left about one editor tick of slack per step.
+            const int steps = 4;
+            TimeSpan window = TimeSpan.FromMilliseconds(250);
+            TimeSpan stepDuration = TimeSpan.FromMilliseconds(100);
+            Assert.Less(stepDuration, window, "shape: no single step may reach the idle window");
+            Assert.Greater(TimeSpan.FromTicks(stepDuration.Ticks * steps), window,
+                "shape: the steps must add up past the idle window, or the whole-turn regression is invisible");
+
+            VirtualIdleClock clock = new();
+            CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride = clock.Schedule;
             try
             {
-                // 4 steps * 100ms = ~400ms total, past the 250ms idle window — but each individual gap
-                // between tool-call events stays under it.
-                ToolCallProgressOrchestrator orchestrator = new(4, TimeSpan.FromMilliseconds(100));
-                StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = 0.25f };
+                GatedToolCallOrchestrator orchestrator = new(steps);
+                StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = (float)window.TotalSeconds };
                 CoreAiChatService service = new(orchestrator, settings: settings);
 
                 string result = null;
@@ -610,19 +607,36 @@ namespace CoreAI.Tests.EditMode
 
                 Task drive = DriveAsync();
 
-                float deadline = Time.realtimeSinceStartup + 15f;
-                while (!drive.IsCompleted && Time.realtimeSinceStartup < deadline)
+                for (int i = 0; i < steps; i++)
+                {
+                    float guard = Time.realtimeSinceStartup + HangGuardSeconds;
+                    while (orchestrator.StartedSteps <= i && !drive.IsCompleted && Time.realtimeSinceStartup < guard)
+                    {
+                        yield return null;
+                    }
+
+                    Assert.AreEqual(i + 1, orchestrator.StartedSteps, $"tool call {i} never started; failure: {failure}");
+                    Assert.AreEqual(clock.Now + window, clock.PendingDeadline,
+                        $"tool call {i} starting must re-arm the idle deadline to one full window from now");
+                    clock.Advance(stepDuration);
+                    orchestrator.Release(i);
+                }
+
+                float finalGuard = Time.realtimeSinceStartup + HangGuardSeconds;
+                while (!drive.IsCompleted && Time.realtimeSinceStartup < finalGuard)
                 {
                     yield return null;
                 }
 
-                Assert.IsTrue(drive.IsCompleted, "should finish in real time while the game is paused.");
+                Assert.IsTrue(drive.IsCompleted, "the turn never finished after the last tool call was released");
                 Assert.IsNull(failure, $"expected no timeout, got: {failure}");
                 Assert.AreEqual("done", result);
+                Assert.Greater(clock.Now, window, "the turn as a whole must have outlived the idle window");
+                Assert.IsNull(clock.PendingDeadline, "a finished turn must leave no deadline armed");
             }
             finally
             {
-                Time.timeScale = previousTimeScale;
+                CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride = null;
             }
         }
 
@@ -855,16 +869,140 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-        /// <summary>Streams <paramref name="chunks"/> with a fixed real-time delay before each one.</summary>
-        private sealed class DelayedChunkOrchestrator : IAiOrchestrationService
+        /// <summary>
+        /// Fake idle-deadline scheduler for <see cref="CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride"/>:
+        /// a deadline falls due on a clock the test advances by hand, so the idle window is measured in virtual
+        /// time and no wall-clock margin is involved. A deadline whose handle was not disposed keeps counting,
+        /// so a re-arm that forgets the old timer is caught exactly like a missing re-arm.
+        /// </summary>
+        private sealed class VirtualIdleClock
+        {
+            private readonly object _gate = new();
+            private readonly List<Deadline> _armed = new();
+
+            public TimeSpan Now { get; private set; }
+
+            /// <summary>Earliest due time among armed, undisposed deadlines; null when nothing is armed.</summary>
+            public TimeSpan? PendingDeadline
+            {
+                get
+                {
+                    lock (_gate)
+                    {
+                        TimeSpan? earliest = null;
+                        foreach (Deadline deadline in _armed)
+                        {
+                            if (deadline.Active && (earliest == null || deadline.Due < earliest.Value))
+                            {
+                                earliest = deadline.Due;
+                            }
+                        }
+
+                        return earliest;
+                    }
+                }
+            }
+
+            public IDisposable Schedule(CancellationTokenSource cts, TimeSpan window)
+            {
+                lock (_gate)
+                {
+                    Deadline deadline = new(cts, Now + window);
+                    _armed.Add(deadline);
+                    return deadline;
+                }
+            }
+
+            public void Advance(TimeSpan delta)
+            {
+                List<Deadline> due = new();
+                lock (_gate)
+                {
+                    Now += delta;
+                    foreach (Deadline deadline in _armed)
+                    {
+                        if (deadline.Active && deadline.Due <= Now)
+                        {
+                            due.Add(deadline);
+                        }
+                    }
+                }
+
+                foreach (Deadline deadline in due)
+                {
+                    deadline.Fire();
+                }
+            }
+
+            private sealed class Deadline : IDisposable
+            {
+                private readonly CancellationTokenSource _cts;
+
+                public TimeSpan Due { get; }
+                public bool Active { get; private set; } = true;
+
+                public Deadline(CancellationTokenSource cts, TimeSpan due)
+                {
+                    _cts = cts;
+                    Due = due;
+                }
+
+                public void Fire()
+                {
+                    Active = false;
+                    _cts.Cancel();
+                }
+
+                public void Dispose()
+                {
+                    Active = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Waits for a test-released gate while honouring <paramref name="ct"/>, so a fired idle deadline
+        /// surfaces as <see cref="OperationCanceledException"/> exactly as a cancelled transport would.
+        /// </summary>
+        private static async Task WaitForGateAsync(Task gate, CancellationToken ct)
+        {
+            TaskCompletionSource<bool> cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (ct.Register(() => cancelled.TrySetCanceled(ct)))
+            {
+                Task finished = await Task.WhenAny(gate, cancelled.Task);
+                await finished;
+            }
+        }
+
+        private static TaskCompletionSource<bool>[] CreateGates(int count)
+        {
+            TaskCompletionSource<bool>[] gates = new TaskCompletionSource<bool>[count];
+            for (int i = 0; i < count; i++)
+            {
+                gates[i] = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+
+            return gates;
+        }
+
+        /// <summary>
+        /// Streams <paramref name="chunks"/> one per released gate; gate <c>chunks.Length</c> releases the
+        /// terminal chunk, so the test decides when the turn ends.
+        /// </summary>
+        private sealed class GatedChunkOrchestrator : IAiOrchestrationService
         {
             private readonly string[] _chunks;
-            private readonly TimeSpan _delayBetweenChunks;
+            private readonly TaskCompletionSource<bool>[] _gates;
 
-            public DelayedChunkOrchestrator(string[] chunks, TimeSpan delayBetweenChunks)
+            public GatedChunkOrchestrator(string[] chunks)
             {
                 _chunks = chunks;
-                _delayBetweenChunks = delayBetweenChunks;
+                _gates = CreateGates(chunks.Length + 1);
+            }
+
+            public void Release(int gate)
+            {
+                _gates[gate].TrySetResult(true);
             }
 
             public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
@@ -877,12 +1015,13 @@ namespace CoreAI.Tests.EditMode
                 [System.Runtime.CompilerServices.EnumeratorCancellation]
                 CancellationToken ct = default)
             {
-                foreach (string c in _chunks)
+                for (int i = 0; i < _chunks.Length; i++)
                 {
-                    await Task.Delay(_delayBetweenChunks, ct);
-                    yield return new LlmStreamChunk { Text = c };
+                    await WaitForGateAsync(_gates[i].Task, ct);
+                    yield return new LlmStreamChunk { Text = _chunks[i] };
                 }
 
+                await WaitForGateAsync(_gates[_chunks.Length].Task, ct);
                 yield return new LlmStreamChunk { IsDone = true };
             }
 
@@ -917,27 +1056,34 @@ namespace CoreAI.Tests.EditMode
         /// <summary>
         /// Simulates a multi-tool-call turn on the non-streaming path: fires
         /// <see cref="CoreAi.OnToolCallStarted"/>/<see cref="CoreAi.OnToolCallCompleted"/> for
-        /// <see cref="AiTaskRequest.RoleId"/> around each simulated step, with a real-time delay per step.
+        /// <see cref="AiTaskRequest.RoleId"/> around each step, each step blocking on a test-released gate.
         /// </summary>
-        private sealed class ToolCallProgressOrchestrator : IAiOrchestrationService
+        private sealed class GatedToolCallOrchestrator : IAiOrchestrationService
         {
-            private readonly int _steps;
-            private readonly TimeSpan _delayPerStep;
+            private readonly TaskCompletionSource<bool>[] _gates;
 
-            public ToolCallProgressOrchestrator(int steps, TimeSpan delayPerStep)
+            public GatedToolCallOrchestrator(int steps)
             {
-                _steps = steps;
-                _delayPerStep = delayPerStep;
+                _gates = CreateGates(steps);
+            }
+
+            /// <summary>Number of tool calls whose start event has already been raised.</summary>
+            public int StartedSteps { get; private set; }
+
+            public void Release(int step)
+            {
+                _gates[step].TrySetResult(true);
             }
 
             public async Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
             {
-                for (int i = 0; i < _steps; i++)
+                for (int i = 0; i < _gates.Length; i++)
                 {
                     CoreAi.NotifyToolCallStarted(new LlmToolCallStarted("trace", request.RoleId, $"tool{i}", "{}"));
-                    await Task.Delay(_delayPerStep, ct);
+                    StartedSteps = i + 1;
+                    await WaitForGateAsync(_gates[i].Task, ct);
                     CoreAi.NotifyToolCallCompleted(new LlmToolCallCompleted(
-                        "trace", request.RoleId, $"tool{i}", "{}", "{}", _delayPerStep.TotalMilliseconds));
+                        "trace", request.RoleId, $"tool{i}", "{}", "{}", 0d));
                 }
 
                 return "done";

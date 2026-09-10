@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -21,8 +21,6 @@ namespace CoreAI.Chat
     /// </summary>
     public class CoreAiChatService
     {
-        /// <summary>Whether buffered and streaming results come from a truthful typed task implementation.</summary>
-        public bool SupportsTaskResults => _orchestrator is IAiTaskResultService typed && typed.SupportsTaskResults;
         private readonly IAiOrchestrationService _orchestrator;
         private readonly AgentMemoryPolicy _memoryPolicy;
         private readonly ICoreAISettings _settings;
@@ -187,20 +185,7 @@ namespace CoreAI.Chat
         /// </remarks>
         public async System.Threading.Tasks.Task<string> SendMessageAsync(
             AiTaskRequest request,
-            CancellationToken ct = default) =>
-            await SendMessageCoreAsync(request, token => _orchestrator.RunTaskAsync(request, token), ct) ?? "";
-
-        /// <summary>Preserves typed task completion; a legacy string-only orchestrator is explicitly unsupported.</summary>
-        public System.Threading.Tasks.Task<LlmCompletionResult> SendMessageResultAsync(
-            AiTaskRequest request, CancellationToken ct = default)
-        {
-            if (_orchestrator is not IAiTaskResultService typed || !typed.SupportsTaskResults)
-                throw new NotSupportedException("The orchestrator does not expose typed task results.");
-            return SendMessageCoreAsync(request, token => typed.RunTaskResultAsync(request, token), ct);
-        }
-
-        private async System.Threading.Tasks.Task<TResult> SendMessageCoreAsync<TResult>(AiTaskRequest request,
-            Func<CancellationToken, System.Threading.Tasks.Task<TResult>> send, CancellationToken ct)
+            CancellationToken ct = default)
         {
             if (request == null)
             {
@@ -265,11 +250,11 @@ namespace CoreAI.Chat
                     CoreAi.OnToolCallFailed += onToolFailed;
                 }
 
-                TResult result = await send(effectiveCt);
+                string result = await _orchestrator.RunTaskAsync(request, effectiveCt);
                 // Orchestrator + LLM stack use ConfigureAwait(false); marshal to player loop for UI.
                 // WebGL player: see CoreAiWebGlUiThreadMarshaling (Editor WebGL keeps full switch).
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
-                return result;
+                return result ?? "";
             }
             catch (OperationCanceledException) when (
                 deadlineCts != null &&
@@ -868,107 +853,68 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// An idle/no-progress deadline on <paramref name="cts"/>: callers push the cancellation point
-        /// out on every sign of progress (a streamed chunk, a tool-call start/finish) instead of covering
-        /// a whole multi-step turn with one fixed budget. The source is cancelled once no
-        /// <see cref="Rearm"/> has arrived for a full <c>timeoutSec</c> window.
+        /// An idle/no-progress deadline on <paramref name="cts"/>: re-arming disposes the previous
+        /// <c>CancelAfterSlim</c> handle and schedules a fresh one, so callers can push the cancellation
+        /// point out on every sign of progress (a streamed chunk, a tool-call start/finish) instead of
+        /// covering a whole multi-step turn with one fixed budget.
         /// </summary>
         /// <remarks>
-        /// WHY one watchdog instead of a timer per re-arm: the previous shape disposed the running
-        /// <c>CancelAfterSlim</c> and started a fresh one on EVERY re-arm, and streaming re-arms on every
-        /// chunk - a new <c>PlayerLoopTimer</c> plus a player-loop registration per token, on WebGL's
-        /// single thread, while the model is still speaking. Now <see cref="Rearm"/> is one timestamp
-        /// write and allocates nothing; a single realtime delay sleeps for the window and, on waking,
-        /// either cancels (idle for the whole window) or goes back to sleep for exactly the remaining
-        /// time. The cancellation moment is the same: the first instant the turn has been idle for
-        /// <c>timeoutSec</c>.
-        /// <para>
-        /// <see cref="Rearm"/> may run off the main thread (tool-call events and stream continuations can
-        /// arrive on a threadpool thread) - a volatile write is safe from anywhere, so the re-arm is no
-        /// longer best-effort. A re-arm after <see cref="Dispose"/> is a harmless write; the previous shape
-        /// would have started a timer against a source the caller was about to dispose.
-        /// </para>
+        /// <see cref="Rearm"/> is best-effort: <c>CancelAfterSlim</c> registers on the UniTask PlayerLoop
+        /// and re-arming may run off the main thread (tool-call events and stream continuations can arrive
+        /// on a threadpool thread), so failures are swallowed — worst case the previous deadline stands,
+        /// which is still correct, just less generous.
         /// </remarks>
         internal sealed class IdleTimeoutDeadline : IDisposable
         {
+            /// <summary>
+            /// Test seam (InternalsVisibleTo): when set, arms the deadline through this delegate instead of
+            /// the real-time player-loop timer, so a test can drive the idle window from a virtual clock
+            /// rather than wall time. Null means production behaviour; whoever sets it must reset it.
+            /// </summary>
+            internal static Func<CancellationTokenSource, TimeSpan, IDisposable> SchedulerOverride;
+
             private readonly CancellationTokenSource _cts;
-            private readonly CancellationTokenSource _watchdogCts = new();
-            private readonly double _timeoutSec;
-            private long _lastActivityTimestamp;
+            private readonly TimeSpan _window;
+            private readonly object _gate = new();
+            private IDisposable _handle;
 
             public IdleTimeoutDeadline(CancellationTokenSource cts, float timeoutSec)
             {
-                _cts = cts ?? throw new ArgumentNullException(nameof(cts));
-                _timeoutSec = timeoutSec;
-                _lastActivityTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
-                WatchdogAsync(_watchdogCts.Token).Forget();
+                _cts = cts;
+                _window = TimeSpan.FromSeconds(timeoutSec);
+                _handle = Schedule();
             }
 
-            /// <summary>Records progress: the idle window starts over from now. Allocation-free.</summary>
             public void Rearm()
-            {
-                Volatile.Write(ref _lastActivityTimestamp, System.Diagnostics.Stopwatch.GetTimestamp());
-            }
-
-            private async UniTaskVoid WatchdogAsync(CancellationToken stop)
-            {
-                double waitSec = _timeoutSec;
-                while (true)
-                {
-                    try
-                    {
-                        await UniTask.Delay(TimeSpan.FromSeconds(waitSec), DelayType.Realtime,
-                            PlayerLoopTiming.Update, stop);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        return;
-                    }
-
-                    double idleSec = SecondsSince(Volatile.Read(ref _lastActivityTimestamp));
-                    if (idleSec >= _timeoutSec)
-                    {
-                        Fire();
-                        return;
-                    }
-
-                    // Progress arrived while sleeping: sleep again for what is left of the window that
-                    // started at the last re-arm, so the deadline lands exactly where a per-re-arm timer would.
-                    waitSec = _timeoutSec - idleSec;
-                }
-            }
-
-            private void Fire()
             {
                 try
                 {
-                    _cts.Cancel();
+                    lock (_gate)
+                    {
+                        _handle?.Dispose();
+                        _handle = Schedule();
+                    }
                 }
-                catch (ObjectDisposedException)
+                catch
                 {
-                    // WHY: the turn finished and released its source between the wake-up and the cancel;
-                    // there is nothing left to time out.
+                    // WHY: a failed re-arm must never break or cancel the turn.
                 }
-            }
-
-            private static double SecondsSince(long timestamp)
-            {
-                return (System.Diagnostics.Stopwatch.GetTimestamp() - timestamp) /
-                       (double)System.Diagnostics.Stopwatch.Frequency;
             }
 
             public void Dispose()
             {
-                try
+                lock (_gate)
                 {
-                    _watchdogCts.Cancel();
+                    _handle?.Dispose();
                 }
-                catch (ObjectDisposedException)
-                {
-                    return;
-                }
+            }
 
-                _watchdogCts.Dispose();
+            private IDisposable Schedule()
+            {
+                Func<CancellationTokenSource, TimeSpan, IDisposable> scheduler = SchedulerOverride;
+                return scheduler != null
+                    ? scheduler(_cts, _window)
+                    : _cts.CancelAfterSlim(_window, DelayType.Realtime);
             }
         }
     }

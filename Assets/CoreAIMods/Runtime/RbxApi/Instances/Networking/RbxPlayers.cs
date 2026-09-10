@@ -190,7 +190,12 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             NetworkActorId = actorId ?? throw new ArgumentNullException(nameof(actorId));
             UserId = userId;
             Name = string.IsNullOrEmpty(username) ? "Player" + userId : username;
-            DisplayName = string.IsNullOrEmpty(displayName) ? Name : displayName;
+            // WHY null falls back and an empty string does not: the profile default belongs to the
+            // moment an actor is admitted (EnsureActor decides it there); a restore or a replica
+            // spawn hands over a value that was captured verbatim, an empty one included, and must
+            // get it back unchanged. Null means no value was supplied at all, and the username is
+            // the one name every caller has.
+            DisplayName = displayName ?? Name;
         }
     }
 
@@ -327,9 +332,13 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                         displayName = username;
                     }
                 }
-                else if (string.IsNullOrWhiteSpace(displayName))
+
+                // WHY the default is decided here: admission is the one moment a profile is read,
+                // so a backend that knows no display name gets the username now, while Initialize
+                // keeps whatever a restore or a replica hands it.
+                if (string.IsNullOrWhiteSpace(displayName))
                 {
-                    displayName = username;
+                    displayName = string.IsNullOrEmpty(username) ? "Player" + userId : username;
                 }
 
                 player.Initialize(actor, userId, username, displayName);

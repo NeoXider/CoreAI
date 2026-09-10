@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Mods.Rbx.Instances.Networking;
 
 namespace CoreAI.Mods.Rbx.Instances.Replication
 {
@@ -122,11 +123,15 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         /// that says everything cannot be filtered member by member, and a reader that has to guess
         /// what everything means will disagree with the applier the first time a class grows a field.
         /// WHY each name here answers to its class yaml's member-level tags: the mirror marks what
-        /// does not replicate per member as well as per class. Name, Archivable, PrimaryPart and the
-        /// Value of every live value class are untagged; <see cref="Parent"/> and
-        /// <see cref="WorldPivot"/> are tagged NotReplicated and carried for the reasons written on
-        /// each. GuardedReplicationFilterEditModeTests holds that transcription, so a member added
-        /// here without a verdict fails a test instead of reaching every client.
+        /// does not replicate per member as well as per class. Name, Archivable, PrimaryPart, the
+        /// Value of every live value class, and Player's Character and DisplayName are untagged;
+        /// <see cref="Parent"/> and <see cref="WorldPivot"/> are tagged NotReplicated and carried
+        /// for the reasons written on each. GuardedReplicationFilterEditModeTests holds that
+        /// transcription, so a member added here without a verdict fails a test instead of
+        /// reaching every client.
+        /// WHY a Player's two members are enumerated at all: a spawn carries exactly the members
+        /// named here, and the applier hydrates nothing it is not told to — so a member missing
+        /// from this list never reaches a replica with the first snapshot, filter or no filter.
         /// </remarks>
         public static List<string> EnumerateReplicable(RbxInstance instance, bool includeParent)
         {
@@ -157,6 +162,12 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
             if (instance is RbxValueBase)
             {
                 members.Add(Value);
+            }
+
+            if (instance is RbxPlayer)
+            {
+                members.Add(RbxPlayer.CharacterMember);
+                members.Add(RbxPlayer.DisplayNameMember);
             }
 
             if (instance is RbxModel)

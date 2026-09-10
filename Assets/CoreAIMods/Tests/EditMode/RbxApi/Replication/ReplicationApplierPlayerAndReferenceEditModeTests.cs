@@ -384,6 +384,88 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
             Assert.IsEmpty(_pair.Resyncs);
         }
 
+        [Test]
+        public void Negative_AFilterDenyingDisplayNameAndCharacter_AdmitsThePlayerAtSpawn_WithoutEitherValue()
+        {
+            // WHY at spawn and not only on a patch: a patch already carries only the members the
+            // filter admits; the first snapshot must keep the same promise, or the value the filter
+            // protects reaches the recipient once, with the join, and the filter is decoration.
+            RbxPlayer alice = _pair.ServerPlayers.EnsureActor(_pair.Server, Alice);
+            alice.DisplayName = "Ally";
+            Assert.IsNotNull(alice.Character);
+            _pair.Filter.DeniedMembers.Add(RbxPlayer.DisplayNameMember);
+            _pair.Filter.DeniedMembers.Add(RbxPlayer.CharacterMember);
+
+            ReplicationApplyResult seed = _pair.Seed();
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, seed.Status, seed.Detail);
+            RbxPlayers players = _pair.ReplicaPlayers;
+            Assert.AreEqual(1, players.GetPlayers().Count, "identity is not a member a filter can deny: the player is admitted");
+            RbxPlayer replicaAlice = players.GetPlayers()[0];
+            Assert.AreEqual(alice.Id, replicaAlice.Id);
+            Assert.AreEqual(alice.UserId, replicaAlice.UserId);
+            Assert.AreEqual(alice.Name, replicaAlice.Name);
+            Assert.IsTrue(players.TryGetByActorId(Alice, out RbxPlayer byActor));
+            Assert.AreSame(replicaAlice, byActor);
+            Assert.AreNotEqual("Ally", replicaAlice.DisplayName, "a display name the filter denied must not leak with the spawn");
+            Assert.AreEqual(replicaAlice.Name, replicaAlice.DisplayName,
+                "with no display name supplied the replica shows the username, the one name it was told");
+            Assert.IsNotNull(_pair.Replica(alice.Character), "the character model itself is visible; only the reference was denied");
+            Assert.IsNull(replicaAlice.Character, "a Character reference the filter denied must not be wired with the spawn");
+            Assert.IsEmpty(_pair.Resyncs);
+        }
+
+        [Test]
+        public void AnEmptyDisplayName_SurvivesASpawn_Exactly()
+        {
+            RbxPlayer alice = _pair.ServerPlayers.EnsureActor(_pair.Server, Alice);
+            alice.DisplayName = "";
+
+            ReplicationApplyResult seed = _pair.Seed();
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, seed.Status, seed.Detail);
+            RbxPlayer replicaAlice = _pair.ReplicaPlayers.GetPlayers()[0];
+            Assert.AreEqual("", replicaAlice.DisplayName,
+                "the serializer captures an empty DisplayName verbatim and the validator admits it; the replica must not substitute the username");
+            Assert.AreEqual(alice.Name, replicaAlice.Name);
+            Assert.IsEmpty(_pair.Resyncs);
+        }
+
+        [Test]
+        public void AnEmptyDisplayName_SurvivesAPatch_Exactly()
+        {
+            RbxPlayer alice = _pair.ServerPlayers.EnsureActor(_pair.Server, Alice);
+            alice.DisplayName = "Ally";
+            _pair.Seed();
+            RbxPlayer replicaAlice = _pair.ReplicaPlayers.GetPlayers()[0];
+            Assert.AreEqual("Ally", replicaAlice.DisplayName);
+
+            alice.DisplayName = "";
+            ReplicationApplyResult result = _pair.Step();
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, result.Status, result.Detail);
+            Assert.AreEqual("", replicaAlice.DisplayName,
+                "a patch that reports success must leave the replica holding the server's value, not a name of its own");
+            Assert.IsEmpty(_pair.Resyncs);
+        }
+
+        [Test]
+        public void AnEmptyDisplayName_SurvivesATreeRoundTrip_Exactly()
+        {
+            RbxPlayer alice = _pair.ServerPlayers.EnsureActor(_pair.Server, Alice);
+            alice.DisplayName = "";
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(alice);
+            Assert.AreEqual("", snapshot.Instances[0].Player.DisplayName, "captured verbatim");
+
+            InstanceRegistry target = new(binder: new InMemoryInstanceBackingBinder());
+            RbxPlayer restored = (RbxPlayer)InstanceTreeSerializer.Restore(snapshot, target);
+
+            Assert.AreEqual("", restored.DisplayName,
+                "save/load must hand back the value the validator explicitly admits, not the username");
+            Assert.AreEqual(alice.Name, restored.Name);
+            Assert.AreEqual(alice.UserId, restored.UserId);
+        }
+
         /// <summary>
         /// An authoritative registry and one replica, joined directly: the server's stream plans,
         /// the replica applies, and the node state is read off the live server at apply time.
@@ -494,15 +576,25 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
             }
         }
 
-        /// <summary>The default filter, minus whichever instances the test hides by id.</summary>
+        /// <summary>
+        /// The default filter, minus whichever instances the test hides by id and whichever
+        /// members it denies by name.
+        /// </summary>
         private sealed class HidingFilter : IReplicationFilter
         {
             public HashSet<ulong> Hidden { get; } = new();
+
+            public HashSet<string> DeniedMembers { get; } = new(StringComparer.Ordinal);
 
             public bool IsVisibleTo(string recipientActorId, RbxInstance instance)
             {
                 return instance != null && !Hidden.Contains(instance.Id.Value)
                        && DefaultReplicationFilter.Instance.IsVisibleTo(recipientActorId, instance);
+            }
+
+            public bool IsMemberVisibleTo(string recipientActorId, RbxInstance instance, string member)
+            {
+                return !DeniedMembers.Contains(member);
             }
         }
 

@@ -48,6 +48,44 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
         }
 
+        /// <summary>
+        /// A batch is graded as its items: one <c>spawn</c> each, named exactly as the production
+        /// executor names them, so batch-spawned objects reach <c>Count("spawn")</c> and the spawn graders.
+        /// </summary>
+        [Test]
+        public void SpawnBatch_RecordsOneSpawnPerItem_NamedLikeTheProductionExecutor()
+        {
+            RecordingWorldExecutor executor = new();
+            Execute(executor, new CoreAiWorldCommandEnvelope
+            {
+                action = "spawn_batch",
+                prefabKeyOrName = "Cube",
+                items = new[]
+                {
+                    new CoreAiSpawnBatchItem { name = "Keep", x = 1f },
+                    new CoreAiSpawnBatchItem { x = 2f },
+                    new CoreAiSpawnBatchItem { prefabKey = "Sphere", x = 3f }
+                }
+            });
+            Execute(executor, new CoreAiWorldCommandEnvelope
+            {
+                action = "spawn_batch",
+                targetName = "Wall",
+                prefabKeyOrName = "Cube",
+                items = new[] { new CoreAiSpawnBatchItem { x = 4f } }
+            });
+
+            Assert.AreEqual(4, executor.Count("spawn"));
+            Assert.AreEqual(0, executor.Count("spawn_batch"));
+            Assert.AreEqual(0, executor.InvalidCommandCount);
+            Assert.AreEqual("Keep", executor.Commands[0].TargetName);
+            Assert.AreEqual("Cube_2", executor.Commands[1].TargetName);
+            Assert.AreEqual("Sphere_3", executor.Commands[2].TargetName);
+            Assert.AreEqual("Sphere", executor.Commands[2].PrefabKeyOrName);
+            Assert.AreEqual("Wall_1", executor.Commands[3].TargetName);
+            Assert.AreEqual(4f, executor.Commands[3].X);
+        }
+
         private static CoreAiWorldCommandEnvelope Spawn(
             string name, string prefab, float x, float y, float z,
             string parent = "", bool worldPositionStays = false)
@@ -67,7 +105,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         private static void Execute(
-            VisualBenchmarkWorldExecutor executor, CoreAiWorldCommandEnvelope envelope)
+            RecordingWorldExecutor executor, CoreAiWorldCommandEnvelope envelope)
         {
             Assert.IsTrue(executor.TryExecute(new ApplyAiGameCommand
             {

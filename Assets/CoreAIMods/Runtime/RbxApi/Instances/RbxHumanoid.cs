@@ -49,6 +49,22 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Requests one jump using the currently configured power or height.</summary>
         void Jump(double jumpPower, double jumpHeight, bool useJumpPower);
 
+        /// <summary>Requests one jump and reports whether the controller took it.</summary>
+        /// <remarks>
+        /// WHY a refusal is an answer and not an error: a controller may legitimately decline — no
+        /// head clearance, mid-animation, on a ladder — and the Humanoid then has to leave its state
+        /// machine where it was rather than announce a Jumping state the character never enters
+        /// (every airborne sample after that read as Freefall, even while ascending). WHY a default
+        /// body that forwards to <see cref="Jump"/> and reports acceptance, the same pattern as
+        /// <see cref="Step"/>: added after the seam shipped, so an external motor implementing only
+        /// the original members keeps compiling and keeps today's rule that every request is a jump.
+        /// </remarks>
+        bool TryJump(double jumpPower, double jumpHeight, bool useJumpPower)
+        {
+            Jump(jumpPower, jumpHeight, useJumpPower);
+            return true;
+        }
+
         /// <summary>Walks toward a world point, in studs. A null target stops the walk.</summary>
         void MoveTo(RbxVector3? targetStuds);
 
@@ -57,6 +73,22 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>Unit direction the character is moving in; zero when standing still.</summary>
         RbxVector3 MoveDirection { get; }
+
+        /// <summary>
+        /// Horizontal speed the character is actually covering, in studs per second, or null when
+        /// this motor cannot measure it.
+        /// </summary>
+        /// <remarks>
+        /// WHY measured and not configured: <c>Humanoid.Running(speed)</c> is the mirror's report of
+        /// the speed the character is running at, and a controller with acceleration, a wall in the
+        /// way, or a WalkSpeed it has not reached yet is not moving at that number.
+        /// <see cref="MoveDirection"/> is a unit vector, so nothing about the rate can be recovered
+        /// from it. WHY null rather than a value computed here: the only fallback available —
+        /// direction magnitude times the configured WalkSpeed — needs the WalkSpeed the Humanoid
+        /// holds, so the Humanoid derives it; an external motor implementing only the original
+        /// members keeps compiling and keeps reporting that derived number.
+        /// </remarks>
+        double? MeasuredSpeed => null;
 
         /// <summary>True while the character stands on something.</summary>
         bool IsGrounded { get; }
@@ -135,6 +167,13 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// WHY this body is empty yet the inherited <see cref="IRbxCharacterMotor.TryJump"/> still
+        /// reports the jump as taken: a headless Humanoid runs its state machine with nothing to
+        /// refuse on behalf of, and the frozen Tier-A fixture TBC-010-gravity-low-jump creates one
+        /// with no body and asserts that <c>Jumping(true)</c> fires. Refusing here would break that
+        /// corpus.
+        /// </remarks>
         public void Jump(double jumpPower, double jumpHeight, bool useJumpPower)
         {
         }
@@ -183,6 +222,47 @@ namespace CoreAI.Mods.Rbx.Instances
         /// </remarks>
         public const double ArrivalRadiusStuds = 2d;
 
+        /// <summary>
+        /// Smallest change in running speed, in studs per second, that <see cref="Running"/> reports
+        /// while the character is moving.
+        /// </summary>
+        /// <remarks>
+        /// OURS — the mirror does not publish a resolution. WHY 0.1 stud/s (2.8 cm/s): a velocity-
+        /// driven body reads solver jitter of a few millimetres per second, about 0.01–0.03 stud/s,
+        /// and reporting each of those would fire Running every frame at a steady walk; at the
+        /// default 16 stud/s, 0.1 is under one percent of full speed, below anything an animation
+        /// blend or footstep cadence can show.
+        /// </remarks>
+        public const double RunningSpeedResolutionStuds = 0.1d;
+
+        /// <summary>
+        /// Speed, in studs per second, under which a moving character is reported as stopped —
+        /// the mirror's "fires with a speed of 0".
+        /// </summary>
+        /// <remarks>
+        /// OURS. WHY 0.1 stud/s: it is the resting jitter floor. A body standing on a physics
+        /// contact still reads 0.01–0.03 stud/s, and the mirror promises an exact 0 for a character
+        /// that has stopped, not almost 0.
+        /// </remarks>
+        public const double RunningStopSpeedStuds = 0.1d;
+
+        /// <summary>
+        /// Speed, in studs per second, a stopped character has to reach before it is reported as
+        /// moving again.
+        /// </summary>
+        /// <remarks>
+        /// OURS. WHY a second line one resolution step above <see cref="RunningStopSpeedStuds"/>
+        /// rather than the same number: with a single cutoff a body hovering at it (0.099, 0.101,
+        /// 0.099 — a real change of 0.002) flipped between 0 and 0.101 on every step, each flip a
+        /// queued signal, so the zero boundary was fifty times more sensitive than any other speed.
+        /// A band exactly one resolution wide means no change under the resolution — by definition
+        /// not one the signal reports — can cross both lines, while a character setting off toward
+        /// the default 16 stud/s is past 0.2 within a frame or two. WHY not wider: every stud/s of
+        /// band is a creep speed a script never hears about.
+        /// </remarks>
+        public const double RunningStartSpeedStuds =
+            RunningStopSpeedStuds + RunningSpeedResolutionStuds;
+
         private IRbxCharacterMotor _motor = NullRbxCharacterMotor.Instance;
         private ModScheduler _scheduler;
         private double _maxHealth = DefaultMaxHealth;
@@ -195,6 +275,7 @@ namespace CoreAI.Mods.Rbx.Instances
         private RbxHumanoidState _state = RbxHumanoidState.Running;
         private RbxVector3? _walkTarget;
         private double _walkElapsed;
+        private double _reportedRunningSpeed;
 
         /// <summary>Constructed by the class catalog for <c>Humanoid</c>.</summary>
         protected internal RbxHumanoid(ClassDescriptor descriptor) : base(descriptor)
@@ -363,7 +444,14 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
-            _motor.Jump(_jumpPower, _jumpHeight, _useJumpPower);
+            // WHY the state machine stays put on a refusal: the controller declining is a legitimate
+            // answer (see IRbxCharacterMotor.TryJump), and Jumping is the state of a character that
+            // is actually rising, not of one that asked to.
+            if (!_motor.TryJump(_jumpPower, _jumpHeight, _useJumpPower))
+            {
+                return;
+            }
+
             EnterState(RbxHumanoidState.Jumping);
             Jumping.Fire(true);
         }
@@ -450,30 +538,105 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private void UpdateGroundedState()
         {
-            if (_motor.IsGrounded)
+            if (!_motor.IsGrounded)
             {
-                if (_state == RbxHumanoidState.Freefall || _state == RbxHumanoidState.Jumping)
+                if (_state != RbxHumanoidState.Freefall)
                 {
-                    EnterState(RbxHumanoidState.Landed);
-                    return;
-                }
-
-                if (_state != RbxHumanoidState.Running)
-                {
-                    EnterState(RbxHumanoidState.Running);
-                    Running.Fire(_motor.MoveDirection.Magnitude * _walkSpeed);
+                    EnterState(RbxHumanoidState.Freefall);
+                    FreeFalling.Fire(true);
                 }
 
                 return;
             }
 
-            if (_state != RbxHumanoidState.Freefall)
+            if (_state == RbxHumanoidState.Freefall || _state == RbxHumanoidState.Jumping)
             {
-                EnterState(RbxHumanoidState.Freefall);
-                FreeFalling.Fire(true);
+                EnterState(RbxHumanoidState.Landed);
+                return;
             }
+
+            if (_state == RbxHumanoidState.Running)
+            {
+                ReportRunningSpeed(force: false);
+                return;
+            }
+
+            EnterState(RbxHumanoidState.Running);
         }
 
+        /// <summary>
+        /// Fires <see cref="Running"/> with the speed the motor measures now. Called only while the
+        /// state is Running; every exit from that state reports through
+        /// <see cref="ReportRunningStopped"/> instead.
+        /// </summary>
+        /// <param name="force">
+        /// Report even when the value equals the last one reported. Entering the Running state
+        /// passes true so a landing is always announced (see <see cref="EnterState"/>).
+        /// </param>
+        /// <remarks>
+        /// WHY on every step rather than once per state entry: the mirror says the signal fires
+        /// "when the speed at which a Humanoid is running changes" and "with a speed of 0" when it
+        /// stops, so a footstep or animation script reads it as a rate, not as a state entry.
+        /// WHY the stopped/moving flip is always reported and a change while moving only past the
+        /// resolution: the two lines around zero (see <see cref="RunningStartSpeedStuds"/>) keep a
+        /// hovering body from flipping, and a flip that does happen is the mirror's documented 0 or
+        /// the end of it — never something a resolution check may swallow.
+        /// </remarks>
+        private void ReportRunningSpeed(bool force)
+        {
+            bool wasMoving = _reportedRunningSpeed > 0d;
+            double speed = _motor.MeasuredSpeed ?? _motor.MoveDirection.Magnitude * _walkSpeed;
+            if (speed < (wasMoving ? RunningStopSpeedStuds : RunningStartSpeedStuds))
+            {
+                speed = 0d;
+            }
+
+            bool isMoving = speed > 0d;
+            if (!force
+                && isMoving == wasMoving
+                && Math.Abs(speed - _reportedRunningSpeed) < RunningSpeedResolutionStuds)
+            {
+                return;
+            }
+
+            _reportedRunningSpeed = speed;
+            Running.Fire(speed);
+        }
+
+        /// <summary>
+        /// Fires <see cref="Running"/> with the mirror's stop value, 0, if the last report said the
+        /// character was moving; a character already reported stopped gets nothing.
+        /// </summary>
+        private void ReportRunningStopped()
+        {
+            if (_reportedRunningSpeed <= 0d)
+            {
+                return;
+            }
+
+            _reportedRunningSpeed = 0d;
+            Running.Fire(0d);
+        }
+
+        /// <summary>
+        /// Moves the state machine and keeps <see cref="Running"/> bracketed inside the Running
+        /// state: a stop is the last thing reported before leaving it, a speed the first thing
+        /// reported after entering it.
+        /// </summary>
+        /// <remarks>
+        /// WHY the stop goes BEFORE <see cref="StateChanged"/> and before the airborne signal the
+        /// caller fires next: leaving Running is what ends the walk, and the mirror's default
+        /// character animation script picks a pose per signal — FreeFalling picks the fall,
+        /// Running(0) picks the idle, and the last one to arrive wins. A stop heard after the fall
+        /// announcement leaves the character standing in mid-air; the same holds for a stop heard
+        /// after Jumping(true), and for one heard after a StateChanged(Dead) handler has started a
+        /// death animation.
+        /// WHY entering Running always reports, even when the value is unchanged: the stop reported
+        /// on the way out is 0, an idle character measures 0 on landing, and a change-only report
+        /// would then say nothing — yet Running is the only signal that takes that animation script
+        /// out of the falling pose. Both halves live here, in the one place a transition happens,
+        /// so no call site can reorder them back.
+        /// </remarks>
         private void EnterState(RbxHumanoidState next)
         {
             if (_state == next)
@@ -481,9 +644,18 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
+            if (next != RbxHumanoidState.Running)
+            {
+                ReportRunningStopped();
+            }
+
             RbxHumanoidState previous = _state;
             _state = next;
             StateChanged.Fire(previous, next);
+            if (next == RbxHumanoidState.Running)
+            {
+                ReportRunningSpeed(force: true);
+            }
         }
 
         private void SetHealth(double value)
@@ -511,6 +683,13 @@ namespace CoreAI.Mods.Rbx.Instances
 
             _died = true;
             _walkTarget = null;
+            // WHY the state changes before Died fires: Advance refuses a dead Humanoid, so this is
+            // the last time the running speed is looked at, and a walk cycle driven by Running
+            // alone would otherwise keep the last rate forever with auto-respawn off. EnterState
+            // reports that stop — once, and only for a character that was moving — ahead of its
+            // StateChanged, so Died is the last thing a listener hears about this character and
+            // whatever its handler starts — a death animation, a ragdoll, a respawn timer — is not
+            // followed by a stale Running(0) telling an animation script to blend back to idle.
             EnterState(RbxHumanoidState.Dead);
             Died.Fire();
         }

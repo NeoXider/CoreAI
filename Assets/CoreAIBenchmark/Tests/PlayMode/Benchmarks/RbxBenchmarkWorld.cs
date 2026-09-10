@@ -13,6 +13,8 @@ using CoreAI.Logging;
 using CoreAI.Messaging;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Scripting;
+using Microsoft.Extensions.AI;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 using VContainer;
 
@@ -79,7 +81,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         private readonly LuaCsModStack _stack;
         private readonly ActorContext _actor;
 
-        public RbxBenchmarkWorld(ICoreAISettings settings, Transform parent)
+        /// <param name="settings">CoreAI settings the tool logs against.</param>
+        /// <param name="parent">Visual root the world is parented under so the hero shot frames it.</param>
+        /// <param name="liveResultNote">
+        /// Optional live note (the scenario clock) stamped into every <c>execute_lua</c> result as
+        /// <c>TimeLeft</c>; null leaves results untouched.
+        /// </param>
+        public RbxBenchmarkWorld(ICoreAISettings settings, Transform parent, Func<string> liveResultNote = null)
         {
             ContainerBuilder builder = new();
             builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
@@ -114,12 +122,22 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     pickSource: host.PickSource)
             });
 
-            Tool = new LuaLlmTool(_stack.ToolExecutor, settings, Log.Instance,
-                new LuaGenerationRateLimiter());
+            // WHY no rate limit: LuaLlmTool's default limiter (20 execute_lua calls per 60 s) guards the
+            // envelope pipeline against runaway generation loops. The free build tells the model to keep
+            // calling until the scene is complete under a 1000-roundtrip cap and a 10-minute clock; with
+            // the limiter, a model building in small sections has its 21st call of a minute rejected as
+            // a FAILED tool call (mandatory clean_tools plus the per-failure penalty) for doing exactly
+            // what the prompt asked. The roundtrip cap remains the runaway valve.
+            LuaLlmTool inner = new(_stack.ToolExecutor, settings, Log.Instance,
+                new LuaGenerationRateLimiter(maxPerWindow: 0));
+            Tool = new TimedExecuteLuaTool(inner, liveResultNote);
         }
 
-        /// <summary>The production <c>execute_lua</c> tool over this world.</summary>
-        public LuaLlmTool Tool { get; }
+        /// <summary>
+        /// The production <c>execute_lua</c> tool over this world, with the scenario clock stamped into
+        /// every result as <c>TimeLeft</c> when one was supplied.
+        /// </summary>
+        public IAIFunctionLlmTool Tool { get; }
 
         /// <summary>
         /// Reads the built scene back through the same Lua surface the model used.
@@ -180,6 +198,142 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         {
             public void Publish(ApplyAiGameCommand command)
             {
+            }
+        }
+
+        /// <summary>
+        /// <c>execute_lua</c> with the scenario clock stamped into each result.
+        /// <para>
+        /// WHY: the free-build goal promises the model a countdown after every call so it can pace a
+        /// 10-minute build. The <c>world_command</c> tool appends that note itself; <c>LuaLlmTool</c>
+        /// has no such seam, so on the Roblox-API build the promise was simply false and the model
+        /// built blind until the deadline cut it off. The note rides inside the JSON result
+        /// (<c>{"Success":true,"TimeLeft":"~412s left …"}</c>) rather than after it, so the tool
+        /// policy's success detection still parses the result as JSON.
+        /// </para>
+        /// </summary>
+        internal sealed class TimedExecuteLuaTool : IAIFunctionLlmTool
+        {
+            private const string TimeLeftProperty = "TimeLeft";
+
+            private readonly LuaLlmTool _inner;
+            private readonly Func<string> _liveResultNote;
+
+            public TimedExecuteLuaTool(LuaLlmTool inner, Func<string> liveResultNote)
+            {
+                _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+                _liveResultNote = liveResultNote;
+            }
+
+            public string Name => _inner.Name;
+
+            public string Description => _inner.Description;
+
+            public string ParametersSchema => _inner.ParametersSchema;
+
+            public bool AllowDuplicates => _inner.AllowDuplicates;
+
+            public int? ToolTimeoutMsOverride => ((ILlmTool)_inner).ToolTimeoutMsOverride;
+
+            public bool IsMutating => ((ILlmTool)_inner).IsMutating;
+
+            public AIFunction CreateAIFunction()
+            {
+                return WithTimeLeft(_inner.CreateAIFunction(), _liveResultNote);
+            }
+
+            /// <summary>
+            /// Wraps <paramref name="function"/> so every result carries the live note as
+            /// <c>TimeLeft</c>; a null note returns the function unchanged.
+            /// </summary>
+            internal static AIFunction WithTimeLeft(AIFunction function, Func<string> liveResultNote)
+            {
+                if (function == null)
+                {
+                    throw new ArgumentNullException(nameof(function));
+                }
+
+                return liveResultNote == null
+                    ? function
+                    : new NoteStampingFunction(function, liveResultNote);
+            }
+
+            /// <summary>
+            /// Adds <c>TimeLeft</c> to a JSON-object result; leaves anything else untouched.
+            /// <para>
+            /// WHY: <c>AIFunctionFactory.Create</c> over a <c>Task&lt;string&gt;</c> delegate — the
+            /// shape <c>LuaTool.CreateAIFunction</c> builds — hands the delegate's string back as a
+            /// <see cref="System.Text.Json.JsonElement"/> of kind String, not as a <c>string</c>
+            /// (verified against the bundled Microsoft.Extensions.AI.Abstractions 10.9.0). A
+            /// string-only check let every result through unstamped while the prompt promised the
+            /// note was there. The stamped result goes back as a <c>string</c>: the tool policy reads
+            /// both shapes through <c>ToString()</c>, so its success detection sees the same JSON text
+            /// as before plus one top-level property it does not look at.
+            /// </para>
+            /// </summary>
+            internal static object Stamp(object result, Func<string> liveResultNote)
+            {
+                string note;
+                try
+                {
+                    note = liveResultNote?.Invoke();
+                }
+                catch
+                {
+                    return result;
+                }
+
+                if (string.IsNullOrWhiteSpace(note) || !TryReadText(result, out string json))
+                {
+                    return result;
+                }
+
+                try
+                {
+                    JObject payload = JObject.Parse(json);
+                    payload[TimeLeftProperty] = note.Trim();
+                    return payload.ToString(Newtonsoft.Json.Formatting.None);
+                }
+                catch (Newtonsoft.Json.JsonException)
+                {
+                    return result;
+                }
+            }
+
+            private static bool TryReadText(object result, out string text)
+            {
+                switch (result)
+                {
+                    case string s:
+                        text = s;
+                        return true;
+                    case System.Text.Json.JsonElement element
+                        when element.ValueKind == System.Text.Json.JsonValueKind.String:
+                        text = element.GetString();
+                        return true;
+                    default:
+                        text = null;
+                        return false;
+                }
+            }
+
+            private sealed class NoteStampingFunction : DelegatingAIFunction
+            {
+                private readonly Func<string> _liveResultNote;
+
+                public NoteStampingFunction(AIFunction innerFunction, Func<string> liveResultNote)
+                    : base(innerFunction)
+                {
+                    _liveResultNote = liveResultNote;
+                }
+
+                protected override async ValueTask<object> InvokeCoreAsync(
+                    AIFunctionArguments arguments,
+                    CancellationToken cancellationToken)
+                {
+                    object result = await InnerFunction.InvokeAsync(arguments, cancellationToken);
+                    return Stamp(result, _liveResultNote);
+                }
             }
         }
     }
