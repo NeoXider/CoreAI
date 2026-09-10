@@ -495,10 +495,14 @@ namespace CoreAI.Tests.EditMode
             string classifierTest = File.ReadAllText(Path.Combine(
                 Application.dataPath,
                 "CoreAiUnity/Tests/EditMode/RetryFallbackToolTraceSuppressionEditModeTests.cs"));
-            // WHY the declaration and not the bare name: the name also appears in this guard's own
-            // summary and failure message, which sit ABOVE it in the file - matching the first
-            // occurrence would read this guard's text as the classifier's body and pass on nothing.
-            const string declaration = "public void TraceIndicatesInvocation_ClassifiesSourcesCorrectly()";
+            // WHY the newline and the indent are part of the needle: the method name also appears in
+            // this guard's summary, in its failure message, AND in this very constant - all of which
+            // sit ABOVE the real declaration in the file. The first version searched for the bare
+            // declaration text and matched the constant holding it, sliced an empty body, and
+            // reported every source as unclassified. A guard that cannot find what it guards is
+            // worse than none: it fails loudly for the wrong reason. Only a real declaration starts
+            // a line at method indentation.
+            const string declaration = "\n        public void TraceIndicatesInvocation_ClassifiesSourcesCorrectly()";
             int pinned = classifierTest.IndexOf(declaration, StringComparison.Ordinal);
             Assert.Greater(pinned, -1, "The classifier test was renamed: this guard cannot find what it checks.");
             int nextTest = classifierTest.IndexOf("[Test]", pinned, StringComparison.Ordinal);

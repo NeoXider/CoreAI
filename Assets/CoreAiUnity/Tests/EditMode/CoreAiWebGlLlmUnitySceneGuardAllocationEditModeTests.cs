@@ -45,7 +45,12 @@ namespace CoreAI.Tests.EditMode
                 agent.enabled = true;
 
                 int disabled = -1;
-                Assert.That(() => disabled = CoreAiWebGlLlmUnitySceneGuard.DisableLlmUnityBehaviours(behaviours),
+                // WHY the braces: `() => disabled = f()` is an EXPRESSION lambda whose value is the
+                // int it assigned, so it binds as Func<int>, and the constraint takes a void
+                // TestDelegate - NUnit rejected it with "must be a TestDelegate but was Int32". The
+                // statement form assigns and yields nothing, which is what was meant all along.
+                Assert.That(
+                    () => { disabled = CoreAiWebGlLlmUnitySceneGuard.DisableLlmUnityBehaviours(behaviours); },
                     Is.Not.AllocatingGCMemory(),
                     "A rescan over a settled scene must not allocate per component.");
 

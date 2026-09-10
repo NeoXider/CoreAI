@@ -21,6 +21,13 @@ namespace CoreAI.Infrastructure.Llm
     /// are never treated as missing during mutation. Logical ids are case-insensitive on every platform.
     /// On WebGL a successful write means the engine's automatic <c>persistentDataPath</c> persistence has
     /// taken it; no IndexedDB completion receipt exists to wait for (<see cref="CoreAiWebGlPersistence"/>).
+    /// <para>
+    /// <b>What "serialize" means for a synchronous caller</b> (see <see cref="Enter"/>): it waits out
+    /// another SYNCHRONOUS operation and then runs - two writers both succeed, one after the other, and
+    /// neither loses its edit. It is refused at once, with "busy; retry", while an ASYNCHRONOUS operation
+    /// holds the gate, because that one releases from a continuation which may need the very thread the
+    /// wait would park.
+    /// </para>
     /// </summary>
     public sealed class FileSkillStore : ISkillStore, ICommittedSkillStore, IAsyncSkillStore, IDisposable
     {
@@ -38,6 +45,13 @@ namespace CoreAI.Infrastructure.Llm
             internal readonly SemaphoreSlim Gate = new(1, 1);
             internal Func<Task> PendingConfirmation;
             internal long Generation;
+            /// <summary>
+            /// Asynchronous operations on this directory that are queued for <see cref="Gate"/> or
+            /// already holding it. Read by <see cref="FileSkillStore.Enter"/> to tell the two kinds of
+            /// holder apart; a synchronous caller may wait for a synchronous one and never for one of
+            /// these. Written with <see cref="Interlocked"/> only.
+            /// </summary>
+            internal int AsyncUsers;
         }
         private static readonly AsyncLocal<DirectoryState> Confirming = new();
         private readonly DirectoryState _state;
@@ -361,11 +375,73 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
+        /// <summary>
+        /// Takes the directory gate for a SYNCHRONOUS operation. The free gate is the common case and
+        /// costs one non-blocking probe; the two busy cases are deliberately different.
+        /// <para>
+        /// The platform fork arrived with these tests in 7.36.0 and was lost in the publication wave of
+        /// 7.39.0, which left the WebGL half running everywhere. On a desktop or editor thread that
+        /// turned "wait your turn" into "Skill store is busy" for a caller that had no way to know a
+        /// turn was even needed: two mods (or two coordinators over one folder) saving a skill in the
+        /// same moment produced one saved skill and one thrown exception, and the synchronous API -
+        /// which is what SkillAuthoringCoordinator, AgentBuilder and Save/Delete/Mutate all use - has no
+        /// retry of its own, so the second edit was simply lost. It now waits and then runs, as before.
+        /// </para>
+        /// </summary>
         private void Enter(SemaphoreSlim gate)
         {
             SkillStoreCallbackContext.ThrowIfActive();
             ThrowIfConfirming();
-            if (!gate.Wait(0)) throw new InvalidOperationException("Skill store is busy; retry after the current operation.");
+            if (gate.Wait(0)) return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // A WebGL player has ONE thread. Parking it parks the code that would release the gate, so
+            // the wait could never end: a busy store answers immediately and the caller retries.
+            throw new InvalidOperationException("Skill store is busy; retry after the current operation.");
+#else
+            // An ASYNCHRONOUS holder releases the gate from a continuation, and that continuation may be
+            // owed to the very thread a wait here would park (an await in this file captures the caller's
+            // SynchronizationContext). That is refused, not awaited - it is the deadlock
+            // FileAgentMemoryStore still carries, and FileSkillStoreAsyncEditModeTests pins the refusal
+            // ("WithoutBlockingSyncCaller"). A SYNCHRONOUS holder releases on its own thread, so waiting
+            // it out is safe and is the whole point of a store that serializes.
+            if (Volatile.Read(ref _state.AsyncUsers) > 0)
+                throw new InvalidOperationException("Skill store is busy; retry after the current operation.");
+            gate.Wait();
+#endif
+        }
+
+        /// <summary>
+        /// Takes the directory gate for an ASYNCHRONOUS operation and marks it in flight for as long as
+        /// it is queued or holding, so <see cref="Enter"/> can refuse to park a thread behind it. The
+        /// mark is raised before the wait on purpose: a queued async operation can win the gate the
+        /// instant it is released, and a synchronous caller must not be parked behind that either.
+        /// </summary>
+        private async Task<AsyncLease> EnterAsync(CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _state.AsyncUsers);
+            try
+            {
+                await _gate.WaitAsync(cancellationToken);
+            }
+            catch
+            {
+                Interlocked.Decrement(ref _state.AsyncUsers);
+                throw;
+            }
+
+            return new AsyncLease(this);
+        }
+
+        private readonly struct AsyncLease : IDisposable
+        {
+            private readonly FileSkillStore _store;
+            internal AsyncLease(FileSkillStore store) => _store = store;
+
+            public void Dispose()
+            {
+                _store._gate.Release();
+                Interlocked.Decrement(ref _store._state.AsyncUsers);
+            }
         }
 
         private void ThrowIfConfirming()
@@ -466,8 +542,7 @@ namespace CoreAI.Infrastructure.Llm
             ThrowIfConfirming();
             string key = Normalize(id);
             if (key.Length == 0) return null;
-            await _gate.WaitAsync(cancellationToken);
-            try
+            using (await EnterAsync(cancellationToken))
             {
                 await ConfirmPendingAsync(key);
                 List<(SkillRecord Record, string Path)> records = await ReadRecordsAsync(cancellationToken);
@@ -485,7 +560,6 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 return null;
             }
-            finally { _gate.Release(); }
         }
 
         /// <inheritdoc />
@@ -494,8 +568,7 @@ namespace CoreAI.Infrastructure.Llm
             ThrowIfDisposed();
             SkillStoreCallbackContext.ThrowIfActive();
             ThrowIfConfirming();
-            await _gate.WaitAsync(cancellationToken);
-            try
+            using (await EnterAsync(cancellationToken))
             {
                 await ConfirmPendingAsync("store");
                 List<(SkillRecord Record, string Path)> entries = await ReadRecordsAsync(cancellationToken);
@@ -504,7 +577,6 @@ namespace CoreAI.Infrastructure.Llm
                 records.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Id, right.Id));
                 return records.AsReadOnly();
             }
-            finally { _gate.Release(); }
         }
 
         /// <inheritdoc />
@@ -520,8 +592,7 @@ namespace CoreAI.Infrastructure.Llm
             if (callbackContext == null) throw new ArgumentNullException(nameof(callbackContext));
             string key = Normalize(id);
             if (key.Length == 0) throw new ArgumentException("Skill id must not be empty.", nameof(id));
-            await _gate.WaitAsync(cancellationToken);
-            try
+            using (await EnterAsync(cancellationToken))
             {
                 await ConfirmPendingAsync(key);
                 List<(SkillRecord Record, string Path)> entries = await ReadRecordsAsync(cancellationToken);
@@ -562,7 +633,6 @@ namespace CoreAI.Infrastructure.Llm
                 await SkillStoreCallbackContext.PublishAsync(key, mutation.Result, publish, callbackContext);
                 return mutation.Result;
             }
-            finally { _gate.Release(); }
         }
 
         private void ThrowIfDisposed()

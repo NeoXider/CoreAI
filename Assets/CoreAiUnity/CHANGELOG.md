@@ -17,6 +17,44 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   of observed model output cited as evidence - stays, listed with a written reason; the excuse is
   mechanical and per line, so an ordinary Russian comment in those files still fails.
 
+### Fixed
+
+- **Two skills saved at the same moment: one saved, the other refused - and the refused edit was
+  gone.** `FileSkillStore` guards its directory with one gate, and taking that gate had always been
+  forked by platform: a WebGL player has a single thread, so a busy store answers "busy; retry" at
+  once (parking that thread would park the code that must release the gate), while every other
+  platform waits its turn and then runs. The publication wave of 7.39.0 collapsed the fork and left
+  the WebGL half everywhere. In the editor and in a desktop build the synchronous API - which is what
+  `SkillAuthoringCoordinator`, `AgentBuilder` and `Save`/`Delete`/`Mutate` all use, and which has no
+  retry of its own - began throwing `InvalidOperationException` whenever another operation happened to
+  hold the gate: two mods, or two coordinators over one skills folder, produced one saved skill and
+  one exception, and the second author's edit was simply lost. The fork is restored, so concurrent
+  writers serialize and every one of them commits, in order.
+- **The refusal that still matters is now told apart from the wait that never did.** A synchronous
+  caller must never park behind an ASYNCHRONOUS holder: that one releases the gate from a
+  continuation, and the continuation may be owed to the very thread the wait would park - the
+  deadlock `FileAgentMemoryStore` still carries. `FileSkillStore` therefore counts its in-flight
+  asynchronous operations and keeps refusing that case immediately, on every platform, while waiting
+  out an ordinary synchronous holder. `FileSkillStoreEditModeTests` (cross-instance ordering) and
+  `FileSkillStoreAsyncEditModeTests` (the non-blocking refusal) pin the two halves against each other.
+
+### Tests
+
+- **One MEAI test scripted a single model answer where the code legitimately asks for two.**
+  `MeaiLlmClientEditModeTests.CompleteAsync_FinalAssistantMessage_ConcatenatesTextPartsAndDropsNonText`
+  used a `FunctionCallContent` as an inert decoy while its request carried no tools at all, so the call
+  was an invented name bound to nothing - and since 7.39.0 that is not inert: CoreAI answers the
+  invented call itself with the list of tools that do exist, writes its own assistant/tool pair into
+  the history and asks the model again, because an answer nobody reads corrects nothing. The test now
+  scripts that correction turn, with deliberately different text and reasoning in the discarded first
+  answer, so the assertions also show that nothing from it leaks into the visible reply. No production
+  behaviour changed.
+- **`QueuedAiOrchestratorEditModeTests` broke the engine-free build.** A newly declared
+  `LogAssert.Expect` brought `using UnityEngine;` into a fixture that `tools/portable/Tests` also
+  compiles, and that project has no Unity assemblies - the whole portable gate stopped building. The
+  Unity-only expectation and its usings are gated behind `UNITY_5_3_OR_NEWER`, the way
+  `SkillSetEditModeTests` already does it.
+
 ## [7.39.0] - 2026-09-10
 
 ### Fixed

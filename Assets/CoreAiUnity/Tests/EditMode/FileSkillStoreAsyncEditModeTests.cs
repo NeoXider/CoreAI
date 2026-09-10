@@ -13,6 +13,27 @@ namespace CoreAI.Tests.EditMode
 {
     public sealed class FileSkillStoreAsyncEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY this fixture detaches: a test here waits on a Task from the calling thread
+        /// (Assert.ThrowsAsync/CatchAsync does exactly that). Under Unity's SynchronizationContext the
+        /// awaited continuation is posted back to the very thread the wait is holding, and the whole
+        /// EditMode run hangs at this fixture with no results file - not a failure, silence.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         private string _root;
         [SetUp] public void SetUp() => _root = Path.Combine(Path.GetTempPath(), "coreai-skills-async-" + Guid.NewGuid().ToString("N"));
         [TearDown] public void TearDown() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }

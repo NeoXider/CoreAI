@@ -842,21 +842,40 @@ namespace CoreAI.Tests.EditMode
         /// The visible reply of one message is the native <c>ChatMessage.Text</c>: every
         /// <c>TextContent</c> of that message concatenated, with tool calls and reasoning left out.
         /// Guards the hand-rolled concatenation that used to sit here from coming back.
+        /// <para>
+        /// WHY the model answers TWICE here. The request carries no tools, so <c>lookup</c> in the first
+        /// answer is an invented name bound to nothing. Since 7.39.0 that is not inert: CoreAI answers
+        /// the invented call itself - with the list of tools that DO exist - writes its own
+        /// assistant/tool pair into the history and asks the model again, because an answer nobody reads
+        /// corrects nothing. The first answer therefore leaves the turn whole, text and reasoning
+        /// included, and the SECOND response is the final assistant message this test measures. Scripting
+        /// only one response made that legitimate roundtrip look like a defect ("ran out of responses").
+        /// The two answers carry deliberately different text and reasoning, so the assertions also show
+        /// that nothing from the discarded turn leaks into the visible reply.
+        /// </para>
         /// </summary>
         [Test]
         public async Task CompleteAsync_FinalAssistantMessage_ConcatenatesTextPartsAndDropsNonText()
         {
-            MEAI.ChatResponse response = new(new List<MEAI.ChatMessage>
+            MEAI.ChatResponse discardedWithInventedCall = new(new List<MEAI.ChatMessage>
+            {
+                new(MEAI.ChatRole.Assistant, new List<MEAI.AIContent>
+                {
+                    new MEAI.TextContent("first attempt, discarded with the invented call."),
+                    new MEAI.TextReasoningContent("first thoughts"),
+                    new MEAI.FunctionCallContent("call-1", "lookup", new Dictionary<string, object>())
+                })
+            });
+            MEAI.ChatResponse afterCorrection = new(new List<MEAI.ChatMessage>
             {
                 new(MEAI.ChatRole.Assistant, new List<MEAI.AIContent>
                 {
                     new MEAI.TextContent("visible one. "),
                     new MEAI.TextReasoningContent("private chain of thought"),
-                    new MEAI.FunctionCallContent("call-1", "lookup", new Dictionary<string, object>()),
                     new MEAI.TextContent("visible two.")
                 })
             });
-            MeaiLlmClient client = new(new ScriptedUsageChatClient(response),
+            MeaiLlmClient client = new(new ScriptedUsageChatClient(discardedWithInventedCall, afterCorrection),
                 GameLoggerUnscopedFallback.Instance,
                 new StubCoreSettings(),
                 supportsNativeToolCalling: true,

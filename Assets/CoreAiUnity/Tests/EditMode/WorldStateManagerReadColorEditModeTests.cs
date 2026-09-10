@@ -51,7 +51,15 @@ namespace CoreAI.Tests.EditMode
 
             Color color = WorldStateManager.ReadColor(_cube, new MaterialPropertyBlock());
 
-            Assert.AreEqual(new Color(0.25f, 0.5f, 0.75f, 1f), color);
+            // WHY per-channel with a tolerance and not Assert.AreEqual(Color, Color): the colour makes
+            // a round trip through the shader property block as float32, so the value that comes back
+            // is bit-inexact. Equality on the struct then fails with a message that prints the two
+            // sides IDENTICALLY - "RGBA(0.250, 0.500, 0.750, 1.000)" against itself - which is a
+            // uniquely unhelpful way to spend twenty minutes.
+            Assert.AreEqual(0.25f, color.r, 1e-4f, "red channel");
+            Assert.AreEqual(0.5f, color.g, 1e-4f, "green channel");
+            Assert.AreEqual(0.75f, color.b, 1e-4f, "blue channel");
+            Assert.AreEqual(1f, color.a, 1e-4f, "alpha channel");
         }
 
         [Test]

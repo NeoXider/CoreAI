@@ -9,6 +9,14 @@ using CoreAI.Authority;
 using CoreAI.Session;
 using CoreAI.Messaging;
 using NUnit.Framework;
+#if UNITY_5_3_OR_NEWER
+// WHY gated: this fixture is also compiled by tools/portable/Tests, an engine-free project with no
+// Unity assemblies at all. An ungated Unity using here fails that build outright, and the portable
+// gate is the one that runs without an editor.
+using System.Text.RegularExpressions;
+using UnityEngine;
+using UnityEngine.TestTools;
+#endif
 
 namespace CoreAI.Tests.EditMode
 {
@@ -71,6 +79,14 @@ namespace CoreAI.Tests.EditMode
         {
             AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario scenario = new();
             scenario.Summary.FailSave = true;
+            // WHY the expectation is declared: a summary that will not save IS an error, and the
+            // orchestrator is right to log one - a host that never heard about it would keep sending
+            // turns into a memory that is quietly not persisting. Unity fails a test on any
+            // undeclared LogError, so the error this test ARRANGES has to be named. Naming it beats
+            // silencing the fixture wholesale, which would swallow unrelated errors too.
+#if UNITY_5_3_OR_NEWER
+            LogAssert.Expect(LogType.Error, new Regex("Summary confirmation failed"));
+#endif
             LlmCompletionResult result = await scenario.Orchestrator.RunTaskResultAsync(scenario.Request);
             Assert.IsFalse(result.Ok);
             scenario.AssertOldSourceRetained();

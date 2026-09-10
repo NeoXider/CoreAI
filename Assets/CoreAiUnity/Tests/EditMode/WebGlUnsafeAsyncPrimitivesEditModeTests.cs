@@ -289,18 +289,13 @@ namespace CoreAI.Tests.EditMode
                 RiskMarker + " tool body of the same class as execute_lua before 7.3.1; fixed after the " +
                 "LuaTool pattern (drop ConfigureAwait(false) + MeaiToolTaskBridge.Publish at the MEAI border)"),
 
-            // The ConfigureAwaitFalse exception for this file is GONE ON PURPOSE: all 17 occurrences were
-            // removed and the file now carries the rule in its own header. Keeping the entry would have left
-            // standing permission for a primitive nobody uses any more — and permission outlives the reason
-            // it was granted unless someone takes it away.
-            [("Assets/CoreAiUnity/Runtime/Source/Features/AgentMemory/Infrastructure/FileAgentMemoryStore.cs",
-                Primitive.PoolContinuations)] = new(
-                Claim.RiskAcceptedNotEnforced,
-                RiskMarker + " one TaskCompletionSource still asks for asynchronous continuations. WebGL has " +
-                "no pool to run them on, so whoever awaits that promise resumes nowhere. The reason this " +
-                "entry used to give (ConfigureAwait(false) elsewhere in the file) no longer exists, but the " +
-                "flag does; it belongs to the open memory-boundary task with the blocking waits below"),
-
+            // Two entries for this file are GONE ON PURPOSE, and the pair is instructive.
+            // ConfigureAwaitFalse: the flag is back on the gate awaits, so the file needs it - but as a
+            // proven case, not a risk, and the argument now lives on the _gate field itself.
+            // PoolContinuations: the last RunContinuationsAsynchronously left the file, so the entry
+            // stopped excusing anything at all. An allowlist entry outlives the reason it was granted
+            // unless someone takes it away, and a permission nobody needs is a permission somebody
+            // will lean on.
             [("Assets/CoreAiUnity/Runtime/Source/Features/AgentMemory/Infrastructure/FileAgentMemoryStore.cs",
                 Primitive.BlockingWait)] = new(
                 Claim.RiskAcceptedNotEnforced,

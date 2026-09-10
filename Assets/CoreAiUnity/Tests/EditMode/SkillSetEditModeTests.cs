@@ -20,6 +20,27 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class SkillSetEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY this fixture detaches: a test here waits on a Task from the calling thread
+        /// (Assert.ThrowsAsync/CatchAsync does exactly that). Under Unity's SynchronizationContext the
+        /// awaited continuation is posted back to the very thread the wait is holding, and the whole
+        /// EditMode run hangs at this fixture with no results file - not a failure, silence.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────
 
         private static DelegateLlmTool MakeTool(string name)
@@ -1197,7 +1218,11 @@ namespace CoreAI.Tests.EditMode
             ManageSkillsLlmTool tool = new(coordinator);
             using CancellationTokenSource cancellation = new();
             cancellation.Cancel();
-            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            // WHY CatchAsync and not ThrowsAsync: ThrowsAsync demands the EXACT type, and what a
+            // cancelled await actually delivers is TaskCanceledException - a subclass. The caller's
+            // guarantee is "cancellation, not a fault", which is the base type; pinning the exact
+            // subclass pins a runtime detail instead, and it differs between Unity and desktop .NET.
+            Assert.CatchAsync<OperationCanceledException>(async () =>
                 await tool.ExecuteAsync("create", "canceled", instructions: "body", cancellationToken: cancellation.Token));
             Assert.That(catalog.Get("canceled"), Is.Null);
         }
