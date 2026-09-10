@@ -221,7 +221,7 @@ namespace CoreAI.Tests.EditMode
                 chunks.Add(chunk);
             }
 
-            Assert.AreEqual(2, chunks.Count, "default-fallback → 1 текст + 1 терминальный");
+            Assert.AreEqual(2, chunks.Count, "default fallback -> 1 text + 1 terminal");
             Assert.AreEqual("full result", chunks[0].Text);
             Assert.IsFalse(chunks[0].IsDone);
             Assert.IsTrue(chunks[1].IsDone);
@@ -246,8 +246,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task QueuedAiOrchestrator_Streaming_DelegatesRealChunks()
         {
-            // Если QueuedAiOrchestrator не переопределял бы RunStreamingAsync, default-fallback
-            // склеил бы весь ответ в 1 чанк через RunTaskAsync. Этот тест фиксирует контракт.
+            // If QueuedAiOrchestrator did not override RunStreamingAsync, the default fallback
+            // would glue the whole answer into 1 chunk through RunTaskAsync. This test pins the contract.
             StreamingOrchestrator inner = new("Hel", "lo,", " wo", "rld!");
             QueuedAiOrchestrator queued = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 2 });
 
@@ -258,10 +258,10 @@ namespace CoreAI.Tests.EditMode
                 chunks.Add(chunk);
             }
 
-            Assert.AreEqual(1, inner.StreamCalls, "должен быть вызов стриминга, не sync-пути");
-            Assert.AreEqual(0, inner.RunTaskCalls, "RunTaskAsync не должен вызываться");
+            Assert.AreEqual(1, inner.StreamCalls, "streaming must be called, not the sync path");
+            Assert.AreEqual(0, inner.RunTaskCalls, "RunTaskAsync must not be called");
 
-            // 4 текстовых + 1 терминальный
+            // 4 text chunks + 1 terminal
             Assert.AreEqual(5, chunks.Count);
             Assert.AreEqual("Hel", chunks[0].Text);
             Assert.AreEqual("lo,", chunks[1].Text);
@@ -304,9 +304,9 @@ namespace CoreAI.Tests.EditMode
 
             await Task.WhenAll(stream1, stream2);
 
-            Assert.AreEqual(4, stream1.Result.Count, "stream1: 3 текстовых + 1 терминальный");
-            Assert.AreEqual(4, stream2.Result.Count, "stream2: 3 текстовых + 1 терминальный");
-            Assert.AreEqual(2, inner.StreamCalls, "оба стрима выполнены");
+            Assert.AreEqual(4, stream1.Result.Count, "stream1: 3 text chunks + 1 terminal");
+            Assert.AreEqual(4, stream2.Result.Count, "stream2: 3 text chunks + 1 terminal");
+            Assert.AreEqual(2, inner.StreamCalls, "both streams ran");
         }
 
         [Test]
@@ -400,16 +400,16 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task QueuedAiOrchestrator_Streaming_ExternalCancellation_EmitsCancelledTerminal()
         {
-            // Пользовательская отмена (cancellationToken параметр) во время стрима
-            // должна привести к терминальному чанку с Error="cancelled", а не к
-            // необработанному OperationCanceledException в reader'е.
+            // A user cancellation (the cancellationToken parameter) during a stream
+            // must lead to a terminal chunk with Error="cancelled", not to an
+            // unhandled OperationCanceledException in the reader.
             SlowStreamingOrchestrator inner = new();
             QueuedAiOrchestrator queued = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 2 });
 
             using CancellationTokenSource cts = new();
             List<LlmStreamChunk> collected = new();
 
-            // Отменяем через 80мс — стрим уже начал выдавать чанки.
+            // Cancel after 80 ms, when the stream has already started emitting chunks.
             _ = Task.Run(async () =>
             {
                 await Task.Delay(80);
@@ -426,7 +426,7 @@ namespace CoreAI.Tests.EditMode
                 }
             }
 
-            // Должен быть как минимум один терминальный чанк с Error="cancelled".
+            // There must be at least one terminal chunk with Error="cancelled".
             bool gotCancelled = false;
             foreach (LlmStreamChunk chunk in collected)
             {
@@ -438,8 +438,8 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.IsTrue(gotCancelled,
-                $"QueuedAiOrchestrator должен эмитить терминальный chunk с Error=\"cancelled\" при отмене. " +
-                $"Получено чанков: {collected.Count}");
+                $"QueuedAiOrchestrator must emit a terminal chunk with Error=\"cancelled\" on cancellation. " +
+                $"Chunks received: {collected.Count}");
         }
 
         private static void AssertHasCancelledTerminal(IReadOnlyList<LlmStreamChunk> chunks)
@@ -485,7 +485,7 @@ namespace CoreAI.Tests.EditMode
             {
                 yield return new LlmStreamChunk { Text = "first-chunk" };
 
-                // Имитируем долгую генерацию, но реагируем на отмену.
+                // Simulate a long generation while still reacting to cancellation.
                 try
                 {
                     await Task.Delay(10000, cancellationToken);

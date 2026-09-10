@@ -145,9 +145,9 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Вторая итерация tool-цикла — это ВТОРАЯ реплика модели, и признак границы обязан стоять
-        /// ровно на её первом видимом чанке. Без признака потребитель склеивал реплики встык, и на
-        /// проде ученик читал «Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**».
+        /// The second iteration of the tool loop is the model's SECOND reply, and the boundary flag has to sit
+        /// exactly on its first visible chunk. Without the flag the consumer glued the replies together, and in
+        /// production the learner read "Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**".
         /// </summary>
         [Test]
         public async Task CompleteStreamingAsync_SecondIteration_FlagsFirstVisibleChunkOnly()
@@ -174,18 +174,18 @@ namespace CoreAI.Tests.EditMode
 
             Assert.That(visible.Count, Is.GreaterThanOrEqualTo(2));
             Assert.IsFalse(visible[0].StartsNewMessage,
-                "Первая реплика хода не является «новой» — разделять нечего.");
+                "The first reply of a turn is not a \"new\" one, there is nothing to separate.");
             Assert.AreEqual(1, visible.Count(c => c.StartsNewMessage),
-                "Признак ставится РОВНО на одном чанке итерации, иначе потребитель размножит разделители.");
+                "The flag is set on EXACTLY one chunk per iteration, otherwise the consumer multiplies separators.");
 
             LlmStreamChunk boundary = visible.First(c => c.StartsNewMessage);
             Assert.That(boundary.Text, Does.StartWith("Retry"),
-                "Граница обязана попасть на первый видимый чанк ВТОРОЙ итерации.");
+                "The boundary must land on the first visible chunk of the SECOND iteration.");
         }
 
         /// <summary>
-        /// Один ход без инструментов — одна реплика: границ в потоке нет, и потребитель ведёт себя
-        /// ровно как до появления признака.
+        /// One turn without tools is one reply: the stream has no boundaries, and the consumer behaves exactly
+        /// as it did before the flag existed.
         /// </summary>
         [Test]
         public async Task CompleteStreamingAsync_SingleIteration_NeverFlagsNewMessage()
@@ -831,9 +831,9 @@ namespace CoreAI.Tests.EditMode
             StreamingScripted inner = new(
                 new[] { "Проверь себя: ", "{\"name\":\"quiz_tool\",\"arguments\":{\"question\":\"2+2\"}}" },
                 new[] { "Карточка не открылась, разберём вслух." });
-            // Запасной канал объявлен явно: этот скрипт отдаёт вызов ПРОЗОЙ (см. сестринский
-            // CompleteStreamingAsync_TurnEndingToolFromText_ClosesTurnAndKeepsProse), а на нативном канале
-            // проза не разбирается вовсе — тест проверял бы только то, что сырой JSON утекает в текст.
+            // The fallback channel is declared on purpose: this script emits the call as PROSE (see the sibling
+            // CompleteStreamingAsync_TurnEndingToolFromText_ClosesTurnAndKeepsProse), and on the native channel
+            // prose is not parsed at all, so the test would only prove that raw JSON leaks into the text.
             MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: false, memoryStore: null);
 
             List<LlmStreamChunk> chunks = new();

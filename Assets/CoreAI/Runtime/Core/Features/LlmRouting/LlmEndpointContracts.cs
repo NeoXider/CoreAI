@@ -20,26 +20,28 @@ namespace CoreAI.Ai
     }
 
     /// <summary>
-    /// Каким каналом эндпойнт передаёт вызовы инструментов. Это свойство СЕРВЕРА, а не вида эндпойнта:
-    /// llama.cpp отдаёт нативные <c>tool_calls</c> на своём OpenAI-совместимом маршруте, когда запущен
-    /// с jinja-шаблоном, и отвергает параметр <c>tools</c> («tools param requires --jinja flag»), когда
-    /// запущен без него. Поэтому канал объявляется конфигурацией, а там, где конфигурация молчит,
-    /// устанавливается пробой при активации — и никогда не зашивается константой в исходник.
+    /// Which channel an endpoint carries tool calls over. This is a property of the SERVER, not of the
+    /// endpoint kind: llama.cpp returns native <c>tool_calls</c> on its OpenAI-compatible route when it is
+    /// started with a jinja template, and rejects the <c>tools</c> parameter ("tools param requires
+    /// --jinja flag") when it is started without one. That is why the channel is declared by configuration
+    /// and, wherever the configuration is silent, established by a probe at activation time - and never
+    /// hard-coded as a constant in the source.
     /// </summary>
     public enum LlmToolChannel
     {
         /// <summary>
-        /// Решить при активации: для OpenAI-совместимого HTTP-эндпойнта канал есть по определению API;
-        /// для локального llama.cpp под LLMUnity — один пробный запрос с объявленным инструментом.
+        /// Decide at activation time: for an OpenAI-compatible HTTP endpoint the channel exists by
+        /// definition of the API; for local llama.cpp under LLMUnity it takes one probe request with a
+        /// declared tool.
         /// </summary>
         Auto = 0,
 
-        /// <summary>Сервер принимает <c>tools</c> и возвращает <c>tool_calls</c>; проза не разбирается.</summary>
+        /// <summary>The server accepts <c>tools</c> and returns <c>tool_calls</c>; no prose is parsed.</summary>
         Native = 1,
 
         /// <summary>
-        /// Сервер отвергает <c>tools</c> (llama.cpp без <c>--jinja</c>); вызов может прийти только текстом
-        /// в ответе модели, и CoreAI разбирает прозу.
+        /// The server rejects <c>tools</c> (llama.cpp without <c>--jinja</c>); a call can only arrive as
+        /// text inside the model's answer, and CoreAI parses the prose.
         /// </summary>
         Text = 2
     }
@@ -107,8 +109,8 @@ namespace CoreAI.Ai
         public string ExtraBodyJson { get; set; } = "";
 
         /// <summary>
-        /// Канал вызовов инструментов у этого эндпойнта. Явное значение имеет приоритет над пробой и
-        /// не стоит лишнего запроса; <see cref="LlmToolChannel.Auto"/> отдаёт решение фабрике.
+        /// The tool-call channel of this endpoint. An explicit value takes precedence over the probe and
+        /// costs no extra request; <see cref="LlmToolChannel.Auto"/> leaves the decision to the factory.
         /// </summary>
         public LlmToolChannel ToolChannel { get; set; } = LlmToolChannel.Auto;
 

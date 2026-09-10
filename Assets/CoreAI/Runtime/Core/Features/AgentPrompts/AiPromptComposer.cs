@@ -90,16 +90,16 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Заголовок блока рантайм-контекста на ЛЕГАСИ-пути <see cref="AppendRuntimeContext"/>, где блок
-        /// дописывается прямо в системный промпт и ему нужен собственный заголовок.
+        /// Header of the runtime-context block on the LEGACY path <see cref="AppendRuntimeContext"/>,
+        /// where the block is appended straight into the system prompt and needs a header of its own.
         /// </summary>
         public const string RuntimeContextHeading = "## Runtime Context";
 
         /// <summary>
-        /// Дописывает рантайм-контекст запроса в конец системного промпта под заголовком
-        /// <see cref="RuntimeContextHeading"/>. Легаси-путь для вызывающих вне оркестратора; сам оркестратор
-        /// кладёт тот же блок хвостовым сообщением <c>## World State</c> (см.
-        /// <c>AiOrchestrator.BuildWorldStateInstructions</c>) и берёт его через <see cref="BuildRuntimeContext"/>.
+        /// Appends the request's runtime context to the end of the system prompt under the
+        /// <see cref="RuntimeContextHeading"/> header. Legacy path for callers outside the orchestrator;
+        /// the orchestrator itself puts the same block into a trailing <c>## World State</c> message (see
+        /// <c>AiOrchestrator.BuildWorldStateInstructions</c>) and obtains it via <see cref="BuildRuntimeContext"/>.
         /// </summary>
         public string AppendRuntimeContext(string systemPrompt, AiTaskRequest request, string roleId, string traceId)
         {
@@ -113,14 +113,15 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Собирает секции рантайм-контекста запроса БЕЗ заголовка: сначала per-role
-        /// <see cref="IAgentRuntimeContextProvider"/>, затем глобальные <see cref="IAiPromptContextProvider"/>,
-        /// секции разделены пустой строкой. Заголовок ставит тот, кто размещает блок: оркестратор — свой
-        /// <c>## World State</c>, <see cref="AppendRuntimeContext"/> — <see cref="RuntimeContextHeading"/>.
+        /// Assembles the request's runtime-context sections WITHOUT a header: first the per-role
+        /// <see cref="IAgentRuntimeContextProvider"/>, then the global <see cref="IAiPromptContextProvider"/>,
+        /// sections separated by a blank line. The header is supplied by whoever places the block: the
+        /// orchestrator its own <c>## World State</c>, <see cref="AppendRuntimeContext"/> the
+        /// <see cref="RuntimeContextHeading"/>.
         /// <para>
-        /// Раньше заголовок <c>## Runtime Context</c> ставился здесь, и оркестратор оборачивал его во второй,
-        /// <c>## World State</c>: модель получала два заголовка подряд для одного блока, а два дока описывали
-        /// один блок под разными именами.
+        /// The <c>## Runtime Context</c> header used to be emitted here, and the orchestrator wrapped it in
+        /// a second one, <c>## World State</c>: the model received two headers in a row for one block, and
+        /// two documents described a single block under different names.
         /// </para>
         /// </summary>
         public string BuildRuntimeContext(AiTaskRequest request, string roleId, string traceId)
@@ -170,13 +171,13 @@ namespace CoreAI.Ai
         /// <summary>
         /// Builds the user-facing prompt payload from session state and the requested AI task.
         /// <para>
-        /// Два пути. Без пользовательского шаблона роли — <see cref="BuildDefaultUserBody"/>: либо сырая
-        /// подсказка, либо JSON-конверт, где каждая подстановка экранирована <see cref="EscapeJson"/>.
-        /// С шаблоном (<see cref="IAgentUserPromptTemplateProvider"/>) — шаблон это ПРОЗА автора роли
-        /// (пример: <c>Designer hint: {hint}</c>), поэтому <c>{hint}</c>, <c>{source_tag}</c> и ключи
-        /// телеметрии подставляются дословно: экранирование здесь показало бы модели обратные слэши
-        /// посреди фразы. Единственная подстановка с JSON-контрактом — <c>{telemetry}</c>: это готовый
-        /// самодостаточный объект, экранированный внутри.
+        /// Two paths. Without a per-role user template - <see cref="BuildDefaultUserBody"/>: either the raw
+        /// hint or a JSON envelope in which every substitution is escaped by <see cref="EscapeJson"/>.
+        /// With a template (<see cref="IAgentUserPromptTemplateProvider"/>) the template is PROSE written by
+        /// the role's author (for example <c>Designer hint: {hint}</c>), so <c>{hint}</c>, <c>{source_tag}</c>
+        /// and the telemetry keys are substituted verbatim: escaping here would show the model backslashes
+        /// in the middle of a sentence. The only substitution with a JSON contract is <c>{telemetry}</c>:
+        /// it is a ready, self-contained object, escaped internally.
         /// </para>
         /// </summary>
         public string BuildUserPayload(GameSessionSnapshot snap, AiTaskRequest task)
@@ -319,11 +320,11 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Экранирует строку для вставки внутрь JSON-литерала конверта. Экранируются ВСЕ символы, которые
-        /// JSON запрещает в строке сырыми: обратный слэш, кавычка и управляющие символы ниже U+0020.
-        /// Раньше экранировались только слэш и кавычка, и перевод строки в подсказке ученика или табуляция
-        /// в значении телеметрии давали невалидный конверт. Кириллица и прочий не-ASCII остаются как есть:
-        /// в JSON они законны, а в промпте читаемы.
+        /// Escapes a string for insertion inside the envelope's JSON literal. EVERY character JSON forbids
+        /// raw inside a string is escaped: the backslash, the quote, and control characters below U+0020.
+        /// Only the backslash and the quote used to be escaped, so a newline in the learner's hint or a tab
+        /// in a telemetry value produced an invalid envelope. Cyrillic and other non-ASCII stay as they
+        /// are: they are legal in JSON and readable in the prompt.
         /// </summary>
         private static string EscapeJson(string s)
         {

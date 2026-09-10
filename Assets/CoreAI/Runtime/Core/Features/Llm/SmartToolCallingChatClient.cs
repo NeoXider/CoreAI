@@ -865,8 +865,8 @@ namespace CoreAI.Infrastructure.Llm
                             .ConfigureAwait(false);
 #endif
                     executedToolCallInRequest = true;
-                    // Ход из одних no-op'ов эха — не успех: ничего не исполнялось, и «подтолкнуть»
-                    // модель после пустого ответа на его основании нельзя.
+                    // A turn made up of nothing but echo no-ops is not a success: nothing ran, so it is no
+                    // grounds for nudging the model after an empty answer.
                     if (!batch.AllFailed && !batch.AllDuplicates)
                     {
                         anyToolCallSucceeded = true;
@@ -964,8 +964,8 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     else if (!batch.AnyFailed && !batch.AllDuplicates && pendingErrorFeedback.Count > 0)
                     {
-                        // Только РЕАЛЬНЫЙ успех делает прежние ошибки устаревшими; эхо-ход ничего не
-                        // исполнял и не отвечает на них.
+                        // Only a REAL success makes the earlier errors stale; an echo turn executed nothing
+                        // and answers none of them.
                         int removedFeedback =
                             ToolCallHistoryTrimmer.RemoveResolvedErrorFeedback(messages, pendingErrorFeedback);
                         if (removedFeedback > 0 && _settings.LogMeaiToolCallingSteps)

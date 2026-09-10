@@ -992,10 +992,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Один поток несёт НЕСКОЛЬКО реплик — после каждого раунда инструментов модель говорит
-        /// заново. Накопитель обязан разделять их пустой строкой: на проде он склеивал их встык, и
-        /// ученик читал «Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**» — эта же
-        /// склейка уезжала в историю роли и в <c>ApplyAiGameCommand</c>.
+        /// One stream carries SEVERAL replies: after every tool round the model starts speaking again. The
+        /// accumulator must separate them with a blank line; in production it glued them together and the learner
+        /// read "Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**" - and that same glued string
+        /// travelled into the role history and into <c>ApplyAiGameCommand</c>.
         /// </summary>
         [Test]
         public async Task RunStreamingAsync_ChunkStartsNewMessage_SeparatesMessagesInAccumulatedTurn()
@@ -1014,13 +1014,13 @@ namespace CoreAI.Tests.EditMode
 
             string assistant = memory.Appended.Single(m => m.MessageRole == "assistant").Content;
             Assert.That(assistant, Does.Not.Contain("себя:**Ход"),
-                "Две реплики учителя не имеют права слипнуться встык.");
+                "Two replies from the teacher have no right to be glued together.");
             Assert.That(assistant, Does.Contain("Проверь себя:\n\n**Ход завершён.**"));
         }
 
         /// <summary>
-        /// Без признака границы накопитель ведёт себя ровно как раньше: обычные дельты одной реплики
-        /// склеиваются вплотную, разделитель не появляется сам собой.
+        /// Without a boundary flag the accumulator behaves exactly as before: ordinary deltas of one reply are
+        /// concatenated tightly, and a separator never appears by itself.
         /// </summary>
         [Test]
         public async Task RunStreamingAsync_WithoutNewMessageFlag_KeepsPlainConcatenation()
@@ -1042,8 +1042,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Клиент, отдающий заранее заданные чанки: даёт тесту прямой контроль над признаком границы
-        /// сообщения, который в бою ставит <c>MeaiLlmClient</c> на первом видимом чанке новой итерации.
+        /// A client that emits pre-scripted chunks: it gives the test direct control over the message boundary flag,
+        /// which in production is set by <c>MeaiLlmClient</c> on the first visible chunk of a new iteration.
         /// </summary>
         private sealed class SegmentedStreamLlmClient : ILlmClient
         {
@@ -1870,7 +1870,7 @@ namespace CoreAI.Tests.EditMode
                 memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = $"Short msg {i}" });
             }
 
-            // Настраиваем агента с лимитом в 15 сообщений
+            // Configure the agent with a limit of 15 messages
             int maxMessages = 15;
             string[] sourceTranscript = memory.FakeHistory.Select(message => message.Content).ToArray();
             policy.ConfigureChatHistory("test_role", true, 8192, false, maxMessages);

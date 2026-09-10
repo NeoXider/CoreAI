@@ -197,7 +197,7 @@ namespace CoreAI.Tests.EditMode
                 policy,
                 settings);
 
-            // UI слой выключил стриминг → всё остальное игнорируется
+            // The UI layer turned streaming off -> everything else is ignored
             Assert.IsFalse(service.IsStreamingEnabled("Role", uiOverride: false));
         }
 
@@ -209,7 +209,7 @@ namespace CoreAI.Tests.EditMode
                 null,
                 settings);
 
-            // Перегрузка bool?: false выключает, true/null — обычное разрешение
+            // bool? overload: false turns it off, true/null fall back to the usual resolution
             Assert.IsFalse(service.IsStreamingEnabled("Role", (bool?)false));
             Assert.IsTrue(service.IsStreamingEnabled("Role", (bool?)true));
             Assert.IsTrue(service.IsStreamingEnabled("Role", (bool?)null));
@@ -324,7 +324,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, orchestrator.CompleteCallCount);
             Assert.AreEqual(0, orchestrator.StreamingCallCount);
 
-            // onChunk должен быть вызван даже в non-streaming пути: 1 чанк с текстом + финал
+            // onChunk must fire on the non-streaming path too: 1 chunk with the text + the final one
             Assert.AreEqual(1, chunks.Count);
             Assert.AreEqual("Full response text", chunks[0]);
         }
@@ -366,7 +366,7 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"));
 
-            // В EditMode нет CoreAILifetimeScope — StopAgent должен отработать молча (graceful degradation).
+            // EditMode has no CoreAILifetimeScope, so StopAgent must do its work silently (graceful degradation).
             Assert.DoesNotThrow(() => service.StopAgent("Role"));
         }
 

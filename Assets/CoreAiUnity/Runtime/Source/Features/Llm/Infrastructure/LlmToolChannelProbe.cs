@@ -10,20 +10,20 @@ using UnityEngine.Networking;
 
 namespace CoreAI.Infrastructure.Llm
 {
-    /// <summary>Чем сервер ответил на пробный запрос с объявленным инструментом.</summary>
+    /// <summary>What the server answered to a probe request that declared a tool.</summary>
     public enum LlmToolChannelProbeOutcome
     {
-        /// <summary>Сервер принял <c>tools</c> и ответил успешно — канал есть.</summary>
+        /// <summary>The server accepted <c>tools</c> and answered successfully - the channel is there.</summary>
         Accepted = 0,
 
-        /// <summary>Сервер отверг <c>tools</c> внятной ошибкой про jinja — канала нет.</summary>
+        /// <summary>The server rejected <c>tools</c> with an explicit jinja error - there is no channel.</summary>
         Rejected = 1,
 
-        /// <summary>Ответ не позволяет судить о канале (транспорт, таймаут, другая ошибка сервера).</summary>
+        /// <summary>The answer says nothing about the channel (transport, timeout, another server error).</summary>
         Inconclusive = 2
     }
 
-    /// <summary>Вход пробы канала инструментов.</summary>
+    /// <summary>Input of the tool-channel probe.</summary>
     public sealed class LlmToolChannelProbeRequest
     {
         public string BaseUrl { get; set; } = "";
@@ -31,13 +31,14 @@ namespace CoreAI.Infrastructure.Llm
         public string Model { get; set; } = "";
 
         /// <summary>
-        /// Проба просит один токен, но перед ним сервер прогоняет промпт с описанием инструмента, поэтому
-        /// потолок выше, чем у пробы готовности: на CPU с тяжёлой моделью префилл занимает секунды.
+        /// The probe asks for a single token, but before that the server runs the prompt carrying the tool
+        /// description through it, so the ceiling is higher than the readiness probe's: on a CPU with a
+        /// heavy model the prefill takes seconds.
         /// </summary>
         public int TimeoutSeconds { get; set; } = 15;
     }
 
-    /// <summary>Исход пробы канала инструментов без хостовых HTTP-типов.</summary>
+    /// <summary>Outcome of the tool-channel probe, free of host HTTP types.</summary>
     public sealed class LlmToolChannelProbeResult
     {
         public LlmToolChannelProbeOutcome Outcome { get; set; }
@@ -45,7 +46,7 @@ namespace CoreAI.Infrastructure.Llm
         public string Detail { get; set; } = "";
     }
 
-    /// <summary>Хостовая проба: принимает ли OpenAI-совместимый сервер параметр <c>tools</c>.</summary>
+    /// <summary>Host-side probe: does an OpenAI-compatible server accept the <c>tools</c> parameter.</summary>
     public interface ILlmToolChannelProbe
     {
         Task<LlmToolChannelProbeResult> ProbeAsync(
@@ -54,15 +55,17 @@ namespace CoreAI.Infrastructure.Llm
     }
 
     /// <summary>
-    /// Тело пробного запроса и правило чтения ответа — общие для любого транспорта и проверяемые без сети.
+    /// The probe request body and the rule for reading the answer - shared by every transport and testable
+    /// without a network.
     /// </summary>
     public static class LlmToolChannelProbePolicy
     {
         public const string ProbeToolName = "coreai_tool_channel_probe";
 
         /// <summary>
-        /// Минимальный запрос с одним объявленным инструментом: один токен на выходе, чтобы проба стоила
-        /// префилл, а не генерацию. Сам инструмент модель вызывать не обязана — вопрос к серверу, а не к ней.
+        /// A minimal request with a single declared tool: one token of output, so the probe costs a prefill
+        /// and not a generation. The model is under no obligation to call the tool itself - the question is
+        /// addressed to the server, not to the model.
         /// </summary>
         public static string BuildRequestBody(string model)
         {
@@ -96,10 +99,10 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Читает ответ сервера. Отказ распознаётся по ТЕКСТУ ошибки, а не по коду: llama.cpp отдаёт
-        /// «tools param requires --jinja flag» как HTTP 500 (`server_error`), проверено живым прогоном
-        /// 2026-09-06; код 400 у других сборок читается так же. Всё, что не успех и не этот отказ, —
-        /// не доказательство ни в одну сторону.
+        /// Reads the server's answer. A refusal is recognized by the TEXT of the error, not by its code:
+        /// llama.cpp returns "tools param requires --jinja flag" as HTTP 500 (`server_error`), verified by a
+        /// live run on 2026-09-06; a 400 from other builds is read the same way. Anything that is neither a
+        /// success nor that refusal is proof in neither direction.
         /// </summary>
         public static LlmToolChannelProbeResult Classify(int statusCode, string body, string transportError)
         {
@@ -160,7 +163,7 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception)
             {
-                // WHY: тело не JSON (HTML-страница прокси, plain text) — читаем как есть, обрезав.
+                // WHY: the body is not JSON (a proxy's HTML page, plain text) - read it as is, truncated.
             }
 
             return SingleLine(text, 200);
@@ -173,23 +176,23 @@ namespace CoreAI.Infrastructure.Llm
         }
     }
 
-    /// <summary>Откуда взялось решение о канале — от этого зависит уровень записи в логе.</summary>
+    /// <summary>Where the channel decision came from - the log level depends on it.</summary>
     public enum LlmToolChannelDecisionSource
     {
-        /// <summary>Явная настройка эндпойнта.</summary>
+        /// <summary>An explicit endpoint setting.</summary>
         Declared = 0,
 
-        /// <summary>Известно из вида эндпойнта или из установленного факта о сервере, без пробы.</summary>
+        /// <summary>Known from the endpoint's kind, or from an established fact about the server, with no probe.</summary>
         Known = 1,
 
-        /// <summary>Проба дала однозначный ответ.</summary>
+        /// <summary>The probe gave an unambiguous answer.</summary>
         Probe = 2,
 
-        /// <summary>Проба не удалась — взят консервативный канал.</summary>
+        /// <summary>The probe failed - the conservative channel was taken.</summary>
         ProbeInconclusive = 3
     }
 
-    /// <summary>Решение о канале вместе с причиной — причина уходит в лог дословно.</summary>
+    /// <summary>The channel decision together with its reason - the reason goes to the log verbatim.</summary>
     public readonly struct LlmToolChannelDecision
     {
         public LlmToolChannelDecision(bool native, LlmToolChannelDecisionSource source, string reason)
@@ -206,25 +209,26 @@ namespace CoreAI.Infrastructure.Llm
     }
 
     /// <summary>
-    /// Единственное место, где настройка и проба складываются в решение. Порядок: явная настройка —
-    /// без пробы и без лишнего запроса; иначе проба; неудачная проба — текстовый канал, потому что он
-    /// работает на любом сервере (нативные <c>tool_calls</c> клиент исполняет и в нём), а нативный на
-    /// сервере без jinja роняет каждый запрос с инструментами.
+    /// The single place where the setting and the probe add up to a decision. The order: an explicit
+    /// setting wins with no probe and no extra request; otherwise the probe runs; a failed probe means the
+    /// text channel, because that one works on any server (the client executes native <c>tool_calls</c>
+    /// inside it too), whereas native on a server without jinja fails every request carrying tools.
     /// </summary>
     public static class LlmToolChannelResolution
     {
         /// <summary>
-        /// Причина для путей без пробы под LLMUnity. Факт установлен живым прогоном 2026-09-06: сервер
-        /// LlamaLib v2.0.5 (комплект LLMUnity 3.0.3), поднятый тем же <c>LLMService_Construct</c> +
-        /// <c>LLM_Start_Server</c>, что и компонент <c>LLM</c>, принимает <c>tools</c> и возвращает
-        /// <c>tool_calls</c> (в том числе по SSE) — его llama.cpp собран с jinja по умолчанию.
+        /// The reason used on the probe-less paths under LLMUnity. The fact was established by a live run on
+        /// 2026-09-06: the LlamaLib v2.0.5 server (bundled with LLMUnity 3.0.3), brought up by the same
+        /// <c>LLMService_Construct</c> + <c>LLM_Start_Server</c> as the <c>LLM</c> component, accepts
+        /// <c>tools</c> and returns <c>tool_calls</c> (over SSE as well) - its llama.cpp is built with jinja
+        /// on by default.
         /// </summary>
         public const string BundledLlamaLibReason =
             "LLMUnity's bundled LlamaLib v2.0.5 server starts with jinja chat templates on and returns native " +
             "tool_calls (verified 2026-09-06); no probe is possible on this path because the client is built " +
             "before the server exists — set LlmUnityToolChannel=Text for a LlamaLib build that rejects tools";
 
-        /// <summary>Описание явно выбранного legacy OpenAI-адаптера; runtime Auto использует пробу.</summary>
+        /// <summary>Description of the explicitly chosen legacy OpenAI adapter; runtime Auto uses the probe.</summary>
         public const string OpenAiHttpReason =
             "Legacy OpenAI adapter declares native tool calling; runtime endpoints use ToolChannel=Auto " +
             "to probe the actual server capability";
@@ -234,7 +238,7 @@ namespace CoreAI.Infrastructure.Llm
             return setting == LlmToolChannel.Auto;
         }
 
-        /// <summary>Решение там, где пробы нет: явная настройка либо известный ответ для <c>Auto</c>.</summary>
+        /// <summary>The decision where there is no probe: an explicit setting, or the known answer for <c>Auto</c>.</summary>
         public static LlmToolChannelDecision ResolveWithoutProbe(LlmToolChannel setting, string autoReason)
         {
             return setting == LlmToolChannel.Auto
@@ -242,7 +246,7 @@ namespace CoreAI.Infrastructure.Llm
                 : Declared(setting);
         }
 
-        /// <summary>Решение по пробе; явная настройка по-прежнему выигрывает, проба тогда не нужна.</summary>
+        /// <summary>The decision from a probe; an explicit setting still wins, and then no probe is needed.</summary>
         public static LlmToolChannelDecision Resolve(LlmToolChannel setting, LlmToolChannelProbeResult probe)
         {
             if (setting != LlmToolChannel.Auto)
@@ -291,7 +295,7 @@ namespace CoreAI.Infrastructure.Llm
         }
     }
 
-    /// <summary>Одна строка лога о выбранном канале — чтобы выбор никогда не был молчаливым.</summary>
+    /// <summary>One log line about the chosen channel - so the choice is never a silent one.</summary>
     public static class LlmToolChannelLog
     {
         public static string Format(string endpointId, string displayName, LlmToolChannelDecision decision)
@@ -309,7 +313,7 @@ namespace CoreAI.Infrastructure.Llm
         }
     }
 
-    /// <summary>Unity-адаптер пробы канала: один POST на <c>/chat/completions</c> с объявленным инструментом.</summary>
+    /// <summary>Unity adapter of the channel probe: one POST to <c>/chat/completions</c> with a declared tool.</summary>
     public sealed class UnityWebRequestToolChannelProbe : ILlmToolChannelProbe
     {
         public async Task<LlmToolChannelProbeResult> ProbeAsync(

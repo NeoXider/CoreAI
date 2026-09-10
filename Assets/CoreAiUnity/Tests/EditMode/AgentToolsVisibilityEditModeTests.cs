@@ -40,7 +40,7 @@ namespace CoreAI.Tests.EditMode
             policy.SetToolsForRole("TestRole", tools);
 
             IReadOnlyList<ILlmTool> retrieved = policy.GetToolsForRole("TestRole");
-            // Кастомный список уже содержит memory — синглтон из политики не дублируется.
+            // The custom list already contains memory, so the singleton coming from the policy is not duplicated.
             Assert.AreEqual(2, retrieved.Count);
             Assert.AreEqual("memory", retrieved[0].Name);
         }

@@ -786,7 +786,7 @@ namespace CoreAI.Ai
                                 // boundary between two assistant replies in one stream, and the consumer
                                 // reacts to it exactly once - on a chunk that now carries no text it is
                                 // simply lost, and the next reply gets glued onto the previous one
-                                // ("Проверь себя:**Ход завершён…**"). Carry it to the next visible chunk.
+                                // ("Check yourself:**Turn complete...**"). Carry it to the next visible chunk.
                                 carriedStartsNewMessage |= current.StartsNewMessage;
                             }
                             else

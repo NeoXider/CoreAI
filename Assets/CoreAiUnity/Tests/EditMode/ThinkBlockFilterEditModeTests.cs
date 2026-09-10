@@ -13,20 +13,20 @@ using UnityEngine.UIElements;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Как ПАНЕЛЬ снимает <c>&lt;think&gt;</c>-блоки: непотоковый путь —
-    /// <see cref="CoreAiChatPanel.StripThinkBlocks"/>, которым чистится цельный ответ (непотоковый режим
-    /// и симулированная реплика); потоковый путь — панель обязана в конце потока забрать у
-    /// <see cref="ThinkBlockStreamFilter"/> удержанный хвост (<c>Flush</c>).
+    /// How the PANEL strips <c>&lt;think&gt;</c> blocks: the non-streaming path is
+    /// <see cref="CoreAiChatPanel.StripThinkBlocks"/>, which cleans a whole answer (non-streaming mode and a
+    /// simulated reply); on the streaming path the panel must collect the held tail from
+    /// <see cref="ThinkBlockStreamFilter"/> at the end of the stream (<c>Flush</c>).
     /// <para>
-    /// Раньше этот файл сторожил собственную копию regex'а и собственную копию потокового автомата
-    /// («зеркало» <c>CoreAiChatPanel.FilterStreamChunk</c>): тесты были зелёными при ЛЮБОЙ реализации
-    /// боевого кода. Теперь здесь только боевые методы; сам автомат фильтра покрыт в
+    /// This file used to guard its own copy of the regex and its own copy of the streaming state machine
+    /// (a "mirror" of <c>CoreAiChatPanel.FilterStreamChunk</c>): the tests stayed green for ANY production
+    /// implementation. Now only production methods are called here; the filter's own state machine is covered in
     /// <c>ThinkBlockStreamFilterEditModeTests</c>.
     /// </para>
     /// </summary>
     public class ThinkBlockFilterEditModeTests
     {
-        // ===================== Непотоковый путь: StripThinkBlocks =====================
+        // ===================== Non-streaming path: StripThinkBlocks =====================
 
         [Test]
         public void StripThinkBlocks_RemovesSimpleBlock()
@@ -76,7 +76,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Ответ учителя Python по-русски: <c>&lt;</c> внутри — оператор сравнения, блок — по-русски.
+        /// A Python teacher's answer in Russian: the <c>&lt;</c> inside it is a comparison operator, and the block is in Russian.
         /// </summary>
         [Test]
         public void StripThinkBlocks_CyrillicAndComparisonOperator_KeepsVisibleText()
@@ -85,13 +85,13 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("Верно: 2 < 3 и 5 > 4.", CoreAiChatPanel.StripThinkBlocks(input));
         }
 
-        // ===================== Потоковый путь: хвост в конце потока =====================
+        // ===================== Streaming path: the tail at the end of the stream =====================
 
         /// <summary>
-        /// Ответ учителя кончается на <c>&lt;</c> («оператор сравнения: &lt;»), и провайдер отдал этот символ
-        /// отдельным последним чанком. Фильтр удерживает его на случай, что это начало тега, а следующего
-        /// чанка не будет. Панель зва́ла у фильтра только обработку чанка и сброс, но не <c>Flush</c> —
-        /// ученик читал ответ без последнего символа и в ленте, и в истории роли, и у обработчика ответа.
+        /// The teacher's answer ends with <c>&lt;</c> ("comparison operator: &lt;"), and the provider delivered that
+        /// character as a separate last chunk. The filter holds it back in case it starts a tag, and the next chunk
+        /// never comes. The panel asked the filter only for chunk processing and reset, never for <c>Flush</c>, so
+        /// the learner read the answer without its last character, in the feed, in the role history and in the response handler.
         /// </summary>
         [Test]
         public async Task Streaming_AnswerEndsWithLoneLessThan_LastCharacterReachesBubbleAndResponse()
@@ -117,18 +117,18 @@ namespace CoreAI.Tests.EditMode
                 new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
 
             Assert.AreEqual("Оператор сравнения: <", response,
-                "Полный ответ уходит в историю и обработчикам — последний символ обязан быть в нём.");
+                "The full answer goes into the history and to the handlers, so the last character has to be inside it.");
 
             List<Label> aiLabels = scroll.contentContainer.Query<Label>().Class("coreai-ai-message").ToList();
             Assert.AreEqual(1, aiLabels.Count);
             Assert.AreEqual("Оператор сравнения: <", aiLabels[0].text,
-                "Удержанный хвост дописывается в тот же пузырь, а не теряется и не открывает новый.");
+                "The held tail is appended to the same bubble; it is neither lost nor given a new one.");
         }
 
         /// <summary>
-        /// Тот же хвост, но настоящий тег: <c>&lt;</c> в конце одного чанка и <c>think&gt;…&lt;/think&gt;</c> в
-        /// следующем. Хвост обязан ждать следующего чанка, а не уходить на экран — иначе рассуждение
-        /// мелькнуло бы перед ответом.
+        /// The same tail, but a real tag this time: <c>&lt;</c> at the end of one chunk and <c>think&gt;...&lt;/think&gt;</c>
+        /// in the next. The tail has to wait for the next chunk instead of going to the screen, otherwise the
+        /// reasoning would flash up before the answer.
         /// </summary>
         [Test]
         public async Task Streaming_LessThanThatBecomesThinkTag_HidesReasoningKeepsAnswer()
@@ -183,8 +183,8 @@ namespace CoreAI.Tests.EditMode
             GameObject go = new("CoreAiChatPanel_ThinkBlockFilter_Test");
             CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
             panel.SetActorIdentityProvider(new LocalActorIdentityProvider("think-block-filter-panel-test"));
-            // WHY: EditMode не вызывает lifecycle-колбэки MonoBehaviour, поэтому «панель включена»
-            // моделируется явно, не ослабляя боевой страж жизненного цикла.
+            // WHY: EditMode does not fire MonoBehaviour lifecycle callbacks, so "the panel is enabled" is modelled
+            // explicitly, without weakening the production lifecycle guard.
             SetField(panel, "_lifecycleActive", true);
             return new PanelCtx(go, panel);
         }

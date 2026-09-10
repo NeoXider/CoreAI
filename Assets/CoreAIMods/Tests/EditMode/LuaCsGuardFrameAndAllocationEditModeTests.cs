@@ -225,7 +225,18 @@ namespace CoreAI.Tests.EditMode
             using CancellationTokenSource cancellation = new();
             cancellation.Cancel();
 
-            Assert.ThrowsAsync<LuaCanceledException>(async () =>
+            // WHY the base OperationCanceledException and not Lua-CSharp's own LuaCanceledException,
+            // which this assertion originally named: the VM does raise LuaCanceledException, and it does
+            // so both for a token cancelled before the run and for one cancelled mid-loop, with or
+            // without the guard hook installed — measured directly against Lua.dll rather than assumed.
+            // It cannot survive the trip out, though. LuaCsExecutionGuard.ExecuteAsync is an `async
+            // Task`, and a cancellation escaping one completes the Task as CANCELED rather than faulted;
+            // Unity's runtime does not carry the original exception through that transition, so the
+            // awaiter raises a fresh TaskCanceledException (desktop .NET 8 does carry it, which is why
+            // the original expectation looks right on paper). Both are OperationCanceledException, so
+            // that is the contract CoreAI can actually keep and the one a host needs to tell "the run was
+            // cancelled" from "the mod's script failed"; pinning the subtype pins the runtime instead.
+            Assert.CatchAsync<OperationCanceledException>(async () =>
                 await guard.ExecuteAsync(
                     state,
                     state.Load(UnboundedArithmeticLoop, "cancel_probe"),

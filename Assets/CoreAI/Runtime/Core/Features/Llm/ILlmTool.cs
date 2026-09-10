@@ -80,24 +80,25 @@ namespace CoreAI.Ai
         bool EndsTurn => false;
 
         /// <summary>
-        /// True, когда инструмент МЕНЯЕТ общее состояние — мир, память, файлы, реестр. Мутирующие
-        /// инструменты никогда не выполняются ОДНОВРЕМЕННО друг с другом внутри одного хода: политика
-        /// исполнения ставит их в одну упорядоченную цепочку, а read-only инструменты продолжают идти
-        /// параллельно под <see cref="ICoreAISettings.MaxParallelToolCalls"/>. Две мутации, гоняющиеся за
-        /// одним хранилищем, теряют записи или читают рваное состояние, и автор инструмента не может
-        /// защититься от этого изнутри тела — поэтому флаг объявляется в контракте.
+        /// True when the tool CHANGES shared state - the world, memory, files, a registry. Mutating tools
+        /// never run CONCURRENTLY with one another inside a single turn: the execution policy puts them
+        /// into one ordered chain, while read-only tools keep running in parallel under
+        /// <see cref="ICoreAISettings.MaxParallelToolCalls"/>. Two mutations racing for the same store
+        /// lose writes or read torn state, and the tool's author cannot defend against that from inside
+        /// the body - which is why the flag is declared in the contract.
         /// <para>
-        /// По умолчанию <c>false</c>: необъявленный инструмент считается read-only и МОЖЕТ перекрываться с
-        /// любым другим вызовом хода. Объявляйте флаг у каждого инструмента с побочным эффектом. Встроенные
-        /// мутирующие инструменты (<c>memory</c>, <c>manage_mods</c>, <c>manage_skills</c>,
+        /// Defaults to <c>false</c>: an undeclared tool is treated as read-only and MAY overlap with any
+        /// other call of the turn. Declare the flag on every tool with a side effect. The built-in
+        /// mutating tools (<c>memory</c>, <c>manage_mods</c>, <c>manage_skills</c>,
         /// <c>world_command</c>, <c>component_command</c>, <c>execute_lua</c>, <c>call_skill_tool</c>)
-        /// политика узнаёт и по имени, поэтому хост, зарегистрировавший их под этими именами, сохраняет
-        /// гарантию без правок.
+        /// are recognised by the policy by name as well, so a host that registered them under those names
+        /// keeps the guarantee without any edits.
         /// </para>
         /// <para>
-        /// Флаг НЕ связан с подавлением эха: повторный вызов подавляется по своей per-call сигнатуре у
-        /// любого инструмента с <see cref="AllowDuplicates"/> = <c>false</c>, мутирующего или нет.
-        /// Разрешается ПО ИМЕНИ из списка инструментов роли, как и <see cref="ToolTimeoutMsOverride"/>.
+        /// The flag has NOTHING to do with echo suppression: a repeated call is suppressed by its own
+        /// per-call signature for any tool with <see cref="AllowDuplicates"/> = <c>false</c>, mutating or
+        /// not. It is resolved BY NAME from the role's tool list, just like
+        /// <see cref="ToolTimeoutMsOverride"/>.
         /// </para>
         /// </summary>
         bool IsMutating => false;
@@ -162,8 +163,8 @@ namespace CoreAI.Ai
         public virtual bool EndsTurn => false;
 
         /// <summary>
-        /// Переопределите в инструменте с побочным эффектом; см. <see cref="ILlmTool.IsMutating"/> — что
-        /// именно гарантирует флаг и почему он не заменяет подавление эха.
+        /// Override this in a tool with a side effect; see <see cref="ILlmTool.IsMutating"/> for what the
+        /// flag guarantees and why it is not a substitute for echo suppression.
         /// </summary>
         public virtual bool IsMutating => false;
 

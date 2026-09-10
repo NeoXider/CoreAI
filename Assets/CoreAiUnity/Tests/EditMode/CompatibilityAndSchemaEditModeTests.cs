@@ -74,7 +74,7 @@ namespace CoreAI.Tests.EditMode
             CompatibilityChecker checker = new();
             checker.AddRule("Fire", "Water", 0f, "Incompatible");
 
-            // Проверяем что порядок не важен
+            // Check that the order does not matter
             CompatibilityResult r1 = checker.Check("Fire", "Water");
             CompatibilityResult r2 = checker.Check("Water", "Fire");
             Assert.IsFalse(r1.IsCompatible);
@@ -111,7 +111,7 @@ namespace CoreAI.Tests.EditMode
             CompatibilityChecker checker = new();
             checker.AddGroupRule(0f, "Four elements cancel out", "Fire", "Water", "Earth", "Air");
 
-            // Только 3 из 4 — правило на 4 не должно матчить
+            // Only 3 out of 4 - the four-element rule must not match
             CompatibilityResult result = checker.Check("Fire", "Water", "Earth");
             Assert.IsTrue(result.IsCompatible); // default score 1.0
         }
@@ -122,7 +122,7 @@ namespace CoreAI.Tests.EditMode
             CompatibilityChecker checker = new();
             checker.AddGroupRule(1.5f, "Fire+Earth synergy", "Fire", "Earth");
 
-            // 3 ингредиента, но парное правило Fire+Earth всё равно матчит
+            // 3 ingredients, but the Fire+Earth pair rule still matches
             CompatibilityResult result = checker.Check("Fire", "Earth", "Wind");
             Assert.IsTrue(result.IsCompatible);
             Assert.Greater(result.CompatibilityScore, 1.0f);
@@ -132,14 +132,14 @@ namespace CoreAI.Tests.EditMode
         public void Compatibility_GroupRule_LargerRuleHasMoreWeight()
         {
             CompatibilityChecker checker = new();
-            // Парное правило: Fire+Earth = 0.5 (плохо)
+            // Pair rule: Fire+Earth = 0.5 (bad)
             checker.AddRule("Fire", "Earth", 0.5f, "Pair: weak");
-            // Тройное правило: Fire+Earth+Air = 1.8 (синергия, перевешивает)
+            // Triple rule: Fire+Earth+Air = 1.8 (synergy, outweighs the pair)
             checker.AddGroupRule(1.8f, "Triple: synergy!", "Fire", "Earth", "Air");
 
             CompatibilityResult result = checker.Check("Fire", "Earth", "Air");
             Assert.IsTrue(result.IsCompatible);
-            // Тройное правило весит 3 сравнительно с парным весом 2
+            // The triple rule weighs 3 against the pair weight of 2
             // (0.5*2 + 1.8*3) / (2+3) = (1.0 + 5.4) / 5 = 1.28
             Assert.Greater(result.CompatibilityScore, 1.0f, "Triple rule should outweigh pair rule");
         }
@@ -153,7 +153,7 @@ namespace CoreAI.Tests.EditMode
             checker.RegisterElement("WaterFlask", "Water");
             checker.AddRule("Metal", "Water", 0.3f, "Metal rusts in water");
 
-            // IronOre → Metal, WaterFlask → Water → правило Metal+Water матчит
+            // IronOre -> Metal, WaterFlask -> Water -> the Metal+Water rule matches
             CompatibilityResult result = checker.Check("IronOre", "WaterFlask");
             Assert.IsTrue(result.IsCompatible);
             Assert.Less(result.CompatibilityScore, 1.0f);
@@ -516,7 +516,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Schema_ComplexCraftResult_FullValidation()
         {
-            // Реалистичный сценарий: CoreMechanicAI возвращает результат крафта
+            // Realistic scenario: CoreMechanicAI returns a crafting result
             JsonSchemaValidator schema = new JsonSchemaValidator("CraftResult")
                 .AddField("itemName", "string", true, description: "Name of crafted item")
                 .AddField("quality", "number", true, 0, 100)

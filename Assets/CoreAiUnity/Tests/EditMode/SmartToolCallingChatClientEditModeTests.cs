@@ -25,7 +25,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ThreeConsecutiveErrors_StopsAgent()
         {
-            // Модель каждый раз вызывает тулзу "my_tool", тулза всегда возвращает failure
+            // The model calls the "my_tool" tool every time, and the tool always returns a failure
             int callCount = 0;
             ScriptedChatClient fakeInner = new(iteration =>
             {
@@ -272,7 +272,7 @@ namespace CoreAI.Tests.EditMode
         public async Task SuccessResetsCounter_ThenThreeErrorsStop()
         {
             int callCount = 0;
-            // Последовательность: fail, fail, success, fail, fail, fail → stop
+            // Sequence: fail, fail, success, fail, fail, fail -> stop
             bool[] sequence = new[] { false, false, true, false, false, false };
 
             ScriptedChatClient fakeInner = new(iteration =>
@@ -313,13 +313,13 @@ namespace CoreAI.Tests.EditMode
         public async Task SuccessOnThirdAttempt_ResetsAndContinues()
         {
             int callCount = 0;
-            // fail, fail, success, fail, fail, text (модель отвечает текстом)
+            // fail, fail, success, fail, fail, text (the model answers with text)
             bool[] sequence = new[] { false, false, true, false, false };
 
             ScriptedChatClient fakeInner = new(iteration =>
             {
                 callCount++;
-                // После 5 тулзовых вызовов модель отвечает текстом
+                // After 5 tool calls the model answers with text
                 if (callCount > sequence.Length)
                 {
                     return MakeTextResponse("Done");
@@ -347,9 +347,9 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatResponse response =
                 await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
-            // 5 тулзовых итераций + 1 текстовый ответ = 6 вызовов innerClient
+            // 5 tool iterations + 1 text response = 6 innerClient calls
             Assert.AreEqual(6, callCount, "Expected 6 iterations: 5 tool calls + 1 text response");
-            // Последний ответ должен быть текстовым "Done", а не аварийный break
+            // The last response must be the text "Done", not an emergency break
             string lastText = response.Messages?.LastOrDefault()?.Text;
             Assert.IsTrue(lastText?.Contains("Done") == true, "Agent should have finished normally with text response");
         }
@@ -440,7 +440,7 @@ namespace CoreAI.Tests.EditMode
                 callCount++;
                 if (callCount <= 2)
                 {
-                    // Одинаковый tool call с одинаковыми args
+                    // The same tool call with the same args
                     return MakeToolCallResponse("my_tool", "call_" + callCount,
                         new Dictionary<string, object> { { "x", 42 } });
                 }
@@ -459,15 +459,15 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
             await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
-            // Ожидаем 3 итерации: 1) успешный tool call, 2) дубликат (отклонён), 3) текст
+            // We expect 3 iterations: 1) a successful tool call, 2) a duplicate (rejected), 3) text
             Assert.AreEqual(3, callCount,
-                "После обнаружения дубликата должен сработать rejection, модель переходит к текстовому ответу");
+                "Once a duplicate is detected the rejection must fire and the model must move on to a text response");
         }
 
         /// <summary>
-        /// Дефект: эхо считалось провальной итерацией, и три повтора подряд («покажи карточку ещё раз»)
-        /// упирались в предел ошибок и обрывали ход сообщением об аборте. Эхо — структурированный no-op:
-        /// модель получает <c>ok:true, duplicate:true</c>, счётчик сбоев не двигается, ход продолжается.
+        /// Defect: an echo counted as a failed iteration, so three repeats in a row ("show me the card again")
+        /// hit the error limit and cut the turn short with an abort message. An echo is a structured no-op: the
+        /// model receives <c>ok:true, duplicate:true</c>, the failure counter does not move, the turn continues.
         /// </summary>
         [Test]
         public async Task RepeatedEchoes_AreNoOps_AndNeverAbortTheTurn()
@@ -513,8 +513,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Дефект: когда предел ошибок достигнут и сводочный ход текста не дал, наружу уходил сырой
-        /// служебный JSON <c>{"error":"Agent aborted …"}</c> как реплика ассистента.
+        /// Defect: once the error limit was reached and the summarising turn produced no text, the raw internal
+        /// JSON <c>{"error":"Agent aborted ..."}</c> went out as the assistant's reply.
         /// </summary>
         [Test]
         public async Task MaxErrorsWithoutSummaryText_ReturnsPlainProse_NotRawJson()
@@ -574,7 +574,7 @@ namespace CoreAI.Tests.EditMode
             await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(4, callCount,
-                "Три разных аргумента + текстовый ответ = 4 итерации, блокировки не должно быть");
+                "Three different argument sets + a text response = 4 iterations, and nothing may be blocked");
         }
 
         /// <summary>
@@ -608,7 +608,7 @@ namespace CoreAI.Tests.EditMode
             await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(4, callCount,
-                "Инструмент с AllowDuplicates=true не триггерит rejection");
+                "A tool with AllowDuplicates=true does not trigger the rejection");
         }
 
         // ===================== Edge Cases =====================
@@ -628,7 +628,7 @@ namespace CoreAI.Tests.EditMode
 
             SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 new CoreAISettingsOptions(),
-                true, // отключаем дубликаты, чтобы увидеть именно not-found
+                true, // duplicates off, so we see the not-found case itself
                 new List<Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool>() };

@@ -282,8 +282,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ParseCompletion_EmptyContent_KeepsReasoningOutOfVisibleText()
         {
-            // WHY: В RedoSchool reasoning_content сохранялся как готовая заметка ученика; пустой
-            // content обязан остаться пустым, а рассуждения доступны только для диагностики.
+            // WHY: in RedoSchool reasoning_content was stored as a finished note for the learner; empty
+            // content must stay empty, and the reasoning stays available for diagnostics only.
             const string json =
                 "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"Hello from reasoning\"}}]}";
             MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
@@ -453,8 +453,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task GetStreamingResponseAsync_ReasoningOnlyStream_KeepsVisibleTextEmpty()
         {
-            // WHY: В RedoSchool поток рассуждений доезжал до потребителя как заметка. Дельты
-            // reasoning_content считаются реальными, но никогда не повышаются до видимого текста.
+            // WHY: in RedoSchool the reasoning stream reached the consumer as a note. reasoning_content
+            // deltas count as real deltas, but are never promoted to visible text.
             const string sse =
                 "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"I am \"}}]}\n\n" +
                 "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n\n" +

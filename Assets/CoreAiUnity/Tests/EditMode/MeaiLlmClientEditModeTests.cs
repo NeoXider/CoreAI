@@ -1116,8 +1116,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task CompleteStreamingAsync_ReasoningDelta_NeverJoinsConsumerText()
         {
-            // WHY: В RedoSchool потоковый consumer сохранял рассуждения как заметку; публичный Text
-            // должен собираться только из content, а reasoning остаётся отдельной диагностикой.
+            // WHY: in RedoSchool the streaming consumer stored the reasoning as a note; the public Text
+            // must be assembled from content only, and reasoning stays a separate diagnostic channel.
             ReasoningChatClient inner = new();
             MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
             LlmCompletionRequest request = new()

@@ -35,8 +35,8 @@ end
         [Test]
         public void Programmer_PlainText_ReturnsTrue()
         {
-            // ProgrammerResponsePolicy теперь пропускает любой текст
-            // т.к. tool calls обрабатываются через MEAI pipeline отдельно
+            // ProgrammerResponsePolicy now lets any text through,
+            // because tool calls are handled separately by the MEAI pipeline.
             string content = "Sure, I can help with that. Here's what you should do...";
             Assert.IsTrue(_composite.TryValidate("Programmer", content, out _));
         }

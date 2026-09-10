@@ -277,6 +277,14 @@ namespace CoreAI.Sandbox.LuaCs
         /// <param name="closure">The loaded chunk.</param>
         /// <param name="frameYielder">Host frame port; null runs without yielding, exactly as before.</param>
         /// <param name="cancellationToken">Cancels the run; the guard hook is restored either way.</param>
+        /// <remarks>
+        /// Cancellation surfaces as an <see cref="OperationCanceledException"/>. The CONCRETE subtype is
+        /// the runtime's, not CoreAI's, and callers must not switch on it: Lua-CSharp raises its own
+        /// <c>LuaCanceledException</c>, but a cancellation escaping an <c>async Task</c> completes that
+        /// Task as canceled rather than faulted, and Unity's runtime does not carry the original
+        /// exception through that transition — the awaiter sees a plain <see cref="TaskCanceledException"/>
+        /// there while desktop .NET keeps the Lua one. Catch the base type.
+        /// </remarks>
         public async Task<LuaValue[]> ExecuteAsync(
             LuaState state,
             LuaClosure closure,

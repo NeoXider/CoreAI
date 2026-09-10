@@ -52,9 +52,9 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Дефект: прежняя норма считала перекрытием совпадение одного имени инструмента. Два вызова
-        /// одного инструмента с РАЗНЫМИ результатами — это два разных вызова (аргументов в durable-блоке
-        /// нет, доказать «тот же вызов» нечем), и ребёнок терял первый из них.
+        /// Defect: the previous rule counted an overlap whenever one tool name matched. Two calls of the same tool
+        /// with DIFFERENT results are two different calls (the durable block carries no arguments, so there is
+        /// nothing to prove "the same call" with), and the child lost the first of them.
         /// </summary>
         [Test]
         public void Prune_KeepsOlderToolResult_WhenSameToolReturnedADifferentResult()
@@ -77,8 +77,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Перекрытие, которое можно доказать по данным: тот же инструмент и дословно та же записанная
-        /// выдача в более новом блоке. Старшая копия не несёт ничего нового и уходит.
+        /// An overlap the data can actually prove: the same tool and the very same recorded output inside a newer
+        /// block. The older copy carries nothing new and goes away.
         /// </summary>
         [Test]
         public void Prune_DropsOlderToolResult_WhenNewerBlockRepeatsTheSameToolAndResult()
@@ -106,10 +106,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Страж на скиллы. У учителя RedoSchool каждый скилл идёт через один внешний инструмент
-        /// <c>call_skill_tool</c>, и по старой норме «следующий слайд» выбрасывал из промпта вывод
-        /// код-станции — тот самый, про который ребёнок сейчас спрашивает «а почему вывелось 5?».
-        /// Разные внутренние вызовы одной обёртки должны выживать все.
+        /// A guard for skills. In the RedoSchool teacher every skill goes through a single external tool,
+        /// <c>call_skill_tool</c>, and under the old rule "next slide" threw the code station output out of the
+        /// prompt - the very output the child is asking about right now with "so why did it print 5?".
+        /// Different inner calls of one wrapper must all survive.
         /// </summary>
         [Test]
         public void Prune_SkillRouter_NextSlideDoesNotDiscardCodeStationOutput()
@@ -311,8 +311,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Под политикой Full выдача инструмента лежит в отступном блоке Detail и входит в идентичность
-        /// записи: та же выдача в новом блоке — старший блок избыточен.
+        /// Under the Full policy the tool output sits in the indented Detail block and is part of the record's
+        /// identity: the same output in a newer block makes the older block redundant.
         /// </summary>
         [Test]
         public void Prune_StillSupersedes_RealTopLevelEntry_WithIdenticalFullDetail()
@@ -337,8 +337,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Под Full две выдачи одного инструмента различаются только внутри Detail — и этого достаточно,
-        /// чтобы считать их разными вызовами: старшая выдача остаётся.
+        /// Under Full two outputs of the same tool differ only inside Detail, and that is enough to count them as
+        /// two different calls: the older output stays.
         /// </summary>
         [Test]
         public void Prune_KeepsOlderFullPolicyBlock_WhenOnlyTheDetailDiffers()

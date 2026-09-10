@@ -401,9 +401,9 @@ namespace CoreAI.Tests.EditMode
             };
 
             StubSettings settings = new();
-            // Вызов написан ПРОЗОЙ, а связанный инструмент обязан выполниться — это запасной канал
-            // (у эндпойнта нет нативного канала вызовов); канал объявляется явно, а не умолчанием
-            // конструктора: умолчание — «канал есть», и на нём проза не разбирается.
+            // The call is written as PROSE, and the bound tool still has to run: this is the fallback channel
+            // (the endpoint has no native call channel). The channel is declared explicitly rather than left to the
+            // constructor default: the default is "there is a native channel", and prose is not parsed on it.
             MeaiLlmClient client = new(inner,
                 new NullGameLogger(),
                 settings,
@@ -611,24 +611,24 @@ namespace CoreAI.Tests.EditMode
 
         // ------------ LLMUnity Qwen3.5: function-call syntax --------
         //
-        // Форма `ident(...)` не несёт никакой улики вызова: read_skill("Alchemy") и print("Привет, мир!")
-        // — одна и та же строка кода. Поэтому она распознаётся ТОЛЬКО против реестра объявленных
-        // инструментов (перегрузка TryExtract с knownToolNames) и только для объявленного имени.
-        // Тесты ниже передают реестр явно; без реестра форма не работает — это отдельные стражи.
+        // The `ident(...)` shape carries no evidence of a call at all: read_skill("Alchemy") and print("Привет, мир!")
+        // are the very same line of code. That is why it is recognised ONLY against the registry of declared tools
+        // (the TryExtract overload taking knownToolNames) and only for a declared name.
+        // The tests below pass the registry explicitly; without a registry the shape does not work, and separate guards cover that.
 
         [Test]
         public void PortableExtractor_PythonOneLinerAnswer_IsTextForTheChild_NotAToolCall(
             [Values("print(\"Привет, мир!\")", "input(\"Введи своё имя\")", "len(my_list)")]
             string pythonAnswer)
         {
-            // Дефект: ответ учителя, состоящий из одной строки Python, целиком становился вызовом
-            // несуществующего инструмента `print` — модель получала «Unknown tool», ребёнок — пустой пузырь.
+            // Defect: a teacher answer consisting of a single line of Python became, in its entirety, a call to a
+            // non-existent tool `print`. The model got "Unknown tool" and the child got an empty bubble.
             bool ok = LlmToolCallTextExtractor.TryExtract(pythonAnswer, Declared("spawn_quiz", "memory"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
-            Assert.IsFalse(ok, "Строка Python для ребёнка не является вызовом инструмента.");
+            Assert.IsFalse(ok, "A line of Python written for the child is not a tool call.");
             Assert.AreEqual(0, matches.Count);
-            Assert.AreEqual(pythonAnswer, cleaned, "Ребёнок должен увидеть строку кода целиком.");
+            Assert.AreEqual(pythonAnswer, cleaned, "The child must see the whole line of code.");
             Assert.AreEqual(pythonAnswer,
                 LlmToolCallTextExtractor.StripForDisplay(pythonAnswer, Declared("spawn_quiz", "memory")));
         }
@@ -636,13 +636,13 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void PortableExtractor_FunctionCallSyntax_WithoutToolRegistry_NeverFires()
         {
-            // Без реестра read_skill("x") и print("x") неотличимы — значит, форма `ident(...)`
-            // не распознаётся вовсе, а текст доходит до ребёнка нетронутым.
+            // Without a registry read_skill("x") and print("x") are indistinguishable, so the `ident(...)` shape
+            // is not recognised at all and the text reaches the child untouched.
             string input = "read_skill(\"Alchemy\")";
             bool ok = LlmToolCallTextExtractor.TryExtract(input,
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
-            Assert.IsFalse(ok, "Без реестра имён форма ident(...) не считается вызовом.");
+            Assert.IsFalse(ok, "With no registry of names the ident(...) shape does not count as a call.");
             Assert.AreEqual(input, cleaned);
             Assert.AreEqual(input, LlmToolCallTextExtractor.StripForDisplay(input));
         }
@@ -650,12 +650,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void PortableExtractor_FunctionCallSyntax_UndeclaredTool_StaysVisible()
         {
-            // Реестр есть, но такого инструмента в нём нет: исполнить нечего, прятать нельзя.
+            // There is a registry, but this tool is not in it: there is nothing to execute and nothing may be hidden.
             string input = "lookup_item(\"Flame Sword\")";
             bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("memory", "read_skill"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
-            Assert.IsFalse(ok, "Имя вне реестра — не вызов.");
+            Assert.IsFalse(ok, "A name outside the registry is not a call.");
             Assert.AreEqual(input, cleaned);
         }
 
@@ -897,22 +897,22 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void PortableExtractor_PseudoWrite_MemoryNotDeclared_NotExecuted()
         {
-            // Псевдозапись синтезирует вызов ИМЕННО `memory`; если роли его не давали — синтезировать нечего.
+            // A pseudo-write synthesises a call to `memory` SPECIFICALLY; if the role was never given it, there is nothing to synthesise.
             string input = "Okay. Action=write content=\"hello\"";
             bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("spawn_quiz"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
-            Assert.IsFalse(ok, "Без объявленного memory псевдозапись — просто текст.");
+            Assert.IsFalse(ok, "Without a declared memory tool a pseudo-write is just text.");
             Assert.AreEqual(input, cleaned);
         }
 
-        // ------------ Пример JSON в уроке — не вызов (реестр имён и ограды) --------
+        // ------------ A JSON example inside a lesson is not a call (name registry and fences) --------
 
         [Test]
         public void PortableExtractor_SpawnQuizJsonExampleInFencedBlock_ShownToTheChild_NotExecuted()
         {
-            // Учитель объясняет формат квиза и приводит JSON примером внутри ```json … ```. Имя
-            // инструмента — настоящее и объявленное, так что отличить пример от вызова может только ограда.
+            // The teacher explains the quiz format and shows the JSON as an example inside ```json ... ```. The tool
+            // name is real and declared, so only the fence can tell an example apart from a call.
             string example =
                 "{\"name\": \"spawn_quiz\", \"arguments\": {\"question\": \"Что выведет print(2 + 2)?\", " +
                 "\"options\": [\"4\", \"22\"], \"answer\": 0}}";
@@ -922,16 +922,16 @@ namespace CoreAI.Tests.EditMode
             bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("spawn_quiz"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
-            Assert.IsFalse(ok, "JSON-пример внутри ограды кода не исполняется.");
+            Assert.IsFalse(ok, "A JSON example inside a code fence is not executed.");
             Assert.AreEqual(0, matches.Count);
-            Assert.AreEqual(input, cleaned, "Пример остаётся в тексте урока целиком.");
+            Assert.AreEqual(input, cleaned, "The example stays in the lesson text in full.");
         }
 
         [Test]
         public void PortableExtractor_JsonExampleInFenceCutOffByTokenLimit_NotExecuted()
         {
-            // Ответ оборвался лимитом токенов внутри ```json-примера: закрывающей ограды нет.
-            // Раньше незакрытая ограда не считалась блоком кода, и пример исполнялся как вызов.
+            // The answer was cut off by the token limit inside a ```json example, so there is no closing fence.
+            // An unclosed fence used to not count as a code block, and the example was executed as a call.
             string input =
                 "Вот пример вызова:\n```json\n" +
                 "{\"name\": \"spawn_quiz\", \"arguments\": {\"question\": \"Сколько будет 2 + 2?\"}}\n" +
@@ -940,28 +940,28 @@ namespace CoreAI.Tests.EditMode
             bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("spawn_quiz"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
-            Assert.IsFalse(ok, "Открытая, но не закрытая ограда — всё ещё блок кода до конца текста.");
+            Assert.IsFalse(ok, "A fence that is opened but never closed is still a code block until the end of the text.");
             Assert.AreEqual(input, cleaned);
         }
 
         [Test]
         public void PortableExtractor_JsonWithUndeclaredToolName_StaysVisibleWhenRegistryKnown()
         {
-            // Пример с выдуманным именем: исполнить его нельзя, а вырезать — значит показать ребёнку
-            // пустоту вместо строки объяснения.
+            // An example with an invented name: it cannot be executed, and cutting it out would show the child
+            // emptiness where a line of explanation should be.
             string input = "Формат такой: {\"name\": \"example_tool\", \"arguments\": {\"x\": 1}} — имя и аргументы.";
             bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("spawn_quiz", "memory"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
-            Assert.IsFalse(ok, "Имя вне реестра — не вызов.");
+            Assert.IsFalse(ok, "A name outside the registry is not a call.");
             Assert.AreEqual(input, cleaned);
         }
 
         [Test]
         public void PortableExtractor_JsonForDeclaredTool_StillExtractedWithRegistry()
         {
-            // Реестр сужает, а не ломает: настоящий вызов объявленного инструмента извлекается как раньше,
-            // причём и с пробелом после двоеточия — так пишут модели.
+            // The registry narrows things down, it does not break them: a real call to a declared tool is extracted as
+            // before, including with a space after the colon, which is how models write it.
             string input = "Запоминаю. {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"любит котов\"}}";
             bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("memory", "spawn_quiz"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
@@ -976,7 +976,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void PortableExtractor_EmptyRegistry_NothingIsACall()
         {
-            // Реестр передан и пуст — объявленных инструментов нет, значит и вызовов быть не может.
+            // The registry was passed and it is empty: there are no declared tools, so there can be no calls either.
             string input = "{\"name\":\"memory\",\"arguments\":{\"action\":\"clear\"}}";
             bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared(),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
@@ -988,13 +988,13 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void PortableExtractor_XmlExampleInsideFence_NotExecuted()
         {
-            // Дыра сверх описанной: XML-ветка искала по сырому тексту, минуя ограды кода.
+            // A hole beyond the one described: the XML branch searched the raw text, bypassing code fences.
             string input =
                 "Некоторые модели пишут вызов так:\n```xml\n<function=memory><parameter=action>clear</parameter></function>\n```\n";
             bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("memory"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
-            Assert.IsFalse(ok, "XML-пример внутри ограды кода не исполняется.");
+            Assert.IsFalse(ok, "An XML example inside a code fence is not executed.");
             Assert.AreEqual(input, cleaned);
         }
 
@@ -1005,7 +1005,7 @@ namespace CoreAI.Tests.EditMode
             bool ok = LlmToolCallTextExtractor.TryExtract(input, Declared("memory"),
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
-            Assert.IsFalse(ok, "XML-вызов инструмента вне реестра — не вызов.");
+            Assert.IsFalse(ok, "An XML tool call outside the registry is not a call.");
         }
 
         [Test]
@@ -1014,9 +1014,9 @@ namespace CoreAI.Tests.EditMode
             string input = "text ```json\n{\"name\":\"x\",\"arguments\":{}}";
             string stripped = LlmToolCallTextExtractor.StripCodeBlocks(input);
 
-            Assert.AreEqual(input.Length, stripped.Length, "Длина обязана сохраняться — на неё завязаны смещения.");
+            Assert.AreEqual(input.Length, stripped.Length, "The length must be preserved: offsets are computed against it.");
             StringAssert.StartsWith("text ", stripped);
-            Assert.That(stripped.Substring(5).Trim(), Is.Empty, "Всё после открытой ограды — пробелы.");
+            Assert.That(stripped.Substring(5).Trim(), Is.Empty, "Everything after an open fence is whitespace.");
         }
 
         // ------------ Non-streaming: arguments_json key through SmartToolCallingChatClient --------
@@ -1061,13 +1061,13 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(client.LastExecutedToolCalls[0].Success);
         }
 
-        // ------------ Non-streaming: строка Python доходит до ребёнка --------
+        // ------------ Non-streaming: a line of Python reaches the child --------
 
         [Test]
         public async Task NonStreaming_PythonOneLinerAnswer_ReachesTheChildUnchanged()
         {
-            // Дефект целиком: на запасном канале модель ответила одной строкой кода, и цикл превращал её
-            // в вызов инструмента `print`. Ребёнок должен получить ровно эту строку, инструменты — молчать.
+            // The defect in full: on the fallback channel the model answered with a single line of code, and the loop
+            // turned it into a call to the tool `print`. The child must get exactly that line, and the tools must stay quiet.
             const string answer = "print(\"Привет, мир!\")";
             int iter = 0;
             int quizInvocations = 0;
@@ -1093,21 +1093,21 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatResponse response =
                 await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
-            Assert.AreEqual(1, iter, "Строка кода — обычный ответ: второй итерации быть не должно.");
+            Assert.AreEqual(1, iter, "A line of code is an ordinary answer: there must be no second iteration.");
             Assert.AreEqual(0, quizInvocations);
-            Assert.AreEqual(0, client.LastExecutedToolCalls.Count, "Ни одного вызова, даже «missing».");
+            Assert.AreEqual(0, client.LastExecutedToolCalls.Count, "Not a single call, not even a \"missing\" one.");
             Assert.AreEqual(answer, response.Messages?.LastOrDefault()?.Text ?? "");
         }
 
-        // ------------ Streaming: боевые формы — нарезка по токенам, кириллица, экранирование --------
+        // ------------ Streaming: production shapes - token slicing, Cyrillic, escaping --------
 
         [Test]
         public async Task Streaming_PythonOneLinerAnswer_IsShownToTheChild_NotTurnedIntoToolCall()
         {
-            // Тот же дефект в потоковом цикле MeaiLlmClient на запасном канале — там проза разбирается
-            // на вызовы, и именно там строка кода становилась вызовом. Канал объявлен явно
-            // (`supportsNativeToolCalling: false`): на нативном канале проза не разбирается вовсе, и тест
-            // прошёл бы, ничего не охраняя. Один инструмент объявлен и связан, ответ — строка Python по токенам.
+            // The same defect in the streaming loop of MeaiLlmClient on the fallback channel: prose is parsed into
+            // calls there, and that is exactly where a line of code became a call. The channel is declared explicitly
+            // (`supportsNativeToolCalling: false`): on the native channel prose is not parsed at all and the test would
+            // pass while guarding nothing. One tool is declared and bound, and the answer is a line of Python by tokens.
             StreamingScripted inner = new(new[] { "print(", "\"Привет, ", "мир!\")" });
             MeaiLlmClient client = new(inner,
                 new NullGameLogger(),
@@ -1137,22 +1137,22 @@ namespace CoreAI.Tests.EditMode
             }
 
             string visible = string.Concat(chunks.Where(c => !string.IsNullOrEmpty(c.Text)).Select(c => c.Text));
-            Assert.AreEqual("print(\"Привет, мир!\")", visible, "Ребёнок видит строку кода целиком.");
+            Assert.AreEqual("print(\"Привет, мир!\")", visible, "The child sees the whole line of code.");
             Assert.AreEqual(0, quizInvocations);
             LlmStreamChunk done = chunks.LastOrDefault(c => c.IsDone);
             Assert.IsNotNull(done, "Stream must yield an IsDone terminator.");
-            Assert.IsNull(done!.Error, $"Ответ без вызова не должен заканчиваться ошибкой: {done.Error}");
+            Assert.IsNull(done!.Error, $"An answer with no call must not end with an error: {done.Error}");
             Assert.That(done.ExecutedToolCalls ?? new List<LlmToolCallTrace>(), Is.Empty,
-                "Никакого вызова — ни настоящего, ни «missing» — из строки кода синтезировать нельзя.");
+                "No call at all, neither a real one nor a \"missing\" one, may be synthesised out of a line of code.");
         }
 
         [Test]
         public async Task Streaming_ToolCallJsonSplitAcrossTokenBoundaries_ExtractedAndStripped()
         {
-            // Боевой случай: модель отдаёт JSON вызова десятками дельт, ключи и имя рвутся посреди слова.
-            // До этого все тесты подавали JSON одной дельтой. Запасной канал объявлен явно; инструмент
-            // объявлен, но не связан (memoryStore == null) — извлечение обязано сработать, JSON — исчезнуть
-            // из ленты.
+            // The production case: the model emits the call JSON in dozens of deltas, and the keys and the name break
+            // mid-word. Until now every test fed the JSON in a single delta. The fallback channel is declared
+            // explicitly; the tool is declared but not bound (memoryStore == null), so extraction must still fire and
+            // the JSON must vanish from the feed.
             StreamingScripted inner = new(
                 new[]
                 {
@@ -1181,22 +1181,22 @@ namespace CoreAI.Tests.EditMode
 
             string visible = string.Concat(chunks.Where(c => !string.IsNullOrEmpty(c.Text)).Select(c => c.Text));
             Assert.That(visible, Does.Contain("Сейчас запомню."));
-            AssertNoToolCallJsonFor(visible, "memory", "Нарезанный по токенам JSON вызова не должен утечь в ленту.");
+            AssertNoToolCallJsonFor(visible, "memory", "Call JSON sliced up by tokens must not leak into the feed.");
             Assert.That(visible, Does.Not.Contain("\"arguments\""));
 
             LlmStreamChunk done = chunks.LastOrDefault(c => c.IsDone);
             Assert.IsNotNull(done);
             Assert.That(done!.ExecutedToolCalls, Is.Not.Null);
             Assert.That(done.ExecutedToolCalls.Any(t => t.Name == "memory" && t.Source == "missing"), Is.True,
-                "Вызов собран из кусков и дошёл до политики (инструмент не связан — трейс «missing»).");
+                "The call was reassembled from the pieces and reached the policy (the tool is not bound, so the trace is \"missing\").");
         }
 
         [Test]
         public async Task Streaming_CyrillicAndEscapedQuotesSplitAtChunkBoundary_ArgumentsArriveIntact()
         {
-            // Боевой spawn_quiz: русский вопрос с экранированными кавычками внутри, разрезанный так, что
-            // одна дельта кончается одиноким `\` (экранирование рвётся на границе чанка), а кириллица
-            // рвётся посреди слова. Инструмент связан: аргумент обязан прийти в него без потерь.
+            // A production spawn_quiz: a Russian question with escaped quotes inside it, sliced so that one delta ends
+            // with a lone `\` (the escape breaks on a chunk boundary) and the Cyrillic breaks mid-word.
+            // The tool is bound: the argument has to arrive in it without losses.
             StreamingScripted inner = new(
                 new[]
                 {
@@ -1216,7 +1216,7 @@ namespace CoreAI.Tests.EditMode
                 return "{\"Success\":true}";
             };
 
-            // Запасной канал объявлен явно: вызов приходит прозой только там, где нативного канала нет.
+            // The fallback channel is declared explicitly: a call arrives as prose only where there is no native channel.
             MeaiLlmClient client = new(inner,
                 new NullGameLogger(),
                 new StubSettings(),
@@ -1238,7 +1238,7 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.AreEqual("Что выведет print(\"Привет\")?", capturedQuestion,
-                "Кириллица и экранированные кавычки, разрезанные на границе чанков, обязаны дойти целиком.");
+                "Cyrillic and escaped quotes sliced at a chunk boundary must arrive intact.");
 
             string visible = string.Concat(chunks.Where(c => !string.IsNullOrEmpty(c.Text)).Select(c => c.Text));
             Assert.That(visible, Does.Contain("Проверим!"));
@@ -1255,15 +1255,15 @@ namespace CoreAI.Tests.EditMode
 
         // ------------ Helpers ------------
 
-        /// <summary>Реестр объявленных инструментов для перегрузки <c>TryExtract</c> с именами.</summary>
+        /// <summary>The registry of declared tools for the <c>TryExtract</c> overload that takes names.</summary>
         private static IReadOnlyCollection<string> Declared(params string[] names)
         {
             return names;
         }
 
         /// <summary>
-        /// ПОЧЕМУ: модели пишут JSON и как <c>"name":"x"</c>, и как <c>"name": "x"</c>; проверка по точной
-        /// подстроке пропускала утечку с пробелом после двоеточия.
+        /// WHY: models write JSON both as <c>"name":"x"</c> and as <c>"name": "x"</c>; a check against the exact
+        /// substring let a leak with a space after the colon slip through.
         /// </summary>
         private static void AssertNoToolCallJsonFor(string text, string toolName, string message = null)
         {

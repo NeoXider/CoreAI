@@ -512,12 +512,12 @@ namespace CoreAI.Composition
             }
 
             LlmUnityServerHttpSettings adapter = new(settings, settings.LlmUnityServerPort, modelName, "");
-            // WHY: канал у llama.cpp есть (нативные tool_calls при jinja-шаблоне), и сервер LlamaLib
-            // v2.0.5 из комплекта LLMUnity включает jinja по умолчанию — проверено живым прогоном
-            // 2026-09-06. Пробы здесь нет: клиент строится до того, как сервер поднимется, — поэтому
-            // канал берётся из настройки ассета (Auto = нативный по установленному факту, Text — для
-            // сборки без jinja). Прежняя константа `false` с пояснением «у сервера нет канала» была
-            // ложью и молча переводила локальную модель на разбор прозы.
+            // WHY: llama.cpp DOES have the channel (native tool_calls with a jinja template), and the
+            // LlamaLib v2.0.5 server bundled with LLMUnity turns jinja on by default - verified by a live
+            // run on 2026-09-06. There is no probe here: the client is built before the server comes up,
+            // so the channel comes from the asset setting instead (Auto = native, on that established
+            // fact; Text = for a build without jinja). The old hardcoded `false` with its "the server has
+            // no channel" note was a lie, and it silently downgraded the local model to prose parsing.
             LlmToolChannelDecision toolChannel = LlmToolChannelResolution.ResolveWithoutProbe(
                 settings.LlmUnityToolChannel,
                 LlmToolChannelResolution.BundledLlamaLibReason);

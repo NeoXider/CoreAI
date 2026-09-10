@@ -11,8 +11,8 @@ using NUnit.Framework;
 namespace CoreAI.Core.Tests.EditMode
 {
     /// <summary>
-    /// <see cref="ClientLimitedLlmClientDecorator"/> с точки зрения игрока: локальный потолок сессии — это
-    /// не «квота аккаунта исчерпана», а неудавшаяся попытка не съедает лимит.
+    /// <see cref="ClientLimitedLlmClientDecorator"/> from the player's point of view: a local session cap
+    /// is not "the account quota is exhausted", and a failed attempt does not eat the limit.
     /// </summary>
     public sealed class ClientLimitedLlmClientDecoratorEditModeTests
     {
@@ -53,7 +53,7 @@ namespace CoreAI.Core.Tests.EditMode
             Assert.AreNotEqual(
                 LlmErrorPresentation.ForErrorCode(LlmErrorCode.QuotaExceeded),
                 LlmErrorPresentation.ForErrorCode(rejected.ErrorCode),
-                "Игрок не должен читать про исчерпанную квоту АККАУНТА, когда кончился локальный счётчик.");
+                "The player must not read about an exhausted ACCOUNT quota when it was the local counter that ran out.");
             Assert.AreEqual(1, inner.Calls);
         }
 
@@ -85,7 +85,7 @@ namespace CoreAI.Core.Tests.EditMode
             LlmCompletionResult retried = await limited.CompleteAsync(Req("one again"));
 
             Assert.IsFalse(failed.Ok);
-            Assert.IsTrue(retried.Ok, "Сбой бэкенда не должен был списать единственный слот сессии.");
+            Assert.IsTrue(retried.Ok, "A backend failure must not have consumed the only session slot.");
             Assert.AreEqual(2, inner.Calls);
         }
 
@@ -105,7 +105,7 @@ namespace CoreAI.Core.Tests.EditMode
             inner.Results.Enqueue(new LlmCompletionResult { Ok = true, Content = "answer" });
             LlmCompletionResult ok = await limited.CompleteAsync(Req("three"));
 
-            Assert.IsTrue(ok.Ok, "Ни исключение, ни отмена не должны были списать слот.");
+            Assert.IsTrue(ok.Ok, "Neither an exception nor a cancellation must have consumed the slot.");
         }
 
         [Test]
@@ -123,12 +123,12 @@ namespace CoreAI.Core.Tests.EditMode
 
             inner.Streams.Enqueue(new[] { new LlmStreamChunk { Text = "hi" }, new LlmStreamChunk { IsDone = true } });
             List<LlmStreamChunk> clean = await Drain(limited.CompleteStreamingAsync(Req("two")));
-            Assert.IsTrue(clean.Exists(c => c.Text == "hi"), "После упавшего потока слот должен быть свободен.");
+            Assert.IsTrue(clean.Exists(c => c.Text == "hi"), "After a failed stream the slot must be free.");
 
             List<LlmStreamChunk> rejected = await Drain(limited.CompleteStreamingAsync(Req("three")));
             Assert.AreEqual(1, rejected.Count);
             Assert.AreEqual(LlmErrorCode.ClientLimitExceeded, rejected[0].ErrorCode,
-                "Чистый поток слот занимает — третий запрос упирается в локальный потолок.");
+                "A clean stream does take the slot - the third request hits the local cap.");
             Assert.AreEqual(2, inner.StreamCalls);
         }
 
@@ -144,7 +144,7 @@ namespace CoreAI.Core.Tests.EditMode
             inner.Streams.Enqueue(new[] { new LlmStreamChunk { Text = "hi", IsDone = true } });
             List<LlmStreamChunk> next = await Drain(limited.CompleteStreamingAsync(Req("two")));
 
-            Assert.IsTrue(next.Exists(c => c.Text == "hi"), "Поток без единого чанка — не ответ, слот не списан.");
+            Assert.IsTrue(next.Exists(c => c.Text == "hi"), "A stream without a single chunk is not an answer; the slot is not consumed.");
         }
 
         [Test]
@@ -157,9 +157,9 @@ namespace CoreAI.Core.Tests.EditMode
             Task<LlmCompletionResult> first = limited.CompleteAsync(Req("one"));
             Task<LlmCompletionResult> second = limited.CompleteAsync(Req("two"));
 
-            Assert.IsTrue(second.IsCompleted, "Второй запрос должен быть отвергнут, пока первый в полёте.");
+            Assert.IsTrue(second.IsCompleted, "The second request must be rejected while the first is in flight.");
             Assert.AreEqual(LlmErrorCode.ClientLimitExceeded, second.Result.ErrorCode);
-            Assert.AreEqual(1, inner.Calls, "Резерв ставится ДО вызова, иначе двое проскочили бы потолок вдвоём.");
+            Assert.AreEqual(1, inner.Calls, "The slot is reserved BEFORE the call, otherwise two callers would slip past the cap together.");
 
             inner.Hold.SetResult(true);
             Assert.IsTrue(first.Result.Ok);

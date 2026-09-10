@@ -1,5 +1,90 @@
 # Changelog
 
+## [7.40.0] - 2026-09-10
+
+### Fixed
+
+- **Every RunService signal fired twice per frame, because the merge left two frame authorities in
+  the tree.** The publication wave had made `LuaCsRbxApiBindings.PumpSchedulerPhase` route all six
+  scheduler phases instead of only input processing — a real production fix, since the shipped host
+  (`LuaModRuntimeTickDriver` → `RbxWorldRuntimeSessionController.PumpFrame`) advances the scheduler and
+  does nothing else, so any phase not routed there never fires its signals in a built player at all.
+  7.39.0 branched before that change and kept the older host shape, in which the caller fires the
+  signals itself through the public `Pump*` methods and then advances the scheduler to drain them.
+  Merging the two took the routing and inherited the older callers, so each frame ran twice: `Stepped`,
+  `Heartbeat` and `RenderStepped` fired once from the scheduler phase and again from the pump beside it.
+  A mod's per-frame counter doubled, a Heartbeat handler cut for a runaway loop was cut a second time in
+  the same frame (`ModHandlerErrored` and `ThreadFaulted` each raised twice for one offence), and the
+  observable phase order came out `SSDHHIRR` where the contract is `SDHIR`.
+- **The scheduler is now the single frame authority, and the duplicate route is gone rather than
+  filtered.** `ModScheduler.Advance` walks the phase pipeline and the bindings that own both that
+  scheduler and the RunService instance fire each phase exactly once from `PhaseReached`.
+  `LuaModRuntimeTickDriver` no longer subscribes to `PhaseReached` and no longer accepts the three
+  per-phase pump delegates it used to re-invoke; one frame is one `Advance`, and the reasoning is
+  recorded in the driver, in `CoreAiModsInstaller` and on `LuaCsRbxApiBindings.PumpFrame` so the second
+  route cannot quietly return. The affected EditMode fixtures emulate the host the same way — one
+  `Advance` per frame — instead of pumping and advancing; their expectations were already correct and
+  are untouched.
+- **A cancelled `LuaCsExecutionGuard.ExecuteAsync` was pinned to an exception type Unity never
+  delivers.** `AsyncExecute_HonoursCancellation` demanded Lua-CSharp's `LuaCanceledException`. The VM
+  does raise exactly that — measured against `Lua.dll` directly, for a token cancelled before the run
+  and for one cancelled mid-loop, with and without the guard hook installed — but it cannot survive the
+  trip out: `ExecuteAsync` is an `async Task`, a cancellation escaping one completes the Task as
+  *canceled* rather than faulted, and Unity's runtime drops the original exception at that transition
+  (desktop .NET 8 keeps it, which is why the expectation reads as correct). Both types are
+  `OperationCanceledException`, and that is the contract CoreAI can actually keep: it is what a host
+  needs to tell "the run was cancelled" from "the mod's script failed", and nothing in the codebase
+  switched on the subtype. The guarantee is now written on `ExecuteAsync` and the test asserts it; the
+  test's real subject — the state stays usable, because the guard hook is restored either way — is
+  unchanged.
+- **A mistyped tool argument cost the learner the whole turn.** `arg-conversion` is emitted again — by
+  the structural preflight `ToolExecutionPolicy.TryBindArgumentsStructurally`, which runs MEAI's own
+  coercion standalone *before* `function.InvokeAsync` — but `LoggingLlmClientDecorator.TraceIndicatesInvocation`
+  was never told, so the source fell through to the fail-safe `default` and counted as "a tool ran".
+  The consequence was the exact inverse of the danger that default exists for: a turn in which the model
+  merely typed `"many"` where an `int` was declared, and in which **nothing executed at all**, was
+  reported as having mutated the world — so a 429 or 5xx arriving in that same turn could neither be
+  retried by the decorator's own loop nor failed over by `FallbackLlmClientDecorator`, and the student
+  got a hard error instead of an answer. The branch is restored, and the reasoning now sits in the code:
+  this source is *proof* of non-invocation, not an inference from a stack shape.
+- **The branch had been deleted as dead, correctly, and then the source came back without it.** 7.39.0
+  removed `arg-conversion` from the classifier because nothing emitted it any more — argument failures
+  had stopped being classified from stack frames (IL2CPP/WebGL strips them) and were all traced `native`.
+  That removal even predicted the failure mode, warning that the string's "future reuse" would be
+  silently misclassified; the reuse arrived with the structural preflight in the same wave, and the
+  prediction came true in the opposite direction. `TraceIndicatesInvocation_ClassifiesSourcesCorrectly`
+  now pins the case explicitly, with the history written next to it, so it cannot read as dead a third
+  time.
+- **A third source had the same defect and had simply never been looked at.** `tools-disabled` is
+  recorded when the request arrives with `ToolMode = None` and the policy refuses the call before
+  reaching the function - the same shape as `arg-conversion`, nothing executed - yet it sat on the
+  fail-safe `default` and suppressed retry and failover exactly as the other one did. Fixed. The
+  neighbouring `blocked` is now documented as a deliberate `true` rather than a fourth oversight: it
+  marks a turn in which an EARLIER invocation stopped observing its deadline, so that body may still
+  be running and replaying the turn could execute it twice. A lost turn is cheaper than a mutation
+  applied twice.
+- **The door this defect keeps arriving through is now guarded.** Three times the classifier's
+  `default` branch - right for an unknown source, silent for a known one - has swallowed a source
+  nobody added to the list, and each time the only symptom was a lesson turn lost to an error that
+  could have been retried. `EveryEmittedTraceSource_IsClassifiedOnPurpose` reads the sources
+  `ToolExecutionPolicy` actually emits and fails if any of them is not pinned by name in the
+  classifier test. An omission is now loud where it happens, not where a learner feels it.
+
+### Changed
+
+- **Two tests that pinned the interim "the distinction is gone entirely" state were corrected, not
+  deleted.** `DelegateLlmTool_ArgumentCoercionFailure_IsTracedAsInvoked` (in both
+  `ToolContractPromisesEditModeTests` and `RetryFallbackToolTraceSuppressionEditModeTests`) asserted
+  `native`/invoked for a coercion failure — right for the window in which the argument-vs-body
+  distinction had been deleted outright, wrong once it returned as a structural proof. Both are renamed
+  to `…_IsRejectedBeforeInvocation` and carry a WHY recording why the previous expectation was correct
+  when written and is not now; this supersedes the 7.39.0 note "An argument-coercion failure is traced
+  as invoked, not as never-invoked", whose reasoning still holds only for failures thrown *across* the
+  invocation boundary. The delegate case is kept rather than folded into the raw-function one because it
+  is the only guard that the preflight still sees `UnderlyingMethod` through
+  `DelegateExceptionBoundaryAIFunction`'s `DelegatingAIFunction` wrapper — were that forwarding ever to
+  stop, the preflight would silently degrade to the conservative verdict with no other test noticing.
+
 ## [7.39.0] - 2026-09-10
 
 ### Added

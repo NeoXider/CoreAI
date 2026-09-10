@@ -166,8 +166,8 @@ namespace CoreAI.Ai
         {
             if (!TryLoadMemory(out string current, out AgentMemoryState state))
             {
-                // WHY: документ есть, но не читается. Ответить «память пуста» — значит выдать модели
-                // пустоту за факт, и она перезапишет то, чего не видела.
+                // WHY: the document exists but cannot be read. Answering "memory is empty" would hand the
+                // model emptiness as a fact, and it would overwrite what it never saw.
                 return SerializeResult(new MemoryResult
                 {
                     Success = false,
@@ -353,11 +353,12 @@ namespace CoreAI.Ai
         private async Task<string> MutateMemoryAsync(string action, Func<string, MemoryMutationPlan> planner,
             CancellationToken cancellationToken)
         {
-            // WHY: мутатор только МЕНЯЕТ состояние и описывает исход. Ответ «сохранено» собирается ниже,
-            // когда MutateAsync уже вернулся, то есть когда стор по своему контракту записал результат
-            // (IAtomicAgentMemoryStore: «сохраняет результат до освобождения замка»). Раньше и лог SUCCESS,
-            // и ответ формировались внутри мутатора — ДО записи, — и сбой диска, проглоченный стором, не
-            // менял ничего: модель и ученик видели, что учитель запомнил, а на диске было пусто.
+            // WHY: the mutator only CHANGES the state and describes the outcome. The "saved" answer is
+            // assembled below, once MutateAsync has returned - that is, once the store has by its own
+            // contract written the result (IAtomicAgentMemoryStore: "persists the result before releasing
+            // the lock"). Both the SUCCESS log and the answer used to be produced inside the mutator -
+            // BEFORE the write - so a disk failure swallowed by the store changed nothing: the model and
+            // the learner saw that the teacher had remembered, while the disk held nothing.
             MutationOutcome outcome = await _store.MutateAsync(
                     _roleId,
                     state =>
@@ -412,7 +413,7 @@ namespace CoreAI.Ai
             });
         }
 
-        /// <summary>Исход мутации, каким его видит мутатор; в ответ инструмента превращается после записи.</summary>
+        /// <summary>The mutation outcome as the mutator sees it; it becomes the tool answer after the write.</summary>
         private readonly struct MutationOutcome
         {
             private MutationOutcome(bool success, bool changed, string message, string error, int version,
@@ -496,9 +497,9 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Читает документ роли. <c>false</c> — документ существует, но прочитать его не удалось: стор,
-        /// умеющий это различать (<see cref="IAgentMemoryLoadDiagnostics"/>), сообщил
-        /// <see cref="AgentMemoryLoadStatus.Failed"/>. Отсутствующий документ — это пустая память.
+        /// Reads the role's document. <c>false</c> means the document exists but could not be read: a
+        /// store able to tell the two apart (<see cref="IAgentMemoryLoadDiagnostics"/>) reported
+        /// <see cref="AgentMemoryLoadStatus.Failed"/>. A missing document is simply empty memory.
         /// </summary>
         private bool TryLoadMemory(out string memory, out AgentMemoryState state)
         {

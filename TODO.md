@@ -10,6 +10,32 @@
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
+## One frame, one driver — the trap that cost sixteen tests is still armed (2026-09-10)
+
+**Fixed:** the merge of `fix` and `main` left two frame drivers in the tree. `LuaModRuntimeTickDriver`
+subscribed to `Scheduler.PhaseReached` while `LuaCsRbxApiBindings.PumpSchedulerPhase` had just been
+widened from input-only to all six phases, so every phase ran twice: `SDHIR` came out as `SSDHHIRR`,
+"fires exactly once" became two, sixteen tests failed at once. The driver's subscription is gone; a
+frame is one `Scheduler.Advance()`, the same call the shipping host makes.
+
+**Still open, and it is a trap rather than a defect:** the public per-phase surface (`PumpInput`,
+`PumpPreAnimation`, `PumpPreSimulation`, `PumpPostSimulation`, `PumpHeartbeat`, `PumpPreRender`,
+`PumpFrame`) is still there, and seven fixtures still call one of them next to `Advance`. They are
+green only because nothing they assert counts occurrences — which is exactly what makes it a trap:
+the shape survived the wave that was cleaning it up, and the next person to copy one of those
+fixtures as a template re-arms it.
+
+**The fix is to make `Advance` the only entry point** and delete the public `Pump*` surface, moving
+the twelve call sites over. That is the real change; it was left out of the 7.40.0 wave deliberately,
+to keep a defect fix from turning into an API change under time pressure.
+
+**A text guard was tried and rejected**, and the reason is worth keeping so nobody re-tries it: a
+check for "one method that both pumps and advances" fires 31 times on the current tree, and a large
+share of those are legitimate — `Mvp8PlayersCompletionEditModeTests` deliberately asserts that the
+character motor does NOT move on the render pump, which requires calling both in one test. Telling
+intent apart needs more than a regex, and a guard shipped with a 31-entry allowlist would be worse
+than none: it teaches people to add entries.
+
 ## WebGL storage gate shipped with its fix (2026-09-09) — closes a 7.37.0 pre-publication blocker
 
 `CoreAIWebGlPersistentDataSyncBuildGuard` travelled inside `com.neoxider.coreaiunity` while the

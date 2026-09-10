@@ -1610,9 +1610,9 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// История, где второе сообщение — durable-блок результата инструмента в том виде, в каком его
-        /// пишет оркестратор. С FlatTokenEstimator(10) и бюджетом 25 сворачиваются первые три сообщения,
-        /// то есть tool-блок точно попадает в компакцию.
+        /// A history whose second message is a durable tool result block, exactly as the orchestrator writes it.
+        /// With FlatTokenEstimator(10) and a budget of 25 the first three messages are folded, so the tool block
+        /// certainly lands in the compaction.
         /// </summary>
         private static ChatMessage[] HistoryWithFoldedToolBlock()
         {
@@ -1631,10 +1631,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Дефект: сырой блок «## Tool Results» уезжал в компактор, тот по инструкции «сохраняй
-        /// идентификаторы и числа» переносил его в summary, а summary возвращался в промпт уже мимо
-        /// проекции — и ребёнок снова читал служебный регистр в ответе учителя. Суммаризатор обязан
-        /// видеть tool-сообщения через ту же проекцию, что и основной промпт.
+        /// Defect: the raw "## Tool Results" block travelled into the compactor, which - following its "keep
+        /// identifiers and numbers" instruction - carried it into the summary, and the summary came back into the
+        /// prompt bypassing the projection, so the child read the internal register inside the teacher's answer
+        /// again. The summarizer must see tool messages through the same projection as the live prompt.
         /// </summary>
         [Test]
         public async Task LlmAssisted_CompactionPayload_ShowsToolResultsInTheMachineRegister_NotTheRawBlock()
@@ -1656,8 +1656,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Детерминированный путь пишет summary сам, без LLM, — и он же служит запасным при любой
-        /// ошибке компактора. Его bullet-строки обязаны быть спроецированы так же.
+        /// The deterministic path writes the summary itself, without an LLM, and it also serves as the fallback for
+        /// any compactor failure. Its bullet lines have to be projected the same way.
         /// </summary>
         [Test]
         public void DeterministicManager_BulletSummary_ProjectsToolResults_NotTheRawBlock()
@@ -1693,11 +1693,11 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Порядок «сначала компакция, потом прунинг»: старый tool-блок дословно повторён новым (поэтому
-        /// прунер выкинул бы его из хвоста), но сводка обязана его увидеть — иначе он исчезнет из всех
-        /// будущих промптов бесследно. Мутация для проверки: свернуть <c>history</c> через
-        /// <c>PruneIfEnabled</c> до партиции в <c>DeterministicConversationContextManager.BuildSnapshot</c> —
-        /// маркер из summary пропадёт.
+        /// The order is "compact first, prune second": an old tool block is repeated verbatim by a newer one (so the
+        /// pruner would drop it from the tail), yet the summary must still see it, otherwise it vanishes from every
+        /// future prompt without a trace. Mutation to check this: fold <c>history</c> through <c>PruneIfEnabled</c>
+        /// before the partition in <c>DeterministicConversationContextManager.BuildSnapshot</c> and the marker
+        /// disappears from the summary.
         /// </summary>
         [Test]
         public void DeterministicManager_CompactionFoldsPrefix_BeforePruningDiscardsIt()
@@ -1738,8 +1738,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Флаг <c>EnableContextPruning</c> действует и на LLM-пути: хвост с дословно повторённым
-        /// tool-блоком выходит без старшей копии. До правки async-путь игнорировал флаг молча.
+        /// The <c>EnableContextPruning</c> flag applies to the LLM path too: a tail with a verbatim repeated tool
+        /// block comes out without the older copy. Before the fix the async path ignored the flag silently.
         /// </summary>
         [Test]
         public async Task LlmAssisted_EnableContextPruning_PrunesEmittedTail()

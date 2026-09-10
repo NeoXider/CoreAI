@@ -440,10 +440,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Продление дедлайна на каждый чанк раньше создавало новый источник отмены, отменяло предыдущий и
-        /// запускало новое ожидание — по исключению и по нескольким аллокациям на КАЖДЫЙ токен. Теперь у
-        /// потока одно сторожевое ожидание: хост получает ровно один запрос задержки на окно, сколько бы
-        /// чанков ни пришло.
+        /// Extending the deadline on every chunk used to create a new cancellation source, cancel the previous one
+        /// and start a new wait, costing an exception and several allocations on EVERY token. Now a stream has one
+        /// watchdog wait: the host receives exactly one delay request per window, no matter how many chunks
+        /// arrive.
         /// </summary>
         [Test]
         public async Task Streaming_ManyChunks_DoNotRearmTheHostDelayPerChunk()
@@ -457,15 +457,15 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(chunkCount + 1, chunks.Count);
             Assert.AreEqual(1, marshaler.DelayCallCount,
-                "Каждый чанк — отметка прогресса, а не новый таймер: ожидание у хоста запрашивается один раз на окно.");
+                "Every chunk is a progress mark, not a new timer: the host is asked to wait once per window.");
             Assert.LessOrEqual(marshaler.CancelledDelays, 1,
-                "Разрешена одна отмена таймера при завершении запроса; отдельной отмены на каждый чанк быть не должно.");
+                "One timer cancellation when the request completes is allowed; there must be no separate cancellation per chunk.");
             marshaler.ReleaseAll();
         }
 
         /// <summary>
-        /// Сбой таймера — не истечение таймера: если задержка хоста упала, запрос НЕ отменяется и не
-        /// репортится как таймаут, а сбой отдаётся в обработчик.
+        /// A timer failure is not a timer expiry: if the host delay faults, the request is NOT cancelled and is not
+        /// reported as a timeout; the failure is handed to the error handler instead.
         /// </summary>
         [Test]
         public async Task Streaming_HostDelayFaults_RequestIsNotReportedAsTimeout()
@@ -478,9 +478,9 @@ namespace CoreAI.Tests.EditMode
             List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
 
             Assert.IsFalse(chunks.Exists(c => c.ErrorCode == LlmErrorCode.Timeout),
-                "Упавший таймер раньше трактовался как истёкший, и здоровый запрос отменялся с кодом Timeout.");
+                "A faulted timer used to be read as an expired one, and a healthy request was cancelled with code Timeout.");
             Assert.IsTrue(chunks.Exists(c => c.Text == "answer"));
-            Assert.IsInstanceOf<InvalidOperationException>(reported, "Сбой таймера должен быть виден хосту.");
+            Assert.IsInstanceOf<InvalidOperationException>(reported, "A timer failure must be visible to the host.");
         }
 
         [Test]
@@ -544,15 +544,15 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Streaming_ProgressWithinWindow_KeepsStreamAlive_ThenStallTimesOut()
         {
-            // Три чанка с паузой в 60 мс при окне 150 мс: ни одна пауза не превышает окно — поток жив;
-            // затем застой на 400 мс — таймаут.
+            // Three chunks 60 ms apart with a 150 ms window: no single gap exceeds the window, so the stream stays alive;
+            // then a 400 ms stall - timeout.
             StallingAfterChunksClient inner = new() { ChunkGapMs = 60, StallMs = 400 };
             TimeoutLlmClientDecorator sut = new(inner, () => 0.15f);
 
             List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
 
-            Assert.AreEqual(3, chunks.FindAll(c => c.Text == "t").Count, "Все три чанка до застоя должны дойти.");
-            Assert.AreEqual(LlmErrorCode.Timeout, chunks[chunks.Count - 1].ErrorCode, "Застой дольше окна — таймаут.");
+            Assert.AreEqual(3, chunks.FindAll(c => c.Text == "t").Count, "All three chunks before the stall must arrive.");
+            Assert.AreEqual(LlmErrorCode.Timeout, chunks[chunks.Count - 1].ErrorCode, "A stall longer than the window is a timeout.");
         }
 
         // ---- helpers ----
@@ -617,7 +617,7 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-        /// <summary>Задержка хоста, которая никогда не истекает сама, но считает запросы и отмены.</summary>
+        /// <summary>A host delay that never expires on its own, but counts requests and cancellations.</summary>
         private sealed class PendingDelayMarshaler : ILlmAsyncMarshaler
         {
             private readonly List<TaskCompletionSource<bool>> _pending = new();

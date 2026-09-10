@@ -154,8 +154,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Сценарий по вызовам: бросить 429, затем отдавать 429 результатом (Ok=false) заданное число раз,
-        /// затем ответить успехом. Так сбой меняет ФОРМУ (исключение → результат), не меняя причины.
+        /// A scenario scripted per call: throw a 429, then return a 429 as a result (Ok=false) a given number of
+        /// times, then answer with a success. The failure changes SHAPE (exception -> result) without changing cause.
         /// </summary>
         private sealed class ThrowThenReturnRateLimitMock : ILlmClient
         {
@@ -385,9 +385,9 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Дефект: бюджет ретраев выдавался дважды — циклу по исключению и циклу по результату. Адаптер,
-        /// бросивший 429, а затем вернувший 429 результатом, получал 2N+1 вызовов; ученик всё это время
-        /// смотрел на индикатор набора. Бюджет один на запрос: 1 + N вызовов, затем честный отказ.
+        /// Defect: the retry budget was handed out twice, once to the exception loop and once to the result loop.
+        /// An adapter that threw a 429 and then returned a 429 as a result got 2N+1 calls; all that time the learner
+        /// stared at the typing indicator. The budget is one per request: 1 + N calls, then an honest refusal.
         /// </summary>
         [TestCase(1)]
         [TestCase(2)]
@@ -411,10 +411,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Дефект: на ветке исключений код ошибки вклеивался в строку, но не в поле ErrorCode. Один и тот
-        /// же 429 доезжал до потребителя как RateLimited или как None в зависимости от того, бросил адаптер
-        /// исключение или вернул результат; при None ребёнок вместо плашки «учитель недоступен» видел сырой
-        /// английский текст ошибки в пузыре.
+        /// Defect: on the exception branch the error code was glued into the string but never into the ErrorCode
+        /// field. One and the same 429 reached the consumer as RateLimited or as None depending on whether the
+        /// adapter threw or returned a result; with None the child saw the raw English error text in the bubble
+        /// instead of the "teacher unavailable" banner.
         /// </summary>
         [Test]
         public async Task ThrownRetryableFailure_ExhaustedRetries_KeepsTypedErrorCode()
@@ -583,9 +583,9 @@ namespace CoreAI.Tests.EditMode
                 LlmCompletionRequest request,
                 CancellationToken cancellationToken = default)
             {
-                // Если кто-то вызвал CompleteAsync вместо стриминга — тест это
-                // увидит через Ok=true и Content = concat(parts), но это будет
-                // единичный chunk (в fallback пути) — индикатор бага.
+                // If somebody called CompleteAsync instead of streaming, the test
+                // will notice through Ok=true and Content = concat(parts), but it
+                // will be a single chunk (the fallback path) - the sign of the bug.
                 return Task.FromResult(new LlmCompletionResult
                 {
                     Ok = true,
@@ -612,9 +612,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Streaming_DelegatesRealChunks_NotSingleShotFallback()
         {
-            // Если LoggingLlmClientDecorator не переопределял CompleteStreamingAsync,
-            // дефолтная реализация интерфейса свернула бы всё в один chunk через
-            // CompleteAsync — стриминг «не был бы виден» (как в issue 2).
+            // If LoggingLlmClientDecorator did not override CompleteStreamingAsync,
+            // the interface's default implementation would fold everything into one chunk
+            // through CompleteAsync, and streaming "would not be visible" (as in issue 2).
             SpyLogger spy = new();
             StreamingMockLlm inner = new("Hel", "lo,", " wo", "rld!");
             LoggingLlmClientDecorator dec = new(inner, spy, 0f);
@@ -626,13 +626,13 @@ namespace CoreAI.Tests.EditMode
                 chunks.Add(chunk);
             }
 
-            // 4 текстовых + 1 финальный = 5 чанков (не 1 как было при fallback)
-            Assert.AreEqual(5, chunks.Count, "Streaming должен прокидывать чанки по мере поступления");
+            // 4 text chunks + 1 final = 5 chunks (not 1, as it was on the fallback path)
+            Assert.AreEqual(5, chunks.Count, "Streaming must forward chunks as they arrive");
             Assert.AreEqual("Hel", chunks[0].Text);
             Assert.AreEqual("lo,", chunks[1].Text);
             Assert.AreEqual(" wo", chunks[2].Text);
             Assert.AreEqual("rld!", chunks[3].Text);
-            Assert.IsTrue(chunks[4].IsDone, "Последний чанк должен быть терминальным");
+            Assert.IsTrue(chunks[4].IsDone, "The last chunk must be the terminal one");
         }
 
         [Test]
@@ -650,11 +650,11 @@ namespace CoreAI.Tests.EditMode
             }
 
             string joined = string.Join("\n", spy.Lines);
-            StringAssert.Contains("s2", joined, "Должен быть traceId");
-            StringAssert.Contains("(stream)", joined, "Маркер стримингового вызова");
-            StringAssert.Contains("LLM >", joined, "Лог старта");
-            StringAssert.Contains("LLM <", joined, "Лог успешного завершения");
-            StringAssert.Contains("chunks=2", joined, "Должно быть число текстовых чанков");
+            StringAssert.Contains("s2", joined, "The traceId must be there");
+            StringAssert.Contains("(stream)", joined, "The streaming call marker");
+            StringAssert.Contains("LLM >", joined, "The start log line");
+            StringAssert.Contains("LLM <", joined, "The successful completion log line");
+            StringAssert.Contains("chunks=2", joined, "The number of text chunks must be there");
             StringAssert.Contains("promptBudget", joined);
         }
 

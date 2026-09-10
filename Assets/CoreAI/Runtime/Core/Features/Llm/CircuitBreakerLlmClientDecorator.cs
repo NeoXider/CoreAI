@@ -9,24 +9,25 @@ using CoreAI.Ai;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Предохранитель для <see cref="ILlmClient"/>. После <c>failureThreshold</c> ТРАНЗИЕНТНЫХ сбоев подряд
-    /// (см. <see cref="IsTransientFailure"/>) предохранитель <b>размыкается</b> и коротит последующие вызовы
-    /// результатом <see cref="LlmErrorCode.BackendUnavailable"/> <i>без обращения к внутреннему клиенту</i> —
-    /// мёртвый основной бэкенд больше не стоит <c>таймаут × (retries + 1)</c> на каждый ход. Через
-    /// <c>openDurationMs</c> предохранитель переходит в <b>полуоткрытое</b> состояние и пропускает ровно
-    /// один пробный запрос: успех — <b>замыкается</b>, сбой — снова размыкается на период охлаждения.
+    /// A circuit breaker for <see cref="ILlmClient"/>. After <c>failureThreshold</c> consecutive TRANSIENT
+    /// failures (see <see cref="IsTransientFailure"/>) the breaker <b>opens</b> and short-circuits every
+    /// subsequent call with an <see cref="LlmErrorCode.BackendUnavailable"/> result <i>without touching the
+    /// inner client</i> - a dead primary backend no longer costs <c>timeout x (retries + 1)</c> on every
+    /// turn. After <c>openDurationMs</c> the breaker moves to <b>half-open</b> and lets exactly one probe
+    /// request through: on success it <b>closes</b>, on failure it opens again for another cool-down.
     /// <para>
-    /// Считаются только ТРАНЗИЕНТНЫЕ сбои (таймаут, rate limit, недоступность бэкенда, общая ошибка
-    /// провайдера, ошибка маршрутизации) — и неважно, пришли они результатом, терминальным чанком или
-    /// брошенным <see cref="LlmClientException"/>. Сбои по вине вызывающего — истёкшая авторизация,
-    /// требуется оплата, неверный запрос, превышение контекста, отмена — предохранитель НИКОГДА не
-    /// размыкают: повтор в другой момент не поможет. Такие исключения перебрасываются как есть, с типом,
-    /// кодом и HTTP-статусом, чтобы внешние декораторы (retry/fallback) видели ту же классификацию, что
-    /// и без предохранителя. Поток, кончившийся без единого чанка, — сбой: бэкенд не ответил ничего.
+    /// Only TRANSIENT failures count (timeout, rate limit, backend unavailable, generic provider error,
+    /// routing error) - and it makes no difference whether they arrived as a result, as a terminal chunk,
+    /// or as a thrown <see cref="LlmClientException"/>. Caller-fault failures - expired auth, payment
+    /// required, invalid request, context overflow, cancellation - NEVER open the breaker: retrying at
+    /// another moment will not help. Such exceptions are rethrown as they are, with their type, code and
+    /// HTTP status intact, so that outer decorators (retry/fallback) see the same classification they
+    /// would without the breaker. A stream that ends without a single chunk is a failure: the backend
+    /// answered nothing.
     /// </para>
     /// <para>
-    /// Время подаётся как монотонный источник миллисекунд, поэтому предохранитель полностью
-    /// детерминирован в тестах.
+    /// Time is supplied as a monotonic millisecond source, which makes the breaker fully deterministic
+    /// in tests.
     /// </para>
     /// </summary>
     public sealed class CircuitBreakerLlmClientDecorator : ILlmClient
@@ -51,11 +52,11 @@ namespace CoreAI.Infrastructure.Llm
         private bool _halfOpenProbeInFlight;
         private long _generation;
 
-        /// <param name="inner">Защищаемый клиент.</param>
-        /// <param name="failureThreshold">Сколько транзиентных сбоев подряд размыкают предохранитель (мин. 1).</param>
-        /// <param name="openDurationMs">Сколько предохранитель остаётся разомкнутым до пробного запроса (мин. 1).</param>
-        /// <param name="nowMs">Монотонные часы в миллисекундах (инъекция ради детерминированных тестов).</param>
-        /// <param name="log">Необязательный однострочный приёмник диагностики переходов состояния.</param>
+        /// <param name="inner">The client being protected.</param>
+        /// <param name="failureThreshold">How many consecutive transient failures open the breaker (min 1).</param>
+        /// <param name="openDurationMs">How long the breaker stays open before a probe request (min 1).</param>
+        /// <param name="nowMs">Monotonic clock in milliseconds (injected for deterministic tests).</param>
+        /// <param name="log">Optional one-line diagnostics sink for state transitions.</param>
         public CircuitBreakerLlmClientDecorator(
             ILlmClient inner,
             int failureThreshold,
@@ -122,22 +123,22 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    // ПОЧЕМУ: отмена — намерение вызывающего, а не сбой бэкенда: не считать и не глотать.
+                    // WHY: cancellation is the caller's intent, not a backend failure: neither count it nor swallow it.
                     throw;
                 }
                 catch (LlmClientException ex)
                 {
-                    // ПОЧЕМУ: типизированное исключение уже несёт классификацию адаптера. Судить по ней —
-                    // три 401 подряд не размыкают предохранитель — и перебрасывать КАК ЕСТЬ: обёртка в
-                    // ProviderError без статуса делала 402 ретраебельным для внешних декораторов.
+                    // WHY: the typed exception already carries the adapter's classification. Judge by it -
+                    // three 401s in a row do not open the breaker - and rethrow it AS IS: wrapping into a
+                    // statusless ProviderError made a 402 look retryable to the outer decorators.
                     RecordResult(lease, false, ex.ErrorCode);
                     classified = true;
                     throw;
                 }
                 catch (Exception)
                 {
-                    // Нетипизированный бросок внутреннего клиента — транзиентный сбой бэкенда; сам объект
-                    // исключения перебрасывается без изменений.
+                    // An untyped throw from the inner client is a transient backend failure; the exception
+                    // object itself is rethrown unchanged.
                     RecordFailure(lease);
                     classified = true;
                     throw;
@@ -154,8 +155,8 @@ namespace CoreAI.Infrastructure.Llm
             {
                 if (!classified)
                 {
-                    // ПОЧЕМУ: вызов закончился без вердикта о здоровье (отмена): освободить слот пробного
-                    // запроса, чтобы предохранитель не завис в ожидании результата, который не придёт.
+                    // WHY: the call ended without a health verdict (cancellation): release the probe slot so
+                    // the breaker does not hang waiting for a result that will never come.
                     ReleaseHalfOpenProbe(lease);
                 }
             }
@@ -187,16 +188,16 @@ namespace CoreAI.Infrastructure.Llm
             IAsyncEnumerator<LlmStreamChunk> e = null;
             try
             {
-                // ПОЧЕМУ: получаем внутри try, чтобы синхронный бросок внутреннего клиента всё равно прошёл
-                // через finally, освобождающий слот пробного запроса, а не заклинил предохранитель.
+                // WHY: obtained inside the try so that a synchronous throw from the inner client still goes
+                // through the finally that releases the probe slot instead of jamming the breaker.
                 e = _inner.CompleteStreamingAsync(request, cancellationToken)
                     .GetAsyncEnumerator(cancellationToken);
 
                 while (true)
                 {
                     LlmStreamChunk chunk;
-                    // ПОЧЕМУ: C# запрещает `yield` внутри catch, поэтому сбой внутреннего потока
-                    // запоминается здесь, а терминальный чанк выдаётся ПОСЛЕ try/catch.
+                    // WHY: C# forbids `yield` inside a catch, so a failure of the inner stream is recorded
+                    // here and the terminal chunk is emitted AFTER the try/catch.
                     LlmStreamChunk faultChunk = null;
                     try
                     {
@@ -223,8 +224,9 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     catch (LlmClientException ex)
                     {
-                        // Классификация адаптера сохраняется в чанке целиком (код, статус, retry-after):
-                        // сбой по вине вызывающего не размыкает предохранитель и не становится ProviderError.
+                        // The adapter's classification is preserved in the chunk in full (code, status,
+                        // retry-after): a caller-fault failure neither opens the breaker nor becomes a
+                        // ProviderError.
                         RecordResult(lease, false, ex.ErrorCode);
                         classified = true;
                         faultChunk = new LlmStreamChunk
@@ -309,7 +311,7 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <summary>Имя текущего состояния для диагностики/тестов: "Closed", "Open" или "HalfOpen".</summary>
+        /// <summary>Current state name for diagnostics/tests: "Closed", "Open" or "HalfOpen".</summary>
         public string StateName
         {
             get
@@ -322,8 +324,8 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Решает, можно ли пропустить вызов. Переводит Open→HalfOpen по истечении охлаждения и
-        /// допускает ровно один пробный запрос. Возвращает false (с причиной), пока предохранитель разомкнут.
+        /// Decides whether a call may pass. Moves Open to HalfOpen once the cool-down has elapsed and
+        /// admits exactly one probe request. Returns false (with a reason) while the breaker is open.
         /// </summary>
         private bool TryEnter(out long lease, out string rejectReason)
         {
@@ -350,8 +352,8 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (_state == State.HalfOpen)
                 {
-                    // ПОЧЕМУ: в полуоткрытом состоянии в полёте может быть ровно ОДИН пробный запрос. Пропуск
-                    // всех одновременных вызывающих вываливал весь бэклог на бэкенд, который скорее всего ещё лежит.
+                    // WHY: in the half-open state exactly ONE probe request may be in flight. Admitting every
+                    // concurrent caller dumped the whole backlog onto a backend that is most likely still down.
                     if (_halfOpenProbeInFlight)
                     {
                         rejectReason =
@@ -373,9 +375,9 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Освобождает слот пробного запроса, когда вызов закончился без вердикта успех/сбой (потребитель
-        /// отменил вызов или бросил поток). Предохранитель остаётся полуоткрытым, следующий вызов
-        /// становится новым пробным; брошенный поток никогда не засчитывается как сбой бэкенда.
+        /// Releases the probe slot when a call ended without a success/failure verdict (the consumer
+        /// cancelled the call or abandoned the stream). The breaker stays half-open and the next call
+        /// becomes the new probe; an abandoned stream is never counted as a backend failure.
         /// </summary>
         private void ReleaseHalfOpenProbe(long lease)
         {
@@ -402,10 +404,10 @@ namespace CoreAI.Infrastructure.Llm
             }
             else
             {
-                // ПОЧЕМУ: сбой по вине вызывающего (авторизация, оплата, неверный запрос, контекст, пустой
-                // ответ) — не проблема здоровья бэкенда: предохранитель не размыкать; а пробный запрос,
-                // вернувший такой результат, всё же означает, что бэкенд достижим, — для состояния это
-                // мягкий успех.
+                // WHY: a caller-fault failure (auth, payment, invalid request, context, empty response) is
+                // not a backend-health problem: do not open the breaker; and a probe request that came
+                // back with such a result still means the backend is reachable - for the state machine
+                // that counts as a soft success.
                 RecordSuccess(lease);
             }
         }
@@ -460,8 +462,8 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Транзиентные сбои, ради которых стоит размыкаться: бэкенд (временно) нездоров, и долбить его —
-        /// лишь тратить таймаут на каждый вызов. Коды по вине вызывающего исключены: повтор не поможет.
+        /// Transient failures worth opening for: the backend is (temporarily) unhealthy, and hammering it
+        /// only burns a timeout on every call. Caller-fault codes are excluded: a retry will not help.
         /// </summary>
         private static bool IsTransientFailure(LlmErrorCode code)
         {

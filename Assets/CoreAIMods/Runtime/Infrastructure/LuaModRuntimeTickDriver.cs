@@ -18,9 +18,6 @@ namespace CoreAI.Infrastructure.Lua
     {
         private ILuaModRuntime _runtime;
         private ActorContext _actorContext;
-        private System.Action<float> _preSimulation;
-        private System.Action<float> _heartbeat;
-        private System.Action<float> _preRender;
         private ModScheduler _scheduler;
         private RbxWorldRuntimeSessionController _sessionController;
         private System.Action _beginPhysicsStep;
@@ -28,28 +25,25 @@ namespace CoreAI.Infrastructure.Lua
         private System.Action<float> _stepCharacterMotors;
         private System.Func<System.Action> _liveApplyGravity;
 
-        /// <summary>Attaches the runtime and phase-specific host pumps to the scheduler.</summary>
-        public void Initialize(ILuaModRuntime runtime, ActorContext actorContext, ModScheduler scheduler = null,
-            System.Action<float> preSimulation = null,
-            System.Action<float> heartbeat = null,
-            System.Action<float> preRender = null)
+        /// <summary>Attaches the runtime and, for a host that owns one directly, its scheduler.</summary>
+        /// <remarks>
+        /// WHY this driver takes no per-phase pumps: the scheduler is the ONLY frame authority.
+        /// <c>ModScheduler.Advance</c> raises <c>PhaseReached</c> for each phase in pipeline order, and
+        /// <c>LuaCsRbxApiBindings</c> — which owns both the scheduler and the RunService instance whose
+        /// signals those phases fire — subscribes to it once and pumps every phase itself. A driver that
+        /// ALSO subscribed and re-invoked the very same public <c>Pump*</c> methods made Stepped,
+        /// Heartbeat and RenderStepped fire TWICE per frame: mods counted double, budget kills were
+        /// charged twice, and a handler cut for a runaway loop was cut again in the same frame. Do not
+        /// re-add a second phase route here, and do not call the bindings' <c>Pump*</c> methods next to
+        /// an <c>Advance</c> — one frame is one <c>Advance</c>.
+        /// </remarks>
+        public void Initialize(ILuaModRuntime runtime, ActorContext actorContext,
+            ModScheduler scheduler = null)
         {
-            if (_scheduler != null)
-            {
-                _scheduler.PhaseReached -= OnSchedulerPhaseReached;
-            }
-
             _runtime = runtime;
             _sessionController = null;
             _actorContext = actorContext;
             _scheduler = scheduler;
-            _preSimulation = preSimulation;
-            _heartbeat = heartbeat;
-            _preRender = preRender;
-            if (_scheduler != null)
-            {
-                _scheduler.PhaseReached += OnSchedulerPhaseReached;
-            }
         }
 
         /// <summary>
@@ -62,12 +56,6 @@ namespace CoreAI.Infrastructure.Lua
             _applyGravity = applyGravity;
         }
 
-        /// <summary>
-        /// Attaches the character-motor fixed-step pump (F10): <c>LuaCsRbxApiBindings.
-        /// StepCharacterMotors</c>, called from <see cref="FixedUpdate"/> alongside the physics-step
-        /// opening and gravity, never from the render-frame pump. Null leaves character motors
-        /// unstepped, same as an unattached physics pump.
-        /// </summary>
         /// <summary>
         /// Attaches the resolver for the LIVE physics port, so the fixed step follows a world
         /// replacement instead of pumping the world that was just disposed.
@@ -84,6 +72,12 @@ namespace CoreAI.Infrastructure.Lua
             _liveApplyGravity = liveApplyGravity;
         }
 
+        /// <summary>
+        /// Attaches the character-motor fixed-step pump (F10): <c>LuaCsRbxApiBindings.
+        /// StepCharacterMotors</c>, called from <see cref="FixedUpdate"/> alongside the physics-step
+        /// opening and gravity, never from the render-frame pump. Null leaves character motors
+        /// unstepped, same as an unattached physics pump.
+        /// </summary>
         public void AttachCharacterMotorStep(System.Action<float> stepCharacterMotors)
         {
             _stepCharacterMotors = stepCharacterMotors;
@@ -94,16 +88,8 @@ namespace CoreAI.Infrastructure.Lua
             RbxWorldRuntimeSessionController sessionController,
             ActorContext actorContext)
         {
-            if (_scheduler != null)
-            {
-                _scheduler.PhaseReached -= OnSchedulerPhaseReached;
-            }
-
             _runtime = null;
             _scheduler = null;
-            _preSimulation = null;
-            _heartbeat = null;
-            _preRender = null;
             _sessionController = sessionController
                 ?? throw new System.ArgumentNullException(nameof(sessionController));
             _actorContext = actorContext;
@@ -148,14 +134,6 @@ namespace CoreAI.Infrastructure.Lua
             gravity?.Invoke();
         }
 
-        private void OnDestroy()
-        {
-            if (_scheduler != null)
-            {
-                _scheduler.PhaseReached -= OnSchedulerPhaseReached;
-            }
-        }
-
         /// <summary>Advances one scaled host frame in scheduler, signal, then runtime order.</summary>
         public void PumpFrame(float deltaSeconds)
         {
@@ -165,35 +143,10 @@ namespace CoreAI.Infrastructure.Lua
                 return;
             }
 
-            if (_scheduler != null)
-            {
-                _scheduler.Advance(deltaSeconds);
-            }
-            else
-            {
-                _preSimulation?.Invoke(deltaSeconds);
-                _heartbeat?.Invoke(deltaSeconds);
-                _preRender?.Invoke(deltaSeconds);
-            }
-
+            // WHY nothing but Advance: the scheduler walks the phase pipeline and the Rbx bindings fire
+            // each phase's signals from PhaseReached. Adding a second pump here fires them twice.
+            _scheduler?.Advance(deltaSeconds);
             _runtime?.Tick(_actorContext, deltaSeconds);
-        }
-
-        private void OnSchedulerPhaseReached(SchedulerPhase phase, double deltaSeconds)
-        {
-            float frameDelta = (float)deltaSeconds;
-            switch (phase)
-            {
-                case SchedulerPhase.PreSimulation:
-                    _preSimulation?.Invoke(frameDelta);
-                    return;
-                case SchedulerPhase.Heartbeat:
-                    _heartbeat?.Invoke(frameDelta);
-                    return;
-                case SchedulerPhase.PreRender:
-                    _preRender?.Invoke(frameDelta);
-                    return;
-            }
         }
     }
 }

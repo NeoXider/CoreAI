@@ -135,10 +135,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Явная граница сообщения из клиента открывает НОВЫЙ пузырь и ставит пустую строку в полном
-        /// ответе хода. Прежде границу ловила только эвристика по tool-progress подсказке, которой нет
-        /// на нативном tool-calling: на проде две реплики слипались в одну строку и ученик читал
-        /// «Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**».
+        /// An explicit message boundary coming from the client opens a NEW bubble and puts a blank line into
+        /// the full turn response. The boundary used to be caught only by a heuristic over the tool-progress
+        /// hint, which native tool-calling does not send: in production two replies were glued into one line
+        /// and the learner read "Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**".
         /// </summary>
         [Test]
         public async Task Streaming_ChunkStartsNewMessage_OpensSecondBubbleAndSeparatesFullResponse()
@@ -164,21 +164,21 @@ namespace CoreAI.Tests.EditMode
                 new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
 
             Assert.AreEqual("Проверь себя:\n\n**Ход завершён.**", response,
-                "Полный ответ хода уходит в историю одной строкой — граница обязана остаться в нём.");
+                "The full turn response goes into history as one string, so the boundary has to survive inside it.");
 
             List<Label> aiLabels = scroll.contentContainer
                 .Query<Label>().Class("coreai-ai-message").ToList();
 
             Assert.AreEqual(2, aiLabels.Count,
-                "Признак новой реплики обязан открыть отдельный пузырь.");
+                "The new-message flag must open a separate bubble.");
             Assert.AreEqual("Проверь себя:", aiLabels[0].text);
             Assert.AreEqual("**Ход завершён.**", aiLabels[1].text,
-                "Разделитель живёт в полном ответе, а не в тексте нового пузыря.");
+                "The separator lives in the full response, not in the text of the new bubble.");
         }
 
         /// <summary>
-        /// Реплика, уже закончившаяся абзацем, не получает третьей пустой строки, а признак на самом
-        /// первом чанке не выносит разделитель в начало ответа.
+        /// A reply that already ends with a paragraph break does not get a third blank line, and the flag on the
+        /// very first chunk does not push a separator to the front of the response.
         /// </summary>
         [Test]
         public void AppendStreamedMessage_AddsOnlyTheMissingBlankLine()

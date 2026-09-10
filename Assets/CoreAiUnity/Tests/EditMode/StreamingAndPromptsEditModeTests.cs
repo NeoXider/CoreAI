@@ -35,7 +35,7 @@ namespace CoreAI.Tests.EditMode
             Assert.That(result, Does.Contain("Ты учитель."), "Layer 2: base from provider");
             Assert.That(result, Does.Contain("Используй аналогии из игр."), "Layer 3: additional from AgentBuilder");
 
-            // Порядок: prefix → base → additional
+            // Order: prefix -> base -> additional
             int prefixIdx = result.IndexOf("Отвечай кратко.");
             int baseIdx = result.IndexOf("Ты учитель.");
             int additionalIdx = result.IndexOf("Используй аналогии из игр.");

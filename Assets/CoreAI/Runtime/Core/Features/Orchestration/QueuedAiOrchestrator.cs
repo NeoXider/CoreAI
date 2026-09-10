@@ -465,10 +465,11 @@ namespace CoreAI.Ai
                     w.TrySetResult(result);
                 }
             }
-            // WHY: Таймаут библиотеки наследует OperationCanceledException, но это НЕ отмена: никто
-            // (ни ученик, ни scope, ни Dispose) не просил остановить ход. Схлопывание его в
-            // TrySetCanceled() отдавало вызывающему голый TaskCanceledException, и презентация
-            // сообщала ребёнку «запрос остановлен» — то есть что он сам прервал ответ учителя.
+            // WHY: A library timeout derives from OperationCanceledException, but it is NOT a cancellation:
+            // nobody (neither the learner, nor the scope, nor Dispose) asked to stop the turn. Collapsing
+            // it into TrySetCanceled() handed the caller a bare TaskCanceledException, and the presentation
+            // told the child "the request was stopped" - i.e. that they themselves had interrupted the
+            // teacher's answer.
             catch (Exception ex) when (TryFindLibraryTimeout(ex, token, out LlmOperationTimeoutException timeout))
             {
                 w.TrySetException(timeout);
@@ -539,7 +540,7 @@ namespace CoreAI.Ai
                     w.Queue.Complete();
                 }
             }
-            // WHY: См. RunOneAsync — таймаут библиотеки остаётся таймаутом, а не «ученик остановил ответ».
+            // WHY: See RunOneAsync - a library timeout stays a timeout, not "the learner stopped the answer".
             catch (Exception ex) when (TryFindLibraryTimeout(ex, token, out LlmOperationTimeoutException timeout))
             {
                 w.Queue.Write(new LlmStreamChunk
@@ -562,10 +563,10 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                // WHY: Полная причина — в лог; в чат уходит типизированный код и фраза для игрока.
-                // Терминальный чанк с Error = ex.Message и ErrorCode = None показывал ребёнку текст
-                // внутреннего исключения как реплику учителя: потребитель выбирает плашку по коду, а
-                // None ни в одну категорию недоступности не входит.
+                // WHY: The full reason goes to the log; what goes to the chat is a typed code and a
+                // player-facing phrase. A terminal chunk with Error = ex.Message and ErrorCode = None
+                // showed the child the text of an internal exception as the teacher's reply: the consumer
+                // picks its banner by the code, and None belongs to no unavailability category.
                 Log.Instance.Error(
                     $"[QueuedAiOrchestrator] Stream for actor '{w.ActorId}' failed: {ex}",
                     LogTag.Llm);
@@ -1052,9 +1053,9 @@ namespace CoreAI.Ai
             {
                 work.PendingCancellation.Dispose();
                 RecordUnstartedTurn(work, "stream queue full");
-                // WHY: Текст исключения с внутренним actorId и MaxPending — для разработчика и уходит в
-                // лог целиком; в чат ученика доезжают только код и фраза, которую потребитель показал бы
-                // по этому коду сам.
+                // WHY: The exception text, with its internal actorId and MaxPending, is for the developer
+                // and goes to the log in full; what reaches the learner's chat is only the code and the
+                // phrase the consumer would have shown for that code on its own.
                 AiOrchestrationQueueFullException rejection =
                     new(work.ActorId, _maxPending);
                 Log.Instance.Warn($"[QueuedAiOrchestrator] {rejection.Message}", LogTag.Llm);
@@ -1327,10 +1328,11 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Таймаут библиотеки (<see cref="LlmOperationTimeoutException"/>, в том числе завёрнутый в
-        /// <see cref="AggregateException"/>), пришедший при живом токене работы. Если токен уже отменён,
-        /// это не таймаут, а отмена — кто-то из владельцев (ученик, scope, Dispose) действительно просил
-        /// остановиться, и гонка с таймером решается в пользу отмены.
+        /// A library timeout (<see cref="LlmOperationTimeoutException"/>, including one wrapped in an
+        /// <see cref="AggregateException"/>) that arrived while the work item's token was still alive. If
+        /// the token is already cancelled it is not a timeout but a cancellation - one of the owners (the
+        /// learner, the scope, Dispose) really did ask to stop, and the race with the timer is settled in
+        /// favour of the cancellation.
         /// </summary>
         private static bool TryFindLibraryTimeout(
             Exception ex,
@@ -1364,12 +1366,12 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Отмена: <see cref="OperationCanceledException"/> само по себе либо внутри
-        /// <see cref="AggregateException"/> (некоторые стеки заворачивают отмену именно так).
-        /// Цепочка <see cref="Exception.InnerException"/> просматривается ТОЛЬКО когда токен работы
-        /// действительно отменён: тогда любая ошибка, выросшая из отмены, и есть отмена. При живом токене
-        /// транспортная ошибка с вложенным <see cref="TaskCanceledException"/> — это сбой, а не отмена, и
-        /// раньше она молча превращалась в «ученик остановил ответ».
+        /// A cancellation: <see cref="OperationCanceledException"/> on its own or inside an
+        /// <see cref="AggregateException"/> (some stacks wrap cancellation exactly that way). The
+        /// <see cref="Exception.InnerException"/> chain is walked ONLY when the work item's token really is
+        /// cancelled: then any error that grew out of the cancellation is the cancellation. While the token
+        /// is alive, a transport error with a nested <see cref="TaskCanceledException"/> is a failure, not
+        /// a cancellation, and it used to turn silently into "the learner stopped the answer".
         /// </summary>
         private static bool IsCancellationLike(Exception ex, CancellationToken token)
         {
@@ -1401,11 +1403,12 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Терминальный чанк для сбоя производителя потока: категория всегда осмысленная, текст — фраза
-        /// для игрока. У <see cref="LlmClientException"/> классификация адаптера (код, HTTP-статус,
-        /// retry-after) сохраняется, а текст проходит через <see cref="LlmErrorPresentation"/>: сырой
-        /// <c>Message</c> адаптера — это <c>HTTP error 4xx: …</c> с телом провайдера, то есть строка для
-        /// лога, а не для пузыря чата. Внутренние сообщения прочих исключений в чат не попадают.
+        /// The terminal chunk for a failure of the stream's producer: the category is always meaningful and
+        /// the text is a player-facing phrase. For an <see cref="LlmClientException"/> the adapter's
+        /// classification (code, HTTP status, retry-after) is preserved while the text goes through
+        /// <see cref="LlmErrorPresentation"/>: the adapter's raw <c>Message</c> is an
+        /// <c>HTTP error 4xx: ...</c> with the provider's body, i.e. a line for the log, not for a chat
+        /// bubble. The internal messages of other exceptions never reach the chat.
         /// </summary>
         private static LlmStreamChunk DescribeStreamFailure(Exception ex)
         {

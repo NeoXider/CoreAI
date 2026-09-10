@@ -1704,6 +1704,15 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>Runs the split frame pumps in their observable scheduler order.</summary>
+        /// <remarks>
+        /// WHY this is an EITHER/OR with <see cref="ModScheduler.Advance"/>, never both: since the
+        /// scheduler became the frame authority, <see cref="PumpSchedulerPhase"/> already fires every
+        /// phase from <c>PhaseReached</c>. A caller that pumps here AND advances runs the frame twice —
+        /// Stepped/Heartbeat/RenderStepped fire twice, a mod's per-frame counter doubles, and a runaway
+        /// handler is cut once per copy. This entry exists only for a host with no scheduler frame of
+        /// its own; the production host (and every test that emulates it) advances the scheduler and
+        /// calls nothing here.
+        /// </remarks>
         public void PumpFrame(float dt)
         {
             PumpPreAnimation(dt);

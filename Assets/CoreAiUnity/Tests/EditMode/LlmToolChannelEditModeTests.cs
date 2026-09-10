@@ -69,13 +69,13 @@ namespace CoreAI.Tests.EditMode
             return new LlmToolChannelProbeResult { Outcome = outcome, Detail = detail };
         }
 
-        // ---------------------------------------------------------------- проба: чтение ответа сервера
+        // ---------------------------------------------------------------- probe: reading the server reply
 
         [TestCase(500)]
         [TestCase(400)]
         public void Classify_JinjaRejection_IsRejectedByMessageNotByStatus(int status)
         {
-            // Живой llama.cpp без --jinja отвечает HTTP 500 (server_error); другие сборки — 400.
+            // A live llama.cpp without --jinja answers HTTP 500 (server_error); other builds answer 400.
             LlmToolChannelProbeResult result = LlmToolChannelProbePolicy.Classify(status, JinjaRejectionBody, "");
 
             Assert.AreEqual(LlmToolChannelProbeOutcome.Rejected, result.Outcome);
@@ -130,7 +130,7 @@ namespace CoreAI.Tests.EditMode
                 body["tools"][0]["function"]["name"].Value<string>());
         }
 
-        // ---------------------------------------------------------------- решение: настройка > проба
+        // ---------------------------------------------------------------- decision: setting beats probe
 
         [Test]
         public void Resolve_ExplicitSettingWinsOverProbe()
@@ -187,13 +187,13 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(LlmToolChannelResolution.RequiresProbe(LlmToolChannel.Text));
         }
 
-        // ---------------------------------------------------------------- фабрика: локальный эндпойнт
+        // ---------------------------------------------------------------- factory: local endpoint
 
         [Test]
         public async Task LocalEndpoint_ServerWithNativeChannel_DoesNotFallToProseParsing()
         {
-            // Дефект: локальный llama.cpp с jinja получал `false` и разбор прозы. Проба говорит «принял» —
-            // канал нативный, и запрос ушёл на тот адрес и с той моделью, что у эндпойнта.
+            // Defect: a local llama.cpp with jinja got `false` and prose parsing. The probe says "accepted", so the
+            // channel is native, and the request went out to the address and the model the endpoint carries.
             ScriptedToolChannelProbe probe = new() { Result = Outcome(LlmToolChannelProbeOutcome.Accepted, "HTTP 200") };
 
             LlmToolChannelDecision decision = await LlmEndpointClientFactory.DecideToolChannelAsync(
@@ -272,7 +272,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(text.Native);
         }
 
-        // ---------------------------------------------------------------- фабрика: HTTP-эндпойнт
+        // ---------------------------------------------------------------- factory: HTTP endpoint
 
         [TestCase(LlmToolChannelProbeOutcome.Accepted, true)]
         [TestCase(LlmToolChannelProbeOutcome.Rejected, false)]
@@ -504,7 +504,7 @@ namespace CoreAI.Tests.EditMode
             };
         }
 
-        // ---------------------------------------------------------------- лог: выбор не молчит
+        // ---------------------------------------------------------------- log: the choice is not silent
 
         [Test]
         public void ActivationLog_ToolChannelPhase_NamesChannelAndReason()
@@ -538,7 +538,7 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains(decision.Reason, line);
         }
 
-        // ---------------------------------------------------------------- настройка: хранится и читается
+        // ---------------------------------------------------------------- setting: stored and read back
 
         [Test]
         public void Persistence_KeepsToolChannelAcrossSaveAndLoad()

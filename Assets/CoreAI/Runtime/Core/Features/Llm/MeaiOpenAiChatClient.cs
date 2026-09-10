@@ -768,8 +768,9 @@ namespace CoreAI.Infrastructure.Llm
                         break;
                     }
 
-                    // WHY: В инциденте RedoSchool reasoning_content сохранился как готовая заметка
-                    // ученика. Даже reasoning-only поток остаётся диагностикой и не становится TextContent.
+                    // WHY: In the RedoSchool incident reasoning_content got persisted as the learner's
+                    // finished note. Even a reasoning-only stream stays diagnostics and never becomes
+                    // TextContent.
                     yield break;
                 }
             }
@@ -1512,8 +1513,8 @@ namespace CoreAI.Infrastructure.Llm
                 bool hasToolCalls = toolCalls != null && toolCalls.Count > 0;
 
                 List<MEAI.AIContent> contents = new();
-                // WHY: В инциденте RedoSchool reasoning_content попал в сохраняемую заметку вместо
-                // ответа. Оставляем рассуждения только в диагностическом TextReasoningContent.
+                // WHY: In the RedoSchool incident reasoning_content ended up in the persisted note instead
+                // of the answer. Keep the reasoning in the diagnostic TextReasoningContent only.
                 if (!string.IsNullOrEmpty(reasoning))
                 {
                     contents.Add(new MEAI.TextReasoningContent(reasoning));

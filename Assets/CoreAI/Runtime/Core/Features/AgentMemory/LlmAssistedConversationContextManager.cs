@@ -243,11 +243,12 @@ namespace CoreAI.Ai
             for (int i = Math.Max(0, startInclusive); i < splitExclusive; i++)
             {
                 string role = string.IsNullOrWhiteSpace(history[i].Role) ? "unknown" : history[i].Role.Trim();
-                // WHY: Суммаризатор видит tool-сообщения через ТУ ЖЕ проекцию, что и основной промпт.
-                // Без неё сырой durable-блок «## Tool Results» с JSON-хвостами уезжал в компактор, тот
-                // по инструкции «сохраняй идентификаторы и числа» переносил его в summary, а summary
-                // возвращался в промпт уже мимо ToolResultPromptProjection — и модель снова повторяла
-                // ребёнку служебный регистр, который проекция как раз убирала.
+                // WHY: The summarizer sees tool messages through THE SAME projection as the main prompt.
+                // Without it the raw durable "## Tool Results" block with its JSON tails went into the
+                // compactor, which - following its "preserve identifiers and numbers" instruction -
+                // carried it into the summary, and the summary came back into the prompt bypassing
+                // ToolResultPromptProjection - so the model again echoed to the child the machine register
+                // the projection exists to strip.
                 string content = ToolResultPromptProjection.ForPrompt(history[i].Role, history[i].Content ?? "");
                 if (content.Length > maxPerMsg)
                 {

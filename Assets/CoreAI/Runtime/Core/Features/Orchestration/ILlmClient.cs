@@ -342,21 +342,22 @@ namespace CoreAI.Ai
         public string Text { get; set; } = "";
 
         /// <summary>
-        /// <c>true</c> на ПЕРВОМ видимом чанке НОВОГО сообщения ассистента внутри одного и того же
-        /// потока. Один запрос порождает несколько реплик: после каждого раунда инструментов модель
-        /// начинает говорить заново, но потребитель видит по-прежнему один непрерывный поток чанков.
+        /// <c>true</c> on the FIRST visible chunk of a NEW assistant message inside one and the same
+        /// stream. A single request produces several replies: after every tool round the model starts
+        /// speaking anew, while the consumer still sees one continuous stream of chunks.
         /// <para>
-        /// Без этого признака потребителю нечем отличить «продолжение той же реплики» от «пошла
-        /// следующая». Цена ошибки видна ученику: накопитель склеивал конец одной реплики с началом
-        /// другой встык, и в чате получалось «Проверь себя:**Ход завершён — ждём ответ ученика.**» —
-        /// двоеточие вплотную к заглавной букве, два разных сообщения слиплись в одно.
+        /// Without this marker the consumer has no way to tell "a continuation of the same reply" from
+        /// "the next one has started". The price of getting it wrong is visible to the learner: the
+        /// accumulator glued the end of one reply directly onto the start of another, and the chat showed
+        /// "Check yourself:**Turn complete - waiting for the learner's answer.**" - a colon flush against
+        /// a capital letter, two different messages stuck into one.
         /// </para>
         /// <para>
-        /// Признак ставится РОВНО на одном чанке (первом видимом чанке итерации, кроме самой
-        /// первой), а не на каждом чанке новой реплики: потребитель обязан реагировать на него
-        /// однократно — разделителем в накопителе, новым пузырём в UI. Угадывать границу по
-        /// пунктуации нельзя: реплика может законно кончаться двоеточием и законно начинаться со
-        /// строчной буквы.
+        /// The marker is set on EXACTLY one chunk (the first visible chunk of an iteration, except the
+        /// very first one), not on every chunk of a new reply: the consumer must react to it once - a
+        /// separator in the accumulator, a new bubble in the UI. Guessing the boundary from punctuation
+        /// is not an option: a reply may legitimately end with a colon and legitimately begin with a
+        /// lowercase letter.
         /// </para>
         /// </summary>
         public bool StartsNewMessage { get; set; }

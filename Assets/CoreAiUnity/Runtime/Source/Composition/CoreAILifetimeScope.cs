@@ -204,17 +204,17 @@ namespace CoreAI.Composition
             agentMemoryPersistenceMode = mode;
         }
 
-        /// <summary>Потолок сообщений чата на роль, который получит backing store при сборке.</summary>
+        /// <summary>The per-role chat message cap the backing store will get when this scope builds.</summary>
         public int ConfiguredChatHistoryMessageCap => chatHistoryMessageCap;
 
-        /// <summary>Потолок строк транскрипта на роль, который получит backing store при сборке.</summary>
+        /// <summary>The per-role transcript row cap the backing store will get when this scope builds.</summary>
         public int ConfiguredTranscriptEntryCap => transcriptEntryCap;
 
         /// <summary>
-        /// Задаёт потолки переписки до сборки контейнера. Раньше 500/2000 были зашиты в регистрацию:
-        /// курс ученика — сотни ходов, и после потолка начало переписки исчезало при каждом новом
-        /// сообщении без возможности это поменять. Понижение потолков применяется к уже сохранённой
-        /// истории при следующей загрузке роли.
+        /// Sets the conversation caps before the container is built. 500/2000 used to be hardcoded into
+        /// the registration: a student's course is hundreds of turns long, and past the cap the start of
+        /// the conversation disappeared on every new message with no way to change that. Lowering the caps
+        /// is applied to already-persisted history the next time the role is loaded.
         /// </summary>
         /// <exception cref="System.InvalidOperationException">The container is already built.</exception>
         /// <exception cref="System.ArgumentOutOfRangeException">A cap is below one.</exception>
@@ -504,9 +504,9 @@ namespace CoreAI.Composition
         }
 
         /// <summary>
-        /// The host logger when the container has one. Раньше файловые сторы получали <c>null</c>, и КАЖДЫЙ
-        /// сбой записи памяти или переписки в бою исчезал бесследно: строки в логе не было даже там, где код
-        /// её «писал».
+        /// The host logger when the container has one. The file stores used to be handed <c>null</c>, so
+        /// EVERY memory or conversation write failure in production vanished without a trace: there was no
+        /// line in the log even where the code "wrote" one.
         /// </summary>
         private static ILog ResolveLogOrNull(IObjectResolver c)
         {
@@ -545,8 +545,8 @@ namespace CoreAI.Composition
         /// </summary>
         /// <param name="builder">Container builder.</param>
         /// <param name="mode">Backing selection.</param>
-        /// <param name="maxChatHistoryMessages">Потолок сообщений чата на роль (см. <see cref="SetConversationHistoryCaps"/>).</param>
-        /// <param name="maxTranscriptEntries">Потолок строк транскрипта на роль.</param>
+        /// <param name="maxChatHistoryMessages">Per-role chat message cap (see <see cref="SetConversationHistoryCaps"/>).</param>
+        /// <param name="maxTranscriptEntries">Per-role transcript row cap.</param>
         internal static void RegisterAgentMemoryStore(
             IContainerBuilder builder,
             AgentMemoryPersistenceMode mode = AgentMemoryPersistenceMode.Persistent,

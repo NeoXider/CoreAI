@@ -548,8 +548,12 @@ namespace CoreAI.Composition
                             runtime.RehydrateFromStore(scriptCapabilities,
                                 (scriptCapabilities & LuaCapabilities.Full) != 0);
 
-                            // WHY: phase-specific pumps preserve Stepped -> delayed work -> input ->
-                            // Heartbeat -> RenderStepped before the runtime tick each scaled frame.
+                            // WHY the driver gets the session controller and nothing else: one scaled
+                            // frame is one ModScheduler.Advance on the PUBLISHED session. The scheduler
+                            // walks the phase pipeline (Stepped -> delayed work -> input -> Heartbeat ->
+                            // RenderStepped) and the bindings that own that scheduler fire each phase's
+                            // signals, so the driver must carry no per-phase pumps of its own — a second
+                            // route fires every RunService signal twice per frame.
                             LuaModRuntimeTickDriver tickDriver =
                                 tickerGo.AddComponent<LuaModRuntimeTickDriver>();
                             tickDriver.Initialize(sessionController, hostActor);

@@ -12,10 +12,11 @@ namespace CoreAI.Tests.EditMode
     public sealed class ChatScrollAnchorEditModeTests
     {
         /// <summary>
-        /// Правило одно на все точки прокрутки. <see cref="ChatScrollAnchor.FollowIfAtBottom"/> —
-        /// поведение мессенджера: читателя, ушедшего ВВЕРХ перечитать разобранное, не тащат вниз, а
-        /// стоящего у низа лента везёт дальше, иначе ответ и карточка задания появляются под кромкой
-        /// экрана и их будто нет. <see cref="ChatScrollAnchor.KeepPosition"/> не двигает вид никогда.
+        /// One rule covers every scroll anchor. <see cref="ChatScrollAnchor.FollowIfAtBottom"/> is
+        /// messenger behaviour: a reader who scrolled UP to re-read what was already explained is not
+        /// dragged back down, while a reader parked at the bottom keeps being carried along; otherwise the
+        /// answer and the task card show up below the edge of the screen and look as if they never came.
+        /// <see cref="ChatScrollAnchor.KeepPosition"/> never moves the view at all.
         /// </summary>
         [TestCase(ChatScrollAnchor.Bottom, true, true)]
         [TestCase(ChatScrollAnchor.Bottom, false, true)]

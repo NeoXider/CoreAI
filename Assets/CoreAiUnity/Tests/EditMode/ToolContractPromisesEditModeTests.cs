@@ -17,9 +17,9 @@ using CoreAI.Infrastructure.Llm;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Стражи обещаний контракта инструментов, которые доки давали, а код не выполнял. Каждый тест
-    /// написан от лица дефекта: автор инструмента строит поведение на обещании и не пишет своей защиты,
-    /// поэтому расхождение здесь опаснее обычного бага.
+    /// Guards for the tool contract promises the docs made and the code did not keep. Every test here is written
+    /// from the defect's point of view: a tool author builds behaviour on the promise and writes no defence of
+    /// their own, which makes a divergence here more dangerous than an ordinary bug.
     /// </summary>
     public sealed class ToolContractPromisesEditModeTests
     {
@@ -65,12 +65,12 @@ namespace CoreAI.Tests.EditMode
         private const string CountSchema =
             "{\"type\":\"object\",\"properties\":{\"count\":{\"type\":\"integer\",\"description\":\"How many\"}},\"required\":[\"count\"]}";
 
-        // ==================== Дефект 5: схема на нативном канале ====================
+        // ==================== Defect 5: schema on the native channel ====================
 
         /// <summary>
-        /// Два дока обещали: на нативном канале текст <c>ParametersSchema</c> не отправляется. Боевой
-        /// путь (<c>AppendStableRoleToolContract</c>) печатал схему каждого инструмента независимо от
-        /// канала, и модель получала два расходящихся определения одного инструмента.
+        /// Two docs promised it: on the native channel the <c>ParametersSchema</c> text is not sent. The production
+        /// path (<c>AppendStableRoleToolContract</c>) printed the schema of every tool regardless of the channel,
+        /// and the model received two diverging definitions of the same tool.
         /// </summary>
         [Test]
         public void StableRoleContract_NativeChannel_CarriesNoTextualDefinitions()
@@ -94,8 +94,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Префикс обязан быть байт-стабильным ради кэша промпта: пропуск определений зависит только от
-        /// роли и канала, поэтому два вызова с теми же входами дают один и тот же текст.
+        /// The prefix has to be byte-stable for the sake of the prompt cache: skipping definitions depends only on
+        /// the role and the channel, so two calls with the same inputs produce exactly the same text.
         /// </summary>
         [Test]
         public void StableRoleContract_NativeChannel_IsByteStable()
@@ -127,13 +127,13 @@ namespace CoreAI.Tests.EditMode
                 new MEAI.AIFunctionFactoryOptions { Name = name, Description = name });
         }
 
-        // ==================== Дефект 8: классификация без стек-фреймов ====================
+        // ==================== Defect 8: classification without stack frames ====================
 
         /// <summary>
-        /// Тело инструмента (не делегат — обычная функция без границы исключений) меняет мир и бросает
-        /// исключение «формы преобразования». Раньше оно классифицировалось как сбой привязки аргументов
-        /// («инструмент не вызывался», retry-safe) — под IL2CPP так выглядел бы любой сбой тела. Теперь
-        /// всё, что вылетело из вызова, — «вызов», и трасса не даёт декораторам повторить мутацию.
+        /// A tool body (not a delegate, an ordinary function with no exception boundary) changes the world and
+        /// throws an exception "shaped like a conversion". It used to be classified as an argument binding failure
+        /// ("the tool was never invoked", retry-safe) - under IL2CPP any body failure would look exactly like that.
+        /// Now anything that escapes the call is "invoked", and the trace stops decorators repeating the mutation.
         /// </summary>
         [Test]
         public async Task ExecuteSingle_BodyThrowsConversionShapedException_IsRecordedAsInvoked()
@@ -162,8 +162,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// MEAI отвергает неконвертируемый аргумент до тела. Трасса консервативно считает границу
-        /// вызванной: собственная reflection-проверка привязки не дублирует механизм MEAI.
+        /// MEAI rejects an unconvertible argument before the body runs. The trace conservatively counts the boundary
+        /// as invoked: our own reflection binding check does not duplicate MEAI's mechanism.
         /// </summary>
         [Test]
         public async Task ExecuteSingle_UnconvertibleArgument_IsRejectedBeforeInvocation()
@@ -197,8 +197,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Граница <see cref="DelegateLlmTool"/> больше не читает стек: любое исключение тела —
-        /// синхронное или после первого await — становится результатом <c>Error: …</c>.
+        /// The <see cref="DelegateLlmTool"/> boundary no longer reads the stack: any body exception, synchronous or
+        /// after the first await, becomes an <c>Error: ...</c> result.
         /// </summary>
         [Test]
         public async Task DelegateLlmTool_BodyExceptions_BecomeErrorResults_WithoutStackInspection()
@@ -222,15 +222,29 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Тот же вердикт для инструмента-делегата: MEAI отвергает неконвертируемый аргумент ДО тела, но
-        /// трасса всё равно «вызывался». Раньше здесь стоял источник <c>arg-conversion</c>, полученный
-        /// поиском метода делегата в стеке; под IL2CPP/WebGL фреймы срываются, и по тому же признаку
-        /// исключение ИЗ ТЕЛА объявлялось «инструмент не вызывался» — декораторы ретрая повторяли ход,
-        /// уже изменивший мир. Различение снято целиком, поэтому у безопасной и небезопасной ситуации
-        /// теперь ОДИН консервативный вердикт, и стоит он лишь одной несделанной повторной попытки.
+        /// The same verdict for a delegate tool as for a raw function: an unconvertible argument is rejected by the
+        /// structural preflight, so the trace is <c>arg-conversion</c> and counts as never-invoked.
+        /// <para>
+        /// WHY this test previously expected <c>native</c>/invoked and that expectation was wrong: it was written
+        /// during the interim state where the argument-vs-body distinction had been deleted OUTRIGHT. That deletion
+        /// was right about the old mechanism - the verdict was guessed by hunting for the delegate's method in the
+        /// exception stack, and IL2CPP/WebGL strips those frames, so an exception FROM THE BODY was read as "never
+        /// invoked" and retry decorators replayed a turn that had already changed the world. But the distinction did
+        /// not stay deleted: it came back as <c>TryBindArgumentsStructurally</c>, which runs MEAI's own coercion
+        /// standalone BEFORE the invocation boundary and therefore PROVES the body was never entered instead of
+        /// inferring it from a stack. Keeping the interim expectation would have pinned the strictly worse outcome -
+        /// a turn that executed nothing being reported as "a tool ran", which blocks retry and fallback.
+        /// </para>
+        /// <para>
+        /// What this case adds over the raw-function one next to it: a delegate tool is invoked through
+        /// <c>DelegateExceptionBoundaryAIFunction</c>, a <c>DelegatingAIFunction</c> wrapper. The preflight can only
+        /// prove anything while <c>UnderlyingMethod</c> and <c>JsonSerializerOptions</c> reach it through that
+        /// wrapper; if a future wrapper stopped forwarding them the preflight would silently fall back to the
+        /// conservative verdict, and this test is what notices.
+        /// </para>
         /// </summary>
         [Test]
-        public async Task DelegateLlmTool_ArgumentCoercionFailure_IsTracedAsInvoked()
+        public async Task DelegateLlmTool_ArgumentCoercionFailure_IsRejectedBeforeInvocation()
         {
             int sideEffects = 0;
             DelegateLlmTool tool = new("grant_items", "Grant items.", (Func<int, string>)(count =>
@@ -249,19 +263,19 @@ namespace CoreAI.Tests.EditMode
                     new Dictionary<string, object> { ["count"] = "not-an-integer" }),
                 options, CancellationToken.None);
 
-            Assert.AreEqual(0, sideEffects, "Sanity: MEAI really does reject the argument before the body");
+            Assert.AreEqual(0, sideEffects, "Sanity: the argument really is rejected before the body");
             Assert.IsFalse(result.Succeeded);
             Assert.AreEqual(1, policy.ExecutedTraces.Count);
-            Assert.AreEqual("native", policy.ExecutedTraces[0].Source,
-                "No stack-shape classification survives: the invocation boundary is the verdict");
-            Assert.IsTrue(LoggingLlmClientDecorator.TraceIndicatesInvocation(policy.ExecutedTraces[0]),
-                "Retry/fallback must treat it as invoked — the cheap verdict is the safe one");
+            Assert.AreEqual("arg-conversion", policy.ExecutedTraces[0].Source,
+                "The preflight must see through the delegate's exception-boundary wrapper to UnderlyingMethod");
+            Assert.IsFalse(LoggingLlmClientDecorator.TraceIndicatesInvocation(policy.ExecutedTraces[0]),
+                "Nothing ran, so a later 429 must stay retryable and failover-eligible");
         }
 
-        // ==================== Дефект 6: результат «дословно» ====================
+        // ==================== Defect 6: the result "verbatim" ====================
 
         /// <summary>
-        /// Обрезка по <c>MaxToolResultChars</c> обязана быть видна модели явной пометкой с исходной длиной.
+        /// Truncation at <c>MaxToolResultChars</c> must be visible to the model as an explicit marker carrying the original length.
         /// </summary>
         [Test]
         public async Task ExecuteSingle_OversizedResult_IsTruncatedWithVisibleMarker()
@@ -283,8 +297,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Пустой результат не подменяется выдуманным «Success» с сообщением о выполнении: конверт
-        /// явно говорит <c>empty:true</c>, чтобы модель отличала «нечего сказать» от ответа.
+        /// An empty result is not replaced by an invented "Success" with an execution message: the envelope says
+        /// <c>empty:true</c> outright, so the model can tell "nothing to say" apart from an answer.
         /// </summary>
         [Test]
         public async Task ExecuteSingle_EmptyResult_IsAnHonestEmptyEnvelope()
@@ -305,7 +319,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Всё остальное уходит модели дословно — включая отказ инструмента, чтобы она могла его исправить.
+        /// Everything else reaches the model verbatim, including a refusal from the tool, so that it can fix it.
         /// </summary>
         [Test]
         public async Task ExecuteSingle_NormalResult_ReachesTheModelVerbatim()

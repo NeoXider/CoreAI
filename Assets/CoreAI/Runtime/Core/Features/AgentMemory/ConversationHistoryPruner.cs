@@ -206,17 +206,18 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Помечает tool-блок «перекрытым», когда КАЖДАЯ его запись дословно повторяется в более новом
-        /// блоке: тот же инструмент и та же записанная выдача.
+        /// Marks a tool block as "superseded" when EVERY one of its entries is repeated verbatim in a
+        /// newer block: same tool and same recorded output.
         /// <para>
-        /// Раньше перекрытием считалось совпадение одного лишь ИМЕНИ инструмента. Имя в трассе — это имя
-        /// внешнего вызова, а у учителя RedoSchool почти всё идёт через один скилл-роутер
-        /// <c>call_skill_tool</c>: следующий слайд презентации «перекрывал» вывод код-станции, про который
-        /// ребёнок в эту минуту спрашивает, и результат исчезал из промпта. Аргументов вызова durable-блок
-        /// не хранит (<c>LlmToolCallTrace</c> несёт только имя и результат), поэтому единственная
-        /// идентичность, которую можно ДОКАЗАТЬ по данным, — «тот же инструмент + та же запись результата».
-        /// Такая запись в новом блоке несёт ровно ту же информацию, и старшая копия избыточна; всё
-        /// остальное — разные вызовы, и решать за модель, что из них устарело, пруннер не вправе.
+        /// Superseding used to be decided by a match on the tool NAME alone. The name in a trace is the
+        /// name of the outer call, and in the RedoSchool teacher nearly everything goes through a single
+        /// skill router, <c>call_skill_tool</c>: the next presentation slide "superseded" the code station
+        /// output the child is asking about right now, and the result vanished from the prompt. The
+        /// durable block does not store the call arguments (<c>LlmToolCallTrace</c> carries only the name
+        /// and the result), so the only identity that can be PROVEN from the data is "same tool + same
+        /// recorded result". Such an entry in the newer block carries exactly the same information and the
+        /// older copy is redundant; everything else is a different call, and the pruner has no right to
+        /// decide on the model's behalf which of them is stale.
         /// </para>
         /// </summary>
         private static int MarkSupersededToolResults(List<ChatMessage> messages, bool[] dropped)
@@ -283,17 +284,19 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Извлекает из durable-блока «## Tool Results» (его пишет <c>AiOrchestrator.BuildToolResultsMemoryBlock</c>)
-        /// ключ идентичности каждой записи: строку записи <c>- {name}: {ok|FAILED}[ detail]</c> вместе со всеми
-        /// её отступными строками (под политикой <c>Full</c> это блок <c>  Detail:</c> с выдачей инструмента).
-        /// Ключ — это имя И результат: одно имя без результата не отличает два вызова одного инструмента
-        /// (см. <see cref="MarkSupersededToolResults"/>).
+        /// Extracts, from the durable "## Tool Results" block (written by
+        /// <c>AiOrchestrator.BuildToolResultsMemoryBlock</c>), the identity key of every entry: the entry
+        /// line <c>- {name}: {ok|FAILED}[ detail]</c> together with all of its indented lines (under the
+        /// <c>Full</c> policy that is the <c>  Detail:</c> block holding the tool output). The key is the
+        /// name AND the result: a name without a result does not tell two calls of the same tool apart
+        /// (see <see cref="MarkSupersededToolResults"/>).
         /// <para>
-        /// Распознавание записи то же, на которое опирается <see cref="ToolResultPromptProjection"/>: выдача
-        /// инструмента под <c>Full</c> сама может содержать строки вида <c>  - foo: bar</c> (markdown/YAML/diff),
-        /// и наивный разбор «первый '-' … первый ':'» принял бы их за записи. Поэтому запись — это только
-        /// (1) bullet в нулевой колонке (вложенная выдача всегда с отступом) и (2) значение после двоеточия,
-        /// начинающееся с известного статуса (<c>ok</c> / <c>FAILED</c>); всё прочее — хвост текущей записи.
+        /// Entry recognition is the same one <see cref="ToolResultPromptProjection"/> relies on: under
+        /// <c>Full</c> the tool output itself may contain lines shaped like <c>  - foo: bar</c>
+        /// (markdown/YAML/diff), and a naive "first '-' ... first ':'" parse would take them for entries.
+        /// So an entry is only (1) a bullet in column zero (nested output is always indented) and (2) a
+        /// value after the colon that starts with a known status (<c>ok</c> / <c>FAILED</c>); anything
+        /// else is the tail of the current entry.
         /// </para>
         /// </summary>
         private static List<string> ExtractToolEntryKeys(string content)
@@ -318,9 +321,10 @@ namespace CoreAI.Ai
                     continue;
                 }
 
-                // WHY: Строка без формы записи после записи — это её выдача (Detail под Full), и она часть
-                // идентичности: тот же инструмент с другой выдачей — другой вызов. Пустые строки в хвосте
-                // и заголовок до первой записи ничего не идентифицируют и в ключ не идут.
+                // WHY: A line that is not entry-shaped and follows an entry is that entry's output (Detail
+                // under Full), and it is part of the identity: the same tool with a different output is a
+                // different call. Blank tail lines and the header before the first entry identify nothing
+                // and stay out of the key.
                 if (currentEntry != null && line.Length > 0)
                 {
                     currentEntry.Append('\n').Append(line);
@@ -345,7 +349,7 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>True для bullet нулевой колонки <c>- name: ok|FAILED …</c> с непустым именем.</summary>
+        /// <summary>True for a column-zero bullet <c>- name: ok|FAILED ...</c> with a non-empty name.</summary>
         private static bool IsEntryLine(string line)
         {
             if (line.Length < 2 || line[0] != '-' || line[1] != ' ')

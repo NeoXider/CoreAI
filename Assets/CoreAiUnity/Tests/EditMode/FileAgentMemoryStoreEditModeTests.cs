@@ -15,10 +15,10 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Раскладка на диске: <see cref="FileAgentMemoryStore"/> держит документ памяти в <c>&lt;role&gt;.json</c>
-    /// и переписку в <c>&lt;role&gt;.history.jsonl</c>. Тесты — от лица дефекта: что теряет ученик, если стор
-    /// врёт об успехе, подменяет непрочитанное пустым, молча режет историю или переписывает всё на каждое
-    /// сообщение. Каждый тест работает в собственном временном каталоге — на рабочую машину ничего не пишется.
+    /// The on-disk layout: <see cref="FileAgentMemoryStore"/> keeps the memory document in <c>&lt;role&gt;.json</c>
+    /// and the conversation in <c>&lt;role&gt;.history.jsonl</c>. The tests are written from the defect's side: what the
+    /// learner loses when the store lies about success, swaps an unread document for an empty one, silently cuts the
+    /// history or rewrites everything per message. Each test runs in its own temp directory, writing nothing to the machine.
     /// </summary>
     public sealed class FileAgentMemoryStoreEditModeTests
     {
@@ -358,7 +358,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         // ---------------------------------------------------------------------------------------------
-        // Дефект 1: битый или непрочитанный документ памяти
+        // Defect 1: a corrupted or unread memory document
         // ---------------------------------------------------------------------------------------------
 
         [Test]
@@ -370,8 +370,8 @@ namespace CoreAI.Tests.EditMode
             AgentMemoryLoadStatus status = store.TryLoadDetailed(_roleId, out AgentMemoryState state);
 
             Assert.AreEqual(AgentMemoryLoadStatus.Failed, status,
-                "Файл есть, а что в нём — неизвестно. Это не «памяти нет»: тот, кто примет пустоту за истину и " +
-                "сохранит, сотрёт документ ученика вместе с версиями.");
+                "The file is there, but what is inside it is unknown. That is not \"there is no memory\": whoever takes " +
+                "the emptiness for truth and saves it wipes the learner's document together with its versions.");
             Assert.IsNull(state);
             Assert.IsFalse(store.TryLoad(_roleId, out _));
         }
@@ -392,16 +392,16 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(_roleId, thrown.RoleId);
             Assert.AreEqual(corrupt, File.ReadAllText(MemoryPath),
-                "Раньше `TryLoadCore(roleId) ?? new AgentMemoryState()` применял мутатор к ПУСТОМУ документу и " +
-                "перезаписывал им память и все 30 версий: временный сбой чтения = безвозвратная потеря.");
+                "`TryLoadCore(roleId) ?? new AgentMemoryState()` used to apply the mutator to an EMPTY document and " +
+                "overwrite the memory and all 30 versions with it: a temporary read failure meant irreversible loss.");
         }
 
         [Test]
         public async Task ScopedDecorator_OverTheRealFileStore_ForwardsRealLoadDiagnostics()
         {
-            // WHY: CoreAuditFindingsEditModeTests проверяет защиту на ФЕЙКОВОМ сторе с капабилити. Пока боевой
-            // файловый стор её не реализовывал, декоратор честно возвращал оптимистичный NotFound — и тест
-            // давал ложное чувство защищённости.
+            // WHY: CoreAuditFindingsEditModeTests checks this protection on a FAKE store that has the capability. While
+            // the production file store did not implement it, the decorator honestly returned an optimistic NotFound, and
+            // the test gave a false sense of safety.
             File.WriteAllText(MemoryPath, "{ definitely not json");
             ScopedAgentMemoryStoreDecorator scoped = new(NewStore(), new DefaultAgentMemoryScopeProvider());
 
@@ -419,8 +419,8 @@ namespace CoreAI.Tests.EditMode
             store.Save(_roleId, new AgentMemoryState { Memory = "recovered" });
 
             Assert.AreEqual(AgentMemoryLoadStatus.Loaded, NewStore().TryLoadDetailed(_roleId, out AgentMemoryState loaded),
-                "Раньше Save читал старый файл через `FromJson(...) ?? new`, разбор бросал, и после ОДНОГО " +
-                "битого файла каждая последующая запись роли уходила в лог, не сохраняя ничего — навсегда.");
+                "Save used to read the old file through `FromJson(...) ?? new`, parsing threw, and after ONE corrupted " +
+                "file every later write for that role went into the log and saved nothing, forever.");
             Assert.AreEqual("recovered", loaded.Memory);
         }
 
@@ -433,23 +433,23 @@ namespace CoreAI.Tests.EditMode
             ChatMessage[] reloaded = NewStore().GetChatHistory(_roleId);
 
             Assert.AreEqual(1, reloaded.Length,
-                "Переписка живёт в своём файле: битый документ памяти не должен останавливать запись уроков.");
+                "The conversation lives in its own file: a corrupted memory document must not stop lessons being written.");
             Assert.AreEqual("still here", reloaded[0].Content);
         }
 
         [Test]
         public async Task MemoryTool_WriteThatDidNotReachDisk_IsReportedAsFailure()
         {
-            // WHY: каталог с именем файла памяти: File.Exists(path) = false (это не файл), а подмена tmp -> path
-            // падает. Детерминированный сбой записи без хуков внутри стора.
+            // WHY: a directory named like the memory file: File.Exists(path) = false (it is not a file), and the
+            // tmp -> path swap fails. A deterministic write failure with no hooks inside the store.
             Directory.CreateDirectory(MemoryPath);
             MemoryTool tool = new(NewStore(), _roleId, QuietSettings());
 
             string result = await tool.ExecuteAsync("write", "the child likes dragons");
 
             Assert.That(result, Does.Contain("\"Success\":false"),
-                "Раньше ответ «сохранено» собирался ВНУТРИ мутатора, до записи, а стор глотал исключение: модель " +
-                "и ребёнок видели, что учитель запомнил, а на диске было пусто.");
+                "The \"saved\" answer used to be assembled INSIDE the mutator, before the write, and the store swallowed " +
+                "the exception: the model and the child saw that the teacher had remembered, while the disk was empty.");
             Assert.That(result, Does.Not.Contain("DONE"));
         }
 
@@ -463,7 +463,7 @@ namespace CoreAI.Tests.EditMode
 
             Assert.That(result, Does.Contain("\"Success\":false"));
             Assert.That(result, Does.Not.Contain("Memory is empty"),
-                "«Память пуста» на нечитаемом документе — приглашение модели перезаписать то, чего она не видела.");
+                "\"Memory is empty\" on an unreadable document is an invitation for the model to overwrite what it never saw.");
         }
 
         [Test]
@@ -475,7 +475,7 @@ namespace CoreAI.Tests.EditMode
 
             Assert.That(result, Does.Contain("\"Success\":true"));
             Assert.IsTrue(NewStore().TryLoad(_roleId, out AgentMemoryState loaded),
-                "Ответ «DONE» обязан означать, что документ уже на диске (контракт IAtomicAgentMemoryStore).");
+                "A \"DONE\" answer must mean the document is already on disk (the IAtomicAgentMemoryStore contract).");
             Assert.AreEqual("likes dragons", loaded.Memory);
         }
 
@@ -490,17 +490,17 @@ namespace CoreAI.Tests.EditMode
             ChatMessage[] beforeRepair = store.GetChatHistory(_roleId);
             store.AppendChatMessage(_roleId, "assistant", "second", true);
 
-            Assert.AreEqual(1, beforeRepair.Length, "Оборванный хвост пропускается, остальное читается.");
+            Assert.AreEqual(1, beforeRepair.Length, "A truncated tail is skipped and the rest is read.");
             Assert.That(string.Join("\n", log.Messages), Does.Contain("unreadable line"));
             string[] lines = File.ReadAllLines(HistoryPath).Where(l => !string.IsNullOrWhiteSpace(l)).ToArray();
-            Assert.AreEqual(2, lines.Length, "Следующая запись переписывает файл без мусора.");
+            Assert.AreEqual(2, lines.Length, "The next write rewrites the file without the garbage.");
             Assert.IsFalse(lines.Any(l => l.Contains("torn by")));
             CollectionAssert.AreEqual(new[] { "first", "second" },
                 NewStore().GetChatHistory(_roleId).Select(m => m.Content).ToArray());
         }
 
         // ---------------------------------------------------------------------------------------------
-        // Дефект 4: усечение видимо и настраиваемо
+        // Defect 4: truncation is visible and configurable
         // ---------------------------------------------------------------------------------------------
 
         [Test]
@@ -515,13 +515,13 @@ namespace CoreAI.Tests.EditMode
             store.AppendChatMessage(_roleId, "user", "turn 2", true);
             store.AppendChatMessage(_roleId, "user", "turn 3", true);
 
-            Assert.AreEqual(1, events.Count, "Первое сообщение сверх потолка — событие хосту.");
+            Assert.AreEqual(1, events.Count, "The first message past the ceiling raises an event for the host.");
             Assert.AreEqual(1, events[0].DroppedChatMessages);
             Assert.AreEqual(2, events[0].RetainedChatMessages);
             Assert.AreEqual(2, events[0].MaxChatHistoryMessages);
             Assert.That(string.Join("\n", log.Messages), Does.Contain("reached its cap"),
-                "Раньше 500/2000 резались молча: после потолка начало переписки исчезало при каждом новом " +
-                "сообщении, и никто не узнавал.");
+                "500/2000 used to be cut silently: past the ceiling the start of the conversation disappeared on every " +
+                "new message, and nobody ever found out.");
             Assert.AreEqual(2, store.MaxChatHistoryMessages);
             Assert.AreEqual(3, store.MaxTranscriptEntries);
         }
@@ -539,7 +539,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         // ---------------------------------------------------------------------------------------------
-        // Дефект 5: стоимость — одна строка на сообщение, без дублирования и полной перезаписи
+        // Defect 5: the cost is one line per message, with no duplication and no full rewrite
         // ---------------------------------------------------------------------------------------------
 
         [Test]
@@ -553,12 +553,12 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.IsFalse(File.Exists(MemoryPath),
-                "Сообщение чата не должно переписывать документ памяти (текст, 30 версий, снимок промпта).");
+                "A chat message must not rewrite the memory document (text, 30 versions, prompt snapshot).");
             string[] lines = File.ReadAllLines(HistoryPath).Where(l => !string.IsNullOrWhiteSpace(l)).ToArray();
-            Assert.AreEqual(20, lines.Length, "Одна строка на сообщение.");
+            Assert.AreEqual(20, lines.Length, "One line per message.");
             string text = File.ReadAllText(HistoryPath);
             Assert.AreEqual(1, CountOccurrences(text, "turn 7"),
-                "Раньше история и транскрипт хранили один и тот же текст дважды, с отступами.");
+                "History and transcript used to store the very same text twice, with indentation.");
         }
 
         [Test]
@@ -567,8 +567,8 @@ namespace CoreAI.Tests.EditMode
             FileAgentMemoryStore store = NewStore(null, 2, 4);
             int slack = store.CompactionSlack;
 
-            // WHY: после четырёх строк каждое сообщение оставляет в файле одну «мёртвую» строку головы;
-            // уплотнение наступает, когда их накопится slack, — то есть на (4 + slack + 1)-м сообщении.
+            // WHY: after four lines every message leaves one "dead" line at the head of the file; compaction happens
+            // once slack of them have piled up, that is on message number (4 + slack + 1).
             for (int i = 0; i < 4 + slack; i++)
             {
                 store.AppendChatMessage(_roleId, "user", $"turn {i}", true);
@@ -576,14 +576,14 @@ namespace CoreAI.Tests.EditMode
 
             int linesBeforeCompaction = File.ReadAllLines(HistoryPath).Count(l => !string.IsNullOrWhiteSpace(l));
             Assert.Greater(linesBeforeCompaction, 4,
-                "Отрезанные строки остаются в голове файла до уплотнения — читатели их не видят.");
+                "The cut lines stay at the head of the file until compaction; readers never see them.");
             Assert.AreEqual(2, store.GetChatHistory(_roleId).Length);
             Assert.AreEqual(4, store.GetTranscriptEntries(_roleId, 0).Count);
 
             store.AppendChatMessage(_roleId, "user", "the one that compacts", true);
 
             int linesAfterCompaction = File.ReadAllLines(HistoryPath).Count(l => !string.IsNullOrWhiteSpace(l));
-            Assert.AreEqual(4, linesAfterCompaction, "Уплотнение оставляет ровно окно транскрипта.");
+            Assert.AreEqual(4, linesAfterCompaction, "Compaction leaves exactly the transcript window.");
             Assert.AreEqual(4, NewStore(null, 2, 4).GetTranscriptEntries(_roleId, 0).Count);
         }
 
@@ -622,17 +622,17 @@ namespace CoreAI.Tests.EditMode
             IReadOnlyList<ConversationEntry> transcript = store.GetTranscriptEntries(_roleId, 0);
 
             CollectionAssert.AreEqual(new[] { "hello", "hi" }, chat.Select(m => m.Content).ToArray());
-            Assert.AreEqual(ms / 1000, chat[0].Timestamp, "Миллисекунды формата v1 приводятся к секундам.");
+            Assert.AreEqual(ms / 1000, chat[0].Timestamp, "Milliseconds from the v1 format are converted to seconds.");
             CollectionAssert.AreEqual(new[] { "hello", "tool row", "hi" }, transcript.Select(e => e.Content).ToArray());
             Assert.AreEqual("c1", transcript[1].CallId);
             Assert.IsTrue(store.TryLoad(_roleId, out AgentMemoryState state));
             Assert.AreEqual("PLAYER_QUEST:rescue_dog", state.Memory);
             Assert.AreEqual(1, state.Versions.Length);
 
-            Assert.IsTrue(File.Exists(HistoryPath), "Переписка вынесена в свой файл.");
+            Assert.IsTrue(File.Exists(HistoryPath), "The conversation is moved out into its own file.");
             LegacyPersisted rewritten = JsonUtility.FromJson<LegacyPersisted>(File.ReadAllText(MemoryPath));
             Assert.IsTrue(string.IsNullOrEmpty(rewritten.chatHistoryJson) && string.IsNullOrEmpty(rewritten.transcriptEntriesJson),
-                "Документ памяти больше не несёт переписку — миграция не повторяется.");
+                "The memory document no longer carries the conversation, so the migration does not run twice.");
             FileAgentMemoryStore reloaded = NewStore();
             Assert.AreEqual(2, reloaded.GetChatHistory(_roleId).Length);
             Assert.AreEqual(3, reloaded.GetTranscriptEntries(_roleId, 0).Count);
@@ -680,13 +680,13 @@ namespace CoreAI.Tests.EditMode
 
             FileAgentMemoryStore reloaded = NewStore();
             Assert.AreEqual("must survive", reloaded.GetChatHistory(_roleId).Single().Content,
-                "Save перезаписывает документ целиком; переписка формата v1 обязана уехать в свой файл ДО этого.");
+                "Save rewrites the whole document; a v1-format conversation has to move to its own file BEFORE that.");
             Assert.IsTrue(reloaded.TryLoad(_roleId, out AgentMemoryState state));
             Assert.AreEqual("new memory", state.Memory);
         }
 
         // ---------------------------------------------------------------------------------------------
-        // Дефект 6: persistToDisk=false — только в этом процессе, без двусмысленности
+        // Defect 6: persistToDisk=false means this process only, with no ambiguity
         // ---------------------------------------------------------------------------------------------
 
         [Test]
@@ -704,12 +704,12 @@ namespace CoreAI.Tests.EditMode
             store.AppendChatMessage(_roleId, "assistant", "public last", true);
 
             Assert.That(File.ReadAllText(HistoryPath), Does.Not.Contain("secret"),
-                "Раньше «без записи на диск» попадало на диск при следующем добавлении с записью — то есть " +
-                "и не откладывалось честно, и не оставалось в процессе честно.");
+                "\"Without writing to disk\" used to reach the disk on the next append that did write, so it was neither " +
+                "honestly deferred nor honestly kept inside the process.");
             ChatMessage[] inProcess = store.GetChatHistory(_roleId);
-            Assert.IsTrue(inProcess.Any(m => m.Content == "secret 2"), "В этом процессе сообщение видно.");
+            Assert.IsTrue(inProcess.Any(m => m.Content == "secret 2"), "Inside this process the message is visible.");
             Assert.IsFalse(NewStore(null, 3, 3).GetChatHistory(_roleId).Any(m => m.Content.StartsWith("secret")),
-                "После перезапуска его нет — как и обещано ролью с PersistChatHistory=false.");
+                "After a restart it is gone, exactly as a role with PersistChatHistory=false promises.");
         }
 
         [Test]
@@ -724,7 +724,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         // ---------------------------------------------------------------------------------------------
-        // Дефект 8: единица отметки времени
+        // Defect 8: the unit of the timestamp
         // ---------------------------------------------------------------------------------------------
 
         [Test]
@@ -739,13 +739,13 @@ namespace CoreAI.Tests.EditMode
             ConversationEntry row = NewStore().GetTranscriptEntries(_roleId, 0).Single();
 
             Assert.That(message.Timestamp, Is.InRange(before, after),
-                "Раньше файловый стор писал миллисекунды, а конструктор ChatMessage и InMemoryAgentMemoryStore " +
-                "— секунды: единица зависела от реализации.");
+                "The file store used to write milliseconds while the ChatMessage constructor and InMemoryAgentMemoryStore " +
+                "wrote seconds: the unit depended on the implementation.");
             Assert.AreEqual(message.Timestamp, row.Timestamp);
         }
 
         // ---------------------------------------------------------------------------------------------
-        // Дефект 3: долговечность — в редакторе подтверждение мгновенно, контракт async-путей проверяем
+        // Defect 3: durability - in the editor the confirmation is instant, so we check the contract of the async paths
         // ---------------------------------------------------------------------------------------------
 
         [Test]
@@ -774,7 +774,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         // ---------------------------------------------------------------------------------------------
-        // Контракты Clear / ClearChatHistory при раздельных файлах
+        // The Clear / ClearChatHistory contracts with separate files
         // ---------------------------------------------------------------------------------------------
 
         [Test]
@@ -873,9 +873,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Clear_WithPersistedConversation_RemovesTheMemoryDocument_AndKeepsTheConversation()
         {
-            // WHY: раньше документ и переписка делили один файл, поэтому Clear при наличии переписки лишь
-            // обнулял поля памяти и «поднимал» версию промпта. Теперь у переписки свой файл: Clear — это
-            // честное удаление документа роли, и TryLoadDetailed отвечает NotFound, а не «пустая память».
+            // WHY: the document and the conversation used to share one file, so Clear with a conversation present only
+            // zeroed the memory fields and "bumped" the prompt version. Now the conversation has its own file: Clear is
+            // an honest deletion of the role document, and TryLoadDetailed answers NotFound, not "empty memory".
             FileAgentMemoryStore store = NewStore();
             AgentMemoryState state = new()
             {
@@ -904,7 +904,7 @@ namespace CoreAI.Tests.EditMode
             store.Clear(_roleId);
 
             Assert.AreEqual(AgentMemoryLoadStatus.NotFound, store.TryLoadDetailed(_roleId, out _),
-                "После явной очистки роль снова пишется: Failed сменяется на NotFound, а не на «пустая память».");
+                "After an explicit clear the role is written again: Failed becomes NotFound, not \"empty memory\".");
             Assert.That(string.Join("\n", log.Messages), Does.Contain("unreadable memory document"));
             await store.MutateAsync(_roleId, s =>
             {
@@ -930,9 +930,9 @@ namespace CoreAI.Tests.EditMode
 
             using (File.Open(HistoryPath, FileMode.Open, FileAccess.Read, FileShare.None))
             {
-                // WHY: void-контракт не бросает: сбой уходит в лог. Но несработавший сброс обязан остаться
-                // несработавшим и в памяти — иначе чтение отдаёт пустоту, а неудалённый файл воскрешает
-                // историю при следующей загрузке.
+                // WHY: the void contract does not throw, the failure goes into the log. But a reset that did not happen
+                // must stay un-happened in memory as well, otherwise reads return emptiness while the undeleted file
+                // resurrects the history on the next load.
                 store.ClearChatHistory(_roleId);
                 Assert.AreEqual(1, store.GetChatHistory(_roleId).Length,
                     "The file delete failed, so the reset did not happen; reads must still see the turns.");
@@ -960,7 +960,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         // ---------------------------------------------------------------------------------------------
-        // Потолки, раунд-трипы, конкурентность
+        // Ceilings, round-trips, concurrency
         // ---------------------------------------------------------------------------------------------
 
         [Test]
@@ -1006,8 +1006,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TranscriptCap_DoesNotEvictTheChatWindow()
         {
-            // WHY: раньше чат и транскрипт были двумя списками с независимыми потолками; при одной записи на
-            // сообщение окно чата обязано переживать поток строк инструментов так же, как раньше.
+            // WHY: chat and transcript used to be two lists with independent ceilings; with one write per message the
+            // chat window must survive a flood of tool lines exactly as it did before.
             FileAgentMemoryStore store = NewStore(null, 2, 3);
             store.AppendChatMessage(_roleId, "user", "chat_a", true);
             store.AppendChatMessage(_roleId, "assistant", "chat_b", true);
@@ -1154,7 +1154,7 @@ namespace CoreAI.Tests.EditMode
             public string memory;
         }
 
-        /// <summary>Формат v1: переписка внутри документа памяти. Имена полей — контракт старого файла.</summary>
+        /// <summary>Format v1: the conversation inside the memory document. The field names are the contract of the old file.</summary>
         [Serializable]
         private sealed class LegacyPersisted
         {

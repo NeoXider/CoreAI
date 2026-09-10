@@ -7,9 +7,9 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Ключ памяти именованного актора. <see cref="ActorContext.MemoryScope"/> обещан как «tenant, user,
-    /// session и topic, которыми пользуется персистентность» — значит, два урока одного актора не делят
-    /// один файл, а хост с именованными акторами может получить тот же ключ вне хода, что и внутри него.
+    /// The memory key of a named actor. <see cref="ActorContext.MemoryScope"/> is promised to be the "tenant,
+    /// user, session and topic that persistence uses", which means two lessons of the same actor must not share
+    /// one file, and a host with named actors can obtain the same key outside a turn as it does inside one.
     /// </summary>
     public sealed class AgentMemoryActorScopeKeyEditModeTests
     {
@@ -94,8 +94,8 @@ namespace CoreAI.Tests.EditMode
             string lesson2 = KeyInsideTurn(NamedActor("player-42", new AgentMemoryScope("school", "u1", "", "lesson-2")), host);
 
             Assert.AreNotEqual(lesson1, lesson2,
-                "Раньше для именованного актора поля scope отбрасывались: два урока делили один файл, хотя " +
-                "ActorContext.MemoryScope документирован как участник ключа.");
+                "The scope fields used to be dropped for a named actor: two lessons shared one file, even though " +
+                "ActorContext.MemoryScope is documented as part of the key.");
             StringAssert.IsMatch("^actor-v1-[0-9a-f]{64}$", lesson1);
             StringAssert.IsMatch("^actor-v1-[0-9a-f]{64}$", lesson2);
         }
@@ -108,7 +108,7 @@ namespace CoreAI.Tests.EditMode
             string tenantB = KeyInsideTurn(NamedActor("player-1", new AgentMemoryScope("tenant-b", "", "", "")), host);
 
             Assert.AreNotEqual(tenantA, tenantB,
-                "Одинаковый id актора у двух арендаторов — обычное дело (счётчик соединений); смешивать их память нельзя.");
+                "The same actor id under two tenants is ordinary (a connection counter); their memory must never be mixed.");
         }
 
         [Test]
@@ -169,14 +169,14 @@ namespace CoreAI.Tests.EditMode
             string learnerB = KeyInsideTurn(actor, new FixedScopeProvider(new AgentMemoryScope("school", "learner-b", "", "")));
 
             Assert.AreNotEqual(learnerA, learnerB,
-                "Провайдер личности не заполнил scope, но хост объявил ученика через IAgentMemoryScopeProvider: " +
-                "два ученика на одном id актора не должны читать друг друга.");
+                "The identity provider left the scope empty, but the host declared the learner through IAgentMemoryScopeProvider: " +
+                "two learners sharing one actor id must not read each other.");
         }
 
         [Test]
         public void NamedActor_EmptyScopeEverywhere_KeepsTheLegacyActorKey()
         {
-            // WHY: файлы уже существующих именованных акторов без scope (серверные хосты) не должны осиротеть.
+            // WHY: files of already existing named actors with no scope (server hosts) must not be orphaned.
             string legacy = KeyInsideTurn(NamedActor("durable-actor", AgentMemoryScope.Empty), new DefaultAgentMemoryScopeProvider());
             string again = KeyInsideTurn(NamedActor("durable-actor", AgentMemoryScope.Empty), new DefaultAgentMemoryScopeProvider());
 
@@ -192,20 +192,20 @@ namespace CoreAI.Tests.EditMode
 
             string inside = KeyInsideTurn(actor, host);
             string outsideWithoutActor = KeyOutsideTurn(host);
-            string outsideEntered = KeyInsideTurn(actor, host); // тот же вход, что доступен хосту вне хода
+            string outsideEntered = KeyInsideTurn(actor, host); // the same entry point the host has outside a turn
 
             Assert.AreNotEqual(inside, outsideWithoutActor,
-                "Вне хода актора нет, и ключ считается по провайдеру: хост с именованными акторами читал и чистил " +
-                "не тот файл, что писал ход. Расхождение честное, и закрывается оно входом ниже.");
+                "Outside a turn there is no actor and the key is derived from the provider: a host with named actors read and " +
+                "cleared a different file than the turn wrote. The divergence is honest, and the entry below closes it.");
             Assert.AreEqual(inside, outsideEntered,
-                "AgentMemoryActorScope.Enter даёт снаружи ровно тот ключ, под которым пишет ход.");
+                "AgentMemoryActorScope.Enter yields from the outside exactly the key the turn writes under.");
         }
 
         [Test]
         public void Enter_RejectsAContextThatNoProviderIssued()
         {
             Assert.Throws<InvalidOperationException>(() => AgentMemoryActorScope.Enter(default(ActorContext)),
-                "Собранный вручную контекст не должен открывать чужую память.");
+                "A hand-assembled context must not unlock somebody else's memory.");
         }
 
         [Test]

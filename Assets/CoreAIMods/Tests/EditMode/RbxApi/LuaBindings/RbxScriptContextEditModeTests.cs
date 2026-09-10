@@ -274,11 +274,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             StringAssert.Contains("not a valid member", store.Get("m", "err"));
         }
 
-        /// <summary>Fires Heartbeat, then drains the queued invocation — mirrors the sibling budget-kill
-        /// fixture's PumpHeartbeat helper (production's split pump/advance frame driver).</summary>
-        private static void PumpHeartbeat(LuaCsRbxApiBindings roblox, float dt, double scaledDt)
+        /// <summary>Runs one host frame — a single scheduler Advance, which fires Heartbeat from its own
+        /// phase and drains the queued invocation in the same call. Mirrors the sibling budget-kill
+        /// fixture's helper and the production frame driver, which also advances the scheduler and pumps
+        /// nothing itself; pumping as well would run the frame twice.</summary>
+        private static void PumpHeartbeat(LuaCsRbxApiBindings roblox, double scaledDt)
         {
-            roblox.PumpHeartbeat(dt);
             roblox.Scheduler.Advance(scaledDt);
         }
 
@@ -311,7 +312,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             // First fire: well-behaved, returns without yielding — warms the pooled runner's coroutine
             // handle at the untouched default budget (500 ms) and parks it back in the idle pool.
-            PumpHeartbeat(roblox, 0.1f, 0.1d);
+            PumpHeartbeat(roblox, 0.1d);
             Assert.AreEqual("ok", store.Get("m", "warm"), "the first fire must complete normally");
             Assert.AreEqual(1, roblox.SchedulerThreadFactory.SignalRunnersCreated,
                 "exactly one pooled runner must have been built so far");
@@ -330,7 +331,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             // 50 ms bound. If it had frozen its budget at construction (the regression), it would instead
             // run for the OLD 500 ms default before being cut.
             Stopwatch stopwatch = Stopwatch.StartNew();
-            PumpHeartbeat(roblox, 0.1f, 0.1d);
+            PumpHeartbeat(roblox, 0.1d);
             stopwatch.Stop();
 
             Assert.AreEqual(1, errors.Count, "the runaway second fire must be cut exactly once");

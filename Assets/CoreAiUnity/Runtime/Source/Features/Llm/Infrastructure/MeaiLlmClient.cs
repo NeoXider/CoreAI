@@ -530,17 +530,17 @@ namespace CoreAI.Infrastructure.Llm
             bool emittedAnyVisibleText = false;
             // One-shot guard for the reasoning-runaway rescue at the terminal path.
             bool emptyResponseNudgeSent = false;
-            // Граница между репликами внутри ОДНОГО потока. Цикл ниже — это несколько ходов модели
-            // (после каждого раунда инструментов она говорит заново), а наружу они уезжают одним
-            // непрерывным потоком чанков. Флаг взводится на входе в следующую итерацию и гаснет на
-            // первом же видимом чанке: без него потребитель склеивал конец одной реплики с началом
-            // другой встык, и ученик читал «Проверь себя:**Ход завершён…**».
+            // The boundary between messages inside ONE stream. The loop below is several turns of the model
+            // (after every tool round it speaks anew), while outwards they leave as a single continuous
+            // stream of chunks. The flag is raised on entering the next iteration and cleared on the very
+            // first visible chunk: without it the consumer glued the end of one message straight onto the
+            // start of the next, and the learner read "Проверь себя:**Ход завершён…**".
             bool visibleMessageBoundaryPending = false;
             string lastVisibleMessageId = null;
 
-            // Единая точка выдачи видимого текста: помечает начало новой реплики РОВНО один раз и
-            // ведёт учёт «была ли вообще видимая речь». Раньше эти два факта расползались по
-            // четырнадцати местам, и любое новое место выдачи молча теряло границу.
+            // The single point that emits visible text: it marks the start of a new message EXACTLY once and
+            // keeps track of "was there any visible speech at all". These two facts used to be scattered
+            // across fourteen places, and any new emission site silently lost the boundary.
             LlmStreamChunk MarkVisibleChunk(LlmStreamChunk visibleChunk)
             {
                 emittedAnyVisibleText = true;
@@ -704,8 +704,8 @@ namespace CoreAI.Infrastructure.Llm
                     yield break;
                 }
 
-                // Итоговый ход без инструментов — это отдельная реплика: перед ней уже прошли и речь,
-                // и раунды инструментов.
+                // A final turn without tools is a message of its own: both speech and tool rounds have
+                // already passed before it.
                 visibleMessageBoundaryPending |= emittedAnyVisibleText;
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return MarkVisibleChunk(new LlmStreamChunk { Text = summaryText });
@@ -727,9 +727,9 @@ namespace CoreAI.Infrastructure.Llm
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 toolIteration++;
-                // Новая итерация — новая реплика модели, но только если предыдущая уже что-то
-                // сказала: иначе «границей» окажется самое начало ответа и потребитель поставит
-                // разделитель перед первым же словом.
+                // A new iteration is a new message from the model, but only if the previous one already said
+                // something: otherwise the "boundary" lands at the very start of the answer and the consumer
+                // puts a separator before the first word.
                 visibleMessageBoundaryPending |= emittedAnyVisibleText;
                 string streamModel = ResolveModelName();
                 if (maxToolIterations > 0 && toolIteration > maxToolIterations)
@@ -816,7 +816,7 @@ namespace CoreAI.Infrastructure.Llm
                 bool unboundToolsRequested = toolsDeclared && aiTools.Count == 0;
                 // WHY: failed local binding does not change the endpoint protocol or authorize parsing prose.
                 bool interpretProseAsToolCalls = toolsDeclared && InterpretsProseAsToolCalls(request);
-                // Удерживаем прозу ровно тогда, когда разбираем её как вызовы, — другого повода нет.
+                // Hold the prose back exactly when we parse it as calls - there is no other reason to.
                 bool hybridToolJsonHold = interpretProseAsToolCalls;
                 bool streamLiveVisibleText = !hybridToolJsonHold;
                 int hybridRawExclusiveEndEmitted = 0;

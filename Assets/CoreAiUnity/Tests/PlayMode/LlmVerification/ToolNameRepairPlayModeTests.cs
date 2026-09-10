@@ -87,7 +87,7 @@ namespace CoreAI.Tests.PlayMode
             public bool EnableHttpDebugLogging => false;
             public IRequestHeaderProvider? HeaderProvider => null;
         }
-        // Тест 1: wrong casing → repair → tool executed → final answer from real LLM
+        // Test 1: wrong casing -> repair -> tool executed -> final answer from real LLM
         // =========================================================================
 
         [UnityTest]
@@ -141,7 +141,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         // =========================================================================
-        // Тест 2: unknown tool → error fed back → real LLM self-corrects
+        // Test 2: unknown tool -> error fed back -> real LLM self-corrects
         // =========================================================================
 
         [UnityTest]
@@ -204,7 +204,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         // =========================================================================
-        // Тест 3: mixed-case tool in text with prefix → repair + text preserved
+        // Test 3: mixed-case tool in text with prefix -> repair + text preserved
         // =========================================================================
 
         [UnityTest]

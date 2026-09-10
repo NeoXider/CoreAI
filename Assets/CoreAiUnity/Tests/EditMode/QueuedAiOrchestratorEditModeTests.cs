@@ -219,7 +219,7 @@ namespace CoreAI.Tests.EditMode
                     Gates.Add(gate);
                 }
 
-                // Ждём, пока тест "откроет ворота" или CancellationToken сработает
+                // Wait until the test "opens the gate" or the CancellationToken fires
                 using CancellationTokenRegistration reg = cancellationToken.Register(() =>
                 {
                     try
@@ -265,7 +265,7 @@ namespace CoreAI.Tests.EditMode
 
             public async Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
             {
-                // Ждём стартовый сигнал (только первый раз или всегда — зависит от теста)
+                // Wait for the start signal (only the first time, or every time - depends on the test)
                 await StartGate.Task;
 
                 cancellationToken.ThrowIfCancellationRequested();
@@ -487,8 +487,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Внутренний оркестратор, который падает заданным исключением — сразу либо (при
-        /// <see cref="WaitForCancellation"/>) только после того, как его токен отменили.
+        /// An inner orchestrator that fails with a given exception, either immediately or (with
+        /// <see cref="WaitForCancellation"/>) only after its token has been cancelled.
         /// </summary>
         private sealed class FaultingOrchestrator : IAiOrchestrationService
         {
@@ -536,8 +536,8 @@ namespace CoreAI.Tests.EditMode
                     return;
                 }
 
-                // WHY: Ждём отмену БЕЗ броска OperationCanceledException: проверяется, как очередь
-                // классифицирует именно то исключение, которое бросит внутренний слой поверх отмены.
+                // WHY: wait for the cancellation WITHOUT throwing OperationCanceledException: what is under test is
+                // how the queue classifies exactly the exception the inner layer throws on top of the cancellation.
                 TaskCompletionSource<bool> cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 using CancellationTokenRegistration registration =
                     cancellationToken.Register(() => cancelled.TrySetResult(true));
@@ -609,20 +609,20 @@ namespace CoreAI.Tests.EditMode
         #endregion
 
         // ──────────────────────────────────────────────────────────
-        // Тест 1: Приоритет — задача с высоким Priority выполняется раньше
+        // Test 1: priority - a task with a high Priority runs earlier
         // ──────────────────────────────────────────────────────────
 
         [Test]
         public async Task Priority_HigherPriorityTask_ExecutesFirst()
         {
-            // Arrange: MaxConcurrent = 1, чтобы очередь накапливалась
+            // Arrange: MaxConcurrent = 1 so the queue builds up
             RecordingOrchestrator inner = new();
             QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
 
-            // Первая задача — занимает единственный слот
+            // The first task takes the only slot
             Task blocker = queue.RunTaskAsync(new AiTaskRequest { Hint = "blocker", Priority = 0 });
 
-            // Пока blocker выполняется, добавляем 3 задачи с разными приоритетами
+            // While the blocker runs, add 3 tasks with different priorities
             Task low = queue.RunTaskAsync(new AiTaskRequest { Hint = "low", Priority = 1 });
             Task high = queue.RunTaskAsync(new AiTaskRequest { Hint = "high", Priority = 10 });
             Task mid = queue.RunTaskAsync(new AiTaskRequest { Hint = "mid", Priority = 5 });
@@ -632,31 +632,31 @@ namespace CoreAI.Tests.EditMode
             await WaitUntilAsync(() => inner.Gates.Count == 1,
                 "Only blocker should start while the remaining work is queued.");
 
-            // Act: завершаем blocker → очередь начинает pump
-            Assert.AreEqual(1, inner.Gates.Count, "Только blocker должен был начать выполнение");
+            // Act: finish the blocker so the queue starts pumping
+            Assert.AreEqual(1, inner.Gates.Count, "Only the blocker should have started running");
             inner.Gates[0].TrySetResult(null);
             await WaitUntilAsync(() => inner.Gates.Count >= 2,
                 "After blocker the highest-priority task must start.");
 
-            // high (priority=10) должен выполниться следующим
-            Assert.GreaterOrEqual(inner.Gates.Count, 2, "После blocker должна начаться следующая задача");
-            Assert.AreEqual("high", inner.ExecutionLog[1], "Задача с наивысшим приоритетом должна идти следующей");
+            // high (priority=10) must run next
+            Assert.GreaterOrEqual(inner.Gates.Count, 2, "The next task must start after the blocker");
+            Assert.AreEqual("high", inner.ExecutionLog[1], "The highest-priority task must go next");
 
-            // Завершаем high → mid должен быть следующим
+            // Finish high, so mid must be next
             inner.Gates[1].TrySetResult(null);
             await WaitUntilAsync(() => inner.Gates.Count >= 3,
                 "After high-priority work the middle-priority task must start.");
 
             Assert.GreaterOrEqual(inner.Gates.Count, 3);
-            Assert.AreEqual("mid", inner.ExecutionLog[2], "Средний приоритет после высокого");
+            Assert.AreEqual("mid", inner.ExecutionLog[2], "Medium priority after high");
 
-            // Завершаем mid → low
+            // Finish mid, then low
             inner.Gates[2].TrySetResult(null);
             await WaitUntilAsync(() => inner.Gates.Count >= 4,
                 "After middle-priority work the low-priority task must start.");
 
             Assert.AreEqual(4, inner.ExecutionLog.Count);
-            Assert.AreEqual("low", inner.ExecutionLog[3], "Низкий приоритет последним");
+            Assert.AreEqual("low", inner.ExecutionLog[3], "Low priority last");
 
             // Cleanup
             inner.Gates[3].TrySetResult(null);
@@ -698,17 +698,17 @@ namespace CoreAI.Tests.EditMode
         }
 
         // ──────────────────────────────────────────────────────────
-        // Тест 2: CancellationScope — новая задача с тем же scope отменяет предыдущую
+        // Test 2: CancellationScope - a new task with the same scope cancels the previous one
         // ──────────────────────────────────────────────────────────
 
         [Test]
         public async Task CancellationScope_SameScope_CancelsPreviousTask()
         {
-            // Arrange: MaxConcurrent = 2, чтобы обе задачи запустились
+            // Arrange: MaxConcurrent = 2 so both tasks start
             RecordingOrchestrator inner = new();
             QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 2 });
 
-            // Первая задача со scope "crafting"
+            // The first task with scope "crafting"
             Task first = queue.RunTaskAsync(new AiTaskRequest
             {
                 Hint = "first",
@@ -717,9 +717,9 @@ namespace CoreAI.Tests.EditMode
 
             await WaitUntilAsync(() => inner.Gates.Count == 1,
                 "Only blocker should be active before the latest scoped task is released.");
-            Assert.AreEqual(1, inner.Gates.Count, "Первая задача должна запуститься");
+            Assert.AreEqual(1, inner.Gates.Count, "The first task must start");
 
-            // Вторая задача с тем же scope — должна отменить первую
+            // The second task with the same scope must cancel the first one
             Task second = queue.RunTaskAsync(new AiTaskRequest
             {
                 Hint = "second",
@@ -728,7 +728,7 @@ namespace CoreAI.Tests.EditMode
 
             await WaitUntilAsync(() => inner.Gates.Count == 2,
                 "Second same-scope turn must start when a concurrent slot is available.");
-            Assert.AreEqual(2, inner.Gates.Count, "Вторая задача тоже должна запуститься (MaxConcurrent=2)");
+            Assert.AreEqual(2, inner.Gates.Count, "The second task must start as well (MaxConcurrent=2)");
 
             await WaitUntilAsync(() => first.IsCanceled,
                 "The previous same-scope turn must observe cancellation.");
@@ -736,7 +736,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(first.IsCanceled,
                 "Previous active task with the same CancellationScope must be cancelled, not merely completed.");
 
-            // Cleanup: завершаем вторую
+            // Cleanup: finish the second one
             inner.Gates[1].TrySetResult(null);
             await second;
         }
@@ -1667,7 +1667,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         // ──────────────────────────────────────────────────────────
-        // Тест 3: MaxConcurrent — не более N задач одновременно
+        // Test 3: MaxConcurrent - no more than N tasks at a time
         // ──────────────────────────────────────────────────────────
 
         [Test]
@@ -1677,7 +1677,7 @@ namespace CoreAI.Tests.EditMode
             RecordingOrchestrator inner = new();
             QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 2 });
 
-            // Запускаем 4 задачи
+            // Start 4 tasks
             Task t1 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t1" });
             Task t2 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t2" });
             Task t3 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t3" });
@@ -1686,28 +1686,28 @@ namespace CoreAI.Tests.EditMode
             await WaitUntilAsync(() => inner.Gates.Count == 2,
                 "Exactly two tasks must start at MaxConcurrent=2.");
 
-            // Assert: только 2 задачи должны начать выполнение
+            // Assert: only 2 tasks may start running
             Assert.AreEqual(2, inner.Gates.Count,
-                "MaxConcurrent=2: только 2 задачи должны начать выполняться одновременно");
+                "MaxConcurrent=2: only 2 tasks may start running at the same time");
             Assert.AreEqual("t1", inner.ExecutionLog[0]);
             Assert.AreEqual("t2", inner.ExecutionLog[1]);
 
-            // Завершаем первую — третья должна начаться
+            // Finish the first one, so the third must start
             inner.Gates[0].TrySetResult(null);
             await WaitUntilAsync(() => inner.Gates.Count == 3,
                 "Third task must start when the first slot is released.");
 
             Assert.AreEqual(3, inner.Gates.Count,
-                "После завершения первой задачи третья должна начаться");
+                "The third task must start once the first one has finished");
             Assert.AreEqual("t3", inner.ExecutionLog[2]);
 
-            // Завершаем вторую — четвёртая должна начаться
+            // Finish the second one, so the fourth must start
             inner.Gates[1].TrySetResult(null);
             await WaitUntilAsync(() => inner.Gates.Count == 4,
                 "Fourth task must start when the second slot is released.");
 
             Assert.AreEqual(4, inner.Gates.Count,
-                "После завершения второй задачи четвёртая должна начаться");
+                "The fourth task must start once the second one has finished");
             Assert.AreEqual("t4", inner.ExecutionLog[3]);
 
             // Cleanup
@@ -1717,7 +1717,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         // ──────────────────────────────────────────────────────────
-        // Тест 4: CancelTasks — отменяет текущие и удаляет из очереди задачи указанного scope
+        // Test 4: CancelTasks - cancels the running tasks of the given scope and drops that scope from the queue
         // ──────────────────────────────────────────────────────────
 
         [Test]
@@ -1727,19 +1727,19 @@ namespace CoreAI.Tests.EditMode
             RecordingOrchestrator inner = new();
             QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
 
-            // Задача 1 (active)
+            // Task 1 (active)
             Task t1 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t1", CancellationScope = "NPC1" });
 
-            // Задача 2 (pending, другой scope)
+            // Task 2 (pending, a different scope)
             Task t2 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t2", CancellationScope = "NPC2" });
 
             await WaitUntilAsync(() => inner.Gates.Count == 1,
                 "Only NPC1 should be active before scoped cancellation.");
 
-            // Assert: только t1 стартовала
+            // Assert: only t1 started
             Assert.AreEqual(1, inner.Gates.Count);
 
-            // Act: Отменяем все задачи для NPC1
+            // Act: cancel every task for NPC1
             queue.CancelTasks("NPC1");
             using (CancellationTokenSource wait = new(TimeSpan.FromSeconds(10)))
             {
@@ -1750,15 +1750,15 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.IsTrue(t1.IsCompleted,
-                $"t1 должна завершиться после CancelTasks (status={t1.Status}).");
-            // t1 должна быть отменена (IsCanceled)
+                $"t1 must complete after CancelTasks (status={t1.Status}).");
+            // t1 must be cancelled (IsCanceled)
             Assert.IsTrue(t1.IsCanceled,
-                $"t1 (active) должна быть отменена (status={t1.Status}, fault={(t1.IsFaulted ? t1.Exception?.GetBaseException().Message : null)}).");
+                $"t1 (active) must be cancelled (status={t1.Status}, fault={(t1.IsFaulted ? t1.Exception?.GetBaseException().Message : null)}).");
 
-            // t2 (NPC2) должна была начать выполняться, так как слот освободился.
+            // t2 (NPC2) must have started running, because a slot became free.
             await WaitUntilAsync(() => inner.Gates.Count == 2,
                 "NPC2 must start after cancelling active NPC1.");
-            Assert.AreEqual(2, inner.Gates.Count, "t2 (NPC2) должна стартовать после отмены NPC1");
+            Assert.AreEqual(2, inner.Gates.Count, "t2 (NPC2) must start once NPC1 has been cancelled");
             Assert.AreEqual("t2", inner.ExecutionLog[1]);
 
             // Cleanup
@@ -2055,8 +2055,8 @@ namespace CoreAI.Tests.EditMode
                 "A streaming request rejected by admission control gets exactly one terminal chunk.");
             Assert.IsTrue(chunks[0].IsDone);
             Assert.AreEqual(LlmErrorCode.BackendUnavailable, chunks[0].ErrorCode);
-            // WHY: Текст чанка показывается в пузыре чата как есть. Внутренний actorId и MaxPending —
-            // для лога, а не для ученика.
+            // WHY: the chunk text is shown in the chat bubble as-is. The internal actorId and MaxPending are for the
+            // log, not for the learner.
             Assert.IsNotEmpty(chunks[0].Error);
             Assert.That(chunks[0].Error, Does.Not.Contain("MaxPending"));
             Assert.That(chunks[0].Error, Does.Not.Contain("stream-overflow-actor"));
@@ -2070,13 +2070,13 @@ namespace CoreAI.Tests.EditMode
         }
 
         // ──────────────────────────────────────────────────────────
-        // Классификация сбоев внутреннего слоя: таймаут ≠ отмена, чужие формулировки — не в чат
+        // Classifying inner-layer failures: a timeout is not a cancellation, and foreign wording never reaches the chat
         // ──────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Дефект: LlmOperationTimeoutException наследует OperationCanceledException, и очередь
-        /// схлопывала её в TrySetCanceled(). Вызывающий получал голый TaskCanceledException, а презентация
-        /// говорила ребёнку «запрос остановлен» — будто он сам прервал ответ учителя.
+        /// Defect: LlmOperationTimeoutException derives from OperationCanceledException, and the queue collapsed it
+        /// into TrySetCanceled(). The caller got a bare TaskCanceledException, and presentation told the child "the
+        /// request was stopped", as if they had interrupted the teacher's answer themselves.
         /// </summary>
         [Test]
         public async Task LibraryTimeout_RunTaskAsync_SurfacesAsTimeout_NotAsUserStop()
@@ -2109,9 +2109,9 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Дефект: «отменой» считалось любое исключение, у которого где-то в цепочке InnerException лежит
-        /// OperationCanceledException. Транспортная ошибка с вложенным TaskCanceledException при живом
-        /// токене превращалась в «ученик остановил ответ».
+        /// Defect: "a cancellation" meant any exception with an OperationCanceledException somewhere in its
+        /// InnerException chain. A transport error with a nested TaskCanceledException, while the token was still
+        /// alive, turned into "the learner stopped the answer".
         /// </summary>
         [Test]
         public async Task TransportFaultWrappingCancellation_WithLiveToken_IsAFault_NotCancellation()
@@ -2169,9 +2169,9 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Дефект: сбой производителя потока уходил в чат как Error = ex.Message с ErrorCode = None.
-        /// Потребитель выбирает плашку по коду, None ни в одну категорию не входит — ребёнок видел текст
-        /// внутреннего исключения как реплику учителя.
+        /// Defect: a stream producer failure went into the chat as Error = ex.Message with ErrorCode = None. The
+        /// consumer picks the banner by the code, and None belongs to no category at all, so the child saw the text
+        /// of an internal exception as the teacher's reply.
         /// </summary>
         [Test]
         public async Task StreamProducerFault_CarriesTypedCode_AndKeepsInternalMessageOutOfChat()
@@ -2220,8 +2220,8 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual(LlmErrorCode.RateLimited, chunks[0].ErrorCode);
                 Assert.AreEqual(429, chunks[0].HttpStatus);
                 Assert.AreEqual(7, chunks[0].RetryAfterSeconds);
-                // WHY: Message адаптера — строка для лога («HTTP error 429: …»); в пузырь чата уходит
-                // фраза для игрока без транспортного префикса.
+                // WHY: the adapter's Message is a string for the log ("HTTP error 429: ..."); what goes into the chat
+                // bubble is a phrase for the player, without the transport prefix.
                 Assert.IsNotEmpty(chunks[0].Error);
                 Assert.That(chunks[0].Error, Does.Not.StartWith("HTTP error"));
                 queue.Dispose();

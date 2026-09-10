@@ -41,10 +41,10 @@ namespace CoreAI.Chat
         KeepPosition = 2,
 
         /// <summary>
-        /// Поведение мессенджера: лента едет за новым содержимым, ПОКА читатель стоит у низа, и
-        /// перестаёт, как только он ушёл вверх. Безусловное <see cref="KeepPosition"/> оказалось
-        /// слишком строгим: ученик, только что отправивший сообщение, стоит внизу, и ответ вместе с
-        /// карточкой задания появлялся у него под кромкой экрана — то есть его будто и не было.
+        /// Messenger behaviour: the feed follows new content WHILE the reader stands at the bottom, and
+        /// stops the moment they move up. An unconditional <see cref="KeepPosition"/> turned out to be too
+        /// strict: a learner who has just sent a message IS at the bottom, and the answer together with the
+        /// task card appeared below the edge of their screen - that is, as if it had never arrived.
         /// </summary>
         FollowIfAtBottom = 3,
     }
@@ -692,12 +692,13 @@ namespace CoreAI.Chat
             // WHY: BusyStateChanged(false) is raised later by teardown and handlers may submit reentrantly.
             // Publish lifecycle ownership first so that submit is rejected before it can reach a provider.
             _lifecycleActive = false;
-            // WHY: единственная точка решения «обрывать ли ход». Раньше поколение сдвигалось на ЛЮБОМ
-            // выключении, а флаг проверялся только в отмене запроса — и хост, отключивший отмену, всё
-            // равно терял ответ: первый же чанк видел себя устаревшим, выходил из перечисления, сервис
-            // досрочно закрывал итератор оркестратора, а тот в finally записывал в историю только реплику
-            // ученика. При false ход остаётся владельцем поколения, запроса и busy-флагов: никто его не
-            // прерывал, значит он обязан дойти до конца и записаться — см. CancelsActiveRequestOnDisable.
+            // WHY: the single decision point for "should the turn be aborted". The generation used to move
+            // on ANY disable while the flag was checked only when cancelling the request - so a host that
+            // had turned cancellation off still lost the answer: the very first chunk saw itself as stale,
+            // left the enumeration, the service closed the orchestrator's iterator early, and the
+            // orchestrator's finally wrote only the student's own line into history. With false the turn
+            // stays the owner of the generation, the request and the busy flags: nobody interrupted it, so
+            // it is obliged to run to the end and be recorded - see CancelsActiveRequestOnDisable.
             if (CancelsActiveRequestOnDisable)
             {
                 bool invalidatedActiveTurn = InvalidateTurnOwnershipOnDisable();
@@ -750,28 +751,30 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Отменять ли активный запрос, когда панель выключается.
+        /// Whether the active request is cancelled when the panel is disabled.
         /// <para>
-        /// Пакетное значение — <c>true</c>: панель исчезла, ответ показывать некому. Ход становится
-        /// устаревшим (поколение сдвигается), запрос отменяется, busy-флаги сбрасываются здесь же.
+        /// The package default is <c>true</c>: the panel is gone, so there is nobody left to show the answer
+        /// to. The turn becomes stale (the generation moves on), the request is cancelled, and the busy
+        /// flags are reset right here.
         /// </para>
         /// <para>
-        /// Но у хоста, где чат — часть урока, выключение панели значит лишь «человек вышел из
-        /// фокуса» (в RedoSchool это Esc). Обрывать на этом ход учителя нельзя: собеседник ничего не
-        /// прерывал, а по возвращении он видел «ничего не ответили». Хост, у которого история живёт
-        /// вне панели, переопределяет свойство в <c>false</c> и получает ход, доигранный до конца:
-        /// <see cref="OnDisable"/> не трогает ни поколение, ни запрос, ни busy-флаги — ход остаётся
-        /// текущим, доходит до конца потока (ответ попадает в историю оркестратора и в кэш ленты роли),
-        /// вызывает <see cref="OnResponseReceived"/> и сам снимает busy в своём <c>finally</c>. Пока он
-        /// идёт, панель занята: новая реплика не отправится, учитель не будет перебит.
+        /// But on a host where the chat is part of a lesson, disabling the panel only means "the person
+        /// stepped out of focus" (in RedoSchool that is Esc). The teacher's turn must not be cut off over
+        /// that: the person on the other side interrupted nothing, yet on their return they were shown
+        /// "nothing was answered". A host whose history lives outside the panel overrides this property to
+        /// <c>false</c> and gets a turn played through to the end: <see cref="OnDisable"/> touches neither
+        /// the generation nor the request nor the busy flags - the turn stays the current one, runs to the
+        /// end of the stream (the answer reaches the orchestrator's history and the role's feed cache),
+        /// calls <see cref="OnResponseReceived"/> and clears busy itself in its own <c>finally</c>. While it
+        /// runs the panel is busy: no new message will be sent, and the teacher will not be interrupted.
         /// </para>
         /// <para>
-        /// Дерево UI при выключении всё равно отпускается (<see cref="ResetUiReferences"/>): ход после
-        /// этого рисовать некуда, и он не рисует. Когда дерево привязано заново (включение,
-        /// перезагрузка <c>PanelRenderer</c>), сегмент ответа, который стримится в этот момент, открывает
-        /// пузырь в новом дереве целиком — с начала сегмента, а не с хвоста. Уже показанные до
-        /// выключения сегменты (до границы инструментов) в новое дерево не переносятся: их вернёт
-        /// следующая гидрация из хранилища.
+        /// The UI tree is released on disable regardless (<see cref="ResetUiReferences"/>): after that the
+        /// turn has nowhere to draw, and it does not draw. Once the tree is bound again (re-enable, a
+        /// <c>PanelRenderer</c> reload), the answer segment being streamed at that moment opens a bubble in
+        /// the new tree in full - from the start of the segment, not from its tail. Segments already shown
+        /// before the disable (up to a tool boundary) are not carried over into the new tree: the next
+        /// hydration from the store brings them back.
         /// </para>
         /// </summary>
         protected virtual bool CancelsActiveRequestOnDisable => true;
@@ -3018,15 +3021,15 @@ namespace CoreAI.Chat
             // WHY: the bubbles THIS turn opened, tracked locally because _turnStreamingBubbles is reset by
             // whichever turn starts next — and an abandoned turn unwinds after that reset.
             List<Label> ownStreamingBubbles = new();
-            // Текст сегмента, который сейчас стримится в текущий пузырь (с момента его открытия).
-            // Нужен ровно для одного случая: дерево UI перепривязали посреди хода (панель выключили и
-            // включили, PanelRenderer перезагрузил документ) — пузырь отпущен, лента очищена гидрацией,
-            // а ответ продолжает идти. Тогда сегмент открывает пузырь в новом дереве с начала, а не
-            // хвостом без начала.
+            // The text of the segment currently streaming into the open bubble (since that bubble opened).
+            // Needed for exactly one case: the UI tree was re-bound mid-turn (the panel was disabled and
+            // re-enabled, PanelRenderer reloaded the document) - the bubble was released, the feed was
+            // cleared by hydration, and the answer keeps coming. The segment then opens a bubble in the new
+            // tree from its start, instead of a tail with no beginning.
             StringBuilder segmentRendered = new();
 
-            // Дописывает один видимый кусок в полный ответ и в пузырь на экране. Общий путь для чанков
-            // потока и для хвоста, который фильтр удерживал до конца потока.
+            // Appends one visible piece to the full response and to the bubble on screen. The shared path
+            // for stream chunks and for the tail the filter held back until the end of the stream.
             void AppendVisibleText(string visible, bool startsNewMessage)
             {
                 if (fullResponse.Length == 0)
@@ -3039,11 +3042,11 @@ namespace CoreAI.Chat
                     return;
                 }
 
-                // Явная граница из клиента: началась СЛЕДУЮЩАЯ реплика того же потока.
-                // Раньше границу ловила только эвристика по tool-progress подсказке
-                // (см. BufferedStreamingUseToolProgressHint выше), а её нет на нативном
-                // tool-calling — вторая реплика дописывалась в конец первой, и ученик
-                // читал слипшееся «Проверь себя:**Ход завершён…**» одним пузырём.
+                // An explicit boundary from the client: the NEXT message of the same stream has begun.
+                // The boundary used to be caught only by the tool-progress hint heuristic
+                // (see BufferedStreamingUseToolProgressHint above), and native tool calling has
+                // no such hint - the second message was appended to the end of the first, and the
+                // learner read the glued-together "Проверь себя:**Ход завершён…**" as one bubble.
                 if (startsNewMessage)
                 {
                     SealStreamingBubbleIfAny();
@@ -3076,9 +3079,9 @@ namespace CoreAI.Chat
                 // WHY: fullResponse keeps the complete text for history/handlers; only the
                 // rendered streaming label is capped (see AppendToStreaming).
                 string formatted = FormatResponseText(visible);
-                // Пузыри разъехались, но fullResponse уходит в историю и обработчикам
-                // одной строкой — там граница обязана остаться пустой строкой, иначе
-                // склейка вернётся при следующем показе той же истории.
+                // The bubbles have been split apart, but fullResponse goes to history and to the
+                // handlers as ONE string - the boundary there has to stay a blank line, otherwise
+                // the gluing returns the next time that same history is shown.
                 AppendStreamedMessage(fullResponse, formatted, startsNewMessage, joinScratch);
                 if (outcome != null) outcomeContentPending = true;
                 segmentRendered.Append(formatted);
@@ -3153,9 +3156,10 @@ namespace CoreAI.Chat
                             // (matches claude/cursor behaviour) instead of being appended to the bubble that
                             // was opened before the tools (which would leave tools below the answer).
                             SealStreamingBubbleIfAny();
-                            // WHY: сегмент до инструментов закончился; если пузыря уже нет (дерево
-                            // отпущено), запечатать нечего, и без сброса следующая проза после
-                            // инструментов открылась бы в новом дереве вместе с чужим началом.
+                            // WHY: the segment before the tools has ended; if the bubble is already gone
+                            // (the tree was released) there is nothing to seal, and without this reset the
+                            // next prose after the tools would open in the new tree carrying somebody
+                            // else's beginning.
                             segmentRendered.Clear();
                         }
 
@@ -3192,9 +3196,10 @@ namespace CoreAI.Chat
                     return null;
                 }
 
-                // WHY: фильтр удерживает хвост, похожий на начало тега («<», «<th»), пока следующий чанк
-                // не докажет обратное. В конце потока следующего чанка нет — без Flush ответ учителя
-                // «оператор сравнения: <» терял последний символ и в ленте, и в истории.
+                // WHY: the filter holds back a tail that looks like the start of a tag ("<", "<th") until
+                // the next chunk proves otherwise. At the end of the stream there is no next chunk - without
+                // Flush the teacher's answer "оператор сравнения: <" lost its last character both in the
+                // feed and in history.
                 AppendVisibleText(_thinkFilter.Flush(), false);
 
                 if (fullResponse.Length == 0)
@@ -4366,8 +4371,8 @@ namespace CoreAI.Chat
                 return;
             }
 
-            // WHY: следование за хвостом переоценивается на КАЖДОМ чанке. Ученик, отошедший вверх
-            // посреди ответа, тем самым перестал следовать — и лента обязана его отпустить.
+            // WHY: following the tail is re-evaluated on EVERY chunk. A learner who moved up in the middle
+            // of an answer has by that very act stopped following - and the feed must let them go.
             if (ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom && _readerFollowsBottom)
             {
                 _readerFollowsBottom = IsReaderAtBottom();
@@ -4384,12 +4389,14 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Дописывает очередной кусок речи в полный ответ хода. Само правило разделения реплик общее
-        /// для всех накопителей и живёт в <see cref="StreamedMessageJoiner"/> — здесь только вызов.
+        /// Appends the next piece of speech to the turn's full response. The message-separation rule itself
+        /// is shared by every accumulator and lives in <see cref="StreamedMessageJoiner"/> - this is only
+        /// the call.
         /// <para>
-        /// Пузыри на экране уже разъехались, но <c>fullResponse</c> уходит ОДНОЙ строкой в историю
-        /// роли и обработчикам ответа, поэтому разделитель нужен и тут: иначе склейка «Проверь
-        /// себя:**Ход завершён…**» всплывёт снова при следующем показе той же истории.
+        /// The bubbles on screen have already been split apart, but <c>fullResponse</c> goes to the role's
+        /// history and to the response handlers as ONE string, so the separator is needed here too:
+        /// otherwise the glued-together "Проверь себя:**Ход завершён…**" surfaces again the next time that
+        /// same history is shown.
         /// </para>
         /// </summary>
         internal static string AppendStreamedMessage(string fullResponse, string formatted, bool startsNewMessage) =>
@@ -4660,14 +4667,14 @@ namespace CoreAI.Chat
                 _ => true,
             };
 
-        /// <summary>Порог «лента у низа» в единицах прокрутки (пиксели контента).</summary>
+        /// <summary>The "feed is at the bottom" threshold, in scroller units (content pixels).</summary>
         private const float AtBottomEpsilon = 8f;
 
-        // WHY: где читатель стоял ДО вставки. После вставки высота контента уже выросла, и отличить
-        // «он внизу» от «он ушёл вверх» по самому скроллеру уже нельзя.
+        // WHY: where the reader stood BEFORE the insert. Afterwards the content height has already grown,
+        // and the scroller alone can no longer tell "they are at the bottom" from "they moved up".
         private bool _readerFollowsBottom = true;
 
-        /// <summary>Стоит ли лента у низа прямо сейчас.</summary>
+        /// <summary>Whether the feed stands at the bottom right now.</summary>
         protected bool IsReaderAtBottom()
         {
             Scroller vs = MessageScroll?.verticalScroller;
@@ -4680,19 +4687,20 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Запоминает место читателя перед добавлением строки. Зовётся ДО <c>MessageScroll.Add</c>:
-        /// после вставки ответ на этот вопрос уже недоступен.
+        /// Remembers the reader's position before a row is appended. Called BEFORE <c>MessageScroll.Add</c>:
+        /// once the row is inserted, the answer to that question is no longer available.
         /// </summary>
         private void RememberReaderPositionBeforeAppend() => _readerFollowsBottom = IsReaderAtBottom();
 
         /// <summary>
-        /// Учащийся действовал прямо в ленте — ответил на встроенную карточку, нажал кнопку внутри
-        /// сообщения, — и ждёт продолжения так же, как после отправки своего сообщения.
+        /// The learner acted inside the feed itself - answered an embedded card, pressed a button inside a
+        /// message - and is waiting for what comes next exactly as they would after sending a message.
         /// <para>
-        /// Такое действие не создаёт пузыря пользователя, поэтому обычный путь
-        /// <c>AppendMessageBubble(isUser: true)</c> его не ловит: флаг следования оставался тем, каким
-        /// был во время чтения карточки. Карточка выше ленты на целый экран — читатель почти никогда
-        /// не «у низа» в момент нажатия, и ответ приходил за пределами видимой области.
+        /// Such an action creates no user bubble, so the usual
+        /// <c>AppendMessageBubble(isUser: true)</c> path does not catch it: the follow flag stayed whatever
+        /// it had been while the card was being read. The card sits a whole screen above the bottom of the
+        /// feed, so the reader is almost never "at the bottom" at the moment they press it, and the answer
+        /// arrived outside the visible area.
         /// </para>
         /// </summary>
         public void FollowFeedAfterLearnerAction()
@@ -4702,7 +4710,7 @@ namespace CoreAI.Chat
             ScrollToBottom();
         }
 
-        /// <summary>Двигать ли вид под содержимое ассистента прямо сейчас.</summary>
+        /// <summary>Whether the view should be moved for assistant content right now.</summary>
         private bool ShouldMoveViewForAssistantContent() =>
             MovesViewForAssistantContent(ScrollAnchor, _readerFollowsBottom);
 

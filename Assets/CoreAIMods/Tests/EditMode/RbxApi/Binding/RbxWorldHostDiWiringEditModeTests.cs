@@ -601,8 +601,9 @@ end)",
 
                 outgoingRuntime.EmitEvent(actor, "probe");
                 outgoingRuntime.Tick(actor, 1d);
+                // WHY one Advance and no separate PumpHeartbeat: advancing the detached scheduler is what
+                // fires its Heartbeat phase, so this already exercises the torn-down world's pump.
                 Assert.DoesNotThrow(() => outgoingRbxApi.Scheduler.Advance(1d));
-                Assert.DoesNotThrow(() => outgoingRbxApi.PumpHeartbeat(1f));
                 network.RegisterActor("network-teardown-client");
                 network.EmitEvent(new RbxNetworkEventMessage(
                     outgoingRemote.Id,
@@ -621,8 +622,10 @@ end)",
                     "rejected-stale-runtime",
                     "return true",
                     persistToStore: false));
-                controller.CurrentRbxApi.PumpHeartbeat(1f);
-                controller.CurrentRbxApi.Scheduler.Advance(0d);
+                // WHY a single Advance is one frame: the published bindings fire Heartbeat from the
+                // scheduler's Heartbeat phase, so pumping as well would count the restarted mod's
+                // handler twice and this assertion could no longer tell "restarted once" from "twice".
+                controller.CurrentRbxApi.Scheduler.Advance(1d);
                 Assert.AreEqual("1", modData.Get("active-restored", "heartbeat_count"));
                 stableRuntime.EmitEvent(actor, "probe");
                 stableRuntime.Tick(actor, 0d);

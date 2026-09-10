@@ -3,35 +3,38 @@ using System.Text;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Собирает текст одного потока в связный ответ, разделяя РАЗНЫЕ реплики ассистента пустой строкой.
+    /// Assembles the text of one stream into a coherent answer, separating DIFFERENT assistant replies
+    /// with a blank line.
     /// <para>
-    /// Один поток несёт несколько реплик: после каждого раунда инструментов модель говорит заново, но
-    /// наружу это уезжает непрерывной чередой чанков. Пока в контракте не было
-    /// <see cref="LlmStreamChunk.StartsNewMessage"/>, накопители склеивали конец одной реплики с
-    /// началом другой встык, и на проде ученик читал «…Проверь себя:<b>Ход завершён — ждём ответ
-    /// ученика на карточке.</b>» — двоеточие вплотную к заглавной букве.
+    /// A single stream carries several replies: after every tool round the model speaks anew, yet what
+    /// leaves the client is one continuous run of chunks. Until
+    /// <see cref="LlmStreamChunk.StartsNewMessage"/> existed in the contract, accumulators glued the end of
+    /// one reply directly onto the start of another, and in production the learner read
+    /// "...Check yourself:<b>Turn complete - waiting for the learner's answer on the card.</b>" - a colon
+    /// flush against a capital letter.
     /// </para>
     /// <para>
-    /// <b>Правило живёт здесь и только здесь.</b> Оно нужно трём накопителям сразу — оркестратору
-    /// (история чата и <c>ApplyAiGameCommand</c>), панели чата (полный текст ответа) и потребителям
-    /// вне CoreAI. Когда каждый нёс свою копию, копии разошлись за один день: две считали накопитель
-    /// из одних пробелов «уже разделённым», третья дописывала в него пустую строку. Расхождение в
-    /// таком правиле не падает тестом, а тихо меняет то, что читает ребёнок.
+    /// <b>The rule lives here and only here.</b> Three accumulators need it at once - the orchestrator
+    /// (chat history and <c>ApplyAiGameCommand</c>), the chat panel (the full answer text) and consumers
+    /// outside CoreAI. When each carried its own copy, the copies diverged within a single day: two
+    /// treated an accumulator made of nothing but spaces as "already separated", the third appended a
+    /// blank line to it. A divergence in a rule like this does not fail a test, it quietly changes what
+    /// the child reads.
     /// </para>
     /// <para>
-    /// Граница берётся ТОЛЬКО из признака в чанке. Угадывать её по пунктуации нельзя: реплика вправе
-    /// закончиться двоеточием и вправе начаться со строчной буквы, поэтому любая эвристика ошибается
-    /// в обе стороны — и делает дефект невоспроизводимым.
+    /// The boundary comes ONLY from the marker on the chunk. Guessing it from punctuation is not an
+    /// option: a reply may legitimately end with a colon and legitimately begin with a lowercase letter,
+    /// so any heuristic errs in both directions - and makes the defect impossible to reproduce.
     /// </para>
     /// </summary>
     public static class StreamedMessageJoiner
     {
-        /// <summary>Реплики разделяет пустая строка: это абзац markdown, а не просто перенос.</summary>
+        /// <summary>Replies are separated by a blank line: that is a markdown paragraph, not just a break.</summary>
         public const int SeparatorNewlines = 2;
 
         /// <summary>
-        /// Дописывает очередной кусок текста к накопителю-строке. Без признака границы ведёт себя ровно
-        /// как прежняя конкатенация, поэтому подстановка безопасна на любом старом вызове.
+        /// Appends the next piece of text to a string accumulator. Without the boundary marker it behaves
+        /// exactly like the previous concatenation, so dropping it into any old call site is safe.
         /// </summary>
         public static string Append(string accumulated, string text, bool startsNewMessage)
         {
@@ -50,7 +53,7 @@ namespace CoreAI.Ai
                 : accumulated + text;
         }
 
-        /// <summary>Тот же контракт для накопителя-построителя.</summary>
+        /// <summary>The same contract for a StringBuilder accumulator.</summary>
         public static void Append(StringBuilder accumulated, LlmStreamChunk chunk)
         {
             if (accumulated == null || chunk == null || string.IsNullOrEmpty(chunk.Text))
@@ -60,9 +63,9 @@ namespace CoreAI.Ai
 
             if (chunk.StartsNewMessage && accumulated.Length > 0)
             {
-                // Снимок строки здесь не расточительство: граница случается раз на раунд инструментов,
-                // а не на каждый чанк. Цена — одно копирование хвоста хода; выигрыш — правило
-                // разделения не продублировано ещё раз под StringBuilder и не может разойтись.
+                // Snapshotting the string here is not wasteful: a boundary happens once per tool round,
+                // not per chunk. The cost is one copy of the turn's tail; the gain is that the separation
+                // rule is not duplicated once more for StringBuilder and cannot drift apart.
                 accumulated.Append(SeparatorFor(accumulated.ToString()));
             }
 
@@ -70,16 +73,16 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Чего не хватает до пустой строки. Дописывается ровно недостающее: реплика, уже
-        /// закончившаяся абзацем, не получает третьей пустой строки.
+        /// What is still missing for a blank line. Exactly the shortfall is appended: a reply that already
+        /// ended with a paragraph break does not get a third blank line.
         /// </summary>
         private static string SeparatorFor(string accumulated) =>
             new('\n', SeparatorNewlines - TrailingNewlines(accumulated));
 
         /// <summary>
-        /// Сколько переводов строки уже стоит в хвосте; пробелы, табы и <c>\r</c> хвост не прерывают.
-        /// Накопитель без содержательного текста считается «уже разделённым» — разделитель перед
-        /// первой репликой добавил бы только пустоту.
+        /// How many newlines already stand at the tail; spaces, tabs and <c>\r</c> do not break the tail.
+        /// An accumulator with no meaningful text counts as "already separated" - a separator before the
+        /// first reply would add nothing but emptiness.
         /// </summary>
         private static int TrailingNewlines(string accumulated)
         {

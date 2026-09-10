@@ -34,12 +34,13 @@ namespace CoreAI.Ai
         /// <summary>
         /// Appends the deterministic, role-wide tool contract used by the cacheable provider prefix.
         /// <para>
-        /// На нативном канале блок определений (имена, описания, <c>schema:</c> из
-        /// <see cref="ILlmTool.ParametersSchema"/>) НЕ печатается: определения уходят провайдеру в списке
-        /// инструментов запроса, сгенерированные из сигнатуры делегата. Второй, рукописный экземпляр в
-        /// системном префиксе расходился с ним и оплачивался токенами на каждом запросе — то же правило,
-        /// по которому диагностический <see cref="AppendToolContract"/> давно пропускает блок. Префикс
-        /// остаётся байт-стабильным: он зависит только от инструментов роли и от канала, а не от запроса.
+        /// On the native channel the definitions block (names, descriptions, <c>schema:</c> from
+        /// <see cref="ILlmTool.ParametersSchema"/>) is NOT printed: the definitions go to the provider in
+        /// the request's tool list, generated from the delegate's signature. A second, hand-written copy in
+        /// the system prefix drifted away from it and was paid for in tokens on every request - the same
+        /// rule under which the diagnostic <see cref="AppendToolContract"/> has long skipped the block. The
+        /// prefix stays byte-stable: it depends only on the role's tools and on the channel, not on the
+        /// request.
         /// </para>
         /// </summary>
         public static string AppendStableRoleToolContract(

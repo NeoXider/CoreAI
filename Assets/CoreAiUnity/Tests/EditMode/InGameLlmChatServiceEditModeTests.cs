@@ -99,7 +99,7 @@ namespace CoreAI.Tests.EditMode
             await service.SendPlayerMessageAsync("first");
             await service.SendPlayerMessageAsync("second");
 
-            // Второй запрос должен содержать историю (2 предыдущих + 1 новый = 3 сообщения)
+            // The second request must carry the history (2 previous + 1 new = 3 messages)
             Assert.AreEqual(3, llm.LastChatHistoryCount);
         }
 
@@ -133,7 +133,7 @@ namespace CoreAI.Tests.EditMode
             service.ClearHistory();
             await service.SendPlayerMessageAsync("msg2");
 
-            // После clear — только 1 сообщение (новый user message)
+            // After clear there is only 1 message (the new user message)
             Assert.AreEqual(1, llm.LastChatHistoryCount);
         }
 
@@ -146,12 +146,12 @@ namespace CoreAI.Tests.EditMode
         {
             StubLlmClient llm = new("reply");
             StubPromptProvider prompts = new("system");
-            // maxMessages=4 → максимум 2 пары (user+assistant)
+            // maxMessages=4 -> at most 2 pairs (user+assistant)
             InGameLlmChatService service = new(llm, prompts, 4);
 
             await service.SendPlayerMessageAsync("msg1");
             await service.SendPlayerMessageAsync("msg2");
-            await service.SendPlayerMessageAsync("msg3"); // должна вытеснить msg1
+            await service.SendPlayerMessageAsync("msg3"); // must push msg1 out
 
             Assert.AreEqual(2, service.HistoryPairCount, "Should keep only 2 pairs after trimming");
         }
@@ -163,8 +163,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SendPlayerMessageAsync_OverlappingRequests_SecondSeesFirstTurn()
         {
-            // FINDING-15: запросы, стартовавшие внахлёст, снимали снапшот истории до того,
-            // как первый ход был дописан — второй запрос не видел первую пару сообщений.
+            // FINDING-15: requests started while another was in flight took a snapshot of the history before
+            // the first turn had been written back, so the second request never saw the first pair of messages.
             BlockingStubLlmClient llm = new();
             StubPromptProvider prompts = new("system");
             InGameLlmChatService service = new(llm, prompts);
@@ -194,7 +194,7 @@ namespace CoreAI.Tests.EditMode
         {
             StubLlmClient llm = new("reply");
             StubPromptProvider prompts = new("system");
-            // Лимит 2 запроса в окне 60 секунд
+            // A limit of 2 requests in a 60 second window
             InGameLlmChatService service = new(llm, prompts, 24,
                 2,
                 60);
@@ -205,11 +205,11 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsTrue(r1.Ok);
             Assert.IsTrue(r2.Ok);
-            Assert.IsFalse(r3.Ok, "Третий запрос должен быть отклонён rate limiter'ом");
+            Assert.IsFalse(r3.Ok, "The third request must be rejected by the rate limiter");
             StringAssert.StartsWith("rate_limited", r3.Error,
-                "Ошибка должна содержать 'rate_limited' префикс");
+                "The error must carry the 'rate_limited' prefix");
             Assert.AreEqual(2, llm.CallCount,
-                "LLM не должен вызываться при срабатывании rate limiter'а");
+                "The LLM must not be called once the rate limiter fires");
         }
 
         [Test]
@@ -224,7 +224,7 @@ namespace CoreAI.Tests.EditMode
             for (int i = 0; i < 20; i++)
             {
                 LlmCompletionResult r = await service.SendPlayerMessageAsync("msg" + i);
-                Assert.IsTrue(r.Ok, $"Запрос {i} должен пройти, когда лимит = 0");
+                Assert.IsTrue(r.Ok, $"Request {i} must go through when the limit is 0");
             }
 
             Assert.AreEqual(20, llm.CallCount);
@@ -245,9 +245,9 @@ namespace CoreAI.Tests.EditMode
             LlmCompletionResult rejected = await service.SendPlayerMessageAsync("second");
             Assert.IsFalse(rejected.Ok);
 
-            // История не должна расти, т.к. второй запрос отклонён
+            // The history must not grow, because the second request was rejected
             Assert.AreEqual(1, service.HistoryPairCount,
-                "Отклонённый rate limiter'ом запрос не должен попадать в историю");
+                "A request rejected by the rate limiter must not land in the history");
         }
 
         [Test]
@@ -255,7 +255,7 @@ namespace CoreAI.Tests.EditMode
         {
             StubLlmClient llm = new("reply");
             StubPromptProvider prompts = new("system");
-            // 1 запрос в окне 1 секунда — слишком жёстко, но для теста скользящего окна достаточно
+            // 1 request in a 1 second window is far too strict, but it is enough to exercise the sliding window
             InGameLlmChatService service = new(llm, prompts, 24,
                 1,
                 1);
@@ -266,11 +266,11 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(first.Ok);
             Assert.IsFalse(blocked.Ok);
 
-            // Ждём больше окна, чтобы timestamp выпал из sliding window
+            // Wait longer than the window so the timestamp falls out of the sliding window
             await Task.Delay(1200);
 
             LlmCompletionResult allowed = await service.SendPlayerMessageAsync("msg3");
-            Assert.IsTrue(allowed.Ok, "После истечения окна запрос снова проходит");
+            Assert.IsTrue(allowed.Ok, "Once the window has passed the request goes through again");
         }
 
         #endregion

@@ -42,9 +42,10 @@ namespace CoreAI.Ai
         public int? ToolTimeoutMsOverride { get; set; }
 
         /// <summary>
-        /// Настраиваемый аналог <see cref="ILlmTool.IsMutating"/>: инструмент-делегат с побочным эффектом
-        /// (спавн, запись в сохранение, вызов сервера) объявляет его здесь и попадает в цепочку
-        /// сериализации мутаций, не превращаясь ради этого в класс. По умолчанию <c>false</c> — read-only.
+        /// The settable counterpart of <see cref="ILlmTool.IsMutating"/>: a delegate tool with a side
+        /// effect (a spawn, a save write, a server call) declares it here and joins the mutation
+        /// serialization chain without having to become a class for that. Defaults to <c>false</c>,
+        /// i.e. read-only.
         /// </summary>
         public bool IsMutating { get; set; }
 
@@ -89,16 +90,18 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Граница исключений тела делегата: всё, что вылетает из вызова (кроме отмены), становится
-        /// результатом <c>"Error: …"</c>, который модель может прочитать и исправить, а не сбоем запроса.
+        /// The exception boundary around the delegate body: anything thrown out of the invocation (other
+        /// than cancellation) becomes an <c>"Error: ..."</c> result the model can read and correct, rather
+        /// than a failure of the whole request.
         /// <para>
-        /// ПОЧЕМУ здесь нет классификации «привязка аргументов vs тело»: раньше она искала метод
-        /// делегата в стеке исключения, а под IL2CPP/WebGL фреймы срываются — тогда исключение ИЗ ТЕЛА
-        /// выглядело как сбой привязки, политика записывала «инструмент не вызывался», и декораторы
-        /// ретрая/фолбэка повторяли ход, который уже изменил мир. Теперь различение делает
-        /// <c>ToolExecutionPolicy</c> консервативно на границе вызова; всё, что
-        /// добралось сюда, по определению уже «вызов», и единственно безопасная трактовка — «тело
-        /// исполнялось». Поэтому граница одна для синхронных и асинхронных сбоев и не зависит от формы стека.
+        /// WHY there is no "argument binding vs body" classification here: it used to look for the
+        /// delegate's method in the exception's stack trace, and under IL2CPP/WebGL frames get stripped -
+        /// an exception FROM THE BODY then looked like a binding failure, the policy recorded "the tool
+        /// was never invoked", and the retry/fallback decorators replayed a turn that had already changed
+        /// the world. The distinction is now drawn conservatively by <c>ToolExecutionPolicy</c> at the
+        /// invocation boundary; anything that got this far is by definition already "an invocation", and
+        /// the only safe reading is "the body ran". That is why the boundary is one and the same for
+        /// synchronous and asynchronous failures and does not depend on the shape of the stack.
         /// </para>
         /// </summary>
         private sealed class DelegateExceptionBoundaryAIFunction : DelegatingAIFunction

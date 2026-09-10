@@ -500,7 +500,7 @@ namespace CoreAI.Tests.EditMode
                 "A terminal error chunk seen before abandonment is a real failure and must trip a threshold of 1.");
         }
 
-        // ---- Сбои по вине вызывающего, пришедшие ИСКЛЮЧЕНИЕМ (док обещал: никогда не размыкают) ----
+        // ---- Caller-side failures arriving as an EXCEPTION (the doc promised: these never open the breaker) ----
 
         [Test]
         public async Task ThrownAuthFailures_DoNotTripBreaker_AndPropagateUnchanged()
@@ -513,12 +513,12 @@ namespace CoreAI.Tests.EditMode
             {
                 inner.NextExceptions.Enqueue(new LlmClientException("HTTP error 401: expired", LlmErrorCode.AuthExpired, 401));
                 LlmClientException thrown = await CaptureExceptionAsync<LlmClientException>(() => breaker.CompleteAsync(Req()));
-                Assert.AreEqual(LlmErrorCode.AuthExpired, thrown.ErrorCode, "Классификация адаптера должна пережить предохранитель.");
-                Assert.AreEqual(401, thrown.HttpStatus, "HTTP-статус должен дойти до вызывающего.");
+                Assert.AreEqual(LlmErrorCode.AuthExpired, thrown.ErrorCode, "The adapter's classification must survive the breaker.");
+                Assert.AreEqual(401, thrown.HttpStatus, "The HTTP status must reach the caller.");
             }
 
             Assert.AreEqual("Closed", breaker.StateName,
-                "Три 401 подряд — проблема вызывающего, не здоровья бэкенда: предохранитель обязан остаться замкнутым.");
+                "Three 401s in a row are the caller's problem, not backend health: the breaker must stay closed.");
             Assert.AreEqual(3, inner.CallCount);
         }
 
@@ -533,9 +533,9 @@ namespace CoreAI.Tests.EditMode
             LlmClientException thrown = await CaptureExceptionAsync<LlmClientException>(() => breaker.CompleteAsync(Req()));
 
             Assert.AreEqual(LlmErrorCode.PaymentRequired, thrown.ErrorCode,
-                "402 нельзя перебрасывать как ProviderError: внешние retry/fallback сочтут его транзиентным и будут повторять.");
+                "402 must not be rethrown as ProviderError: outer retry/fallback would read it as transient and keep repeating it.");
             Assert.AreEqual(402, thrown.HttpStatus);
-            Assert.AreEqual("Closed", breaker.StateName, "Требуется оплата — не сбой бэкенда, порог 1 не должен сработать.");
+            Assert.AreEqual("Closed", breaker.StateName, "Payment required is not a backend failure, a threshold of 1 must not trip.");
         }
 
         [Test]
@@ -550,7 +550,7 @@ namespace CoreAI.Tests.EditMode
             await CaptureExceptionAsync<LlmClientException>(() => breaker.CompleteAsync(Req()));
             await CaptureExceptionAsync<LlmClientException>(() => breaker.CompleteAsync(Req()));
 
-            Assert.AreEqual("Open", breaker.StateName, "Транзиентные сбои исключением считаются так же, как результатом.");
+            Assert.AreEqual("Open", breaker.StateName, "Transient failures thrown as exceptions count exactly like the ones returned as results.");
         }
 
         [Test]
@@ -564,7 +564,7 @@ namespace CoreAI.Tests.EditMode
             InvalidOperationException thrown =
                 await CaptureExceptionAsync<InvalidOperationException>(() => breaker.CompleteAsync(Req()));
 
-            Assert.AreEqual("socket reset", thrown.Message, "Исходное исключение не должно подменяться обёрткой.");
+            Assert.AreEqual("socket reset", thrown.Message, "The original exception must not be swapped for a wrapper.");
             Assert.AreEqual("Open", breaker.StateName);
         }
 
@@ -584,10 +584,10 @@ namespace CoreAI.Tests.EditMode
             await CaptureExceptionAsync<LlmClientException>(() => breaker.CompleteAsync(Req()));
 
             Assert.AreEqual("Closed", breaker.StateName,
-                "Пробный запрос дошёл до бэкенда и получил ответ по вине вызывающего: бэкенд достижим, предохранитель замыкается.");
+                "The probe request reached the backend and got an answer that is the caller's fault: the backend is reachable, so the breaker closes.");
         }
 
-        // ---- Поток ----
+        // ---- Streaming ----
 
         [Test]
         public async Task Streaming_EmptyStream_IsAFailure_NotASuccess()
@@ -602,7 +602,7 @@ namespace CoreAI.Tests.EditMode
             await Drain(breaker.CompleteStreamingAsync(Req()));
 
             Assert.AreEqual("Open", breaker.StateName,
-                "Поток без единого чанка — бэкенд не ответил ничего; раньше это записывалось УСПЕХОМ.");
+                "A stream without a single chunk means the backend answered nothing; this used to be recorded as a SUCCESS.");
         }
 
         [Test]
@@ -617,7 +617,7 @@ namespace CoreAI.Tests.EditMode
             inner.NextStreams.Enqueue(Array.Empty<LlmStreamChunk>());
             await Drain(breaker.CompleteStreamingAsync(Req()));
 
-            Assert.AreEqual("Open", breaker.StateName, "Пустой поток после таймаута — второй сбой подряд, не сброс серии.");
+            Assert.AreEqual("Open", breaker.StateName, "An empty stream after a timeout is the second failure in a row, not a reset of the streak.");
         }
 
         [Test]
@@ -634,7 +634,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(chunks[0].IsDone);
             Assert.AreEqual(LlmErrorCode.PaymentRequired, chunks[0].ErrorCode);
             Assert.AreEqual(402, chunks[0].HttpStatus);
-            Assert.AreEqual("Closed", breaker.StateName, "402 в потоке — не сбой бэкенда.");
+            Assert.AreEqual("Closed", breaker.StateName, "A 402 inside a stream is not a backend failure.");
         }
 
         [Test]

@@ -161,12 +161,12 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("boom", replayed[0].Error);
         }
 
-        // ===================== ClearContext (без LifetimeScope — EditMode) =====================
+        // ===================== ClearContext (no LifetimeScope - EditMode) =====================
 
         [Test]
         public void ClearContext_WithoutScope_DoesNotThrow()
         {
-            // В EditMode нет CoreAILifetimeScope, ClearContext должен отработать молча
+            // EditMode has no CoreAILifetimeScope, so ClearContext must do its work silently
             Assert.DoesNotThrow(() =>
                 CoreAi.ClearContext("SomeRole", true, false));
         }
@@ -186,12 +186,12 @@ namespace CoreAI.Tests.EditMode
                 CoreAi.ClearContext("SomeRole", false, false));
         }
 
-        // ===================== StopAgent (без LifetimeScope — EditMode) =====================
+        // ===================== StopAgent (no LifetimeScope - EditMode) =====================
 
         [Test]
         public void StopAgent_WithoutScope_DoesNotThrow()
         {
-            // В EditMode нет оркестратора; вызов должен быть безопасным
+            // EditMode has no orchestrator; the call must still be safe to make
             Assert.DoesNotThrow(() => CoreAi.StopAgent("SomeRole"));
         }
 

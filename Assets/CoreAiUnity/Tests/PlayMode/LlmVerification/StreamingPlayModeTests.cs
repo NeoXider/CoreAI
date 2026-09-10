@@ -231,8 +231,8 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator Streaming_ThinkBlocks_StrippedFromResponse()
         {
-            // Модели могут писать think в <think> (content) либо отдельно как delta.reasoning_content;
-            // MeaiLlmClient/ThinkBlockStreamFilter убирают теги; HTTP-клиент не прокидывает reasoning в UI.
+            // Models may write their thinking inside <think> (content) or separately as delta.reasoning_content;
+            // MeaiLlmClient/ThinkBlockStreamFilter strip the tags; the HTTP client never forwards reasoning to the UI.
             LlmCompletionRequest request = new()
             {
                 AgentRoleId = "SmartChat",
@@ -246,8 +246,8 @@ namespace CoreAI.Tests.PlayMode
             Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None, chunks,
                 _ => { });
 
-            // Ожидание не меньше UnityWebRequest (RequestTimeoutSeconds) + запас: длинный reasoning_content
-            // съедает тот же wall-time, что и генерация, и тест не должен обрываться раньше HTTP.
+            // Wait at least as long as UnityWebRequest (RequestTimeoutSeconds) plus slack: a long reasoning_content
+            // eats the same wall-time as generation, and the test must not give up before HTTP does.
             float waitSec = 180f;
             CoreAISettingsAsset asset = CoreAISettingsAsset.Instance;
             if (asset != null)

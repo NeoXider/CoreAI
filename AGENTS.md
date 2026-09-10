@@ -29,12 +29,28 @@ player on device?"**
 - **Commits**: NEVER add `Co-Authored-By` or any AI-attribution trailers.
 - **TODO.md** is the living priority tracker; every fix wave updates it.
 - Every bug fix ships with a regression test; every feature ships with tests and docs.
-- **Language: English for all prose.** READMEs, `Docs/`, package docs, `TODO.md`/`PLAN.md` additions,
-  code comments (`///` XML docs, `// WHY:`), test names/messages/assert texts, and log strings are
-  written in English. Keep other languages only inside quoted upstream text. Legacy non-English prose
-  is migrated gradually when a file is touched for a real change — never as a standalone rewrite wave.
+- **Language: English for all prose, and it is enforced.** READMEs, `Docs/`, package docs,
+  `TODO.md`/`PLAN.md` additions, code comments (`///` XML docs, `// WHY:`), test names, assertion
+  messages, exception text and log strings are written in English.
+  The guard is `EnglishOnlyProseEditModeTests` (CoreAiUnity EditMode): it scans every shipped package
+  for Cyrillic and fails with the exact file and line.
+  The one exception is non-Latin text that is **quoted rather than written**, in two shapes: a string
+  literal that is the subject under test (token estimation, think-block filtering and response
+  sanitising all have to survive Cyrillic input — rewriting their data in English deletes the
+  coverage), and a **verbatim sample of observed model output** pasted into a comment as evidence for
+  the WHY around it (translate the sample and a piece of evidence becomes a paraphrase of one).
+  Such files go in the guard's `QuotedNonLatin` list **with a written reason**. The excuse is
+  mechanical and per line: every Cyrillic character on the line must sit inside quotes, so an
+  ordinary Russian comment in one of those files still fails.
+  This rule used to end with "legacy prose is migrated gradually, never as a standalone rewrite
+  wave". That sentence is why 99 files were still Russian on 2026-09-10, including the load-bearing
+  WHYs on the memory store and the streaming client: every wave had a better use for its time, so the
+  debt only grew, and the owner read a Russian comment in a package meant to ship to anyone. There is
+  no legacy allowance any more — the guard makes the question decidable when the file is written.
   Mirror rule: RedoSchool is a Russian-language project; when copying text or patterns between the
   repos, translate the language layer.
+  Not covered: `Docs/LocalBusinessPlans/` — the owner's own business documents, written for a
+  Russian-speaking reader and never shipped inside a package.
 
 ## Verification while the Unity editor holds the project lock
 

@@ -15,8 +15,9 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.AiMemory
 {
     /// <summary>
-    /// Что и сколько отрезал <see cref="FileAgentMemoryStore"/> у переписки одной роли, когда она упёрлась
-    /// в потолок. Ключ роли не передаётся: это может быть scoped-ключ ученика, а событие уходит в лог хоста.
+    /// What <see cref="FileAgentMemoryStore"/> cut from one role's conversation, and how much, once that
+    /// conversation hit its cap. The role key is not passed along: it may be a student's scoped key, and
+    /// this event goes to the host's log.
     /// </summary>
     public readonly struct AgentHistoryTrimmedEventArgs
     {
@@ -32,22 +33,22 @@ namespace CoreAI.Infrastructure.AiMemory
             MaxTranscriptEntries = maxTranscriptEntries;
         }
 
-        /// <summary>Сколько самых старых сообщений чата исчезло из истории этим усечением.</summary>
+        /// <summary>How many of the oldest chat messages this trim removed from the history.</summary>
         public int DroppedChatMessages { get; }
 
-        /// <summary>Сколько строк транскрипта (включая сообщения чата) исчезло этим усечением.</summary>
+        /// <summary>How many transcript rows (chat messages included) this trim removed.</summary>
         public int DroppedTranscriptEntries { get; }
 
-        /// <summary>Сколько сообщений чата осталось.</summary>
+        /// <summary>How many chat messages are left.</summary>
         public int RetainedChatMessages { get; }
 
-        /// <summary>Сколько строк транскрипта осталось.</summary>
+        /// <summary>How many transcript rows are left.</summary>
         public int RetainedTranscriptEntries { get; }
 
-        /// <summary>Действующий потолок сообщений чата.</summary>
+        /// <summary>The chat message cap in force.</summary>
         public int MaxChatHistoryMessages { get; }
 
-        /// <summary>Действующий потолок строк транскрипта.</summary>
+        /// <summary>The transcript row cap in force.</summary>
         public int MaxTranscriptEntries { get; }
     }
 
@@ -56,30 +57,32 @@ namespace CoreAI.Infrastructure.AiMemory
     /// Data is stored below <see cref="Application.persistentDataPath"/> in the CoreAI folder so it
     /// survives scene reloads and player restarts.
     /// <para>
-    /// <b>Раскладка на диске (v2).</b> На роль два файла: <c>&lt;stem&gt;.json</c> — документ памяти
-    /// (текст, версии, снимок системного промпта; переписывается целиком только при мутации памяти) и
-    /// <c>&lt;stem&gt;.history.jsonl</c> — переписка, по одной JSON-строке на запись. Сообщение чата и его
-    /// строка транскрипта — ОДНА запись с флагом <c>m</c>, а не две копии одного текста. Добавление сообщения
-    /// — это дозапись одной строки в конец, а не чтение-разбор-сериализация-замена всего файла. Файл старого
-    /// формата (переписка внутри документа памяти в полях <c>chatHistoryJson</c> /
-    /// <c>transcriptEntriesJson</c>) мигрируется при первом обращении к переписке роли.
+    /// <b>On-disk layout (v2).</b> Two files per role: <c>&lt;stem&gt;.json</c> is the memory document
+    /// (text, versions, system-prompt snapshot; rewritten in full only when memory is mutated), and
+    /// <c>&lt;stem&gt;.history.jsonl</c> is the conversation, one JSON line per record. A chat message and
+    /// its transcript row are ONE record carrying the <c>m</c> flag, not two copies of the same text.
+    /// Adding a message appends a single line at the end instead of read-parse-serialize-replace over the
+    /// entire file. A file in the old format (the conversation living inside the memory document in the
+    /// <c>chatHistoryJson</c> / <c>transcriptEntriesJson</c> fields) is migrated the first time the role's
+    /// conversation is touched.
     /// </para>
     /// <para>
-    /// <b>Потолки.</b> Переписка усекается до <c>maxChatHistoryMessages</c> сообщений чата и
-    /// <c>maxTranscriptEntries</c> строк транскрипта. Усечение видимо: событие <see cref="HistoryTrimmed"/>
-    /// на каждое усечение и запись в лог (первый раз для роли и далее при каждом уплотнении файла). Файл
-    /// уплотняется не на каждое сообщение, а когда в его голове накопилось <see cref="CompactionSlack"/>
-    /// уже отрезанных строк; при чтении лишние строки головы отбрасываются, поэтому читатели никогда не
-    /// видят больше потолка.
+    /// <b>Caps.</b> The conversation is trimmed down to <c>maxChatHistoryMessages</c> chat messages and
+    /// <c>maxTranscriptEntries</c> transcript rows. Trimming is visible: a <see cref="HistoryTrimmed"/>
+    /// event on every trim, plus a log line (the first time for a role, and from then on at every file
+    /// compaction). The file is compacted not on every message, but once <see cref="CompactionSlack"/>
+    /// already-trimmed lines have piled up at its head; on read the surplus head lines are discarded, so
+    /// readers never see more than the cap.
     /// </para>
     /// <para>
-    /// <b>Честность записи.</b> Стор различает «файла нет» (<see cref="AgentMemoryLoadStatus.NotFound"/>)
-    /// и «файл есть, но не читается» (<see cref="AgentMemoryLoadStatus.Failed"/>): атомарная мутация на
-    /// нечитаемом документе бросает <see cref="AgentMemoryLoadException"/> и НЕ перезаписывает его пустым.
-    /// Запись документа памяти не зависит от чтения старого файла, поэтому битый документ лечится первым же
-    /// <see cref="Save"/> или <see cref="Clear"/>; оборванная строка в файле переписки пропускается с
-    /// предупреждением и стирается при следующем уплотнении. <c>persistToDisk=false</c> означает «только в
-    /// этом процессе»: такая запись НИКОГДА не попадает на диск, в том числе при уплотнении.
+    /// <b>Honest writes.</b> The store tells "no file" (<see cref="AgentMemoryLoadStatus.NotFound"/>) apart
+    /// from "the file is there but unreadable" (<see cref="AgentMemoryLoadStatus.Failed"/>): an atomic
+    /// mutation over an unreadable document throws <see cref="AgentMemoryLoadException"/> and does NOT
+    /// overwrite it with an empty one. Writing the memory document does not depend on reading the old file,
+    /// so a corrupt document is healed by the very first <see cref="Save"/> or <see cref="Clear"/>; a
+    /// truncated line in the conversation file is skipped with a warning and erased at the next compaction.
+    /// <c>persistToDisk=false</c> means "in this process only": such a record NEVER reaches the disk, not
+    /// even during compaction.
     /// </para>
     /// <para>
     /// <b>WebGL.</b> <c>persistentDataPath</c> is the tab's in-memory filesystem; the ENGINE carries it
@@ -106,10 +109,10 @@ namespace CoreAI.Infrastructure.AiMemory
     public sealed class FileAgentMemoryStore : IAgentMemoryStore, IAgentMemoryLoadDiagnostics,
         IAtomicAgentMemoryStore, IConversationTranscriptStore, IDisposable
     {
-        /// <summary>Потолок сообщений чата по умолчанию.</summary>
+        /// <summary>Default chat message cap.</summary>
         public const int DefaultMaxChatHistoryMessages = 500;
 
-        /// <summary>Потолок строк транскрипта по умолчанию.</summary>
+        /// <summary>Default transcript row cap.</summary>
         public const int DefaultMaxTranscriptEntries = 2000;
 
         /// <summary>
@@ -130,15 +133,16 @@ namespace CoreAI.Infrastructure.AiMemory
         private static readonly ConcurrentDictionary<string, long> HistoryOrders =
             new(StringComparer.Ordinal);
 
-        /// <summary>Документ памяти роли на диске (JsonUtility; имена полей — контракт файла).</summary>
+        /// <summary>The role's on-disk memory document (JsonUtility; the field names are the file contract).</summary>
         [Serializable]
         private sealed class Persisted
         {
             public string lastSystemPrompt;
             public string memory;
 
-            // WHY: поля формата v1 — переписка жила внутри документа памяти. Читаются только ради миграции
-            // в <stem>.history.jsonl и после неё всегда пустые; писать в них нельзя.
+            // WHY: v1-format fields - the conversation used to live inside the memory document. They are
+            // read only to migrate it into <stem>.history.jsonl and are always empty afterwards; never
+            // write to them.
             public string chatHistoryJson;
             public string transcriptEntriesJson;
 
@@ -153,7 +157,7 @@ namespace CoreAI.Infrastructure.AiMemory
             public int maxMemoryVersions;
         }
 
-        /// <summary>Одна строка файла переписки. Короткие имена — это формат файла, не стиль.</summary>
+        /// <summary>One line of the conversation file. The short names are the file format, not a style choice.</summary>
         private sealed class HistoryLine
         {
             [JsonProperty("k")] public int Kind;
@@ -165,57 +169,56 @@ namespace CoreAI.Infrastructure.AiMemory
             // Unlike Unix seconds, this distinguishes concurrent turns and session-only rows.
             [JsonProperty("o", DefaultValueHandling = DefaultValueHandling.Ignore)] public long Order;
 
-            /// <summary>Строка одновременно является сообщением плоской истории чата.</summary>
+            /// <summary>The row is at the same time a message of the flat chat history.</summary>
             [JsonProperty("m")] public bool IsChatMessage;
 
             /// <summary>
-            /// Только в этом процессе (<c>persistToDisk=false</c>): строка живёт в памяти и никогда не
-            /// пишется в файл. Не сериализуется — на диске таких строк не бывает по определению.
+            /// In this process only (<c>persistToDisk=false</c>): the row lives in memory and is never
+            /// written to the file. Not serialized - by definition no such row exists on disk.
             /// </summary>
             [JsonIgnore] public bool Persisted = true;
             [JsonIgnore] public bool PendingWrite;
 
             /// <summary>
-            /// Строка входит в окно чата (последние <c>maxChatHistoryMessages</c> сообщений). Вычисляется при
-            /// загрузке заново, поэтому не сериализуется.
+            /// The row is inside the chat window (the last <c>maxChatHistoryMessages</c> messages).
+            /// Recomputed on every load, hence not serialized.
             /// </summary>
             [JsonIgnore] public bool InChatView;
 
-            /// <summary>Строка входит в окно транскрипта (последние <c>maxTranscriptEntries</c> строк).</summary>
+            /// <summary>The row is inside the transcript window (the last <c>maxTranscriptEntries</c> rows).</summary>
             [JsonIgnore] public bool InTranscriptView;
         }
 
-        /// <summary>Загруженная переписка одной роли плюс учёт того, что лежит в её файле.</summary>
+        /// <summary>One role's loaded conversation plus the bookkeeping of what its file holds.</summary>
         private sealed class RoleHistory
         {
             public readonly List<HistoryLine> Lines = new();
 
-            /// <summary>Сколько сообщений чата сейчас в окне чата.</summary>
+            /// <summary>How many chat messages are currently inside the chat window.</summary>
             public int ChatCount;
 
-            /// <summary>Сколько строк сейчас в окне транскрипта.</summary>
+            /// <summary>How many rows are currently inside the transcript window.</summary>
             public int TranscriptCount;
 
-            /// <summary>Сколько строк в <see cref="Lines"/> предназначено для диска.</summary>
+            /// <summary>How many rows in <see cref="Lines"/> are meant for the disk.</summary>
             public int PersistedCount;
 
-            /// <summary>Сколько строк физически лежит в файле, включая уже отрезанные и нечитаемые.</summary>
+            /// <summary>How many rows physically sit in the file, already-trimmed and unreadable ones included.</summary>
             public int FileLineCount;
 
             /// <summary>
-            /// Файл надо переписать из памяти при следующей записи: в нём есть нечитаемые строки, либо
-            /// дозапись не удалась и содержимое файла расходится с памятью.
+            /// The file must be rewritten from memory on the next write: it holds unreadable lines, or an
+            /// append failed and the file's contents diverge from memory.
             /// </summary>
             public bool NeedsRewrite;
 
             /// <summary>
-            /// Файл существует, но прочитать его не удалось (ввод-вывод, не разбор). Его содержимое неизвестно,
-            /// поэтому переписывать его из памяти нельзя — это стёрло бы то, чего мы не видели. Дозапись
-            /// безопасна.
+            /// The file exists, but reading it failed (I/O, not parsing). Its contents are unknown, so it
+            /// must not be rewritten from memory - that would erase what we never saw. Appending is safe.
             /// </summary>
             public bool LoadFailed;
 
-            /// <summary>Первое усечение для роли уже отмечено в логе.</summary>
+            /// <summary>The role's first trim has already been noted in the log.</summary>
             public bool TrimLogged;
             public long Revision;
         }
@@ -238,9 +241,9 @@ namespace CoreAI.Infrastructure.AiMemory
         /// Serializes all file and in-memory cache access for this store instance so the async
         /// thread-pool offloads cannot race the synchronous (main-thread) interface methods.
         /// SemaphoreSlim is not reentrant, so the gate is acquired only in public entry points;
-        /// private *Core helpers assume the gate is already held. Под этим замком нельзя ждать ничего,
-        /// что по-настоящему уступает поток: на WebGL синхронные методы берут его блокирующим
-        /// <c>Wait()</c>, и ожидание браузерного колбэка под замком остановило бы единственный поток.
+        /// private *Core helpers assume the gate is already held. Nothing that truly yields the thread may
+        /// be awaited under this lock: on WebGL the synchronous methods take it with a blocking
+        /// <c>Wait()</c>, and waiting for a browser callback under the lock would stall the single thread.
         /// <para>
         /// WHY every <c>await</c> that acquires or releases <see cref="_gate"/> or a mutation gate (see
         /// <see cref="GetMutationGate"/>) uses <c>.ConfigureAwait(false)</c>: without it, a continuation
@@ -268,8 +271,8 @@ namespace CoreAI.Infrastructure.AiMemory
         /// Optional override for the storage directory (used by tests); defaults to the CoreAI
         /// agent-memory folder under <see cref="Application.persistentDataPath"/>.
         /// </param>
-        /// <param name="maxChatHistoryMessages">Потолок сообщений чата на роль.</param>
-        /// <param name="maxTranscriptEntries">Потолок строк транскрипта на роль.</param>
+        /// <param name="maxChatHistoryMessages">Per-role chat message cap.</param>
+        /// <param name="maxTranscriptEntries">Per-role transcript row cap.</param>
         public FileAgentMemoryStore(ILog log = null, string rootDirectory = null,
             int maxChatHistoryMessages = DefaultMaxChatHistoryMessages,
             int maxTranscriptEntries = DefaultMaxTranscriptEntries)
@@ -284,20 +287,21 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Срабатывает после каждого усечения переписки (уже вне внутренних замков стора, так что из
-        /// обработчика можно обращаться к стору). Дополняет запись в логе, а не заменяет её.
+        /// Raised after every conversation trim, already outside the store's internal locks, so a handler
+        /// is free to call back into the store. It complements the log line rather than replacing it.
         /// </summary>
         public event Action<AgentHistoryTrimmedEventArgs> HistoryTrimmed;
 
-        /// <summary>Действующий потолок сообщений чата.</summary>
+        /// <summary>The chat message cap in force.</summary>
         public int MaxChatHistoryMessages => _maxChatHistoryMessages;
 
-        /// <summary>Действующий потолок строк транскрипта.</summary>
+        /// <summary>The transcript row cap in force.</summary>
         public int MaxTranscriptEntries => _maxTranscriptEntries;
 
         /// <summary>
-        /// Сколько уже отрезанных строк может накопиться в голове файла переписки до его уплотнения.
-        /// Меньше — чаще полная перезапись, больше — больше мусора на диске; читатели мусор не видят.
+        /// How many already-trimmed lines may pile up at the head of the conversation file before it is
+        /// compacted. Lower means more full rewrites, higher means more junk on disk; readers never see
+        /// that junk.
         /// </summary>
         internal int CompactionSlack => Math.Max(16, _maxTranscriptEntries / 8);
 
@@ -376,7 +380,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// Async variant of <see cref="TryLoad"/> that performs the file read on the thread pool.
         /// Returns the loaded state, or <c>null</c> when no memory exists for the role.
         /// </summary>
-        /// <exception cref="AgentMemoryLoadException">Документ есть, но прочитать его не удалось.</exception>
+        /// <exception cref="AgentMemoryLoadException">The document exists, but reading it failed.</exception>
         public async Task<AgentMemoryState> TryLoadAsync(string roleId)
         {
             await _gate.WaitAsync().ConfigureAwait(false);
@@ -426,14 +430,15 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                // WHY: файл ЕСТЬ, а что в нём — неизвестно. Это не «памяти нет»: вызывающий, который
-                // примет пустое за истину и сохранит, сотрёт документ и все его версии.
+                // WHY: the file IS there, but what is inside it is unknown. This is not "no memory": a
+                // caller that takes emptiness for the truth and saves would erase the document and every
+                // version it holds.
                 LogStorageFailure("load memory", ex);
                 return AgentMemoryLoadStatus.Failed;
             }
         }
 
-        /// <summary>Читает документ памяти; любой дефект файла — исключение, а не пустой документ.</summary>
+        /// <summary>Reads the memory document; any defect in the file is an exception, not an empty document.</summary>
         private static Persisted ReadPersisted(string path)
         {
             string json = File.ReadAllText(path);
@@ -448,9 +453,10 @@ namespace CoreAI.Infrastructure.AiMemory
 
         /// <inheritdoc />
         /// <remarks>
-        /// Best-effort по контракту <c>void</c>: сбой записи уходит в лог, исключение не пробрасывается —
-        /// оркестратор зовёт этот метод ради кэша промпта посреди хода, и падение диска не должно ронять
-        /// ход. Кому нужен результат записи — <see cref="SaveAsync"/> или <see cref="MutateAsync{TResult}"/>.
+        /// Best-effort, as its <c>void</c> contract implies: a write failure goes to the log and no exception
+        /// is propagated - the orchestrator calls this method for the prompt cache in the middle of a turn,
+        /// and a disk failure must not bring that turn down. Callers who need the write's outcome use
+        /// <see cref="SaveAsync"/> or <see cref="MutateAsync{TResult}"/>.
         /// </remarks>
         public void Save(string roleId, AgentMemoryState state)
         {
@@ -482,7 +488,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// Async variant of <see cref="Save"/> that performs the atomic file write on the thread pool and
         /// returns only after the write is durable (on WebGL — confirmed by the browser).
         /// </summary>
-        /// <exception cref="IOException">Запись не удалась или не подтверждена.</exception>
+        /// <exception cref="IOException">The write failed or was not confirmed.</exception>
         public async Task SaveAsync(string roleId, AgentMemoryState state, CancellationToken cancellationToken = default)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
@@ -509,13 +515,14 @@ namespace CoreAI.Infrastructure.AiMemory
 
         /// <inheritdoc />
         /// <remarks>
-        /// Выполняет контракт буквально: результат мутации лежит на диске (на WebGL — подтверждён
-        /// браузером) ДО того, как метод вернёт результат. Любой сбой — исключение, не тихий лог.
+        /// Honours the contract literally: the mutation's result is on disk (on WebGL - confirmed by the
+        /// browser) BEFORE the method returns that result. Any failure is an exception, not a quiet log line.
         /// </remarks>
         /// <exception cref="AgentMemoryLoadException">
-        /// Документ роли существует, но не читается: мутатор не запускается, документ не трогается.
+        /// The role's document exists but is unreadable: the mutator does not run and the document is left
+        /// untouched.
         /// </exception>
-        /// <exception cref="IOException">Запись не удалась или не подтверждена.</exception>
+        /// <exception cref="IOException">The write failed or was not confirmed.</exception>
         public async Task<TResult> MutateAsync<TResult>(
             string roleId,
             Func<AgentMemoryState, TResult> mutator,
@@ -539,9 +546,9 @@ namespace CoreAI.Infrastructure.AiMemory
                         AgentMemoryLoadStatus status = TryLoadDetailedCore(roleId, out AgentMemoryState state);
                         if (status == AgentMemoryLoadStatus.Failed)
                         {
-                            // WHY: раньше здесь стояло `TryLoadCore(roleId) ?? new AgentMemoryState()`:
-                            // временный сбой чтения превращался в мутацию ПУСТОГО документа, а затем
-                            // успешная запись заменяла им настоящую память и все её версии.
+                            // WHY: this used to read `TryLoadCore(roleId) ?? new AgentMemoryState()`: a
+                            // transient read failure turned into a mutation of an EMPTY document, and then
+                            // a successful write replaced the real memory and all of its versions with it.
                             throw new AgentMemoryLoadException(roleId);
                         }
 
@@ -566,15 +573,16 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Пишет документ памяти из <paramref name="state"/>. Старый файл НЕ читается: содержимое документа
-        /// целиком в состоянии, поэтому битый файл просто перезаписывается. Исключения пробрасываются —
-        /// решать, глотать ли их, вызывающему по его контракту.
+        /// Writes the memory document out of <paramref name="state"/>. The old file is NOT read: the whole
+        /// content of the document lives in the state, so a corrupt file is simply overwritten. Exceptions
+        /// propagate - whether to swallow them is up to the caller and its own contract.
         /// </summary>
         private void SaveCore(string roleId, AgentMemoryState state, bool queueFlush)
         {
             state ??= new AgentMemoryState();
-            // WHY: файл формата v1 может ещё нести переписку в полях документа. Вынести её в свой файл
-            // ДО перезаписи документа — иначе Save стёр бы историю ученика вместе с полями.
+            // WHY: a v1-format file may still carry the conversation in the document's fields. Move it out
+            // into its own file BEFORE rewriting the document - otherwise Save would erase the student's
+            // history along with those fields.
             EnsureHistoryLoaded(roleId);
             EnsureDir();
             Persisted p = new()
@@ -595,10 +603,10 @@ namespace CoreAI.Infrastructure.AiMemory
 
         /// <inheritdoc />
         /// <remarks>
-        /// Удаляет документ памяти роли (текст, версии, снимок промпта); переписка живёт в своём файле и не
-        /// трогается. Нечитаемый документ тоже удаляется: это единственный явный способ вернуть роли
-        /// работоспособную память после порчи файла, и после него <see cref="TryLoadDetailed"/> честно
-        /// отвечает <see cref="AgentMemoryLoadStatus.NotFound"/>.
+        /// Deletes the role's memory document (text, versions, prompt snapshot); the conversation lives in
+        /// its own file and is left untouched. An unreadable document is deleted too: this is the only
+        /// explicit way to give a role working memory back after its file was corrupted, and afterwards
+        /// <see cref="TryLoadDetailed"/> honestly answers <see cref="AgentMemoryLoadStatus.NotFound"/>.
         /// </remarks>
         public void Clear(string roleId)
         {
@@ -630,7 +638,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// Async variant of <see cref="Clear"/> that performs the file removal on the thread pool and
         /// returns after it is durable.
         /// </summary>
-        /// <exception cref="IOException">Удаление не удалось или не подтверждено.</exception>
+        /// <exception cref="IOException">The removal failed or was not confirmed.</exception>
         public async Task ClearAsync(string roleId, CancellationToken cancellationToken = default)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
@@ -657,7 +665,8 @@ namespace CoreAI.Infrastructure.AiMemory
 
         private void ClearCore(string roleId, bool queueFlush)
         {
-            // WHY: сначала вынести переписку из файла v1 (если она там), и только потом удалять документ.
+            // WHY: first move the conversation out of the v1 file (if it lives there), and only then delete
+            // the document.
             EnsureHistoryLoaded(roleId);
             string path = GetMemoryPath(roleId);
             if (!File.Exists(path))
@@ -712,7 +721,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// Async variant of <see cref="ClearChatHistory"/> that performs the file removal on the thread
         /// pool and returns after it is durable.
         /// </summary>
-        /// <exception cref="IOException">Удаление не удалось или не подтверждено.</exception>
+        /// <exception cref="IOException">The removal failed or was not confirmed.</exception>
         public async Task ClearChatHistoryAsync(string roleId, CancellationToken cancellationToken = default)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
@@ -739,8 +748,8 @@ namespace CoreAI.Infrastructure.AiMemory
 
         private void ClearChatHistoryCore(string roleId, bool queueFlush)
         {
-            // WHY: миграция v1 обязана случиться до удаления — иначе переписка осталась бы в полях документа
-            // памяти и «воскресла» бы при следующем обращении.
+            // WHY: the v1 migration must happen before the delete - otherwise the conversation would stay
+            // in the memory document's fields and "resurrect" itself on the next access.
             EnsureHistoryLoaded(roleId);
             // A previous migration may have written history but failed to remove the legacy fields.
             // Remove those fields before deleting history, or the next store would resurrect it.
@@ -765,9 +774,9 @@ namespace CoreAI.Infrastructure.AiMemory
                 return;
             }
 
-            // WHY: память сбрасывается только после удавшегося удаления файла. Наоборот (сначала забыть,
-            // потом удалять) превращало сбой диска в «успешный» сброс: чтение отдавало пустоту, а файл
-            // оставался, и история «воскресала» при следующей загрузке.
+            // WHY: the in-memory copy is dropped only after the file delete succeeded. The other way round
+            // (forget first, delete second) turned a disk failure into a "successful" reset: reads returned
+            // nothing while the file stayed put, and the history "resurrected" itself on the next load.
             File.Delete(path);
             _histories.Remove(roleId);
             HistoryClearRevisions[GetHistoryPath(roleId)] = AdvanceHistoryRevision(roleId);
@@ -778,11 +787,12 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Appends a chat message to the role's conversation. С <paramref name="persistToDisk"/> =
-        /// <c>false</c> сообщение живёт только в этом процессе и на диск не попадает никогда.
+        /// Appends a chat message to the role's conversation. With <paramref name="persistToDisk"/> =
+        /// <c>false</c> the message lives in this process only and never reaches the disk.
         /// </summary>
-        /// <remarks>Best-effort по контракту <c>void</c>: сбой записи — в лог, файл будет переписан из
-        /// памяти при следующей удачной записи. Подтверждённый вариант — <see cref="AppendChatMessageAsync"/>.</remarks>
+        /// <remarks>Best-effort, as its <c>void</c> contract implies: a write failure goes to the log and
+        /// the file is rewritten from memory on the next successful write. For a confirmed write use
+        /// <see cref="AppendChatMessageAsync"/>.</remarks>
         public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
         {
             if (string.IsNullOrWhiteSpace(content))
@@ -790,8 +800,9 @@ namespace CoreAI.Infrastructure.AiMemory
                 return;
             }
 
-            // WHY: как AppendTranscriptEntry: пустой role id дал бы общий stem ".history.jsonl", где
-            // смешались бы чужие вызовы, а null ронял бы вызов исключением из SanitizedFileStem.
+            // WHY: same as AppendTranscriptEntry: an empty role id would yield the shared stem
+            // ".history.jsonl", where unrelated callers would mix together, and a null would break the call
+            // with an exception out of SanitizedFileStem.
             if (string.IsNullOrWhiteSpace(roleId))
             {
                 return;
@@ -824,7 +835,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// Async variant of <see cref="AppendChatMessage"/> that performs the file I/O on the thread pool
         /// and, when <paramref name="persistToDisk"/> is set, returns only after the write is durable.
         /// </summary>
-        /// <exception cref="IOException">Запись не удалась или не подтверждена.</exception>
+        /// <exception cref="IOException">The write failed or was not confirmed.</exception>
         public async Task AppendChatMessageAsync(string roleId, string role, string content,
             bool persistToDisk = true, CancellationToken cancellationToken = default)
         {
@@ -833,7 +844,7 @@ namespace CoreAI.Infrastructure.AiMemory
                 return;
             }
 
-            // WHY: как AppendChatMessage: пустой role id не маршрутизируется ни в чей файл.
+            // WHY: same as AppendChatMessage: an empty role id routes to nobody's file.
             if (string.IsNullOrWhiteSpace(roleId))
             {
                 return;
@@ -843,7 +854,7 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <inheritdoc />
-        /// <remarks>Best-effort по контракту <c>void</c>, как <see cref="AppendChatMessage"/>.</remarks>
+        /// <remarks>Best-effort, as its <c>void</c> contract implies, like <see cref="AppendChatMessage"/>.</remarks>
         public void AppendTranscriptEntry(string roleId, ConversationEntry entry, bool persistToDisk = true)
         {
             if (entry == null || string.IsNullOrWhiteSpace(roleId))
@@ -878,7 +889,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// Async variant of <see cref="AppendTranscriptEntry"/> that performs the file I/O on the thread
         /// pool and, when <paramref name="persistToDisk"/> is set, returns only after the write is durable.
         /// </summary>
-        /// <exception cref="IOException">Запись не удалась или не подтверждена.</exception>
+        /// <exception cref="IOException">The write failed or was not confirmed.</exception>
         public async Task AppendTranscriptEntryAsync(string roleId, ConversationEntry entry,
             bool persistToDisk = true, CancellationToken cancellationToken = default)
         {
@@ -924,8 +935,9 @@ namespace CoreAI.Infrastructure.AiMemory
 
         private static HistoryLine ChatLine(string role, string content)
         {
-            // WHY: единица отметки времени — та же, что у конструктора ChatMessage и у InMemoryAgentMemoryStore
-            // (секунды Unix); раньше файловый стор писал миллисекунды, и единица зависела от реализации.
+            // WHY: the timestamp unit is the same one the ChatMessage constructor and InMemoryAgentMemoryStore
+            // use (Unix seconds); the file store used to write milliseconds, so the unit depended on which
+            // implementation you got.
             ChatMessage message = new(role ?? "", content);
             return new HistoryLine
             {
@@ -951,12 +963,13 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Добавляет строку в память роли и, если она предназначена для диска, в файл. Возвращает описание
-        /// усечения (если оно случилось), чтобы вызывающий поднял событие уже вне замков.
+        /// Adds a row to the role's in-memory history and, when that row is meant for the disk, to the file
+        /// as well. Returns a description of the trim (if one happened) so that the caller raises the event
+        /// outside the locks.
         /// </summary>
         /// <param name="swallowWriteFailure">
-        /// Синхронный контракт: сбой записи — в лог и <see cref="RoleHistory.NeedsRewrite"/>. Async-контракт
-        /// пробрасывает исключение.
+        /// The synchronous contract: a write failure goes to the log and to
+        /// <see cref="RoleHistory.NeedsRewrite"/>. The async contract propagates the exception instead.
         /// </param>
         private AgentHistoryTrimmedEventArgs? AppendLineCore(string roleId, HistoryLine line, bool persistToDisk,
             bool queueFlush, bool swallowWriteFailure)
@@ -976,8 +989,9 @@ namespace CoreAI.Infrastructure.AiMemory
             Track(history, line);
 
             AgentHistoryTrimmedEventArgs? trimmed = TrimRetained(history);
-            // WHY: первое усечение роли — в лог сразу, не дожидаясь уплотнения файла: иначе первые
-            // потерянные ходы (в том числе у роли, чья история живёт только в процессе) уходят молча.
+            // WHY: a role's first trim goes to the log right away, without waiting for a file compaction:
+            // otherwise the first lost turns (including those of a role whose history lives in the process
+            // only) disappear silently.
             if (!persistToDisk)
             {
                 if (trimmed.HasValue && !history.TrimLogged)
@@ -1022,8 +1036,8 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex) when (swallowWriteFailure)
             {
-                // WHY: строка уже в памяти и помечена как предназначенная для диска; следующая удачная
-                // запись перепишет файл из памяти целиком и вернёт её на диск.
+                // WHY: the row is already in memory and marked as meant for the disk; the next successful
+                // write rewrites the whole file from memory and puts the row back on disk.
                 history.NeedsRewrite = true;
                 line.PendingWrite = true;
                 _histories[roleId] = history;
@@ -1063,7 +1077,7 @@ namespace CoreAI.Infrastructure.AiMemory
             return copy;
         }
 
-        /// <summary>Ставит новую (или только что загруженную) строку в оба окна и обновляет счётчики.</summary>
+        /// <summary>Puts a new (or just-loaded) row into both windows and updates the counters.</summary>
         private static void Track(RoleHistory history, HistoryLine line)
         {
             line.InChatView = line.IsChatMessage;
@@ -1082,11 +1096,12 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Удерживает два окна над одним списком: последние <see cref="MaxChatHistoryMessages"/> сообщений
-        /// чата и последние <see cref="MaxTranscriptEntries"/> строк транскрипта. Выпадение из окна — это то,
-        /// что видит читатель, и именно оно считается усечением и попадает в событие; строка физически
-        /// удаляется, только когда не нужна уже ни одному окну. Сообщение чата старше окна транскрипта живёт,
-        /// пока не выпало из окна чата, — ровно как раньше жили две независимые копии.
+        /// Maintains two windows over one list: the last <see cref="MaxChatHistoryMessages"/> chat messages
+        /// and the last <see cref="MaxTranscriptEntries"/> transcript rows. Falling out of a window is what
+        /// the reader sees, and that is exactly what counts as a trim and reaches the event; a row is
+        /// physically removed only once neither window needs it any more. A chat message older than the
+        /// transcript window stays alive until it falls out of the chat window - precisely how the two
+        /// independent copies used to live.
         /// </summary>
         private AgentHistoryTrimmedEventArgs? TrimRetained(RoleHistory history)
         {
@@ -1208,8 +1223,9 @@ namespace CoreAI.Infrastructure.AiMemory
             {
                 RoleHistory history = EnsureHistoryLoaded(roleId);
                 List<HistoryLine> lines = history.Lines;
-                // WHY: строки вне окна транскрипта всегда старше строк внутри него (окно покидают с головы,
-                // порядок не меняется), поэтому окно — это хвост списка длиной TranscriptCount.
+                // WHY: rows outside the transcript window are always older than rows inside it (rows leave
+                // the window from the head and the order never changes), so the window is the tail of the
+                // list, TranscriptCount rows long.
                 int take = maxEntries > 0 ? Math.Min(maxEntries, history.TranscriptCount) : history.TranscriptCount;
                 if (take == 0)
                 {
@@ -1284,8 +1300,8 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Загружает переписку роли при первом обращении: из <c>.history.jsonl</c>, а если его нет —
-        /// мигрирует из полей документа памяти формата v1.
+        /// Loads the role's conversation on first access: from <c>.history.jsonl</c>, or, when that file
+        /// does not exist, by migrating it out of the v1-format memory document's fields.
         /// </summary>
         private RoleHistory EnsureHistoryLoaded(string roleId)
         {
@@ -1349,7 +1365,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                // WHY: содержимое файла неизвестно — переписывать его из памяти нельзя (см. LoadFailed).
+                // WHY: the file's contents are unknown - it must not be rewritten from memory (see LoadFailed).
                 history.LoadFailed = true;
                 LogStorageFailure("read conversation history", ex);
                 return;
@@ -1386,8 +1402,8 @@ namespace CoreAI.Infrastructure.AiMemory
 
             if (unreadable > 0)
             {
-                // WHY: оборванная строка — след прерванного syncfs или частичной записи. Она пропускается,
-                // остальное читается, а файл переписывается начисто при следующей записи.
+                // WHY: a truncated line is the trace of an interrupted syncfs or a partial write. It is
+                // skipped, the rest is read, and the file is rewritten from scratch on the next write.
                 history.NeedsRewrite = true;
                 _log?.Warn(
                     $"[FileAgentMemoryStore] Skipped {unreadable} unreadable line(s) in one role's conversation " +
@@ -1396,11 +1412,12 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Формат v1 хранил переписку в документе памяти дважды: плоский чат в <c>chatHistoryJson</c>
-        /// (JsonUtility) и транскрипт в <c>transcriptEntriesJson</c> (Newtonsoft). Сливает их в один список
-        /// строк: запись транскрипта, совпадающая со следующим сообщением чата по роли, тексту и времени, —
-        /// это то же сообщение (одна строка с флагом чата); остальное — строки только транскрипта. Чат без
-        /// транскрипта (самый старый формат) становится строками чата.
+        /// The v1 format stored the conversation inside the memory document twice: the flat chat in
+        /// <c>chatHistoryJson</c> (JsonUtility) and the transcript in <c>transcriptEntriesJson</c>
+        /// (Newtonsoft). This merges them into a single list of rows: a transcript entry matching the next
+        /// chat message by role, text and timestamp IS that same message (one row carrying the chat flag);
+        /// everything else becomes a transcript-only row. Chat without a transcript (the oldest format)
+        /// becomes chat rows.
         /// </summary>
         private void MigrateLegacyConversation(string roleId, RoleHistory history)
         {
@@ -1417,8 +1434,8 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                // WHY: документ v1 не читается — переписка внутри него недоступна так же, как и память.
-                // Документ не трогаем: его состояние (Failed) сообщает TryLoadDetailed.
+                // WHY: the v1 document does not read - the conversation inside it is just as unreachable as
+                // the memory. Leave the document alone: TryLoadDetailed reports its state (Failed).
                 LogStorageFailure("migrate legacy conversation", ex);
                 return;
             }
@@ -1504,8 +1521,8 @@ namespace CoreAI.Infrastructure.AiMemory
             TrimRetained(history);
             RewriteHistoryFile(roleId, history);
 
-            // WHY: переписка теперь в своём файле; документ памяти переписывается без полей v1, чтобы
-            // миграция не повторялась и чтобы Save не нёс их дальше.
+            // WHY: the conversation now lives in its own file; the memory document is rewritten without the
+            // v1 fields so that the migration does not repeat itself and Save does not carry them further.
             p.chatHistoryJson = null;
             p.transcriptEntriesJson = null;
             AtomicWriteAllText(memoryPath, JsonUtility.ToJson(p));
@@ -1522,8 +1539,9 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Формат v1 писал миллисекунды в отметки чата. Секунды Unix не превысят 10^11 ещё три тысячи лет,
-        /// миллисекунды перевалили за него в 1973-м — граница однозначна.
+        /// The v1 format wrote milliseconds into chat timestamps. Unix seconds will not pass 10^11 for
+        /// another three thousand years, while milliseconds crossed it back in 1973 - the boundary is
+        /// unambiguous.
         /// </summary>
         private static long NormalizeToUnixSeconds(long timestamp)
         {
@@ -1567,7 +1585,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
         }
 
-        /// <summary>Переписывает файл переписки из памяти: только строки, предназначенные для диска.</summary>
+        /// <summary>Rewrites the conversation file from memory: only the rows meant for the disk.</summary>
         private void RewriteHistoryFile(string roleId, RoleHistory history)
         {
             EnsureDir();
@@ -1633,8 +1651,8 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Releases the internal file-access semaphore. Отложенных записей у стора нет: всё, что
-        /// предназначалось диску, уже на нём (на WebGL — как минимум в очереди на флаш).
+        /// Releases the internal file-access semaphore. The store has no deferred writes: everything that
+        /// was meant for the disk is already there (on WebGL - at least queued for the flush).
         /// </summary>
         public void Dispose()
         {
@@ -1687,9 +1705,9 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Restores the memory version audit trail from its persisted JSON string. Нечитаемый след версий
-        /// не ломает чтение документа (текст памяти важнее), но и не молчит: он попадает в лог, потому что
-        /// следующая запись документа его уже не сохранит.
+        /// Restores the memory version audit trail from its persisted JSON string. An unreadable version
+        /// trail does not break reading the document (the memory text matters more), but it does not stay
+        /// silent either: it goes to the log, because the next write of the document will no longer keep it.
         /// </summary>
         private AgentMemoryVersionSnapshot[] DeserializeVersions(string versionsJson)
         {
