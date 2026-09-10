@@ -387,6 +387,16 @@ Still open, recorded honestly:
       The editor re-introduces them whenever Mirror is installed locally, which stays a live
       hazard; the `tools/check_positive_module_opt_in.py` release gate now checks for it.
 
+- [ ] **A PlayMode test fails on `main` and it is not the merge's doing — proven.**
+      `CoreAiChatPanelNonStreamingPlayModeTests.TypedBufferedFailure_IsAdmittedWithoutCompletionEventOrLegacyExecution`
+      fails with an unhandled log message: "[CoreAI] [Core] [CoreAiChatPanel] UIDocument component not
+      found on this GameObject!". It is NOT a headless artefact: the two sibling tests in the same
+      fixture pass under the same run. It arrived with the publication-wave commit `43c007ec`.
+      **Evidence it predates the 7.41.1 merge:** the tree was checked out at `12309ac7` (the parallel
+      line's tip, before the merge) and the fixture run there gives the same 2 passed / 1 failed with
+      the same message (`artifacts/testresults/theirs1.xml`). Left for whoever owns that line rather
+      than fixed blind, because two collisions with that work already cost a rebuild this session.
+
 ### Character motor contract — known limits, not defects of the bridge seam
 
 - [ ] **A false landing between a jump and the fall.** With a real motor, on the first fixed step
