@@ -11,17 +11,24 @@ Full methodology: [benchmark guide](../Assets/CoreAIBenchmark/README.md) · [ben
 
 Scores are only comparable **within the same suite version**. Scenario sets, checkpoint weights, penalties, and caps change between versions, so a v1.6 score and a hypothetical v1.7 score are different measurements even for the same model. The suite version is stamped into every report JSON (`suiteVersion`) and shown in the report header. When the suite version bumps, the leaderboard starts a new section; older sections are kept for history but never mixed into the current ranking.
 
-**Current suite version: v1.7** (G1-G8, no token caps).
+**Current suite version: v1.8** (G1-G8, no token caps). No v1.8 rows exist yet; the v1.7 table below is the latest published sweep.
 
 ### Suite version history
 
 | Suite | Status | Notes |
 |---|---|---|
-| v1.7 | **Current** | G1-G8; adds described-state conditional selection and benchmark v2 prompts. |
+| v1.8 | **Current** | G6 free-build runs on the Roblox API (`execute_lua`, `Instance.new('Part')` with `Enum.Material`/`Enum.PartType`) and is graded on parts, names, volume, material and shape variety; the G6 prompt now matches that runtime (section size, writable Part surface, how `Color` composes with a texture). **In every group** the recording executor now expands a `spawn_batch` into one `spawn` per item, named as the production executor names them (`item.name`, else `targetName_i`, else `prefab_i`); under v1.7 a batch was recorded as a single opaque non-spawn command. So batch-spawned objects now count toward the spawn totals G1, G7 and G8 grade, and a `spawn_batch` satisfies G5's spawn-only constraint instead of violating it. Prompts, weights and penalties of G1-G5, G7, G8 are otherwise unchanged from v1.7. |
+| v1.7 | Historical | G1-G8; adds described-state conditional selection and benchmark v2 prompts. G6 was the `world_command` primitive castle graded on castle signals. |
 | v1.6 | Historical | G1-G7 scenario groups, six-dimension scoring, role fitness, mean-over-repetitions suite score. |
 | < v1.6 | Retired | Pre-leaderboard development iterations; results were not published and are not comparable. |
 
-## Leaderboard — Suite v1.7
+## Leaderboard — Suite v1.8
+
+No submissions yet. The current G6 (Roblox-API castle, since CoreAI 7.5.0 / 2026-09-03) has **no published
+score for any model** — the only recorded G6 numbers are the v1.7 rows below, produced by the earlier
+`world_command` castle and its castle-signal grader, so they say nothing about the Lua build.
+
+## Historical Leaderboard — Suite v1.7
 
 ### Frontier models (2026-07-11 maintainer sweep, G1–G8)
 
@@ -43,9 +50,23 @@ CLIs). Ranked by suite base score. Per-group scores are G1…G8; see the benchma
 
 > Single run per model (reps=1), streaming off, native tools on, temperature 0.1, Unity 6000.3.14f1. Run over
 > the CLI bridge, so absolute tokens/time are not comparable to a direct-API submission (tool-calling was
-> verified equivalent to a native OpenAI backend first). The G6 image-feedback (vision) variant did not run —
-> the CLI bridge is text + tool-calls only. Indicative single-shot results, not a controlled multi-rep A/B.
-> A ranked public submission still requires the artifacts and hardware disclosure below.
+> verified equivalent to a native OpenAI backend first). The G6 image-feedback (vision) variant **did run**,
+> as a second G6 scenario (`COREAI_BENCHMARK_VISION_MODE=both`): the P/PA/F columns sum to 29 scenario runs
+> per model, and the suite at the sweep commit had 28 scenarios without the vision build (3+5+6+3+6+1+1+3 for
+> G1-G8; `gpt-5.6-sol` sums to 28 — one run short, reason not recorded; the report JSONs are not in the
+> repo). The CLI bridge is text + tool-calls only, so no model could actually see the screenshot: the G6
+> column is the mean of the text build and a second, effectively text-blind free-build sample, not a vision
+> measurement. (An earlier revision of this note said the variant did not run; the benchmark README's
+> account, written the same day after a `gpt-5.3-spark` re-run of both variants, is the corrected one.)
+> Indicative single-shot results, not a controlled multi-rep A/B. A ranked public submission still requires
+> the artifacts and hardware disclosure below.
+>
+> **G6 column:** measured on the pre-7.5.0 `world_command` castle (coloured primitives, -9..9 m, graded on
+> towers/walls/gate/keep signals, transforms and named detail groups). The v1.8 G6 is a different scenario
+> (Roblox API, materials and shapes) with a different grader; these G6 numbers do not carry over. The same
+> world-tool castles scored 80-94 on G6 in the v1.6 runs a week earlier (gpt-5.3-spark 80, gpt-5.5 / opus-4.8 /
+> fable-5 87, sonnet-5 94 — the hero headers in `Docs/Images/castles/`), so the 25-75 here already reflects the
+> sweep's measurement conditions, not a change of build tool.
 >
 > **Bridge note:** `claude-opus-4.8` (79.7 → **83.2**), `claude-fable-5` (78.9 → **81.4**) and `gpt-5.3-spark`
 > (91.0 → **92.9**) were re-run after the bridge gained a *no-tool-call recovery retry* — it re-prompts when a
@@ -127,13 +148,13 @@ Add one row to the appropriate table (cloud or local) with your name/handle in *
 | Run id | The `yyyyMMdd_HHmmss` timestamp from the report filename — goes into the **Run** column. |
 | Model identity | Exact model id / file name and, for local models, the quantization (e.g. `Q4_K_M`, `imatrix`) and context length used. |
 | Hardware | For local runs: GPU/CPU, VRAM/RAM, and the runtime (LM Studio / llama.cpp / other) with version. Cloud runs: provider + endpoint type. |
-| Suite version | Must match the leaderboard section you are adding to (currently **v1.7**; check `suiteVersion` in your report JSON). |
+| Suite version | Must match the leaderboard section you are adding to (currently **v1.8**; check `suiteVersion` in your report JSON). |
 | Settings | Groups run (full current submissions must be G1-G8), repetitions, any timeout overrides, and any non-default endpoint settings. |
 
 ### 3. What reviewers check
 
 - The report JSON parses, its `suiteVersion` matches the section, and the table row matches the JSON's suite score, pass-rate, P/PA/F, dimension scores, tool-error rate, tokens, and run id.
-- All eight groups G1-G8 were run for a current v1.7 submission (partial-group runs are not rankable — dimensions the run did not measure cannot be compared).
+- All eight groups G1-G8 were run for a current v1.8 submission (partial-group runs are not rankable — dimensions the run did not measure cannot be compared).
 - The model id, quantization, and hardware declaration are plausible and complete.
 - No signs of harness modification (scenario prompts, weights, penalties, or caps changed locally).
 

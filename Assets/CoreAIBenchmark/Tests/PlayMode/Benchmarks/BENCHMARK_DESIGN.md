@@ -115,14 +115,20 @@ checkpoint (the InstructionAdherence dimension) that fails when violated, plus a
 for repeated violations; a mandatory core task prevents "do nothing" from scoring 100. Constraints:
 never touch a protected object, spawn-only (no other action), exactly N actions, a forbidden tool
 (no `execute_lua`), a tool-call budget, and an exact spawn order. Violations are detected
-deterministically from the captured tool-call trace and world commands.
+deterministically from the captured tool-call trace and world commands. Since suite v1.8 the recording
+executor expands a `spawn_batch` into one `spawn` per item (named `item.name`, else `targetName_i`, else
+`prefab_i`, exactly as the production executor does), so a batch satisfies the spawn-only constraint and
+its items count as spawns in every group; under v1.7 a batch was one opaque non-spawn command.
 
 ### G6 — Free-build castle (bonus, visual)
-Open-ended: the model designs and places a whole castle scene via `world_command` (towers, walls, a gate,
-flags, …) with model-authored positions. Graded leniently on scale (12+ objects) and variety (20+); the
-screenshot preserves the model's layout (no grid normalisation, no ghosts) and is embedded as the **hero
-image at the top of the report**. Purpose is a vivid, comparable visual of what each model builds — not a
-precise score.
+Open-ended: the model designs and places a whole castle scene through the Roblox API — `execute_lua`
+over a live `RbxWorldHost`, `Instance.new('Part')` with `Size`/`CFrame`/`Material`/`Color`/`Shape` — with
+model-authored positions (since 7.5.0; before that, `world_command` primitives with no materials and four
+shapes). Graded on 40+ distinctly named parts inside the build volume, 12+ distinct `Enum.Material` values
+and all five `Enum.PartType` shapes, read back through the same Lua surface; composition and colour are
+not scored. The screenshot preserves the model's layout (no grid normalisation, no ghosts) and is embedded
+as the **hero image at the top of the report**. Purpose is a vivid, comparable visual of what each model
+builds — not a precise score.
 
 ### G7 — Comprehensive integration
 A key-and-gate puzzle combines exact world construction with Lua logic in one model session. The harness

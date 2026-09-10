@@ -864,18 +864,25 @@ namespace CoreAI.Chat
         /// on a threadpool thread), so failures are swallowed — worst case the previous deadline stands,
         /// which is still correct, just less generous.
         /// </remarks>
-        private sealed class IdleTimeoutDeadline : IDisposable
+        internal sealed class IdleTimeoutDeadline : IDisposable
         {
+            /// <summary>
+            /// Test seam (InternalsVisibleTo): when set, arms the deadline through this delegate instead of
+            /// the real-time player-loop timer, so a test can drive the idle window from a virtual clock
+            /// rather than wall time. Null means production behaviour; whoever sets it must reset it.
+            /// </summary>
+            internal static Func<CancellationTokenSource, TimeSpan, IDisposable> SchedulerOverride;
+
             private readonly CancellationTokenSource _cts;
-            private readonly float _timeoutSec;
+            private readonly TimeSpan _window;
             private readonly object _gate = new();
             private IDisposable _handle;
 
             public IdleTimeoutDeadline(CancellationTokenSource cts, float timeoutSec)
             {
                 _cts = cts;
-                _timeoutSec = timeoutSec;
-                _handle = cts.CancelAfterSlim(TimeSpan.FromSeconds(timeoutSec), DelayType.Realtime);
+                _window = TimeSpan.FromSeconds(timeoutSec);
+                _handle = Schedule();
             }
 
             public void Rearm()
@@ -885,7 +892,7 @@ namespace CoreAI.Chat
                     lock (_gate)
                     {
                         _handle?.Dispose();
-                        _handle = _cts.CancelAfterSlim(TimeSpan.FromSeconds(_timeoutSec), DelayType.Realtime);
+                        _handle = Schedule();
                     }
                 }
                 catch
@@ -900,6 +907,14 @@ namespace CoreAI.Chat
                 {
                     _handle?.Dispose();
                 }
+            }
+
+            private IDisposable Schedule()
+            {
+                Func<CancellationTokenSource, TimeSpan, IDisposable> scheduler = SchedulerOverride;
+                return scheduler != null
+                    ? scheduler(_cts, _window)
+                    : _cts.CancelAfterSlim(_window, DelayType.Realtime);
             }
         }
     }

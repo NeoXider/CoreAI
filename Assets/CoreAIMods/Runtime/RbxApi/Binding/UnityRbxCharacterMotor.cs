@@ -99,6 +99,31 @@ namespace CoreAI.Mods.Rbx.Binding
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// WHY the solver-resolved velocity and not the speed <see cref="Step()"/> commanded: the
+        /// physics step decides how fast the body actually moved — a wall it walks into leaves the
+        /// commanded WalkSpeed in place and the resolved velocity at zero — and it is the same vector
+        /// <see cref="MoveDirection"/> reads, so direction and speed can never disagree.
+        /// WHY null and not 0 once the body is destroyed: the seam defines null as "this motor
+        /// cannot measure", and a vanished body is a character that no longer exists, not one that
+        /// has stopped. Answering 0 would present a despawn as a genuine stop to the Humanoid while
+        /// <see cref="IsAvailable"/> is already telling the pipeline to rebuild this motor.
+        /// </remarks>
+        public double? MeasuredSpeed
+        {
+            get
+            {
+                if (_body == null)
+                {
+                    return null;
+                }
+
+                Vector3 planar = new(_body.linearVelocity.x, 0f, _body.linearVelocity.z);
+                return RbxSpace.LengthFromUnity(planar.magnitude);
+            }
+        }
+
+        /// <inheritdoc />
         public bool IsGrounded =>
             _body != null && Physics.Raycast(_body.position, Vector3.down, _groundProbeOrigin + GroundProbeMetres);
 
@@ -111,9 +136,20 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <inheritdoc />
         public void Jump(double jumpPower, double jumpHeight, bool useJumpPower)
         {
+            TryJump(jumpPower, jumpHeight, useJumpPower);
+        }
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// WHY refused off the ground and on a kinematic body: an airborne character has nothing to
+        /// push against, and a kinematic body ignores velocity writes, so reporting acceptance would
+        /// put the Humanoid into Jumping for a jump that never happened.
+        /// </remarks>
+        public bool TryJump(double jumpPower, double jumpHeight, bool useJumpPower)
+        {
             if (_body == null || _body.isKinematic || !IsGrounded)
             {
-                return;
+                return false;
             }
 
             // WHY two formulas: the mirror treats JumpPower as an upward impulse and JumpHeight as
@@ -132,6 +168,7 @@ namespace CoreAI.Mods.Rbx.Binding
             Vector3 velocity = _body.linearVelocity;
             velocity.y = upward;
             _body.linearVelocity = velocity;
+            return true;
         }
 
         /// <inheritdoc />

@@ -4,13 +4,17 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Benchmarking;
 using CoreAI.Infrastructure.Llm;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 using static CoreAI.Tests.PlayMode.Benchmarks.GameCreationBenchmarkHarness;
+using MEAI = Microsoft.Extensions.AI;
 
 namespace CoreAI.Tests.PlayMode.Benchmarks
 {
@@ -27,7 +31,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     public sealed class GameCreationBenchmarkPlayModeTests
     {
-        private const string SuiteVersion = "1.7";
+        // WHY 1.8: 7.5.0 rebuilt G6 on the Roblox API (execute_lua, Enum.Material/Enum.PartType) with a
+        // new grader, and the free-build prompt now describes that runtime honestly (section size, the
+        // writable Part surface, how Color really composes). The versioning policy says scores compare
+        // only within a suite version; every published v1.7 G6 number is the old world_command build.
+        private const string SuiteVersion = "1.8";
 
         /// <summary>
         /// NUnit hard-abort backstop (110 min). Attribute arguments must be compile-time constants, so the
@@ -213,6 +221,69 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Assert.IsFalse(ShouldRequireScenarioResults(true, 0));
             Assert.IsTrue(ShouldRequireScenarioResults(false, 0));
             Assert.IsTrue(ShouldRequireScenarioResults(true, 1));
+        }
+
+        // ==================== RbxBenchmarkWorld.TimedExecuteLuaTool ====================
+
+        /// <summary>
+        /// Drives the wrapper over the exact shape <c>LuaTool.CreateAIFunction</c> builds —
+        /// <c>AIFunctionFactory.Create</c> over a <c>Task&lt;string&gt;</c> delegate — so the assertion
+        /// covers what MEAI really hands back (a <c>JsonElement</c>, not a <c>string</c>), not a stand-in.
+        /// </summary>
+        [Test]
+        public void TimedExecuteLuaTool_StampsTimeLeftIntoMeaiMarshalledResult()
+        {
+            Func<string, CancellationToken, Task<string>> body =
+                (code, cancellationToken) => Task.FromResult("{\"Success\":true,\"Output\":\"3\"}");
+            MEAI.AIFunction inner = MEAI.AIFunctionFactory.Create(body, new MEAI.AIFunctionFactoryOptions
+            {
+                Name = "execute_lua",
+                Description = "probe"
+            });
+            MEAI.AIFunction timed =
+                RbxBenchmarkWorld.TimedExecuteLuaTool.WithTimeLeft(inner, () => "~412s left");
+
+            object result = timed
+                .InvokeAsync(new MEAI.AIFunctionArguments { ["code"] = "return 3" })
+                .AsTask().GetAwaiter().GetResult();
+
+            JObject payload = JObject.Parse(result?.ToString() ?? "");
+            Assert.AreEqual("~412s left", (string)payload["TimeLeft"]);
+            Assert.IsTrue((bool)payload["Success"]);
+            Assert.AreEqual("3", (string)payload["Output"]);
+        }
+
+        [Test]
+        public void TimedExecuteLuaTool_Stamp_AcceptsStringAndJsonStringElement()
+        {
+            const string json = "{\"Success\":false,\"Error\":\"boom\"}";
+            System.Text.Json.JsonElement element = System.Text.Json.JsonSerializer.SerializeToElement(json);
+
+            foreach (object raw in new object[] { json, element })
+            {
+                string shape = raw.GetType().Name;
+                object stamped = RbxBenchmarkWorld.TimedExecuteLuaTool.Stamp(raw, () => " 9s left ");
+
+                Assert.IsInstanceOf<string>(stamped, shape);
+                JObject payload = JObject.Parse((string)stamped);
+                Assert.AreEqual("9s left", (string)payload["TimeLeft"], shape);
+                Assert.IsFalse((bool)payload["Success"], shape);
+                Assert.AreEqual("boom", (string)payload["Error"], shape);
+            }
+        }
+
+        [Test]
+        public void TimedExecuteLuaTool_Stamp_LeavesResultUntouchedWithoutNoteOrJsonObject()
+        {
+            System.Text.Json.JsonElement element =
+                System.Text.Json.JsonSerializer.SerializeToElement("{\"Success\":true}");
+
+            Assert.IsInstanceOf<System.Text.Json.JsonElement>(
+                RbxBenchmarkWorld.TimedExecuteLuaTool.Stamp(element, null));
+            Assert.IsInstanceOf<System.Text.Json.JsonElement>(
+                RbxBenchmarkWorld.TimedExecuteLuaTool.Stamp(element, () => " "));
+            Assert.AreEqual("plain text",
+                RbxBenchmarkWorld.TimedExecuteLuaTool.Stamp("plain text", () => "9s left"));
         }
 
         [UnityTest]

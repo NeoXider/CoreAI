@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
@@ -555,6 +556,144 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             }
         }
 
+        [Test]
+        public void DisposingBindings_AThrowingRelease_StillReleasesTheRestAndFinishesTheTeardown()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            GameObject hostGo = new("RbxWorldHost");
+            RbxWorldHost host = hostGo.AddComponent<RbxWorldHost>();
+            host.Initialize();
+            RecordingCharacterMotorProvider provider = new();
+
+            ContainerBuilder builder = new();
+            RegisterMinimalModStack(builder, registry);
+            builder.RegisterInstance(host);
+            builder.RegisterInstance<IRbxCharacterMotorProvider>(provider);
+
+            IObjectResolver container = builder.Build();
+            try
+            {
+                LuaCsRbxApiBindings bindings = container.Resolve<LuaCsModStack>().GameplayBindings.RbxApi;
+                RbxPlayer playerA = bindings.ConnectActor(Actor("dispose-throw-a"));
+                bindings.Scheduler.Advance(1d / 60d);
+                RbxPlayer playerB = bindings.ConnectActor(Actor("dispose-throw-b"));
+                bindings.Scheduler.Advance(1d / 60d);
+
+                RecordingCharacterMotor motorA = (RecordingCharacterMotor)
+                    ((RbxHumanoid)playerA.Character.FindFirstChild("Humanoid")).Motor;
+                RecordingCharacterMotor motorB = (RecordingCharacterMotor)
+                    ((RbxHumanoid)playerB.Character.FindFirstChild("Humanoid")).Motor;
+                // WHY the first-attached motor is the one that throws: Dispose retires motors in
+                // attach order, so a throw here is what used to abort the release of every motor
+                // after it and every teardown step that follows the loop.
+                motorA.ReleaseFailure = new InvalidOperationException("host controller refused to let go");
+
+                List<string> diagnostics = new();
+                bindings.Registry.Diagnostics = diagnostics.Add;
+
+                // WHY an input source and not a motor step: Dispose empties the motor table, so a
+                // surviving scheduler subscription would no longer be visible through Step. The
+                // InputProcessing phase pumps UserInputService through the bindings' own handler,
+                // so a poll after Dispose proves that handler is still subscribed.
+                PollCountingInputSource input = new();
+                Assert.IsNotNull(bindings.UserInputService);
+                bindings.UserInputService.AttachInputSource(input);
+                bindings.Scheduler.Advance(1d / 60d);
+                Assert.Greater(input.PollCount, 0,
+                    "sanity: a scheduler frame must reach the bindings' input pump while they are live.");
+
+                // WHY Dispose is called directly: this is the world-replacement path
+                // (outgoing.RbxApi.Dispose()), the one that swallowed the escaping exception and
+                // left the leak permanent because the disposed flag was already set.
+                Assert.DoesNotThrow(() => bindings.Dispose(),
+                    "a host motor's Release that throws must never escape Dispose.");
+
+                Assert.AreEqual(1, motorA.ReleaseCallCount,
+                    "the throwing motor must still have been asked to release exactly once.");
+                Assert.AreEqual(1, motorB.ReleaseCallCount,
+                    "one Release that throws must cost only that motor; the next motor must still " +
+                    "be released.");
+                Assert.AreEqual(1,
+                    diagnostics.FindAll(m => m.Contains("IRbxCharacterMotor.Release threw")).Count,
+                    "the contained failure must be reported through the registry's diagnostics " +
+                    "sink exactly once, not swallowed silently.");
+
+                int pollsAfterDispose = input.PollCount;
+                bindings.Scheduler.Advance(1d / 60d);
+                Assert.AreEqual(pollsAfterDispose, input.PollCount,
+                    "Dispose must still unsubscribe its scheduler phase handler after a throwing " +
+                    "Release; a later frame must not reach the disposed bindings.");
+            }
+            finally
+            {
+                container.Dispose();
+                UnityEngine.Object.DestroyImmediate(registry);
+                UnityEngine.Object.DestroyImmediate(hostGo);
+            }
+        }
+
+        [Test]
+        public void ReplacingAMotorWhoseReleaseThrows_InstallsTheReplacementAndNeverReleasesItAgain()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            GameObject hostGo = new("RbxWorldHost");
+            RbxWorldHost host = hostGo.AddComponent<RbxWorldHost>();
+            host.Initialize();
+            RecordingCharacterMotorProvider provider = new();
+
+            ContainerBuilder builder = new();
+            RegisterMinimalModStack(builder, registry);
+            builder.RegisterInstance(host);
+            builder.RegisterInstance<IRbxCharacterMotorProvider>(provider);
+
+            IObjectResolver container = builder.Build();
+            try
+            {
+                LuaCsRbxApiBindings bindings = container.Resolve<LuaCsModStack>().GameplayBindings.RbxApi;
+                RbxPlayer player = bindings.ConnectActor(Actor("replace-throw-a"));
+                bindings.Scheduler.Advance(1d / 60d);
+                RbxHumanoid humanoid = (RbxHumanoid)player.Character.FindFirstChild("Humanoid");
+                RecordingCharacterMotor failingMotor = provider.LastCreatedMotor;
+                Assert.IsNotNull(failingMotor);
+                Assert.AreSame(failingMotor, humanoid.Motor);
+                failingMotor.ReleaseFailure = new InvalidOperationException("host controller refused to let go");
+
+                List<string> diagnostics = new();
+                bindings.Registry.Diagnostics = diagnostics.Add;
+
+                RecordingCharacterMotor firstReplacement = new();
+                Assert.DoesNotThrow(() => bindings.AttachCharacterMotorFactory(_ => firstReplacement),
+                    "the outgoing motor's Release throwing must not escape the rebuild.");
+
+                Assert.AreEqual(1, failingMotor.ReleaseCallCount);
+                Assert.AreSame(firstReplacement, humanoid.Motor,
+                    "the replacement must still be built and installed after the outgoing Release " +
+                    "threw; the Humanoid must not be left with its host detached and no motor.");
+                Assert.AreEqual(1,
+                    diagnostics.FindAll(m => m.Contains("IRbxCharacterMotor.Release threw")).Count,
+                    "the contained failure must be reported through the registry's diagnostics sink.");
+
+                // WHY a second swap: with the dead motor still owned by the table, this is where
+                // the pipeline used to call Release on the same failed motor again.
+                RecordingCharacterMotor secondReplacement = new();
+                bindings.AttachCharacterMotorFactory(_ => secondReplacement);
+
+                Assert.AreEqual(1, failingMotor.ReleaseCallCount,
+                    "a motor whose Release threw is no longer owned; a later attach must not " +
+                    "release it a second time.");
+                Assert.AreEqual(1, firstReplacement.ReleaseCallCount,
+                    "the second swap must release the motor it actually displaced, exactly once.");
+                Assert.AreSame(secondReplacement, humanoid.Motor);
+                Assert.AreEqual(0, secondReplacement.ReleaseCallCount);
+            }
+            finally
+            {
+                container.Dispose();
+                UnityEngine.Object.DestroyImmediate(registry);
+                UnityEngine.Object.DestroyImmediate(hostGo);
+            }
+        }
+
         /// <summary>Mirrors RbxWorldHostDiWiringEditModeTests' minimal registrations: just enough for
         /// RegisterCoreAiMods' LuaCsModStack factory to resolve, plus the world-command executors it
         /// expects.</summary>
@@ -660,6 +799,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
 
             public int ReleaseCallCount { get; private set; }
 
+            /// <summary>When set, <see cref="Release"/> records the call and then throws this, the
+            /// way a host controller with a bug in its own teardown would.</summary>
+            public Exception ReleaseFailure { get; set; }
+
             public void SetWalkSpeed(double studsPerSecond)
             {
             }
@@ -684,6 +827,37 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             public void Release()
             {
                 ReleaseCallCount++;
+                if (ReleaseFailure != null)
+                {
+                    throw ReleaseFailure;
+                }
+            }
+        }
+
+        /// <summary>Counts how often the bindings' input pump polls it, so a test can tell whether a
+        /// scheduler frame still reaches the bindings after they were disposed.</summary>
+        private sealed class PollCountingInputSource : IInputSource
+        {
+            public int PollCount { get; private set; }
+
+            public void CollectPressedKeyCodes(ICollection<int> buffer)
+            {
+                PollCount++;
+            }
+
+            public bool IsKeyCodeDown(int keyCodeValue)
+            {
+                return false;
+            }
+
+            public bool IsMouseButtonDown(int button)
+            {
+                return false;
+            }
+
+            public RbxVector2 GetMouseLocation()
+            {
+                return RbxVector2.Zero;
             }
         }
     }

@@ -327,14 +327,17 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
                     // applier cannot tell those apart from a bug in its own restore code by type —
                     // either way the replica now holds a state the server never had, and a resync is
                     // the only recovery for both. The full exception goes to Diagnostics so a
-                    // programmer error stays loud in the log without taking the client down. What is
-                    // deliberately left to escape: Apply's own argument checks and the apply scope's
-                    // LIFO check, which run outside this block because they are the applier's contract
-                    // with its caller, not the server's data.
+                    // programmer error stays loud in the log without taking the client down — through
+                    // the registry's containment, because this runs before the resync is requested,
+                    // and a sink that threw here would escape past a half-applied batch with the
+                    // replica never asking for the world again. What is deliberately left to escape:
+                    // Apply's own argument checks and the apply scope's LIFO check, which run outside
+                    // this block because they are the applier's contract with its caller, not the
+                    // server's data.
                     violation = "could not apply (" + exception.GetType().Name + "): " + exception.Message;
-                    _registry.Diagnostics?.Invoke("[CoreAI.RbxApi] replica batch " + batch.Sequence
-                                                  + " threw while applying; treated as a protocol violation: "
-                                                  + exception);
+                    _registry.ReportDiagnostic("[CoreAI.RbxApi] replica batch " + batch.Sequence
+                                               + " threw while applying; treated as a protocol violation: "
+                                               + exception);
                 }
             }
 
@@ -372,7 +375,9 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         {
             NeedsResync = true;
             ResyncReason = reason;
-            _registry.Diagnostics?.Invoke("[CoreAI.RbxApi] replica requests resync: " + reason);
+            // WHY the report is contained: ResyncRequested IS the recovery, and the host's logger
+            // must not be able to stand between the fault and the subscriber that fetches the world.
+            _registry.ReportDiagnostic("[CoreAI.RbxApi] replica requests resync: " + reason);
             ResyncRequested?.Invoke(reason);
         }
 
@@ -413,7 +418,7 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
 
             if (instance is RbxPlayer player)
             {
-                string hollow = HydratePlayer(player, node, deferred);
+                string hollow = HydratePlayerIdentity(player, node);
                 if (hollow != null)
                 {
                     return hollow;
@@ -445,12 +450,19 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         }
 
         /// <summary>
-        /// Gives a spawned Player the identity the server sent, before its members land, so its
-        /// username, UserId and DisplayName are what the server's are; the character is a
-        /// reference and takes the deferred path.
+        /// Gives a spawned Player the identity it cannot exist without — actor, UserId and the
+        /// username — before its members land. Nothing else: DisplayName and Character are members
+        /// like any other, so they reach the replica only when the operation names them and land
+        /// through <see cref="ApplyMembers"/> with the rest.
         /// </summary>
-        private static string HydratePlayer(RbxPlayer player, InstanceSnapshot node,
-            List<DeferredReference> deferred)
+        /// <remarks>
+        /// WHY the identity is not a member: the replica's <c>Players</c> service cannot admit a
+        /// Player without it, so a filter cannot deny it — a Player the recipient may see is a
+        /// Player it may identify. What a filter CAN deny is what a Player displays and drives, and
+        /// a spawn must honour that the way a patch already does, or the first snapshot leaks what
+        /// every later batch protects.
+        /// </remarks>
+        private static string HydratePlayerIdentity(RbxPlayer player, InstanceSnapshot node)
         {
             PlayerSnapshot identity = node.Player;
             if (identity == null)
@@ -469,8 +481,7 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
                 return "spawn for Player id " + node.Id + " carried no Name to serve as the username";
             }
 
-            player.Initialize(identity.ActorId, identity.UserId, node.Name, identity.DisplayName);
-            deferred.Add(new DeferredReference(player, RbxPlayer.CharacterMember, identity.CharacterId));
+            player.Initialize(identity.ActorId, identity.UserId, node.Name, displayName: null);
             return null;
         }
 
@@ -486,9 +497,9 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
                 // WHY reported rather than refused: the mirror keeps every Player under Players, but
                 // a tree in which the server put one elsewhere is the server's to explain; the replica
                 // mirrors it faithfully, and the service simply does not list it.
-                _registry.Diagnostics?.Invoke("[CoreAI.RbxApi] replicated Player '" + player.Name
-                                              + "' (id " + player.Id.Value + ") is not under a Players "
-                                              + "service, so Players:GetPlayers() will not list it");
+                _registry.ReportDiagnostic("[CoreAI.RbxApi] replicated Player '" + player.Name
+                                           + "' (id " + player.Id.Value + ") is not under a Players "
+                                           + "service, so Players:GetPlayers() will not list it");
                 return null;
             }
 
@@ -671,11 +682,18 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
                 }
                 else if (string.Equals(member, RbxPlayer.DisplayNameMember, StringComparison.Ordinal))
                 {
-                    if (instance is RbxPlayer player && node.Player != null)
+                    if (instance is RbxPlayer player)
                     {
-                        player.DisplayName = string.IsNullOrEmpty(node.Player.DisplayName)
-                            ? player.Name
-                            : node.Player.DisplayName;
+                        if (node.Player?.DisplayName == null)
+                        {
+                            return "state for id " + node.Id + " names member DisplayName but carries none";
+                        }
+
+                        // WHY verbatim, an empty string included: the serializer captures the value
+                        // as it is and the validator admits an empty one on purpose; a replica that
+                        // wrote the username instead would report success while holding a value the
+                        // server does not have.
+                        player.DisplayName = node.Player.DisplayName;
                     }
                 }
                 else if (string.Equals(member, ReplicationMembers.WorldPivot, StringComparison.Ordinal))
@@ -691,9 +709,9 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
                     // members it owns; a member it does not know belongs to a layer above (BasePart
                     // geometry lives with the Unity binder) and silence here would hide that layer's
                     // absence.
-                    _registry.Diagnostics?.Invoke("[CoreAI.RbxApi] replication member '" + member
-                                                  + "' on " + instance.ClassName + " (id " + node.Id
-                                                  + ") is not applied by the engine-free core; skipped");
+                    _registry.ReportDiagnostic("[CoreAI.RbxApi] replication member '" + member
+                                               + "' on " + instance.ClassName + " (id " + node.Id
+                                               + ") is not applied by the engine-free core; skipped");
                 }
             }
 

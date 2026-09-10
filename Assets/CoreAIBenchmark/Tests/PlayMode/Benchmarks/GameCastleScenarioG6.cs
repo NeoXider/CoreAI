@@ -10,6 +10,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// <summary>
     /// G6 — free-form visual build. This group gives the model creative freedom and grades leniently,
     /// while preserving the model-authored positions for the report hero screenshot.
+    /// <para>
+    /// What the grader measures since the move to the Roblox API (7.5.0): part count, distinct names,
+    /// build volume, the number of distinct <c>Enum.Material</c> values and of <c>Enum.PartType</c>
+    /// shapes. It does NOT measure composition, colour or whether the result reads as a castle — 40
+    /// parts of 20 materials heaped at the origin score the same as a castle. The pre-7.5.0
+    /// <c>world_command</c> grader scored castle signals (towers/walls/gate/keep by position), so G6
+    /// scores across that change are not comparable; the leaderboard's v1.7 G6 column is the old build.
+    /// </para>
     /// </summary>
     internal static class GameFreeBuildScenariosG6
     {
@@ -57,8 +65,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override string SystemPrompt =>
                 "You are a 3D scene builder working in the Roblox API. Use the execute_lua tool and build " +
                 "with Instance.new('Part'): set Name, Size (Vector3), CFrame, Material, Color, Shape, " +
-                "Anchored = true and Parent = workspace. One unit is one Roblox stud. Send several parts " +
-                "per execute_lua call — a whole section at a time — and keep calling until the scene is " +
+                "Anchored = true and Parent = workspace. One unit is one Roblox stud. Send one section of " +
+                "about 10-20 parts per execute_lua call and keep calling until the scene is " +
                 "complete; do not stop early and do not ask questions. Pick the Enum.Material each surface " +
                 "would really be made of and the Enum.PartType shape that fits it; a scene of grey blocks " +
                 "reads as unfinished. Vary positions, sizes and angles.";
@@ -171,12 +179,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     string baseGoal = full
                                       ?? (FreeBuildSubject() is string subject ? GenericGoal(subject) : CastleGoal);
 
-                    // Tell the model it is on a clock and that every spawn result reports the time left, so it
-                    // can pace itself and stop cleanly before the deadline rather than being cut off.
+                    // Tell the model it is on a clock and that every execute_lua result carries the time left
+                    // (RbxBenchmarkWorld stamps it in as TimeLeft), so it can pace itself and stop cleanly
+                    // before the deadline rather than being cut off.
                     return baseGoal +
-                           "\n\nYou are on a time budget. After every spawn, the tool result tells you how many " +
-                           "seconds remain. Pace yourself: keep building steadily, and when the time is nearly up, " +
-                           "stop spawning and finish — a complete smaller scene beats a half-built large one.";
+                           "\n\nYou are on a time budget. Every execute_lua result carries a TimeLeft note with " +
+                           "the seconds remaining. Pace yourself: keep building steadily, and when the time is " +
+                           "nearly up, stop building and finish — a complete smaller scene beats a half-built " +
+                           "large one.";
                 }
             }
 
@@ -194,6 +204,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// <summary>
             /// The Roblox-API contract every G6 goal shares: how to spawn a Part, the shapes that exist,
             /// the materials worth using and the build volume the hero camera frames.
+            /// <para>
+            /// Every claim here is checked against the runtime rather than Roblox: the property list is
+            /// the BasePart write surface of LuaCsRbxInstanceBindings (anything else throws "is not a
+            /// valid member" and ends the call); the section size follows from how a call fails (parts
+            /// before the error stay, the rest are lost, C#-thrown Rbx errors carry no line number; a
+            /// section costs ~51 VM instructions per part against a 50,000,000-step one-shot cap, so the
+            /// budget is never the limit — recoverability is); and the colour advice is the textured
+            /// shader's actual formula, albedo × lerp(1, saturate(Color × 1.15), influence), which can
+            /// only darken a photographed texture.
+            /// </para>
             /// </summary>
             private const string RbxHowTo =
                 "Use the execute_lua tool only. Build with the Roblox API:\n" +
@@ -206,9 +226,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "  p.Shape = Enum.PartType.Block\n" +
                 "  p.Anchored = true\n" +
                 "  p.Parent = workspace\n" +
-                "Emit MANY parts per execute_lua call (a whole section at a time) — a local helper " +
-                "function that takes name/size/cframe/material/color/shape keeps the code short. Lua 5.2 " +
+                "Emit one section of about 10-20 parts per execute_lua call through a local helper " +
+                "function that takes name/size/cframe/material/color/shape. A call stops at its first " +
+                "error: the parts created before it stay in the world, the rest of that call are lost, " +
+                "and the error does not name the line — so keep sections small, and before retrying a " +
+                "failed section check workspace:GetDescendants() for what already exists. Do not declare " +
+                "a new local per part (Lua allows 200 locals per chunk); call the helper. Lua 5.2 " +
                 "syntax only: no '+=', no 'continue', no type annotations.\n\n" +
+                "A Part here has exactly these writable properties: Name, Parent, Size, CFrame, Position, " +
+                "Orientation, Rotation, Color, Material, MaterialVariant, Shape, Anchored, CanCollide, " +
+                "Transparency. Anything else fails the whole call — no TopSurface/BottomSurface, no " +
+                "BrickColor, no Reflectance, no CastShadow, no Enum.SurfaceType — and there is no " +
+                "WedgePart or CornerWedgePart class: wedges are a Part with Shape = Enum.PartType.Wedge " +
+                "or CornerWedge.\n\n" +
                 "SHAPES — use ALL FIVE Enum.PartType values, each where it belongs: Block for walls, " +
                 "floors and slabs; Cylinder for round towers, pillars, wells, chimneys and bars (a Cylinder " +
                 "runs along X, so a vertical drum needs CFrame.Angles(0, 0, math.rad(90))); Wedge for " +
@@ -219,9 +249,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Marble, Plaster, Pavement, Pebble, CeramicTiles, ClayRoofTiles, RoofShingles, Wood, " +
                 "WoodPlanks, Metal, CorrodedMetal, DiamondPlate, Foil, Glass, Neon, Fabric, Carpet, " +
                 "Leather, Cardboard, Rubber, Grass, LeafyGrass, Ground, Mud, Sand, Snow, Ice, CrackedLava, " +
-                "Asphalt, Plastic, SmoothPlastic, ForceField. Use at least 12 DIFFERENT ones. Set " +
-                "p.Color as well: the colour tints the material's texture, so keep tints natural " +
-                "(Color3.fromRGB) rather than fully saturated.\n\n" +
+                "Asphalt, Plastic, SmoothPlastic, ForceField. Use at least 12 DIFFERENT ones.\n\n" +
+                "COLOUR — p.Color multiplies the material's photographed texture and can only darken it: " +
+                "a channel of 222 or more is neutral, 146 shows stone at about 75% brightness, 100 at " +
+                "about 60%, 60 at about 50%. So for stone, brick, wood, metal, ground and roof materials " +
+                "leave Color unset or use light tints (every channel 180 or more, e.g. " +
+                "Color3.fromRGB(226, 224, 214)); dark 'natural' tints turn the whole scene muddy. Use " +
+                "strong colours only where the colour IS the surface — Plastic, SmoothPlastic, Neon, " +
+                "Fabric, Carpet, Glass — for banners, lamps, flags and props.\n\n" +
                 "VOLUME — keep every part within x and z of -64..64 studs and y of 0..96 studs so the whole " +
                 "scene fits in one screenshot. Ground sits at y = 0.\n\n";
 

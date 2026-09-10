@@ -1271,8 +1271,31 @@ namespace CoreAI.Ai.LuaCs
                 // WHY milliseconds, rounded: LuaCsCoroutineHandle's wall-clock budget is stored in
                 // whole milliseconds; a non-positive result falls back to the documented default
                 // rather than disabling the guard (LuaCsCoroutineBudgetSettings.ResumeTimeoutMs).
+                double milliseconds = Math.Round(seconds * 1000d, MidpointRounding.AwayFromZero);
+
+                // WHY an explicit ceiling before the cast: C# leaves an unchecked double-to-int cast
+                // of an out-of-range value unspecified, and on x64 it produces int.MinValue — so a
+                // finite but huge request such as SetTimeout(1e9) used to READ BACK as the short
+                // default through the non-positive fallback above, the opposite of what the host
+                // asked for, with no error. The caller is host code that can be fixed, so the request
+                // is refused rather than clamped to int.MaxValue. The negative side has nothing to
+                // refuse — every non-positive result already means "use the default" — so it is only
+                // kept off that same unspecified cast.
+                if (milliseconds > int.MaxValue)
+                {
+                    const double maxSeconds = int.MaxValue / 1000d;
+                    throw RbxError.BadArgument(
+                        "ScriptContext:SetTimeout expects at most "
+                        + maxSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        + " seconds at argument 1, got "
+                        + seconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        "pass a number of seconds no larger than "
+                        + maxSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        + " (about 24.8 days), e.g. ScriptContext:SetTimeout(10)");
+                }
+
                 context.Bindings.CoroutineResumeBudget.SetResumeTimeoutMs(
-                    (int)Math.Round(seconds * 1000d, MidpointRounding.AwayFromZero));
+                    (int)Math.Max(milliseconds, int.MinValue));
                 return LuaValue.Nil;
             }, "ScriptContext");
 

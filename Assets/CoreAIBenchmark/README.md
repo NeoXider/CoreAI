@@ -17,7 +17,7 @@ The benchmark answers the practical production question: is this model usable fo
 | G3 - Reasoning/design | 4-5/5 | Derived game-rule reasoning, not code transcription | Work out tiered prices, Fibonacci rewards, clamps, boolean dungeon logic, or balanced enemy HP. |
 | G4 - Playthrough | 5/5 | Multi-slot rule systems that survive simulation | Combat, shop, and crafting-chain playthroughs checked step by step. |
 | G5 - Strict instruction-following | 3/5 | Subtractive compliance under explicit constraints | Never touch a protected object, use spawn only, obey exact counts/order, avoid forbidden tools, and stay within a tool budget. |
-| G6 - Free-build castle hero | 5/5 | Open-ended visual building with real scene output | Build a castle scene from the model's own positions; graded leniently on scale (12+ objects) and variety (20+), kept as the report hero image. |
+| G6 - Free-build castle hero | 5/5 | Open-ended visual building with real scene output | Build a castle through the Roblox API (`execute_lua`, `Instance.new('Part')` with `Enum.Material`/`Enum.PartType`) from the model's own positions; graded on 40+ named parts inside the build volume, 12+ distinct materials and all five shapes (composition and colour are not scored), kept as the report hero image. |
 | G7 - Comprehensive integration | 5/5 (hardest) | World-building and Lua logic staying cross-consistent in one session | A key-and-gate puzzle: spawn Player/Gate/Key to an exact plan, install a `key_found` proximity slot, and keep the spawned world and the logic describing it in agreement end to end. |
 | G8 - Described-state selection | 4/5 | Reasoning over a GIVEN textual world state, not live scene sensing | The prompt describes an already-populated scene; the model selects named objects, clears only junk, raises only undersized towers, and encodes the described wave-scaling rule as Lua. It is a single-turn conditional-selection test, not sustained multi-turn recovery. |
 
@@ -39,6 +39,8 @@ The six benchmark dimensions are:
 | Instruction adherence | Obeys explicit constraints, especially in subtractive G5 scenarios. |
 
 Penalties subtract from the base score for failed tool calls, invalid world commands, over-building, disallowed actions, forbidden tools, repeated violations, and scenario-specific mistakes. Hard caps prevent misleading scores: an incomplete timeout/fault or final-state failure can cap at 60, and a prose-only run that never fires a tool can cap at 40.
+
+World commands are graded from the recorded command stream. Since suite v1.8 a `spawn_batch` is expanded there into one `spawn` per item, named as the production executor names them (`item.name`, else `targetName_i`, else `prefab_i`), so batch-spawned objects count toward spawn totals in every group and a batch satisfies G5's spawn-only constraint; under v1.7 a batch was one opaque non-spawn command, invisible to the spawn graders and a violation in the spawn-only scenario.
 
 Bonus is separate from the comparable base score. A scenario can earn up to 20 bonus points only when its base score is at least 90, and the bonus rewards **correctness only** — being more right than the pass bar. Speed/efficiency (tokens and time) is **reported as a tok/s metric, never scored**, so a merely-faster model (e.g. a "spark" tier) cannot look smarter than an equally-correct but slower one. Reports show `Total = Base + Bonus`, but suite rankings compare base score.
 
@@ -206,8 +208,9 @@ _G6 scene example: a free-form castle build preserving the model-authored layout
 _Comparison chart: suite base scores across the newest JSON report for each selected model._
 
 The repository's published cloud-model and local-model tables are historical suite v1.6 / G1-G7
-baselines in the [README benchmark section](../../README.md#game-creation-benchmark). Current v1.7 / G1-G8
-runs start a separate leaderboard and must not be mixed with those scores. Historical example (local models,
+baselines in the [README benchmark section](../../README.md#game-creation-benchmark). Current v1.8 / G1-G8
+runs start a separate leaderboard and must not be mixed with those scores (nor with the v1.7 frontier sweep
+below, whose G6 was the earlier `world_command` castle). Historical example (local models,
 2026-07-02 sweep):
 
 | # | Model | Suite | Pass-rate | P/PA/F | Tools | Intent | Task | Determ | Reason | Instr | Eff | Tool-err | Tokens | Run |
@@ -262,9 +265,11 @@ in prose but emits no tool call). Re-running the affected models on it recovered
 
 **Why G6 (free-build castle) is everyone's worst, and the vision variant here means little.** The unbounded
 creative build is genuinely the hardest scenario, but two measurement issues inflate how bad it looks: (1)
-this sweep ran with the G6 **image-feedback (vision) variant enabled**, and the CLI bridge is text + tool-calls
-only — **no model tested could actually see the screenshot**, so the "image-feedback" number is just a second
-noisy free-build sample, not a vision measurement; (2) an earlier version of the vision prompt *coached* the
+this sweep ran with the G6 **image-feedback (vision) variant enabled** (`COREAI_BENCHMARK_VISION_MODE=both`,
+which is why the P/PA/F columns sum to 29 scenario runs per model against 28 text-only scenarios), and the
+CLI bridge is text + tool-calls only — **no model tested could actually see the screenshot**, so the
+"image-feedback" number is just a second noisy free-build sample, not a vision measurement, and the G6 column
+averages it with the text build; (2) an earlier version of the vision prompt *coached* the
 model to "use the camera and refine", which made non-vision models waste effort and score worse — that
 coaching has since been removed, so the two G6 variants are now identical except for tool availability (a
 clean A/B). A verified `gpt-5.3-spark` re-run after the fix scores the two variants on par (65.6 vs 68.9),
@@ -323,7 +328,7 @@ per-scenario breakdown and transcript example.
 
 ## Community Leaderboard
 
-Ranked results with version-separated sections (current suite v1.7/G1-G8; historical v1.6/G1-G7)
+Ranked results with version-separated sections (current suite v1.8/G1-G8; historical v1.7/G1-G8 and v1.6/G1-G7)
 and a public submission workflow live on the
 [community leaderboard page](../../Docs/BENCHMARK_LEADERBOARD.md). Run the suite as described in
 [How To Run](#how-to-run) above, then open a PR adding your row with the report JSON, run id,

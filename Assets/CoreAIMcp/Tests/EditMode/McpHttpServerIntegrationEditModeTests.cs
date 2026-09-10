@@ -172,26 +172,27 @@ namespace CoreAI.Mcp.Tests
         public async Task NotificationCapacity_IsBounded_AndPostContinuesWorking()
         {
             _server.MaxNotificationStreams = 1;
+            // WHY: this test holds three responses on one origin at once - the admitted stream, the
+            // refused 409 and the POST - and a response returned with ResponseHeadersRead keeps its
+            // connection until it is disposed. Under Unity's Mono, HttpClient runs on HttpWebRequest,
+            // whose per-origin budget defaults to two and whose HttpClientHandler.MaxConnectionsPerServer
+            // throws NotImplementedException; with the inherited budget the POST queued client-side until
+            // its own timeout while the server sat idle (measured headless on the same Mono: the request
+            // never reached the listener, a fresh raw socket was answered in 1 ms). The budget is stated
+            // on this test's own loopback endpoint, so nothing global leaks to other tests.
+            ServicePointManager.FindServicePoint(new Uri(Url)).ConnectionLimit = 3;
             using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(10) };
             using HttpResponseMessage firstInit = await PostAsync(client, InitializeBody(), "application/json");
             using HttpResponseMessage secondInit = await PostAsync(client, InitializeBody(), "application/json");
             using HttpResponseMessage first = await OpenNotificationsAsync(client,
                 firstInit.Headers.GetValues(McpServerInfo.SessionHeader).Single());
-            // WHY the refused stream is disposed before the POST instead of held to the end of the
-            // test: this client allows two connections per origin, and a response returned with
-            // ResponseHeadersRead holds its connection until it is disposed. Holding BOTH the open
-            // stream and the unread 409 left no connection for the POST, which then queued client-side
-            // until its own timeout — a client-side budget, measured, not a server that stopped
-            // answering. The property under test is unchanged: the first stream is still open and
-            // unread while the POST runs.
-            using (HttpResponseMessage rejected = await OpenNotificationsAsync(client,
-                secondInit.Headers.GetValues(McpServerInfo.SessionHeader).Single()))
-            {
-                Assert.AreEqual(HttpStatusCode.Conflict, rejected.StatusCode);
-            }
+            Assert.AreEqual(HttpStatusCode.OK, first.StatusCode);
+            using HttpResponseMessage rejected = await OpenNotificationsAsync(client,
+                secondInit.Headers.GetValues(McpServerInfo.SessionHeader).Single());
+            Assert.AreEqual(HttpStatusCode.Conflict, rejected.StatusCode);
 
-            Assert.IsTrue(first.IsSuccessStatusCode,
-                "the admitted stream must still be open while the POST below runs.");
+            // WHY: both the admitted stream and the refused response stay open and unread here - the
+            // property under test is that neither stops ordinary request handling.
             using HttpResponseMessage post = await PostAsync(client, InitializeBody(), "application/json");
             Assert.AreEqual(HttpStatusCode.OK, post.StatusCode);
         }

@@ -328,6 +328,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public BenchmarkLuaExecutor()
             {
                 LogicSlots.RegisterApis(Registry);
+                // WHY: the execute_lua tool description the model reads ends its worked example with
+                // report('…') and says "Use report(message) to describe the applied change". Production
+                // registers it as a no-op (CoreDefaultLuaCsRuntimeBindings); without it here the chunk
+                // died with "attempt to call a nil value (global 'report')" AFTER logic_define had already
+                // installed the slot, so a model that followed the tool contract lost the clean-Lua
+                // checkpoint and the failed-call penalty for a call that did its job.
+                Registry.Register("report", new Action<string>(_ => { }));
             }
 
             public void DeclareSlot(string name)
@@ -434,6 +441,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         return true;
                     }
 
+                    if (string.Equals(env.action, "spawn_batch", StringComparison.OrdinalIgnoreCase))
+                    {
+                        RecordSpawnBatch(env);
+                        return true;
+                    }
+
                     RecordedWorldCommand recorded = new()
                     {
                         Action = env.action,
@@ -471,6 +484,83 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 return true;
+            }
+
+            /// <summary>
+            /// Records a <c>spawn_batch</c> as one <c>spawn</c> per item, named the way the production
+            /// executor (<c>CoreAiWorldCommandExecutor.TrySpawnBatch</c>) names them: <c>item.name</c>,
+            /// else <c>targetName_i</c>, else <c>prefab_i</c>.
+            /// <para>
+            /// WHY: the tool schema tells the model "ONE call spawns every item" and the production
+            /// executor instantiates each item; recording the batch as a single non-spawn command made
+            /// every object in it invisible to <c>Count("spawn")</c> and the spawn graders, so a model
+            /// that took the schema's own hint scored zero for objects it did place.
+            /// </para>
+            /// </summary>
+            private void RecordSpawnBatch(CoreAiWorldCommandEnvelope env)
+            {
+                CoreAiSpawnBatchItem[] items = env.items ?? Array.Empty<CoreAiSpawnBatchItem>();
+                if (items.Length == 0)
+                {
+                    InvalidCommandCount++;
+                    return;
+                }
+
+                string namePrefix = (env.targetName ?? "").Trim();
+                for (int i = 0; i < items.Length; i++)
+                {
+                    CoreAiSpawnBatchItem item = items[i];
+                    if (item == null)
+                    {
+                        InvalidCommandCount++;
+                        continue;
+                    }
+
+                    string prefab = !string.IsNullOrWhiteSpace(item.prefabKey)
+                        ? item.prefabKey.Trim()
+                        : (env.prefabKeyOrName ?? "").Trim();
+                    bool named = !string.IsNullOrWhiteSpace(item.name);
+                    if (!named && namePrefix.Length == 0 && prefab.Length == 0)
+                    {
+                        InvalidCommandCount++;
+                        continue;
+                    }
+
+                    string name = named
+                        ? item.name.Trim()
+                        : namePrefix.Length > 0 ? $"{namePrefix}_{i + 1}" : $"{prefab}_{i + 1}";
+
+                    bool rotated = item.rx != 0f || item.ry != 0f || item.rz != 0f;
+                    RecordedWorldCommand recorded = new()
+                    {
+                        Action = "spawn",
+                        TargetName = name,
+                        PrefabKeyOrName = prefab,
+                        StringValue = item.parent ?? "",
+                        X = item.x,
+                        Y = item.y,
+                        Z = item.z,
+                        FloatValue = item.scale,
+                        Fx = item.rx,
+                        Fy = item.ry,
+                        Fz = item.rz,
+                        ScaleX = item.scaleX,
+                        ScaleY = item.scaleY,
+                        ScaleZ = item.scaleZ,
+                        WorldPositionStays = item.worldPositionStays,
+                        HasPosition = true,
+                        HasRotation = rotated,
+                        HasScale = item.scale > 0f || item.scaleX > 0f || item.scaleY > 0f || item.scaleZ > 0f,
+                        HasX = true,
+                        HasY = true,
+                        HasZ = true,
+                        HasFx = item.rx != 0f,
+                        HasFy = item.ry != 0f,
+                        HasFz = item.rz != 0f
+                    };
+                    Commands.Add(recorded);
+                    OnCommand(recorded);
+                }
             }
 
             /// <summary>Hook for subclasses (e.g. the visual executor) to react to a recorded command.</summary>
@@ -1112,7 +1202,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 {
                     return _rbxWorld ??= new RbxBenchmarkWorld(
                         Settings,
-                        (World as VisualBenchmarkWorldExecutor)?.Root);
+                        (World as VisualBenchmarkWorldExecutor)?.Root,
+                        TimeRemainingNote);
                 }
             }
 

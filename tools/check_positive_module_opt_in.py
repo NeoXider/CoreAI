@@ -23,6 +23,7 @@ SKIPPED_PARTS = {
     "bin",
     "obj",
 }
+OPTIONAL_PACKAGE_SYMBOLS = ("MIRROR", "EDGEGAP_PLUGIN_SERVERS")
 HISTORICAL_FILES = {
     Path("Docs/Audits/2026-07-16/architecture-api.md"),
     Path("Docs/Audits/2026-07-16/SUMMARY.md"),
@@ -60,6 +61,13 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def is_scratch(relative: Path) -> bool:
+    """Untracked working notes that .gitignore already keeps out of the repository."""
+    # WHY skipped rather than checked: these are per-task checkpoints written by CLI subagents,
+    # regenerated on every run and ignored by git, so they are not what this gate ships or governs.
+    return relative.name.startswith("PROGRESS.") and relative.suffix == ".md"
+
+
 def is_historical(relative: Path) -> bool:
     if relative.name == "CHANGELOG.md":
         return True
@@ -67,7 +75,13 @@ def is_historical(relative: Path) -> bool:
 
 
 def read_active_text(path: Path, relative: Path) -> str:
-    text = path.read_text(encoding="utf-8-sig")
+    # WHY the decode is guarded: this gate walks the whole checkout, including untracked scratch
+    # left by tooling, and one file the CLI wrote in the OEM codepage used to end the run in a
+    # UnicodeDecodeError traceback that named no file. A release gate must say what it choked on.
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as error:
+        fail(f"{relative.as_posix()} is not valid UTF-8 and cannot be checked: {error}")
     if relative == DGF_SPEC:
         if DGF_HISTORY_HEADING not in text:
             fail("DGF_SPEC revision-history boundary is missing")
@@ -85,7 +99,7 @@ def verify_legacy_symbols_absent() -> None:
             if path.suffix.lower() not in TEXT_SUFFIXES:
                 continue
             relative = path.relative_to(ROOT)
-            if is_historical(relative):
+            if is_historical(relative) or is_scratch(relative):
                 continue
             text = read_active_text(path, relative)
             if LEGACY_LUA_SYMBOL in text or LEGACY_LLM_SYMBOL in text:
@@ -294,6 +308,35 @@ def verify_current_release_docs() -> None:
             fail(f"{relative.as_posix()} current release note does not state the full positive-module contract")
 
 
+def verify_no_optional_package_defines() -> None:
+    """Refuses a scripting-define row carrying symbols of a package that is not in the repository."""
+    # WHY this gate exists: `Assets/Mirror` is gitignored, and when it is present locally the editor
+    # writes MIRROR/EDGEGAP symbols into whatever platform row is active. A clean clone on that
+    # platform then compiles `CoreAI.Net.Mirror` (asmdef defineConstraints: ["MIRROR"]) against a
+    # package that is not there. It nearly reached a release commit twice on 2026-09-10, so the
+    # discipline of "remember to revert ProjectSettings" is replaced by a check.
+    settings = (ROOT / "ProjectSettings/ProjectSettings.asset").read_text(encoding="utf-8-sig")
+    block = settings.split("scriptingDefineSymbols:", 1)
+    if len(block) != 2:
+        fail("ProjectSettings has no scriptingDefineSymbols block")
+    offenders: list[str] = []
+    # WHY the first element is dropped: splitlines() returns the REMAINDER of the
+    # "scriptingDefineSymbols:" line itself as element 0, which is empty and would end the loop
+    # before a single platform row is read. This guard silently passed on a known-bad file until
+    # that was found by feeding it one.
+    for line in block[1].splitlines()[1:]:
+        if not line.startswith("    ") or ":" not in line:
+            break
+        platform, _, symbols = line.strip().partition(":")
+        for symbol in OPTIONAL_PACKAGE_SYMBOLS:
+            if symbol in symbols:
+                offenders.append(f"{platform} carries {symbol}")
+    if offenders:
+        fail("scripting defines name a package the repository does not ship ("
+             + "; ".join(offenders)
+             + "); revert ProjectSettings/ProjectSettings.asset before committing")
+
+
 def main() -> None:
     verify_legacy_symbols_absent()
     verify_module_manager()
@@ -303,6 +346,7 @@ def main() -> None:
     verify_asmdefs_are_not_blanket_gated()
     verify_input_system_compatibility_gate()
     verify_project_baseline()
+    verify_no_optional_package_defines()
     verify_current_release_docs()
     print("Positive module opt-in contract: PASS")
 

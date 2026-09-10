@@ -309,7 +309,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
             foreach (string className in new[]
                      {
                          "Folder", "Model", "IntValue", "NumberValue", "StringValue", "BoolValue", "ObjectValue",
-                         "Vector3Value", "CFrameValue", "Color3Value"
+                         "Vector3Value", "CFrameValue", "Color3Value", "Player"
                      })
             {
                 RbxInstance instance = _registry.Create(className);
@@ -424,7 +424,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
             ["ObjectValue.Value"] = false,
             ["Vector3Value.Value"] = false,
             ["CFrameValue.Value"] = false,
-            ["Color3Value.Value"] = false
+            ["Color3Value.Value"] = false,
+            ["Player.Character"] = false,
+            ["Player.DisplayName"] = false
         };
 
         // WHY a second table: a member the mirror tags NotReplicated may still be carried, but only
