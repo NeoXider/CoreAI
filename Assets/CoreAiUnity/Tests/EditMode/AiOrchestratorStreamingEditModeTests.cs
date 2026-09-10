@@ -47,36 +47,41 @@ namespace CoreAI.Tests.EditMode
             {
                 await AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario.AwaitEntered(scenario.Summary.SaveEntered.Task);
                 Assert.IsFalse(turn.IsCompleted);
-                scenario.AssertOldSourceRetained();
+                scenario.AssertPreparationInFlight();
             }
             finally { scenario.Summary.SaveGate.TrySetResult(true); }
             if (failConfirmation)
             {
                 Assert.That(await AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario.CaptureFailure(turn),
                     Is.TypeOf<IOException>());
-                scenario.AssertOldSourceRetained();
+                scenario.AssertUndispatchedTurnKeptUserIntent();
+                Assert.AreEqual("", scenario.Summary.Stored,
+                    "An unconfirmed write must leave no half-written summary behind.");
                 scenario.Summary.FailSave = false;
                 await CollectAsync(scenario.Orchestrator.RunStreamingAsync(scenario.Request));
+                scenario.AssertRetryAfterUndispatchedTurnPublished();
+                return;
             }
-            else { await turn; }
+
+            await turn;
             scenario.AssertPublishedOnce();
         }
 
         [Test]
-        public async Task SummaryPreflight_StreamingFailedLoadPreservesSourceAndCanRetry()
+        public async Task SummaryPreflight_StreamingFailedLoadStopsDispatchAndCanRetry()
         {
             AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario scenario = new();
             scenario.Summary.FailLoad = true;
             Assert.That(await AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario.CaptureFailure(
                 CollectAsync(scenario.Orchestrator.RunStreamingAsync(scenario.Request))), Is.TypeOf<IOException>());
-            scenario.AssertOldSourceRetained();
+            scenario.AssertUndispatchedTurnKeptUserIntent();
             scenario.Summary.FailLoad = false;
             await CollectAsync(scenario.Orchestrator.RunStreamingAsync(scenario.Request));
-            scenario.AssertPublishedOnce();
+            scenario.AssertRetryAfterUndispatchedTurnPublished();
         }
 
         [Test]
-        public async Task SummaryPreflight_StreamingCancellationDuringLoadDoesNotAppendFromFinally()
+        public async Task SummaryPreflight_StreamingCancellationDuringLoadStillRecordsUserIntent()
         {
             AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario scenario = new();
             scenario.Summary.LoadGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -86,7 +91,7 @@ namespace CoreAI.Tests.EditMode
             cancellation.Cancel();
             Assert.That(await AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario.CaptureFailure(turn),
                 Is.InstanceOf<OperationCanceledException>());
-            scenario.AssertOldSourceRetained();
+            scenario.AssertUndispatchedTurnKeptUserIntent();
         }
 
         [Test]

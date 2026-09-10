@@ -106,8 +106,7 @@ namespace CoreAI.Ai
         private async Task<RequestBundle> BuildRequestAsync(
             AiTaskRequest task,
             int contextRetryPass,
-            CancellationToken cancellationToken,
-            UserTurnHistoryLatch userTurn)
+            CancellationToken cancellationToken)
         {
             string roleId = ResolveRoleId(task);
             ActorContext actorContext = task.ActorContext.Value;
@@ -224,7 +223,7 @@ namespace CoreAI.Ai
 
             (string updatedSystem, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool wasCompacted,
                     ConversationContextSnapshot contextSnapshot) =
-                await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId, cancellationToken, userTurn);
+                await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId, cancellationToken);
             system = updatedSystem;
             bool shouldConsolidateMemorySnapshot = wasCompacted || contextRetryPass > 0;
             if (shouldConsolidateMemorySnapshot &&
@@ -319,7 +318,7 @@ namespace CoreAI.Ai
                     // WHY the platform fork is gone: its two branches differed only by
                     // ConfigureAwait(false) off WebGL. Resuming on the host context is now the rule on
                     // every platform, so the fork was trap surface with no behaviour behind it.
-                    bundle = await BuildRequestAsync(task, contextPass, cancellationToken, userTurn);
+                    bundle = await BuildRequestAsync(task, contextPass, cancellationToken);
                     roleId = bundle.RoleId;
                     traceId = bundle.TraceId;
                     system = bundle.SystemPrompt;
@@ -565,7 +564,7 @@ namespace CoreAI.Ai
 
             while (true)
             {
-                RequestBundle bundle = await BuildRequestAsync(task, contextPass, cancellationToken, turn.UserTurn);
+                RequestBundle bundle = await BuildRequestAsync(task, contextPass, cancellationToken);
                 // WHY: the teardown in RunStreamingAsync needs the role config of the LAST attempt to know
                 // where (and whether) the user turn is persisted.
                 turn.Bundle = bundle;
@@ -1347,16 +1346,13 @@ namespace CoreAI.Ai
                 string system,
                 ConversationContextBuildArgs buildArgs,
                 string traceId,
-                CancellationToken cancellationToken,
-                UserTurnHistoryLatch userTurn)
+                CancellationToken cancellationToken)
         {
             if (!roleConfig.WithChatHistory || _memoryStore == null)
             {
                 return (system, null, false, null);
             }
 
-            // Failure teardown must not evict old source while its summary is still unconfirmed.
-            userTurn.SummaryPreflightPending = _settings.EnableConversationHistorySummarization;
             int maxMessages = roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30;
             // Compaction must receive the retained prefix as well as the prompt window. The store
             // already bounds its history; applying the role cap here would silently skip that prefix.
@@ -1364,7 +1360,6 @@ namespace CoreAI.Ai
                 _settings.EnableConversationHistorySummarization ? 0 : maxMessages);
             if (history == null || history.Length == 0)
             {
-                userTurn.SummaryPreflightPending = false;
                 return (system, null, false, null);
             }
 
@@ -1405,14 +1400,17 @@ namespace CoreAI.Ai
 
             if (snapshot == null)
             {
-                userTurn.SummaryPreflightPending = false;
                 return (system, null, false, null);
             }
 
             // This summary describes old messages: preserve it before any provider/tool side effect
             // or bounded history append, even when the forthcoming model request later fails.
+            // WHY it cannot wait for success: every terminal path of a turn appends the user message
+            // (see EnsureUserTurnRecorded), and on a bounded store an append evicts the oldest
+            // message. Committing here is what makes that eviction safe - the evicted source is
+            // already retold. A summary is a retelling of messages the store still holds, so writing
+            // one for a turn that later fails costs a rolled summary, not a lost message.
             await snapshot.CommitAsync(cancellationToken);
-            userTurn.SummaryPreflightPending = false;
             cancellationToken.ThrowIfCancellationRequested();
 
             string resultSystem = system;
@@ -1597,9 +1595,6 @@ namespace CoreAI.Ai
         {
             /// <summary>Whether the store append was attempted, including one that committed and then threw.</summary>
             public bool Attempted;
-
-            /// <summary>Old history cannot be evicted until summary preparation is durably acknowledged.</summary>
-            public bool SummaryPreflightPending;
         }
 
         /// <inheritdoc />
@@ -1612,7 +1607,17 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Writes the user turn into role chat history once per turn.
+        /// Writes the user turn into role chat history exactly once per turn, on every terminal path.
+        /// <para>
+        /// WHY there is no second condition: the learner's own words are the one thing in the store that
+        /// cannot be reconstructed from anything else, and the chat has already rendered them. 7.40.0 added
+        /// a "summary preflight still pending" gate here, so a turn that broke while conversation context
+        /// was being built - a cancelled build, an unreadable summary file - recorded nothing at all: the
+        /// question stayed on screen while the model's history never learned it was asked. The eviction that
+        /// gate was defending against is handled where it happens, by committing the rolling summary before
+        /// this append (see BuildChatHistoryAsync); skipping the append cannot protect old source, because
+        /// the very next turn appends anyway.
+        /// </para>
         /// </summary>
         private void EnsureUserTurnRecorded(
             RequestBundle bundle,
@@ -1620,7 +1625,7 @@ namespace CoreAI.Ai
             UserTurnHistoryLatch latch,
             bool suppressPersistenceErrors = false)
         {
-            if (latch == null || latch.Attempted || latch.SummaryPreflightPending || task == null)
+            if (latch == null || latch.Attempted || task == null)
             {
                 return;
             }

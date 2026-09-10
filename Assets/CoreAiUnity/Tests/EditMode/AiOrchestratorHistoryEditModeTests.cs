@@ -2450,8 +2450,19 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(512, recorder.LastBuildArgs.MaxRolledSummaryTokens);
         }
 
+        /// <summary>
+        /// WHY the expectation flipped: this test was written when the rolling summary was committed only
+        /// after the owning request succeeded, so a turn that never got an answer left the summary store
+        /// untouched. That ordering had a hole - every terminal path of a turn, failure included, appends
+        /// the learner's message, and on a bounded store an append evicts the oldest message. Committing
+        /// only on success meant a failed turn could evict source that nothing retold yet. Since 7.40.0 the
+        /// fold is committed before the request is dispatched, which is what makes the teardown append safe,
+        /// and the price is exactly this: a turn that dies in context-overflow retries leaves behind the
+        /// summary it prepared. That is a retelling of messages the store still holds, not new content, so
+        /// the trade is a rolled summary against a lost message.
+        /// </summary>
         [Test]
-        public async Task RunTaskAsync_ContextOverflowRetriesFail_DoesNotPersistAttemptSummaries()
+        public async Task RunTaskAsync_ContextOverflowRetriesFail_StillCommitsTheSummaryTheAppendReliesOn()
         {
             ToolTraceLlmClient llm = new(
                 new LlmCompletionResult
@@ -2489,7 +2500,11 @@ namespace CoreAI.Tests.EditMode
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "retry" });
 
             Assert.AreEqual(2, llm.Requests.Count);
-            Assert.AreEqual("", summaryStore.LoadSummary("test_role"));
+            CollectionAssert.AreEqual(new[] { "user" }, memory.Appended.Select(m => m.Role).ToArray(),
+                "A turn that exhausted its retries still records the learner's message once.");
+            Assert.AreEqual("retry", memory.Appended[0].Content);
+            StringAssert.Contains("old-context-0", summaryStore.LoadSummary("test_role"),
+                "The oldest source the teardown append can evict must already be retold in the summary.");
         }
 
         [Test]

@@ -4,6 +4,31 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.41.0] - 2026-09-10
+
+### Changed
+
+- **The summary-preflight EditMode scenarios say what a broken turn actually leaves behind.** Core
+  removed `UserTurnHistoryLatch.SummaryPreflightPending`, so a turn that dies while building its
+  conversation context now records the learner's message instead of dropping it (see the core changelog
+  for why). The host fixtures that pinned the old behaviour moved with it: `AssertOldSourceRetained`
+  split into `AssertPreparationInFlight` and `AssertUndispatchedTurnKeptUserIntent`, the latter now also
+  asserting the resulting bounded window — the append lands last and the oldest message is what pays for
+  it, which is the cost the old helper's name denied. A third helper,
+  `AssertRetryAfterUndispatchedTurnPublished`, asserts the full append sequence of the retry that follows
+  such a turn, including the second copy of the learner's message that a per-invocation latch cannot
+  prevent. Without it those retry sites asserted only the provider call and the summary, and a swallowed
+  or tripled user turn would have passed. Ordinary, streaming and queued mirrors share the three helpers.
+- **`Docs/MEMORY_STORE_CUSTOM_BACKENDS.md` describes the preflight the orchestrator actually runs.** It
+  no longer promises that a failed preflight suppresses the user append, and it now names what a custom
+  backend has to plan for: write-once is per orchestrator invocation rather than per learner message, an
+  `AppendChatMessage` that throws during failure teardown is warned about rather than retried, and a chat
+  cap has to be sized against the fold window (the shipped stores trim at 500 while folding starts around
+  thirty) rather than against a single turn.
+- **Russian release notes in `Assets/CoreAI/CHANGELOG.md` are translated.** The 7.40.0 mods section was
+  written in Russian, and `EnglishOnlyProseEditModeTests` only scans `*.cs`, so nothing caught it —
+  the English-prose rule in `AGENTS.md` covers package docs and changelogs too.
+
 ## [7.40.0] - 2026-09-10
 
 ### Changed

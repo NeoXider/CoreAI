@@ -75,7 +75,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task TypedTask_SummaryPreflightFailureDoesNotEnterProviderOrEvictHistory()
+        public async Task TypedTask_SummaryPreflightFailureDoesNotEnterProviderAndKeepsUserIntent()
         {
             AiOrchestratorRefactorEditModeTests.SummaryPreflightScenario scenario = new();
             scenario.Summary.FailSave = true;
@@ -89,10 +89,10 @@ namespace CoreAI.Tests.EditMode
 #endif
             LlmCompletionResult result = await scenario.Orchestrator.RunTaskResultAsync(scenario.Request);
             Assert.IsFalse(result.Ok);
-            scenario.AssertOldSourceRetained();
+            scenario.AssertUndispatchedTurnKeptUserIntent();
             scenario.Summary.FailSave = false;
             Assert.IsTrue((await scenario.Orchestrator.RunTaskResultAsync(scenario.Request)).Ok);
-            scenario.AssertPublishedOnce();
+            scenario.AssertRetryAfterUndispatchedTurnPublished();
         }
 
         private static AiOrchestrator BuildReceiptOrchestrator(ReceiptLlmClient provider) => new(

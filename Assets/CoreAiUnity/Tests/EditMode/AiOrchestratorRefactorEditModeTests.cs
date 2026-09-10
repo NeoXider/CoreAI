@@ -196,12 +196,81 @@ namespace CoreAI.Tests.EditMode
                     new DeterministicConversationContextManager(Summary));
             }
 
-            internal void AssertOldSourceRetained()
+            /// <summary>
+            /// The turn is still preparing its context: nothing has been dispatched, published, or written
+            /// into history, because history is only ever touched at teardown.
+            /// </summary>
+            internal void AssertPreparationInFlight()
             {
-                Assert.AreEqual(0, Memory.Appends.Count, "Failed preflight must not append and evict old source.");
+                Assert.AreEqual(0, Memory.Appends.Count, "History is touched at teardown, never during preparation.");
                 CollectionAssert.AreEqual(Memory.Original, Memory.GetChatHistory(Request.RoleId));
                 Assert.AreEqual(0, Provider.Calls, "The main provider must wait for durable summary confirmation.");
                 Assert.AreEqual(0, Publications, "An unprepared request cannot publish an answer.");
+            }
+
+            /// <summary>
+            /// A turn that broke while preparing context never reached the provider, and still left the
+            /// learner's message in history exactly once.
+            /// <para>
+            /// WHY this replaced "a failed preflight must not append at all": that rule bought one turn of
+            /// delay for the oldest stored message by destroying the newest one outright. The learner's own
+            /// words are the only thing here that cannot be reconstructed - the summary is a retelling of
+            /// messages the store still holds - and the chat has already rendered them. Skipping the append
+            /// also does not save the old source: the next turn appends and evicts it anyway. Eviction is
+            /// made safe where it happens, by committing the rolling summary before any append; when that
+            /// commit is impossible the failure is reported, not hidden behind a lost question.
+            /// </para>
+            /// </summary>
+            internal void AssertUndispatchedTurnKeptUserIntent()
+            {
+                Assert.AreEqual(0, Provider.Calls, "The main provider must wait for durable summary confirmation.");
+                Assert.AreEqual(0, Publications, "An unprepared request cannot publish an answer.");
+                Assert.AreEqual(1, Memory.Appends.Count, "The learner's message is recorded once on every terminal path.");
+                Assert.AreEqual("user", Memory.Appends[0].Role);
+                Assert.AreEqual(Request.Hint, Memory.Appends[0].Content);
+
+                // WHY the resulting window is asserted and not just the append: the helper this replaced
+                // also checked the store, claiming the oldest source survived. It does not survive any
+                // more - this fixture holds exactly two messages, so the teardown append evicts the oldest,
+                // and on this path the summary that would have retold it was never confirmed. That is the
+                // price of the trade and it belongs in writing. It stays affordable only because the ratio
+                // is nothing like this fixture's: a shipped store trims at 500 messages while folding
+                // starts around thirty, so hundreds of consecutive broken turns would have to land before
+                // an eviction reached unsummarized source. If the append ever stops being last, or stops
+                // evicting from the front, this is where it shows.
+                ChatMessage[] window = Memory.GetChatHistory(Request.RoleId);
+                Assert.AreEqual(2, window.Length);
+                Assert.AreEqual(Memory.Original[1].Content, window[0].Content,
+                    "The append lands at the end of the bounded window, so eviction takes the oldest message.");
+                Assert.AreEqual(Request.Hint, window[1].Content);
+            }
+
+            /// <summary>
+            /// The turn that follows an undispatched one reaches the provider, publishes once and commits
+            /// the fold - and the learner's message is now in history twice.
+            /// <para>
+            /// WHY the duplicate is asserted instead of quietly tolerated: the latch that keeps the user
+            /// append to one write is per orchestrator invocation, not per learner message, so a host that
+            /// resubmits the same request records the intent again. That is the price of never dropping it,
+            /// and it is why these retry sites can no longer call <see cref="AssertPublishedOnce"/>. Left
+            /// unasserted the count is free to drift either way - back to a swallowed turn, or on to a
+            /// third copy - with every one of these tests still green.
+            /// </para>
+            /// </summary>
+            internal void AssertRetryAfterUndispatchedTurnPublished()
+            {
+                Assert.AreEqual(1, Provider.Calls, "The retry reaches the provider once summary storage works again.");
+                Assert.AreEqual(1, Publications);
+                Assert.IsNotEmpty(Summary.Stored, "The retry commits the fold the undispatched turn could not.");
+                Assert.AreEqual(0, Summary.SyncCalls, "Async orchestration must not use sync summary storage.");
+                Assert.AreEqual(3, Memory.Appends.Count,
+                    "Two invocations of the same request record the learner's message twice, then the answer.");
+                Assert.AreEqual("user", Memory.Appends[0].Role);
+                Assert.AreEqual(Request.Hint, Memory.Appends[0].Content);
+                Assert.AreEqual("user", Memory.Appends[1].Role);
+                Assert.AreEqual(Request.Hint, Memory.Appends[1].Content);
+                Assert.AreEqual("assistant", Memory.Appends[2].Role);
+                Assert.AreEqual("ok", Memory.Appends[2].Content);
             }
 
             internal void AssertPublishedOnce()
@@ -319,34 +388,38 @@ namespace CoreAI.Tests.EditMode
             {
                 await SummaryPreflightScenario.AwaitEntered(scenario.Summary.SaveEntered.Task);
                 Assert.IsFalse(turn.IsCompleted);
-                scenario.AssertOldSourceRetained();
+                scenario.AssertPreparationInFlight();
             }
             finally { scenario.Summary.SaveGate.TrySetResult(true); }
             await turn;
             if (failConfirmation)
             {
-                scenario.AssertOldSourceRetained();
+                scenario.AssertUndispatchedTurnKeptUserIntent();
+                Assert.AreEqual("", scenario.Summary.Stored,
+                    "An unconfirmed write must leave no half-written summary behind.");
                 scenario.Summary.FailSave = false;
                 await scenario.Orchestrator.RunTaskAsync(scenario.Request);
+                scenario.AssertRetryAfterUndispatchedTurnPublished();
+                return;
             }
             scenario.AssertPublishedOnce();
         }
 
         [Test]
-        public async Task SummaryPreflight_FailedLoadPreservesSourceAndCanRetry()
+        public async Task SummaryPreflight_FailedLoadStopsDispatchAndCanRetry()
         {
             SummaryPreflightScenario scenario = new();
             scenario.Summary.FailLoad = true;
             using ExpectedSummaryFailureLog failureLog = new(SummaryPreflightScenario.ControlledSummary.LoadFailure);
             await scenario.Orchestrator.RunTaskAsync(scenario.Request);
-            scenario.AssertOldSourceRetained();
+            scenario.AssertUndispatchedTurnKeptUserIntent();
             scenario.Summary.FailLoad = false;
             await scenario.Orchestrator.RunTaskAsync(scenario.Request);
-            scenario.AssertPublishedOnce();
+            scenario.AssertRetryAfterUndispatchedTurnPublished();
         }
 
         [Test]
-        public async Task SummaryPreflight_CancellationDuringLoadDoesNotAppendFromFinally()
+        public async Task SummaryPreflight_CancellationDuringLoadStillRecordsUserIntent()
         {
             SummaryPreflightScenario scenario = new();
             scenario.Summary.LoadGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -355,7 +428,7 @@ namespace CoreAI.Tests.EditMode
             await SummaryPreflightScenario.AwaitEntered(scenario.Summary.LoadEntered.Task);
             cancellation.Cancel();
             Assert.That(await SummaryPreflightScenario.CaptureFailure(turn), Is.InstanceOf<OperationCanceledException>());
-            scenario.AssertOldSourceRetained();
+            scenario.AssertUndispatchedTurnKeptUserIntent();
         }
 
         [TestCase(false)]
@@ -373,7 +446,7 @@ namespace CoreAI.Tests.EditMode
                 await SummaryPreflightScenario.AwaitEntered(scenario.Summary.SaveEntered.Task);
                 cancellation.Cancel();
                 Assert.IsFalse(turn.IsCompleted, "An accepted write must finish host confirmation despite caller cancellation.");
-                scenario.AssertOldSourceRetained();
+                scenario.AssertPreparationInFlight();
             }
             finally { scenario.Summary.SaveGate.TrySetResult(true); }
             Assert.That(await SummaryPreflightScenario.CaptureFailure(turn), Is.InstanceOf<OperationCanceledException>());

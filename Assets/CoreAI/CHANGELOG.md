@@ -1,5 +1,59 @@
 # Changelog
 
+## [7.41.0] - 2026-09-10
+
+### Fixed
+
+- **A turn that broke while building its context threw the learner's message away.** 7.40.0 introduced
+  `UserTurnHistoryLatch.SummaryPreflightPending`: raised as soon as conversation context building began,
+  lowered only once the rolling summary had been durably written, and while raised it made
+  `EnsureUserTurnRecorded` return without writing anything. Everything that can go wrong in that window
+  landed on the learner: the caller cancelling, a summary file that will not read, an LLM-assisted
+  compaction that is itself a network call and takes seconds. The question stayed on screen in the chat
+  while the model's history never learned it had been asked, and the next turn answered a conversation
+  with a hole in it. The gate is removed; the write-once user turn is unconditional again on every
+  terminal path — which is what the surrounding design already assumed, in `IUnstartedAiTurnRecorder`
+  and in the authority-denial branch of `RunTaskResultAsync` that exists purely so a refused turn cannot
+  bypass the same boundary.
+- **The gate could not have protected what it was defending, either.** Its stated purpose was to stop a
+  bounded store from evicting old messages that a still-unconfirmed summary retells. Skipping one append
+  does not save those messages: the next turn appends and evicts them just the same, so the guard bought
+  one turn of delay for the oldest message by destroying the newest one outright. Eviction safety is
+  owned where the eviction happens — the fold is committed before dispatch, so by the time any append
+  runs, whatever it can evict is already retold. In the shipped stores the two thresholds are not even
+  close: `FileAgentMemoryStore` and `InMemoryAgentMemoryStore` trim at 500 messages while folding is
+  driven by the context budget and starts around thirty, so the gate would have had to sit through
+  hundreds of consecutive failing turns — dropping a message each time — before it protected anything.
+- **The price of the fix, stated plainly: a resubmitted turn now records the learner's message twice.**
+  The latch is per orchestrator invocation, not per message — nothing in the store identifies a message
+  as the one already written — so a host that retries a request that died during context building
+  appends the same intent again. Under the removed gate that retry produced exactly one copy, because
+  the first attempt had written nothing. This is the trade being made and not a side effect that was
+  overlooked: a duplicated question is a conversation the model can still read, a missing one is not.
+  The retry scenarios in `AiOrchestratorRefactorEditModeTests`, its streaming mirror and its queued
+  mirror assert the full append sequence, so the count cannot drift back to a swallowed turn or on to a
+  third copy without a test saying so.
+
+### Changed
+
+- **A failed turn leaves the summary it prepared, and the test now says so.**
+  `RunTaskAsync_ContextOverflowRetriesFail_DoesNotPersistAttemptSummaries` was written against the
+  pre-7.40.0 ordering, where the summary was committed only after the owning request had succeeded, and
+  had been red since that ordering changed. It is renamed `…_StillCommitsTheSummaryTheAppendReliesOn`
+  and asserts what the new ordering requires: the fold covering the oldest source is committed, because
+  the teardown append relies on it, and the turn records the learner's message once. This is a retelling
+  of messages the store still holds, not new content, so the cost of a failed turn is a rolled summary
+  rather than a lost message.
+- **The summary-preflight tests assert the boundary they actually guard.** `AssertOldSourceRetained` split
+  into `AssertPreparationInFlight` (nothing dispatched, published, or appended while context is being
+  prepared) and `AssertUndispatchedTurnKeptUserIntent` (a turn that never reached the provider still holds
+  the learner's message exactly once, and the bounded window shows the append landing last). The ordinary,
+  streaming, and queued mirrors of that scenario were updated together, and `MEMORY_STORE_CUSTOM_BACKENDS.md`
+  no longer promises that a failed preflight suppresses the user append — it now spells out the three
+  consequences a custom backend has to plan for instead: write-once is per invocation, a teardown append
+  that throws is only warned about, and the chat cap has to be sized against the fold window rather than
+  against a single turn.
+
 ## [7.40.0] - 2026-09-10
 
 ### Fixed
@@ -84,77 +138,79 @@
   is the only guard that the preflight still sees `UnderlyingMethod` through
   `DelegateExceptionBoundaryAIFunction`'s `DelegatingAIFunction` wrapper — were that forwarding ever to
   stop, the preflight would silently degrade to the conservative verdict with no other test noticing.
+
 ### Added
 
-- **Свой контроллер персонажа может сообщать измеренную скорость и отказывать в прыжке.**
-  `IRbxCharacterMotor` получил `double? MeasuredSpeed` и `bool TryJump(...)` — оба с реализацией
-  по умолчанию, поэтому чужой мотор, написанный до этой версии, продолжает собираться и ведёт себя
-  как раньше. Зачем: `Humanoid.Running` умножал ЕДИНИЧНЫЙ `MoveDirection` на `WalkSpeed`, то есть
-  мог отдать только ноль или полную скорость, и срабатывал один раз при входе в состояние. Зеркало
-  говорит другое: сигнал срабатывает, когда скорость бега МЕНЯЕТСЯ, и отдаёт ноль при остановке.
-  Теперь так и есть, а `UnityRbxCharacterMotor` отдаёт скорость, разрешённую солвером, так что
-  персонаж, упирающийся в стену, читается как стоящий, хотя заданная скорость не менялась.
-  **Порядок сигналов теперь часть контракта:** выход из состояния бега сообщает остановку ПЕРЕД
-  сменой состояния, то есть до `FreeFalling` или `Jumping`, а вход в бег сообщает скорость ВСЕГДА,
-  даже если значение не изменилось. Без первого правила обработчик, выбирающий позу покоя по нулю,
-  побеждал обработчик падения в том же кадре, и персонаж стоял в воздухе. Без второго приземление
-  в покое не сообщалось вовсе, и скрипт никогда не выходил из позы падения. Скобка стоит в самом
-  переходе состояний, поэтому покрывает все три выхода из бега — полёт, прыжок и смерть.
-  Мотор с уничтоженным телом отдаёт `null`, а не ноль: исчезнувшее тело не остановившийся персонаж.
+- **A custom character controller can report a measured speed and refuse a jump.**
+  `IRbxCharacterMotor` gained `double? MeasuredSpeed` and `bool TryJump(...)`, both with a default
+  implementation, so a third-party motor written before this version still compiles and behaves the way
+  it did. Why: `Humanoid.Running` multiplied the UNIT `MoveDirection` by `WalkSpeed`, so it could only
+  report zero or full speed, and it fired once on entering the state. The mirror says something else:
+  the signal fires when running speed CHANGES, and reports zero on stopping. It now does, and
+  `UnityRbxCharacterMotor` reports the speed the solver allowed, so a character pressed against a wall
+  reads as standing even though its requested speed never changed.
+  **Signal order is now part of the contract:** leaving the running state reports the stop BEFORE the
+  state changes — that is, before `FreeFalling` or `Jumping` — while entering a run ALWAYS reports the
+  speed, even when the value did not change. Without the first rule, a handler that picks the idle pose
+  from a zero beat the falling handler in the same frame and the character stood in mid-air. Without
+  the second, landing at rest was never reported at all and the script never left the falling pose. The
+  bracket sits in the state transition itself, so it covers all three exits from running — flight, jump
+  and death. A motor whose body has been destroyed returns `null` rather than zero: a body that is gone
+  is not a character that stopped.
 
 ### Fixed
 
-- **Падение чужого кода при выключении мира больше не оставляет мир недоразобранным.**
-  `IRbxCharacterMotor.Release` — это код игры, и он вызывался незащищённым в трёх местах. Хуже
-  всего было при `Dispose`: флаг «уже уничтожен» ставился раньше, поэтому одно исключение обрывало
-  весь остальной демонтаж навсегда — планировщик продолжал звать уничтоженный объект, соединения и
-  потоки оставались жить, а повторная попытка сразу выходила. Теперь владение мотором снимается
-  ДО вызова чужого кода, каждый вызов изолирован, а отказ уходит в диагностику реестра.
-- **`ScriptContext:SetTimeout` больше не превращает большое значение в маленькое.** Проверка
-  ловила бесконечность, но не диапазон, а приведение слишком большого числа к целому не определено
-  и на x64 даёт минимальное целое — которое читалось назад как короткое значение по умолчанию.
-  Потолок теперь назван явно (2147483.647 с, около 24.8 суток), всё выше отклоняется с внятной
-  причиной вместо тихой подмены.
-- **Смерть персонажа сообщает нулевую скорость.** Обработчик отказывается считать мёртвого, поэтому
-  скрипт анимации оставался с последним ненулевым значением навсегда при выключенном автовозрождении.
-  Ноль отправляется один раз, до сигнала смерти, чтобы обработчик смерти не догоняло запоздалое
-  указание вернуться в покой.
-- **Дрожание на границе остановки больше не шлёт событие каждый кадр.** Вместо одного порога —
-  гистерезис: идущий останавливается ниже 0.1 стад/с, стоящий должен набрать 0.2, чтобы снова
-  считаться идущим. Полоса равна ровно одному шагу разрешения, поэтому изменение меньше того, о
-  котором вообще сообщают, не может перебрасывать состояние туда-сюда.
-- **Ядро репликации: три дефекта.** Диагностика на путях восстановления шла мимо обёртки, гасящей
-  бросающий приёмник, — упавший логгер срывал запрос ресинхронизации после частично применённой
-  пачки, и реплика оставалась рассогласованной. Первичное создание игрока переносило отображаемое
-  имя и ссылку на персонажа мимо списка разрешённых полей, так что фильтр честно защищал правки, но
-  протекал на первом снимке. Пустое отображаемое имя подменялось логином, хотя сериализатор его
-  явно разрешает и сохраняет дословно; профильное значение теперь выбирается в момент допуска
-  игрока, а восстановление и реплика получают сохранённое дословно.
+- **Foreign code throwing during world shutdown no longer leaves the world half torn down.**
+  `IRbxCharacterMotor.Release` is game code, and it was called unguarded in three places. `Dispose` was
+  the worst: the "already destroyed" flag was set first, so one exception aborted the rest of the
+  teardown forever — the scheduler kept calling the destroyed object, connections and threads stayed
+  alive, and a second attempt returned immediately. Motor ownership is now released BEFORE the foreign
+  call, each call is isolated, and a failure goes to the registry diagnostics.
+- **`ScriptContext:SetTimeout` no longer turns a large value into a small one.** The check caught
+  infinity but not range, and casting an out-of-range number to an integer is undefined — on x64 it
+  yields the minimum integer, which read back as the short default. The ceiling is now named explicitly
+  (2147483.647 s, about 24.8 days), and anything above it is rejected with a stated reason instead of
+  being silently replaced.
+- **A character's death reports zero speed.** The handler refuses to measure a dead character, so with
+  auto-respawn off the animation script kept its last non-zero value forever. Zero is sent once, before
+  the death signal, so no late "return to idle" instruction can arrive after the death handler.
+- **Jitter at the stopping threshold no longer sends an event every frame.** Instead of a single
+  threshold there is hysteresis: a walker stops below 0.1 studs/s, and a standing character has to reach
+  0.2 to count as walking again. The band is exactly one resolution step wide, so a change smaller than
+  the smallest one ever reported cannot flip the state back and forth.
+- **Replication core: three defects.** Diagnostics on the recovery paths went around the wrapper that
+  absorbs a throwing receiver — a failing logger aborted the resync request after a partially applied
+  batch, and the replica stayed out of sync. Initial player creation carried the display name and the
+  character reference past the allowed-field list, so the filter honestly protected edits but leaked on
+  the first snapshot. An empty display name was replaced by the login even though the serializer
+  explicitly permits it and stores it verbatim; the profile value is now chosen at the moment the player
+  is admitted, and both recovery and the replica receive what was stored verbatim.
 
 ### Changed
 
-- **Бенчмарк создания игр: версия набора 1.7 → 1.8.** Разбор группы G6 нашёл несколько ран,
-  нанесённых самим бенчмарком. Промпт обещал модели обратный отсчёт времени, которого на этой
-  сборке не было, и модель строила вслепую до отсечки. На инструмент стоял лимит в 20 вызовов за
-  минуту при том, что промпт требует звать его до тысячи раз, а каждый отказ засчитывался как
-  провал вызова и стоил очков. Совет «задавай цвет, держи оттенки натуральными» прямо вредил:
-  шейдер собирает цвет как текстура × цвет детали, множитель никогда не больше единицы, поэтому
-  любой заданный цвет только затемняет — пример из самого промпта давал три четверти яркости камня.
-  Промпт переписан по измеренной формуле, размер секции снижен до 10-20 частей, а цена одного сбоя
-  названа честно. Отсчёт времени пришлось чинить дважды: первая попытка правила результат, только
-  если он строка, а библиотека отдаёт разобранный JSON, поэтому нота не появлялась вообще — это
-  доказано отдельной программой против той самой сборки библиотеки, что лежит в проекте. Во всех
-  группах пакетный спавн теперь записывается как N отдельных спавнов с именами как в продакшене;
-  раньше пакет был одной непрозрачной командой — невидимой для оценки спавна и нарушением в группе,
-  где разрешён только он. Числа G6 в таблице лидеров получены на СТАРОМ инструменте (таблица последний раз
-  обновлялась 2026-07-11, G6 переехал на Roblox API 2026-09-03) и не переносятся на текущий набор.
+- **Game-creation benchmark: suite version 1.7 → 1.8.** A review of group G6 found several wounds the
+  benchmark had inflicted on itself. The prompt promised the model a countdown that this build did not
+  have, so the model built blind until the cut-off. The tool carried a limit of 20 calls per minute
+  while the prompt requires calling it up to a thousand times, and every refusal counted as a failed
+  call and cost points. The advice "set a colour, keep the shades natural" was actively harmful: the
+  shader builds colour as texture × part colour, the multiplier is never above one, so any colour set
+  only darkens — the example in the prompt itself produced three quarters of stone's brightness. The
+  prompt is rewritten around the measured formula, section size is lowered to 10-20 parts, and the cost
+  of a single failure is stated honestly. The countdown had to be fixed twice: the first attempt
+  corrected the result only when it was a string, while the library returns parsed JSON, so the note
+  never appeared at all — proven by a separate program run against the very build of the library that
+  sits in this project. In every group a batch spawn is now recorded as N separate spawns with
+  production names; a batch used to be one opaque command — invisible to spawn scoring, and a violation
+  in the group where only spawning is allowed. The G6 numbers on the leaderboard were produced on the
+  OLD tool (the table was last updated 2026-07-11, G6 moved to the Roblox API 2026-09-03) and do not
+  carry over to the current suite.
 
 ### Notes
 
-- Предположение, что большие секции не влезают в бюджет корутины (10 000 шагов), ПРОВЕРЕНО И
-  ОПРОВЕРГНУТО замером: одиночный `execute_lua` идёт под собственным пределом в 50 000 000 шагов и
-  10 с, а одна деталь стоит около 50 инструкций. Реальный потолок — ограничение Lua в 200 локальных
-  переменных.
+- The assumption that large sections do not fit the coroutine budget (10 000 steps) was TESTED AND
+  DISPROVED by measurement: a single `execute_lua` runs under its own limit of 50 000 000 steps and
+  10 s, and one part costs about 50 instructions. The real ceiling is Lua's limit of 200 local
+  variables.
 
 ## [7.39.0] - 2026-09-10
 
@@ -390,6 +446,10 @@ from a served WebGL player built on 2026-09-09, not from an automated suite.
 - **Conversation-summary preflight is committed before any provider or tool side effect**, and
   `UserTurnHistoryLatch.SummaryPreflightPending` blocks user-turn appends until the write is
   acknowledged — bounded history can no longer evict the messages a still-unconfirmed summary retells.
+  *Half of this is superseded by 7.41.0: the commit-before-side-effect ordering stands and is what
+  eviction safety now rests on, but `SummaryPreflightPending` is removed — it dropped the learner's
+  message whenever a turn broke during context building. This pointer is here because the symbol is
+  gone from the code, so a reader who finds only this entry would take a removed API for a current one.*
 - **Async context building requires an async summary store.** `BuildSnapshotAsync` used to call the
   synchronous `LoadSummary`; against `FileConversationSummaryStore` that API is fail-fast while the file
   gate is busy, so an overlapping async operation turned an ordinary compaction into an
