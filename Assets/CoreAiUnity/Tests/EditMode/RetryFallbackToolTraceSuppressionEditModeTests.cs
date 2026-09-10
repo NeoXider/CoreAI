@@ -271,6 +271,27 @@ namespace CoreAI.Tests.EditMode
                 await AssertAcceptedAsync(tool, "o", element);
                 Assert.IsNotNull(received);
             })).SetName("ArgConversionParity_JsonElementToObject");
+
+            // Боевая форма spawn_quiz: нормализатор отдаёт аргумент-объект компактной JSON-строкой, а
+            // MEAI биндит её содержимое в типизированный параметр. Преflight обязан принять ровно то,
+            // что принимает биндер, — иначе вызов падал ещё до тела инструмента.
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                StubPayload received = null;
+                Action<StubPayload> body = p => received = p;
+                DelegateLlmTool tool = new("echo_payload", "Echo a payload.", body);
+                await AssertAcceptedAsync(tool, "p", "{\"name\":\"kit\",\"count\":2}");
+                Assert.IsNotNull(received);
+                Assert.AreEqual("kit", received.Name);
+                Assert.AreEqual(2, received.Count);
+            })).SetName("ArgConversionParity_JsonStringToComplexParameter");
+        }
+
+        private sealed class StubPayload
+        {
+            public string Name { get; set; }
+
+            public int Count { get; set; }
         }
 
         /// <summary>

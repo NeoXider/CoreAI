@@ -934,9 +934,19 @@ namespace CoreAI.Infrastructure.Llm
 
                 try
                 {
-                    System.Text.Json.JsonElement element =
-                        System.Text.Json.JsonSerializer.SerializeToElement(raw, raw.GetType(), options);
-                    System.Text.Json.JsonSerializer.Deserialize(element, parameter.ParameterType, options);
+                    if (raw is string rawJson && parameter.ParameterType != typeof(string))
+                    {
+                        // WHY: MEAI binds a JSON-string argument to a complex parameter by deserializing
+                        // the string's CONTENT. Wrapping the string in a JSON string element first (the
+                        // element path below) proves the opposite and rejected calls the binder accepts.
+                        System.Text.Json.JsonSerializer.Deserialize(rawJson, parameter.ParameterType, options);
+                    }
+                    else
+                    {
+                        System.Text.Json.JsonElement element =
+                            System.Text.Json.JsonSerializer.SerializeToElement(raw, raw.GetType(), options);
+                        System.Text.Json.JsonSerializer.Deserialize(element, parameter.ParameterType, options);
+                    }
                 }
                 catch (Exception ex) when (ex is System.Text.Json.JsonException || ex is FormatException ||
                                             ex is InvalidCastException || ex is NotSupportedException)
@@ -944,6 +954,15 @@ namespace CoreAI.Infrastructure.Llm
                     bindingError =
                         $"Argument '{name}' does not match the expected type for tool '{function.Name}': {ex.Message}";
                     return false;
+                }
+                catch (ArgumentException)
+                {
+                    // WHY: an ArgumentException/ArgumentNullException raised INSIDE the serializer is an
+                    // infrastructure failure (the observed one is ArgumentNullException("format")), not a
+                    // proof that the model's arguments are wrong. It must not reject a call MEAI may still
+                    // accept, and it must not leak past this preflight where it would be misread as a
+                    // conversion error. Leave the decision to MEAI.
+                    continue;
                 }
             }
 
@@ -964,8 +983,16 @@ namespace CoreAI.Infrastructure.Llm
                 if (current is JsonException ||
                     current is System.Text.Json.JsonException ||
                     current is InvalidCastException ||
-                    current is FormatException ||
-                    current is ArgumentException)
+                    current is FormatException)
+                {
+                    return true;
+                }
+
+                // An ArgumentNullException is an infrastructure "a required value was missing"
+                // failure (the known one is ArgumentNullException("format") from a serializer),
+                // never a shape mismatch the model can fix by re-sending a schema. A plain
+                // ArgumentException stays a conversion signal.
+                if (current is ArgumentException && !(current is ArgumentNullException))
                 {
                     return true;
                 }
