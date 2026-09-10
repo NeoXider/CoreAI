@@ -271,6 +271,27 @@ namespace CoreAI.Tests.EditMode
         /// </summary>
         private sealed class SyncIsForbiddenSkillStore : ISkillStore, IAsyncSkillStore
         {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY: a test here waits on a Task from the calling thread (Assert.ThrowsAsync/CatchAsync, or
+        /// a blocking read of a Task local). Under Unity's SynchronizationContext the awaited
+        /// continuation is posted back to the very thread the wait is holding, and the EditMode batch
+        /// stops with no results file - silence, not a failure.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
             private readonly Dictionary<string, SkillRecord> _records = new(StringComparer.OrdinalIgnoreCase);
             private readonly Func<CancellationToken, Task> _beforeList;
 
@@ -373,6 +394,27 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class SyncOnlySkillStore : ISkillStore
         {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY: a test here waits on a Task from the calling thread (Assert.ThrowsAsync/CatchAsync, or
+        /// a blocking read of a Task local). Under Unity's SynchronizationContext the awaited
+        /// continuation is posted back to the very thread the wait is holding, and the EditMode batch
+        /// stops with no results file - silence, not a failure.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
             public void Save(SkillRecord record)
             {
             }

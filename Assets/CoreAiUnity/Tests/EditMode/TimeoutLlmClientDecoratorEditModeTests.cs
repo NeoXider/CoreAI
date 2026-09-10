@@ -137,6 +137,27 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class IgnoringCancellationClient : ILlmClient, IAsyncEnumerable<LlmStreamChunk>, IAsyncEnumerator<LlmStreamChunk>
         {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY: a test here waits on a Task from the calling thread (Assert.ThrowsAsync/CatchAsync, or
+        /// a blocking read of a Task local). Under Unity's SynchronizationContext the awaited
+        /// continuation is posted back to the very thread the wait is holding, and the EditMode batch
+        /// stops with no results file - silence, not a failure.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
             public readonly TaskCompletionSource<LlmCompletionResult> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             public readonly TaskCompletionSource<bool> Move = new(TaskCreationOptions.RunContinuationsAsynchronously);
             public readonly TaskCompletionSource<bool> Disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);

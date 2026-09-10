@@ -875,6 +875,28 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class AsyncSkillAuthoringEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY this fixture detaches too, when the first class in this file already does: the deadlock
+        /// guard checks for a detach PER FILE, and this file holds four fixtures. One of them having
+        /// the SetUp satisfied the guard while the other three ran with Unity's context still
+        /// attached - and this one hung the whole EditMode batch for 420 s with no results file.
+        /// A per-file check on a per-class problem is a hole, and it is named in TODO.md.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         private sealed class RawStore : ISkillStore
         {
             internal readonly Dictionary<string, SkillRecord> Records = new(StringComparer.OrdinalIgnoreCase);
@@ -939,6 +961,27 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class HostMarshaler : SynchronizationContext, ILlmAsyncMarshaler, IDisposable
         {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY: a test here waits on a Task from the calling thread (Assert.ThrowsAsync/CatchAsync, or
+        /// a blocking read of a Task local). Under Unity's SynchronizationContext the awaited
+        /// continuation is posted back to the very thread the wait is holding, and the EditMode batch
+        /// stops with no results file - silence, not a failure.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
             private readonly BlockingCollection<Action> _queue = new();
             private readonly Thread _thread;
             internal bool Active => Environment.CurrentManagedThreadId == _thread.ManagedThreadId;
@@ -1210,6 +1253,28 @@ namespace CoreAI.Tests.EditMode
 
     public sealed class SkillAuthoringEditModeTests
     {
+        private SynchronizationContext _previousSynchronizationContext;
+
+        /// <summary>
+        /// WHY this fixture detaches too, when the first class in this file already does: the deadlock
+        /// guard checks for a detach PER FILE, and this file holds four fixtures. One of them having
+        /// the SetUp satisfied the guard while the other three ran with Unity's context still
+        /// attached - and this one hung the whole EditMode batch for 420 s with no results file.
+        /// A per-file check on a per-class problem is a hole, and it is named in TODO.md.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _previousSynchronizationContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+        }
+
         [Test]
         public void ManageSkills_CanceledCallDoesNotPublishOrPersist()
         {

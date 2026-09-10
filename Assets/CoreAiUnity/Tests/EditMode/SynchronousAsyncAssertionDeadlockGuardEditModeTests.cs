@@ -240,11 +240,76 @@ namespace SomeOther.Namespace
             string code = StripCommentsAndStringLiterals(source);
             List<string> violations = new();
 
-            if (HasLocalSynchronizationContextDetach(code))
+            // WHY per class and not per file: the detach is a [SetUp], and NUnit runs a [SetUp] for the
+            // fixture that declares it - nothing else. Checking the whole file meant one covered fixture
+            // vouched for every other fixture beside it. That is not a hypothetical: SkillSetEditModeTests.cs
+            // holds four fixtures, one had the SetUp, and this guard read the file as clean while
+            // AsyncSkillAuthoringEditModeTests ran with Unity's context still attached and hung the
+            // EditMode batch for 420 s with no results file at all. The guard was green the whole time.
+            foreach ((string body, bool detached) in EnumerateFixtures(code))
             {
-                return violations;
+                if (detached)
+                {
+                    continue;
+                }
+
+                violations.AddRange(FindViolationsInFixture(body));
             }
 
+            return violations;
+        }
+
+        /// <summary>
+        /// Splits stripped source into fixture bodies, each flagged with whether it declares its own
+        /// detach. Anything outside a class declaration is returned as one trailing region so a file
+        /// shaped unexpectedly is still scanned rather than silently skipped.
+        /// </summary>
+        private static IEnumerable<(string Body, bool Detached)> EnumerateFixtures(string code)
+        {
+            // WHY the region runs to the MATCHING brace instead of to the next `class` keyword: a
+            // fixture routinely declares nested helper classes (stubs, fakes, scenario builders) in the
+            // middle of itself, and splitting on the keyword hands every test written after one of them
+            // to a "region" that is really the helper - which has no [SetUp] and never needed one. That
+            // shape reported eight fixtures as uncovered that were already covered. A nested class
+            // belongs to the fixture that encloses it, so the region has to be brace-scoped.
+            int cursor = 0;
+            bool foundAny = false;
+            while (true)
+            {
+                Match declaration = Regex.Match(code.Substring(cursor), @"\bclass\s+\w+");
+                if (!declaration.Success)
+                {
+                    break;
+                }
+
+                int start = cursor + declaration.Index;
+                int open = code.IndexOf('{', start);
+                if (open < 0)
+                {
+                    break;
+                }
+
+                int close = FindMatchingBrace(code, open);
+                if (close < 0)
+                {
+                    break;
+                }
+
+                foundAny = true;
+                string body = code.Substring(start, close - start + 1);
+                yield return (body, HasLocalSynchronizationContextDetach(body));
+                cursor = close + 1;
+            }
+
+            if (!foundAny)
+            {
+                yield return (code, HasLocalSynchronizationContextDetach(code));
+            }
+        }
+
+        private static List<string> FindViolationsInFixture(string code)
+        {
+            List<string> violations = new();
             foreach (Match testAttribute in Regex.Matches(code, @"\[Test\]"))
             {
                 int braceIndex = code.IndexOf('{', testAttribute.Index);
