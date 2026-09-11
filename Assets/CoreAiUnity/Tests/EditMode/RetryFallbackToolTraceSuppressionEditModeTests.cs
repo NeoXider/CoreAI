@@ -272,9 +272,10 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsNotNull(received);
             })).SetName("ArgConversionParity_JsonElementToObject");
 
-            // Боевая форма spawn_quiz: нормализатор отдаёт аргумент-объект компактной JSON-строкой, а
-            // MEAI биндит её содержимое в типизированный параметр. Преflight обязан принять ровно то,
-            // что принимает биндер, — иначе вызов падал ещё до тела инструмента.
+            // The production shape of spawn_quiz: the normalizer hands an object argument as a compact
+            // JSON string, and MEAI binds that string's CONTENT into a typed parameter. The preflight
+            // must accept exactly what the binder accepts - otherwise the call failed before the tool
+            // body ran.
             yield return new TestCaseData(new Func<Task>(async () =>
             {
                 StubPayload received = null;

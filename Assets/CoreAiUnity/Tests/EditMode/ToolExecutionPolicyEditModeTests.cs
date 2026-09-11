@@ -639,9 +639,9 @@ namespace CoreAI.Tests.EditMode
                 "Inner exceptions must be inspected (MEAI wraps the real conversion failure)");
             Assert.IsFalse(ToolExecutionPolicy.LooksLikeArgumentConversionError(
                 new InvalidOperationException("world is not loaded")));
-            // Инфраструктурный null-аргумент (наблюдался ArgumentNullException("format") из
-            // сериализатора) — не форма аргументов модели: schema-hint клеить нельзя, повтор
-            // «перешли JSON по схеме» тут не помог бы.
+            // An infrastructure null argument (the observed one is ArgumentNullException("format")
+            // from a serializer) is NOT a shape mismatch of the model's arguments: the schema hint
+            // must not be attached, because "re-send JSON matching the schema" would not have helped.
             Assert.IsFalse(ToolExecutionPolicy.LooksLikeArgumentConversionError(
                 new ArgumentNullException("format")));
         }

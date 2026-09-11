@@ -4,18 +4,19 @@
 
 ### Fixed
 
-- **Инструмент с типизированным объектом-аргументом падал до своего тела.** Оркестратор отдаёт
-  аргумент-объект компактной JSON-строкой, а структурная проверка аргументов заворачивала эту
-  строку в JSON-строку и требовала из неё объект — получалось «аргумент не того типа», хотя сам
-  MEAI такую строку принимает и биндит её содержимое. Из-за расхождения вызов вроде `spawn_quiz`
-  с карточкой без верного ответа (`correct: []`) отвергался ещё до инструмента: модель видела
-  «Value cannot be null. Parameter name: format» плюс подсказку схемы и безрезультатно повторяла.
-  Проверка теперь повторяет приём биндера: строку под сложный параметр разбирает как JSON, а не
-  оборачивает её.
-- **Инфраструктурный null-аргумент сериализатора выдавался за ошибку аргументов модели.** Проверка
-  аргументов больше не отвергает вызов по `ArgumentException` из сериализатора (решение отдаётся
-  MEAI), а классификатор конверсии не считает `ArgumentNullException` ошибкой формы — schema-hint,
-  предлагающий «переслать JSON по схеме», на такой причине не помогал и только сбивал модель.
+- **A tool with a typed object argument failed before its body ran.** The orchestrator hands an
+  object argument to the tool as a compact JSON string, and the structural argument preflight wrapped
+  that string in a JSON string element and then required an object from it - reporting "argument is
+  not of the expected type" even though MEAI itself binds the string's content fine. Because of that
+  mismatch a call such as `spawn_quiz` with a no-right-answer card (`correct: []`) was rejected before
+  the tool: the model saw "Value cannot be null. Parameter name: format" plus the schema hint and
+  retried without success. The check now mirrors the binder: a string under a complex parameter is
+  parsed as JSON instead of being wrapped.
+- **An infrastructure null argument from the serializer was reported as a model argument-shape
+  error.** The argument preflight no longer rejects a call on an `ArgumentException` from the
+  serializer (the decision is left to MEAI), and the conversion classifier no longer treats
+  `ArgumentNullException` as a shape error - a schema hint telling the model to "re-send JSON matching
+  the schema" would not have helped on that cause and only misled the model.
 
 ## [7.41.1] - 2026-09-10
 
