@@ -811,10 +811,39 @@ namespace CoreAI.Chat
             _lifecycleActive = false;
             CoreAiRoutingUi.ControllerChanged -= HandleRoutingControllerChanged;
             AttachRoutingController(null);
-            _cts?.Cancel();
-            _cts?.Dispose();
-            _activeRequestCts?.Cancel();
-            _activeRequestCts?.Dispose();
+            // WHY cancel-only for the request source: the turn that created it may still be unwinding (a scene
+            // change destroys the panel mid-turn), and it reads that source in its catch/finally. Disposing it here
+            // turned an ordinary cancellation into ObjectDisposedException, logged as a provider error. The turn's
+            // own finally is the single owner that disposes it. The root source is not read by a running turn after
+            // it started (its token was linked at the start), so it is cancelled, disposed and forgotten here.
+            CancellationTokenSource active = _activeRequestCts;
+            if (IsCancellationSourceActive(active))
+            {
+                try
+                {
+                    active.Cancel();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatPanel] OnDestroy: active request cancel failed: {ex.Message}");
+                }
+            }
+
+            CancellationTokenSource root = _cts;
+            _cts = null;
+            if (root != null)
+            {
+                try
+                {
+                    root.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+
+                root.Dispose();
+            }
         }
 
         private Button _examplesButton;
@@ -2702,11 +2731,13 @@ namespace CoreAI.Chat
 
         private CancellationTokenSource GetOrCreateCancellationTokenSource()
         {
-            if (_cts == null || _cts.IsCancellationRequested)
+            if (_cts == null || IsCancellationRequested(_cts))
             {
-                _cts?.Cancel();
-                _cts?.Dispose();
+                CancellationTokenSource stale = _cts;
                 _cts = new CancellationTokenSource();
+                // WHY no Cancel: a source is only replaced once it is already cancelled (or gone), and Cancel on a
+                // disposed source throws.
+                stale?.Dispose();
             }
 
             return _cts;
@@ -2821,13 +2852,17 @@ namespace CoreAI.Chat
             CancellationTokenSource requestCts =
                 CancellationTokenSource.CreateLinkedTokenSource(GetOrCreateCancellationTokenSource().Token,
                     cancellationToken);
+            // WHY the tokens are read once, here: a CancellationTokenSource's Token getter throws once the source
+            // is disposed, while a token copy keeps answering IsCancellationRequested. Everything after the first
+            // await - the catch included - uses these copies, never the sources.
+            CancellationToken requestToken = requestCts.Token;
             _activeRequestCts = requestCts;
             // WHY a separate source: the host deadline stops the turn like any cancellation, but it must not be
             // part of requestCts - that token is the "somebody asked to stop" side of the classification below.
             CancellationTokenSource deadlineLinkedCts = deadlineToken.CanBeCanceled
-                ? CancellationTokenSource.CreateLinkedTokenSource(requestCts.Token, deadlineToken)
+                ? CancellationTokenSource.CreateLinkedTokenSource(requestToken, deadlineToken)
                 : null;
-            CancellationToken turnToken = deadlineLinkedCts?.Token ?? requestCts.Token;
+            CancellationToken turnToken = deadlineLinkedCts?.Token ?? requestToken;
 
             try
             {
@@ -2861,7 +2896,7 @@ namespace CoreAI.Chat
                 if (useStreaming)
                 {
                     return await SendStreamingAsync(request, turnGeneration, turnToken, outcome,
-                        requestCts.Token, deadlineToken);
+                        requestToken, deadlineToken);
                 }
 
                 return await SendNonStreamingAsync(request, turnGeneration, turnToken, outcome);
@@ -2875,7 +2910,7 @@ namespace CoreAI.Chat
                 // a timeout; every other cancellation (the caller's token, CoreAi.StopAgent from elsewhere) is not
                 // "the service is not responding" and must never produce that bubble - a host counting those
                 // bubbles read cancelled turns as outages.
-                LlmErrorCode interruption = LlmCancellation.Classify(error, requestCts.Token, deadlineToken);
+                LlmErrorCode interruption = LlmCancellation.Classify(error, requestToken, deadlineToken);
                 SetExternalFailure(outcome, interruption, error.Message);
                 LogTurnInterruption(interruption, error.Message);
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);

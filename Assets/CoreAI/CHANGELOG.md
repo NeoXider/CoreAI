@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [7.44.1] - 2026-09-17
+
+### Fixed
+
+- No core changes. Lockstep release for the `com.neoxider.coreaiunity` fix: destroying `CoreAiChatPanel`
+  mid-turn raised `ObjectDisposedException` instead of reporting a cancellation (see that changelog).
+
 ## [7.44.0] - 2026-09-17
 
 ### Added

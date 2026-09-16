@@ -4,6 +4,28 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.44.1] - 2026-09-17
+
+### Fixed
+
+- **Destroying `CoreAiChatPanel` mid-turn raised `ObjectDisposedException` instead of a cancellation**
+  (regression in 7.44.0). `OnDestroy` cancelled and immediately disposed the active request source while the
+  turn was still unwinding, and the 7.44.0 classification read that source's `Token` in the turn's catch -
+  a getter that throws on a disposed source. A scene change during a turn was logged as an error and
+  reported as `ProviderError`. The turn now reads its tokens once, before the first await, and uses the
+  copies everywhere after; `OnDestroy` only cancels the request source (the turn's `finally` is its single
+  owner and disposes it), and cancels, disposes and forgets the root source.
+  `GetOrCreateCancellationTokenSource` no longer calls `Cancel` on a source it is replacing, which threw
+  once that source had been disposed. The other entry points (`SubmitMessageFromExternalAsync`,
+  `SubmitMessageFromExternalResultAsync`, `SendToAIFromUiAsync`, the streaming loop, the host deadline source)
+  and `CoreAiChatService` read their tokens synchronously before awaiting and dispose only sources they own.
+
+### Tests
+
+- `CoreAiChatPanelResolveTimeoutMessageEditModeTests`: destroying the panel mid-turn - UI and external turn,
+  streaming and buffered, and the typed result API - ends as a cancellation (`ResolveCancelledMessage`,
+  `Completion.ErrorCode = Cancelled`) with no error logged.
+
 ## [7.44.0] - 2026-09-17
 
 ### Added

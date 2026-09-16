@@ -37,6 +37,12 @@ namespace CoreAI.Tests.EditMode
                 return ResolveCancelledMessage();
             }
 
+            /// <summary>EditMode runs no lifecycle callbacks; this is the destroy a scene change performs.</summary>
+            public void SimulateDestroy()
+            {
+                OnDestroy();
+            }
+
             protected override string ResolveTimeoutMessage(bool stopRequestedByUser)
             {
                 TimeoutCalls++;
@@ -226,6 +232,57 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(result.Admitted);
             Assert.AreEqual(CoreAiChatExternalSubmitRejection.Cancelled, result.Rejection);
             Assert.AreEqual(LlmErrorCode.Timeout, result.Completion.ErrorCode);
+        }
+
+        [TestCase(true, false)]
+        [TestCase(false, false)]
+        [TestCase(true, true)]
+        [TestCase(false, true)]
+        public async Task PanelDestroyedMidTurn_EndsAsACancellation_WithoutADisposedSourceError(
+            bool streaming,
+            bool external)
+        {
+            // WHY: 7.44.0 read the request source's Token in the turn's catch, and OnDestroy had already
+            // disposed that source - a scene change mid-turn became ObjectDisposedException, logged as an error
+            // (Unity fails this test on any unexpected error log) instead of an ordinary cancellation.
+            ParkedOrchestrator orchestrator = new();
+            using PanelScope scope = NewPanel(orchestrator, streaming);
+
+            Task turn = external
+                ? scope.Panel.SubmitMessageFromExternalAsync(
+                    "help payload",
+                    new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false })
+                : (Task)typeof(CoreAiChatPanel)
+                    .GetMethod("SendToAIFromUiAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(scope.Panel, new object[] { "typed question" });
+            await orchestrator.Started;
+            scope.Panel.SimulateDestroy();
+            await turn;
+
+            Assert.AreEqual(1, scope.Panel.CancelledCalls, "Destroying the panel stops the turn: a cancellation.");
+            Assert.AreEqual(0, scope.Panel.TimeoutCalls);
+            Assert.AreEqual(0, scope.Panel.StreamErrorCalls);
+            Assert.IsFalse(scope.Panel.IsBusy);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task ResultApi_PanelDestroyedMidTurn_ReportsCancelled(bool streaming)
+        {
+            ParkedOrchestrator orchestrator = new();
+            using PanelScope scope = NewPanel(orchestrator, streaming);
+
+            Task<CoreAiChatExternalSubmitResult> turn = scope.Panel.SubmitMessageFromExternalResultAsync(
+                "help payload",
+                new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+            await orchestrator.Started;
+            scope.Panel.SimulateDestroy();
+            CoreAiChatExternalSubmitResult result = await turn;
+
+            Assert.IsTrue(result.Admitted);
+            Assert.AreEqual(LlmErrorCode.Cancelled, result.Completion.ErrorCode,
+                "Not ProviderError: the turn was stopped, it did not fail.");
+            StringAssert.DoesNotContain("disposed", result.Completion.Error ?? "");
         }
 
         private static bool GetPanelFlag(CoreAiChatPanel panel, string fieldName)
