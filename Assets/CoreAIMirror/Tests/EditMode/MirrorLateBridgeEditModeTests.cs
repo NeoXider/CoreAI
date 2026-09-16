@@ -138,24 +138,37 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
-        public void Server_AttachingTheWorldAgain_SwapsItWithoutAdmittingTwice()
+        public void Negative_Server_AttachingTheWorldAgain_IsRefused_AndTheFirstWorldKeepsItsSessions()
         {
             AttachWorld();
             StartServerAndAdmit(Connection);
             _ = _provider.Bridge;
-            List<string> secondWorld = new();
+            Frame();
+            List<string> secondConnected = new();
+            List<string> secondDisconnected = new();
 
-            _provider.AttachWorld(
+            Assert.Throws<InvalidOperationException>(() => _provider.AttachWorld(
                 context =>
                 {
-                    secondWorld.Add(context.ActorId);
+                    secondConnected.Add(context.ActorId);
                     return true;
                 },
-                _ => true);
+                context =>
+                {
+                    secondDisconnected.Add(context.ActorId);
+                    return true;
+                }));
 
-            Assert.IsEmpty(secondWorld, "a session already live is not admitted again into the swapped world");
+            Assert.IsEmpty(secondConnected, "a refused attach must not admit the live session into a second world");
             CollectionAssert.AreEqual(new[] { "remote-1" }, _connected);
             Assert.AreEqual(1, _provider.SessionHost.LiveSessionCount);
+
+            OfflineMirror.DropServerConnection(Connection);
+
+            CollectionAssert.AreEqual(new[] { "remote-1" }, _disconnected,
+                "the player's disconnect must reach the world that created it");
+            Assert.IsEmpty(secondDisconnected, "and never the world that was refused");
+            Assert.AreEqual(0, _provider.SessionHost.LiveSessionCount);
         }
 
         [Test]

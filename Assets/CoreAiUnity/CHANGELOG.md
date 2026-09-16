@@ -4,6 +4,53 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.43.0] - 2026-09-16
+
+### Changed
+
+- **Incremental streaming is proven by a deterministic test instead of a live guess.** The new
+  `CoreAiChatPanelPacedSseStreamingPlayModeTests` serves an SSE body one event per read with a real
+  250 ms delay, through the production path - `HttpClientOpenAiTransport`, the SSE parser of
+  `MeaiOpenAiChatClient`, `MeaiLlmClient`, `AiOrchestrator`, `CoreAiChatService` - into the demo
+  scene's `CoreAiChatPanel`, and requires the streaming bubble to show a strict prefix of the answer
+  before the producer hands out its last content event. A sibling injects the regression at the seam
+  (the body drained before its first byte) and asserts the same predicate turns false, so a green run
+  cannot come from a blind probe.
+- **The live chat-demo test no longer judges pacing.** Its probe is a second request, and an endpoint
+  that generates the whole answer and then replays it (a local OpenAI-compatible bridge does) bursts
+  with a different timing on every request - one burst lands between two frames, the next spreads over
+  three - so neither "the probe saw content while its turn was open" nor "every delta arrived at
+  completion" says anything about the panel's own turn. Every pacing verdict is now a skip that keeps
+  the probe's counts and arrival times in its message; the paced test above is the one that decides.
+  Errored turns, empty answers, a turn that ignores Stop and the Stop-and-recover contract still fail.
+- **Tests no longer write into the developer's chat history.** The real-model chat-demo fixture keyed
+  its turns under the default memory scope, so they landed in the same
+  `persistentDataPath/CoreAI/AgentMemory/SmartChat.history.jsonl` the demo scene reads - and so did the
+  two backend-switch fixtures - and every later run replayed the whole pile to the model (35 messages in
+  one measured request). The demo fixture now loads the scene under a test-only memory scope, starts
+  from an empty transcript and scrubs it in an unconditional teardown; the backend-switch fixtures run
+  with session-only memory. Turns already written by earlier runs are left in place.
+- **Mirror and Players regressions are pinned.** New EditMode suites cover `Player:Kick()` ending the
+  connection (`MirrorKickEditModeTests`), a world that throws or refuses on admission
+  (`MirrorProviderAdmissionFailureEditModeTests`) and a mods scope built with no network bridge
+  provider (`CoreAiModsLifetimeScopeNoNetworkBridgeEditModeTests`); the tool-argument preflight gained
+  parity cases for enums, `Guid`, `DateTime`, `TimeSpan`, `Uri`, `char` and nullable enums.
+- `PlayModeSceneSandbox.IsSceneInBuildSettings` is shared by the scene-driven PlayMode fixtures.
+
+### Fixed
+
+- **CI's package-graph gate was red since the commit after 7.41.1 (27f29b65).** A locally installed
+  Mirror (gitignored) wrote `MIRROR;...;EDGEGAP_PLUGIN_SERVERS` into the WebGL scripting-define row and
+  that row was committed, so `tools/check_positive_module_opt_in.py` failed on every push. The row is
+  stripped again, and the gate gained `--staged`, which validates the ProjectSettings row about to be
+  committed on a machine where the editor keeps re-injecting it.
+- **The portable Core test build did not compile under C# 14.** `array.Reverse()` binds to the `void`
+  `MemoryExtensions.Reverse(Span<T>)` there; the test now calls `Enumerable.Reverse`.
+- **The grace-window timeout test failed one run in five on Windows.** Its cooperative inner client
+  waited `Task.Delay(5)` after cancellation, and that timer and the decorator's 20 ms grace delay are
+  both quantized to the ~15.6 ms system tick, so they could fire on the same tick. The inner now
+  unwinds without a timer; 0 failures in 15 runs, and it still fails when the grace window is removed.
+
 ## [7.42.0] - 2026-09-16
 
 ### Changed

@@ -212,6 +212,56 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void Negative_ATimeoutCompletionThatUnregistersTheActor_DoesNotAbortThePump()
+        {
+            // WHY two open requests and an unregistering completion: the completion is mod code —
+            // a failed RemoteFunction handler that kicks the player reaches UnregisterActor, whose
+            // FailPendingFor removes the peer's other open request before the pump gets to it.
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            _bridge.RegisterActor("actor-a");
+            List<RbxNetworkResponse> first = new();
+            List<RbxNetworkResponse> second = new();
+            _bridge.SendRequest(ServerRequest(), response =>
+            {
+                first.Add(response);
+                _bridge.UnregisterActor("actor-a");
+            });
+            _bridge.SendRequest(ServerRequest(), second.Add);
+            _now = MirrorNetworkBridge.RequestTimeoutSeconds + 1d;
+
+            Assert.DoesNotThrow(() => _bridge.PumpTimeouts());
+
+            Assert.AreEqual(1, first.Count);
+            Assert.AreEqual(1, second.Count,
+                "exactly once: failed by the unregister, never again by the pump");
+            StringAssert.Contains("disconnected", second[0].Error);
+            Assert.AreEqual(1, _bridge.TimedOutRequests,
+                "only the request the pump itself failed counts as timed out");
+        }
+
+        [Test]
+        public void Negative_ADisconnectCompletionThatUnregistersTheActor_DoesNotAbortTheRest()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            _bridge.RegisterActor("actor-a");
+            List<RbxNetworkResponse> first = new();
+            List<RbxNetworkResponse> second = new();
+            _bridge.SendRequest(ServerRequest(), response =>
+            {
+                first.Add(response);
+                _bridge.UnregisterActor("actor-a");
+            });
+            _bridge.SendRequest(ServerRequest(), second.Add);
+
+            Assert.DoesNotThrow(() => _bridge.NotifyDisconnected(11,
+                RbxNetworkDisconnectReason.TransportLost));
+
+            Assert.AreEqual(1, first.Count);
+            Assert.AreEqual(1, second.Count, "the nested unregister failed it; the outer loop must not fail it twice");
+            CollectionAssert.IsEmpty(_bridge.ActorIds);
+        }
+
+        [Test]
         public void Negative_AnOversizePayload_IsRefusedBeforeTheWire()
         {
             _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.IO;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -41,6 +42,25 @@ namespace CoreAI.Tests.PlayMode
 
             // One extra frame so destroyed scopes finish disposing before the next test's SetUp runs.
             yield return null;
+        }
+
+        /// <summary>
+        /// True when a scene with this name is registered in Build Settings. Replaces
+        /// <c>Application.CanStreamedLevelBeLoaded</c>, which reports <c>false</c> in the Editor even for
+        /// a scene that IS registered and enabled, so a guard built on it skipped unconditionally.
+        /// </summary>
+        public static bool IsSceneInBuildSettings(string sceneName)
+        {
+            for (int i = 0; i < SceneManager.sceneCountInBuildSettings; i++)
+            {
+                string path = SceneUtility.GetScenePathByBuildIndex(i);
+                if (Path.GetFileNameWithoutExtension(path) == sceneName)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

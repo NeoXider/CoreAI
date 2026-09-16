@@ -13,6 +13,8 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using UnityEngine.UIElements;
+using VContainer;
+using VContainer.Unity;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -20,11 +22,24 @@ using Object = UnityEngine.Object;
 
 namespace CoreAI.Tests.PlayMode
 {
+    /// <summary>
+    /// The demo scene's chat against the real endpoint the environment names: a turn streams, Stop cancels
+    /// it and the chat recovers. Hard failures are the unambiguous outcomes only — a turn that errors,
+    /// completes empty, ignores Stop or never settles after cancellation. Whether partial text was on
+    /// screen while a turn was open is reported, not asserted: a live endpoint cannot be made to pace on
+    /// demand, and <c>CoreAiChatPanelPacedSseStreamingPlayModeTests</c> decides panel pacing
+    /// deterministically. Every persisted SmartChat turn of the scene goes to a test-scoped memory key that
+    /// the teardown erases, so the developer's own chat history is neither fed to the model nor touched.
+    /// </summary>
     public sealed class CoreAiChatDemoRealModelWebGlPlayModeTests
     {
         [UnityTearDown]
-        public IEnumerator UnloadLoadedScenes()
+        public IEnumerator ScrubTestScopedHistoryAndUnloadLoadedScenes()
         {
+            // WHY the scrub precedes the unload: the panel and the scope's stores are reachable only while
+            // the scene is loaded, and a turn the test left in flight must settle first — the cancellation
+            // an unload triggers still appends the turn's user line to history, after any earlier erase.
+            yield return ScrubTestScopedChatHistory();
             // Single-mode scene loads otherwise persist past this test and leak their scope into the
             // rest of the PlayMode run.
             yield return PlayModeSceneSandbox.UnloadToEmptyScene();
@@ -44,15 +59,40 @@ namespace CoreAI.Tests.PlayMode
         private const float StopSettleTimeoutSeconds = 120f;
 
         // WHY 120 s and 3 frames: the pacing probe repeats an unsampled prompt through the panel's own
-        // service. Content that arrives and then leaves the turn open for three polled frames would have
-        // sat in the panel's bubble for at least two of them, one marshal hop of skew allowed, so a panel
-        // that showed nothing dropped it. The wait matches the settle budget a stopped turn already gets.
+        // service so the skip message can say how this endpoint paced it. Three polled frames with content
+        // while the turn is still open are all that report needs, so the probe stops there instead of
+        // waiting for the whole answer; the wait matches the settle budget a stopped turn already gets.
         private const float PacingProbeTimeoutSeconds = 120f;
         private const int PacingProbeOpenFrames = 3;
+
+        // WHY 10 s: the teardown only needs a turn the test left in flight to settle after Stop before the
+        // test-scoped history is erased; a turn that ignores Stop for longer has already failed the test.
+        private const float TearDownSettleTimeoutSeconds = 10f;
+
+        /// <summary>
+        /// The memory scope every persisted SmartChat turn of the demo scene is keyed under while a test of
+        /// this fixture runs. The scene's scope registers a file-backed store under
+        /// <c>Application.persistentDataPath/CoreAI/AgentMemory</c>, and with the default empty scope the
+        /// demo, the developer's own Play sessions and every fixture that orchestrates SmartChat share one
+        /// <c>SmartChat.history.jsonl</c> — the model then received that whole file as context on each run.
+        /// A declared scope digests into a separate file of its own, which the teardown erases.
+        /// </summary>
+        private static readonly IAgentMemoryScopeProvider TestMemoryScope = new FixedAgentMemoryScopeProvider(
+            new AgentMemoryScope(
+                "CoreAI.Tests.PlayMode",
+                "",
+                nameof(CoreAiChatDemoRealModelWebGlPlayModeTests),
+                ""));
 
         private CoreAISettingsAsset _sharedSettings;
         private string _sharedSettingsSnapshotJson;
 
+        /// <summary>
+        /// A first turn streams to completion, a long second turn is stopped and its bubble stays frozen,
+        /// and a third turn answers. Skipped when the endpoint hands a turn over before a frame can sample
+        /// it; the Stop contract that needs no sampled stream is pinned by
+        /// <see cref="CoreAiChatDemo_RealModel_StopCancelsTheTurnAndChatRecovers"/>.
+        /// </summary>
         [UnityTest]
         [Category("RealLlm")]
         [Category("WebGL")]
@@ -188,8 +228,9 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Loads the demo scene against the endpoint the environment names and hands back its panel,
-        /// service and settings; skips the configurations the live demo cannot run under.
+        /// Loads the demo scene against the endpoint the environment names, keys its persisted SmartChat
+        /// data under <see cref="TestMemoryScope"/>, starts it from an empty transcript and store, and hands
+        /// back its panel, service and settings; skips the configurations the live demo cannot run under.
         /// </summary>
         private IEnumerator OpenDemoChat(DemoChat demo)
         {
@@ -198,7 +239,17 @@ namespace CoreAI.Tests.PlayMode
             // LoadSceneAsync would reach a client that was already built as LLMUnity or Offline.
             RetargetSharedSettingsFromTestEnvironment();
 
-            yield return SceneManager.LoadSceneAsync(SceneName, LoadSceneMode.Single);
+            // WHY Enqueue rather than CoreAILifetimeScope.SetAgentMemoryScopeProvider: the scene's scope
+            // builds its container in Awake while the load completes, so no frame exists in which the test
+            // holds the scope unbuilt. VContainer runs the installer queued here after Configure, and a later
+            // registration of the same interface is the one the container resolves, so the decorators that
+            // key memory, history, transcript and summary all take the test scope. Disposed as soon as the
+            // load returns, so no scope built later in the run inherits it.
+            using (LifetimeScope.Enqueue(builder => builder.RegisterInstance<IAgentMemoryScopeProvider>(TestMemoryScope)))
+            {
+                yield return SceneManager.LoadSceneAsync(SceneName, LoadSceneMode.Single);
+            }
+
             yield return null;
             yield return null;
 
@@ -229,6 +280,16 @@ namespace CoreAI.Tests.PlayMode
             {
                 Assert.Ignore($"{LogPrefix} CoreAISettingsAsset is configured for Offline mode.");
             }
+
+            // WHY the clear on a scope that is already the test's own: a run killed before its teardown
+            // leaves the test-scoped files behind, and the panel has by now hydrated them into the
+            // transcript — and would hand them to the model as context. The service call settles the
+            // history through the scoped store even when the CoreAi facade cannot resolve the scene's scope;
+            // ClearChat then drops the bubbles, the summary and the long-term memory the same way the demo's
+            // own Clear button does.
+            chatService.ClearHistory(RoleId);
+            panel.ClearChat(true, true);
+            yield return null;
 
             demo.Panel = panel;
             demo.ChatService = chatService;
@@ -398,9 +459,9 @@ namespace CoreAI.Tests.PlayMode
             {
                 // WHY the deadline alone decides nothing: a pending turn with nothing rendered looks the same
                 // for a slow first token, a reasoning-only prelude and a product that never surfaces deltas.
-                // Stop splits off the hang — a turn that ignores it is the product's — and the pacing probe
-                // below splits the rest by asking the same service for the same prompt: a panel that shows
-                // nothing while the service hands out content honours Stop too, so Stop alone cannot clear it.
+                // Stop splits off the hang — a turn that ignores it is the product's. The pacing probe below
+                // then repeats the prompt through the same service so the skip message says how this endpoint
+                // paced it; it can neither clear nor blame the panel, see JudgeUnsampledTurn.
                 StopActiveTurn(panel, task, operationName);
                 float stopIssued = Time.realtimeSinceStartup;
                 while (!task.IsCompleted && Time.realtimeSinceStartup - stopIssued <= StopSettleTimeoutSeconds)
@@ -461,10 +522,12 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Repeats an unsampled prompt through the panel's own service, bypassing the panel, and records
-        /// whether visible content reached the test while the turn stayed open for
-        /// <see cref="PacingProbeOpenFrames"/> polled frames — the state in which the panel's bubble would
-        /// have been sampled.
+        /// Repeats an unsampled prompt through the panel's own service, bypassing the panel, and records how
+        /// the service paced it: whether visible content reached the test while the turn was still open,
+        /// how many polled frames it stayed open after that (the probe stops at
+        /// <see cref="PacingProbeOpenFrames"/>), and when each chunk reached the callback, so content that
+        /// arrived only in the completion frame is counted and dated. The record feeds the skip message;
+        /// only a probe that ignores cancellation afterwards turns into a verdict.
         /// </summary>
         private static IEnumerator ProbeServicePacing(
             CoreAiChatService chatService,
@@ -473,45 +536,50 @@ namespace CoreAI.Tests.PlayMode
             PacingProbe pacing)
         {
             CancellationTokenSource cancellation = new();
+            // WHY a stopwatch and not Time.realtimeSinceStartup: the chunk callback may run off the main
+            // thread, where Unity's clock throws; this one is readable anywhere and every timestamp in the
+            // probe shares it.
+            System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
             Task<string> task = chatService.SendMessageSmartAsync(
                 prompt,
                 RoleId,
-                chunk =>
-                {
-                    if (!string.IsNullOrEmpty(chunk.Text))
-                    {
-                        Interlocked.Increment(ref pacing.ContentChunks);
-                    }
-                },
+                chunk => pacing.RecordChunk(chunk, clock.Elapsed.TotalSeconds),
                 panelUiStreaming,
                 cancellation.Token);
 
-            float started = Time.realtimeSinceStartup;
             while (!task.IsCompleted)
             {
-                if (Volatile.Read(ref pacing.ContentChunks) > 0)
+                if (pacing.ContentChunks > 0)
                 {
                     if (pacing.FirstContentSeconds < 0f)
                     {
-                        pacing.FirstContentSeconds = Time.realtimeSinceStartup - started;
+                        pacing.FirstContentSeconds = (float)clock.Elapsed.TotalSeconds;
                     }
 
                     if (++pacing.OpenFramesWithContent >= PacingProbeOpenFrames)
                     {
-                        pacing.Incremental = true;
                         break;
                     }
                 }
-                else if (Time.realtimeSinceStartup - started > PacingProbeTimeoutSeconds)
+                else
                 {
-                    pacing.TimedOut = true;
-                    break;
+                    if (pacing.ReasoningChunks > 0)
+                    {
+                        pacing.OpenFramesWithReasoning++;
+                    }
+
+                    if (clock.Elapsed.TotalSeconds > PacingProbeTimeoutSeconds)
+                    {
+                        pacing.TimedOut = true;
+                        break;
+                    }
                 }
 
                 yield return null;
             }
 
-            pacing.Seconds = Time.realtimeSinceStartup - started;
+            pacing.Seconds = (float)clock.Elapsed.TotalSeconds;
+            pacing.OpenAtExit = !task.IsCompleted;
             cancellation.Cancel();
             float cancelled = Time.realtimeSinceStartup;
             while (!task.IsCompleted && Time.realtimeSinceStartup - cancelled <= StopSettleTimeoutSeconds)
@@ -528,20 +596,14 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Ends the test for a settled turn that never showed partial text, on the pacing probe's evidence:
-        /// a service that handed out content and kept the turn open is a panel that dropped it; anything
-        /// else is an endpoint this test cannot sample mid-stream.
+        /// Ends the test for a settled turn that never showed partial text. The one verdict the probe can
+        /// still return is a hang: a probe that ignored cancellation fails. Everything else is skipped with
+        /// the probe's frame counts and arrival times in the message — the probe is a second request, and
+        /// what it saw does not carry over to the turn that was not sampled.
         /// </summary>
         private static void JudgeUnsampledTurn(string prelude, string diagnostics, PacingProbe pacing)
         {
             string pacingReport = pacing.Describe();
-            if (pacing.Incremental)
-            {
-                Assert.Fail(
-                    $"{prelude}; yet the same service streamed this prompt to the test with the turn still open " +
-                    $"({pacingReport}), so the panel dropped or buffered visible deltas on their way to the bubble. {diagnostics}");
-            }
-
             if (!pacing.Settled)
             {
                 Assert.Fail(
@@ -549,9 +611,23 @@ namespace CoreAI.Tests.PlayMode
                     $"a hang the product owns. {diagnostics}");
             }
 
+            // WHY a skip whatever the probe saw: a replaying endpoint (a local OpenAI-compatible bridge that
+            // generates the whole answer and then plays it back as many SSE events) bursts with a timing of
+            // its own on every request — one burst lands between two polled frames, the next is spread over
+            // three. A probe that saw content while its turn was open therefore does not show that the
+            // panel's turn had anything to show while it was open, and a probe that received every delta in
+            // its completion frame does not clear the panel either; from inside the client a flushed stream
+            // and a replayed one are the same bytes on the same clock. The split is made where the pacing is
+            // controlled: CoreAiChatPanelPacedSseStreamingPlayModeTests hands the same client, service and
+            // panel a body whose events are stamped on the test's own clock, and fails when the bubble shows
+            // nothing before the last content event was handed out. The counts and times stay in this
+            // message so a human reading the run still sees how this endpoint paced.
             Assert.Ignore(
-                $"{prelude}; the service paced this prompt the same way ({pacingReport}), so this endpoint cannot be " +
-                $"sampled mid-stream. {diagnostics} {ReasoningHint} Use a slower model or a longer answer to observe streaming.");
+                $"{prelude}; the same service then ran this prompt a second time ({pacingReport}). " +
+                "A second request's pacing does not decide whether the panel showed the first one's deltas — " +
+                "a replaying endpoint bursts differently on every request — so this endpoint cannot be sampled " +
+                "mid-stream from a live test; CoreAiChatPanelPacedSseStreamingPlayModeTests decides panel pacing " +
+                $"with a paced body. {diagnostics} {ReasoningHint} Use a slower model or a longer answer to observe streaming.");
         }
 
         /// <summary>
@@ -566,6 +642,50 @@ namespace CoreAI.Tests.PlayMode
             object options = optionsProperty?.GetValue(panel);
             PropertyInfo enableStreaming = options?.GetType().GetProperty("EnableStreaming");
             return enableStreaming?.GetValue(options) is bool enabled ? enabled : true;
+        }
+
+        /// <summary>
+        /// Erases the test-scoped SmartChat history, summary and long-term memory while the scene is still
+        /// loaded, after a turn the test left in flight has been stopped and has settled. Never throws: a
+        /// scrub that failed is logged, and the scene unload that follows must still run.
+        /// </summary>
+        private static IEnumerator ScrubTestScopedChatHistory()
+        {
+            CoreAiChatPanel panel = Object.FindFirstObjectByType<CoreAiChatPanel>();
+            if (panel == null)
+            {
+                yield break;
+            }
+
+            if (panel.IsBusy)
+            {
+                panel.StopAgent();
+                float stopped = Time.realtimeSinceStartup;
+                while (panel.IsBusy && Time.realtimeSinceStartup - stopped <= TearDownSettleTimeoutSeconds)
+                {
+                    yield return null;
+                }
+
+                if (panel.IsBusy)
+                {
+                    Debug.LogWarning(
+                        $"{LogPrefix} A turn was still busy {TearDownSettleTimeoutSeconds:0.#}s after Stop in TearDown; " +
+                        "its late history write may leave a test-scoped file behind.");
+                }
+            }
+
+            try
+            {
+                // WHY both calls: the facade clears history, summary and long-term memory through the scope's
+                // decorators but silently does nothing when it cannot resolve the scene's scope; the service
+                // reaches the same scoped store directly and settles the history either way.
+                CoreAi.ClearContext(RoleId, clearChatHistory: true, clearLongTermMemory: true);
+                panel.ChatService?.ClearHistory(RoleId);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"{LogPrefix} Scrubbing the test-scoped chat history failed: {ex.Message}");
+            }
         }
 
         private static void StopActiveTurn(CoreAiChatPanel panel, Task<string> task, string operationName)
@@ -732,29 +852,135 @@ namespace CoreAI.Tests.PlayMode
             public CoreAISettingsAsset Settings;
         }
 
+        /// <summary>One declared scope for every role, the way a host isolates a learner or a session.</summary>
+        private sealed class FixedAgentMemoryScopeProvider : IAgentMemoryScopeProvider
+        {
+            private readonly AgentMemoryScope _scope;
+
+            public FixedAgentMemoryScopeProvider(AgentMemoryScope scope)
+            {
+                _scope = scope;
+            }
+
+            public AgentMemoryScope GetScope(string roleId)
+            {
+                return _scope;
+            }
+        }
+
+        /// <summary>
+        /// What the service's second run of an unsampled prompt looked like from the test: chunk counts
+        /// and arrival times on the probe's clock, the polled frames the turn stayed open with content or
+        /// reasoning, and how the probe ended. Reported in the skip message; only <see cref="Settled"/>
+        /// decides anything.
+        /// </summary>
         private sealed class PacingProbe
         {
-            public int ContentChunks;
+            private readonly object _gate = new();
+            private int _contentChunks;
+            private int _reasoningChunks;
+            private double _firstContentArrivalSeconds = -1d;
+            private double _lastContentArrivalSeconds = -1d;
+
             public int OpenFramesWithContent;
+            public int OpenFramesWithReasoning;
             public float FirstContentSeconds = -1f;
             public float Seconds;
-            public bool Incremental;
+            /// <summary>The turn was still open when the probe stopped polling — at the frame cap or the wait's end.</summary>
+            public bool OpenAtExit;
             public bool TimedOut;
             public bool Settled;
             public string Error;
 
+            /// <summary>Content deltas that reached the callback so far, including any that arrived in the completion frame.</summary>
+            public int ContentChunks
+            {
+                get
+                {
+                    lock (_gate)
+                    {
+                        return _contentChunks;
+                    }
+                }
+            }
+
+            public int ReasoningChunks
+            {
+                get
+                {
+                    lock (_gate)
+                    {
+                        return _reasoningChunks;
+                    }
+                }
+            }
+
+            public double FirstContentArrivalSeconds
+            {
+                get
+                {
+                    lock (_gate)
+                    {
+                        return _firstContentArrivalSeconds;
+                    }
+                }
+            }
+
+            public double LastContentArrivalSeconds
+            {
+                get
+                {
+                    lock (_gate)
+                    {
+                        return _lastContentArrivalSeconds;
+                    }
+                }
+            }
+
+            /// <summary>Records one chunk from the service's callback, on whichever thread it arrives.</summary>
+            public void RecordChunk(LlmStreamChunk chunk, double seconds)
+            {
+                lock (_gate)
+                {
+                    if (!string.IsNullOrEmpty(chunk.ReasoningText))
+                    {
+                        _reasoningChunks++;
+                    }
+
+                    if (string.IsNullOrEmpty(chunk.Text))
+                    {
+                        return;
+                    }
+
+                    _contentChunks++;
+                    if (_firstContentArrivalSeconds < 0d)
+                    {
+                        _firstContentArrivalSeconds = seconds;
+                    }
+
+                    _lastContentArrivalSeconds = seconds;
+                }
+            }
+
             public string Describe()
             {
-                string content = FirstContentSeconds < 0f
-                    ? $"no visible content within {Seconds:0.#}s"
-                    : $"first visible content after {FirstContentSeconds:0.#}s, {ContentChunks} content chunk(s) by {Seconds:0.#}s";
-                string turn = Incremental
-                    ? $"turn still open {OpenFramesWithContent} polled frames later"
-                    : TimedOut
-                        ? "wait expired"
+                int contentChunks = ContentChunks;
+                string content = FirstContentSeconds >= 0f
+                    ? $"first visible content after {FirstContentSeconds:0.#}s, {contentChunks} content chunk(s) by {Seconds:0.#}s"
+                    : contentChunks == 0
+                        ? $"no visible content within {Seconds:0.#}s"
+                        : $"no visible content in any open frame within {Seconds:0.#}s, yet {contentChunks} content delta(s) " +
+                          $"reached the callback between {FirstContentArrivalSeconds:0.##}s and {LastContentArrivalSeconds:0.##}s";
+                string reasoning = ReasoningChunks == 0
+                    ? string.Empty
+                    : $", {ReasoningChunks} reasoning delta(s) seen across {OpenFramesWithReasoning} open frame(s)";
+                string turn = TimedOut
+                    ? "wait expired with the turn still open"
+                    : OpenAtExit
+                        ? $"turn still open across {OpenFramesWithContent} polled frame(s) with content"
                         : $"turn completed within {OpenFramesWithContent} polled frame(s) of its content";
                 string error = Error == null ? string.Empty : $", probe error: {Error}";
-                return $"service pacing: {content}, {turn}{error}";
+                return $"service pacing: {content}{reasoning}, {turn}{error}";
             }
         }
     }

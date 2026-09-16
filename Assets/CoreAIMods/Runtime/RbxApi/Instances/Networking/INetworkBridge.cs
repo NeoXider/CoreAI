@@ -220,6 +220,25 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// <summary>Removes a client actor from remote delivery.</summary>
         void UnregisterActor(string actorId);
 
+        /// <summary>
+        /// Ends one admitted actor's connection from the server side — the transport half of a
+        /// kick. The peer's teardown runs through <see cref="PeerDisconnected"/> as
+        /// <see cref="RbxNetworkDisconnectReason.ServerClosed"/>, its binding is released, and the
+        /// transport is told to drop the socket. Nothing happens for an actor that holds no
+        /// connection here: a loopback actor, or one that already left.
+        /// </summary>
+        /// <remarks>
+        /// WHY the bridge and not the Players service alone: removing the Player is the world's
+        /// half, but only the transport can close the socket behind it, and a kicked connection
+        /// that stays bound resolves that client's very next remote to a player the world just
+        /// removed — and re-creates it. WHY a default body: the loopback has no socket per actor
+        /// and nothing to end; a bridge that owns connections overrides this, and the wrappers
+        /// around one forward it.
+        /// </remarks>
+        void DisconnectActor(string actorId)
+        {
+        }
+
         void SendEvent(RbxNetworkEventMessage message);
 
         void SendRequest(RbxNetworkRequestMessage message,

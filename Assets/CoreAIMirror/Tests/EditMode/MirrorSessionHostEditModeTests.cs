@@ -113,6 +113,39 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void Kick_ThroughTheBridge_ReleasesTheSessionOnce_AsServerClosed()
+        {
+            _host.Admit(3, Admit("actor-a", 1L, "a", "A"), "session-a");
+            List<RbxNetworkPeerDisconnected> disconnects = new();
+            _bridge.PeerDisconnected += disconnects.Add;
+
+            _bridge.DisconnectActor("actor-a");
+            // WHY a second report: the transport reports the drop too — on kcp2k inside the call
+            // above, on another transport a pump later — and it must find nothing left to tear down.
+            _bridge.NotifyDisconnected(3, RbxNetworkDisconnectReason.TransportLost);
+
+            CollectionAssert.AreEqual(new[] { "actor-a" }, _disconnected,
+                "the world is told once, by the kick, not again by the transport's report");
+            Assert.AreEqual(0, _host.LiveSessionCount, "a kicked session must not linger in the host");
+            Assert.IsFalse(_host.HasLiveSession(3));
+            Assert.IsFalse(_host.TryGetIdentity("actor-a", out _, out _, out _));
+            CollectionAssert.IsEmpty(_bridge.ActorIds);
+            Assert.AreEqual(1, disconnects.Count);
+            Assert.AreEqual(RbxNetworkDisconnectReason.ServerClosed, disconnects[0].Reason,
+                "a kick is the server ending the connection, and the teardown must say so");
+        }
+
+        [Test]
+        public void Negative_KickingAnActorWithNoConnection_DoesNothing()
+        {
+            _bridge.DisconnectActor("actor-nobody");
+            _bridge.DisconnectActor("");
+
+            Assert.IsEmpty(_disconnected);
+            Assert.AreEqual(0, _host.LiveSessionCount);
+        }
+
+        [Test]
         public void Release_AfterTeardown_ForgetsTheIdentity()
         {
             // A reconnect must be admitted afresh rather than inheriting the previous session's

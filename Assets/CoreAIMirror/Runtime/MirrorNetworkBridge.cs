@@ -70,6 +70,7 @@ namespace CoreAI.Net.Mirror
         private bool _disposed;
         private bool _unadmittedDropLogged;
         private bool _unheardActorLogged;
+        private bool _unsentDropLogged;
 
         /// <summary>The mirror-documented timeout for a RemoteFunction invocation.</summary>
         public const double RequestTimeoutSeconds = 30d;
@@ -117,6 +118,12 @@ namespace CoreAI.Net.Mirror
 
         /// <summary>Responses dropped because nothing was waiting for their correlation id.</summary>
         public int OrphanResponsesDropped { get; private set; }
+
+        /// <summary>
+        /// Envelopes a client dropped instead of handing to the transport because it was not
+        /// connected; never counted as sent. Always zero on a server.
+        /// </summary>
+        public int UnsentPacketsDropped { get; private set; }
 
         /// <summary>Requests that reached the timeout without an answer.</summary>
         public int TimedOutRequests { get; private set; }
@@ -257,9 +264,60 @@ namespace CoreAI.Net.Mirror
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// WHY the teardown runs here, before the transport is asked: kcp2k reports the drop
+        /// before ServerDisconnect returns and another transport reports it later, so a teardown
+        /// left to that report would run as TransportLost, or on a binding this bridge had by then
+        /// forgotten — run here it runs once, as ServerClosed, and the transport's own report then
+        /// finds no binding and does nothing. WHY the binding is released even when nobody listened
+        /// for the peer: a kicked connection that still resolved to its actor would deliver that
+        /// client's next packet as the player the world just removed. WHY the release and the
+        /// drop are in a finally: the teardown behind that report is the world's, and mod code
+        /// runs inside it; a throw out of there must not leave the socket open on a connection
+        /// that is authenticated to Mirror and bound to nobody. The throw itself stays the
+        /// caller's to report — a kick that failed halfway is not made to look whole. A client
+        /// bridge holds no peers, so on a client this is nothing.
+        /// </remarks>
+        public void DisconnectActor(string actorId)
+        {
+            if (string.IsNullOrEmpty(actorId)
+                || !_connectionsByActor.TryGetValue(actorId, out int connectionId))
+            {
+                return;
+            }
+
+            try
+            {
+                NotifyDisconnected(connectionId, RbxNetworkDisconnectReason.ServerClosed);
+            }
+            finally
+            {
+                UnregisterActor(actorId);
+                if (NetworkServer.connections.TryGetValue(connectionId,
+                        out NetworkConnectionToClient conn))
+                {
+                    conn.Disconnect();
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// WHY a client's connection is checked before its budget: a remote fired while
+        /// disconnected is documented as dropped and counted, never sent — and a drop that was
+        /// still charged to the budget would answer the fire after the budget's last one with a
+        /// rate-limit error, for a packet that never left. One state, one outcome. The server
+        /// path is unchanged: its budget is the client traffic it admits.
+        /// </remarks>
         public void SendEvent(RbxNetworkEventMessage message)
         {
             RequirePayloadFits(message.Payload);
+            if (!_isServer && !NetworkClient.isConnected)
+            {
+                DropUnsent();
+                return;
+            }
+
             RbxNetworkRateGroup group =
                 message.Reliability == RbxNetworkReliability.UnreliableUnordered
                     ? RbxNetworkRateGroup.UnreliableRemoteEvent
@@ -284,7 +342,7 @@ namespace CoreAI.Net.Mirror
             if (!_isServer)
             {
                 NetworkClient.Send(wire, channel);
-                Count(message.Payload);
+                CountClientSend(message.Payload);
                 return;
             }
 
@@ -311,10 +369,24 @@ namespace CoreAI.Net.Mirror
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// The connection is checked before the budget for the reason <see cref="SendEvent"/>
+        /// gives: a call that never leaves is a drop, not a budget entry.
+        /// </remarks>
         public void SendRequest(RbxNetworkRequestMessage message,
             Action<RbxNetworkResponse> response)
         {
             RequirePayloadFits(message.Payload);
+            if (!_isServer && !NetworkClient.isConnected)
+            {
+                // WHY failed now rather than at the timeout: nothing was handed to the transport,
+                // so nothing can answer, and thirty seconds of waiting would be a lie about a call
+                // that never left.
+                DropUnsent();
+                response?.Invoke(RbxNetworkResponse.Failure("the client is not connected to a server"));
+                return;
+            }
+
             if (message.Direction == RbxNetworkDirection.ClientToServer)
             {
                 _rateLimiter.Admit(message.SenderActorId, RbxNetworkRateGroup.RemoteFunction);
@@ -339,7 +411,7 @@ namespace CoreAI.Net.Mirror
             if (!_isServer)
             {
                 NetworkClient.Send(wire);
-                Count(message.Payload);
+                CountClientSend(message.Payload);
                 return;
             }
 
@@ -377,8 +449,13 @@ namespace CoreAI.Net.Mirror
 
             for (int index = 0; index < expired.Count; index++)
             {
-                PendingRequest request = _pending[expired[index]];
-                _pending.Remove(expired[index]);
+                // WHY remove-and-test: a completion is mod code and may reach UnregisterActor,
+                // whose FailPendingFor removes and fails entries still ahead in this list.
+                if (!_pending.Remove(expired[index], out PendingRequest request))
+                {
+                    continue;
+                }
+
                 TimedOutRequests++;
                 request.Complete?.Invoke(RbxNetworkResponse.Failure(
                     "the remote did not answer within "
@@ -553,8 +630,20 @@ namespace CoreAI.Net.Mirror
                     null,
                     self,
                     wire.Payload),
-                new RbxNetworkRequestResponder(result => NetworkClient.Send(
+                new RbxNetworkRequestResponder(result => SendClientResponse(
                     ToWire(correlationId, result))));
+        }
+
+        private void SendClientResponse(CoreAiRemoteResponseMessage wire)
+        {
+            if (!NetworkClient.isConnected)
+            {
+                DropUnsent();
+                return;
+            }
+
+            NetworkClient.Send(wire);
+            _unsentDropLogged = false;
         }
 
         private void OnServerResponse(NetworkConnectionToClient conn,
@@ -715,8 +804,13 @@ namespace CoreAI.Net.Mirror
 
             for (int index = 0; index < affected.Count; index++)
             {
-                PendingRequest request = _pending[affected[index]];
-                _pending.Remove(affected[index]);
+                // WHY remove-and-test: same as PumpTimeouts — a completion that unregisters the
+                // actor re-enters here and empties the rest of this list first.
+                if (!_pending.Remove(affected[index], out PendingRequest request))
+                {
+                    continue;
+                }
+
                 request.Complete?.Invoke(RbxNetworkResponse.Failure(reason));
             }
         }
@@ -740,6 +834,36 @@ namespace CoreAI.Net.Mirror
         {
             PacketsSent++;
             BytesSent += payload?.Length ?? 0;
+        }
+
+        /// <summary>Counts a client send the transport took, and arms the unsent line again.</summary>
+        private void CountClientSend(byte[] payload)
+        {
+            Count(payload);
+            _unsentDropLogged = false;
+        }
+
+        /// <summary>
+        /// Drops one client envelope that had no connection to leave on: counted, never sent, and
+        /// said once per disconnected stretch.
+        /// </summary>
+        /// <remarks>
+        /// WHY guarded here rather than left to Mirror: NetworkClient.Send logs an error and drops
+        /// the message on every call made without a connection, so a world that fires while
+        /// disconnected would flood the log while PacketsSent claimed the packets left.
+        /// </remarks>
+        private void DropUnsent()
+        {
+            UnsentPacketsDropped++;
+            if (_unsentDropLogged)
+            {
+                return;
+            }
+
+            _unsentDropLogged = true;
+            _log("[CoreAI.Mirror] a remote was fired while this client is not connected to a "
+                 + "server; it and any that follow are dropped and counted, not sent, until the "
+                 + "client connects");
         }
     }
 }

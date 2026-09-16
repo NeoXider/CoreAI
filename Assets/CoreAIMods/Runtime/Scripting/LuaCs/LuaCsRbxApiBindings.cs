@@ -355,6 +355,7 @@ namespace CoreAI.Ai.LuaCs
             _players.PlayerAdded.BindScheduler(_scheduler);
             _players.PlayerRemoving.BindScheduler(_scheduler);
             _players.Scheduler = _scheduler;
+            _players.NetworkBridge = _networkBridge;
             _players.PartPositionReader = ReadPartPositionStuds;
             _players.RootPartSpawnSeeder = SeedCharacterRootPart;
             _networkRequestSignal = new RbxScriptSignal("NetworkBridge.RequestReceived");

@@ -1,5 +1,80 @@
 # Changelog
 
+## [Unreleased]
+
+## [7.43.0] - 2026-09-16
+
+### Added
+
+- **`INetworkBridge.DisconnectActor(actorId)`** - the transport half of a kick: it ends one admitted
+  actor's connection from the server side. It has an empty default body, so an existing third-party
+  bridge still compiles; the null/loopback bridge validates the id and has nothing to close, the
+  staging wrapper queues it in order with `UnregisterActor`, and the Mirror bridge runs the peer's
+  teardown as `ServerClosed` and drops the socket.
+- **`MirrorNetworkBridge.UnsentPacketsDropped`** - counts client sends dropped because the client had
+  no connection to send them on.
+
+### Fixed
+
+- **A world that failed on admission left a Mirror peer half-authenticated.** The provider's accept
+  listener is added in the mods scope's `Awake`, the `NetworkManager`'s at `StartServer`, and a
+  `UnityEvent` runs them in that order - so a synchronous failure inside the world's admission (the
+  registry refusing the actor, the Player's setup throwing), rethrown by the session host, escaped the
+  event before Mirror's own listener could mark the connection authenticated. The client already held
+  `Admitted = true`, the admission record was already released, and the connection sat there as a peer
+  nothing could ever admit. The provider now contains the throw at its listener, logs it, and drops the
+  connection; a world that refuses the actor after admission is dropped the same way, and the catch-up
+  path shares the outcome. The drop is deferred to the provider's next `Update` (and flushed when the
+  provider is disabled or released): on kcp2k a disconnect raised inside the accept event runs
+  synchronously, so `NetworkManager.OnServerDisconnect` would have run BEFORE Mirror marked the
+  connection authenticated and called `OnServerConnect` on a connection it had already removed - a
+  disconnect-before-connect that leaks any per-connection state a `NetworkManager` subclass keeps. A
+  connection that left on its own before the flush, or whose id was reused, is not touched.
+- **`Player:Kick()` did nothing over the transport.** It removed the `Player`, queued
+  `PlayerRemoving` and unloaded the character, but never touched the bridge: the socket stayed open,
+  the connection still resolved to the actor, and the kicked client's very next `RemoteEvent`
+  re-created its player through the server's inbound dispatch, while the session host kept the entry
+  forever. The engine-free `INetworkBridge` gained `DisconnectActor`; the Mirror bridge maps it onto
+  the peer's teardown as `ServerClosed` plus `conn.Disconnect()`, the staging wrapper queues it in
+  order, and `Players.KickPlayer` routes through it after removing the Player. Both ends are
+  exception-safe: `KickPlayer` calls the bridge in a `finally`, so a throwing Player teardown (character
+  unload, instance destroy) still ends the connection, and the Mirror bridge releases the binding and
+  closes the socket in a `finally`, so a world whose disconnect teardown throws cannot leave the kicked
+  client connected as an authenticated nobody. The exception still reaches the caller.
+- **`AttachWorld` documented a world swap the code did not perform.** A second call handed none of
+  the live sessions to the new world and sent their later disconnects to a world that never created
+  them, so the first world kept ghost players. A second call now throws; the sessions belong to the
+  world that created them, the rule `Role` already follows. To follow a world loaded at runtime, the
+  Mirror README now has the lambdas resolve the live world through the container's `LuaCsModStack`
+  facade instead of capturing one bindings instance.
+- **A RemoteFunction completion could abort the bridge's timeout pump.** Both pending-request loops
+  read a pre-collected key list back through the indexer, and a completion that reached
+  `UnregisterActor` removed other entries first - `KeyNotFoundException` out of `Update`. Both loops
+  now remove-and-test.
+- **A client that fired while disconnected spammed Mirror errors and inflated `PacketsSent`.** Client
+  sends are guarded on connectivity: a remote with no connection to leave on is dropped, counted in
+  the new `UnsentPacketsDropped`, said once per disconnected stretch, and a `RemoteFunction` call
+  fails immediately rather than thirty seconds later. The guard runs before the client's rate
+  limiter, so a burst fired while disconnected is dropped and counted, never answered with a
+  budget error, and does not spend the budget the reconnected client will need.
+
+### Upgrade notes
+
+- A custom `INetworkBridge` that owns real connections must override `DisconnectActor`; the default
+  body keeps it compiling but leaves `Player:Kick()` at the Player teardown, with the socket open.
+- `CoreAiMirrorNetworkBridgeProvider.AttachWorld` may be called once per provider; a second call now
+  throws instead of silently leaving the live sessions with the first world.
+
+### Known limits
+
+- **On the in-process loopback a kick is the Player teardown only.** `NullNetworkBridge` has no
+  connection to end and keeps the actor registered, so that actor's next remote, `Players.LocalPlayer`
+  read or new mod context is a fresh join: the Player is re-created and `PlayerAdded` fires again.
+  Only a transport that owns the connection makes a kick final. Pinned by a test.
+- **A runtime world load does not hand live Mirror sessions to the new world.** Sessions admitted
+  before the load are not re-announced (their Player appears in the new world on its first remote),
+  and the new world's `Players.IdentitySource` has to be set again by the game. Tracked in `TODO.md`.
+
 ## [7.42.0] - 2026-09-16
 
 ### Added

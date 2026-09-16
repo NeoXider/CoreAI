@@ -399,7 +399,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task CompleteAsync_CooperativeInnerUnwindsWithinGraceWindow_StillDeliversResult()
         {
-            CooperativeRecoveryClient inner = new() { DelayAfterCancelMs = 5 };
+            // WHY no timer in the inner unwind: on Windows Task.Delay(5) and the decorator's 20 ms grace delay
+            // are both quantized to the ~15.6 ms system tick and can fire on the SAME tick, so the grace delay
+            // won the race in 3 of 15 runs. The unwind still completes on a later thread-pool hop, after the
+            // deadline fired, so a decorator without the grace window still fails this test.
+            CooperativeRecoveryClient inner = new() { DelayAfterCancelMs = 0 };
             TimeoutLlmClientDecorator sut = new(inner, () => 0.03f);
 
             LlmCompletionResult result = await sut.CompleteAsync(Req());

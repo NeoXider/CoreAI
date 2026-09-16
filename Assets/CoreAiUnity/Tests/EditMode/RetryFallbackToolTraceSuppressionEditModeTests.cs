@@ -310,6 +310,65 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual(StubColor.Blue, received);
             })).SetName("ArgConversionParity_EnumFromNumericString");
 
+            // WHY the six below sit with the enum shapes: the content-only reading 7.41.2 shipped refused
+            // every string that is not JSON, and the enum was merely the member of that class a model hit
+            // first. Guid, DateTime, TimeSpan, Uri, char and a nullable enum are the others the binder's
+            // string-value route accepts; without a case each, the fix could regress for five of the six
+            // types it was shipped for while every enum test stayed green.
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                Guid received = Guid.Empty;
+                Action<Guid> body = g => received = g;
+                DelegateLlmTool tool = new("echo_guid", "Echo a guid.", body);
+                await AssertAcceptedAsync(tool, "g", "3f2504e0-4f89-11d3-9a0c-0305e82c3301");
+                Assert.AreEqual(Guid.Parse("3f2504e0-4f89-11d3-9a0c-0305e82c3301"), received);
+            })).SetName("ArgConversionParity_GuidFromString");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                DateTime received = DateTime.MinValue;
+                Action<DateTime> body = d => received = d;
+                DelegateLlmTool tool = new("echo_datetime", "Echo a date.", body);
+                await AssertAcceptedAsync(tool, "d", "2026-09-16T10:30:00Z");
+                Assert.AreEqual(new DateTime(2026, 9, 16, 10, 30, 0, DateTimeKind.Utc), received.ToUniversalTime());
+            })).SetName("ArgConversionParity_DateTimeFromIsoString");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                TimeSpan received = TimeSpan.Zero;
+                Action<TimeSpan> body = t => received = t;
+                DelegateLlmTool tool = new("echo_timespan", "Echo a duration.", body);
+                await AssertAcceptedAsync(tool, "t", "01:30:00");
+                Assert.AreEqual(TimeSpan.FromMinutes(90), received);
+            })).SetName("ArgConversionParity_TimeSpanFromString");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                Uri received = null;
+                Action<Uri> body = u => received = u;
+                DelegateLlmTool tool = new("echo_uri", "Echo a uri.", body);
+                await AssertAcceptedAsync(tool, "u", "https://example.com/docs?q=1");
+                Assert.AreEqual(new Uri("https://example.com/docs?q=1"), received);
+            })).SetName("ArgConversionParity_UriFromString");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                char received = '\0';
+                Action<char> body = c => received = c;
+                DelegateLlmTool tool = new("echo_char", "Echo a char.", body);
+                await AssertAcceptedAsync(tool, "c", "x");
+                Assert.AreEqual('x', received);
+            })).SetName("ArgConversionParity_CharFromSingleCharacterString");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                StubColor? received = null;
+                Action<StubColor?> body = c => received = c;
+                DelegateLlmTool tool = new("echo_nullable_enum", "Echo an optional enum.", body);
+                await AssertAcceptedAsync(tool, "c", "Green");
+                Assert.AreEqual(StubColor.Green, received);
+            })).SetName("ArgConversionParity_NullableEnumFromName");
+
             yield return new TestCaseData(new Func<Task>(async () =>
             {
                 object received = null;

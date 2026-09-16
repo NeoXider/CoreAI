@@ -2200,6 +2200,17 @@ namespace CoreAI.Mods.WorldPackages
                 QueueOrRun(() => _inner.UnregisterActor(actorId));
             }
 
+            /// <inheritdoc />
+            /// <remarks>
+            /// Queued like <see cref="UnregisterActor"/>, never forwarded ahead of it: a kick from
+            /// a world that is not live yet must not close a connection the live world still
+            /// serves, and after the swap it must land after the registrations queued before it.
+            /// </remarks>
+            public void DisconnectActor(string actorId)
+            {
+                QueueOrRun(() => _inner.DisconnectActor(actorId));
+            }
+
             public void SendEvent(RbxNetworkEventMessage message)
             {
                 QueueOrRun(() => _inner.SendEvent(message));

@@ -118,6 +118,23 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             }
         }
 
+        /// <inheritdoc />
+        /// <remarks>
+        /// Nothing to end: a loopback actor holds no connection, so a kick is the Player teardown
+        /// alone. The actor stays registered — the loopback's registration is the world's own
+        /// admission, released by the world through <see cref="UnregisterActor"/>, not by a socket
+        /// that does not exist. Said plainly: after a kick the actor is still in
+        /// <see cref="ActorIds"/>, so it still passes the world's admission check, and its next use
+        /// — a client remote it sends, a <c>Players.LocalPlayer</c> read, a new mod context created
+        /// for it — is a fresh join: the world's <c>EnsureNetworkActor</c> finds no Player, creates
+        /// one, and <c>PlayerAdded</c> fires again. On the loopback a kick is not "gone for good";
+        /// only a transport that owns the connection can make it so.
+        /// </remarks>
+        public void DisconnectActor(string actorId)
+        {
+            RequireActorId(actorId);
+        }
+
         public void SendEvent(RbxNetworkEventMessage message)
         {
             if (message == null)

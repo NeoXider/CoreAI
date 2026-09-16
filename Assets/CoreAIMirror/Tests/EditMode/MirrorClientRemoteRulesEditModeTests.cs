@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using Mirror;
 using NUnit.Framework;
 
 namespace CoreAI.Net.Mirror.Tests
@@ -145,6 +146,95 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void Negative_AClientThatIsNotConnected_DropsItsSendsCountedAndSaidOnce()
+        {
+            // WHY this state: StartClient leaves Mirror connecting, and a remote fired before the
+            // transport connects — or after it dropped — is the case Mirror answers with an error
+            // per call while the counters claimed the packets left.
+            Assert.IsFalse(NetworkClient.isConnected);
+            List<RbxNetworkResponse> completed = new();
+
+            _client.SendEvent(ClientEvent());
+            _client.SendEvent(ClientEvent());
+            _client.SendRequest(ClientRequest(), completed.Add);
+
+            Assert.AreEqual(0, _client.PacketsSent, "nothing the transport never took may count as sent");
+            Assert.AreEqual(0L, _client.BytesSent);
+            Assert.AreEqual(3, _client.UnsentPacketsDropped);
+            Assert.AreEqual(1, completed.Count,
+                "a request with no connection to leave on fails now, not thirty seconds later");
+            Assert.IsFalse(completed[0].Succeeded);
+            StringAssert.Contains("not connected", completed[0].Error);
+            Assert.AreEqual(1, _said.Count, "one line for the operator, not one per packet");
+            StringAssert.Contains("not connected", _said[0]);
+        }
+
+        [Test]
+        public void Negative_AClientThatIsNotConnected_IsNeverRateLimited_EveryFireIsADrop()
+        {
+            // WHY a budget of two: connected, the third fire of a second is refused with
+            // BudgetExceeded; disconnected, every fire is the documented drop — and a budget
+            // charged before the connection was checked would turn the third into that error, for
+            // a packet that never left. WHY the fixture's bridge is replaced: the budget is fixed
+            // at construction, and the default is too large to reach in a test.
+            _client.Dispose();
+            _client = new MirrorNetworkBridge(isServer: false, maxClientRequestsPerSecond: 2,
+                clockSeconds: () => 0d, log: _said.Add);
+            Assert.IsFalse(NetworkClient.isConnected);
+            List<RbxNetworkResponse> completed = new();
+
+            for (int fire = 1; fire <= 3; fire++)
+            {
+                Assert.DoesNotThrow(() => _client.SendEvent(ClientEvent()),
+                    "event fire " + fire + " while disconnected must be a drop, never a budget error");
+                Assert.DoesNotThrow(() => _client.SendRequest(ClientRequest(), completed.Add),
+                    "request " + fire + " while disconnected must be a drop, never a budget error");
+            }
+
+            Assert.AreEqual(6, _client.UnsentPacketsDropped, "every call is counted as dropped");
+            Assert.AreEqual(0, _client.PacketsSent);
+            Assert.AreEqual(3, completed.Count, "each request fails now, as not connected");
+            Assert.IsTrue(completed.TrueForAll(response =>
+                    !response.Succeeded && response.Error.Contains("not connected")),
+                "a request dropped for no connection says so, not that a budget was spent");
+            Assert.AreEqual(1, _said.Count, "one line for the disconnected stretch");
+
+            // WHY the budget is then shown whole: a drop that had been charged would leave a
+            // connected client refused on its first fire, for packets that never left.
+            Transport.active.OnClientConnected?.Invoke();
+            Assert.IsTrue(NetworkClient.isConnected);
+            _client.SendEvent(ClientEvent());
+            _client.SendEvent(ClientEvent());
+            RbxError error = Assert.Throws<RbxError>(() => _client.SendEvent(ClientEvent()),
+                "connected, the budget applies from its first fire, untouched by the drops");
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, error.Code);
+            Assert.AreEqual(2, _client.PacketsSent);
+        }
+
+        [Test]
+        public void AConnectedClient_HandsItsSendsToTheTransport_AndTheUnsentLineIsArmedAgainByADrop()
+        {
+            _client.SendEvent(ClientEvent());
+            Assert.AreEqual(1, _said.Count);
+            Transport.active.OnClientConnected?.Invoke();
+            Assert.IsTrue(NetworkClient.isConnected, "the transport's connect must move Mirror to connected");
+
+            _client.SendEvent(ClientEvent());
+
+            Assert.AreEqual(1, _client.PacketsSent);
+            Assert.AreEqual(1, _client.UnsentPacketsDropped, "the earlier drop stays counted; the send does not");
+            Assert.AreEqual(1, _said.Count, "a send that left says nothing");
+
+            Transport.active.OnClientDisconnected?.Invoke();
+            _client.SendEvent(ClientEvent());
+
+            Assert.IsFalse(NetworkClient.isConnected);
+            Assert.AreEqual(1, _client.PacketsSent);
+            Assert.AreEqual(2, _client.UnsentPacketsDropped);
+            Assert.AreEqual(2, _said.Count, "each disconnected stretch is said once");
+        }
+
+        [Test]
         public void Negative_AServerBridge_HasNoAdmittedActorOfItsOwn()
         {
             MirrorNetworkBridge server = new(isServer: true, clockSeconds: () => 0d);
@@ -187,6 +277,29 @@ namespace CoreAI.Net.Mirror.Tests
                 CorrelationId = 1u,
                 Payload = Array.Empty<byte>()
             };
+        }
+
+        /// <summary>The message <c>RemoteEvent:FireServer()</c> hands a client bridge.</summary>
+        private static RbxNetworkEventMessage ClientEvent()
+        {
+            return new RbxNetworkEventMessage(
+                new InstanceId(5UL),
+                RbxNetworkDirection.ClientToServer,
+                RbxNetworkReliability.ReliableOrdered,
+                Admitted,
+                null,
+                new byte[] { 1 });
+        }
+
+        /// <summary>The message <c>RemoteFunction:InvokeServer()</c> hands a client bridge.</summary>
+        private static RbxNetworkRequestMessage ClientRequest()
+        {
+            return new RbxNetworkRequestMessage(
+                new InstanceId(6UL),
+                RbxNetworkDirection.ClientToServer,
+                Admitted,
+                null,
+                new byte[] { 1 });
         }
     }
 }

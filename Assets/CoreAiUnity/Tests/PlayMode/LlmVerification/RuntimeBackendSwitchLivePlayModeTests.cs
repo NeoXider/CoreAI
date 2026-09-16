@@ -45,6 +45,11 @@ namespace CoreAI.Tests.PlayMode
             typeof(CoreAILifetimeScope)
                 .GetField("coreAiSettings", BindingFlags.NonPublic | BindingFlags.Instance)
                 ?.SetValue(scope, _settings);
+            // WHY: the default Persistent mode appended every SmartChat turn of this fixture to the
+            // developer's own Application.persistentDataPath/CoreAI/AgentMemory/SmartChat.history.jsonl,
+            // which the demo scene and its live tests then replayed to the model as context. The switch
+            // under test needs no storage that outlives the process.
+            scope.SetAgentMemoryPersistenceMode(AgentMemoryPersistenceMode.SessionOnly);
             _scopeGo.SetActive(true);
 
             CoreAi.Invalidate();

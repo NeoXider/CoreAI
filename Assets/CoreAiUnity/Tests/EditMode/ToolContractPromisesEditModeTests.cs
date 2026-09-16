@@ -104,8 +104,10 @@ namespace CoreAI.Tests.EditMode
 
             string first = AiToolContractPromptFormatter.AppendStableRoleToolContract(
                 "sys", tools, new StubSettings(), supportsNativeToolCalling: true);
+            // WHY Enumerable.Reverse and not tools.Reverse(): under C# 14 an array binds to the void
+            // MemoryExtensions.Reverse(Span<T>), and the portable .NET build stops compiling.
             string second = AiToolContractPromptFormatter.AppendStableRoleToolContract(
-                "sys", tools.Reverse().ToArray(), new StubSettings(), supportsNativeToolCalling: true);
+                "sys", Enumerable.Reverse(tools).ToArray(), new StubSettings(), supportsNativeToolCalling: true);
 
             Assert.AreEqual(first, second);
         }

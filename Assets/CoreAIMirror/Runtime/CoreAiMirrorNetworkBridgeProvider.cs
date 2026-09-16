@@ -23,7 +23,8 @@ namespace CoreAI.Net.Mirror
     /// hand it to <c>CoreAiModsLifetimeScope</c>'s network bridge provider field, and the world's
     /// remotes travel over the wire instead of the in-process loopback. Builds the
     /// <see cref="MirrorNetworkBridge"/> and, on a server, the <see cref="CoreAiMirrorSessionHost"/>
-    /// that turns admitted connections into players; pumps request timeouts every frame.
+    /// that turns admitted connections into players; every frame it pumps request timeouts and
+    /// drops the connections admission could not turn into players.
     /// </summary>
     /// <remarks>
     /// WHY the side is declared in the scene rather than read from Mirror when the bridge is built:
@@ -69,6 +70,7 @@ namespace CoreAI.Net.Mirror
         [SerializeField]
         private CoreAiMirrorAuthenticator authenticator;
 
+        private readonly Queue<NetworkConnectionToClient> _pendingDrops = new();
         private MirrorNetworkBridge _bridge;
         private CoreAiMirrorSessionHost _sessionHost;
         private Func<ActorContext, bool> _connectActor;
@@ -122,22 +124,51 @@ namespace CoreAI.Net.Mirror
         /// <summary>
         /// Wires the world's connect/disconnect entry points, which the session host calls for every
         /// admitted and every lost connection. A connection admitted before a world is attached
-        /// gets its player when one is; calling it again swaps the world (a staged world committed
-        /// at runtime) without losing or repeating the sessions already admitted. Unused on a client.
+        /// gets its player when one is. Once per provider: a second call throws and changes
+        /// nothing. Unused on a client.
         /// </summary>
+        /// <remarks>
+        /// WHY a world cannot be swapped here: the sessions already admitted belong to the world
+        /// that created their players. Handing them to another would either admit them again —
+        /// PlayerAdded for players who never left — or leave the first world holding players whose
+        /// disconnects now reach a world that never created them, and never it. A world committed
+        /// at runtime therefore needs a new composition, the rule <see cref="Role"/> already
+        /// follows.
+        /// </remarks>
         public void AttachWorld(Func<ActorContext, bool> connectActor,
             Func<ActorContext, bool> disconnectActor)
         {
-            _connectActor = connectActor ?? throw new ArgumentNullException(nameof(connectActor));
-            _disconnectActor = disconnectActor
-                               ?? throw new ArgumentNullException(nameof(disconnectActor));
+            if (connectActor == null)
+            {
+                throw new ArgumentNullException(nameof(connectActor));
+            }
+
+            if (disconnectActor == null)
+            {
+                throw new ArgumentNullException(nameof(disconnectActor));
+            }
+
+            if (_connectActor != null)
+            {
+                throw new InvalidOperationException(
+                    "a world is already attached to this Mirror network bridge provider and cannot "
+                    + "be swapped: the sessions it admitted are its own, so a world committed at "
+                    + "runtime needs a new composition with a new provider");
+            }
+
+            _connectActor = connectActor;
+            _disconnectActor = disconnectActor;
             AdmitRecordedConnections();
         }
 
-        /// <summary>Disposes the session host and the bridge; the component is spent afterwards.</summary>
+        /// <summary>
+        /// Drops what admission still owes, then disposes the session host and the bridge; the
+        /// component is spent afterwards.
+        /// </summary>
         internal void ReleaseTransport()
         {
             _released = true;
+            FlushPendingDrops();
             if (_admissionHooked && authenticator != null)
             {
                 if (_bridgeIsServer)
@@ -244,7 +275,21 @@ namespace CoreAI.Net.Mirror
 
             _roleConflict = conflict;
             HookTransport();
+            FlushPendingDrops();
             _bridge.PumpTimeouts();
+        }
+
+        /// <summary>
+        /// Drops what admission still owes before the component stops updating.
+        /// </summary>
+        /// <remarks>
+        /// WHY here as well as in Update: a disabled component runs no Update, and a connection
+        /// owed a drop must not stay authenticated to Mirror as nobody for as long as the provider
+        /// is off — however long that is.
+        /// </remarks>
+        private void OnDisable()
+        {
+            FlushPendingDrops();
         }
 
         private void OnDestroy()
@@ -303,8 +348,81 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
-            _sessionHost.Admit(conn.connectionId, authenticator.ResultFor(conn.connectionId),
-                sessionId: null);
+            AdmitOrDrop(conn);
+        }
+
+        /// <summary>
+        /// Admits one authenticated connection into the world, or marks it for the drop the next
+        /// frame performs when the world threw or refused: the session host has already released
+        /// the binding and the admission record by then, so nothing could ever admit that
+        /// connection again.
+        /// </summary>
+        /// <remarks>
+        /// WHY the throw is contained here and not in the session host: this listener was added in
+        /// the mods scope's Awake and the NetworkManager's at StartServer, and a UnityEvent runs its
+        /// listeners in that order — so a throw out of here skips NetworkManager.OnServerAuthenticated,
+        /// leaving the connection unauthenticated to Mirror while the client already holds
+        /// Admitted = true with its actor id: a peer no dispatch can admit and no catch-up will,
+        /// its record gone. The session host's rethrow is right for a caller that can answer it; a
+        /// Mirror listener cannot, so the honest outcome — no player — is made true on the wire.
+        /// WHY a refusal drops too: after the release the connection is authenticated nobody, and
+        /// every packet from it would be dropped as unadmitted until the client gave up.
+        /// WHY the drop is deferred rather than made here: the same listener order puts this
+        /// before Mirror's own listener, and on kcp2k ServerDisconnect reports the drop before it
+        /// returns — so a drop made here runs NetworkManager.OnServerDisconnect first, and Mirror
+        /// then marks the connection authenticated and calls OnServerConnect on a connection it
+        /// has already removed. A NetworkManager that tracks per-connection state sees a
+        /// disconnect before its connect and leaks the entry. Recorded here and performed from
+        /// the next Update, the drop follows the whole accept chain, and the manager sees connect
+        /// then disconnect, in that order. The frame between is a connection that is
+        /// authenticated to Mirror and bound to nobody on the bridge: every packet from it is
+        /// dropped as unadmitted, which is what the same connection got before the fix, for
+        /// longer. The catch-up path takes the same route so there is one.
+        /// </remarks>
+        private void AdmitOrDrop(NetworkConnectionToClient conn)
+        {
+            bool admitted;
+            try
+            {
+                admitted = _sessionHost.Admit(conn.connectionId,
+                    authenticator.ResultFor(conn.connectionId), sessionId: null);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError("[CoreAI.Mirror] the world threw while admitting connection "
+                               + conn.connectionId + "; the connection is dropped: " + exception);
+                admitted = false;
+            }
+
+            if (!admitted && !_pendingDrops.Contains(conn))
+            {
+                _pendingDrops.Enqueue(conn);
+            }
+        }
+
+        /// <summary>
+        /// Performs the drops <see cref="AdmitOrDrop"/> recorded: each connection still live under
+        /// its id, and only that same connection.
+        /// </summary>
+        /// <remarks>
+        /// WHY the reference is compared and not only the id: kcp2k reuses connection ids, so a
+        /// connection that left on its own between the record and this frame may have a stranger
+        /// on its id by now, whom this provider owes nothing. WHY a queue drained to empty: the
+        /// transport's report of a drop reaches this provider's own listeners inside the call,
+        /// and anything they record is served in the same pass rather than a frame late.
+        /// </remarks>
+        private void FlushPendingDrops()
+        {
+            while (_pendingDrops.Count > 0)
+            {
+                NetworkConnectionToClient dropped = _pendingDrops.Dequeue();
+                if (NetworkServer.connections.TryGetValue(dropped.connectionId,
+                        out NetworkConnectionToClient live)
+                    && ReferenceEquals(live, dropped))
+                {
+                    dropped.Disconnect();
+                }
+            }
         }
 
         /// <summary>
@@ -380,8 +498,11 @@ namespace CoreAI.Net.Mirror
 
             for (int index = 0; recorded != null && index < recorded.Count; index++)
             {
-                _sessionHost.Admit(recorded[index], authenticator.ResultFor(recorded[index]),
-                    sessionId: null);
+                if (NetworkServer.connections.TryGetValue(recorded[index],
+                        out NetworkConnectionToClient conn))
+                {
+                    AdmitOrDrop(conn);
+                }
             }
         }
 

@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -269,7 +268,7 @@ namespace CoreAI.Tests.PlayMode
             // blocks every remaining test in the suite.
             yield return null;
 
-            if (!IsSceneInBuildSettings("CoreAiChatDemo"))
+            if (!PlayModeSceneSandbox.IsSceneInBuildSettings("CoreAiChatDemo"))
             {
                 Assert.Ignore("CoreAiChatDemo scene is not in Build Settings; skipping the scene test.");
                 yield break;
@@ -362,25 +361,6 @@ namespace CoreAI.Tests.PlayMode
             Assert.AreEqual(third.Result, lastCompleted);
             Assert.AreEqual(3, orchestrator.StreamingCalls);
             Assert.IsFalse(panel.IsBusy, "Scene chat panel must remain reusable after stop recovery.");
-        }
-
-        /// <summary>
-        /// True when a scene with this name is registered in Build Settings. Replaces
-        /// <c>Application.CanStreamedLevelBeLoaded</c>, which reports <c>false</c> in the Editor even for
-        /// a scene that IS registered and enabled, so the guard above skipped unconditionally.
-        /// </summary>
-        private static bool IsSceneInBuildSettings(string sceneName)
-        {
-            for (int i = 0; i < SceneManager.sceneCountInBuildSettings; i++)
-            {
-                string path = SceneUtility.GetScenePathByBuildIndex(i);
-                if (Path.GetFileNameWithoutExtension(path) == sceneName)
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         private static IEnumerator AwaitTask(Task task)

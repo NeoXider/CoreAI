@@ -246,6 +246,14 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// </remarks>
         internal Scheduling.ModScheduler Scheduler { get; set; }
 
+        /// <summary>
+        /// The transport an admitted actor's connection lives on; <see cref="KickPlayer"/> ends
+        /// that connection through it. Set by the composition next to <see cref="Scheduler"/>;
+        /// null, like the loopback, leaves a kick at the Player teardown, which is all a solo
+        /// world has.
+        /// </summary>
+        internal INetworkBridge NetworkBridge { get; set; }
+
         /// <summary>Mirror default for <c>Players.RespawnTime</c>: 5 seconds.</summary>
         public const double DefaultRespawnTime = 5d;
 
@@ -603,12 +611,27 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         }
 
         /// <summary>
-        /// Mirror <c>Player:Kick</c>: disconnects the player — it leaves the tree and
+        /// Mirror <c>Player:Kick</c>: disconnects the player — it leaves the tree,
         /// <c>PlayerRemoving</c> fires with the caller-supplied reason (the Lua boundary passes
-        /// <c>CreatorKick</c>). Returns false and fires nothing when the player is null or no
-        /// longer connected (already removed). The kick message is validated at the Lua boundary
+        /// <c>CreatorKick</c>), and its transport connection is ended through
+        /// <see cref="NetworkBridge"/>. Returns false and fires nothing when the player is null or
+        /// no longer connected (already removed). The kick message is validated at the Lua boundary
         /// and dropped here: headless runtime has no presentation surface for it.
         /// </summary>
+        /// <remarks>
+        /// WHY the Player goes before the connection: <see cref="PlayerRemoving"/> is deferred-only
+        /// (<see cref="RbxScriptSignal"/>), so <see cref="RemoveActor(string, RbxEnumItem)"/> runs
+        /// no mod handler — it snapshots the connections and queues the invocation, and that queued
+        /// call is what carries the kick's own reason and a whole, readable player. Ended the other
+        /// way round, the transport's drop teardown would reach RemoveActor first and queue it with
+        /// <c>Unknown</c>; in this order that teardown finds no player and only releases the
+        /// connection. WHY a finally: RemoveActor's own synchronous work can still throw — the
+        /// character unload and the Player's destroy walk the instance tree (parent locks, the
+        /// per-player containers, registry release, and the binder and registry listeners behind
+        /// Destroy run inline) — and a kicked client left connected has its next remote answered as
+        /// a fresh join: the bridge still lists the actor, so the Player is re-created and
+        /// PlayerAdded fires again.
+        /// </remarks>
         public bool KickPlayer(RbxPlayer player, RbxEnumItem kickReason)
         {
             if (player == null || kickReason == null)
@@ -620,7 +643,15 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             {
                 if (ReferenceEquals(_players[index], player))
                 {
-                    return RemoveActor(player.NetworkActorId, kickReason);
+                    string actorId = player.NetworkActorId;
+                    try
+                    {
+                        return RemoveActor(actorId, kickReason);
+                    }
+                    finally
+                    {
+                        NetworkBridge?.DisconnectActor(actorId);
+                    }
                 }
             }
 

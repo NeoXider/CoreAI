@@ -1,8 +1,24 @@
+"""Release gate for the positive module opt-in contract (COREAI_LLM / COREAI_LUA).
+
+Walks the checkout for legacy negative symbols, checks the module manager, the CI matrix, the
+fixture guards, the asmdef constraints, the Input System gate, the ProjectSettings define rows and
+the current-release documents. Exits 1 with one named failure.
+
+Usage:
+    python tools/check_positive_module_opt_in.py            # the working tree (CI, clean checkout)
+    python tools/check_positive_module_opt_in.py --staged   # ProjectSettings read from the INDEX
+
+`--staged` exists for a machine with the gitignored `Assets/Mirror` installed: the editor writes
+MIRROR/EDGEGAP into the WebGL define row on every load, so the working tree is legitimately dirty
+there while the index holds the stripped row that is about to be committed. Only the files read
+from ProjectSettings/ switch source; everything else is always the working tree.
+"""
 from __future__ import annotations
 
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,6 +40,7 @@ SKIPPED_PARTS = {
     "obj",
 }
 OPTIONAL_PACKAGE_SYMBOLS = ("MIRROR", "EDGEGAP_PLUGIN_SERVERS")
+PROJECT_SETTINGS = Path("ProjectSettings/ProjectSettings.asset")
 HISTORICAL_FILES = {
     Path("Docs/Audits/2026-07-16/architecture-api.md"),
     Path("Docs/Audits/2026-07-16/SUMMARY.md"),
@@ -87,6 +104,26 @@ def read_active_text(path: Path, relative: Path) -> str:
             fail("DGF_SPEC revision-history boundary is missing")
         return text.split(DGF_HISTORY_HEADING, 1)[0]
     return text
+
+
+def read_project_settings(staged: bool) -> tuple[str, str]:
+    """The ProjectSettings text this run validates and where it came from (working tree or index)."""
+    # WHY an index mode: a locally installed, gitignored Mirror re-injects its defines into the WebGL
+    # row on every editor load, so on that machine the working tree is dirty by design while the
+    # index holds the stripped row that is about to be committed. CI runs on a clean checkout and
+    # keeps the default; the gate must not teach a Mirror machine to skip itself.
+    if not staged:
+        return (ROOT / PROJECT_SETTINGS).read_text(encoding="utf-8-sig"), "working tree"
+    shown = subprocess.run(
+        ["git", "show", ":" + PROJECT_SETTINGS.as_posix()],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8-sig",
+    )
+    if shown.returncode != 0:
+        fail(f"cannot read {PROJECT_SETTINGS.as_posix()} from the index: {shown.stderr.strip()}")
+    return shown.stdout, "index"
 
 
 def verify_legacy_symbols_absent() -> None:
@@ -221,11 +258,10 @@ def verify_input_system_compatibility_gate() -> None:
             fail(f"{relative.as_posix()} has an unsafe bare ENABLE_INPUT_SYSTEM gate")
 
 
-def verify_project_baseline() -> None:
-    settings = (ROOT / "ProjectSettings/ProjectSettings.asset").read_text(encoding="utf-8-sig")
+def verify_project_baseline(settings: str, source: str) -> None:
     for symbol in (LEGACY_LUA_SYMBOL, LEGACY_LLM_SYMBOL):
         if symbol in settings:
-            fail(f"ProjectSettings baseline contains legacy define {symbol}")
+            fail(f"ProjectSettings baseline ({source}) contains legacy define {symbol}")
     lines = settings.splitlines()
     start = lines.index("  scriptingDefineSymbols:")
     rows: list[str] = []
@@ -239,7 +275,7 @@ def verify_project_baseline() -> None:
         fail("ProjectSettings has no scriptingDefineSymbols rows")
     missing = [row.split(":", 1)[0] for row in rows if LLM_SYMBOL not in row or LUA_SYMBOL not in row]
     if missing:
-        fail(f"repository full-demo baseline lacks COREAI_LLM + COREAI_LUA: {', '.join(missing)}")
+        fail(f"repository full-demo baseline ({source}) lacks COREAI_LLM + COREAI_LUA: {', '.join(missing)}")
 
 
 def lockstep_version() -> str:
@@ -308,14 +344,13 @@ def verify_current_release_docs() -> None:
             fail(f"{relative.as_posix()} current release note does not state the full positive-module contract")
 
 
-def verify_no_optional_package_defines() -> None:
+def verify_no_optional_package_defines(settings: str, source: str) -> None:
     """Refuses a scripting-define row carrying symbols of a package that is not in the repository."""
     # WHY this gate exists: `Assets/Mirror` is gitignored, and when it is present locally the editor
     # writes MIRROR/EDGEGAP symbols into whatever platform row is active. A clean clone on that
     # platform then compiles `CoreAI.Net.Mirror` (asmdef defineConstraints: ["MIRROR"]) against a
     # package that is not there. It nearly reached a release commit twice on 2026-09-10, so the
     # discipline of "remember to revert ProjectSettings" is replaced by a check.
-    settings = (ROOT / "ProjectSettings/ProjectSettings.asset").read_text(encoding="utf-8-sig")
     block = settings.split("scriptingDefineSymbols:", 1)
     if len(block) != 2:
         fail("ProjectSettings has no scriptingDefineSymbols block")
@@ -332,12 +367,23 @@ def verify_no_optional_package_defines() -> None:
             if symbol in symbols:
                 offenders.append(f"{platform} carries {symbol}")
     if offenders:
-        fail("scripting defines name a package the repository does not ship ("
+        remedy = ("stage a stripped row, never `git add` the file wholesale"
+                  if source == "index"
+                  else "revert ProjectSettings/ProjectSettings.asset before committing, or validate "
+                       "the index with --staged when a local Mirror injected them")
+        fail(f"scripting defines ({source}) name a package the repository does not ship ("
              + "; ".join(offenders)
-             + "); revert ProjectSettings/ProjectSettings.asset before committing")
+             + f"); {remedy}")
 
 
-def main() -> None:
+def main(argv: list[str]) -> None:
+    staged = "--staged" in argv
+    unknown = [argument for argument in argv if argument != "--staged"]
+    if unknown:
+        print(f"usage: check_positive_module_opt_in.py [--staged] (unknown: {' '.join(unknown)})",
+              file=sys.stderr)
+        raise SystemExit(2)
+    settings, source = read_project_settings(staged)
     verify_legacy_symbols_absent()
     verify_module_manager()
     verify_ci_matrix()
@@ -345,11 +391,11 @@ def main() -> None:
     verify_llm_fixture_guard()
     verify_asmdefs_are_not_blanket_gated()
     verify_input_system_compatibility_gate()
-    verify_project_baseline()
-    verify_no_optional_package_defines()
+    verify_project_baseline(settings, source)
+    verify_no_optional_package_defines(settings, source)
     verify_current_release_docs()
-    print("Positive module opt-in contract: PASS")
+    print(f"Positive module opt-in contract: PASS (ProjectSettings from the {source})")
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

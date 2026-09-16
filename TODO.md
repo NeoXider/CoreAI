@@ -167,12 +167,12 @@ Against the owner's bar, verified against the tree on 2026-09-10:
     HIGH defects that could not be seen while nothing constructed it. All three verified by hand
     afterwards. **Do not describe the owner's bar as one replication gap short — it is not.**
     - [x] **Server-to-client remotes do not arrive (HIGH, blocks the owner's bar).**
-          `MirrorNetworkBridge.cs:414-424` (`OnClientEvent`) and `:453-464` (`OnClientRequest`) build
+          `MirrorNetworkBridge.OnClientEvent` and `OnClientRequest` built
           their message with `null` identity, so `LuaCsRbxApiBindings.cs:1421` -> `RbxRemotes.cs:90`
           /`:122` rejects the event and the function callback lookup at `:1575` rejects the null.
           `FireClient`/`FireAllClients` — half the Roblox remote surface — never reach a mod. Broken
           even when the remote ids match. This is the first thing a real user would hit.
-          **Fixed 2026-09-10 (uncommitted).** Root cause was one level deeper: the client never
+          **Fixed in 7.42.0 (commit 85dce51d).** Root cause was one level deeper: the client never
           learned its own actor id — `CoreAiAdmissionResponseMessage` carried only `Admitted` and
           `Reason`. And the refusal was a kick, not a drop: `DeliverNetworkEvent` rethrows the
           `RbxError`, Mirror's `exceptionsDisconnect` then disconnects the client on the first
@@ -191,10 +191,15 @@ Against the owner's bar, verified against the tree on 2026-09-10:
           cases pass (`artifacts/testresults/edit_r3.xml`). The "compiles against the pre-fix code"
           claim above is the author's, from an intra-day working state; it is NOT replayable from
           history, because the provider it references is new in the same change set.
-    - [ ] **A server broadcast reaches unadmitted connections (HIGH).** `MirrorNetworkBridge.cs:231`
-          iterates every `NetworkServer.connections` entry, not the admitted actors; Mirror's
-          `NetworkConnection.Send` checks size, not admission. Related: the rate limiter is applied
-          only outbound (`SendEvent:197`, `SendRequest:245`), never on receive (`:398`, `:433` bind
+    - [x] **A server broadcast reached unadmitted connections (HIGH) — fixed in 7.42.0.** `SendEvent`'s
+          broadcast now iterates the ADMITTED set instead of every Mirror connection; pinned by
+          `MirrorBroadcastEditModeTests`, including a witness-validity negative that proves the
+          observer would see an event that did reach a stranger. Recorded here because the INBOUND
+          half of the same finding is still open (next item). What it was: `SendEvent`
+          iterated every `NetworkServer.connections` entry, not the admitted actors, and Mirror's
+          `NetworkConnection.Send` checks size, not admission. Related and STILL OPEN: the limiter is applied
+          only outbound (`SendEvent`, `SendRequest`), never on receive (`ReceiveServerEvent` and
+          `ReceiveServerRequest` bind
           the sender and dispatch), so an admitted custom client bypasses the intended server gate.
     - [ ] **No inbound rate limit on the server's world dispatch (HIGH, now reachable).**
           `MirrorNetworkBridge` calls `_rateLimiter.Admit` only on the OUTBOUND path (`SendEvent`,
@@ -207,12 +212,47 @@ Against the owner's bar, verified against the tree on 2026-09-10:
           disconnects the client, so the fix needs a drop-and-count design rather than a two-line
           insertion. The broadcast half of the same finding WAS fixed in 7.42.0 (a broadcast now goes
           to the admitted set instead of every Mirror connection).
-    - [ ] **A Mirror HOST has no client-side remotes (HIGH).** A server bridge installs server
-          handlers only (`:336`) and the provider refuses a client bridge while the server is active
-          (`CoreAiMirrorNetworkBridgeProvider.cs:263`), so the host's local client is deaf. Host mode
-          is the most common Mirror setup. Worse, `MirrorRestartEditModeTests.cs:146` *enshrines*
-          this as intended ("a host's server bridge must leave the client table to a client bridge") —
-          a test that locks in the defect must be rewritten with the fix, not kept green.
+    - [ ] **A Mirror HOST has no client-side remotes (HIGH).** `MirrorNetworkBridge.AttachHandlers`
+          installs the handlers of ONE side, and `CoreAiMirrorNetworkBridgeProvider`'s role guard
+          refuses a client bridge while the server is active, so a host - server plus local client in
+          one process, the most common Mirror setup - has no client-side remotes at all. Pinned, but
+          honestly: `MirrorRestartEditModeTests.KnownLimitation_HostMode_AServerBridgeDoesNotServeTheLocalClient`
+          records today's behaviour and its message says outright that it is a limitation and not a
+          contract, and that it must be rewritten rather than kept green when host mode is fixed.
+          (Until 7.42.0 that same test asserted the behaviour as intended.)
+    - [x] **`Player:Kick()` did nothing over the transport — fixed in 7.43.0.** `KickPlayer` fired
+          `PlayerRemoving`, removed the `RbxPlayer` and unloaded the character, but never told the bridge:
+          the socket stayed open, the connection still resolved to that actor, and the kicked client's NEXT
+          remote re-created its player through `EnsureNetworkActor`. The session host leaked the entry too,
+          because a later disconnect returned early once the peer binding was gone. A moderation primitive
+          that silently does nothing. Dead while nothing in production built the transport; live the moment
+          the composition seam shipped in 7.42.0, and found by the round-2 audit of that release.
+          `INetworkBridge` now carries `DisconnectActor(actorId)`; the Mirror bridge runs the teardown as
+          `ServerClosed` and drops the connection. Pinned by `MirrorKickEditModeTests` (the kicked
+          connection's next remote is dropped as unadmitted and no player is re-created) and by a session-
+          host test asserting `PlayerRemoving` fires ONCE, with the kick reason rather than a second
+          `Unknown` from the drop's own teardown.
+    - [ ] **A runtime world load does not hand live Mirror sessions to the new world (MEDIUM).**
+          `RbxWorldRuntimeSessionController.LoadConfirmedAsync` builds a NEW `LuaCsRbxApiBindings` over a
+          `StagedNetworkBridge` around the same `INetworkBridge`, publishes it as `CurrentRbxApi` and
+          disposes the outgoing one in `ShutdownOutgoing`. `CoreAiMirrorNetworkBridgeProvider.AttachWorld`
+          is once per provider (a second call throws) and keeps the two lambdas it was given; nothing
+          re-targets them and nothing sets the new world's `Players.IdentitySource`. So sessions admitted
+          before the load are not re-announced to the new world: their Player appears there on its first
+          remote (`EnsureNetworkActor`; `PlayerAdded` fires then, with a counter UserId unless the game
+          set IdentitySource again), and their later disconnect reaches whichever world the lambdas
+          resolve at call time — the disposed first world, if the game captured
+          `stack.GameplayBindings.RbxApi` once as the README used to show. The README now reads the
+          `LuaCsModStack` facade inside the lambdas and lists this under Known limits. Recommended
+          follow-up: either refuse `LoadConfirmedAsync` while a Mirror provider holds live sessions, or
+          give the provider a re-target seam guarded by zero live sessions that also re-sets
+          `Players.IdentitySource` on the newly published world.
+    - [ ] **`INetworkBridge.DisconnectActor` has an empty default body (LOW).** A third-party bridge
+          that owns sockets compiles without overriding it and silently keeps the socket open on kick —
+          the 7.43.0 defect again, one implementation over. The 7.43.0 upgrade note covers it for now.
+          Consider making it abstract at the next major, or a one-time warning when a non-loopback
+          bridge (`Topology` other than `Solo`) still lists the actor in `ActorIds` after
+          `DisconnectActor` returned.
     - [ ] **A refused client never learns it was refused (functional, not a security hole).**
           `CoreAiMirrorAuthenticator.OnAdmissionRequest` does `conn.Send(Respond(result))` and then
           `ServerReject(conn)` on the very next line. With kcp2k — Mirror's default transport, and the
@@ -225,7 +265,8 @@ Against the owner's bar, verified against the tree on 2026-09-10:
           `NetworkLateUpdate` at the END of `PreLateUpdate`, after `MonoBehaviour.LateUpdate`, and the
           batch flush lives there. Verified 2026-09-16 while fixing the loopback harness; the refusal
           itself is sound (the connection IS dropped, no actor and no admission record are created).
-    - [ ] **Restart ordering is unproven, not proven.** `HookTransport:216` reattaches during
+    - [ ] **Restart ordering is unproven, not proven.** `CoreAiMirrorNetworkBridgeProvider.HookTransport`
+          reattaches during
           `Update`, after Mirror's `NetworkLoop` EarlyUpdate, and the new tests insert a `Frame()`
           before delivering a packet, so they do not exercise a packet arriving in the same frame the
           transport came back. The stop/start-within-one-frame window is still open and documented in
@@ -568,6 +609,10 @@ Still open, recorded honestly:
       Mirror/kcp/Telepathy project in the committed solution — the item as written is closed).
       The editor re-introduces them whenever Mirror is installed locally, which stays a live
       hazard; the `tools/check_positive_module_opt_in.py` release gate now checks for it.
+- Local Mirror re-injects `MIRROR;...;EDGEGAP_PLUGIN_SERVERS` into the WebGL define row on every
+  editor load, so the working tree is legitimately dirty there: run
+  `python tools/check_positive_module_opt_in.py --staged` (validates the INDEX) before committing,
+  stage a stripped row, and never `git add` `ProjectSettings/ProjectSettings.asset` wholesale.
 
 - [x] **The live PlayMode tests are NOT blocked on LM Studio — proven 2026-09-10.** They were
       recorded as needing a live model, and LM Studio could not load the configured one ("Failed to
