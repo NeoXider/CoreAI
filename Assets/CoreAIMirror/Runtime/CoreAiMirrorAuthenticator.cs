@@ -39,6 +39,12 @@ namespace CoreAI.Net.Mirror
         public int RejectedCount { get; private set; }
 
         /// <summary>
+        /// The actor this process was admitted as when it joined as a client; null before the
+        /// server answers, after a refusal, and after the client stops.
+        /// </summary>
+        public string ClientActorId { get; private set; }
+
+        /// <summary>
         /// Wires the host's provider. Call before <c>StartServer</c>.
         /// </summary>
         public void Configure(IActorAdmissionProvider provider, string worldId,
@@ -94,6 +100,7 @@ namespace CoreAI.Net.Mirror
         public override void OnStopClient()
         {
             NetworkClient.UnregisterHandler<CoreAiAdmissionResponseMessage>();
+            ClientActorId = null;
         }
 
         /// <inheritdoc />
@@ -166,11 +173,7 @@ namespace CoreAI.Net.Mirror
 
             ActorAdmissionResult result =
                 Decide(conn.connectionId, conn.address, message.Credential);
-            conn.Send(new CoreAiAdmissionResponseMessage
-            {
-                Admitted = result.Admitted,
-                Reason = result.Admitted ? "" : ClientFacingRejection
-            });
+            conn.Send(Respond(result));
 
             if (result.Admitted)
             {
@@ -179,6 +182,25 @@ namespace CoreAI.Net.Mirror
             }
 
             ServerReject(conn);
+        }
+
+        /// <summary>
+        /// What the client is told about a decision: on acceptance the actor it now is, on refusal
+        /// the fixed rejection and nothing else.
+        /// </summary>
+        /// <remarks>
+        /// WHY separable from the handler, like <see cref="Decide"/>: what a rejected client learns
+        /// is a security property, and this is the one place that decides it.
+        /// </remarks>
+        internal static CoreAiAdmissionResponseMessage Respond(ActorAdmissionResult result)
+        {
+            bool admitted = result != null && result.Admitted;
+            return new CoreAiAdmissionResponseMessage
+            {
+                Admitted = admitted,
+                Reason = admitted ? "" : ClientFacingRejection,
+                ActorId = admitted ? result.Context.ActorId : ""
+            };
         }
 
         private ActorAdmissionResult Refused(int connectionId, string reason)
@@ -197,10 +219,14 @@ namespace CoreAI.Net.Mirror
         {
             if (message.Admitted)
             {
+                // WHY stored before ClientAccept: the composition binds the bridge from the
+                // OnClientAuthenticated listener that ClientAccept fires, and reads the id here.
+                ClientActorId = message.ActorId;
                 ClientAccept();
                 return;
             }
 
+            ClientActorId = null;
             ClientReject();
         }
     }

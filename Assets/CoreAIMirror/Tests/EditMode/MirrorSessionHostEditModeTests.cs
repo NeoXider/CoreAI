@@ -4,6 +4,7 @@ using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace CoreAI.Net.Mirror.Tests
 {
@@ -132,6 +133,71 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.IsEmpty(_disconnected);
         }
 
+        [Test]
+        public void Negative_AWorldThatThrowsOnDisconnect_StillReleasesTheConnection_SoAReusedIdIsNobody()
+        {
+            // WHY a real authenticator here: the departed actor lives on in two tables, the bridge's
+            // and the authenticator's, and both are released through the same call that mod code
+            // could interrupt.
+            GameObject go = new("CoreAI_SessionHostAuthenticator");
+            CoreAiMirrorAuthenticator authenticator = go.AddComponent<CoreAiMirrorAuthenticator>();
+            authenticator.Configure(new AdmittingProvider(), "world-a");
+            MirrorNetworkBridge bridge = new(isServer: true, authenticator, clockSeconds: () => 0d);
+            CoreAiMirrorSessionHost throwing = new(bridge, _ => true,
+                _ => throw new InvalidOperationException("PlayerRemoving blew up"));
+            try
+            {
+                ActorAdmissionResult admission = authenticator.Decide(3, "127.0.0.1:3", new byte[] { 1 });
+                Assert.IsTrue(throwing.Admit(3, admission, "session-a"));
+                List<RbxNetworkEventMessage> delivered = new();
+                bridge.EventReceived += delivered.Add;
+
+                Assert.Throws<InvalidOperationException>(() => throwing.Release(3));
+
+                Assert.AreEqual(0, throwing.LiveSessionCount);
+                CollectionAssert.IsEmpty(bridge.ActorIds);
+                Assert.IsNull(authenticator.ResultFor(3),
+                    "the authenticator must not still hold the departed actor for an id kcp2k reuses");
+                bridge.ReceiveServerEvent(3, OfflineMirror.Event(1UL));
+                Assert.IsEmpty(delivered,
+                    "the next connection on id 3 must be nobody until it is admitted itself");
+                Assert.AreEqual(1, bridge.UnadmittedPacketsDropped);
+            }
+            finally
+            {
+                OfflineMirror.RunAll(
+                    () => throwing.Dispose(),
+                    () => bridge.Dispose(),
+                    () => UnityEngine.Object.DestroyImmediate(go));
+            }
+        }
+
+        [Test]
+        public void Negative_AWorldThatThrowsOnConnect_LeavesNoBinding_SoTheConnectionIsNobody()
+        {
+            CoreAiMirrorSessionHost throwing = new(_bridge,
+                _ => throw new InvalidOperationException("PlayerAdded blew up"), _ => true);
+            List<RbxNetworkEventMessage> delivered = new();
+            _bridge.EventReceived += delivered.Add;
+            try
+            {
+                Assert.Throws<InvalidOperationException>(
+                    () => throwing.Admit(5, Admit("actor-b", 7L, "b", "B"), "session-b"));
+
+                Assert.AreEqual(0, throwing.LiveSessionCount);
+                CollectionAssert.IsEmpty(_bridge.ActorIds);
+                Assert.IsFalse(throwing.TryGetIdentity("actor-b", out _, out _, out _));
+                _bridge.ReceiveServerEvent(5, OfflineMirror.Event(1UL));
+                Assert.IsEmpty(delivered,
+                    "a connection whose player was never created must resolve to nobody");
+                Assert.AreEqual(1, _bridge.UnadmittedPacketsDropped);
+            }
+            finally
+            {
+                throwing.Dispose();
+            }
+        }
+
         private static ActorAdmissionResult Admit(string actorId, long userId, string name,
             string displayName)
         {
@@ -143,6 +209,14 @@ namespace CoreAI.Net.Mirror.Tests
                     AgentMemoryScope.Empty)
                 .GetActorContext(BuiltInAgentRoleIds.SmartChat);
             return ActorAdmissionResult.Admit(context, userId, name, displayName);
+        }
+
+        private sealed class AdmittingProvider : IActorAdmissionProvider
+        {
+            public ActorAdmissionResult TryAdmit(in ActorCredential credential, string worldId)
+            {
+                return Admit("actor-a", 1L, "a", "A");
+            }
         }
     }
 }

@@ -30,9 +30,11 @@ namespace CoreAI.Tests.PlayMode.RbxApi
     public sealed class Mvp8PhysicsPlayModeTests
     {
         private const float FixedStep = 0.02f;
+        private const float WalkSeconds = 1f;
 
         private SimulationMode _savedSimulationMode;
         private Vector3 _savedHostGravity;
+        private Action _restoreScale;
         private PhysicsWorld _world;
 
         [SetUp]
@@ -47,18 +49,42 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         [TearDown]
         public void DestroyWorld()
         {
-            // WHY try/finally: simulationMode and gravity are process-global. If Dispose() ever threw
-            // before the two lines below ran, every other PlayMode test sharing this process would
-            // silently inherit a scripted simulation for the rest of the run.
+            // WHY try/finally: simulationMode, gravity and the RbxSpace scale are process-global, and
+            // play mode starts here without a domain reload, so they outlive the session. If Dispose()
+            // ever threw before the lines below ran, every later PlayMode test and the developer's
+            // next Play would silently inherit a scripted simulation or the wrong world scale.
             try
             {
-                _world.Dispose();
+                _world?.Dispose();
+                _world = null;
             }
             finally
             {
                 Physics.simulationMode = _savedSimulationMode;
                 Physics.gravity = _savedHostGravity;
+                _restoreScale?.Invoke();
+                _restoreScale = null;
             }
+        }
+
+        /// <summary>
+        /// Runs the rest of the current test at <paramref name="metersPerStud"/>;
+        /// <see cref="DestroyWorld"/> rolls the scale back on every exit path.
+        /// </summary>
+        /// <remarks>
+        /// WHY BeginSessionReplacement: Configure refuses a second value per session and CreateWorld
+        /// has already pinned the default, while ResetForTests is internal to CoreAI.Mods.Tests and
+        /// invisible from this assembly. The rollback it returns restores scale and configured flag
+        /// exactly, which is what a shared static needs.
+        /// </remarks>
+        internal void UseMetersPerStud(float metersPerStud)
+        {
+            if (_restoreScale != null)
+            {
+                throw new InvalidOperationException("the scale is already switched for this test");
+            }
+
+            _restoreScale = RbxSpace.BeginSessionReplacement(metersPerStud);
         }
 
         [UnityTest]
@@ -205,28 +231,32 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             // The one number the whole metric contract rests on: WalkSpeed is studs per second, and
             // a stud is 0.28 m. A motor that walked in metres would be 3.5x too fast and nothing
             // else in the API would notice.
-            GameObject character = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            character.transform.position = new Vector3(0f, 0.5f, 0f);
-            Rigidbody body = character.AddComponent<Rigidbody>();
-            body.useGravity = false;
-            UnityRbxCharacterMotor motor = new(body);
+            Walker walker = new();
             yield return null;
 
-            motor.SetWalkSpeed(RbxHumanoid.DefaultWalkSpeed);
-            motor.MoveTo(new RbxVector3(0f, 0f, 1000f));
-            Vector3 start = body.position;
-            for (int step = 0; step < 50; step++)
-            {
-                motor.Step();
-                UnityEngine.Physics.Simulate(FixedStep);
-            }
-
-            float travelled = Vector3.Distance(start, body.position);
-            float expected = RbxSpace.LengthToUnity((float)RbxHumanoid.DefaultWalkSpeed) * 1f;
-            UnityEngine.Object.DestroyImmediate(character);
+            float travelled = walker.WalkThenDestroy(RbxHumanoid.DefaultWalkSpeed);
+            float expected = ExpectedWalk(RbxHumanoid.DefaultWalkSpeed, RbxSpace.DefaultMetersPerStud);
 
             Assert.AreEqual(expected, travelled, expected * 0.02f,
                 "16 studs/s must measure 16 x 0.28 m/s on the controller, within 2%");
+        }
+
+        [UnityTest]
+        public IEnumerator Humanoid_AtOneMetrePerStud_StillWalksAtWalkSpeedInStudsPerSecond()
+        {
+            // WHY a second scale: at 0.28 m/stud a motor that multiplied by a hard-coded 0.28 walks
+            // exactly as far as one that read MetersPerStud, so the test above cannot tell them
+            // apart. At 1 m/stud they differ by 3.5x, while a motor that ignored the scale entirely
+            // passes here and fails above. Only the pair pins the conversion.
+            UseMetersPerStud(1f);
+            Walker walker = new();
+            yield return null;
+
+            float travelled = walker.WalkThenDestroy(RbxHumanoid.DefaultWalkSpeed);
+            float expected = ExpectedWalk(RbxHumanoid.DefaultWalkSpeed, 1f);
+
+            Assert.AreEqual(expected, travelled, expected * 0.02f,
+                "16 studs/s must measure 16 m/s on the controller at 1 m/stud, within 2%");
         }
 
         /// <summary>
@@ -244,6 +274,20 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         {
             float acceleration = RbxSpace.AccelerationToUnity((float)gravityStuds);
             return 0.5f * acceleration * seconds * (seconds + FixedStep);
+        }
+
+        /// <summary>
+        /// How far a body walking at <paramref name="walkSpeedStuds"/> covers in
+        /// <see cref="WalkSeconds"/>, in metres, at an explicit <paramref name="metersPerStud"/>.
+        /// </summary>
+        /// <remarks>
+        /// WHY the multiplication is spelled out rather than taken from RbxSpace.LengthToUnity: the
+        /// motor converts with that very call, so an expectation built on it agrees with any
+        /// self-consistent mistake — an inverted or ignored scale — and pins nothing.
+        /// </remarks>
+        private static float ExpectedWalk(double walkSpeedStuds, float metersPerStud)
+        {
+            return (float)walkSpeedStuds * metersPerStud * WalkSeconds;
         }
 
         private static string Pair(RbxInstance first, RbxInstance second, bool began)
@@ -338,11 +382,52 @@ namespace CoreAI.Tests.PlayMode.RbxApi
                 return low + "-" + high + ":" + (began ? "began" : "ended");
             }
         }
+
+        /// <summary>
+        /// A gravity-free capsule driven by CoreAI's own motor: one rig for every WalkSpeed
+        /// measurement, so two scales differ in nothing but the scale.
+        /// </summary>
+        private sealed class Walker
+        {
+            private readonly GameObject _character;
+            private readonly Rigidbody _body;
+            private readonly UnityRbxCharacterMotor _motor;
+
+            public Walker()
+            {
+                _character = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+                _character.transform.position = new Vector3(0f, 0.5f, 0f);
+                _body = _character.AddComponent<Rigidbody>();
+                _body.useGravity = false;
+                _motor = new UnityRbxCharacterMotor(_body);
+            }
+
+            /// <summary>
+            /// Walks toward a far-off target for <see cref="WalkSeconds"/> of fixed steps, destroys
+            /// the capsule, and returns the metres actually covered.
+            /// </summary>
+            public float WalkThenDestroy(double walkSpeedStuds)
+            {
+                _motor.SetWalkSpeed(walkSpeedStuds);
+                _motor.MoveTo(new RbxVector3(0f, 0f, 1000f));
+                Vector3 start = _body.position;
+                int steps = Mathf.RoundToInt(WalkSeconds / FixedStep);
+                for (int step = 0; step < steps; step++)
+                {
+                    _motor.Step();
+                    UnityEngine.Physics.Simulate(FixedStep);
+                }
+
+                float travelled = Vector3.Distance(start, _body.position);
+                UnityEngine.Object.DestroyImmediate(_character);
+                return travelled;
+            }
+        }
     }
 
     /// <summary>
     /// Pins <see cref="Mvp8PhysicsPlayModeTests"/>'s save/restore of the host's own
-    /// <c>Physics.simulationMode</c> and <c>Physics.gravity</c>.
+    /// <c>Physics.simulationMode</c>, <c>Physics.gravity</c> and the RbxSpace scale.
     /// </summary>
     /// <remarks>
     /// WHY a separate fixture: calling <c>CreateWorld</c>/<c>DestroyWorld</c> as plain methods from
@@ -354,22 +439,95 @@ namespace CoreAI.Tests.PlayMode.RbxApi
     [TestFixture]
     public sealed class Mvp8PhysicsPlayModeTearDownRegressionTests
     {
+        private SimulationMode _hostSimulationMode;
+        private Vector3 _hostGravity;
+        private float _hostMetersPerStud;
+        private Mvp8PhysicsPlayModeTests _harness;
+
+        [SetUp]
+        public void RememberHostGlobals()
+        {
+            _hostSimulationMode = Physics.simulationMode;
+            _hostGravity = Physics.gravity;
+            _hostMetersPerStud = RbxSpace.MetersPerStud;
+        }
+
+        [TearDown]
+        public void RestoreHostGlobals()
+        {
+            // WHY this owes nothing to the harness: the test bodies are DestroyWorld's only callers
+            // here, and a timeout, a throw out of CreateWorld or UseMetersPerStud, or the very
+            // regression this fixture pins all leave the globals switched with nothing else to put
+            // them back — play mode starts without a domain reload, so a scripted simulation or a
+            // 1 m/stud scale would outlive the session. [TearDown] runs after every outcome, and the
+            // finally restores what RememberHostGlobals saw even when DestroyWorld throws or was
+            // already called.
+            try
+            {
+                _harness?.DestroyWorld();
+            }
+            finally
+            {
+                _harness = null;
+                Physics.simulationMode = _hostSimulationMode;
+                Physics.gravity = _hostGravity;
+                if (RbxSpace.MetersPerStud != _hostMetersPerStud)
+                {
+                    // WHY the rollback is discarded: BeginSessionReplacement is the one public way to
+                    // move the scale, and a scale that differs here was set through Configure or a
+                    // replacement already, so the configured flag it leaves is the one the session had.
+                    RbxSpace.BeginSessionReplacement(_hostMetersPerStud);
+                }
+            }
+        }
+
         [UnityTest]
         public IEnumerator CreateWorldThenDestroyWorld_RestoresTheHostsSimulationModeAndGravity()
         {
             SimulationMode modeBefore = Physics.simulationMode;
             Vector3 gravityBefore = Physics.gravity;
 
-            Mvp8PhysicsPlayModeTests harness = new();
-            harness.CreateWorld();
+            _harness = new();
+            _harness.CreateWorld();
             yield return null;
-            harness.DestroyWorld();
+            DestroyWorldUnderTest();
+            SimulationMode modeAfter = Physics.simulationMode;
+            Vector3 gravityAfter = Physics.gravity;
 
-            Assert.AreEqual(modeBefore, Physics.simulationMode,
+            Assert.AreEqual(modeBefore, modeAfter,
                 "DestroyWorld must restore the host's own simulation mode, or every other PlayMode "
                 + "test sharing this process would inherit a scripted simulation");
-            Assert.AreEqual(gravityBefore, Physics.gravity,
+            Assert.AreEqual(gravityBefore, gravityAfter,
                 "DestroyWorld must restore the host's own gravity too");
+        }
+
+        [UnityTest]
+        public IEnumerator CreateWorldSwitchScaleThenDestroyWorld_RestoresTheDefaultScale()
+        {
+            _harness = new();
+            _harness.CreateWorld();
+            _harness.UseMetersPerStud(1f);
+            float switched = RbxSpace.MetersPerStud;
+            yield return null;
+            DestroyWorldUnderTest();
+            float restored = RbxSpace.MetersPerStud;
+
+            Assert.AreEqual(1f, switched, "the switch itself must have taken, or this pins nothing");
+            Assert.AreEqual(RbxSpace.DefaultMetersPerStud, restored,
+                "DestroyWorld must roll the RbxSpace scale back: play mode starts without a domain "
+                + "reload here, so a scale left at 1 m/stud would outlive the session and mis-scale "
+                + "every later test and the developer's next Play");
+        }
+
+        /// <summary>
+        /// The call under test, made exactly once: the harness is handed over before the call so
+        /// <see cref="RestoreHostGlobals"/> never repeats it, whether it returns or throws.
+        /// </summary>
+        private void DestroyWorldUnderTest()
+        {
+            Mvp8PhysicsPlayModeTests harness = _harness;
+            _harness = null;
+            harness.DestroyWorld();
         }
     }
 }

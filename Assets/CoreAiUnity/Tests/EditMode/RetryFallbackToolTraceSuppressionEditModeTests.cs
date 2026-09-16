@@ -207,6 +207,15 @@ namespace CoreAI.Tests.EditMode
             Blue
         }
 
+        [Flags]
+        private enum StubFlags
+        {
+            None = 0,
+            A = 1,
+            B = 2,
+            C = 4
+        }
+
         /// <summary>
         /// Shapes the structural arg preflight (<c>TryBindArgumentsStructurally</c>) must accept because
         /// MEAI's own binder accepts them. Each case names the tool, the argument MEAI would bind
@@ -260,6 +269,46 @@ namespace CoreAI.Tests.EditMode
                 await AssertAcceptedAsync(tool, "c", "Green");
                 Assert.AreEqual(StubColor.Green, received);
             })).SetName("ArgConversionParity_EnumFromName");
+
+            // WHY these four sit next to the bare name: they are the other shapes the binder's string-value
+            // route (JsonStringEnumConverter) and its content route accept for an enum - a name in the
+            // wrong case, a flags list, an integer and an integer written as a string. The preflight must
+            // take every one of them, or a model that spells "green" is refused for a call MEAI runs.
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                StubColor received = StubColor.Red;
+                Action<StubColor> body = c => received = c;
+                DelegateLlmTool tool = new("echo_enum_lower", "Echo an enum.", body);
+                await AssertAcceptedAsync(tool, "c", "green");
+                Assert.AreEqual(StubColor.Green, received);
+            })).SetName("ArgConversionParity_EnumFromWrongCaseName");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                StubFlags received = StubFlags.None;
+                Action<StubFlags> body = f => received = f;
+                DelegateLlmTool tool = new("echo_flags", "Echo flags.", body);
+                await AssertAcceptedAsync(tool, "f", "A, C");
+                Assert.AreEqual(StubFlags.A | StubFlags.C, received);
+            })).SetName("ArgConversionParity_FlagsEnumFromNameCombination");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                StubColor received = StubColor.Red;
+                Action<StubColor> body = c => received = c;
+                DelegateLlmTool tool = new("echo_enum_number", "Echo an enum.", body);
+                await AssertAcceptedAsync(tool, "c", 2L);
+                Assert.AreEqual(StubColor.Blue, received);
+            })).SetName("ArgConversionParity_EnumFromNumericValue");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                StubColor received = StubColor.Red;
+                Action<StubColor> body = c => received = c;
+                DelegateLlmTool tool = new("echo_enum_numeric_string", "Echo an enum.", body);
+                await AssertAcceptedAsync(tool, "c", "2");
+                Assert.AreEqual(StubColor.Blue, received);
+            })).SetName("ArgConversionParity_EnumFromNumericString");
 
             yield return new TestCaseData(new Func<Task>(async () =>
             {
@@ -325,6 +374,77 @@ namespace CoreAI.Tests.EditMode
 
         [TestCaseSource(nameof(ArgConversionParityCases))]
         public async Task ArgConversionParity(Func<Task> scenario)
+        {
+            await scenario();
+        }
+
+        /// <summary>
+        /// Shapes the structural arg preflight must REJECT because MEAI's own binder rejects them: its last
+        /// resort hands the raw value to reflection, which throws "cannot be converted". The rejection has
+        /// to land before the body and be traced as never-invoked - which proves the string-value fallback
+        /// that admits an enum name is a second binder route, not a loosened check.
+        /// <para>
+        /// WHY the lambda parameter is NAMED and matches the argument key: MEAI derives the tool's schema
+        /// and its <c>required</c> list from the delegate's parameter names. A discard-style <c>_ =></c>
+        /// declares a parameter called "_", the call's "c" is then a MISSING required argument, and the
+        /// policy rejects it one stage earlier as "schema-validation" - a real refusal, but of the wrong
+        /// thing: the preflight under test never sees the value.
+        /// </para>
+        /// </summary>
+        private static IEnumerable<TestCaseData> ArgConversionRejectionCases()
+        {
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                int bodyRuns = 0;
+                Action<StubColor> body = c => bodyRuns++;
+                DelegateLlmTool tool = new("echo_enum", "Echo an enum.", body);
+                await AssertRejectedAsync(tool, "c", "Purple");
+                Assert.AreEqual(0, bodyRuns);
+            })).SetName("ArgConversionRejection_EnumFromUnknownName");
+
+            yield return new TestCaseData(new Func<Task>(async () =>
+            {
+                int bodyRuns = 0;
+                Action<StubFlags> body = f => bodyRuns++;
+                DelegateLlmTool tool = new("echo_flags", "Echo flags.", body);
+                await AssertRejectedAsync(tool, "f", "A, Q");
+                Assert.AreEqual(0, bodyRuns);
+            })).SetName("ArgConversionRejection_FlagsEnumWithUnknownMember");
+        }
+
+        /// <summary>
+        /// Fails the calling test if <c>TryBindArgumentsStructurally</c> lets through a shape MEAI itself
+        /// would have refused, or refuses it anywhere other than before the body ("arg-conversion").
+        /// </summary>
+        private static async Task AssertRejectedAsync(DelegateLlmTool tool, string argName, object rawValue)
+        {
+            ToolExecutionPolicy policy = new(
+                NullLog.Instance,
+                new StubSettings(),
+                new ILlmTool[] { tool },
+                false,
+                "Tester");
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool.CreateAIFunction() } };
+            MEAI.FunctionCallContent call = new(
+                "call_" + tool.Name,
+                tool.Name,
+                new Dictionary<string, object> { [argName] = rawValue });
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(call, options, CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded,
+                $"MEAI would reject this value for tool '{tool.Name}'; the structural preflight must reject " +
+                $"it too. Got: {result.Result.Result}");
+            Assert.AreEqual(1, policy.ExecutedTraces.Count);
+            Assert.AreEqual("arg-conversion", policy.ExecutedTraces[0].Source);
+            Assert.IsFalse(
+                LoggingLlmClientDecorator.TraceIndicatesInvocation(policy.ExecutedTraces[0]),
+                "A structurally rejected call never crossed the invocation boundary");
+        }
+
+        [TestCaseSource(nameof(ArgConversionRejectionCases))]
+        public async Task ArgConversionRejection(Func<Task> scenario)
         {
             await scenario();
         }

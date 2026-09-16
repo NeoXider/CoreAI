@@ -5,6 +5,7 @@
     "CoreAI.Core",
     "CoreAI.RbxApi.Datatypes",
     "CoreAI.RbxApi.Instances",
+    "CoreAI.RbxApi.Binding",
     "CoreAI.Mods",
     "VContainer",
     "Mirror"

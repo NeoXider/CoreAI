@@ -102,7 +102,14 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.SmartChat,
                 Hint = "Reply with the single word: pong",
-                MaxOutputTokens = 512
+                // WHY the budget matches the health probe above and not a "one word costs little"
+                // estimate: thinking counts toward max_tokens on OpenAI-compatible servers, so a
+                // reasoning model spends the whole 512 in reasoning_content and the orchestrator
+                // correctly returns EmptyResponse. The assertion below then blames the product for
+                // what was a budget the test itself set too low. CoreAiBackend.VerifyAsync already
+                // settled this with 128000 and the rule it states: an empty visible answer AFTER a
+                // generous budget is the real failure signal. This test now applies that same rule.
+                MaxOutputTokens = 128000
             });
             yield return WaitTask(ask, 180f);
 

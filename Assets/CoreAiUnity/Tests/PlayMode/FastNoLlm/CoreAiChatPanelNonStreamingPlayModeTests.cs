@@ -29,6 +29,14 @@ namespace CoreAI.Tests.PlayMode
                 WelcomeMessage = "", LoadPersistedChatOnStartup = false, EnableCameraTool = false });
             BufferedTypedOrchestrator provider = new();
             panel.ChatService = new CoreAiChatService(provider);
+            // WHY the error is expected rather than avoided: this test needs a REAL activation, because
+            // it later deactivates the object to prove the inactive-panel guard refuses a submission.
+            // Activating runs OnEnable, and a panel with no UIDocument correctly reports that it cannot
+            // bind its UI — the two sibling tests never hit it only because they skip activation and
+            // simulate the lifecycle through a private field instead. An unhandled error log fails the
+            // test, so the honest fix is to declare the one the harness deliberately causes.
+            LogAssert.Expect(LogType.Error,
+                new System.Text.RegularExpressions.Regex("UIDocument component not found"));
             go.SetActive(true);
             int completed = 0;
             panel.OnAiResponseCompleted += _ => completed++;

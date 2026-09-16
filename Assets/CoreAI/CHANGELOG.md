@@ -1,5 +1,89 @@
 # Changelog
 
+## [7.42.0] - 2026-09-16
+
+### Added
+
+- **Mirror multiplayer can be switched on from a scene for the first time.** The transport existed
+  and was tested, but nothing in production ever built it: `MirrorNetworkBridge` and
+  `CoreAiMirrorSessionHost` were constructed only in EditMode tests, and `CoreAiModsInstaller` always
+  fell back to `NullNetworkBridge` because nothing registered an `INetworkBridge`. A game that
+  installed Mirror still had to write the wiring itself. The seam that closes this follows the
+  character-motor precedent: `RbxNetworkBridgeProviderBehaviour` (an explicit serialized reference -
+  no scene reflection, no static singleton), an optional field on `CoreAiModsLifetimeScope` that
+  registers it LAZILY as `INetworkBridge`, and `CoreAiMirrorNetworkBridgeProvider` behind the `MIRROR`
+  define. An empty field leaves behaviour byte for byte identical, so every existing scene is
+  untouched. Two limits are documented on the provider rather than hidden: the side (server or client)
+  is an explicit serialized choice, because the bridge is built inside the installer's build callback
+  while still in `Awake`, where Mirror has not started and `NetworkServer.active` is false; and the
+  game still calls `AttachWorld` and sets `Players.IdentitySource` itself.
+
+### Fixed
+
+- **`FireClient` and `FireAllClients` never reached a mod, and disconnected the client.** The client
+  half of the bridge built every inbound message with a null actor identity, because the client was
+  never told which actor the server admitted it as - the admission response carried only a flag and a
+  refusal reason. The world refuses a null identity, that refusal was rethrown, and Mirror's handler
+  wrapper logs it and drops the connection, so with matching remote ids the FIRST server-to-client
+  remote kicked the player. `OnClientEvent` also hard-coded the direction, which made the broadcast
+  branch unreachable. The admission response now names the admitted actor (on acceptance only - a
+  refusal still tells the client nothing), the client bridge stamps it on inbound messages, broadcasts
+  keep their direction, and a packet that arrives before admission is counted and dropped instead of
+  taking the connection down.
+- **The bridge went deaf after a server restart, and kicked the client on the first remote.** Mirror's
+  `Shutdown` clears its handler table, and the bridge registered handlers only in its constructor, so
+  after a stop/start the bridge received nothing while Mirror answered the first packet with "unknown
+  message id" and disconnected the sender. Handler registration is now re-runnable and idempotent, and
+  the provider re-arms it on the inactive-to-active edge of its own side.
+- **An enum passed by name was refused before the tool ran.** 7.41.2 made the structural argument
+  preflight read a string argument as JSON content only, so a bare enum name failed with "'G' is an
+  invalid start of a value" even though the binder accepts it. The defect was never enum-specific -
+  the same path refused `Guid`, `DateTime`, `TimeSpan`, `Uri`, `char` and nullable enums. The preflight
+  now mirrors the binder's own two readings in its order - the string as JSON content first, then, only
+  when that is not JSON at all, as a JSON string value - so a value the binder would bind is no longer
+  rejected, while an unknown enum member still fails both readings and is still refused.
+
+- **A client admitted before the world existed got no player, and its remotes were dropped.** The
+  bridge is built lazily, but it subscribed to the authenticator's accept event at construction and
+  never looked at what had already happened, so if Mirror's `NetworkManager` admitted a connection
+  before the mods world was first resolved the accept had already fired and nothing bound the actor -
+  every server-to-client remote was then dropped after one warning. It now catches up from whichever
+  of the bridge and the world arrives last. A naive replay would have been worse than the bug: with no
+  world attached the admission is refused and the record erased, so the server no longer admits before
+  a world is there, and a departing connection's record is released even when it was never bound.
+- **A stranger could inherit a departed player's identity.** The session host released a connection by
+  calling the world's `PlayerRemoving` path - arbitrary mod code - before unregistering the actor, so a
+  throw from that code left the actor in the bridge's and the authenticator's tables. kcp2k reuses
+  connection ids, and the next connection on that id was resolved as the departed actor. The
+  unregister is now unconditional, the connect path is symmetric, and an unauthenticated connection on
+  a reused id is never replayed as the previous occupant.
+- **`FireAllClients` reached connections that were never admitted.** The broadcast iterated every
+  Mirror connection rather than the admitted set, so a peer that connected and simply never sent an
+  admission request received world events until Mirror's authentication timeout, if one was configured
+  at all. It now goes to the admitted set only.
+- **A role conflict stopped request timeouts and latched forever.** The provider threw out of `Update`
+  when Mirror started as the other side, which skipped `PumpTimeouts` for that frame and, once
+  latched, never re-checked a corrected role - and during the conflict it still attached handlers. It
+  now reports once, keeps pumping, and re-evaluates every frame. A bridge disposed by its owner ends
+  the provider with one message instead of an exception per frame.
+
+### Breaking
+
+- **`CoreAiAdmissionResponseMessage` gained an `ActorId` field.** Server and client must run the same
+  CoreAI version: an older server sends the shorter message, a newer client reads past its end and
+  Mirror drops the connection. There is no compatibility shim.
+
+### Known limits shipped in this release
+
+Recorded in `Assets/CoreAIMirror/README.md` and tracked in `TODO.md`, none of them new but all of them
+newly REACHABLE now that a scene can build the transport: world-state replication still does not cross
+the wire (remotes do); host mode - server plus local client in one process - has no client-side
+remotes; a refused client cannot tell "refused" from "server vanished" because the refusal's batch is
+discarded by the synchronous drop; and the rate limiter runs on the outbound path only, so an admitted
+peer can flood the server's world dispatch. That last one is deliberately not fixed here: the limiter
+throws, and the inbound handlers run inside Mirror's wrapper where a throw disconnects the client, so
+it needs a drop-and-count design rather than a two-line insertion.
+
 ## [7.41.2] - 2026-09-11
 
 ### Fixed

@@ -31,6 +31,18 @@ namespace CoreAI.Net.Mirror
         /// log; the client is told only that it was refused.
         /// </remarks>
         public string Reason;
+
+        /// <summary>
+        /// The actor the server admitted this connection as. Empty on a refusal.
+        /// </summary>
+        /// <remarks>
+        /// WHY the client is told at all: its credential is opaque to CoreAI and the identity behind
+        /// it is decided on the server, so this response is the only place a client can learn who
+        /// the server routes <c>FireClient</c> to — and the client bridge keys every inbound remote
+        /// by it. WHY empty on a refusal: a rejection must tell the client nothing, and an identity
+        /// would be the first thing it must not tell.
+        /// </remarks>
+        public string ActorId;
     }
 
     /// <summary>

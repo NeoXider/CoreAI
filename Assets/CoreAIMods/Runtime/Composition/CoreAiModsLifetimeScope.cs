@@ -52,6 +52,15 @@ namespace CoreAI.Composition
         [SerializeField]
         private Mods.Rbx.Binding.RbxCharacterMotorProviderBehaviour characterMotorProvider;
 
+        [Header("Network transport")]
+        [Tooltip("Optional network bridge provider, e.g. the CoreAI Mirror package's "
+            + "CoreAiMirrorNetworkBridgeProvider. When set, the Rbx world's RemoteEvents and "
+            + "RemoteFunctions travel over its transport and remote players can be admitted. When "
+            + "empty, the world runs headless/offline on the in-process null bridge: no remote "
+            + "peers, remotes loop back locally.")]
+        [SerializeField]
+        private Mods.Rbx.Binding.RbxNetworkBridgeProviderBehaviour networkBridgeProvider;
+
         [Header("Lua coroutine resume budget")]
         [Tooltip("Per-resume budget every guarded Lua coroutine arms by default (instruction-step cap "
             + "and wall-clock cap) — the same mechanism a runaway 'while true do end' handler is cut "
@@ -96,6 +105,17 @@ namespace CoreAI.Composition
                 // implementation the same way without deriving from the behaviour.
                 builder.RegisterInstance<Mods.Rbx.Binding.IRbxCharacterMotorProvider>(
                     characterMotorProvider);
+            }
+
+            if (networkBridgeProvider != null)
+            {
+                // WHY a factory and not RegisterInstance: Configure runs in Awake, and registering a
+                // transport must not build one there. The installer resolves INetworkBridge inside
+                // its own world factory, so this defers construction to that first resolve — the
+                // latest point the composition allows — and a scope built after Mirror started never
+                // touches Mirror in Awake at all. Singleton keeps it one bridge per scope.
+                builder.Register(_ => networkBridgeProvider.Bridge, Lifetime.Singleton)
+                    .As<Mods.Rbx.Instances.Networking.INetworkBridge>();
             }
 
             // WHY always registered, never conditionally: unlike the motor provider this field is

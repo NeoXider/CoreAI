@@ -4,6 +4,47 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.42.0] - 2026-09-16
+
+### Changed
+
+- **The WalkSpeed gate measures the metric contract at a second world scale.** The single WalkSpeed
+  measurement ran only at the default metres-per-stud AND built its expectation with the very
+  `RbxSpace.LengthToUnity` call the motor converts with, so it could only catch a motor that skipped
+  the conversion entirely - an inverted scale, a stored wrong value or a hard-coded 0.28 all passed it.
+  The expectation is now spelled out arithmetically and a sibling repeats the measurement at 1 m/stud,
+  where a hard-coded 0.28 is off by 3.5x while a motor that ignores the scale fails the default case
+  instead. The fixture also gained the scale restore it never had: play mode starts here without a
+  domain reload, so a scale left switched would have mis-scaled every later test and the next Play.
+- **Two live PlayMode fixtures stopped failing for reasons that were not defects.** The chat-panel
+  test that activates its object now declares the "UIDocument component not found" error its own
+  harness deliberately causes by activating a panel with no document; its two passing siblings never
+  hit it only because they skip activation and drive the lifecycle by reflection. The real-model chat
+  demo now honours `COREAI_TEST_BASE_URL` / `COREAI_TEST_MODEL` like every other live fixture, and
+  restores the shared settings asset in an unconditional teardown so the override cannot leak into the
+  rest of the run.
+- **The live Stop contract is verified again, on any endpoint.** The real-model chat demo required
+  observing partial text mid-stream before it could test anything else, and eight measured endpoints
+  fail that for one of two opposite reasons — the whole answer arrives inside a frame, or the first
+  visible token never arrives. So the stop-and-recover contract moved into its own `[UnityTest]` that
+  needs no sampling: it submits, stops a frame later, and asserts the turn cancelled, the result is
+  null, no assistant text appeared afterwards, the panel unlocked and the next turn succeeded. The
+  sampling test keeps its own assertions and now classifies rather than fails: an errored turn, an
+  empty answer, or a turn that ignores Stop still fail; only "a real non-empty answer with no
+  observable intermediate state" is a skip, and a pacing probe through the same transport catches a
+  panel that drops content the service did produce.
+- **A regression test no longer creates the hazard it warns about.** The world-scale teardown pin
+  switched `RbxSpace` in its body with no unconditional restore, so its own failure path left the
+  project at 1 m/stud and `SimulationMode.Script` for the rest of a session that runs without a domain
+  reload. Restore is now unconditional and idempotent, and the main fixture's teardown no longer trips
+  over a world that failed to construct.
+- **The allocation-backstop test measures its own rule instead of its neighbours.** It asserted that a
+  single `IsExceeded()` call trips after 32 MB of retained growth, but the budget's baseline is
+  deliberately garbage-inclusive, so the documented contract only promises a trip that is late, never
+  false. The test passed alone and failed in the full sweep once other tests left more garbage behind.
+  It now collects before taking the baseline; the production bias was deliberately left as it is.
+
+
 ## [7.41.0] - 2026-09-10
 
 ### Changed

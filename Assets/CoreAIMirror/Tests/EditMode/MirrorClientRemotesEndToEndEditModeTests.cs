@@ -1,0 +1,312 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Text;
+using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
+using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
+using Mirror;
+using NUnit.Framework;
+using UnityEngine;
+
+namespace CoreAI.Net.Mirror.Tests
+{
+    /// <summary>
+    /// The half of the Roblox remote surface that travels server to client, end to end: a client
+    /// admitted through the real authenticator over a real Mirror exchange receives what the server
+    /// fires, and the world's own dispatch fires the mod-visible <c>OnClientEvent</c> signal.
+    /// </summary>
+    /// <remarks>
+    /// WHY nothing here names the fix: the fixture is written against the surface that existed
+    /// before it — provider, authenticator, bridge, world bindings — so it compiles against the
+    /// code without the fix and fails there at run time, where the world refuses the null recipient
+    /// with an exception and Mirror answers that by disconnecting the client. WHY the client bridge
+    /// is built before the server starts and the provider is never driven through Update: a host's
+    /// provider refuses a client bridge beside a live server, a separate and open defect, and the
+    /// frame is not what is under test here — the accept-event wiring the provider installs when
+    /// the bridge is built is. WHY a refusal is observed where the authenticator hands it to
+    /// Mirror and not on the wire: the authenticator disconnects inline, right after queueing the
+    /// refusal, and Mirror's default transport (kcp2k) reports the drop before that call returns —
+    /// at which point Mirror clears the connection's unsent batches — so the harness, which echoes
+    /// a drop the same way, carries nothing to a refused client; a wire assertion would therefore
+    /// assert the harness, not the product.
+    /// </remarks>
+    [TestFixture]
+    public sealed class MirrorClientRemotesEndToEndEditModeTests
+    {
+        private const string Credential = "open-sesame";
+        private const string WorldId = "world-a";
+        private const BindingFlags Private = BindingFlags.NonPublic | BindingFlags.Instance;
+
+        /// <summary>
+        /// The one line a world built without a part materialiser writes on purpose, verbatim: this
+        /// fixture builds such a world, having nothing to render.
+        /// </summary>
+        private const string HeadlessNotice =
+            "[CoreAI.RbxApi] Headless mode: no part materialiser (InstanceGameObjectBinder) — "
+            + "Instance.new creates data-model instances but nothing renders in the scene. If this "
+            + "is a player build, check link.xml preserves CoreAI.RbxApi.* assemblies and that "
+            + "RbxWorldHost is wired on CoreAiModsLifetimeScope.";
+
+        private OfflineMirror _mirror;
+        private GameObject _go;
+        private CoreAiMirrorAuthenticator _authenticator;
+        private CoreAiMirrorNetworkBridgeProvider _provider;
+        private MirrorNetworkBridge _server;
+        private MirrorNetworkBridge _client;
+        private CoreAiMirrorSessionHost _sessionHost;
+        private InstanceRegistry _registry;
+        private LuaCsRbxApiBindings _bindings;
+        private List<string> _worldLog;
+        private List<string> _serverActors;
+        private List<CoreAiAdmissionResponseMessage> _responsesHandedToMirror;
+        private int _clientAccepts;
+
+        [SetUp]
+        public void CreateBothSides()
+        {
+            _responsesHandedToMirror = new List<CoreAiAdmissionResponseMessage>();
+            // WHY reset and not left at the field's default: NUnit runs every test of a fixture on
+            // one instance, so an accept a sibling test heard would be carried into the refused
+            // client's "never" and counted against it.
+            _clientAccepts = 0;
+            NetworkDiagnostics.OutMessageEvent += RecordAdmissionResponse;
+            _mirror = new OfflineMirror(loopback: true);
+            _go = new GameObject("CoreAI_ClientRemotesEndToEnd");
+            _authenticator = _go.AddComponent<CoreAiMirrorAuthenticator>();
+            _authenticator.Configure(new TokenProvider(Credential), WorldId);
+            _provider = _go.AddComponent<CoreAiMirrorNetworkBridgeProvider>();
+            _provider.Role = CoreAiMirrorRole.Client;
+            _provider.ClockSeconds = () => 0d;
+            SetField(_provider, "authenticator", _authenticator);
+            _client = (MirrorNetworkBridge)_provider.Bridge;
+
+            _serverActors = new List<string>();
+            _server = new MirrorNetworkBridge(isServer: true, _authenticator, clockSeconds: () => 0d);
+            _sessionHost = new CoreAiMirrorSessionHost(
+                _server,
+                context =>
+                {
+                    _serverActors.Add(context.ActorId);
+                    return true;
+                },
+                _ => true);
+            // WHY two listeners here: there is no NetworkManager, and these are the two things it
+            // does on each side once the authenticator accepts.
+            _authenticator.OnServerAuthenticated.AddListener(conn =>
+            {
+                conn.isAuthenticated = true;
+                _sessionHost.Admit(conn.connectionId, _authenticator.ResultFor(conn.connectionId),
+                    sessionId: null);
+            });
+            _authenticator.OnClientAuthenticated.AddListener(() =>
+            {
+                _clientAccepts++;
+                NetworkClient.connection.isAuthenticated = true;
+            });
+
+            _worldLog = new List<string>();
+            _registry = new InstanceRegistry(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion, worldId: WorldId);
+            _bindings = new LuaCsRbxApiBindings(_registry, DataModelBootstrap.CreateGame(_registry),
+                networkBridge: _client, log: _worldLog.Add);
+        }
+
+        [TearDown]
+        public void RestoreEverything()
+        {
+            OfflineMirror.RunAll(
+                () => NetworkDiagnostics.OutMessageEvent -= RecordAdmissionResponse,
+                () => _bindings.Dispose(),
+                () => _sessionHost.Dispose(),
+                () => _server.Dispose(),
+                () => _provider.ReleaseTransport(),
+                () => _mirror.Dispose(),
+                () => UnityEngine.Object.DestroyImmediate(_go));
+        }
+
+        [Test]
+        public void AdmittedClient_ReceivesFireClient_AndOnClientEventFiresWithTheArgumentsOnly()
+        {
+            string admitted = Join(Credential);
+            List<object[]> received = new();
+            RbxRemoteEvent remote = ClientRemoteHeardBy(admitted, received);
+
+            _server.SendEvent(FireClient(remote, admitted, "[\"hello\",7]"));
+            _mirror.PumpLoopback();
+            _bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual(1, received.Count, "FireClient never reached the client's OnClientEvent");
+            CollectionAssert.AreEqual(new object[] { "hello", 7d }, received[0],
+                "OnClientEvent gets the fired arguments and nothing else: the mirror prepends the "
+                + "player to OnServerEvent, never to OnClientEvent");
+            Assert.AreEqual(1, _client.PacketsDelivered);
+            Assert.AreEqual(0, _client.UnadmittedPacketsDropped);
+            Assert.AreEqual(1, _clientAccepts, "the client hears its admission exactly once");
+            CollectionAssert.IsEmpty(WorldLogBesidesTheHeadlessNotice(),
+                "the world must not have refused the delivery");
+        }
+
+        [Test]
+        public void AdmittedClient_ReceivesFireAllClients_OnItsOwnOnClientEvent()
+        {
+            string admitted = Join(Credential);
+            List<object[]> received = new();
+            RbxRemoteEvent remote = ClientRemoteHeardBy(admitted, received);
+
+            _server.SendEvent(FireAllClients(remote, "[\"all\"]"));
+            _mirror.PumpLoopback();
+            _bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual(1, received.Count, "FireAllClients never reached the client's OnClientEvent");
+            CollectionAssert.AreEqual(new object[] { "all" }, received[0]);
+            Assert.AreEqual(1, _clientAccepts, "the client hears its admission exactly once");
+            CollectionAssert.IsEmpty(WorldLogBesidesTheHeadlessNotice(),
+                "the world must not have refused the delivery");
+        }
+
+        [Test]
+        public void Negative_ARefusedClient_IsAuthenticatedNowhere_AndTheServerHoldsNoActorForIt()
+        {
+            Join("guess");
+
+            Assert.AreEqual(0, _authenticator.AdmittedCount);
+            Assert.AreEqual(1, _authenticator.RejectedCount);
+            Assert.IsNull(_authenticator.ResultFor(OfflineMirror.LoopbackConnectionId));
+            CollectionAssert.IsEmpty(_serverActors, "a refusal must create nothing in the world");
+            CollectionAssert.IsEmpty(_server.ActorIds);
+            Assert.AreEqual(0, _clientAccepts, "the client side must never hear an accept");
+            CollectionAssert.AreEqual(new[] { OfflineMirror.LoopbackConnectionId },
+                _mirror.ServerDisconnectRequests,
+                "the refusal must ask the transport to drop that connection, and only that one");
+            CollectionAssert.IsEmpty(NetworkServer.connections,
+                "once the transport reports the drop the server holds nothing for it");
+            Assert.IsFalse(NetworkClient.isConnected,
+                "and the client learns of the drop from the transport, not from a message");
+            CoreAiAdmissionResponseMessage told = TheOneAdmissionResponseHandedToMirror();
+            Assert.IsFalse(told.Admitted);
+            Assert.AreEqual("not admitted", told.Reason,
+                "what leaves the authenticator is the fixed refusal, never the provider's reason");
+            Assert.AreEqual("", told.ActorId, "and it names nobody");
+        }
+
+        /// <summary>Runs the whole admission exchange and returns the actor the server admitted, or null.</summary>
+        private string Join(string credential)
+        {
+            _authenticator.ConfigureClientCredential(() => Encoding.UTF8.GetBytes(credential));
+            OfflineMirror.StartServer();
+            _authenticator.OnStartServer();
+            _mirror.ConnectLoopback();
+            _authenticator.OnStartClient();
+            _authenticator.OnClientAuthenticate();
+            _mirror.PumpLoopback();
+            return _serverActors.Count == 1 ? _serverActors[0] : null;
+        }
+
+        /// <summary>
+        /// The client world's side of a LocalScript that connects <c>OnClientEvent</c>: the actor
+        /// joins the world under its own id and listens on the remote's signal for that id.
+        /// </summary>
+        private RbxRemoteEvent ClientRemoteHeardBy(string actorId, List<object[]> received)
+        {
+            Assert.IsNotNull(actorId, "admission must have succeeded before a client can listen");
+            ActorContext actor = new LocalActorIdentityProvider(
+                    actorId, "session-" + actorId, WorldId, ActorGrantSet.None, AgentMemoryScope.Empty)
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            _bindings.ConnectActor(actor);
+            RbxRemoteEvent remote = (RbxRemoteEvent)_registry.Create("RemoteEvent");
+            remote.AttachScheduler(_bindings.Scheduler);
+            remote.GetOnClientEvent(actorId).Connect((Action<object[]>)received.Add);
+            return remote;
+        }
+
+        /// <summary>
+        /// Every line the world logged except the one it writes, on purpose, when built without a
+        /// part materialiser.
+        /// </summary>
+        /// <remarks>
+        /// WHY one exact line and not a prefix: the notice is the only benign line a headless world
+        /// writes, and any other wording — the registry-less variant of the same notice included —
+        /// is something new that this fixture must not absorb.
+        /// </remarks>
+        private List<string> WorldLogBesidesTheHeadlessNotice()
+        {
+            List<string> lines = new(_worldLog);
+            lines.Remove(HeadlessNotice);
+            return lines;
+        }
+
+        /// <summary>
+        /// The admission response the server handed Mirror for the loopback client, as the
+        /// authenticator built it, seen at Mirror's send boundary.
+        /// </summary>
+        private CoreAiAdmissionResponseMessage TheOneAdmissionResponseHandedToMirror()
+        {
+            Assert.AreEqual(1, _responsesHandedToMirror.Count,
+                "the server must answer one admission request with exactly one response");
+            return _responsesHandedToMirror[0];
+        }
+
+        private void RecordAdmissionResponse(NetworkDiagnostics.MessageInfo info)
+        {
+            if (info.message is CoreAiAdmissionResponseMessage told)
+            {
+                _responsesHandedToMirror.Add(told);
+            }
+        }
+
+        /// <summary>The message <c>RemoteEvent:FireClient(player, ...)</c> hands the bridge.</summary>
+        private static RbxNetworkEventMessage FireClient(RbxRemoteEvent remote, string recipient,
+            string envelope)
+        {
+            return new RbxNetworkEventMessage(remote.Id, RbxNetworkDirection.ServerToClient,
+                remote.Reliability, null, recipient, Encoding.UTF8.GetBytes(envelope));
+        }
+
+        /// <summary>The message <c>RemoteEvent:FireAllClients(...)</c> hands the bridge.</summary>
+        private static RbxNetworkEventMessage FireAllClients(RbxRemoteEvent remote, string envelope)
+        {
+            return new RbxNetworkEventMessage(remote.Id, RbxNetworkDirection.ServerToAllClients,
+                remote.Reliability, null, null, Encoding.UTF8.GetBytes(envelope));
+        }
+
+        private static void SetField(object target, string name, object value)
+        {
+            FieldInfo field = target.GetType().GetField(name, Private);
+            Assert.IsNotNull(field, name);
+            field.SetValue(target, value);
+        }
+
+        private sealed class TokenProvider : IActorAdmissionProvider
+        {
+            private readonly string _expected;
+            private int _issued;
+
+            public TokenProvider(string expected)
+            {
+                _expected = expected;
+            }
+
+            public ActorAdmissionResult TryAdmit(in ActorCredential credential, string worldId)
+            {
+                string offered = Encoding.UTF8.GetString(credential.Opaque);
+                if (!string.Equals(offered, _expected, StringComparison.Ordinal))
+                {
+                    return ActorAdmissionResult.Reject("credential mismatch");
+                }
+
+                _issued++;
+                ActorContext context = new LocalActorIdentityProvider(
+                        "remote-" + _issued,
+                        "session-" + _issued,
+                        worldId,
+                        ActorGrantSet.Create(new[] { "read" }),
+                        AgentMemoryScope.Empty)
+                    .GetActorContext(BuiltInAgentRoleIds.SmartChat);
+                return ActorAdmissionResult.Admit(context, 1000 + _issued, "player" + _issued, "");
+            }
+        }
+    }
+}

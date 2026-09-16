@@ -141,13 +141,195 @@ Against the owner's bar, verified against the tree on 2026-09-10:
   core exists with tests: `ReplicationDirtySet`, `ReplicationStream`, `ReplicationApplier`. And
   RemoteEvent/RemoteFunction — the Roblox-facing multiplayer surface a mod author actually uses —
   cross that bridge from PRODUCTION code, not only from tests.
-- **The one gap on this bar:** the replication layer and the transport are both real and are not
-  connected to each other. There is no publisher joining them, world state never crosses a socket,
-  and no two-process run has been done. Remotes replicate; world state does not.
+- **Two gaps on this bar, not one, and the composition gap was the deeper of them.** The claim that
+  stood here until 2026-09-10 — "the one gap is that the replication layer and the transport are not
+  connected" — was wrong by omission, and a gpt-6 closure audit caught it. Nothing in PRODUCTION ever
+  built the transport at all: `MirrorNetworkBridge` and `CoreAiMirrorSessionHost` were constructed
+  only in EditMode tests, `Assets/CoreAIMirror/Runtime/` held four plain classes and no
+  MonoBehaviour, and nothing registered an `INetworkBridge`, so `CoreAiModsInstaller.cs:171` and
+  `:371` always fell back to `NullNetworkBridge`. A game that installed Mirror still could not switch
+  multiplayer on without writing the wiring itself. There was nothing to connect replication TO.
+  - **Composition gap: CLOSED 2026-09-10.** `RbxNetworkBridgeProviderBehaviour` (explicit serialized
+    reference per ARCHITECTURE_RULES par.2 — no scene reflection, no static singleton), an optional
+    field on `CoreAiModsLifetimeScope` registering it LAZILY as `INetworkBridge`, and
+    `CoreAiMirrorNetworkBridgeProvider` behind the `MIRROR` define. An empty field leaves behaviour
+    byte-identical, so every existing scene is untouched. Known limits, recorded rather than hidden:
+    the side (server/client) is an explicit serialized choice, because the bridge is built inside the
+    installer's build callback — still in `Awake`, where `NetworkServer.active` is false and there is
+    nothing live to read; and the game must still call `provider.AttachWorld(...)` and set
+    `Players.IdentitySource` itself, both documented on the provider type.
+  - **Replication gap: STILL OPEN.** The replication layer and the transport are not connected to
+    each other. There is no publisher joining them, world state never crosses a socket, and no
+    two-process run has been done. Remotes replicate; world state does not.
+  - **And the seam proved the foundation is NOT one gap short.** A gpt-6 closure audit
+    (2026-09-10, its verdict in `PROGRESS.audit20.md`) was asked to attack the belief that the seam
+    made no dead defect live. It destroyed that belief: making the transport reachable exposed three
+    HIGH defects that could not be seen while nothing constructed it. All three verified by hand
+    afterwards. **Do not describe the owner's bar as one replication gap short — it is not.**
+    - [x] **Server-to-client remotes do not arrive (HIGH, blocks the owner's bar).**
+          `MirrorNetworkBridge.cs:414-424` (`OnClientEvent`) and `:453-464` (`OnClientRequest`) build
+          their message with `null` identity, so `LuaCsRbxApiBindings.cs:1421` -> `RbxRemotes.cs:90`
+          /`:122` rejects the event and the function callback lookup at `:1575` rejects the null.
+          `FireClient`/`FireAllClients` — half the Roblox remote surface — never reach a mod. Broken
+          even when the remote ids match. This is the first thing a real user would hit.
+          **Fixed 2026-09-10 (uncommitted).** Root cause was one level deeper: the client never
+          learned its own actor id — `CoreAiAdmissionResponseMessage` carried only `Admitted` and
+          `Reason`. And the refusal was a kick, not a drop: `DeliverNetworkEvent` rethrows the
+          `RbxError`, Mirror's `exceptionsDisconnect` then disconnects the client on the first
+          `FireClient`. Now the response names the admitted actor on acceptance (still nothing on a
+          refusal — `CoreAiMirrorAuthenticator.Respond` is the one place that decides it), the
+          provider binds it on the client bridge from the accept event and forgets it on the frame
+          the client side stops, the client bridge stamps it as the recipient of every inbound remote
+          and keeps a broadcast's `ServerToAllClients` direction, and a remote with no admission
+          bound is dropped, counted in `UnadmittedPacketsDropped` and said once. Host contract made
+          explicit: the client composition's `IActorIdentityProvider` must issue the same durable
+          actor id the server's `IActorAdmissionProvider` admits, or `FireClient` reaches a signal no
+          local script holds — the bridge says so once. Tests: `MirrorClientRemotesEndToEndEditModeTests`
+          (real authenticator both ends over `OfflineMirror`'s new loopback, real world bindings;
+          compiles against the pre-fix code and fails there), `MirrorClientRemoteRulesEditModeTests`,
+          `MirrorClientAdmissionEditModeTests`. Run in Unity 2026-09-16: all 65 `CoreAI.Net.Mirror.Tests`
+          cases pass (`artifacts/testresults/edit_r3.xml`). The "compiles against the pre-fix code"
+          claim above is the author's, from an intra-day working state; it is NOT replayable from
+          history, because the provider it references is new in the same change set.
+    - [ ] **A server broadcast reaches unadmitted connections (HIGH).** `MirrorNetworkBridge.cs:231`
+          iterates every `NetworkServer.connections` entry, not the admitted actors; Mirror's
+          `NetworkConnection.Send` checks size, not admission. Related: the rate limiter is applied
+          only outbound (`SendEvent:197`, `SendRequest:245`), never on receive (`:398`, `:433` bind
+          the sender and dispatch), so an admitted custom client bypasses the intended server gate.
+    - [ ] **No inbound rate limit on the server's world dispatch (HIGH, now reachable).**
+          `MirrorNetworkBridge` calls `_rateLimiter.Admit` only on the OUTBOUND path (`SendEvent`,
+          `SendRequest`); `ReceiveServerEvent` and `ReceiveServerRequest` resolve the sender and
+          dispatch with no budget at all, so an ADMITTED custom client can flood the server's Lua
+          scheduler. Before the composition seam nothing in production built this bridge and the hole
+          was dead; the seam makes it live, which is why it is listed here rather than as a nicety.
+          Deliberately NOT fixed in 7.42.0 and called out in the release notes: `Admit` throws
+          `RbxError`, and these two methods run inside Mirror's handler wrapper where a throw
+          disconnects the client, so the fix needs a drop-and-count design rather than a two-line
+          insertion. The broadcast half of the same finding WAS fixed in 7.42.0 (a broadcast now goes
+          to the admitted set instead of every Mirror connection).
+    - [ ] **A Mirror HOST has no client-side remotes (HIGH).** A server bridge installs server
+          handlers only (`:336`) and the provider refuses a client bridge while the server is active
+          (`CoreAiMirrorNetworkBridgeProvider.cs:263`), so the host's local client is deaf. Host mode
+          is the most common Mirror setup. Worse, `MirrorRestartEditModeTests.cs:146` *enshrines*
+          this as intended ("a host's server bridge must leave the client table to a client bridge") —
+          a test that locks in the defect must be rewritten with the fix, not kept green.
+    - [ ] **A refused client never learns it was refused (functional, not a security hole).**
+          `CoreAiMirrorAuthenticator.OnAdmissionRequest` does `conn.Send(Respond(result))` and then
+          `ServerReject(conn)` on the very next line. With kcp2k — Mirror's default transport, and the
+          only one CoreAI scenes would use — the disconnect is synchronous, so `conn.Cleanup()` wipes
+          the still-unflushed batch before Mirror's late-update flush. The `Admitted=false` branch of
+          `OnAdmissionResponse` and `ClientReject()` are therefore dead in production: a refused client
+          cannot tell "refused" from "server vanished". Mirror's own `BasicAuthenticator` guards against
+          exactly this with `DelayedDisconnect(conn, 1f)`. The fix is to defer the reject by at least a
+          frame — `LateUpdate` of the same frame is NOT enough, because `NetworkLoop` schedules
+          `NetworkLateUpdate` at the END of `PreLateUpdate`, after `MonoBehaviour.LateUpdate`, and the
+          batch flush lives there. Verified 2026-09-16 while fixing the loopback harness; the refusal
+          itself is sound (the connection IS dropped, no actor and no admission record are created).
+    - [ ] **Restart ordering is unproven, not proven.** `HookTransport:216` reattaches during
+          `Update`, after Mirror's `NetworkLoop` EarlyUpdate, and the new tests insert a `Frame()`
+          before delivering a packet, so they do not exercise a packet arriving in the same frame the
+          transport came back. The stop/start-within-one-frame window is still open and documented in
+          the `HACK:` comment.
 
-So on the plan's bar MVP2.5 is half built; on the owner's bar it is one seam short. Whichever bar a
-future reader uses, they should say WHICH — most of the disagreement in this file's history comes
-from two people silently using different ones.
+So on the plan's bar MVP2.5 is half built; on the owner's bar it is NOT close — the composition
+gap closed and three transport defects opened in its place.
+Whichever bar a future reader uses, they should say WHICH — most of the disagreement in this file's
+history comes from two people silently using different ones.
+
+**The live streaming test, resolved 2026-09-16 — and a correction to an earlier claim.**
+`CoreAiChatDemoRealModelWebGlPlayModeTests.CoreAiChatDemo_RealModel_StreamsStopAndRecovers` requires
+that partial text becomes visible in the UI while the turn is still running. EIGHT endpoints were
+measured against it; every one fails, for one of two OPPOSITE reasons:
+
+| endpoint | visible-content window | why it fails |
+|---|---|---|
+| opencode CLI bridge | whole answer at once | nothing partial to sample |
+| claude CLI bridge | whole answer at once | same |
+| LM Studio `ling-3.0-tiny` | 0.16 s | same |
+| LM Studio `minicpm5-2b` | 0.53 s | same |
+| LM Studio `spark-x2.5-4b` on GPU | 0.24 s | same |
+| LM Studio `spark-x2.5-4b` on CPU | 13 s, but 52 s to first token | borderline |
+| LM Studio `qwen3.5-4b-mtp` | none — whole budget in `reasoning_content` | nothing visible at all |
+| remote `qwen3.8-27b`, thinking disabled | — | 90 s timeout, turn still running |
+
+Two of those models ignore `enable_thinking: false` outright, which is the remedy the test's own
+failure message recommends, so the documented workaround does not work on them either.
+
+**What was done.** The test's SECOND phase already treated this exact condition as a skip
+(`if (stopTask.IsCompleted) Assert.Ignore("Real model completed before Stop could cancel it…")`); the
+first phase hard-failed on it. That asymmetry was the defect, and the first phase now classifies the
+outcome instead: a turn that ERRORS still fails, a turn that completes with an EMPTY answer still
+fails, and a turn that ignores Stop still fails as a product hang. Only "produced a real non-empty
+answer with no observable intermediate state" became a skip — the one case a live test cannot
+distinguish from "the model was too fast". Stop is used as the live probe that splits a slow endpoint
+from a hung product.
+
+**Coverage is not lost**, and that is checked rather than asserted: the SAME demo scene runs the SAME
+stream/stop/stream-again scenario against a stub orchestrator
+(`CoreAiChatDemoScene_WithStubOrchestrator_StreamsStopsAndStreamsAgain`),
+`StopAgent_BusyFalseCallback_StartsSuccessorWithoutOldTailClobber` asserts chunk text in the live
+label while the panel is busy, and `StreamingChat_ReasoningDeltas_StayOutOfIncrementalVisibleText`
+pins incremental visible text directly. All green.
+
+- [ ] **What IS lost, and worth revisiting.** No deterministic test drives the live HTTP-SSE path all
+      the way to the label — only this test did. And a skip in phase one skips phases two and three
+      with it, even though phase two's 80-line prompt is the MOST observable request in the file. If a
+      non-reasoning local model ever lands on this machine, re-check whether phase one can go back to
+      hard-failing, or split the phases so a fast endpoint still exercises the Stop contract.
+
+**The correction:** it was recorded here on 2026-09-10 that the bridge proved the live tests only ever
+needed "a model that answers". That holds for the four live rows that went green. It does NOT hold for
+this one — and the reason is not the chunking strategy, since it fails identically against a bridge
+that replays a finished answer and one that streams tokens live. It is first-token latency plus a
+visible phase shorter than the sampler.
+
+**Endpoint choice for the mandatory sweep:** `opencode muse`. Measured against `codex spark 5.3` on the
+same tree: muse 149 passed / 1 failed, spark 146 passed / 3 failed — spark's emulated tool-calling
+produces no tool calls, so the castle, crafting and backend-switch rows collapse. Tool-calling fidelity,
+not model size, is what the live suite needs from a bridge.
+
+- [ ] **An empty string is reported as a MISSING required argument.**
+      `ToolExecutionPolicy.IsMissingArgumentValue` counts a null, empty or whitespace string as an
+      ABSENT required argument, so a `string` parameter the model deliberately sends as `""` is refused
+      at schema validation with "missing required argument(s)". MEAI itself would bind it: the value is
+      assignable and the binder passes it through. It reads like a deliberate rule rather than an
+      oversight and is not enum-related, so it was left alone when the enum false-rejection was fixed on
+      2026-09-16 — but it is the same class of defect (the preflight refusing a call the binder would
+      have run) and the message misleads: the argument is present, it is empty. Decide whether the rule
+      is intended; if it is, the message should say "empty", not "missing".
+- [ ] **The allocation backstop's trip can be delayed by a whole confirmation on a dirty heap.**
+      `LuaCsAllocationBudget.Reset` takes its baseline with `GC.GetTotalMemory(false)` — deliberately
+      garbage-INCLUSIVE, because Unity's Mono returns 0 from `GetAllocatedBytesForCurrentThread`. The
+      class documents the consequence honestly: live growth is understated by whatever garbage was on
+      the heap at `Reset`, so a trip can be LATE but never FALSE, and the non-trip path re-baselines from
+      the post-collection reading so the next confirmation needs a fresh full budget. That bias is the
+      right one for a backstop — a false trip kills a legitimate script. Recorded because it is a
+      security backstop whose latency is heap-dependent, not because it is wrong: a bomb launched into a
+      session that has just accumulated garbage gets one extra confirmation window before it is cut.
+      Found 2026-09-16 when `LuaCsGuardFrameAndAllocationEditModeTests.RetainedGrowthBeyondBudget_IsAMemoryBudgetTrip`
+      began failing in the full sweep while passing alone — new tests upstream left more garbage behind
+      and the fixture asserted a single-call trip the documented contract does not promise. The TEST was
+      fixed (it now collects before taking its baseline, so it measures the rule it states rather than
+      its neighbours); production was deliberately left alone. If the latency ever matters, the fix is a
+      live-heap baseline at `Reset`, which costs a forced collection per execution — measure first.
+
+**Documentary findings from the same audit (2026-09-10), all verified by hand afterwards:**
+
+- [ ] **The G10 verdict cites evidence that is not in the repository.**
+      `dev-docs/MVP2_ACCEPTANCE_MANIFEST.md:117` names `artifacts/g10-real.json` and
+      `artifacts/g10-real.err` as the evidence for the FAILED verdict. `.gitignore:154` excludes
+      `artifacts/`, `git ls-files artifacts/` is empty, and the file is no longer on disk (an agent
+      last read it on 2026-09-01). The transcribed table survives; the measurement behind it cannot be
+      checked from a clean clone. Either commit a curated copy of the two files or restate the verdict
+      as a transcription whose source is gone.
+- [ ] **"No counters/observability seam prerequisite" is stale.**
+      `dev-docs/MVP2_ACCEPTANCE_MANIFEST.md:266-270` says so; `LuaCsExecutionGuard.cs:196` and
+      `:401-418` plus `G10MeasurementRunner.cs:149` contradict it.
+- [ ] **The G10 impossibility argument is overstated, even though the verdict stands.** The manifest
+      argues from backend parallelism 1 and p95 provider latency that "forty requests cannot be served
+      inside a 60 s window". The audit's objection is fair: provider p95 alone does not prove aggregate
+      impossibility — the served fraction and the end-to-end latency are what actually failed. Keep the
+      FAILED verdict; drop the impossibility proof or replace it with a throughput argument.
 
 **MVP2.5 is NOT closed.** A three-rung closure audit (`dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md`)
 found that MVP8 — previously recorded here as "complete" — has gates whose positive column the code

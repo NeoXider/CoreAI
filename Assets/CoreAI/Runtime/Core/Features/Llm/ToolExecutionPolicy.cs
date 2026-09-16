@@ -934,14 +934,20 @@ namespace CoreAI.Infrastructure.Llm
 
                 try
                 {
-                    if (raw is string rawJson && parameter.ParameterType != typeof(string))
-                    {
-                        // WHY: MEAI binds a JSON-string argument to a complex parameter by deserializing
-                        // the string's CONTENT. Wrapping the string in a JSON string element first (the
-                        // element path below) proves the opposite and rejected calls the binder accepts.
-                        System.Text.Json.JsonSerializer.Deserialize(rawJson, parameter.ParameterType, options);
-                    }
-                    else
+                    // WHY two routes, in THIS order: it is the binder's own order (AIFunctionFactory,
+                    // MarshallViaJsonRoundtrip). A string bound to a non-string parameter is read as JSON
+                    // CONTENT first (an object argument the normalizer handed over as compact JSON) and,
+                    // only when it is not JSON at all, as a JSON STRING VALUE - the route an enum name, a
+                    // Guid or a DateTime bind through. 7.41.2 kept the first route alone, so every bare
+                    // enum name was rejected with "'G' is an invalid start of a value" while MEAI bound it.
+                    // This is a second route, not a looser check: the value must still deserialize into
+                    // the parameter type by one of the binder's two exact readings, so an unknown enum
+                    // member fails both here exactly as it fails MEAI. The binder's "looks like JSON"
+                    // gate is not mirrored: a non-JSON string fails the content read at its first token
+                    // with the very JsonException the binder falls through on.
+                    bool boundAsJsonContent = raw is string rawJson && parameter.ParameterType != typeof(string) &&
+                                              BindsAsJsonContent(rawJson, parameter.ParameterType, options);
+                    if (!boundAsJsonContent)
                     {
                         System.Text.Json.JsonElement element =
                             System.Text.Json.JsonSerializer.SerializeToElement(raw, raw.GetType(), options);
@@ -967,6 +973,26 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// The binder's first reading of a string bound to a non-string parameter: the string as JSON
+        /// CONTENT. <c>false</c> means "not JSON", the one failure the binder falls through on
+        /// (<c>catch (JsonException)</c> around its content read); any other exception propagates so the
+        /// caller classifies it exactly as it would coming from the string-value route.
+        /// </summary>
+        private static bool BindsAsJsonContent(string rawJson, Type parameterType,
+            System.Text.Json.JsonSerializerOptions options)
+        {
+            try
+            {
+                System.Text.Json.JsonSerializer.Deserialize(rawJson, parameterType, options);
+                return true;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return false;
+            }
         }
 
         /// <summary>

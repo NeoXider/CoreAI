@@ -117,6 +117,19 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void RetainedGrowthBeyondBudget_IsAMemoryBudgetTrip()
         {
+            // WHY the collection before Reset: the budget's baseline is a deliberately garbage-INCLUSIVE
+            // GC.GetTotalMemory(false) sample, and LuaCsAllocationBudget documents the consequence -
+            // live growth is understated by whatever garbage was already on the heap, so a trip can be
+            // late but never false. That is the right bias for a backstop and must not change. It does
+            // mean a single IsExceeded() call only trips when the baseline was taken on a reasonably
+            // clean heap. This fixture shares a process with ~4800 other tests and runs without a
+            // domain reload, so without this the assertion measures whichever neighbours ran first: it
+            // passed alone and failed twice in the full sweep once new tests upstream left more garbage
+            // behind. Collecting here makes the test measure the rule it states, not its neighbours.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
             LuaCsAllocationBudget budget = default;
             budget.Reset(8 * 1024 * 1024);
 

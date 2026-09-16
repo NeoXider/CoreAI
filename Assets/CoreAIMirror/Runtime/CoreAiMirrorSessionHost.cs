@@ -42,6 +42,9 @@ namespace CoreAI.Net.Mirror
         /// <summary>How many connections currently hold a live actor.</summary>
         public int LiveSessionCount => _actorsByConnection.Count;
 
+        /// <summary>Whether one connection currently holds a live actor.</summary>
+        public bool HasLiveSession(int connectionId) => _actorsByConnection.ContainsKey(connectionId);
+
         /// <summary>
         /// Admits one connection into the world. Returns false when the decision was a refusal, in
         /// which case nothing at all was created for it.
@@ -60,7 +63,21 @@ namespace CoreAI.Net.Mirror
                     connectionId.ToString()));
             _bridge.RegisterActor(context.ActorId);
 
-            if (!_connectActor(context))
+            bool connected;
+            try
+            {
+                connected = _connectActor(context);
+            }
+            catch
+            {
+                // WHY released before the rethrow: the throw is the world's to report, but the binding
+                // made above would otherwise resolve this connection — and, once kcp2k reuses its id,
+                // the next one — as a player the world never created.
+                Release(connectionId, context);
+                throw;
+            }
+
+            if (!connected)
             {
                 // The world refused the actor after admission said yes — the connection must not be
                 // left holding a binding that resolves to a player who does not exist.
@@ -133,9 +150,17 @@ namespace CoreAI.Net.Mirror
             _identitiesByActor.Remove(context.ActorId);
             // WHY the world first: DisconnectActor is what fires PlayerRemoving, and that handler is
             // entitled to read the leaving player. Unbinding the connection before it would leave
-            // the handler looking at an actor the bridge no longer knows.
-            _disconnectActor(context);
-            _bridge.UnregisterActor(context.ActorId);
+            // the handler looking at an actor the bridge no longer knows. WHY finally: that handler
+            // is mod code, and if it throws the connection id — which kcp2k reuses — must still stop
+            // resolving to the actor that left.
+            try
+            {
+                _disconnectActor(context);
+            }
+            finally
+            {
+                _bridge.UnregisterActor(context.ActorId);
+            }
         }
     }
 }
