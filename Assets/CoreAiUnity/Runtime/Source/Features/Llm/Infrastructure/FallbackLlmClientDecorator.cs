@@ -51,8 +51,11 @@ namespace CoreAI.Infrastructure.Llm
             {
                 LlmCompletionResult result = await _primary.CompleteAsync(request, cancellationToken);
 
+                // WHY the token check: a primary that reports its failure as a result after the caller already
+                // cancelled must not start a second backend for an answer nobody is waiting for.
                 if (result != null &&
                     !result.Ok &&
+                    !cancellationToken.IsCancellationRequested &&
                     !HasExecutedToolCalls(result) &&
                     IsRetryableError(result.ErrorCode))
                 {
@@ -69,6 +72,16 @@ namespace CoreAI.Infrastructure.Llm
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
+            }
+            // WHY: a primary whose transport failed while the caller was cancelling reports the fallout (a
+            // disposed socket, an aborted request), not the cause. The caller asked to stop, so the caller gets a
+            // cancellation - never the secondary, and never a provider error it would count as an outage.
+            catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(
+                    $"The request was cancelled by the caller; the primary then failed with {ex.GetType().Name}.",
+                    ex,
+                    cancellationToken);
             }
             // WHY: OperationCanceledException with an un-cancelled caller token is an internal provider/transport
             // timeout (e.g. MeaiOpenAiChatClient's transport-level timeout), not a user cancellation.
@@ -93,7 +106,7 @@ namespace CoreAI.Infrastructure.Llm
                     LogTag.Llm);
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
                 _logger.Warn(
                     $"[Fallback] Primary threw {ex.GetType().Name}: {ex.Message}, falling back to secondary.",
@@ -137,6 +150,14 @@ namespace CoreAI.Infrastructure.Llm
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
                         throw;
+                    }
+                    // WHY: see CompleteAsync - a failure after the caller cancelled is the cancellation.
+                    catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw new OperationCanceledException(
+                            $"The request was cancelled by the caller; the primary stream then failed with {ex.GetType().Name}.",
+                            ex,
+                            cancellationToken);
                     }
                     catch (OperationCanceledException ex)
                     {
@@ -237,6 +258,9 @@ namespace CoreAI.Infrastructure.Llm
 
             if (primaryFailed)
             {
+                // WHY: a primary that swallowed the caller's cancellation and ended its stream empty looks
+                // exactly like a failed primary; the caller's token is what tells the two apart.
+                cancellationToken.ThrowIfCancellationRequested();
                 FallbackCount++;
                 await foreach (LlmStreamChunk chunk in _secondary.CompleteStreamingAsync(request, cancellationToken))
                 {

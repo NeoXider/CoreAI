@@ -184,6 +184,9 @@ namespace CoreAI.Infrastructure.Llm
                    (retryableException != null ||
                     (!HasExecutedToolCalls(result) && IsRetryableFailureResult(result, out retryAfterSeconds))))
             {
+                // WHY: a retry is never the answer to a caller that has stopped listening, and the delay
+                // helper is host-provided - its honouring of the token is not something to rely on here.
+                cancellationToken.ThrowIfCancellationRequested();
                 if (retriesUsed >= _maxHttpRetryAttempts)
                 {
                     sw.Stop();

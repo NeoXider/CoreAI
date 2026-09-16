@@ -44,10 +44,16 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Returns recent chat history for a role.
+        /// <para>
+        /// Contract: with <paramref name="maxMessages"/> &gt; 0 the result is the LAST <c>maxMessages</c> messages
+        /// (the newest ones), in chronological order - oldest first, newest last. Never the first N. The
+        /// orchestrator reads <c>GetChatHistory(roleId, 1)</c> before recording a user turn to recognise a resend
+        /// of an unanswered message, so a store that returns the oldest message here stores resends twice.
+        /// </para>
         /// </summary>
         /// <param name="roleId">Agent role id that owns the history.</param>
-        /// <param name="maxMessages">Maximum messages to return; <c>0</c> means store default/all.</param>
-        /// <returns>Chat messages in chronological order as provided by the store.</returns>
+        /// <param name="maxMessages">Maximum messages to return, counted from the newest; <c>0</c> means store default/all.</param>
+        /// <returns>Chat messages in chronological order (oldest first).</returns>
         ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0);
     }
 

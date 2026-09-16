@@ -57,8 +57,8 @@ namespace CoreAI.Chat
     /// <remarks>
     /// Override <see cref="OnMessageSending"/>, <see cref="OnResponseReceived"/>,
     /// <see cref="CreateMessageBubble"/>, <see cref="FormatResponseText"/>,
-    /// <see cref="FormatToolExecutedForChat"/>, or <see cref="ResolveTimeoutMessage"/>
-    /// to customize behaviour without replacing the whole panel.
+    /// <see cref="FormatToolExecutedForChat"/>, <see cref="ResolveTimeoutMessage"/>, or
+    /// <see cref="ResolveCancelledMessage"/> to customize behaviour without replacing the whole panel.
     /// </remarks>
     public class CoreAiChatPanel : MonoBehaviour
     {
@@ -2545,19 +2545,22 @@ namespace CoreAI.Chat
             CancellationToken cancellationToken = default)
         {
             CoreAiChatExternalSubmitResult outcome = new();
+            CancellationToken deadlineToken = options?.DeadlineCancellationToken ?? CancellationToken.None;
             try
             {
-                if (cancellationToken.IsCancellationRequested)
+                if (RejectInterruptedBeforeAdmission(outcome, cancellationToken, deadlineToken,
+                        "External submit was cancelled."))
                 {
-                    outcome.Rejection = CoreAiChatExternalSubmitRejection.Cancelled;
-                    SetExternalFailure(outcome, LlmErrorCode.Cancelled, "External submit was cancelled.");
                     return outcome;
                 }
+
                 await SubmitExternalCoreAsync(messageText, options, cancellationToken, outcome);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException error)
             {
-                SetExternalFailure(outcome, LlmErrorCode.Cancelled, "External submit was cancelled.");
+                LlmErrorCode interruption = LlmCancellation.Classify(error, cancellationToken, deadlineToken);
+                SetExternalFailure(outcome, interruption,
+                    interruption == LlmErrorCode.Timeout ? error.Message : "External submit was cancelled.");
             }
             catch (Exception error)
             {
@@ -2613,10 +2616,9 @@ namespace CoreAI.Chat
 
             if (outcome != null)
             {
-                if (cancellationToken.IsCancellationRequested)
+                if (RejectInterruptedBeforeAdmission(outcome, cancellationToken, options.DeadlineCancellationToken,
+                        "External submit was cancelled before admission."))
                 {
-                    outcome.Rejection = CoreAiChatExternalSubmitRejection.Cancelled;
-                    SetExternalFailure(outcome, LlmErrorCode.Cancelled, "External submit was cancelled before admission.");
                     return null;
                 }
                 if (!CanStartAgentTurn() || IsActionInProgress())
@@ -2640,7 +2642,31 @@ namespace CoreAI.Chat
             using CancellationTokenSource linked =
                 CancellationTokenSource.CreateLinkedTokenSource(GetOrCreateCancellationTokenSource().Token,
                     cancellationToken);
-            return await RunAgentTurnAsync(text, options.SimulatedAssistantReply, linked.Token, outcome);
+            return await RunAgentTurnAsync(text, options.SimulatedAssistantReply, linked.Token, outcome,
+                options.DeadlineCancellationToken);
+        }
+
+        /// <summary>
+        /// Rejects an external submit whose caller token or host deadline already fired, with the matching code:
+        /// <see cref="LlmErrorCode.Cancelled"/> for the caller, <see cref="LlmErrorCode.Timeout"/> for the deadline.
+        /// </summary>
+        private static bool RejectInterruptedBeforeAdmission(
+            CoreAiChatExternalSubmitResult outcome,
+            CancellationToken callerToken,
+            CancellationToken deadlineToken,
+            string cancelledMessage)
+        {
+            if (outcome == null ||
+                (!callerToken.IsCancellationRequested && !deadlineToken.IsCancellationRequested))
+            {
+                return false;
+            }
+
+            outcome.Rejection = CoreAiChatExternalSubmitRejection.Cancelled;
+            LlmErrorCode code = LlmCancellation.ClassifyCode(LlmErrorCode.Cancelled, callerToken, deadlineToken);
+            SetExternalFailure(outcome, code,
+                code == LlmErrorCode.Timeout ? "The host deadline elapsed before admission." : cancelledMessage);
+            return true;
         }
 
         private static void SetExternalFailure(CoreAiChatExternalSubmitResult outcome, LlmErrorCode code,
@@ -2718,7 +2744,8 @@ namespace CoreAI.Chat
             string userTextForModel,
             string simulatedAssistantReply,
             CancellationToken cancellationToken,
-            CoreAiChatExternalSubmitResult outcome = null)
+            CoreAiChatExternalSubmitResult outcome = null,
+            CancellationToken deadlineToken = default)
         {
             if (!CanStartAgentTurn())
             {
@@ -2733,10 +2760,9 @@ namespace CoreAI.Chat
                 outcome.Rejection = CoreAiChatExternalSubmitRejection.Busy;
                 return null;
             }
-            if (outcome != null && cancellationToken.IsCancellationRequested)
+            if (RejectInterruptedBeforeAdmission(outcome, cancellationToken, deadlineToken,
+                    "External submit was cancelled before admission."))
             {
-                outcome.Rejection = CoreAiChatExternalSubmitRejection.Cancelled;
-                SetExternalFailure(outcome, LlmErrorCode.Cancelled, "External submit was cancelled before admission.");
                 return null;
             }
 
@@ -2796,6 +2822,12 @@ namespace CoreAI.Chat
                 CancellationTokenSource.CreateLinkedTokenSource(GetOrCreateCancellationTokenSource().Token,
                     cancellationToken);
             _activeRequestCts = requestCts;
+            // WHY a separate source: the host deadline stops the turn like any cancellation, but it must not be
+            // part of requestCts - that token is the "somebody asked to stop" side of the classification below.
+            CancellationTokenSource deadlineLinkedCts = deadlineToken.CanBeCanceled
+                ? CancellationTokenSource.CreateLinkedTokenSource(requestCts.Token, deadlineToken)
+                : null;
+            CancellationToken turnToken = deadlineLinkedCts?.Token ?? requestCts.Token;
 
             try
             {
@@ -2828,15 +2860,24 @@ namespace CoreAI.Chat
 
                 if (useStreaming)
                 {
-                    return await SendStreamingAsync(request, turnGeneration, requestCts.Token, outcome);
+                    return await SendStreamingAsync(request, turnGeneration, turnToken, outcome,
+                        requestCts.Token, deadlineToken);
                 }
 
-                return await SendNonStreamingAsync(request, turnGeneration, requestCts.Token, outcome);
+                return await SendNonStreamingAsync(request, turnGeneration, turnToken, outcome);
             }
             catch (OperationCanceledException error)
             {
-                SetExternalFailure(outcome, error is LlmOperationTimeoutException ? LlmErrorCode.Timeout : LlmErrorCode.Cancelled,
-                    error.Message);
+                // WHY classified against the request token, not by exception type alone: that token links the
+                // panel's own stop source and the external caller's token, so "it was cancelled" means someone
+                // asked for it. Only a library timeout at a live token, or the host deadline
+                // (CoreAiChatExternalSubmitOptions.DeadlineCancellationToken) firing while that token is alive, is
+                // a timeout; every other cancellation (the caller's token, CoreAi.StopAgent from elsewhere) is not
+                // "the service is not responding" and must never produce that bubble - a host counting those
+                // bubbles read cancelled turns as outages.
+                LlmErrorCode interruption = LlmCancellation.Classify(error, requestCts.Token, deadlineToken);
+                SetExternalFailure(outcome, interruption, error.Message);
+                LogTurnInterruption(interruption, error.Message);
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 if (IsStaleTurn(turnGeneration, _currentTurnGeneration))
                 {
@@ -2846,13 +2887,9 @@ namespace CoreAI.Chat
                 FinishStreaming();
                 HideTypingIndicator();
                 ResetLongRequestHint();
-                if (!_stopRequestedByUser && outcome == null)
+                if (outcome == null)
                 {
-                    string bubble = ResolveTimeoutMessage(false);
-                    if (!string.IsNullOrEmpty(bubble))
-                    {
-                        AddMessage(bubble, false);
-                    }
+                    PresentTurnInterruption(interruption);
                 }
 
                 return null;
@@ -2906,6 +2943,7 @@ namespace CoreAI.Chat
                     _activeRequestCts = null;
                 }
 
+                deadlineLinkedCts?.Dispose();
                 requestCts.Dispose();
                 if (!IsStaleTurn(turnGeneration, _currentTurnGeneration))
                 {
@@ -2980,7 +3018,9 @@ namespace CoreAI.Chat
             AiTaskRequest request,
             int turnGeneration,
             CancellationToken ct,
-            CoreAiChatExternalSubmitResult outcome = null)
+            CoreAiChatExternalSubmitResult outcome,
+            CancellationToken callerToken,
+            CancellationToken deadlineToken)
         {
             ShowTypingIndicator();
             ResetThinkFilter();
@@ -3118,10 +3158,11 @@ namespace CoreAI.Chat
 
                     if (outcome != null) CaptureExternalChunk(outcome, chunk);
                     terminalSeen |= chunk.IsDone;
-                    if (!string.IsNullOrEmpty(chunk.Error) || (outcome != null && chunk.ErrorCode != LlmErrorCode.None))
+                    LlmErrorCode interruption = ClassifyStreamInterruption(chunk, callerToken, deadlineToken);
+                    if (!string.IsNullOrEmpty(chunk.Error) || interruption != LlmErrorCode.None ||
+                        (outcome != null && chunk.ErrorCode != LlmErrorCode.None))
                     {
-                        if (_stopRequestedByUser &&
-                            string.Equals(chunk.Error, "cancelled", StringComparison.OrdinalIgnoreCase))
+                        if (_stopRequestedByUser && interruption == LlmErrorCode.Cancelled)
                         {
                             return null;
                         }
@@ -3133,6 +3174,21 @@ namespace CoreAI.Chat
                                 AppendVisibleText(FilterStreamChunk(chunk.Text), chunk.StartsNewMessage);
                             AppendVisibleText(_thinkFilter.Flush(), false);
                         }
+
+                        if (interruption != LlmErrorCode.None)
+                        {
+                            // WHY: a terminal Timeout/Cancelled chunk is the same event as the exception the
+                            // turn catches below, delivered as data. It gets the same presentation: a timeout
+                            // bubble for a timeout, nothing for a cancellation - not the generic stream error.
+                            string detail = string.IsNullOrEmpty(chunk.Error)
+                                ? DescribeInterruption(interruption)
+                                : chunk.Error;
+                            SetExternalFailure(outcome, interruption, detail);
+                            LogTurnInterruption(interruption, detail);
+                            if (outcome == null) PresentTurnInterruption(interruption);
+                            return null;
+                        }
+
                         Logger.LogError(GameLogFeature.Core, $"[CoreAiChatPanel] Stream error: {chunk.Error}");
                         SetExternalFailure(outcome, chunk.ErrorCode == LlmErrorCode.None ? LlmErrorCode.ProviderError : chunk.ErrorCode,
                             chunk.Error ?? "Streaming completion failed.");
@@ -3383,11 +3439,17 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Builds assistant bubble text when <see cref="RunAgentTurnAsync"/> ends with
-        /// <see cref="OperationCanceledException"/> (explicit user stop vs timeout / cancel).
+        /// Builds assistant bubble text when a turn ends with a LIBRARY TIMEOUT: an
+        /// <see cref="LlmOperationTimeoutException"/> or a terminal <see cref="LlmErrorCode.Timeout"/> chunk
+        /// while the turn's token was still alive, or the host's
+        /// <see cref="CoreAiChatExternalSubmitOptions.DeadlineCancellationToken"/> firing while the caller's token
+        /// was alive (see <see cref="LlmCancellation"/>).
+        /// A cancelled turn never reaches this hook - it goes to <see cref="ResolveCancelledMessage"/>.
         /// Return <c>null</c> or empty to skip <see cref="AddMessage"/> when the host already posted diagnostics.
         /// </summary>
-        /// <param name="stopRequestedByUser">True when the user pressed stop.</param>
+        /// <param name="stopRequestedByUser">
+        /// Kept for compatibility; the panel passes <c>false</c>, because a user stop is a cancellation.
+        /// </param>
         protected virtual string ResolveTimeoutMessage(bool stopRequestedByUser)
         {
             if (stopRequestedByUser)
@@ -3396,6 +3458,77 @@ namespace CoreAI.Chat
             }
 
             return Options.TimeoutMessage ?? "Timeout.";
+        }
+
+        /// <summary>
+        /// Builds assistant bubble text when a turn is CANCELLED rather than timed out: the caller's token
+        /// (<see cref="SubmitMessageFromExternalAsync"/>), the panel's own stop source, or
+        /// <c>CoreAi.StopAgent</c> from elsewhere stopped it. Default <c>null</c>: a cancellation was asked for,
+        /// so the transcript says nothing. The user pressing Stop never reaches this hook either - that turn
+        /// is already superseded. Override to show a note or to record the reason.
+        /// </summary>
+        protected virtual string ResolveCancelledMessage()
+        {
+            return null;
+        }
+
+        /// <summary>
+        /// Presents a timed-out or cancelled UI turn: <see cref="ResolveTimeoutMessage"/> for
+        /// <see cref="LlmErrorCode.Timeout"/>, <see cref="ResolveCancelledMessage"/> for everything else.
+        /// </summary>
+        private void PresentTurnInterruption(LlmErrorCode interruption)
+        {
+            if (_stopRequestedByUser)
+            {
+                return;
+            }
+
+            string bubble = interruption == LlmErrorCode.Timeout
+                ? ResolveTimeoutMessage(false)
+                : ResolveCancelledMessage();
+            if (!string.IsNullOrEmpty(bubble))
+            {
+                AddMessage(bubble, false);
+            }
+        }
+
+        private static void LogTurnInterruption(LlmErrorCode interruption, string detail)
+        {
+            string line = $"[CoreAiChatPanel] Turn interrupted (reason={DescribeInterruption(interruption)}): {detail}";
+            if (interruption == LlmErrorCode.Timeout)
+            {
+                Logger.LogWarning(GameLogFeature.Core, line);
+            }
+            else
+            {
+                Logger.LogInfo(GameLogFeature.Core, line);
+            }
+        }
+
+        private static string DescribeInterruption(LlmErrorCode interruption)
+        {
+            return interruption == LlmErrorCode.Timeout ? "timeout" : "cancelled";
+        }
+
+        /// <summary>
+        /// <see cref="LlmErrorCode.Timeout"/> or <see cref="LlmErrorCode.Cancelled"/> when a stream chunk ends
+        /// the turn as an interruption rather than a provider failure; <see cref="LlmErrorCode.None"/> otherwise.
+        /// A legacy producer that only writes <c>Error = "cancelled"</c> counts as a cancellation.
+        /// </summary>
+        private static LlmErrorCode ClassifyStreamInterruption(
+            LlmStreamChunk chunk,
+            CancellationToken callerToken,
+            CancellationToken deadlineToken)
+        {
+            LlmErrorCode code = chunk.ErrorCode;
+            if (code == LlmErrorCode.None &&
+                string.Equals(chunk.Error, "cancelled", StringComparison.OrdinalIgnoreCase))
+            {
+                code = LlmErrorCode.Cancelled;
+            }
+
+            code = LlmCancellation.ClassifyCode(code, callerToken, deadlineToken);
+            return code == LlmErrorCode.Timeout || code == LlmErrorCode.Cancelled ? code : LlmErrorCode.None;
         }
 
         /// <summary>

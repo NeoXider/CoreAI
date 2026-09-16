@@ -10,6 +10,27 @@
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
+## 7.44.0 timeout-vs-cancel wave: EditMode gate still owed (2026-09-17)
+
+The fix (`LlmCancellation`, the panel's `ResolveCancelledMessage`, resend dedupe in `AiOrchestrator`,
+caller-token guards in fallback/retry) was verified only by `dotnet build` of `CoreAI.Core`,
+`CoreAI.Source`, `CoreAI.Core.Tests` and `CoreAI.Tests`, plus a console harness that ran the orchestrator
+history, streaming-timeout, `EndsTurn` and classifier scenarios against the built `CoreAI.Core.dll` (all
+green; a mutation that disabled the dedupe and the streaming classification turned five of them red).
+The Unity-side fixtures never ran.
+
+- [ ] **Verification gate (next editor session):** run `CoreAiChatPanelResolveTimeoutMessageEditModeTests`,
+      `AiOrchestratorHistoryEditModeTests`, `MeaiStreamingToolCallEditModeTests`,
+      `ResilienceFeaturesEditModeTests`, `LoggingLlmClientDecoratorEditModeTests`,
+      `RoutingLlmClientEditModeTests` (assembly `CoreAI.Tests`, namespace `CoreAI.Tests.EditMode`) and the core
+      `LlmErrorPresentationEditModeTests` (assembly `CoreAI.Core.Tests`, namespace
+      `CoreAI.Core.Tests.EditMode`), then the full EditMode suite. The `MeaiStreamingToolCall` fixture compiles
+      only with `COREAI_LLM`.
+- [ ] **Open question, not a defect:** the resend rule compares the history tail byte-for-byte. A host that
+      stamps its re-sent payload (timestamp, attempt counter) still stores two copies. If that shape shows
+      up, the fix belongs in the host (a stable payload), or in an explicit request-level idempotency key -
+      not in fuzzy matching here.
+
 ## Idle-timeout watchdog: our allocation-free variant was dropped, on purpose (2026-09-10)
 
 The hot-path wave replaced `CoreAiChatService.IdleTimeoutDeadline` with a single watchdog task per

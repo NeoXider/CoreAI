@@ -304,6 +304,124 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_TimeoutExceptionAfterCallerCancelled_PublishesCancelled()
+        {
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            ThrowingLlm inner = new(new LlmOperationTimeoutException());
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(new FakeRegistry(inner), null, null, completed, null);
+
+            try
+            {
+                await routing.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "X", UserPayload = "y" },
+                    caller.Token);
+                Assert.Fail("expected throw");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            Assert.AreEqual(1, completed.Messages.Count);
+            Assert.AreEqual(LlmErrorCode.Cancelled, completed.Messages[0].ErrorCode,
+                "The caller stopped the request; a timer that raced the stop does not make it a timeout.");
+        }
+
+        [Test]
+        public async Task CompleteAsync_TimeoutResultAfterCallerCancelled_ReportsCancelled()
+        {
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            FixedResultLlm inner = new(new LlmCompletionResult
+            {
+                Ok = false,
+                Error = "timed out",
+                ErrorCode = LlmErrorCode.Timeout
+            });
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(new FakeRegistry(inner), null, null, completed, null);
+
+            LlmCompletionResult result = await routing.CompleteAsync(
+                new LlmCompletionRequest { AgentRoleId = "X", UserPayload = "y" }, caller.Token);
+
+            Assert.AreEqual(LlmErrorCode.Cancelled, result.ErrorCode);
+            Assert.AreEqual(LlmErrorCode.Cancelled, completed.Messages[0].ErrorCode);
+        }
+
+        [Test]
+        public async Task CompleteAsync_TimeoutResultWithLiveCaller_StaysTimeout()
+        {
+            FixedResultLlm inner = new(new LlmCompletionResult
+            {
+                Ok = false,
+                Error = "timed out",
+                ErrorCode = LlmErrorCode.Timeout
+            });
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(new FakeRegistry(inner), null, null, completed, null);
+
+            LlmCompletionResult result = await routing.CompleteAsync(
+                new LlmCompletionRequest { AgentRoleId = "X", UserPayload = "y" });
+
+            Assert.AreEqual(LlmErrorCode.Timeout, result.ErrorCode);
+            Assert.AreEqual(LlmErrorCode.Timeout, completed.Messages[0].ErrorCode);
+        }
+
+        [Test]
+        public async Task Streaming_TimeoutChunkAfterCallerCancelled_IsReportedAsCancelled()
+        {
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            FixedResultLlm inner = new(null, new LlmStreamChunk
+            {
+                IsDone = true,
+                Error = "LLM request timed out.",
+                ErrorCode = LlmErrorCode.Timeout
+            });
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(new FakeRegistry(inner), null, null, completed, null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in routing.CompleteStreamingAsync(
+                               new LlmCompletionRequest { AgentRoleId = "X", UserPayload = "y" }, caller.Token))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(1, chunks.Count);
+            Assert.AreEqual(LlmErrorCode.Cancelled, chunks[0].ErrorCode);
+            Assert.AreEqual(LlmErrorCode.Cancelled, completed.Messages[0].ErrorCode);
+        }
+
+        /// <summary>Returns one fixed result, and streams one fixed chunk, ignoring the token on purpose.</summary>
+        private sealed class FixedResultLlm : ILlmClient
+        {
+            private readonly LlmCompletionResult _result;
+            private readonly LlmStreamChunk _chunk;
+
+            public FixedResultLlm(LlmCompletionResult result, LlmStreamChunk chunk = null)
+            {
+                _result = result;
+                _chunk = chunk;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(_result);
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                await Task.Yield();
+                yield return _chunk;
+            }
+        }
+
+        [Test]
         public async Task Streaming_RoutesToInnerClient_ForRole()
         {
             // Invariant for issue 2: with no streaming override, the interface's

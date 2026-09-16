@@ -362,6 +362,49 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task FailedCompletion_CallerCancelled_NeverRetries_EvenWhenTheHostDelayIgnoresTheToken()
+        {
+            RateLimitThenOkMock inner = new();
+            TokenIgnoringDelayMarshaler marshaler = new();
+            LoggingLlmClientDecorator sut = new(
+                inner, new SpyLogger(), 0f, 3, true, true, marshaler);
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+
+            try
+            {
+                await sut.CompleteAsync(new LlmCompletionRequest
+                {
+                    AgentRoleId = BuiltInAgentRoleIds.Creator,
+                    UserPayload = "x"
+                }, caller.Token);
+                Assert.Fail("expected OperationCanceledException");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            Assert.AreEqual(1, inner.CompleteCallCount, "A cancelled caller must never get a retry.");
+            Assert.AreEqual(0, marshaler.DelayCallCount);
+        }
+
+        private sealed class TokenIgnoringDelayMarshaler : ILlmAsyncMarshaler
+        {
+            public int DelayCallCount;
+
+            public Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken)
+            {
+                return factory();
+            }
+
+            public Task DelayAsync(int milliseconds, CancellationToken cancellationToken)
+            {
+                DelayCallCount++;
+                return Task.CompletedTask;
+            }
+        }
+
+        [Test]
         [Timeout(20_000)]
         public async Task FailedCompletion_BackendUnavailable_RetriesAndSucceeds()
         {

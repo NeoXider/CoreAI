@@ -779,6 +779,109 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0, fallback.FallbackCount);
         }
 
+        [Test]
+        public async Task Fallback_RetryableResultAfterCallerCancelled_DoesNotStartSecondary()
+        {
+            using CancellationTokenSource cts = new();
+            cts.Cancel();
+
+            // The primary ignores the token and reports its failure as a result - the shape a transport that
+            // swallows cancellation produces.
+            ErrorResultLlmClient primary = new(LlmErrorCode.Timeout);
+            CountingLlmClient secondary = new("secondary");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
+
+            LlmCompletionResult result =
+                await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" }, cts.Token);
+
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(0, secondary.CallCount, "Nobody is waiting for the secondary's answer.");
+            Assert.AreEqual(0, fallback.FallbackCount);
+        }
+
+        [Test]
+        public async Task Fallback_PrimaryStreamSwallowsCallerCancellation_DoesNotStartSecondary()
+        {
+            using CancellationTokenSource cts = new();
+            cts.Cancel();
+
+            EmptyStreamingLlmClient primary = new();
+            StreamingCountingLlmClient secondary = new("secondary-stream");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
+
+            try
+            {
+                await foreach (LlmStreamChunk _ in fallback.CompleteStreamingAsync(
+                                   new LlmCompletionRequest { AgentRoleId = "test" }, cts.Token))
+                {
+                }
+
+                Assert.Fail("expected OperationCanceledException");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            Assert.AreEqual(0, secondary.StreamingCallCount,
+                "An empty primary stream after the caller cancelled is the cancellation, not a failed primary.");
+            Assert.AreEqual(0, fallback.FallbackCount);
+        }
+
+        [Test]
+        public async Task Fallback_PrimaryThrowsNonCancellationAfterCallerCancelled_SurfacesCancellation()
+        {
+            using CancellationTokenSource cts = new();
+            cts.Cancel();
+
+            // Both primaries throw a provider fault regardless of the token - the fallout a transport reports
+            // while the caller is cancelling.
+            CountingLlmClient secondary = new("secondary");
+            FallbackLlmClientDecorator fallback = new(new FaultOnCompleteLlmClient(), secondary);
+
+            OperationCanceledException caught = null;
+            try
+            {
+                await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" }, cts.Token);
+            }
+            catch (OperationCanceledException ex)
+            {
+                caught = ex;
+            }
+
+            Assert.IsNotNull(caught, "A failure after the caller cancelled must surface as the cancellation.");
+            Assert.IsInstanceOf<LlmClientException>(caught.InnerException, "The primary's fault stays attached.");
+            Assert.AreEqual(0, secondary.CallCount);
+            Assert.AreEqual(0, fallback.FallbackCount);
+
+            StreamingCountingLlmClient streamingSecondary = new("secondary-stream");
+            FallbackLlmClientDecorator streamingFallback = new(new ThrowingStreamingLlmClient(), streamingSecondary);
+            caught = null;
+            try
+            {
+                await foreach (LlmStreamChunk _ in streamingFallback.CompleteStreamingAsync(
+                                   new LlmCompletionRequest { AgentRoleId = "test" }, cts.Token))
+                {
+                }
+            }
+            catch (OperationCanceledException ex)
+            {
+                caught = ex;
+            }
+
+            Assert.IsNotNull(caught, "The streaming path follows the same rule.");
+            Assert.AreEqual(0, streamingSecondary.StreamingCallCount);
+            Assert.AreEqual(0, streamingFallback.FallbackCount);
+        }
+
+        private sealed class FaultOnCompleteLlmClient : ILlmClient
+        {
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            {
+                return Task.FromException<LlmCompletionResult>(
+                    new LlmClientException("socket disposed", LlmErrorCode.ProviderError));
+            }
+        }
+
         // Helpers for fallback tests
 
         private sealed class CountingLlmClient : ILlmClient

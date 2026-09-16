@@ -225,8 +225,12 @@ Rules of thumb:
 
 - **Only a SUCCESSFUL call ends the turn.** A failed one keeps its ordinary error roundtrip, because the model
   is the only thing that can recover from it — cutting the turn there leaves the student with nothing.
-- **Prose said BEFORE the call survives.** Only the next roundtrip is cut. A turn with no visible prose at all
-  is still fine: the orchestrator synthesizes the tool-only completion line from the executed-call traces.
+- **Prose said BEFORE the call survives — once.** Only the next roundtrip is cut. Prose streamed in the same
+  round as the call reaches the reader exactly once (live, never again as a buffered copy), and the terminal
+  chunk that closes the turn carries no text of its own. A turn with no visible prose at all is still fine: the
+  orchestrator synthesizes the tool-only completion line from the executed-call traces.
+- **The result is recorded, not replayed.** The call's result stays on its `LlmToolCallTrace.Detail`, so the
+  turn's tool-result memory block and diagnostics see it; it is just never sent back to the model.
 - **It changes nothing for other tools.** The default is `false`, and the loops read one flag
   (`ToolExecutionPolicy.TurnEndingToolSucceeded`) that only a declaring tool can raise.
 - Resolved **by name** from the role's tool list, exactly like `ToolTimeoutMsOverride`: a tool invoked inside

@@ -4,11 +4,95 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.44.0] - 2026-09-17
+
+### Added
+
+- **`CoreAiChatPanel.ResolveCancelledMessage()`** - the bubble text for a turn that was cancelled rather
+  than timed out. Default `null`: a cancellation was asked for, so the transcript says nothing. The base
+  class has already released the busy flags, the typing indicator and the streaming bubble when a hook
+  runs; overrides need not.
+- **`CoreAiChatExternalSubmitOptions.DeadlineCancellationToken`** - the host's own deadline for an external
+  turn, kept apart from the caller's token. It stops the turn like any cancellation, but is reported as
+  `Timeout` (the timeout hook, `Completion.ErrorCode = Timeout`) while the caller's token is alive; a turn
+  whose deadline already elapsed is rejected before admission with `Timeout`.
+
 ### Fixed
 
+- **A cancelled chat turn was presented as a timeout.** `CoreAiChatPanel` sent every
+  `OperationCanceledException` to `ResolveTimeoutMessage(false)`, so a turn whose caller cancelled the
+  token passed to `SubmitMessageFromExternalAsync` (or that `CoreAi.StopAgent` stopped from elsewhere)
+  showed "not responding" and hosts logged `reason=timeout` for it (observed in production). The panel now
+  classifies through `LlmCancellation` against the turn's token: only a library timeout reaches
+  `ResolveTimeoutMessage`, every cancellation reaches `ResolveCancelledMessage`, and the log line is
+  `[CoreAiChatPanel] Turn interrupted (reason=timeout|cancelled)`. `SubmitMessageFromExternalResultAsync`
+  reports the same split in `Completion.ErrorCode`, including for an exception that escapes before
+  admission.
+- **A terminal `Timeout` / `Cancelled` stream chunk was shown as a generic stream error.** Such a chunk is
+  now the same interruption as the exception: a timeout bubble for `Timeout`, nothing for `Cancelled`
+  (a legacy `Error = "cancelled"` chunk counts as a cancellation). `CoreAiChatService` turns a `Timeout`
+  chunk that arrives after the caller cancelled into a cancellation.
+- **`RoutingLlmClient` published `Timeout` for a request the caller had already cancelled.** Its timeout
+  branches now require a live caller token, and a `Timeout` result or stream chunk that arrives after the
+  caller cancelled is rewritten to `Cancelled` (`LlmCancellation.ClassifyCode`) before it is returned and
+  published.
+- **`FallbackLlmClientDecorator` could start the secondary backend after the caller cancelled** - when the
+  primary reported its failure as a result, threw a non-cancellation exception, or swallowed the
+  cancellation and ended its stream empty. Every fallback branch now checks the caller's token first, and a
+  non-cancellation exception thrown after the caller cancelled surfaces as `OperationCanceledException`
+  (the original fault as `InnerException`) on both paths.
 - **The locked-file summary test failed on the Linux portable leg.** It assumes an exclusive
   `FileShare.None` lock blocks the commit, which holds on Windows only; on Unix the lock is advisory and
   the commit is a `rename(2)` that ignores it. The test now runs on Windows and is skipped elsewhere.
+
+### Tests
+
+- `CoreAiChatPanelResolveTimeoutMessageEditModeTests` drives real panel turns: a caller-cancelled turn
+  (streaming and buffered) reaches only the cancelled hook and leaves no busy state behind, a library
+  timeout (exception or terminal chunk) and a host `DeadlineCancellationToken` reach only the timeout hook,
+  a provider error chunk still the stream-error hook, and the typed result API reports `Cancelled` vs
+  `Timeout` (caller stop wins over a deadline; an elapsed deadline is rejected as `Timeout`).
+- `AiOrchestratorHistoryEditModeTests`: a resend after a cancelled turn (buffered and streamed) is stored
+  and sent once; an identical message after an answer and a different message after a cancel are both kept;
+  an unreadable history tail still records the turn; a timeout thrown mid-stream ends as `Timeout`; a turn
+  closed by an `EndsTurn` tool shows and stores its prose once and records the tool result; a resend after
+  a provider error is stored once; a `tool` / `system` message after the user turn (with a one-message cap)
+  and a pruned tool tail are not resends; the same text with attachments is never collapsed.
+- `MeaiStreamingToolCallEditModeTests`: `EndsTurn` with prose streamed in pieces in the same round as the
+  native call - one stream, prose exactly once, a text-less terminal chunk, the result on the trace.
+- `ResilienceFeaturesEditModeTests` / `LoggingLlmClientDecoratorEditModeTests`: no fallback and no retry
+  once the caller has cancelled, even when the primary or the host delay ignores the token; a primary fault
+  after the cancel surfaces as a cancellation.
+- `RoutingLlmClientEditModeTests`: a timeout exception, result or chunk after the caller cancelled is
+  published as `Cancelled`; with a live caller a `Timeout` result stays `Timeout`.
+- **Changed expectation - summary-preflight retries.** The shared
+  `SummaryPreflightScenario.AssertRetryAfterUndispatchedTurnPublished` (used by the ordinary, streaming and
+  queued preflight fixtures) pinned "a re-submitted request records the learner's message twice" as the
+  price of never dropping it. That duplicate is exactly what the 7.44.0 resend rule removes: the
+  undispatched turn's record is the unanswered tail, so the retry appends only the answer, and its prompt
+  no longer carries the question as history. The eviction outcome is unchanged - the bounded window still
+  ends as [question, answer], with one eviction instead of two - so nothing in the preflight/eviction
+  contract depended on the second copy. The helper now asserts one user message, the final window, and the
+  absence of the copy in the retry's prompt.
+- `LlmErrorPresentationEditModeTests` (core): the `LlmCancellation` rule table.
+
+### Upgrade notes
+
+- **A host deadline armed on the caller's token is now a cancellation.** `CancelAfter` on the token passed
+  to `SubmitMessageFromExternalAsync` / `SubmitMessageFromExternalResultAsync` cannot be told apart from a
+  stop, so such a turn reaches `ResolveCancelledMessage` and reports `Cancelled` - an "unavailable" notice
+  shown from `ResolveTimeoutMessage` disappears. Pass the deadline as
+  `CoreAiChatExternalSubmitOptions.DeadlineCancellationToken` (and keep the caller's token for real stops),
+  or, where the host raises the timeout itself, throw `LlmOperationTimeoutException`.
+- An override of `ResolveTimeoutMessage` no longer sees cancelled turns. Side effects kept there for them
+  (logging, counters, notices, analytics) move to `ResolveCancelledMessage`, which must not show an outage
+  notice. The panel now always passes `stopRequestedByUser = false`: a user stop is a superseded turn and
+  reaches neither hook.
+- A terminal `Timeout` chunk now goes to `ResolveTimeoutMessage` instead of
+  `ErrorMessagePrefix + ResolveStreamErrorMessage(...)`; a host that tags its notices by hook sees the
+  category change from `stream_error` to `timeout`.
+- `FallbackLlmClientDecorator` now throws `OperationCanceledException` where a primary fault after the
+  caller's cancel used to propagate as that fault.
 
 ## [7.43.0] - 2026-09-16
 

@@ -122,6 +122,171 @@ namespace CoreAI.Ai
         }
     }
 
+    /// <summary>
+    /// The one rule every layer uses to tell a library timeout from a cancellation.
+    /// <list type="number">
+    /// <item>The caller's own token was cancelled: <see cref="LlmErrorCode.Cancelled"/>, whatever the
+    /// exception says. The caller asked to stop; a timer that raced it does not change that.</item>
+    /// <item>An <see cref="LlmOperationTimeoutException"/> (also inside an <see cref="AggregateException"/>):
+    /// <see cref="LlmErrorCode.Timeout"/>. The library raises that type only when its own deadline fired
+    /// while the caller's token was alive.</item>
+    /// <item>Any other <see cref="OperationCanceledException"/>: <see cref="LlmErrorCode.Cancelled"/> -
+    /// someone other than the caller stopped the work (<c>CoreAi.StopAgent</c>, a cancellation scope,
+    /// a disposed orchestrator). It is not a timeout, and it must not be presented as one.</item>
+    /// </list>
+    /// </summary>
+    public static class LlmCancellation
+    {
+        /// <summary>
+        /// Classifies <paramref name="exception"/> against the caller's token (see the class summary). Returns
+        /// <see cref="LlmErrorCode.None"/> when the exception is neither a timeout nor a cancellation.
+        /// </summary>
+        public static LlmErrorCode Classify(Exception exception, CancellationToken callerToken)
+        {
+            if (exception == null)
+            {
+                return callerToken.IsCancellationRequested ? LlmErrorCode.Cancelled : LlmErrorCode.None;
+            }
+
+            // WHY the InnerException chain is walked only for a cancelled caller: then any error that grew out of
+            // the cancellation IS the cancellation. While the token is alive, a transport error with a nested
+            // TaskCanceledException is a failure, and reading it as a stop hid real outages.
+            if (callerToken.IsCancellationRequested && IsCancellationLike(exception, followInnerExceptions: true))
+            {
+                return LlmErrorCode.Cancelled;
+            }
+
+            if (FindTimeout(exception) != null)
+            {
+                return LlmErrorCode.Timeout;
+            }
+
+            return IsCancellationLike(exception, followInnerExceptions: false)
+                ? LlmErrorCode.Cancelled
+                : LlmErrorCode.None;
+        }
+
+        /// <summary>
+        /// <see cref="Classify(Exception, CancellationToken)"/> for a host that runs its OWN deadline on a separate
+        /// token: a cancellation observed while <paramref name="deadlineToken"/> had fired and
+        /// <paramref name="callerToken"/> was still alive is that host's timeout, not a stop.
+        /// <para>
+        /// WHY a separate token: a deadline armed on the caller's own token (<c>CancelAfter</c> on the token handed
+        /// to a turn) is indistinguishable from a stop - by the time anyone looks, the token is simply cancelled.
+        /// Keep the deadline apart and pass both, or raise <see cref="LlmOperationTimeoutException"/> yourself.
+        /// </para>
+        /// </summary>
+        public static LlmErrorCode Classify(
+            Exception exception,
+            CancellationToken callerToken,
+            CancellationToken deadlineToken)
+        {
+            return ApplyDeadline(Classify(exception, callerToken), callerToken, deadlineToken);
+        }
+
+        /// <summary>
+        /// Normalizes a terminal chunk or result code: a <see cref="LlmErrorCode.Timeout"/> reported after the
+        /// caller already cancelled is the caller's cancellation, not a timeout. Other codes pass through.
+        /// </summary>
+        public static LlmErrorCode ClassifyCode(LlmErrorCode code, CancellationToken callerToken)
+        {
+            return code == LlmErrorCode.Timeout && callerToken.IsCancellationRequested
+                ? LlmErrorCode.Cancelled
+                : code;
+        }
+
+        /// <summary>
+        /// <see cref="ClassifyCode(LlmErrorCode, CancellationToken)"/> with a separate host deadline, by the same
+        /// rule as <see cref="Classify(Exception, CancellationToken, CancellationToken)"/>.
+        /// </summary>
+        public static LlmErrorCode ClassifyCode(
+            LlmErrorCode code,
+            CancellationToken callerToken,
+            CancellationToken deadlineToken)
+        {
+            return ApplyDeadline(ClassifyCode(code, callerToken), callerToken, deadlineToken);
+        }
+
+        private static LlmErrorCode ApplyDeadline(
+            LlmErrorCode code,
+            CancellationToken callerToken,
+            CancellationToken deadlineToken)
+        {
+            return code == LlmErrorCode.Cancelled &&
+                   deadlineToken.IsCancellationRequested &&
+                   !callerToken.IsCancellationRequested
+                ? LlmErrorCode.Timeout
+                : code;
+        }
+
+        /// <summary>True when <see cref="Classify(Exception, CancellationToken)"/> reports <see cref="LlmErrorCode.Timeout"/>.</summary>
+        public static bool IsTimeout(Exception exception, CancellationToken callerToken)
+        {
+            return Classify(exception, callerToken) == LlmErrorCode.Timeout;
+        }
+
+        /// <summary>
+        /// True when <see cref="Classify(Exception, CancellationToken)"/> reports <see cref="LlmErrorCode.Cancelled"/>: the work was
+        /// stopped on purpose and must be neither retried nor presented as "the service is not responding".
+        /// </summary>
+        public static bool IsCancellation(Exception exception, CancellationToken callerToken)
+        {
+            return Classify(exception, callerToken) == LlmErrorCode.Cancelled;
+        }
+
+        /// <summary>
+        /// The <see cref="LlmOperationTimeoutException"/> carried by <paramref name="exception"/> directly or
+        /// inside an <see cref="AggregateException"/>; <c>null</c> when there is none.
+        /// </summary>
+        public static LlmOperationTimeoutException FindTimeout(Exception exception)
+        {
+            switch (exception)
+            {
+                case LlmOperationTimeoutException typed:
+                    return typed;
+                case AggregateException aggregate:
+                    foreach (Exception inner in aggregate.InnerExceptions)
+                    {
+                        LlmOperationTimeoutException found = FindTimeout(inner);
+                        if (found != null)
+                        {
+                            return found;
+                        }
+                    }
+
+                    return null;
+                default:
+                    return null;
+            }
+        }
+
+        private static bool IsCancellationLike(Exception exception, bool followInnerExceptions)
+        {
+            for (Exception current = exception;
+                 current != null;
+                 current = followInnerExceptions ? current.InnerException : null)
+            {
+                if (current is OperationCanceledException)
+                {
+                    return true;
+                }
+
+                if (current is AggregateException aggregate)
+                {
+                    foreach (Exception inner in aggregate.InnerExceptions)
+                    {
+                        if (IsCancellationLike(inner, followInnerExceptions))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+    }
+
     /// <summary>Input for one <see cref="ILlmClient.CompleteAsync"/> call: role, prompts, tracing.</summary>
     public sealed class LlmCompletionRequest
     {

@@ -397,7 +397,11 @@ namespace CoreAI.Chat
                         }
 
                         LlmStreamChunk chunk = streamEnumerator.Current;
-                        if (chunk?.ErrorCode == LlmErrorCode.Cancelled)
+                        // WHY the Timeout arm: a terminal Timeout that arrives after the caller cancelled is
+                        // the caller's stop (LlmCancellation.ClassifyCode), and must not reach the panel as
+                        // "the service is not responding".
+                        if (chunk != null &&
+                            LlmCancellation.ClassifyCode(chunk.ErrorCode, ct) == LlmErrorCode.Cancelled)
                         {
                             if (deadlineCts != null &&
                                 deadlineCts.IsCancellationRequested &&

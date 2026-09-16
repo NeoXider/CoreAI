@@ -786,6 +786,122 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
+        /// <c>EndsTurn</c> with prose streamed token by token in the SAME round as the native call: the prose
+        /// reaches the reader exactly once (live, not live and then again as a buffered copy), the terminal
+        /// chunk adds no text of its own, and the tool result is recorded on the trace that upstream history
+        /// and the tool-only completion line are built from.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_TurnEndingNativeTool_SameRoundProseOnce_ResultRecorded()
+        {
+            ProseThenNativeCallScripted inner = new("quiz_tool", "Check ", "yourself: ", "what is 2+2?");
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(),
+                supportsNativeToolCalling: true, memoryStore: null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool>
+                               {
+                                   new TurnEndingTextTool("quiz_tool",
+                                       "{\"success\":true,\"status\":\"card_shown_waiting_for_student\"}")
+                               }
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(1, inner.StreamCalls, "A successful turn-ending call must not reopen the stream.");
+            string visible = string.Concat(chunks.Select(c => c.Text));
+            Assert.AreEqual(1, CountOccurrences(visible, "Check yourself: what is 2+2?"),
+                $"The same-round prose must be shown exactly once. Visible: '{visible}'");
+            StringAssert.DoesNotContain("Correct", visible);
+
+            LlmStreamChunk last = chunks.Last();
+            Assert.IsTrue(last.IsDone);
+            Assert.IsTrue(string.IsNullOrEmpty(last.Error), $"Unexpected error: {last.Error}");
+            Assert.IsTrue(string.IsNullOrEmpty(last.Text), "The terminal chunk must not repeat the prose.");
+            LlmToolCallTrace trace = last.ExecutedToolCalls.Single(t => t.Name == "quiz_tool");
+            Assert.IsTrue(trace.Success);
+            StringAssert.Contains("card_shown_waiting_for_student", trace.Detail,
+                "The tool result is recorded even though it is not sent back to the model.");
+        }
+
+        private static int CountOccurrences(string value, string needle)
+        {
+            int count = 0;
+            int index = 0;
+            while ((index = value.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+            {
+                count++;
+                index += needle.Length;
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// First stream: prose in several deltas, then one native call. Any later stream would answer
+        /// "Correct!" - the roundtrip a turn-ending tool must prevent.
+        /// </summary>
+        private sealed class ProseThenNativeCallScripted : MEAI.IChatClient
+        {
+            private readonly string _toolName;
+            private readonly string[] _prose;
+
+            public ProseThenNativeCallScripted(string toolName, params string[] prose)
+            {
+                _toolName = toolName;
+                _prose = prose;
+            }
+
+            public int StreamCalls { get; private set; }
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "")));
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                StreamCalls++;
+                if (StreamCalls > 1)
+                {
+                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "Correct!");
+                    yield break;
+                }
+
+                foreach (string piece in _prose)
+                {
+                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, piece);
+                    await Task.Yield();
+                }
+
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, new List<MEAI.AIContent>
+                {
+                    new MEAI.FunctionCallContent("call-quiz", _toolName, new Dictionary<string, object>())
+                });
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        /// <summary>
         /// Text-extraction path (local models emit tool calls as JSON in the assistant text): the same
         /// turn-ending rule holds there, otherwise the defect simply moves to the other branch.
         /// </summary>

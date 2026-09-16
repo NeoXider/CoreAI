@@ -24,6 +24,53 @@ namespace CoreAI.Core.Tests.EditMode
         }
 
         [Test]
+        public void LlmCancellation_CallerCancelledToken_IsCancellationEvenForALibraryTimeout()
+        {
+            using System.Threading.CancellationTokenSource caller = new();
+            caller.Cancel();
+
+            Assert.AreEqual(LlmErrorCode.Cancelled,
+                LlmCancellation.Classify(new LlmOperationTimeoutException(), caller.Token),
+                "The caller asked to stop; a timer that raced it must not turn the stop into a timeout.");
+            Assert.AreEqual(LlmErrorCode.Cancelled,
+                LlmCancellation.Classify(new OperationCanceledException(), caller.Token));
+            Assert.IsTrue(LlmCancellation.IsCancellation(new LlmOperationTimeoutException(), caller.Token));
+            Assert.IsFalse(LlmCancellation.IsTimeout(new LlmOperationTimeoutException(), caller.Token));
+        }
+
+        [Test]
+        public void LlmCancellation_LiveToken_TimeoutOnlyForTheLibraryTimeoutType()
+        {
+            System.Threading.CancellationToken live = System.Threading.CancellationToken.None;
+
+            Assert.AreEqual(LlmErrorCode.Timeout,
+                LlmCancellation.Classify(new LlmOperationTimeoutException(), live));
+            Assert.AreEqual(LlmErrorCode.Timeout,
+                LlmCancellation.Classify(new AggregateException(new LlmOperationTimeoutException()), live),
+                "A timeout wrapped by a Task continuation is still a timeout.");
+            Assert.AreEqual(LlmErrorCode.Cancelled,
+                LlmCancellation.Classify(new OperationCanceledException(), live),
+                "A cancellation nobody reported as a timeout (StopAgent, a scope) must not be shown as one.");
+            Assert.AreEqual(LlmErrorCode.None,
+                LlmCancellation.Classify(new InvalidOperationException("boom"), live));
+        }
+
+        [Test]
+        public void LlmCancellation_ClassifyCode_TimeoutAfterCallerStopBecomesCancellation()
+        {
+            using System.Threading.CancellationTokenSource caller = new();
+            Assert.AreEqual(LlmErrorCode.Timeout, LlmCancellation.ClassifyCode(LlmErrorCode.Timeout, caller.Token));
+            Assert.AreEqual(LlmErrorCode.ProviderError,
+                LlmCancellation.ClassifyCode(LlmErrorCode.ProviderError, caller.Token));
+
+            caller.Cancel();
+            Assert.AreEqual(LlmErrorCode.Cancelled, LlmCancellation.ClassifyCode(LlmErrorCode.Timeout, caller.Token));
+            Assert.AreEqual(LlmErrorCode.RateLimited,
+                LlmCancellation.ClassifyCode(LlmErrorCode.RateLimited, caller.Token),
+                "Only the timeout/cancel ambiguity is resolved; other failures keep their category.");
+        }
+
+        [Test]
         public void LibraryDeadline_IsPresentedAsTimeoutRatherThanUserStop()
         {
             string message = LlmErrorPresentation.ToUserMessage(new LlmOperationTimeoutException());

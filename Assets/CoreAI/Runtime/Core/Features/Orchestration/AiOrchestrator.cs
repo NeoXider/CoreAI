@@ -253,9 +253,15 @@ namespace CoreAI.Ai
                 };
             }
 
+            // WHY decided once, here, from the RAW store tail: the prompt filter below and the teardown append
+            // must agree. Deciding again on the pruned/folded prompt tail disagreed whenever pruning removed a
+            // message after the user turn ([user X, tool] with tool results pruned looks like an unanswered X).
+            bool resendOfUnansweredUserTurn = roleConfig.WithChatHistory && _memoryStore != null &&
+                                              IsResendOfUnansweredUserTurn(roleId, traceId, task);
             (string updatedSystem, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool wasCompacted,
                     ConversationContextSnapshot contextSnapshot) =
-                await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId, cancellationToken);
+                await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId,
+                    resendOfUnansweredUserTurn, cancellationToken);
             system = updatedSystem;
             bool shouldConsolidateMemorySnapshot = wasCompacted || contextRetryPass > 0;
             if (shouldConsolidateMemorySnapshot &&
@@ -298,7 +304,8 @@ namespace CoreAI.Ai
                 ChatHistoryMessageCount = chatHistory?.Count ?? 0,
                 EstimatedPromptTokens = estimatedPromptTokens,
                 ContextSnapshot = contextSnapshot,
-                RouteWindowKey = routeWindowKey
+                RouteWindowKey = routeWindowKey,
+                ResendOfUnansweredUserTurn = resendOfUnansweredUserTurn
             };
         }
 
@@ -616,6 +623,7 @@ namespace CoreAI.Ai
                 int chunkCount = 0;
                 string terminalError = null;
                 LlmErrorCode terminalErrorCode = LlmErrorCode.None;
+                bool wasTimedOutByException = false;
                 int? terminalHttpStatus = null;
                 int? terminalRetryAfterSeconds = null;
                 IReadOnlyList<LlmToolCallTrace> executedToolCalls = Array.Empty<LlmToolCallTrace>();
@@ -646,6 +654,7 @@ namespace CoreAI.Ai
                 IAsyncEnumerator<LlmStreamChunk> enumerator = null;
                 string initError = null;
                 LlmErrorCode initErrorCode = LlmErrorCode.ProviderError;
+                bool initTimedOutByException = false;
                 int? initHttpStatus = null;
                 int? initRetryAfterSeconds = null;
                 string initProviderErrorBody = null;
@@ -657,7 +666,8 @@ namespace CoreAI.Ai
                 catch (OperationCanceledException ex)
                 {
                     initError = ex.Message;
-                    initErrorCode = LlmErrorCode.Cancelled;
+                    initErrorCode = LlmCancellation.Classify(ex, cancellationToken);
+                    initTimedOutByException = initErrorCode == LlmErrorCode.Timeout;
                 }
                 catch (LlmClientException ex)
                 {
@@ -684,7 +694,10 @@ namespace CoreAI.Ai
                         bundle.ActorId,
                         bundle.RoleId,
                         bundle.TraceId,
-                        ClassifyCompletionOutcome(task, initFailure),
+                        // WHY: the same outcome the pump loop below records for a timeout thrown mid-stream.
+                        initTimedOutByException
+                            ? AiLlmCompletionOutcome.DeadlineCancellation
+                            : ClassifyCompletionOutcome(task, initFailure),
                         0d);
                     bool canRetryInitOverflow = _compactionCoordinator.ShouldRetryAfterContextOverflow(
                         initFailure,
@@ -729,13 +742,16 @@ namespace CoreAI.Ai
                             hasNext = await enumerator.MoveNextAsync();
                             current = hasNext ? enumerator.Current : null;
                         }
-                        catch (OperationCanceledException)
+                        catch (OperationCanceledException ex)
                         {
                             // WHY: The OCE may carry a token other than the caller's (timeout decorator's
                             // linked CTS). Falling through to the generic handler would report it as a
-                            // retryable provider fault instead of a cancellation.
-                            terminalError = "cancelled";
-                            terminalErrorCode = LlmErrorCode.Cancelled;
+                            // retryable provider fault instead of a cancellation. A library timeout keeps
+                            // its own code: tagging it Cancelled made the chat treat a dead backend as a
+                            // turn somebody stopped on purpose, and a real stop as a timeout further up.
+                            terminalErrorCode = LlmCancellation.Classify(ex, cancellationToken);
+                            wasTimedOutByException = terminalErrorCode == LlmErrorCode.Timeout;
+                            terminalError = wasTimedOutByException ? ex.Message : "cancelled";
                             wasCancelled = true;
                             hasNext = false;
                         }
@@ -952,6 +968,8 @@ namespace CoreAI.Ai
                                            (executedToolCalls != null && executedToolCalls.Count > 0);
                     AiLlmCompletionOutcome outcome = terminalErrorCode == LlmErrorCode.Cancelled
                         ? ResolveCancellationOutcome(task, null)
+                        : terminalErrorCode == LlmErrorCode.Timeout && wasTimedOutByException
+                            ? AiLlmCompletionOutcome.DeadlineCancellation
                         : string.IsNullOrEmpty(terminalError) && producedContent
                             ? AiLlmCompletionOutcome.Succeeded
                             : AiLlmCompletionOutcome.ProviderFailure;
@@ -1379,6 +1397,12 @@ namespace CoreAI.Ai
             public int SummaryTokenBudget;
             public int SummaryTokensDropped;
             public int ChatHistoryMessageCount;
+
+            /// <summary>
+            /// The request repeats the unanswered user message at the tail of the role history
+            /// (<see cref="IsResendOfUnansweredUserTurn"/>), decided once from the raw store tail.
+            /// </summary>
+            public bool ResendOfUnansweredUserTurn;
             public int EstimatedPromptTokens;
             public ConversationContextSnapshot ContextSnapshot;
             public string RouteWindowKey;
@@ -1418,6 +1442,7 @@ namespace CoreAI.Ai
                 string system,
                 ConversationContextBuildArgs buildArgs,
                 string traceId,
+                bool resendOfUnansweredUserTurn,
                 CancellationToken cancellationToken)
         {
             if (!roleConfig.WithChatHistory || _memoryStore == null)
@@ -1501,6 +1526,19 @@ namespace CoreAI.Ai
             bool hasSummary = summaryBlock.Length > 0;
 
             ChatMessage[] recent = snapshot.RecentMessages ?? Array.Empty<ChatMessage>();
+            // WHY: the tail message is the unanswered record an earlier, cancelled attempt of THIS message left
+            // behind (see IsResendOfUnansweredUserTurn). The live payload already carries it; sending the copy as
+            // history too made the model read the same request twice in a row. Only the prompt drops it - the
+            // store and the context snapshot keep it, so compaction bookkeeping is unchanged. The decision was
+            // made on the raw store tail; the role check only guards against a snapshot that no longer ends there.
+            if (resendOfUnansweredUserTurn && recent.Length > 0 &&
+                string.Equals(recent[recent.Length - 1].Role, "user", StringComparison.Ordinal))
+            {
+                ChatMessage[] withoutResend = new ChatMessage[recent.Length - 1];
+                Array.Copy(recent, withoutResend, withoutResend.Length);
+                recent = withoutResend;
+            }
+
             if (recent.Length == 0)
             {
                 if (hasSummary)
@@ -1701,6 +1739,11 @@ namespace CoreAI.Ai
         /// this append (see BuildChatHistoryAsync); skipping the append cannot protect old source, because
         /// the very next turn appends anyway.
         /// </para>
+        /// <para>
+        /// The one exception is a resend: when the history already ends with this exact user message (an
+        /// earlier attempt was cancelled or failed before any answer), that record IS this turn and nothing is
+        /// appended — see <see cref="IsResendOfUnansweredUserTurn"/>.
+        /// </para>
         /// </summary>
         private void EnsureUserTurnRecorded(
             RequestBundle bundle,
@@ -1732,8 +1775,15 @@ namespace CoreAI.Ai
                 // never re-enters its own request as history. Persist raw intent, not composed live context.
                 // Mark before the call: a store may commit and then throw, making retry unsafe and duplicative.
                 latch.Attempted = true;
-                _memoryStore.AppendChatMessage(roleId, "user",
-                    AppendAttachmentPlaceholders(task.Hint ?? string.Empty, task.Attachments),
+                bool resend = bundle != null
+                    ? bundle.ResendOfUnansweredUserTurn
+                    : IsResendOfUnansweredUserTurn(roleId, traceId, task);
+                if (resend)
+                {
+                    return;
+                }
+
+                _memoryStore.AppendChatMessage(roleId, "user", BuildUserTurnHistoryText(task),
                     roleConfig.PersistChatHistory);
             }
             catch (Exception ex) when (suppressPersistenceErrors)
@@ -1745,6 +1795,79 @@ namespace CoreAI.Ai
                     $"could not persist the user turn: {ex.Message}",
                     LogTag.Llm);
             }
+        }
+
+        /// <summary>The exact text a turn persists as its user message: raw hint plus attachment placeholders.</summary>
+        private static string BuildUserTurnHistoryText(AiTaskRequest task)
+        {
+            return AppendAttachmentPlaceholders(task?.Hint ?? string.Empty, task?.Attachments);
+        }
+
+        /// <summary>
+        /// True when the role history already ends with THIS turn's user message and nothing after it — the
+        /// record an earlier attempt of the same message left behind when it was cancelled or failed before
+        /// an answer. That record already is this turn, so the resend must not add a second copy.
+        /// <para>
+        /// WHY a structural rule and not a rollback: the learner's words are recorded on every terminal path
+        /// on purpose (7.41.0 — "the question stayed on screen while the model never learned it was
+        /// asked"), and a caller cancellation is one of those paths. Removing the record on cancel would
+        /// bring that hole back. What was actually broken is the RESEND: a host that re-submits the same
+        /// payload after cancelling (a help request, a retry button) got the message stored twice and sent
+        /// to the model twice — once as history, once as the live payload. A user message at the tail of
+        /// history is by construction unanswered (every answered turn appends its assistant message after
+        /// it), so "the tail is an identical user message" is exactly "this is a resend of an unanswered
+        /// turn", and it survives a reload because it needs no in-process marker.
+        /// </para>
+        /// <para>
+        /// A read failure never blocks the append: losing the learner's words is worse than a duplicate.
+        /// </para>
+        /// </summary>
+        private bool IsResendOfUnansweredUserTurn(string roleId, string traceId, AiTaskRequest task)
+        {
+            if (task?.Attachments != null && task.Attachments.Count > 0)
+            {
+                // WHY: history keeps only a descriptor of an attachment (name, type, size), so two different
+                // screenshots can produce byte-identical text. A turn with attachments is never collapsed; the
+                // price is a possible duplicate when the very same files are re-sent.
+                return false;
+            }
+
+            string userTurnText = BuildUserTurnHistoryText(task);
+            try
+            {
+                ChatMessage[] tail = _memoryStore.GetChatHistory(roleId, 1);
+                bool resend = tail != null && tail.Length > 0 &&
+                              IsUnansweredCopyOf(tail[tail.Length - 1], userTurnText);
+                if (resend)
+                {
+                    Log.Instance.Info(
+                        $"[AiOrchestrator] role='{roleId}' trace='{traceId ?? "unknown"}' " +
+                        "user turn is a resend of the unanswered message at the tail of history; not stored twice.",
+                        LogTag.Llm);
+                }
+
+                return resend;
+            }
+            catch (Exception ex)
+            {
+                Log.Instance.Warn(
+                    $"[AiOrchestrator] role='{roleId}' trace='{traceId ?? "unknown"}' " +
+                    $"could not read the history tail before recording the user turn: {ex.Message}",
+                    LogTag.Llm);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// True when <paramref name="message"/> is a user message with exactly <paramref name="userTurnText"/>
+        /// as its content. Callers pass only the LAST message of a role history, which is what makes a user
+        /// message there an unanswered one.
+        /// </summary>
+        private static bool IsUnansweredCopyOf(ChatMessage message, string userTurnText)
+        {
+            return !string.IsNullOrWhiteSpace(userTurnText) &&
+                   string.Equals(message.Role, "user", StringComparison.Ordinal) &&
+                   string.Equals(message.Content, userTurnText, StringComparison.Ordinal);
         }
 
         private static string ResolveRoleId(AiTaskRequest task)

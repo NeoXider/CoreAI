@@ -1339,67 +1339,20 @@ namespace CoreAI.Ai
             CancellationToken token,
             out LlmOperationTimeoutException timeout)
         {
-            timeout = token.IsCancellationRequested ? null : FindLibraryTimeout(ex);
+            timeout = token.IsCancellationRequested ? null : LlmCancellation.FindTimeout(ex);
             return timeout != null;
         }
 
-        private static LlmOperationTimeoutException FindLibraryTimeout(Exception ex)
-        {
-            switch (ex)
-            {
-                case LlmOperationTimeoutException typed:
-                    return typed;
-                case AggregateException aggregate:
-                    foreach (Exception inner in aggregate.InnerExceptions)
-                    {
-                        LlmOperationTimeoutException found = FindLibraryTimeout(inner);
-                        if (found != null)
-                        {
-                            return found;
-                        }
-                    }
-
-                    return null;
-                default:
-                    return null;
-            }
-        }
-
         /// <summary>
-        /// A cancellation: <see cref="OperationCanceledException"/> on its own or inside an
-        /// <see cref="AggregateException"/> (some stacks wrap cancellation exactly that way). The
-        /// <see cref="Exception.InnerException"/> chain is walked ONLY when the work item's token really is
-        /// cancelled: then any error that grew out of the cancellation is the cancellation. While the token
-        /// is alive, a transport error with a nested <see cref="TaskCanceledException"/> is a failure, not
-        /// a cancellation, and it used to turn silently into "the learner stopped the answer".
+        /// A cancellation by the single <see cref="LlmCancellation"/> rule: <see cref="OperationCanceledException"/>
+        /// on its own or inside an <see cref="AggregateException"/>, with the <see cref="Exception.InnerException"/>
+        /// chain walked ONLY when the work item's token really is cancelled. While the token is alive, a transport
+        /// error with a nested <see cref="TaskCanceledException"/> is a failure, not "the learner stopped the answer".
+        /// Library timeouts are caught before this filter by <see cref="TryFindLibraryTimeout"/>.
         /// </summary>
         private static bool IsCancellationLike(Exception ex, CancellationToken token)
         {
-            return IsCancellationLike(ex, followInnerExceptions: token.IsCancellationRequested);
-        }
-
-        private static bool IsCancellationLike(Exception ex, bool followInnerExceptions)
-        {
-            for (Exception cur = ex; cur != null; cur = followInnerExceptions ? cur.InnerException : null)
-            {
-                if (cur is OperationCanceledException)
-                {
-                    return true;
-                }
-
-                if (cur is AggregateException aggregate)
-                {
-                    foreach (Exception inner in aggregate.InnerExceptions)
-                    {
-                        if (IsCancellationLike(inner, followInnerExceptions))
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-
-            return false;
+            return LlmCancellation.IsCancellation(ex, token);
         }
 
         /// <summary>

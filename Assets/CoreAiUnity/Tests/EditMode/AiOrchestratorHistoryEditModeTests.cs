@@ -1198,6 +1198,453 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task RunTaskAsync_ResendAfterProviderError_StoresAndSendsTheMessageOnce()
+        {
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = "HTTP 503",
+                    ErrorCode = LlmErrorCode.BackendUnavailable
+                },
+                new LlmCompletionResult { Ok = true, Content = "answer" });
+            RoleScopedLiveMemoryStore memory = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, BuildToolResultPolicy("Teacher"));
+            const string payload = "retry after an outage";
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = payload });
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = payload });
+
+            CollectionAssert.AreEqual(new[] { "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray(),
+                "A failed turn and its retry are one user message, then the answer.");
+            Assert.IsFalse(
+                llm.Requests[1].ChatHistory != null &&
+                llm.Requests[1].ChatHistory.Any(m => (m.Text ?? "").Contains(payload)));
+        }
+
+        [TestCase("tool")]
+        [TestCase("system")]
+        public async Task RunTaskAsync_MessageAfterTheUserTurn_TailIsNotAResend_EvenWithAOneMessageCap(string tailRole)
+        {
+            // WHY: the decision reads the RAW store tail. With a one-message cap the prompt window holds only
+            // the tail message, and the earlier user turn is followed by something - it is not unanswered.
+            ToolTraceLlmClient llm = new(new LlmCompletionResult { Ok = true, Content = "answer" });
+            RoleScopedLiveMemoryStore memory = new();
+            memory.Seed("Teacher", "user", "same question");
+            memory.Seed("Teacher", tailRole, "## Tool Results\n- quiz_tool: ok");
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("Teacher", true, 8192, false, 1);
+            policy.DisableMemoryTool("Teacher");
+            TestSettings settings = new() { EnableConversationHistorySummarization = false };
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy, settings: settings);
+
+            await orchestrator.RunTaskAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "same question" });
+
+            CollectionAssert.AreEqual(new[] { "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray(),
+                $"A user turn followed by a '{tailRole}' message is not unanswered; the new one is stored.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_PrunedToolTail_PromptAndStoreAgreeThatItIsNotAResend()
+        {
+            // WHY: [user X, tool] with every tool result pruned from the prompt ends in "user X" on the PROMPT
+            // side only. Deciding there dropped X from the prompt while the store appended it again; the
+            // decision is made once, from the raw store tail, and both sides follow it.
+            ToolTraceLlmClient llm = new(new LlmCompletionResult { Ok = true, Content = "answer" });
+            RoleScopedLiveMemoryStore memory = new();
+            memory.Seed("Teacher", "user", "quiz me");
+            memory.Seed("Teacher", "tool", "## Tool Results\n- quiz_tool: ok card shown");
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            TestSettings settings = new()
+            {
+                EnableConversationHistorySummarization = false,
+                MaxRetainedToolResultMessages = 0
+            };
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy, settings: settings);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "quiz me" });
+
+            Assert.IsFalse(llm.Requests[0].ChatHistory.Any(m => (m.Text ?? "").Contains("card shown")),
+                "precondition: the tool result really is pruned from the prompt.");
+            Assert.AreEqual(1, llm.Requests[0].ChatHistory.Count(m => m.Role == ChatRole.User && m.Text == "quiz me"),
+                "The earlier, answered request stays in the prompt history.");
+            CollectionAssert.AreEqual(new[] { "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray(),
+                "...and the new one is stored: both sides agree it is not a resend.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_SameTextWithAttachments_IsNeverCollapsed()
+        {
+            // WHY: history keeps only a descriptor (name, type, size); two different screenshots of the same
+            // size produce byte-identical text, so a turn with attachments is never treated as a resend.
+            CancelOnceThenSucceedLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, BuildToolResultPolicy("Teacher"));
+            byte[] first = new byte[4 * 1024];
+            byte[] second = new byte[4 * 1024];
+            second[0] = 1;
+
+            await CaptureExceptionAsync<OperationCanceledException>(() => orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                SourceTag = "Chat",
+                Hint = "what is wrong here?",
+                Attachments = new[] { AiAttachment.Image(first, "image/png", "shot.png") }
+            }));
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                SourceTag = "Chat",
+                Hint = "what is wrong here?",
+                Attachments = new[] { AiAttachment.Image(second, "image/png", "shot.png") }
+            });
+
+            Assert.AreEqual(memory.Appended[0].Content, memory.Appended[1].Content,
+                "precondition: the two different images really describe identically in history.");
+            CollectionAssert.AreEqual(new[] { "user", "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray());
+            Assert.AreEqual(1, llm.Requests[1].ChatHistory.Count(m => m.Role == ChatRole.User),
+                "The earlier message with its own image stays in the prompt history.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_ResendAfterCancelledTurn_StoresAndSendsTheMessageOnce()
+        {
+            // WHY: a host cancelled a service turn (a help request) and re-sent the same payload. The cancelled
+            // attempt had already recorded the message, so the resend stored it a second time and the model
+            // read it twice - once as history, once as the live payload.
+            CancelOnceThenSucceedLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            memory.Seed("Teacher", "assistant", "earlier answer");
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+            const string payload = "[help] the learner is stuck on task 3";
+
+            await CaptureExceptionAsync<OperationCanceledException>(() => orchestrator.RunTaskAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = payload }));
+            string answer = await orchestrator.RunTaskAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = payload });
+
+            Assert.AreEqual("recovered", answer);
+            Assert.AreEqual(2, llm.Requests.Count);
+            Assert.IsFalse(
+                llm.Requests[1].ChatHistory != null &&
+                llm.Requests[1].ChatHistory.Any(m => (m.Text ?? "").Contains(payload)),
+                "The resend carries the message as its payload; the unanswered copy must not ride along as history.");
+            Assert.IsTrue(
+                llm.Requests[1].ChatHistory.Any(m => (m.Text ?? "").Contains("earlier answer")),
+                "precondition: the resend still reads the rest of the history.");
+            CollectionAssert.AreEqual(new[] { "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray(),
+                "One user message for the cancelled attempt and its resend, then the answer.");
+            Ai.ChatMessage[] stored = memory.GetChatHistory("Teacher");
+            Assert.AreEqual(1, stored.Count(m => m.Role == "user" && m.Content == payload));
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_CallerCancelsThenResendsSamePayload_StoresAndSendsTheMessageOnce()
+        {
+            CallerCancelledFirstStreamLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+            const string payload = "[help] repeated service payload";
+
+            LlmStreamChunk terminal = null;
+            using (CancellationTokenSource caller = new())
+            {
+                await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(
+                                   new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = payload },
+                                   caller.Token))
+                {
+                    if (!string.IsNullOrEmpty(chunk.Text))
+                    {
+                        caller.Cancel();
+                    }
+
+                    if (chunk.IsDone)
+                    {
+                        terminal = chunk;
+                    }
+                }
+            }
+
+            Assert.IsNotNull(terminal, "precondition: the cancelled stream ends with a terminal chunk.");
+            Assert.AreEqual(LlmErrorCode.Cancelled, terminal.ErrorCode,
+                "A stream the caller cancelled must end as a cancellation, never as a timeout.");
+
+            await foreach (LlmStreamChunk _ in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = payload }))
+            {
+            }
+
+            Assert.AreEqual(2, llm.Requests.Count);
+            Assert.IsFalse(
+                llm.Requests[1].ChatHistory != null &&
+                llm.Requests[1].ChatHistory.Any(m => (m.Text ?? "").Contains(payload)),
+                "The streamed resend must not see its own unanswered copy as history.");
+            CollectionAssert.AreEqual(new[] { "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray());
+        }
+
+        [Test]
+        public async Task RunTaskAsync_SameMessageAfterAnAnswer_IsStoredAgain()
+        {
+            // WHY: the resend rule covers only an UNANSWERED tail. A learner who says "ok" twice, with the
+            // teacher's answer between, said it twice.
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult { Ok = true, Content = "first answer" },
+                new LlmCompletionResult { Ok = true, Content = "second answer" });
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "ok" });
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "ok" });
+
+            CollectionAssert.AreEqual(new[] { "user", "assistant", "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray());
+            Assert.AreEqual(1, llm.Requests[1].ChatHistory.Count(m => m.Role == ChatRole.User && m.Text == "ok"),
+                "The answered earlier message stays in the second request's history.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_DifferentMessageAfterCancelledTurn_KeepsBoth()
+        {
+            CancelOnceThenSucceedLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await CaptureExceptionAsync<OperationCanceledException>(() => orchestrator.RunTaskAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "first question" }));
+            await orchestrator.RunTaskAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "second question" });
+
+            CollectionAssert.AreEqual(new[] { "user", "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray(),
+                "Only an identical resend collapses; a new question after a cancelled one is its own turn.");
+            Assert.AreEqual(1, llm.Requests[1].ChatHistory.Count(m =>
+                m.Role == ChatRole.User && m.Text == "first question"));
+        }
+
+        [Test]
+        public async Task RunTaskAsync_HistoryTailUnreadable_StillRecordsTheUserTurn()
+        {
+            ThrowingTailReadMemoryStore memory = new();
+            ToolTraceLlmClient llm = new(new LlmCompletionResult { Ok = true, Content = "answer" });
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "q" });
+
+            CollectionAssert.AreEqual(new[] { "user", "assistant" }, memory.Appended.ToArray(),
+                "A failed resend check must never cost the learner's words.");
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_ProviderThrowsLibraryTimeout_EndsWithTimeoutNotCancelled()
+        {
+            TimeoutThrowingStreamLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            LlmStreamChunk terminal = null;
+            await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "slow" }))
+            {
+                if (chunk.IsDone)
+                {
+                    terminal = chunk;
+                }
+            }
+
+            Assert.IsNotNull(terminal);
+            Assert.AreEqual(LlmErrorCode.Timeout, terminal.ErrorCode,
+                "A library timeout thrown mid-stream used to be relabelled Cancelled, so the chat could not " +
+                "tell a dead backend from a stopped turn.");
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_TurnEndedByTool_ProseShownAndStoredOnce_ToolResultRecorded()
+        {
+            // WHY: a turn closed by an EndsTurn tool ends on a text-less terminal chunk that carries the
+            // traces. The prose of that round must reach the reader and the history exactly once, and the
+            // tool result must still be recorded although it never went back to the model.
+            ScriptedStreamLlmClient llm = new(
+                new LlmStreamChunk { Text = "Check yourself: " },
+                new LlmStreamChunk { Text = "what is 2+2?" },
+                new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Text = string.Empty,
+                    ExecutedToolCalls = new[]
+                    {
+                        new LlmToolCallTrace("quiz_tool", true, 1d, "native",
+                            "{\"success\":true,\"message\":\"card shown\"}")
+                    }
+                });
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "Teacher", Hint = "quiz me" }))
+            {
+                chunks.Add(chunk);
+            }
+
+            string visible = string.Concat(chunks.Select(c => c.Text));
+            Assert.AreEqual(1, CountOccurrences(visible, "Check yourself: what is 2+2?"), visible);
+            Assert.AreEqual(1, llm.StreamCalls);
+            LlmStreamChunk last = chunks.Last();
+            Assert.IsTrue(last.IsDone);
+            Assert.AreEqual(LlmErrorCode.None, last.ErrorCode);
+            Assert.IsTrue(last.ExecutedToolCalls.Any(t => t.Name == "quiz_tool" && t.Success));
+
+            CollectionAssert.AreEqual(new[] { "user", "assistant", "tool" },
+                memory.Appended.Select(m => m.Role).ToArray());
+            Assert.AreEqual("Check yourself: what is 2+2?", memory.Appended[1].Content,
+                "The stored answer is the round's prose, once.");
+            StringAssert.Contains("quiz_tool", memory.Appended[2].Content);
+        }
+
+        private sealed class ScriptedStreamLlmClient : ILlmClient
+        {
+            private readonly LlmStreamChunk[] _chunks;
+
+            public ScriptedStreamLlmClient(params LlmStreamChunk[] chunks)
+            {
+                _chunks = chunks;
+            }
+
+            public int StreamCalls { get; private set; }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "buffered" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                StreamCalls++;
+                foreach (LlmStreamChunk chunk in _chunks)
+                {
+                    await Task.Yield();
+                    yield return chunk;
+                }
+            }
+        }
+
+        /// <summary>First stream shows text and then waits for the caller to cancel; later streams answer.</summary>
+        private sealed class CallerCancelledFirstStreamLlmClient : ILlmClient
+        {
+            private bool _first = true;
+
+            public List<LlmCompletionRequest> Requests { get; } = new();
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                Requests.Add(request);
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "buffered" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                await Task.Yield();
+                Requests.Add(request);
+                if (_first)
+                {
+                    _first = false;
+                    yield return new LlmStreamChunk { Text = "partial" };
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+
+                yield return new LlmStreamChunk { Text = "full answer", IsDone = true };
+            }
+        }
+
+        private sealed class TimeoutThrowingStreamLlmClient : ILlmClient
+        {
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromException<LlmCompletionResult>(new LlmOperationTimeoutException());
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                await Task.Yield();
+                throw new LlmOperationTimeoutException();
+#pragma warning disable CS0162 // unreachable code: needed only so the compiler treats this as an iterator.
+                yield break;
+#pragma warning restore CS0162
+            }
+        }
+
+        private sealed class ThrowingTailReadMemoryStore : IAgentMemoryStore
+        {
+            public List<string> Appended { get; } = new();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                state = null;
+                return false;
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+                Appended.Add(role);
+            }
+
+            public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                if (maxMessages == 1)
+                {
+                    throw new IOException("history file is locked");
+                }
+
+                return Array.Empty<Ai.ChatMessage>();
+            }
+        }
+
+        [Test]
         public async Task RunTaskAsync_AuthorityDenied_RecordsRawTurnInResolvedRoleAndNextRequestReadsIt()
         {
             TestAuthority authority = new() { CanRunAiTasks = false };
@@ -1708,9 +2155,10 @@ namespace CoreAI.Tests.EditMode
             IAgentMemoryStore memory,
             AgentMemoryPolicy policy,
             IConversationContextManager contextManager = null,
-            IRoleStructuredResponsePolicy structuredPolicy = null)
+            IRoleStructuredResponsePolicy structuredPolicy = null,
+            TestSettings settings = null)
         {
-            TestSettings settings = new();
+            settings ??= new TestSettings();
             return new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
@@ -1786,6 +2234,7 @@ namespace CoreAI.Tests.EditMode
             public bool EnableConversationHistorySummarization { get; set; } = true;
             public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
             public int ConversationRolledSummaryMaxTokens { get; set; }
+            public int MaxRetainedToolResultMessages { get; set; } = 3;
         }
 
         private sealed class NullSys : IAgentSystemPromptProvider

@@ -247,14 +247,16 @@ namespace CoreAI.Tests.EditMode
 
             /// <summary>
             /// The turn that follows an undispatched one reaches the provider, publishes once and commits
-            /// the fold - and the learner's message is now in history twice.
+            /// the fold - and the learner's message is in history exactly once, answered.
             /// <para>
-            /// WHY the duplicate is asserted instead of quietly tolerated: the latch that keeps the user
-            /// append to one write is per orchestrator invocation, not per learner message, so a host that
-            /// resubmits the same request records the intent again. That is the price of never dropping it,
-            /// and it is why these retry sites can no longer call <see cref="AssertPublishedOnce"/>. Left
-            /// unasserted the count is free to drift either way - back to a swallowed turn, or on to a
-            /// third copy - with every one of these tests still green.
+            /// WHY one user message and not two: the undispatched turn already recorded the message, and it is
+            /// the unanswered tail of the history when the same request is re-submitted. Since 7.44.0 the
+            /// orchestrator recognises that record as this very turn (a resend of an unanswered message): it
+            /// appends nothing for the user, and it leaves the copy out of the retry's prompt history, so the
+            /// model reads the question once. Until 7.43.0 this helper pinned a second copy as "the price of
+            /// never dropping it"; the price is gone and the eviction story is unchanged - the bounded window
+            /// still ends as [question, answer], now with one eviction instead of two. The count stays
+            /// asserted so it cannot drift either way - back to a swallowed turn, or on to a duplicate.
             /// </para>
             /// </summary>
             internal void AssertRetryAfterUndispatchedTurnPublished()
@@ -263,14 +265,30 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual(1, Publications);
                 Assert.IsNotEmpty(Summary.Stored, "The retry commits the fold the undispatched turn could not.");
                 Assert.AreEqual(0, Summary.SyncCalls, "Async orchestration must not use sync summary storage.");
-                Assert.AreEqual(3, Memory.Appends.Count,
-                    "Two invocations of the same request record the learner's message twice, then the answer.");
+                Assert.AreEqual(2, Memory.Appends.Count,
+                    "A resend of the undispatched request is the same turn: its message once, then the answer.");
                 Assert.AreEqual("user", Memory.Appends[0].Role);
                 Assert.AreEqual(Request.Hint, Memory.Appends[0].Content);
-                Assert.AreEqual("user", Memory.Appends[1].Role);
-                Assert.AreEqual(Request.Hint, Memory.Appends[1].Content);
-                Assert.AreEqual("assistant", Memory.Appends[2].Role);
-                Assert.AreEqual("ok", Memory.Appends[2].Content);
+                Assert.AreEqual("assistant", Memory.Appends[1].Role);
+                Assert.AreEqual("ok", Memory.Appends[1].Content);
+
+                ChatMessage[] window = Memory.GetChatHistory(Request.RoleId);
+                Assert.AreEqual(2, window.Length);
+                Assert.AreEqual(Request.Hint, window[0].Content, "The bounded window ends as [question, answer].");
+                Assert.AreEqual("ok", window[1].Content);
+
+                Assert.IsNotNull(Provider.LastRequest);
+                int copiesInHistory = 0;
+                if (Provider.LastRequest.ChatHistory != null)
+                {
+                    foreach (Microsoft.Extensions.AI.ChatMessage message in Provider.LastRequest.ChatHistory)
+                    {
+                        if ((message.Text ?? "").Contains(Request.Hint)) copiesInHistory++;
+                    }
+                }
+
+                Assert.AreEqual(0, copiesInHistory,
+                    "The retry carries the question as its payload; the unanswered record must not ride along as history.");
             }
 
             internal void AssertPublishedOnce()
@@ -365,10 +383,12 @@ namespace CoreAI.Tests.EditMode
             {
                 internal int Calls;
                 internal bool Fail;
+                internal LlmCompletionRequest LastRequest;
                 public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
                     CancellationToken cancellationToken = default)
                 {
                     Calls++;
+                    LastRequest = request;
                     return Task.FromResult(new LlmCompletionResult { Ok = !Fail, Content = Fail ? null : "ok", Error = Fail ? "HTTP 503" : null });
                 }
             }

@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+## [7.44.0] - 2026-09-17
+
+### Added
+
+- **`LlmCancellation`** - the one rule for telling a library timeout from a cancellation:
+  `Classify(exception, callerToken)`, `ClassifyCode(code, callerToken)`, `IsTimeout`, `IsCancellation`,
+  `FindTimeout`. A cancelled caller token wins over everything; `LlmOperationTimeoutException` (also inside
+  an `AggregateException`) is `Timeout`; any other `OperationCanceledException` is `Cancelled`. The
+  `InnerException` chain is walked only when the caller's token is cancelled. `Classify` / `ClassifyCode`
+  overloads with a separate `deadlineToken` report a host deadline that fired while the caller was alive as
+  `Timeout`. `QueuedAiOrchestrator` now uses this rule instead of its private copies.
+
+### Fixed
+
+- **A resend of a cancelled turn was stored and sent twice.** Every terminal path records the learner's
+  message (the 7.41.0 rule), a caller cancellation included. A host that cancelled a service turn and
+  re-submitted the same payload therefore got the message twice in the role history and sent it twice to
+  the model - once as history, once as the live payload (observed in production with a help request).
+  `AiOrchestrator` now treats a history that already ends with a byte-identical `user` message as this
+  very turn: nothing is appended, and the copy is left out of the request's history. A user message at the
+  tail is unanswered by construction, so the rule needs no marker and survives a reload; an identical
+  message after an answer, or a different message after a cancelled one, is recorded as before. The
+  decision is made once per request from the raw store tail and shared by the prompt and the teardown
+  append, so pruning a tool message out of the prompt cannot make the two disagree. A turn with
+  attachments is never collapsed (history keeps only a name/type/size descriptor, so two different
+  images can describe identically). A failed read of the tail never blocks the append. Rolling the record back on cancel was rejected: it would
+  reopen the 7.41.0 hole where the question stayed on screen and the model never learned it was asked.
+- **A library timeout thrown inside a stream was reported as `Cancelled`.** `AiOrchestrator`'s streaming
+  loop labelled every `OperationCanceledException` from the provider `Cancelled`, so the chat could not tell
+  a dead backend from a stopped turn. It now classifies through `LlmCancellation`: the terminal chunk says
+  `Timeout` (and the completion metric `DeadlineCancellation`, both when the stream fails to open and
+  when it fails mid-way) unless the caller had cancelled.
+- **A retry could start after the caller had cancelled.** `LoggingLlmClientDecorator` relied on the
+  host-provided delay to observe the token before retrying a rate-limited or unavailable backend; it now
+  checks the caller's token itself before every retry.
+
+### Upgrade notes
+
+- A custom `IAgentMemoryStore` must return the **latest** messages, oldest first, for
+  `GetChatHistory(roleId, n)` (now stated in the XML doc); the orchestrator reads `n = 1` before recording a
+  user turn.
+- Hosts that re-submit a turn after cancelling it no longer need to deduplicate the history themselves.
+
 ## [7.43.0] - 2026-09-16
 
 ### Added

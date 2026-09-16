@@ -110,13 +110,20 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 LlmCompletionResult result = await inner.CompleteAsync(request, cancellationToken);
+                if (result != null && !result.Ok)
+                {
+                    // WHY: a Timeout reported after the caller already cancelled is the caller's stop; the result
+                    // and the published event carry one classification (LlmCancellation.ClassifyCode).
+                    result.ErrorCode = LlmCancellation.ClassifyCode(result.ErrorCode, cancellationToken);
+                }
+
                 PublishCompleted(request, capturedMode, capturedGeneration, false, result != null && result.Ok,
                     result?.Error ?? "",
                     result?.ErrorCode ?? LlmErrorCode.None);
                 PublishUsage(request, capturedMode, false, result);
                 return result;
             }
-            catch (LlmOperationTimeoutException)
+            catch (LlmOperationTimeoutException) when (!cancellationToken.IsCancellationRequested)
             {
                 PublishCompleted(request, capturedMode, capturedGeneration, false, false, "timeout",
                     LlmErrorCode.Timeout);
@@ -182,7 +189,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         hasNext = await enumerator.MoveNextAsync();
                     }
-                    catch (LlmOperationTimeoutException)
+                    catch (LlmOperationTimeoutException) when (!cancellationToken.IsCancellationRequested)
                     {
                         completedPublished = true;
                         PublishCompleted(request, capturedMode, capturedGeneration, true, false, "timeout",
@@ -227,7 +234,12 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     LlmStreamChunk chunk = enumerator.Current;
-                    if (!string.IsNullOrEmpty(chunk.Error))
+                    if (chunk != null && chunk.ErrorCode != LlmErrorCode.None)
+                    {
+                        chunk.ErrorCode = LlmCancellation.ClassifyCode(chunk.ErrorCode, cancellationToken);
+                    }
+
+                    if (chunk != null && !string.IsNullOrEmpty(chunk.Error))
                     {
                         ok = false;
                         error = chunk.Error;

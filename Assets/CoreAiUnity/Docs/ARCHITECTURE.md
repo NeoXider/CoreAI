@@ -159,6 +159,8 @@ If the backend reports **`LlmErrorCode.ContextLengthExceeded`** (`MeaiOpenAiChat
 
 Override `CoreAiChatPanel.ResolveErrorMessage(Exception)` / `ResolveStreamErrorMessage(string)` to localize or re-route the player-facing text; the log line is written first, so an override cannot hide diagnostics.
 
+**Timeout vs cancellation (since 7.44.0).** A turn that ends interrupted goes to exactly one of two hooks, decided by `LlmCancellation` against the turn's token: `ResolveTimeoutMessage(false)` only for a library timeout (`LlmOperationTimeoutException`, or a terminal `LlmErrorCode.Timeout` chunk while the token was alive), and `ResolveCancelledMessage()` for every cancellation — the external caller's token, the panel's own stop source, or `CoreAi.StopAgent` from elsewhere. The default cancelled text is `null`, so a cancelled turn adds nothing to the transcript. The log line is `[CoreAiChatPanel] Turn interrupted (reason=timeout|cancelled)`. `SubmitMessageFromExternalResultAsync` reports the same split in `Completion.ErrorCode`, and retry/fallback decorators never replay a request whose caller has cancelled. A host that runs its own deadline passes it as `CoreAiChatExternalSubmitOptions.DeadlineCancellationToken`: it stops the turn, and is reported as a timeout while the caller's token is alive. A deadline armed on the caller's token itself is indistinguishable from a stop and is reported as a cancellation. When a hook runs, the base class has already released the busy flags, the typing indicator and the streaming bubble.
+
 ## Test Integrity Rule
 
 See also `Assets/CoreAiUnity/Tests/README.md` for the full EditMode + PlayMode test requirements.
