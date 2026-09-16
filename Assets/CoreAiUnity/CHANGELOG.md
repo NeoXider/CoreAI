@@ -4,6 +4,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Fixed
+
+- **The locked-file summary test failed on the Linux portable leg.** It assumes an exclusive
+  `FileShare.None` lock blocks the commit, which holds on Windows only; on Unix the lock is advisory and
+  the commit is a `rename(2)` that ignores it. The test now runs on Windows and is skipped elsewhere.
+
 ## [7.43.0] - 2026-09-16
 
 ### Changed

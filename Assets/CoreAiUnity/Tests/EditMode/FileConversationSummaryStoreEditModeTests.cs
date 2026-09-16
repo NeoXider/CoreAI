@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -200,6 +201,14 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task LockedFile_FailedPrecommitWrite_PreservesOldSummary()
         {
+            // WHY Windows only: the premise is a lock that blocks the commit. FileShare.None is a mandatory lock
+            // on Windows, where File.Replace fails against it; on Unix it is advisory and the commit is a
+            // rename(2), which ignores it, so the new summary lands and there is no failure to preserve from.
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                Assert.Ignore("An exclusive FileShare.None lock blocks a commit only on Windows.");
+            }
+
             string root = NewTempRoot();
             try
             {
