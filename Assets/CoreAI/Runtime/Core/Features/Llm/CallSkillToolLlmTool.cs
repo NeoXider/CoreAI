@@ -175,8 +175,9 @@ namespace CoreAI.Ai
             public override string Name => "call_skill_tool";
 
             public override string Description =>
-                "Call a tool from a skill. First call read_skill to learn available tools and their parameters. " +
-                "Then call this with tool_name and arguments_json (a JSON object string with the tool's parameters).";
+                "Call a tool from a skill with tool_name and arguments_json (a JSON object string with the tool's parameters). " +
+                "Call read_skill first to learn the available tools and their parameters, unless the request already " +
+                "gives the exact tool name and argument keys - then call this directly.";
 
             public override string ParametersSchema =>
                 "{\"type\":\"object\",\"properties\":{\"tool_name\":{\"type\":\"string\",\"description\":\"Skill tool name returned by read_skill.\"},\"arguments_json\":{\"type\":\"string\",\"description\":\"JSON object string with the skill tool parameters.\"}},\"required\":[\"tool_name\",\"arguments_json\"]}";
@@ -221,16 +222,33 @@ namespace CoreAI.Ai
                     error = $"Tool '{trimmed}' is unavailable for this skill call.";
                     return false;
                 }
+                JObject parsed;
                 try
                 {
-                    invocation = new ResolvedLlmToolInvocation(descriptor, JObject.Parse(json));
-                    return true;
+                    parsed = JObject.Parse(json);
                 }
                 catch (JsonException ex)
                 {
                     error = $"Invalid JSON arguments: {ex.Message}";
                     return false;
                 }
+
+                // WHY before binding: a missing required parameter used to reach MEAI, which threw
+                // "The arguments dictionary is missing a value for the required parameter 'x'" from
+                // INSIDE the invocation boundary. The model got a bare binder message (no tool, no
+                // expected parameters, nothing about the name it used instead), and the policy had to
+                // treat the call as possibly executed. Checked here it is a schema error that provably
+                // never entered the tool body, and the text says how to retry in one step.
+                string missingError = SkillSetToolResolver.DescribeMissingRequiredArguments(
+                    descriptor.Name, descriptor.ParametersSchema, parsed);
+                if (missingError != null)
+                {
+                    error = missingError;
+                    return false;
+                }
+
+                invocation = new ResolvedLlmToolInvocation(descriptor, parsed);
+                return true;
             }
 
             private static bool TryReadString(IDictionary<string, object> arguments, string name, out string value)

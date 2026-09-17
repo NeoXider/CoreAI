@@ -10,6 +10,26 @@
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
+## 7.44.2 skill-tool required arguments (2026-09-17)
+
+Production trace (RedoSchool b303): the model called `submit_task_verdict` through `call_skill_tool` with
+`comment` instead of the required `reason`; MEAI threw a bare binder message from inside the invocation, the
+retry round ran into the host's turn deadline. Fixed: `call_skill_tool` checks required arguments before
+binding with an actionable message; one `LlmToolRequiredArguments` rule for both tool paths (empty string
+is present, `null` is missing); delegated refusals are logged; the `call_skill_tool` description no longer
+demands `read_skill` when the exact call is given. Verified in Unity 6000.3.14f1 by the full EditMode
+suite on 2026-09-17: 4949 total, 4938 passed, 0 failed, 11 skipped (new cases in
+`SkillToolAvailabilityEditModeTests` and `ToolExecutionPolicyEditModeTests`).
+
+- [ ] **Release:** commit, push, tag `v7.44.2` (all seven packages already bumped by
+      `tools/bump_version.py`), then move RedoSchool's manifest pins to `#v7.44.2` and refresh its
+      `packages-lock.json` hashes.
+- [x] **Built-in tools and the empty-string change:** `execute_lua` must not run blank code, and it had
+      relied on the policy refusing it; `LuaTool` now refuses whitespace-only code itself
+      (`LuaToolEditModeTests.ExecuteAsync_WhitespaceOnlyCode_ReturnsErrorWithoutCallingExecutor`).
+- [ ] **Watch the empty-string change in consumer tools:** tools outside this repo that relied on the
+      policy refusing `""` for a required parameter now receive it. A consumer-reported case goes here.
+
 ## 7.44.0 timeout-vs-cancel wave: EditMode gate still owed (2026-09-17)
 
 The fix (`LlmCancellation`, the panel's `ResolveCancelledMessage`, resend dedupe in `AiOrchestrator`,

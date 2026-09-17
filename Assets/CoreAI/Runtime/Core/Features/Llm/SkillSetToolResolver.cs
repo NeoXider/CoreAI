@@ -228,6 +228,88 @@ namespace CoreAI.Ai
             });
         }
 
+        /// <summary>
+        /// Checks a skill tool call against the tool's JSON schema and returns an actionable error when
+        /// a required parameter is absent (or JSON <c>null</c>), otherwise <c>null</c>.
+        /// </summary>
+        /// <remarks>
+        /// The text names the tool, the missing parameters, the keys the model sent that the tool does
+        /// not know (usually the misspelled name of the missing one) and every expected parameter with
+        /// its type, so a single retry can succeed. An empty string is a value, not a missing one: tools
+        /// legitimately give "" a meaning (e.g. "the current item"). Unknown keys alone are not an error -
+        /// the binder ignores them, and rejecting them would break calls that work today. A schema that
+        /// cannot be read disables the check rather than blocking the call.
+        /// </remarks>
+        public static string DescribeMissingRequiredArguments(string toolName, string parametersSchema, JObject arguments)
+        {
+            if (string.IsNullOrWhiteSpace(parametersSchema))
+            {
+                return null;
+            }
+
+            JObject schema;
+            try
+            {
+                schema = JObject.Parse(parametersSchema);
+            }
+            catch (Newtonsoft.Json.JsonException)
+            {
+                return null;
+            }
+
+            List<string> requiredNames = LlmToolRequiredArguments.Read(schema);
+            List<string> missing = LlmToolRequiredArguments.FindMissing(requiredNames, arguments);
+            if (missing.Count == 0)
+            {
+                return null;
+            }
+
+            JObject properties = schema["properties"] as JObject;
+            List<string> expected = new();
+            if (properties != null)
+            {
+                foreach (JProperty property in properties.Properties())
+                {
+                    JToken typeToken = (property.Value as JObject)?["type"];
+                    string type = typeToken switch
+                    {
+                        JValue value => value.ToString(),
+                        JArray union => string.Join("|", union),
+                        _ => "any"
+                    };
+                    string requirement = requiredNames.Contains(property.Name) ? "required" : "optional";
+                    expected.Add($"{property.Name} ({type}, {requirement})");
+                }
+            }
+
+            List<string> unknown = new();
+            if (arguments != null && properties != null)
+            {
+                foreach (JProperty property in arguments.Properties())
+                {
+                    if (properties[property.Name] == null)
+                    {
+                        unknown.Add(property.Name);
+                    }
+                }
+            }
+
+            string message = $"Tool '{toolName}' is missing required argument(s): {string.Join(", ", missing)}.";
+            if (unknown.Count > 0)
+            {
+                message += $" Unknown argument(s) ignored: {string.Join(", ", unknown)}.";
+            }
+
+            if (expected.Count > 0)
+            {
+                message += $" Expected parameters: {string.Join(", ", expected)}.";
+            }
+
+            return message +
+                   $" The tool was NOT executed. Retry call_skill_tool with tool_name=\"{toolName}\" and an " +
+                   "arguments_json object that uses exactly these parameter names.";
+        }
+
         private static IEnumerable<string> GetCallableToolNames(ILlmTool tool)
         {
             if (tool == null)
@@ -415,6 +497,100 @@ namespace CoreAI.Ai
                 JsonValueKind.False => "false",
                 _ => element.GetRawText()
             };
+        }
+    }
+    /// <summary>
+    /// The one rule for "a required tool argument is missing", shared by the direct tool path
+    /// (<c>ToolExecutionPolicy</c>) and the skill proxy (<c>call_skill_tool</c>).
+    /// </summary>
+    /// <remarks>
+    /// Missing means: the key is absent, or its value is <c>null</c> / JSON <c>null</c> / undefined.
+    /// An empty or whitespace-only string is a PRESENT value - tools legitimately give "" a meaning
+    /// ("the current item"), and the two paths used to disagree on it. Required names come from the
+    /// schema's top-level <c>required</c> array; an unreadable schema yields no required names, so the
+    /// check never blocks a call it cannot reason about.
+    /// </remarks>
+    internal static class LlmToolRequiredArguments
+    {
+        public static List<string> Read(string parametersSchema)
+        {
+            if (string.IsNullOrWhiteSpace(parametersSchema))
+            {
+                return new List<string>();
+            }
+
+            try
+            {
+                return Read(JObject.Parse(parametersSchema));
+            }
+            catch (Newtonsoft.Json.JsonException)
+            {
+                return new List<string>();
+            }
+        }
+
+        public static List<string> Read(JObject schema)
+        {
+            List<string> result = new();
+            if (!(schema?["required"] is JArray required))
+            {
+                return result;
+            }
+
+            foreach (JToken token in required)
+            {
+                string name = token.Type == JTokenType.String ? token.Value<string>()?.Trim() : null;
+                if (!string.IsNullOrEmpty(name) && !result.Contains(name))
+                {
+                    result.Add(name);
+                }
+            }
+
+            return result;
+        }
+
+        public static bool IsMissing(object value)
+        {
+            switch (value)
+            {
+                case null:
+                    return true;
+                case JToken token:
+                    return token.Type == JTokenType.Null || token.Type == JTokenType.Undefined;
+                case JsonElement element:
+                    return element.ValueKind == JsonValueKind.Null || element.ValueKind == JsonValueKind.Undefined;
+                default:
+                    return false;
+            }
+        }
+
+        public static List<string> FindMissing(IReadOnlyList<string> required, JObject arguments)
+        {
+            List<string> missing = new();
+            foreach (string name in required)
+            {
+                if (arguments == null || !arguments.TryGetValue(name, StringComparison.Ordinal, out JToken value) ||
+                    IsMissing(value))
+                {
+                    missing.Add(name);
+                }
+            }
+
+            return missing;
+        }
+
+        public static List<string> FindMissing(IReadOnlyList<string> required, IDictionary<string, object> arguments)
+        {
+            List<string> missing = new();
+            foreach (string name in required)
+            {
+                if (arguments == null || !arguments.TryGetValue(name, out object value) || IsMissing(value))
+                {
+                    missing.Add(name);
+                }
+            }
+
+            return missing;
         }
     }
 }

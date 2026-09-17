@@ -4,6 +4,19 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.44.2] - 2026-09-17
+
+### Tests
+
+- `SkillToolAvailabilityEditModeTests`: a skill tool call with a missing required parameter is rejected
+  before binding with the tool name, the missing and unknown keys and the expected parameter list (also
+  through the proxy's own AIFunction); an empty string and an omitted optional parameter are not missing;
+  an unreadable schema does not block the call.
+- `ToolExecutionPolicyEditModeTests`: an empty or whitespace string for a required argument reaches the
+  tool, a `null` one is refused; a delegated `call_skill_tool` refusal is traced as `schema-validation`,
+  carries the expected parameter list and is written to the warning log and the `[ToolCall]` line.
+  See the `com.neoxider.coreai` changelog for the behaviour changes.
+
 ## [7.44.1] - 2026-09-17
 
 ### Fixed

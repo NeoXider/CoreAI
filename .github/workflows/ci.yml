@@ -31,7 +31,7 @@ jobs:
           path: artifacts/portable-tests
 
   # F-22 package isolation (fork-safe, no Unity license): prove every shipped package.json is a
-  # self-consistent UPM graph - all six packages versioned in lockstep and every internal
+  # self-consistent UPM graph - all seven packages versioned in lockstep and every internal
   # com.neoxider.* dependency pin matches the pinned package's actual version. Catches a half-done
   # version bump (one of A-01/A-02's failure classes) before it reaches a consumer.
   package-graph:

@@ -592,8 +592,12 @@ namespace CoreAI.Infrastructure.Llm
             if (!string.IsNullOrEmpty(resolved.Error))
             {
                 string error = "Error: " + resolved.Error;
+                // Same visibility as the direct schema-validation path: a delegated call refused before
+                // binding (missing argument, unknown skill tool, bad JSON) must show up in the call log.
+                _logger.Warn($"[ToolPolicy] {fc.Name} rejected: {resolved.Error}", LogTag.Llm);
                 _eventPublisher.PublishFailed(BuildInfo(fc), error, 0d);
                 RecordSyntheticTrace(fc.Name, false, 0d, "schema-validation", error);
+                LogCallLine(fc, false, 0d, error);
                 return new ToolCallResult
                 {
                     Result = new MEAI.FunctionResultContent(fc.CallId, error),
@@ -1088,22 +1092,8 @@ namespace CoreAI.Infrastructure.Llm
                 return "";
             }
 
-            List<string> required = ReadRequiredParameters(tool.ParametersSchema);
-            if (required.Count == 0)
-            {
-                return "";
-            }
-
-            List<string> missing = new();
-            foreach (string name in required)
-            {
-                if (fc?.Arguments == null || !fc.Arguments.TryGetValue(name, out object value) ||
-                    IsMissingArgumentValue(value))
-                {
-                    missing.Add(name);
-                }
-            }
-
+            List<string> missing = LlmToolRequiredArguments.FindMissing(
+                LlmToolRequiredArguments.Read(tool.ParametersSchema), fc?.Arguments);
             if (missing.Count == 0)
             {
                 return "";
@@ -1113,63 +1103,6 @@ namespace CoreAI.Infrastructure.Llm
             return
                 $"Error: Tool '{tool.Name}' is missing required argument(s): {string.Join(", ", missing)}. " +
                 $"Retry the same tool call with JSON arguments matching this schema: {schema}";
-        }
-
-        private static List<string> ReadRequiredParameters(string schema)
-        {
-            try
-            {
-                JObject root = JObject.Parse(schema);
-                JArray required = root["required"] as JArray;
-                if (required == null)
-                {
-                    return new List<string>();
-                }
-
-                List<string> result = new();
-                foreach (JToken token in required)
-                {
-                    string value = token.Type == JTokenType.String ? token.Value<string>() : token.ToString();
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        result.Add(value.Trim());
-                    }
-                }
-
-                return result;
-            }
-            catch
-            {
-                return new List<string>();
-            }
-        }
-
-        private static bool IsMissingArgumentValue(object value)
-        {
-            if (value == null)
-            {
-                return true;
-            }
-
-            if (value is string text)
-            {
-                return string.IsNullOrWhiteSpace(text);
-            }
-
-            if (value is JValue jValue)
-            {
-                if (jValue.Type == JTokenType.Null || jValue.Type == JTokenType.Undefined)
-                {
-                    return true;
-                }
-
-                if (jValue.Type == JTokenType.String)
-                {
-                    return string.IsNullOrWhiteSpace(jValue.Value<string>());
-                }
-            }
-
-            return false;
         }
 
         private static string CompactSchema(string schema, int maxChars)

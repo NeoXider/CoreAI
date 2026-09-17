@@ -310,6 +310,117 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0, calls);
         }
 
+        private static DelegateLlmTool VerdictTool(Action onCall) =>
+            new("submit_task_verdict", "Verdict",
+                new Func<string, bool, string, string>((task_id, accepted, reason) =>
+                {
+                    onCall();
+                    return "{\"success\":true}";
+                }));
+
+        private static bool TryResolve(ILlmTool caller, string toolName, string json,
+            out ResolvedLlmToolInvocation invocation, out string error) =>
+            ((IResolvedLlmToolCallProvider)caller).TryResolveInvocation(
+                new Dictionary<string, object> { ["tool_name"] = toolName, ["arguments_json"] = json },
+                out invocation, out error);
+
+        /// <summary>
+        /// A misnamed required parameter used to reach MEAI and come back as a bare binder message
+        /// ("The arguments dictionary is missing a value for the required parameter 'reason'") from
+        /// inside the invocation. Now it is rejected before binding with everything a retry needs.
+        /// </summary>
+        [Test]
+        public void MissingRequiredArgument_IsRejectedBeforeBinding_WithExpectedParameters()
+        {
+            int calls = 0;
+            ILlmTool caller = CallSkillToolLlmTool.Create(new[]
+            {
+                new SkillSet("briefing", "", "", VerdictTool(() => calls++))
+            });
+
+            Assert.IsFalse(TryResolve(caller, "submit_task_verdict",
+                "{\"task_id\":\"t1\",\"accepted\":true,\"comment\":\"ok\"}",
+                out ResolvedLlmToolInvocation invocation, out string error));
+
+            Assert.IsNull(invocation);
+            Assert.AreEqual(0, calls);
+            StringAssert.Contains("'submit_task_verdict' is missing required argument(s): reason", error);
+            StringAssert.Contains("Unknown argument(s) ignored: comment", error);
+            StringAssert.Contains("task_id (string, required)", error);
+            StringAssert.Contains("accepted (boolean, required)", error);
+            StringAssert.Contains("reason (string, required)", error);
+            StringAssert.Contains("NOT executed", error);
+        }
+
+        [Test]
+        public async Task MissingRequiredArgument_ThroughProxyFunction_ReturnsActionableFailure()
+        {
+            int calls = 0;
+            ILlmTool caller = CallSkillToolLlmTool.Create(new[]
+            {
+                new SkillSet("briefing", "", "", VerdictTool(() => calls++))
+            });
+            AIFunction function = ((IAIFunctionLlmTool)caller).CreateAIFunction();
+
+            object result = await function.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object>
+            {
+                ["tool_name"] = "submit_task_verdict",
+                ["arguments_json"] = "{\"task_id\":\"t1\",\"accepted\":true}"
+            }), CancellationToken.None);
+
+            JObject parsed = JObject.Parse(result.ToString());
+            Assert.IsFalse(parsed["success"].Value<bool>());
+            StringAssert.Contains("missing required argument(s): reason", parsed["error"].Value<string>());
+            Assert.AreEqual(0, calls);
+        }
+
+        /// <summary>An empty string is a value: tools give "" a meaning, so it must not count as missing.</summary>
+        [Test]
+        public async Task EmptyStringRequiredArgument_IsNotMissing()
+        {
+            int calls = 0;
+            ILlmTool caller = CallSkillToolLlmTool.Create(new[]
+            {
+                new SkillSet("briefing", "", "", VerdictTool(() => calls++))
+            });
+
+            Assert.IsTrue(TryResolve(caller, "submit_task_verdict",
+                "{\"task_id\":\"\",\"accepted\":false,\"reason\":\"\"}",
+                out ResolvedLlmToolInvocation invocation, out string error), error);
+            await invocation.InvokeAsync(CancellationToken.None);
+            Assert.AreEqual(1, calls);
+        }
+
+        [Test]
+        public async Task OptionalParameterWithDefault_MayBeOmitted()
+        {
+            string seen = null;
+            string Handler(string task_id, string reason = "")
+            {
+                seen = task_id + "|" + reason;
+                return "{\"success\":true}";
+            }
+
+            ILlmTool caller = CallSkillToolLlmTool.Create(new[]
+            {
+                new SkillSet("defaults", "", "",
+                    new DelegateLlmTool("with_default", "Optional", new Func<string, string, string>(Handler)))
+            });
+
+            Assert.IsTrue(TryResolve(caller, "with_default", "{\"task_id\":\"t1\"}",
+                out ResolvedLlmToolInvocation invocation, out string error), error);
+            await invocation.InvokeAsync(CancellationToken.None);
+            Assert.AreEqual("t1|", seen);
+        }
+
+        [Test]
+        public void DescribeMissingRequiredArguments_UnreadableSchema_DoesNotBlock()
+        {
+            Assert.IsNull(SkillSetToolResolver.DescribeMissingRequiredArguments("t", "not json", new JObject()));
+            Assert.IsNull(SkillSetToolResolver.DescribeMissingRequiredArguments("t", "{}", new JObject()));
+            Assert.IsNull(SkillSetToolResolver.DescribeMissingRequiredArguments("t", null, null));
+        }
+
         [TestCase("[]")]
         [TestCase("null")]
         [TestCase("broken")]

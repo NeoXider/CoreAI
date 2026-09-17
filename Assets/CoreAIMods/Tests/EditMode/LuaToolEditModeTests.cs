@@ -65,6 +65,25 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0, executor.CallCount);
         }
 
+        /// <summary>
+        /// WHY: since 7.44.2 the policy passes a whitespace-only required argument through to the tool
+        /// (an empty string is a present value), so the tool itself must refuse whitespace-only code.
+        /// </summary>
+        [TestCase("   ")]
+        [TestCase("\n\t ")]
+        public async Task ExecuteAsync_WhitespaceOnlyCode_ReturnsErrorWithoutCallingExecutor(string code)
+        {
+            FakeExecutor executor = new(new LuaTool.LuaResult { Success = true });
+            LuaTool tool = new(executor, new FakeSettings(), new NullLog());
+
+            string json = await tool.ExecuteAsync(code);
+            LuaTool.LuaResult parsed = JsonConvert.DeserializeObject<LuaTool.LuaResult>(json);
+
+            Assert.IsFalse(parsed.Success);
+            StringAssert.Contains("required", parsed.Error);
+            Assert.AreEqual(0, executor.CallCount, "Whitespace-only code must never reach the executor");
+        }
+
         [Test]
         public async Task ExecuteAsync_ExecutorThrows_ReturnsFailureResult()
         {

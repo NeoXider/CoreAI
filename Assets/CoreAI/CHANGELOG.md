@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 
+## [7.44.2] - 2026-09-17
+
+### Fixed
+
+- **`call_skill_tool` now rejects a call with a missing required parameter BEFORE binding, with an
+  actionable message.** Before, the call reached MEAI, which threw `The arguments dictionary is missing a
+  value for the required parameter 'x'` from inside the invocation boundary: the model saw a bare binder
+  message (no tool name, no expected parameters, nothing about the key it sent instead), and the policy had
+  to treat the call as possibly executed. Observed in production: a model sent `comment` instead of `reason`
+  and the turn ran out of time instead of retrying. `CallSkillToolLlmTool` now checks the target's schema in
+  `TryResolveInvocation` (`SkillSetToolResolver.DescribeMissingRequiredArguments`) and returns
+  `Tool 'x' is missing required argument(s): … Unknown argument(s) ignored: … Expected parameters: name
+  (type, required|optional), … The tool was NOT executed. Retry call_skill_tool …`. Through
+  `ToolExecutionPolicy` it surfaces as a `schema-validation` failure. Unknown keys alone are still ignored;
+  an unreadable schema disables the check.
+- **Delegated refusals are visible in the call log.** When `ToolExecutionPolicy` refuses a resolved proxy
+  call before binding (missing required argument, unknown skill tool, malformed `arguments_json`), it now
+  writes the same `[ToolPolicy] … rejected` warning and `[ToolCall] … status=FAIL` line as the direct
+  schema-validation path. Before, such refusals left only a trace entry.
+
+### Changed
+
+- **One rule for "a required argument is missing" on both tool paths** (`LlmToolRequiredArguments`, used by
+  `ToolExecutionPolicy` and `call_skill_tool`): missing means the key is absent or its value is `null` /
+  JSON `null` / undefined. **Behaviour changes:**
+  - `call_skill_tool`: a required parameter sent as JSON `null` is now refused before binding. Before, the
+    `null` reached the delegate (a `string` parameter received `null`).
+  - Direct tool calls: an empty or whitespace-only string for a required parameter is now a PRESENT value
+    and reaches the tool. Before, `ToolExecutionPolicy` refused it as missing while `call_skill_tool`
+    accepted it. Tools give `""` a meaning ("the current item"); a tool that must reject an empty value has
+    to check it itself. The built-in `execute_lua` (`LuaTool`, `com.neoxider.coreaimods`) now does:
+    whitespace-only Lua code is refused with `Lua code is required` and never reaches the executor
+    (it used to check only for an empty string); covered by `LuaToolEditModeTests`.
+- **`call_skill_tool` description** no longer demands `read_skill` unconditionally: read the skill first
+  unless the request already gives the exact tool name and argument keys. A host that hands the model the
+  exact call shape (a check request, a card result) no longer pays an extra round for `read_skill`.
+
 ## [7.44.1] - 2026-09-17
 
 ### Fixed

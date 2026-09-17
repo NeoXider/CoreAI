@@ -548,6 +548,96 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("schema-validation", policy.ExecutedTraces[0].Source);
         }
 
+        private static (ToolExecutionPolicy policy, MEAI.ChatOptions options) RequiredActionPolicy()
+        {
+            const string schema =
+                "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"}},\"required\":[\"action\"]}";
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "manage_mods", ParametersSchema = schema } },
+                false, "test", 3);
+            Func<string, string> func = action => $"action=[{action}]";
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(func,
+                new MEAI.AIFunctionFactoryOptions { Name = "manage_mods", Description = "Manage mods" }));
+            return (policy, opts);
+        }
+
+        /// <summary>
+        /// One rule on both paths (LlmToolRequiredArguments): an empty or whitespace string is a
+        /// present value. The direct path used to reject it while call_skill_tool accepted it.
+        /// </summary>
+        [TestCase("")]
+        [TestCase("   ")]
+        public async Task ExecuteSingle_EmptyStringRequiredArgument_IsPresent(string value)
+        {
+            (ToolExecutionPolicy policy, MEAI.ChatOptions opts) = RequiredActionPolicy();
+
+            ToolExecutionPolicy.ToolCallResult result = await policy.ExecuteSingleAsync(
+                MakeToolCall("manage_mods", new Dictionary<string, object?> { ["action"] = value }),
+                opts,
+                CancellationToken.None);
+
+            string text = result.Result.Result.ToString();
+            StringAssert.DoesNotContain("missing required argument", text);
+            StringAssert.Contains("action=[" + value + "]", text);
+        }
+
+        [Test]
+        public async Task ExecuteSingle_NullRequiredArgument_IsMissing()
+        {
+            (ToolExecutionPolicy policy, MEAI.ChatOptions opts) = RequiredActionPolicy();
+
+            ToolExecutionPolicy.ToolCallResult result = await policy.ExecuteSingleAsync(
+                MakeToolCall("manage_mods", new Dictionary<string, object?> { ["action"] = null }),
+                opts,
+                CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded);
+            StringAssert.Contains("missing required argument(s): action", result.Result.Result.ToString());
+        }
+
+        /// <summary>
+        /// A call_skill_tool call refused before binding (missing required argument of the skill tool)
+        /// is visible in the call log and the warning log, like the direct schema-validation path.
+        /// </summary>
+        [Test]
+        public async Task ExecuteSingle_DelegatedMissingArgument_IsLoggedTracedAndActionable()
+        {
+            int calls = 0;
+            DelegateLlmTool verdict = new("submit_task_verdict", "Verdict",
+                new Func<string, bool, string, string>((task_id, accepted, reason) =>
+                {
+                    calls++;
+                    return "{\"success\":true}";
+                }));
+            ILlmTool proxy = CallSkillToolLlmTool.Create(new[] { new SkillSet("briefing", "", "", verdict) });
+            StubLogger logger = new();
+            ToolExecutionPolicy policy = new(logger, new StubSettings { LogToolCalls = true, LogToolCallResults = true },
+                new List<ILlmTool> { proxy }, false, "test", 3);
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(((IAIFunctionLlmTool)proxy).CreateAIFunction());
+
+            ToolExecutionPolicy.ToolCallResult result = await policy.ExecuteSingleAsync(
+                MakeToolCall("call_skill_tool", new Dictionary<string, object?>
+                {
+                    ["tool_name"] = "submit_task_verdict",
+                    ["arguments_json"] = "{\"task_id\":\"t1\",\"accepted\":true,\"comment\":\"ok\"}"
+                }),
+                opts,
+                CancellationToken.None);
+
+            string text = result.Result.Result.ToString();
+            Assert.IsFalse(result.Succeeded);
+            Assert.AreEqual(0, calls);
+            StringAssert.Contains("missing required argument(s): reason", text);
+            StringAssert.Contains("Expected parameters: task_id (string, required)", text);
+            Assert.AreEqual("schema-validation", policy.ExecutedTraces.Single().Source);
+            Assert.IsTrue(logger.Logs.Any(l => l.StartsWith("[WARN]") && l.Contains("rejected")),
+                string.Join("\n", logger.Logs));
+            Assert.IsTrue(logger.Logs.Any(l => l.Contains("[ToolCall]") && l.Contains("status=FAIL")),
+                string.Join("\n", logger.Logs));
+        }
+
         [Test]
         public async Task ExecuteSingle_TypeConversionError_AppendsSchemaRetryHint()
         {

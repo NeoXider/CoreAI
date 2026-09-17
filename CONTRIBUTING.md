@@ -28,7 +28,7 @@ If the hook blocks your commit, unstage the listed files with `git restore --sta
   The `llm` and `full` jobs similarly require the LLM installer fixture to execute.
 - **Standalone core tests** — a package-local `CoreAI.Core.Tests` EditMode assembly proves the
   `com.neoxider.coreai` package compiles and tests on its own, without the Unity layer.
-- **`package-graph` job** — fork-safe (no Unity licence needed): checks that all six packages carry
+- **`package-graph` job** — fork-safe (no Unity licence needed): checks that all seven packages carry
   the same lockstep version and that their internal dependency pins agree.
 - **`merge-queue-gate` job** — on the `merge_group` trigger the workflow **fails** (does not skip)
   when `UNITY_LICENSE` is absent, so a PR can never be merged through the queue without the licensed

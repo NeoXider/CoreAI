@@ -121,7 +121,7 @@ namespace CoreAI.Ai
             Func<CancellationToken, Task<LuaResult>> execute,
             CancellationToken cancellationToken)
         {
-            if (string.IsNullOrEmpty(code))
+            if (string.IsNullOrWhiteSpace(code))
             {
                 return SerializeResult(new LuaResult { Success = false, Error = "Lua code is required" });
             }

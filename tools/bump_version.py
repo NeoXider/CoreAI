@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bump every CoreAI UPM package to one version, in lockstep.
 
-The repo ships six packages under Assets/*/ that release together. This sets the
+The repo ships seven packages under Assets/*/ that release together. This sets the
 `version` field AND every internal `com.neoxider.*` dependency pin in each
 package.json to the target version, then verifies the result against the same
 rule the CI "Package graph (lockstep + deps)" gate enforces (one shared version,
