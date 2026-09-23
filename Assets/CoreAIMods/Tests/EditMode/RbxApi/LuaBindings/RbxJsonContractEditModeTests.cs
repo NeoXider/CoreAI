@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,6 +9,8 @@ using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
+using CoreAI.Mods.Rbx.Instances.Replication;
 using CoreAI.Sandbox.LuaCs;
 using Lua;
 using NUnit.Framework;
@@ -28,13 +32,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
     /// (mixed keys, sparse arrays) that the JSON encoder tolerates, and formats numbers differently
     /// (Json.NET always renders a decimal point for floats). None of that is something HTTP JSON sent to
     /// a third-party service may carry. So this file does NOT unify them — it pins the agreement that
-    /// does exist (finite non-integer number formatting, string escaping) and the divergence that must
-    /// stay (envelope shape, integer formatting, NaN/Infinity spelling, key-shape strictness) as an
+    /// does exist (finite non-integer number formatting, NaN/Infinity spelling, string escaping) and the
+    /// divergence that must stay (envelope shape, integer formatting, key-shape strictness) as an
     /// explicit, regression-tested contract instead of an unproven or false claim.
+    /// The last two sections pin the remote codec's own wire contract (non-finite numbers, decode
+    /// cost bounded by the payload rather than by path length times sibling count, exact diagnostic
+    /// paths) and the Roblox rule that an Instance a client names in a remote payload resolves on the
+    /// server only when that client can see it.
     /// </summary>
     [TestFixture]
     public sealed class RbxJsonContractEditModeTests
     {
+        private const string SenderActorId = "actor-loopback";
+
         private SynchronizationContext _savedContext;
 
         /// <summary>Same sync-over-async hazard as LuaCsModRuntimeEditModeTests: detach Unity's
@@ -556,7 +566,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Differential_NaNAndInfinity_HttpBareTokens_NetworkQuotedStrings()
+        public void Differential_NaNAndInfinity_BothEncodersEmitBareNumberTokens()
         {
             MemoryStore store = new();
             LuaCsModStack stack = BuildStackWithNetworkCodec(store);
@@ -566,19 +576,21 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 store_set('http_nan', http:JSONEncode(0/0))
                 store_set('net_nan', network_encode(0/0))
                 store_set('http_inf', http:JSONEncode(math.huge))
-                store_set('net_inf', network_encode(math.huge))");
+                store_set('net_inf', network_encode(math.huge))
+                store_set('http_ninf', http:JSONEncode(-math.huge))
+                store_set('net_ninf', network_encode(-math.huge))");
 
             // WHY: mirror says JSONEncode "allows values such as inf and nan which are not valid JSON".
-            // LuaCsRbxJson honors that literally (bare, unquoted tokens). The network codec never chose
-            // to support that extension; Json.NET's default FloatFormatHandling renders a non-finite
-            // double as a JSON STRING, so a NaN/Infinity value crossing the wire silently becomes a Lua
-            // string "NaN"/"Infinity" on decode, not a number. That is a real, separate finding worth
-            // flagging even though this file does not change it (no fixture round-trips inf/nan through
-            // the remote path in production today).
+            // LuaCsRbxJson honors that literally (bare, unquoted tokens). Roblox remotes carry these
+            // values as numbers too, so the network codec spells them the same way instead of
+            // Json.NET's default quoted "NaN"/"Infinity", which used to reach the receiving handler as
+            // Lua STRINGS and break its arithmetic.
             Assert.AreEqual("NaN", store.Get("m", "http_nan"));
-            Assert.AreEqual("\"NaN\"", store.Get("m", "net_nan"));
+            Assert.AreEqual("NaN", store.Get("m", "net_nan"));
             Assert.AreEqual("Infinity", store.Get("m", "http_inf"));
-            Assert.AreEqual("\"Infinity\"", store.Get("m", "net_inf"));
+            Assert.AreEqual("Infinity", store.Get("m", "net_inf"));
+            Assert.AreEqual("-Infinity", store.Get("m", "http_ninf"));
+            Assert.AreEqual("-Infinity", store.Get("m", "net_ninf"));
         }
 
         [Test]
@@ -667,6 +679,630 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             // demands the root be an argument ARRAY — it refuses outright rather than misreading it.
             Assert.AreEqual("false", store.Get("m", "ok"));
             StringAssert.Contains("remote payload root must be an argument array", store.Get("m", "err"));
+        }
+
+        // ---------------------------------------------------------------------------------------
+        // Remote codec wire contract: non-finite numbers, bounded decode cost, diagnostic paths.
+        // ---------------------------------------------------------------------------------------
+
+        [Test]
+        public void NetworkCodec_NaNAndInfinity_CrossTheWireAsNumbersInBothDirections()
+        {
+            LuaCsRbxNetworkCodec codec = NewStandaloneCodec();
+            LuaTable nested = new();
+            nested[1] = new LuaValue(double.NegativeInfinity);
+            nested[2] = new LuaValue(0.5d);
+
+            byte[] wire = codec.EncodeArguments(new[]
+            {
+                new LuaValue(double.NaN), new LuaValue(double.PositiveInfinity),
+                new LuaValue(double.NegativeInfinity), new LuaValue(nested)
+            });
+
+            Assert.AreEqual(
+                "[NaN,Infinity,-Infinity,{\"$rbx\":\"table\",\"kind\":\"array\",\"values\":[-Infinity,0.5]}]",
+                Encoding.UTF8.GetString(wire));
+
+            object[] decoded = codec.DecodeArguments(wire);
+
+            Assert.IsInstanceOf<double>(decoded[0]);
+            Assert.IsTrue(double.IsNaN((double)decoded[0]));
+            Assert.IsInstanceOf<double>(decoded[1]);
+            Assert.IsTrue(double.IsPositiveInfinity((double)decoded[1]));
+            Assert.IsInstanceOf<double>(decoded[2]);
+            Assert.IsTrue(double.IsNegativeInfinity((double)decoded[2]));
+            LuaCsRbxNetworkTable table = (LuaCsRbxNetworkTable)decoded[3];
+            Assert.IsTrue(double.IsNegativeInfinity((double)table.ArrayValues[0]));
+            Assert.AreEqual(0.5d, (double)table.ArrayValues[1]);
+        }
+
+        [Test]
+        public void NetworkCodec_QuotedNaNFromAnOlderSender_StillDecodesAsTheStringItAlwaysWas()
+        {
+            LuaCsRbxNetworkCodec codec = NewStandaloneCodec();
+
+            object[] decoded = codec.DecodeArguments(
+                Encoding.UTF8.GetBytes("[\"NaN\",\"Infinity\",NaN]"));
+
+            // WHY: the decoder did not change, so a payload an older sender wrote reads exactly as it
+            // did, and a genuine Lua string "NaN" is never coerced into a number.
+            Assert.AreEqual("NaN", decoded[0]);
+            Assert.AreEqual("Infinity", decoded[1]);
+            Assert.IsTrue(double.IsNaN((double)decoded[2]));
+        }
+
+        [Test]
+        public void NetworkCodec_MaxSizePayloadWithALongKeyOverManySiblings_DecodesWithBoundedAllocation()
+        {
+            LuaCsRbxNetworkCodec codec = NewStandaloneCodec();
+            string longKey = new('k', 30_000);
+            string prefix = "[{\"$rbx\":\"table\",\"kind\":\"dictionary\",\"values\":{\"" + longKey
+                            + "\":{\"$rbx\":\"table\",\"kind\":\"dictionary\",\"values\":{";
+            const string suffix = "}}}}]";
+            byte[] payload = FillSiblingsUpToTheCap(prefix, suffix, out int siblings);
+
+            codec.DecodeArguments(payload);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            object[] decoded = codec.DecodeArguments(payload);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            LuaCsRbxNetworkTable outer = (LuaCsRbxNetworkTable)decoded[0];
+            Assert.AreEqual(longKey, outer.DictionaryValues[0].Key);
+            LuaCsRbxNetworkTable inner = (LuaCsRbxNetworkTable)outer.DictionaryValues[0].Value;
+            Assert.AreEqual(siblings, inner.DictionaryValues.Count);
+            Assert.Greater(siblings, 4_000);
+            AssertBoundedAllocation(allocated, "decoding a 30,000-character key over "
+                                               + siblings + " siblings");
+        }
+
+        [Test]
+        public void NetworkCodec_MaxSizePayloadWithLongKeysAtEveryNestingLevel_DecodesWithBoundedAllocation()
+        {
+            LuaCsRbxNetworkCodec codec = NewStandaloneCodec();
+            const int levels = LuaCsRbxNetworkCodec.MaxNestingDepth - 1;
+            string key = new('d', 900);
+            StringBuilder open = new("[");
+            StringBuilder close = new();
+            for (int level = 0; level < levels; level++)
+            {
+                open.Append("{\"$rbx\":\"table\",\"kind\":\"dictionary\",\"values\":{\"")
+                    .Append(key).Append(level).Append("\":");
+                close.Append("}}");
+            }
+
+            open.Append("{\"$rbx\":\"table\",\"kind\":\"dictionary\",\"values\":{");
+            byte[] payload = FillSiblingsUpToTheCap(
+                open.ToString(), "}}" + close + "]", out int siblings);
+
+            codec.DecodeArguments(payload);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            object[] decoded = codec.DecodeArguments(payload);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            LuaCsRbxNetworkTable cursor = (LuaCsRbxNetworkTable)decoded[0];
+            for (int level = 0; level < levels; level++)
+            {
+                Assert.AreEqual(key + level, cursor.DictionaryValues[0].Key);
+                cursor = (LuaCsRbxNetworkTable)cursor.DictionaryValues[0].Value;
+            }
+
+            Assert.AreEqual(siblings, cursor.DictionaryValues.Count);
+            Assert.Greater(siblings, 500);
+            AssertBoundedAllocation(allocated, "decoding " + levels
+                                               + " levels of 900-character keys over "
+                                               + siblings + " siblings");
+        }
+
+        [Test]
+        public void NetworkCodec_EncodingALongKeyOverManySiblings_AllocatesBoundedMemory()
+        {
+            LuaCsRbxNetworkCodec codec = NewStandaloneCodec();
+            LuaTable inner = new();
+            for (int index = 0; index < 3_000; index++)
+            {
+                inner[index.ToString("x")] = new LuaValue(0d);
+            }
+
+            LuaTable root = new();
+            root[new string('e', 20_000)] = new LuaValue(inner);
+            LuaValue[] arguments = { new LuaValue(root) };
+
+            codec.EncodeArguments(arguments);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            byte[] wire = codec.EncodeArguments(arguments);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.Greater(wire.Length, 40_000);
+            AssertBoundedAllocation(allocated,
+                "encoding a 20,000-character key over 3000 siblings");
+        }
+
+        [Test]
+        public void NetworkCodec_DecodeErrorDeepInsideAStructure_ReportsTheExactPathText()
+        {
+            LuaCsRbxNetworkCodec codec = NewStandaloneCodec();
+
+            RbxError unknownTag = Assert.Throws<RbxError>(() => codec.DecodeArguments(
+                Encoding.UTF8.GetBytes(
+                    "[1,{\"$rbx\":\"table\",\"kind\":\"dictionary\",\"values\":{\"outer\":"
+                    + "{\"$rbx\":\"table\",\"kind\":\"array\",\"values\":[1,"
+                    + "{\"$rbx\":\"table\",\"kind\":\"dictionary\",\"values\":{\"leaf\":"
+                    + "{\"$rbx\":\"Bogus\"}}}]}}}]")));
+            RbxError badId = Assert.Throws<RbxError>(() => codec.DecodeArguments(
+                Encoding.UTF8.GetBytes(
+                    "[0,0,{\"$rbx\":\"table\",\"kind\":\"array\",\"values\":["
+                    + "{\"$rbx\":\"table\",\"kind\":\"dictionary\",\"values\":{\"b\":"
+                    + "{\"$rbx\":\"Instance\",\"id\":\"x\"}}}]}]")));
+            RbxError rawArray = Assert.Throws<RbxError>(() => codec.DecodeArguments(
+                Encoding.UTF8.GetBytes(
+                    "[{\"$rbx\":\"table\",\"kind\":\"array\",\"values\":[true,[1]]}]")));
+            RbxError badKind = Assert.Throws<RbxError>(() => codec.DecodeArguments(
+                Encoding.UTF8.GetBytes(
+                    "[{\"$rbx\":\"table\",\"kind\":\"dictionary\",\"values\":{\"a\":"
+                    + "{\"$rbx\":\"table\",\"kind\":\"weird\",\"values\":[]}}}]")));
+            StringBuilder deep = new("[");
+            StringBuilder expectedDepthPath = new("$[0]");
+            for (int level = 0; level <= LuaCsRbxNetworkCodec.MaxNestingDepth; level++)
+            {
+                deep.Append("{\"$rbx\":\"table\",\"kind\":\"array\",\"values\":[");
+            }
+
+            deep.Append('1');
+            for (int level = 0; level <= LuaCsRbxNetworkCodec.MaxNestingDepth; level++)
+            {
+                deep.Append("]}");
+            }
+
+            for (int level = 0; level < LuaCsRbxNetworkCodec.MaxNestingDepth; level++)
+            {
+                expectedDepthPath.Append("[1]");
+            }
+
+            RbxError tooDeep = Assert.Throws<RbxError>(() => codec.DecodeArguments(
+                Encoding.UTF8.GetBytes(deep.Append(']').ToString())));
+
+            Assert.AreEqual(
+                "remote payload contains unknown Rbx tag 'Bogus' at $[1].outer[2].leaf",
+                unknownTag.RawMessage);
+            Assert.AreEqual("remote Instance id is invalid at $[2][1].b", badId.RawMessage);
+            Assert.AreEqual("remote payload contains unsupported JSON token Array at $[0][2]",
+                rawArray.RawMessage);
+            Assert.AreEqual("remote table tag has an invalid kind at $[0].a", badKind.RawMessage);
+            Assert.AreEqual(
+                "remote payload table nesting exceeds CoreAI's 64 level limit at "
+                + expectedDepthPath, tooDeep.RawMessage);
+            Assert.AreEqual(RbxErrorCode.BadArgument, unknownTag.Code);
+        }
+
+        [Test]
+        public void NetworkCodec_EncodeErrorDeepInsideAStructure_ReportsTheExactPathText()
+        {
+            LuaCsRbxNetworkCodec codec = NewStandaloneCodec();
+            LuaTable mixed = new();
+            mixed[1] = new LuaValue(1d);
+            mixed["x"] = new LuaValue(2d);
+            LuaTable holder = new();
+            holder["k"] = new LuaValue(mixed);
+            LuaTable array = new();
+            array[1] = new LuaValue(holder);
+            LuaTable cycle = new();
+            LuaTable cycleInner = new();
+            cycle["self"] = new LuaValue(cycleInner);
+            cycleInner["back"] = new LuaValue(cycle);
+            LuaTable sparse = new();
+            sparse[1] = new LuaValue(1d);
+            sparse[3] = new LuaValue(3d);
+            LuaTable sparseHolder = new();
+            sparseHolder["s"] = new LuaValue(sparse);
+            LuaTable budget = new();
+            for (int index = 0; index <= LuaCsRbxNetworkCodec.MaxAggregateEntries; index++)
+            {
+                budget["e" + index] = new LuaValue(true);
+            }
+
+            LuaTable budgetHolder = new();
+            budgetHolder["big"] = new LuaValue(budget);
+
+            RbxError mixedError = Assert.Throws<RbxError>(() => codec.EncodeArguments(
+                new[] { new LuaValue(7d), new LuaValue(array) }));
+            RbxError cycleError = Assert.Throws<RbxError>(() => codec.EncodeArguments(
+                new[] { new LuaValue(cycle) }));
+            RbxError sparseError = Assert.Throws<RbxError>(() => codec.EncodeArguments(
+                new[] { new LuaValue(sparseHolder) }));
+            RbxError budgetError = Assert.Throws<RbxError>(() => codec.EncodeArguments(
+                new[] { new LuaValue(budgetHolder) }));
+
+            Assert.AreEqual(
+                "remote payload contains mixed numeric and non-numeric table keys at $[1][1].k",
+                mixedError.RawMessage);
+            Assert.AreEqual("remote payload contains a cyclic table at $[0].self.back",
+                cycleError.RawMessage);
+            Assert.AreEqual(
+                "remote array keys must be unique contiguous indices 1..N at $[0].s",
+                sparseError.RawMessage);
+            Assert.AreEqual(
+                "remote payload exceeds CoreAI's 100000 aggregate entry limit at $[0].big",
+                budgetError.RawMessage);
+        }
+
+        [Test]
+        public void NetworkCodec_UnresolvedValues_AreLoggedOncePerPayloadNotOncePerValue()
+        {
+            List<string> log = new();
+            LuaCsRbxNetworkCodec codec = new(
+                new InstanceRegistry(), RbxEnumRegistry.CreateWithBuiltins(), log.Add);
+            const string bogusEnum = "{\"$rbx\":\"EnumItem\",\"enum\":\"Bogus\",\"name\":\"A\",\"value\":0}";
+
+            object[] many = codec.DecodeArguments(Encoding.UTF8.GetBytes(
+                "[{\"$rbx\":\"Instance\",\"id\":\"987654321\"},{\"$rbx\":\"Instance\",\"id\":\"987654322\"},"
+                + bogusEnum + "," + bogusEnum + "," + bogusEnum + "]"));
+
+            Assert.AreEqual(5, many.Length);
+            for (int index = 0; index < many.Length; index++)
+            {
+                Assert.IsNull(many[index]);
+            }
+
+            CollectionAssert.AreEqual(new[]
+            {
+                "Remote payload enum item Enum.Bogus.A is not registered; decoded as nil"
+                + " (3 such enum items in this payload).",
+                "Remote payload InstanceId 987654321 is not visible in the receiving registry;"
+                + " decoded as nil (2 such Instance references in this payload)."
+            }, log);
+
+            log.Clear();
+            codec.DecodeArguments(Encoding.UTF8.GetBytes(
+                "[{\"$rbx\":\"Instance\",\"id\":\"987654321\"}," + bogusEnum + "]"));
+
+            CollectionAssert.AreEqual(new[]
+            {
+                "Remote payload enum item Enum.Bogus.A is not registered; decoded as nil.",
+                "Remote payload InstanceId 987654321 is not visible in the receiving registry;"
+                + " decoded as nil."
+            }, log);
+        }
+
+        /// <summary>
+        /// WHY 8 MB: the same payload cost about 268 MB (flat key) and 86 MB (nested keys) while every
+        /// nested value built its own diagnostic path string; the lazy path leaves roughly the cost
+        /// of parsing the JSON itself, about 2.5 MB. WHY 0 passes: Unity's Mono runtime answers 0
+        /// from GetAllocatedBytesForCurrentThread, so the bound is enforced where the counter exists
+        /// (CoreCLR) and the structural assertions above still run everywhere.
+        /// </summary>
+        private static void AssertBoundedAllocation(long allocated, string operation)
+        {
+            const long limit = 8L * 1024 * 1024;
+            Assert.IsTrue(allocated == 0 || allocated < limit,
+                operation + " allocated " + allocated + " bytes; the bound is " + limit);
+        }
+
+        private static byte[] FillSiblingsUpToTheCap(string prefix, string suffix, out int siblings)
+        {
+            StringBuilder entries = new();
+            int budget = LuaCsRbxNetworkCodec.MaxPayloadBytes
+                         - Encoding.UTF8.GetByteCount(prefix) - Encoding.UTF8.GetByteCount(suffix);
+            siblings = 0;
+            while (true)
+            {
+                string entry = (siblings == 0 ? "" : ",") + "\"" + siblings.ToString("x") + "\":0";
+                if (entries.Length + entry.Length > budget)
+                {
+                    break;
+                }
+
+                entries.Append(entry);
+                siblings++;
+            }
+
+            byte[] payload = Encoding.UTF8.GetBytes(prefix + entries + suffix);
+            Assert.LessOrEqual(payload.Length, LuaCsRbxNetworkCodec.MaxPayloadBytes);
+            return payload;
+        }
+
+        private static LuaCsRbxNetworkCodec NewStandaloneCodec()
+        {
+            return new LuaCsRbxNetworkCodec(
+                new InstanceRegistry(), RbxEnumRegistry.CreateWithBuiltins(), null);
+        }
+
+        // ---------------------------------------------------------------------------------------
+        // Remote codec: Instance references a client sends to the server resolve only when the
+        // sender can see them (remote-events guide, "Non-replicated instances").
+        // ---------------------------------------------------------------------------------------
+
+        [Test]
+        public void ClientPayload_NamingAServerStorageChild_DecodesAsNilOnTheServer()
+        {
+            ClientCodecWorld world = new();
+            RbxInstance serverStorage = world.Game.GetService("ServerStorage");
+            RbxInstance vault = world.CreatePart("AdminVault", serverStorage);
+            RbxInstance scripts = world.Game.GetService("ServerScriptService");
+            RbxInstance secretScriptFolder = world.CreatePart("Secrets", scripts);
+
+            object[] decoded = world.Codec.DecodeClientArguments(
+                InstancePayload(vault, secretScriptFolder, vault), SenderActorId);
+
+            // WHY: remote-events guide, "Non-replicated instances": a value only the sender side can
+            // see "passes nil instead". A client has no legitimate way to name a ServerStorage or
+            // ServerScriptService object, so the server must never hand its handler the live one.
+            Assert.AreEqual(3, decoded.Length);
+            Assert.IsNull(decoded[0]);
+            Assert.IsNull(decoded[1]);
+            Assert.IsNull(decoded[2]);
+            Assert.AreEqual(3L, world.Codec.HiddenClientInstanceReferences);
+            Assert.AreEqual(1L, world.Codec.HiddenClientReferencePayloads);
+            Assert.AreEqual(1, world.Log.Count,
+                "hidden references are reported once per payload, not once per value");
+            StringAssert.Contains("actor '" + SenderActorId + "'", world.Log[0]);
+            StringAssert.Contains(
+                "InstanceId " + vault.Id.Value.ToString(CultureInfo.InvariantCulture),
+                world.Log[0]);
+            StringAssert.Contains("cannot see", world.Log[0]);
+        }
+
+        [Test]
+        public void ClientPayload_NamingServerOnlyInstanceInsideATable_DecodesThatEntryAsNil()
+        {
+            ClientCodecWorld world = new();
+            RbxInstance vault = world.CreatePart("AdminVault", world.Game.GetService("ServerStorage"));
+            RbxInstance visible = world.CreatePart("Crate", world.Game.GetService("Workspace"));
+            string json = "[{\"$rbx\":\"table\",\"kind\":\"dictionary\",\"values\":{"
+                          + "\"template\":" + InstanceTag(vault) + ","
+                          + "\"target\":" + InstanceTag(visible) + "}}]";
+
+            object[] decoded = world.Codec.DecodeClientArguments(
+                Encoding.UTF8.GetBytes(json), SenderActorId);
+
+            LuaCsRbxNetworkTable table = (LuaCsRbxNetworkTable)decoded[0];
+            Assert.AreEqual(2, table.DictionaryValues.Count);
+            Assert.AreEqual("template", table.DictionaryValues[0].Key);
+            Assert.IsNull(table.DictionaryValues[0].Value);
+            Assert.AreEqual("target", table.DictionaryValues[1].Key);
+            Assert.AreSame(visible, table.DictionaryValues[1].Value);
+            Assert.AreEqual(1L, world.Codec.HiddenClientInstanceReferences);
+        }
+
+        [Test]
+        public void ClientPayload_NamingReplicatedInstances_ResolvesThoseInstances()
+        {
+            ClientCodecWorld world = new();
+            RbxInstance workspacePart = world.CreatePart(
+                "Crate", world.Game.GetService("Workspace"));
+            RbxInstance template = world.CreatePart(
+                "SwordTemplate", world.Game.GetService("ReplicatedStorage"));
+
+            object[] decoded = world.Codec.DecodeClientArguments(
+                InstancePayload(workspacePart, template), SenderActorId);
+
+            Assert.AreSame(workspacePart, decoded[0]);
+            Assert.AreSame(template, decoded[1]);
+            Assert.AreEqual(0L, world.Codec.HiddenClientInstanceReferences);
+            Assert.AreEqual(0L, world.Codec.HiddenClientReferencePayloads);
+            Assert.IsEmpty(world.Log);
+        }
+
+        [Test]
+        public void ClientPayload_NamingAnotherPlayersBackpack_DecodesAsNil_ButTheSendersOwnResolves()
+        {
+            ClientCodecWorld world = new();
+            RbxPlayers players = (RbxPlayers)world.Game.GetService("Players");
+            RbxPlayer sender = players.EnsureActor(world.Registry, SenderActorId);
+            RbxPlayer other = players.EnsureActor(world.Registry, "actor-other");
+            RbxInstance ownTool = world.CreatePart("OwnTool", sender.FindFirstChild("Backpack"));
+            RbxInstance otherTool = world.CreatePart("OtherTool", other.FindFirstChild("Backpack"));
+            RbxInstance otherGui = other.FindFirstChild("PlayerGui");
+
+            object[] decoded = world.Codec.DecodeClientArguments(
+                InstancePayload(ownTool, otherTool, otherGui, other), SenderActorId);
+
+            Assert.AreSame(ownTool, decoded[0]);
+            Assert.IsNull(decoded[1], "another player's Backpack is replicated to its owner only");
+            Assert.IsNull(decoded[2], "another player's PlayerGui is replicated to its owner only");
+            Assert.AreSame(other, decoded[3], "Player objects replicate to every client");
+            Assert.AreEqual(2L, world.Codec.HiddenClientInstanceReferences);
+        }
+
+        [Test]
+        public void ClientPayload_NamingUnknownDestroyedOrDetachedIds_DecodesAsNil()
+        {
+            ClientCodecWorld world = new();
+            RbxInstance destroyed = world.CreatePart("Gone", world.Game.GetService("Workspace"));
+            InstanceId destroyedId = destroyed.Id;
+            destroyed.Destroy();
+            RbxInstance detached = world.Registry.Create("Part");
+            string json = "[{\"$rbx\":\"Instance\",\"id\":\"987654321\"},"
+                          + "{\"$rbx\":\"Instance\",\"id\":\""
+                          + destroyedId.Value.ToString(CultureInfo.InvariantCulture) + "\"},"
+                          + InstanceTag(detached) + "]";
+
+            object[] decoded = world.Codec.DecodeClientArguments(
+                Encoding.UTF8.GetBytes(json), SenderActorId);
+
+            Assert.IsNull(decoded[0], "an id the server never issued");
+            Assert.IsNull(decoded[1], "an instance destroyed before the payload arrived");
+            Assert.IsNull(decoded[2], "a subtree with no DataModel ancestor replicates to nobody");
+            Assert.AreEqual(3L, world.Codec.HiddenClientInstanceReferences);
+            Assert.AreEqual(1, world.Log.Count);
+        }
+
+        [Test]
+        public void TrustedPayload_ServerToClientAndHostLocalPath_StillResolvesEveryRegisteredInstance()
+        {
+            ClientCodecWorld world = new();
+            RbxInstance vault = world.CreatePart("AdminVault", world.Game.GetService("ServerStorage"));
+            RbxInstance detached = world.Registry.Create("Part");
+
+            object[] decoded = world.Codec.DecodeArguments(InstancePayload(vault, detached));
+
+            Assert.AreSame(vault, decoded[0]);
+            Assert.AreSame(detached, decoded[1]);
+            Assert.AreEqual(0L, world.Codec.HiddenClientInstanceReferences);
+            Assert.IsEmpty(world.Log);
+        }
+
+        [Test]
+        public void ClientPayloadsWithHiddenReferences_AreCountedExactly_AndLoggedAtPowersOfTwo()
+        {
+            ClientCodecWorld world = new();
+            RbxInstance vault = world.CreatePart("AdminVault", world.Game.GetService("ServerStorage"));
+            byte[] payload = InstancePayload(vault);
+
+            for (int index = 0; index < 1000; index++)
+            {
+                Assert.IsNull(world.Codec.DecodeClientArguments(payload, SenderActorId)[0]);
+            }
+
+            Assert.AreEqual(1000L, world.Codec.HiddenClientInstanceReferences);
+            Assert.AreEqual(1000L, world.Codec.HiddenClientReferencePayloads);
+            // WHY 10: payloads 1, 2, 4, ..., 512 are logged; a client repeating the payload at its own
+            // packet rate must not be able to write the server's log at that rate.
+            Assert.AreEqual(10, world.Log.Count);
+            StringAssert.EndsWith("so far: 512.", world.Log[9]);
+        }
+
+        [Test]
+        public void ClientPayload_VisibilityIsDecidedAfreshForEveryPayload()
+        {
+            ClientCodecWorld world = new();
+            RbxInstance part = world.CreatePart("Crate", world.Game.GetService("Workspace"));
+            byte[] payload = InstancePayload(part, part);
+
+            object[] whileReplicated = world.Codec.DecodeClientArguments(payload, SenderActorId);
+            part.Parent = world.Game.GetService("ServerStorage");
+            object[] afterMovingServerSide = world.Codec.DecodeClientArguments(payload, SenderActorId);
+
+            Assert.AreSame(part, whileReplicated[0]);
+            Assert.AreSame(part, whileReplicated[1]);
+            Assert.IsNull(afterMovingServerSide[0]);
+            Assert.IsNull(afterMovingServerSide[1]);
+        }
+
+        [Test]
+        public void ClientPayload_AsksTheReplicationFilterAtMostOncePerNode()
+        {
+            CountingReplicationFilter filter = new(allowEverything: false);
+            ClientCodecWorld world = new(filter);
+            RbxInstance cursor = world.Game.GetService("Workspace");
+            const int depth = 20;
+            for (int level = 0; level < depth; level++)
+            {
+                RbxInstance folder = world.Registry.Create("Folder");
+                folder.Parent = cursor;
+                cursor = folder;
+            }
+
+            const int leaves = 50;
+            RbxInstance[] parts = new RbxInstance[leaves];
+            for (int index = 0; index < leaves; index++)
+            {
+                parts[index] = world.CreatePart("Leaf" + index, cursor);
+            }
+
+            object[] decoded = world.Codec.DecodeClientArguments(InstancePayload(parts), SenderActorId);
+
+            for (int index = 0; index < leaves; index++)
+            {
+                Assert.AreSame(parts[index], decoded[index]);
+            }
+
+            // WHY: the guard asks the game filter about every ancestor of every reference, so without
+            // a per-payload answer cache 50 leaves under 22 shared ancestors cost 50 x 23 = 1150 calls,
+            // and a 64 KiB payload of deep references costs the server N x depth^2. Each distinct node
+            // (50 leaves + 20 folders + Workspace + the DataModel) needs one answer.
+            int distinctNodes = leaves + depth + 2;
+            Assert.Greater(filter.Calls, 0);
+            Assert.LessOrEqual(filter.Calls, distinctNodes);
+        }
+
+        [Test]
+        public void ClientPayload_APermissiveGameFilterCannotLiftTheReplicationFloor()
+        {
+            CountingReplicationFilter filter = new(allowEverything: true);
+            ClientCodecWorld world = new(filter);
+            RbxInstance vault = world.CreatePart("AdminVault", world.Game.GetService("ServerStorage"));
+            RbxPlayers players = (RbxPlayers)world.Game.GetService("Players");
+            players.EnsureActor(world.Registry, SenderActorId);
+            RbxPlayer other = players.EnsureActor(world.Registry, "actor-other");
+            RbxInstance otherTool = world.CreatePart("OtherTool", other.FindFirstChild("Backpack"));
+            RbxInstance detached = world.Registry.Create("Part");
+
+            object[] decoded = world.Codec.DecodeClientArguments(
+                InstancePayload(vault, otherTool, detached), SenderActorId);
+
+            Assert.IsNull(decoded[0], "ServerStorage is below the floor whatever the game filter says");
+            Assert.IsNull(decoded[1], "another player's Backpack is below the floor");
+            Assert.AreSame(detached, decoded[2],
+                "above the floor the game's filter decides, and this one allows everything");
+        }
+
+        private sealed class CountingReplicationFilter : IReplicationFilter
+        {
+            private readonly bool _allowEverything;
+
+            public CountingReplicationFilter(bool allowEverything)
+            {
+                _allowEverything = allowEverything;
+            }
+
+            public int Calls { get; private set; }
+
+            public bool IsVisibleTo(string recipientActorId, RbxInstance instance)
+            {
+                Calls++;
+                return _allowEverything
+                       || DefaultReplicationFilter.Instance.IsVisibleTo(recipientActorId, instance);
+            }
+        }
+
+        private sealed class ClientCodecWorld
+        {
+            public ClientCodecWorld(IReplicationFilter clientVisibility = null)
+            {
+                Registry = new InstanceRegistry();
+                Game = DataModelBootstrap.CreateGame(Registry);
+                Codec = new LuaCsRbxNetworkCodec(
+                    Registry, RbxEnumRegistry.CreateWithBuiltins(), Log.Add, clientVisibility);
+            }
+
+            public InstanceRegistry Registry { get; }
+
+            public RbxDataModel Game { get; }
+
+            public List<string> Log { get; } = new();
+
+            public LuaCsRbxNetworkCodec Codec { get; }
+
+            public RbxInstance CreatePart(string name, RbxInstance parent)
+            {
+                Assert.IsNotNull(parent, "the parent container must exist for " + name);
+                RbxInstance part = Registry.Create("Part");
+                part.Name = name;
+                part.Parent = parent;
+                return part;
+            }
+        }
+
+        private static string InstanceTag(RbxInstance instance)
+        {
+            return "{\"$rbx\":\"Instance\",\"id\":\""
+                   + instance.Id.Value.ToString(CultureInfo.InvariantCulture) + "\"}";
+        }
+
+        private static byte[] InstancePayload(params RbxInstance[] instances)
+        {
+            StringBuilder json = new("[");
+            for (int index = 0; index < instances.Length; index++)
+            {
+                if (index > 0)
+                {
+                    json.Append(',');
+                }
+
+                json.Append(InstanceTag(instances[index]));
+            }
+
+            return Encoding.UTF8.GetBytes(json.Append(']').ToString());
         }
     }
 }
