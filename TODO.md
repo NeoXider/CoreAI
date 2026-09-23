@@ -48,6 +48,161 @@ a panel built on an inactive object never reaches `OnEnable`, and `DeadlineCance
       built) — see `dev-docs/MOD_SYSTEM_DESIGN_NOTES.md`.
 - [ ] **CI Unity jobs** still stop at "UNITY_LICENSE is required" — the secret has to be added by the owner.
 
+## Newcomer API ergonomics audit (2026-09-24)
+
+A newcomer-persona audit of the 7.45.0 tree: install from README/INSTALL through UPM Git URLs, then a chat agent, a
+custom tool, a Lua mod, save/load. Every finding was re-read against the code before it went in, and an item says
+so where verification changed the claim. IDs are the audit's (A bug, B docs/install, C API, D quick win); the
+report itself is not kept. Line numbers are at `61ad743c`. D7 (`InstanceTreeSerializer` raw `FormatException`) is
+fixed in parallel and not listed.
+
+- [ ] **[A1, CRITICAL] Setup menus hardcode `Assets/<package>/…` paths and break on the Git-URL install.**
+      `CoreAIChatDemoSceneCreator.cs:28-29,177-183`, `CoreAISettingsAssetEditor.cs:29,90-97`,
+      `CoreAiHubSetupMenu.cs:19-22,75`: from `Packages/com.neoxider.*` README step 3 builds a chat with no UXML
+      (Play shows an empty screen), the settings inspector falls back to the default one, and `Add Hub` saves into
+      a missing folder then instantiates `null`. Fix: load by GUID or `PackageInfo.FindForAssembly`; see F-22. S–M.
+- [ ] **[A2+B3+D9, MAJOR] A missing `COREAI_LLM` silently swaps the backend for `StubLlmClient` (`Ok = true`).**
+      `LlmPipelineInstaller.cs:271-277,380-381` log nothing and `CoreAiBackend.Status` shows the configured mode;
+      the quick starts omit the define (only INSTALL §2.3 names it) and `Enable Providers` sets it for one target,
+      so `AskAsync(…, "Blacksmith")` returns `ApplyWaveModifier` JSON as the NPC's line. Fix: warn in the
+      `!COREAI_LLM` branches now; then a failing `NotConfigured` client, a build check, a quick-start step. S/M.
+- [ ] **[A3, MAJOR] `StopAgent(roleId)` and `CancelTasks(scope)` cancel nothing in the default composition.**
+      `QueuedAiOrchestrator.cs:1130-1147` gives every task an `ActorContext` (the inner `AiOrchestrator` resolves
+      it) and `CreateScopeEntry` (`:1164`) keeps only its session GUID, so `ResolveCurrentScopeKeys` (`:692-708`)
+      never matches a role id or a domain scope (broader than the audit's facade-only claim; the queue tests use a
+      fake inner). Fix: keep logical scope + role in `ScopeEntry`; test via the real composition. S.
+- [ ] **[A9+C4, MAJOR] `AgentBuilder.Build()` before CoreAI starts registers nothing, and unknown roles run as a
+      default agent, silently.** `AgentBuilder.cs:505-515` applies only when `CoreAIAgent.Policy` is set, which
+      happens in `IStartable.Start` (`CoreAIGameEntryPoint.cs:96`); an unknown or miscased id gets the memory tool
+      only (`AgentMemoryPolicy.cs:631-638`). A blacksmith built in `Awake()` answers with no prompt and no tool.
+      Fix: queue configs until `Initialize`, warn once per unknown role, README uses `blacksmith.AskAsync`. S–M.
+- [ ] **[A5+C1, MAJOR] `CoreAi.AskAsync` returns a provider error as if it were the reply.** `SourceTag = "Chat"`
+      (`CoreAiChatService.cs:384-394`) makes `AiOrchestrator.RunTaskAsync` (`:317`, `:2932-2952`) return the error
+      text, so `"HTTP 401 …"` becomes NPC speech or quest JSON; `StreamAsync` throws and `AgentConfig.AskAsync`
+      returns `null` instead. Fix: `CoreAi.AskResultAsync` / `SmartAskResultAsync` over the existing
+      `SendMessageResultAsync`; document the string contract in COREAI_SINGLETON_API. S.
+- [ ] **[A6, MAJOR] `SmartAskAsync` drops streaming errors.** `CoreAiChatService.SendMessageSmartAsync`
+      (`:689-709`, `:724-747`) joins `chunk.Text` and never reads `chunk.Error`; the facade adapter
+      (`CoreAi.cs:382-400`) forwards text only. After a 500 or a dropped stream the caller saves `""` or half an
+      answer (streaming is on by default for tool roles). Fix: throw like `StreamAsync` on a terminal error chunk
+      through one shared helper; regression test with an `{IsDone, Error}` stub. S.
+- [ ] **[A7, MAJOR] `AgentMode` is not enforced.** `Mode` is read only for build warnings and the streaming default
+      (`AgentBuilder.cs:654-669,858`): `ChatOnly` still offers every tool, memory included, and `ToolsOnly` keeps
+      chat history, contrary to the enum docs and AGENT_BUILDER. Fix: carry `Mode` into `PreparedAgentRole`
+      (ChatOnly strips tools / `ToolMode = None`, ToolsOnly defaults history off) after one release of warnings, or
+      rename/deprecate the modes and fix the docs. M.
+- [ ] **[A4, MAJOR] `CoreAi` keeps a dead chat service after a scene change.** `TryResolve`
+      (`CoreAi.cs:845,878-881`) re-resolves scope and orchestrator (a destroyed scope compares `null`; the audit
+      overstated this) but never `_chatService`, which holds the old disposed queue: `IsReady` is true, `AskAsync`
+      fails. The documented `Invalidate()` also runs `CoreAIAgent.Reset()`, which nothing re-initialises while the
+      new scope owns the facade. Fix: drop caches of a destroyed scope; spare a live owner. S.
+- [ ] **[A8, MAJOR] Runtime key/backend switching writes into the shared `CoreAISettingsAsset`.**
+      `CoreAiBackend.SetApiKey` / `Apply*` (`:154-181,326-329`) mutate the Resources asset in place: in the Editor
+      a key "supplied at runtime" (QUICK_START) outlives Play Mode, aborts the next build in
+      `CoreAIResourcesApiKeyBuildGuard` and is saved by the next inspector edit. Fix: a `[NonSerialized]` session
+      overlay the getters prefer, or an Editor clone; see the [R7.5] hot-swap item. M.
+- [ ] **[A10, MINOR] `AgentMemoryPolicy.AddToolForRole` (`:232-250`) appends duplicates.** A
+      `CoreAi.RegisterGameStateTool()` in `OnEnable` publishes two `game_state` functions after one toggle; nothing
+      de-duplicates downstream (`AiToolOrder.Canonical`, `MeaiLlmClient.cs:2878-2915`) and strict providers reject
+      duplicate names. Fix: replace by name (ordinal) and return whether anything changed. S.
+- [ ] **[A11, MINOR] `LlmToolBase.JsonParams` (`ILlmTool.cs:184-199`) does not JSON-escape.** A quote, backslash or
+      newline in a description yields an unparseable schema: the text path prints it to the model and the
+      `ParametersSchema` half of the required-argument union is lost (the bound function's half still applies, so
+      the check is not fully disabled as claimed). Fix: build with `JObject` / `JsonConvert.ToString`; test it. S.
+- [ ] **[A12+C11, MINOR] `AgentConfig.AskWithCallback` posts `onDone(null)` on failure and outlives its caller.**
+      `AgentConfigExtensions.cs:137-191`: without a `SourceTag` a failed turn returns `null`, so
+      `r => label.text = r.ToUpper()` throws although the doc promises "after a successful response"; with no token
+      a destroyed NPC still gets the callback. Fix: skip `onDone` on `null` (or add `onError`), add a
+      `CancellationToken` overload and a Unity overload bound to `owner.destroyCancellationToken`. S.
+- [ ] **[A13, MINOR] With Domain Reload off, `CoreAi` tool events and tool-call history survive Play sessions.**
+      `ResetForSubsystemRegistration` (`CoreAi.cs:959-973`) clears `CoreAiEvents` (the [A6] runtime item) but not
+      `OnToolExecuted`, `OnToolCall*`, `OnToolCallRecord` or `ToolCallHistory` (replayed by `SubscribeToolCalls`),
+      nor `CoreAiBackend.OnBackendChanged`. Fix: null them and call `ClearToolCallHistory()` in that hook only. S.
+- [ ] **[B1, MAJOR] The "fix my install" menus cannot compile until the install is fixed.**
+      `CoreAIDependencyInstaller` / `CoreAINuGetBootstrapper` sit in `CoreAI.Editor`, which needs `CoreAI.Core`,
+      `CoreAI.Source` and VContainer, so with MEAI or a Git dependency missing the menus INSTALL §1.1 and
+      QUICK_START prescribe do not exist; §1.1 also runs before §1.2 installs CoreAiUnity. Fix: a reference-free
+      setup asmdef (Unity-generated `.meta`), manual manifest block first. S–M.
+- [ ] **[B2, MAJOR] `Newtonsoft.Json` is an undeclared dependency.** The `CoreAI.Core` / `Source` / `Editor`
+      asmdefs reference `Newtonsoft.Json.dll`, but no CoreAI `package.json` declares
+      `com.unity.nuget.newtonsoft-json`; here it arrives via LLMUnity and others, and INSTALL §1.1 tells HTTP-only
+      users to remove `ai.undream.llm`, after which a fresh project fails with CS0246. Fix: declare it in
+      `com.neoxider.coreai` and list it in INSTALL. S.
+- [ ] **[B4, MAJOR] `[Inject]` MonoBehaviour samples leave the field null.** QUICK_START_FULL §5.2 Option A,
+      EXAMPLES.md (four samples), DEMO_RECORDING_GUIDE: a scene MonoBehaviour is injected only through Auto Inject
+      Game Objects, `RegisterComponent` or the resolver, none mentioned, and `CoreAILifetimeScope` is sealed; the
+      copied script throws `NullReferenceException` in `Start`. Fix: `CoreAi.*` / `GetOrchestrator()`, `[Inject]`
+      only in an advanced-DI note that names Auto Inject Game Objects. S.
+- [ ] **[B5, MAJOR] The canonical tool template hangs on WebGL once its body awaits.** TOOL_AUTHORING_GUIDE
+      (`:92-114`, checklist `:147-165`) hands an `async Task<string>` straight to `AIFunctionFactory.Create` and
+      never mentions `MeaiToolTaskBridge.Publish` (MEAI_TOOL_CALLING §3.2): a `UnityWebRequest` in the body works
+      in the Editor and hangs silently in the player. Fix: template through `Publish(ExecuteCoreAsync(...))` plus a
+      checklist line; the framework half is C2/C3. S.
+- [ ] **[B7, MINOR] Agent samples double-register and pair `ChatOnly` with `WithMemory`.** QUICK_START §7 and
+      AGENT_BUILDER Recipes 4–5 call `ApplyToPolicy(CoreAIAgent.Policy)` after `Build()`, which throws
+      `ArgumentNullException` before CoreAI starts; `AskAsync` already registers lazily. Fix: drop those lines and
+      `.WithMemory()` from the ChatOnly sample (or fix A7 first). S.
+- [ ] **[B6, MINOR] EXAMPLES.md:24 still offers "implement `ILlmTool` / subclass `LlmToolBase`" as the escape
+      hatch;** such a tool is skipped at request time (`MeaiLlmClient.cs:2910-2913`). Fix: "and implement
+      `IAIFunctionLlmTool`", link TOOL_AUTHORING_GUIDE. S.
+- [ ] **[B8, MINOR] No host-facing "save and load a world" recipe.** `Docs/CoreAIMods/WORLD_PACKAGE.md` has no C#;
+      `IRbxWorldRuntimeService` (`RbxWorldPackageContracts.cs`) is named only in the FullAccess demo README. Fix: a
+      short section (resolve the service, save, load, handle `player_confirmation_required`) once the in-flight
+      world-package changes land. S.
+- [ ] **[B9, MINOR] RBX_API.md:3-4 promises "mirrors Roblox 1:1 … without a rewrite"** while the same page lists a
+      closed `Instance.new` set and `BindToRenderStep` / network ownership as stubs. Fix: "Roblox names and
+      semantics for the subset below; unsupported members fail loudly" plus a short "Not supported yet" table. S.
+- [ ] **[C3] Class-based tools are unsafe by default.** An `LlmToolBase` without `IAIFunctionLlmTool` passes
+      `WithTool` and is skipped per request with a warning; `ParametersSchema` defaults to `"{}"`, which the text
+      path omits even when the bound function has parameters (`AiToolContractPromptFormatter.cs:215`; the audit's
+      AGENT_BUILDER example has none, so it is unharmed). Fix: `LlmFunctionToolBase` with the WebGL bridge and a
+      derived schema, plus a `ToolWithoutFunctionBinding` build issue. M.
+- [ ] **[C2] Generic delegate overloads, so C# 9 callers need no `new Func<…>(…)` wrapper.**
+      `DelegateLlmTool(string, string, Delegate)` (`:54`) and `AgentBuilder.WithAction(…, Delegate)` (`:339`) force
+      the wrapper README has to teach. Add `Func<…>` / `Action<…>` overloads whose `Task` variants apply
+      `MeaiToolTaskBridge.Publish` (closes B5 for delegates). Additive. S.
+- [ ] **[C7] `Instance` is nil below `WorldEdit`.** `LuaCsRbxApiBindings.cs:2064-2067` registers it only for
+      WorldEdit, unlike `camera_*` (every tier, for an actionable error), so `Instance.new` in the FIRST_MOD sample
+      (`Read | LogicOverride`) fails with "attempt to index a nil value". Fix: a stub whose `new` raises the
+      capability message. S.
+- [ ] **[C10] `AgentConfig.ClearMemory()` clears chat history only** (`AgentConfigExtensions.cs:196-201`), while
+      "memory" means the long-term store everywhere else. Fix: `ClearChatHistory()`, `ClearLongTermMemory()`,
+      `ClearContext(chat, longTerm)` mirroring `CoreAi.ClearContext`; mark `ClearMemory` obsolete. S.
+- [ ] **[C9] Two "backend" dropdowns in the settings Essentials card** (`backendType` "LLM Backend" and
+      `executionMode` "LLM Mode", `CoreAISettingsAssetEditor.uxml:14-17`); `executionMode` wins unless `Auto`
+      (`CoreAISettingsAsset.cs:1273`), yet TROUBLESHOOTING's stub fix names the other one. Fix: show `backendType`
+      only under `Auto` as a legacy preference; point TROUBLESHOOTING at `LLM Mode`. S.
+- [ ] **[C8] `SmartToolCallingChatClient` takes 13 constructor parameters (two bools) and the tools twice**
+      (`SmartToolCallingChatClient.cs:49-55` and `ChatOptions.Tools`); the core README and console sample build the
+      second list with an `(IAIFunctionLlmTool)` cast that throws for `IAIFunctionsLlmTool`. Fix: an options object
+      and a `ToAITools` helper used when `ChatOptions.Tools` is null; old constructor `[Obsolete]`. S–M.
+- [ ] **[C5] No `CoreAiMods` facade.** FIRST_MOD (b) makes every host resolve `ILuaModRuntime` and an unrestricted
+      `ActorContext` from the mods container and pass it to each call; listeners are positional
+      `Action<string, string, string>`. Fix: a static facade in `com.neoxider.coreaimods` (load, emit, a typed
+      disposable `OnModEvent`). Additive. M.
+- [ ] **[C6] No portable composition root.** README's "plain .NET app" row advertises agents, but outside
+      VContainer nothing builds `AiOrchestrator` (11 required dependencies, seven without null checks,
+      `AiOrchestrator.cs:57-81`), so the .NET sample stops at `SmartToolCallingChatClient`. Fix:
+      `CoreAiRuntime.Create(llm, settings, …)` returning the queued orchestrator and policy, plus null guards. M.
+- [ ] **[D1] `AgentMemoryPolicy.GetToolsForRole(null)` throws `ArgumentNullException`** (`:835-841`), while
+      `GetRoleConfig(null)` falls back to `Creator`. Fix: the same fallback. S.
+- [ ] **[D2] The `AgentBuilder.WithTemperature` remark is wrong** (`:363-373`): "applied only when the active
+      settings allow temperature overrides", but `AiOrchestrator.cs:2911` sends a role temperature whenever set. S.
+- [ ] **[D3] `CoreAi.AskWithImageFollowUpAsync` returns `Task<string>` under `#nullable enable`** (`CoreAi.cs:310`)
+      although its doc says it returns `null`. Fix: `Task<string?>`. S.
+- [ ] **[D4] `new AgentBuilder("  ")` is accepted** (`AgentBuilder.cs:78-82`) and fails only later in
+      `ApplyPreparedRole`, and only when a policy exists. Fix: an `IsNullOrWhiteSpace` check in the constructor. S.
+- [ ] **[D5] The license-free `portable-core` CI job compiles the core with `LangVersion latest`**
+      (`tools/portable/CoreAI.Core.csproj:4`), so a fork PR can land C# 10+ syntax that Unity rejects. Fix: `9.0`,
+      as the RbxApi and Luau csprojs already do. S.
+- [ ] **[D8] `Instance.new` of an unsupported class** (`InstanceRegistry.cs:806-812`) hints only "like Part,
+      Folder, or Model". Fix: list the creatable classes from `ClassCatalog` and say when a known Roblox class is
+      not supported yet. S.
+
+Checked and not defects: D6 (`num.ToString("G")` in `LuaCsWorldRuntimeBindings.cs:542` only formats the `parent`
+name of the legacy `coreai_world_spawn` / `coreai_world_change` bindings, which the shipping composition does not
+register; an integer name formats identically in every culture).
+
 ## 7.44.2 skill-tool required arguments (2026-09-17)
 
 Production trace (RedoSchool b303): the model called `submit_task_verdict` through `call_skill_tool` with
