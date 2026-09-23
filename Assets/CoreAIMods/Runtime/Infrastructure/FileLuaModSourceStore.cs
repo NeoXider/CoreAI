@@ -73,6 +73,13 @@ namespace CoreAI.Infrastructure.Lua
             _useCaseSafeFolderNames = useCaseSafeFolderNames;
         }
 
+        /// <summary>
+        /// The durability hook exact world-source preparation awaits: the injected delegate, or the
+        /// production default that asks <see cref="CoreAiWebGlPersistence.SyncAsync"/>. Read-only; tests
+        /// use it to pin that default, which no EditMode run can observe through behaviour.
+        /// </summary>
+        internal Func<CancellationToken, UniTask<bool>> PersistenceSyncForTests => _persistenceSyncAsync;
+
         public void Save(string id, string source, LuaModManifest manifest)
         {
             string modId = Normalize(id);

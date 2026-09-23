@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,6 +30,130 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         private static readonly DateTime CapturedAtUtc =
             new(2026, 9, 1, 6, 7, 8, DateTimeKind.Utc);
+
+        private const string GoldenWorldId = "mvp3-golden";
+
+        /// <summary>2^53 + 1: the first id a JSON number (an IEEE double) cannot represent exactly.</summary>
+        private const ulong GoldenFirstId = 9007199254740993UL;
+
+        private const string HandWrittenManifestJson = @"{
+  ""format"": ""coreai-rbx-world"",
+  ""format_version"": 1,
+  ""minimum_reader_version"": 1,
+  ""api_version"": ""MVP2"",
+  ""created_utc"": ""2026-09-01T06:07:08.0000000Z"",
+  ""world_entry"": ""world.json"",
+  ""mods"": [
+    {
+      ""id"": ""golden-mod"",
+      ""manifest_entry"": ""Mods/0000/manifest.json"",
+      ""source_entry"": ""Mods/0000/main.lua""
+    }
+  ]
+}";
+
+        private const string HandWrittenModManifestJson = @"{
+  ""Id"": ""golden-mod"",
+  ""Name"": ""Golden Mod"",
+  ""Active"": false
+}";
+
+        private const string HandWrittenWorldJson = @"{
+  ""schema_version"": 1,
+  ""settings"": {
+    ""world_id"": ""mvp3-handwritten"",
+    ""world_acl_version"": 1,
+    ""meters_per_stud"": 0.5,
+    ""gravity_studs_per_second_squared"": 144.5,
+    ""signal_behavior"": ""Deferred""
+  },
+  ""camera_cframe"": null,
+  ""instances"": [
+    {
+      ""id"": ""9007199254740993"",
+      ""parent_id"": ""0"",
+      ""class_name"": ""DataModel"",
+      ""name"": ""Game"",
+      ""archivable"": true,
+      ""owner_mod_id"": null,
+      ""origin_tag"": null,
+      ""owner_actor_id"": null,
+      ""access_scope"": ""HostProtected"",
+      ""revision"": ""3"",
+      ""tags"": [],
+      ""attributes"": []
+    },
+    {
+      ""id"": ""9007199254740995"",
+      ""parent_id"": ""9007199254740993"",
+      ""class_name"": ""Workspace"",
+      ""name"": ""Workspace"",
+      ""archivable"": true,
+      ""access_scope"": ""HostProtected"",
+      ""revision"": ""5"",
+      ""tags"": [],
+      ""attributes"": [],
+      ""model"": {
+        ""primary_part_id"": ""0"",
+        ""has_stored_world_pivot"": false,
+        ""stored_world_pivot"": null
+      }
+    },
+    {
+      ""id"": ""9007199254740997"",
+      ""parent_id"": ""9007199254740995"",
+      ""class_name"": ""Model"",
+      ""name"": ""HandModel"",
+      ""archivable"": true,
+      ""origin_tag"": ""console:hand-written"",
+      ""owner_actor_id"": ""actor-hand"",
+      ""access_scope"": ""Owned"",
+      ""revision"": ""9007199254740999"",
+      ""tags"": [ ""Golden"" ],
+      ""attributes"": [
+        {
+          ""name"": ""Label"",
+          ""kind"": ""String"",
+          ""string_value"": ""hand"",
+          ""number_value"": 0,
+          ""bool_value"": false
+        }
+      ],
+      ""model"": {
+        ""primary_part_id"": ""9007199254741001"",
+        ""has_stored_world_pivot"": true,
+        ""stored_world_pivot"": [ 1, 2, 3, 1, 0, 0, 0, 1, 0, 0, 0, 1 ]
+      }
+    },
+    {
+      ""id"": ""9007199254741001"",
+      ""parent_id"": ""9007199254740997"",
+      ""class_name"": ""Part"",
+      ""name"": ""HandPart"",
+      ""archivable"": false,
+      ""origin_tag"": ""console:hand-written"",
+      ""owner_actor_id"": ""actor-hand"",
+      ""access_scope"": ""Owned"",
+      ""revision"": ""7"",
+      ""tags"": [],
+      ""attributes"": [],
+      ""part"": {
+        ""shape"": ""Cylinder"",
+        ""shape_value"": 2,
+        ""material"": ""Wood"",
+        ""material_value"": 512,
+        ""material_variant"": null,
+        ""cframe"": [ 2, 3, -4, 0, 0, 1, 0, 1, 0, -1, 0, 0 ],
+        ""size"": [ 4, 1.5, 2 ],
+        ""color"": [ 0.25, 0.5, 0.75 ],
+        ""color_was_explicitly_set"": true,
+        ""anchored"": true,
+        ""transparency"": 0.25,
+        ""can_collide"": false
+      }
+    }
+  ]
+}";
 
         private readonly List<RbxDataModel> _games = new();
         private readonly List<string> _temporaryDirectories = new();
@@ -1018,7 +1143,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 actor,
                 sourceStore,
                 new[] { "read-target" });
-            IReadOnlyList<string> manualBefore = store.ListManualSlots();
             string[] actions = { "list", "get_source", "export", "versions", "diagnostics" };
 
             foreach (string action in actions)
@@ -1038,7 +1162,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     new[] { "read-target" }));
             Assert.AreEqual(0, store.AutoTriggers.Count);
             Assert.AreEqual(0, store.ManualCalls);
-            CollectionAssert.AreEqual(manualBefore, store.ListManualSlots());
         }
 
         [Test]
@@ -1129,11 +1252,22 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             RbxWorldPackageWriteResult first = await durableStore.CreateManualAsync("slot-a", payload);
             byte[] original = File.ReadAllBytes(first.Path);
-            RbxWorldPackageWriteResult second = await durableStore.CreateManualAsync("slot-a", payload);
+            RbxWorldPackagePayload laterPayload = Capture(source, CapturedAtUtc.AddSeconds(1d));
+            CollectionAssert.AreNotEqual(
+                original,
+                RbxWorldPackageSerializer.WritePackage(laterPayload),
+                "The second save must encode differently, or an overwrite would leave identical bytes.");
+            RbxWorldPackageWriteResult second = await durableStore.CreateManualAsync("slot-a", laterPayload);
 
             Assert.IsTrue(first.Success);
             Assert.IsFalse(second.Success);
+            Assert.AreEqual(first.Path, second.Path);
+            StringAssert.Contains("already exists and cannot be overwritten", second.Error);
             CollectionAssert.AreEqual(original, File.ReadAllBytes(first.Path));
+            CollectionAssert.AreEqual(
+                new[] { first.Path },
+                Directory.GetFiles(Path.GetDirectoryName(first.Path)),
+                "A refused create must leave no second file or temporary behind.");
 
             FileRbxWorldPackageStore unconfirmedStore = new(
                 Path.Combine(root, "unconfirmed"),
@@ -1367,9 +1501,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             RbxWorldPackageWriteResult manual = await store.CreateManualAsync("golden", payload);
             byte[] manualBytes = File.ReadAllBytes(manual.Path);
 
-            Assert.IsTrue((await store.CreateAutoAsync("z-first", payload)).Success);
-            Assert.IsTrue((await store.CreateAutoAsync("a-second", payload)).Success);
-            Assert.IsTrue((await store.CreateAutoAsync("m-third", payload)).Success);
+            Assert.IsTrue((await store.CreateAutoAsync(
+                "z-first", Capture(source, CapturedAtUtc.AddSeconds(1d)))).Success);
+            Assert.IsTrue((await store.CreateAutoAsync(
+                "a-second", Capture(source, CapturedAtUtc.AddSeconds(2d)))).Success);
+            Assert.IsTrue((await store.CreateAutoAsync(
+                "m-third", Capture(source, CapturedAtUtc.AddSeconds(3d)))).Success);
 
             IReadOnlyList<string> autoFiles = store.ListAutoFiles();
             Assert.AreEqual(2, autoFiles.Count);
@@ -1397,6 +1534,387 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             RbxWorldPackageException exception = Assert.ThrowsAsync<RbxWorldPackageException>(
                 async () => await store.LoadManualAsync("hostile"));
             StringAssert.Contains("format version 1 limit", exception.Message);
+        }
+
+        /// <summary>
+        /// Golden, not a round trip: the writer's manifest.json and world.json are parsed as plain JSON and
+        /// compared against literal values derived from the format spec. A codec whose writer and reader
+        /// agree on a wrong mapping (ids as JSON numbers, a renamed key, a dropped field) passes every
+        /// round-trip test and fails here. Ids start above 2^53, where a double cannot hold them exactly.
+        /// </summary>
+        [Test]
+        public void WritePackage_AuthoredWorld_MatchesLiteralGoldenJson()
+        {
+            GoldenWorld golden = BuildGoldenWorld();
+            RbxWorldPackagePayload payload = RbxWorldPackageSerializer.Capture(
+                new RbxWorldPackageCaptureContext(
+                    golden.Registry,
+                    golden.Game,
+                    golden.PartSink,
+                    new RbxWorldSettings
+                    {
+                        WorldId = GoldenWorldId,
+                        MetersPerStud = 0.5f,
+                        GravityStudsPerSecondSquared = 144.5d,
+                        SignalBehavior = RbxWorldSettings.DeferredSignalBehavior
+                    },
+                    golden.CameraRig,
+                    golden.SourceStore,
+                    CapturedAtUtc));
+
+            byte[] package = RbxWorldPackageSerializer.WritePackage(payload);
+
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    "manifest.json",
+                    "world.json",
+                    "Mods/0000/manifest.json",
+                    "Mods/0000/main.lua",
+                    "Mods/0001/manifest.json",
+                    "Mods/0001/main.lua"
+                },
+                ReadEntryNames(package));
+
+            JObject manifest = ParseJsonLiteral(ReadEntryText(package, "manifest.json"));
+            CollectionAssert.AreEquivalent(
+                new[]
+                {
+                    "format", "format_version", "minimum_reader_version", "api_version", "created_utc",
+                    "world_entry", "mods"
+                },
+                PropertyNames(manifest));
+            Assert.AreEqual("coreai-rbx-world", (string)manifest["format"]);
+            Assert.AreEqual(1, (int)manifest["format_version"]);
+            Assert.AreEqual(1, (int)manifest["minimum_reader_version"]);
+            Assert.AreEqual("MVP2", (string)manifest["api_version"]);
+            Assert.AreEqual(JTokenType.String, manifest["created_utc"].Type);
+            Assert.AreEqual("2026-09-01T06:07:08.0000000Z", (string)manifest["created_utc"]);
+            Assert.AreEqual("world.json", (string)manifest["world_entry"]);
+            JArray modIndex = (JArray)manifest["mods"];
+            Assert.AreEqual(2, modIndex.Count);
+            AssertGoldenModIndex(modIndex[0], "alpha-mod", "Mods/0000/");
+            AssertGoldenModIndex(modIndex[1], "beta-mod", "Mods/0001/");
+
+            JObject alphaManifest = ParseJsonLiteral(ReadEntryText(package, "Mods/0000/manifest.json"));
+            Assert.AreEqual("alpha-mod", (string)alphaManifest["Id"]);
+            Assert.AreEqual("Alpha", (string)alphaManifest["Name"]);
+            Assert.IsTrue((bool)alphaManifest["Active"]);
+            Assert.AreEqual("return 'alpha'", ReadEntryText(package, "Mods/0000/main.lua"));
+            JObject betaManifest = ParseJsonLiteral(ReadEntryText(package, "Mods/0001/manifest.json"));
+            Assert.AreEqual("beta-mod", (string)betaManifest["Id"]);
+            Assert.AreEqual("Beta", (string)betaManifest["Name"]);
+            Assert.IsFalse((bool)betaManifest["Active"]);
+            Assert.AreEqual("return 'beta'", ReadEntryText(package, "Mods/0001/main.lua"));
+
+            JObject world = ParseJsonLiteral(ReadEntryText(package, "world.json"));
+            CollectionAssert.AreEquivalent(
+                new[] { "schema_version", "settings", "camera_cframe", "instances" },
+                PropertyNames(world));
+            Assert.AreEqual(1, (int)world["schema_version"]);
+            JObject settings = (JObject)world["settings"];
+            CollectionAssert.AreEquivalent(
+                new[]
+                {
+                    "world_id", "world_acl_version", "meters_per_stud",
+                    "gravity_studs_per_second_squared", "signal_behavior"
+                },
+                PropertyNames(settings));
+            Assert.AreEqual(GoldenWorldId, (string)settings["world_id"]);
+            Assert.AreEqual(1, (int)settings["world_acl_version"]);
+            Assert.AreEqual(0.5d, settings["meters_per_stud"].Value<double>(), 0d);
+            Assert.AreEqual(144.5d, settings["gravity_studs_per_second_squared"].Value<double>(), 0d);
+            Assert.AreEqual("Deferred", (string)settings["signal_behavior"]);
+            AssertJsonNumbers(world["camera_cframe"], 10d, 5d, -4d, 1d, 0d, 0d, 0d, 1d, 0d, 0d, 0d, 1d);
+
+            JArray instances = (JArray)world["instances"];
+            Assert.AreEqual(4, instances.Count);
+            AssertGoldenNode(
+                instances[0], "9007199254740993", "0", "DataModel", "Game",
+                null, null, "HostProtected", "1");
+            Assert.AreEqual(JTokenType.Null, instances[0]["model"].Type);
+            AssertGoldenNode(
+                instances[1], "9007199254740994", "9007199254740993", "Workspace", "Workspace",
+                null, null, "HostProtected", "2");
+            AssertGoldenModelState(instances[1]["model"], "0", null);
+            AssertGoldenNode(
+                instances[2], "9007199254740995", "9007199254740994", "Model", "GoldenModel",
+                "console:golden-invocation", "actor-golden", "Owned", "8");
+            AssertGoldenModelState(
+                instances[2]["model"],
+                "9007199254740996",
+                new[] { 1d, 2d, 3d, 1d, 0d, 0d, 0d, 1d, 0d, 0d, 0d, 1d });
+            CollectionAssert.AreEqual(new[] { "Golden" }, instances[2]["tags"].Values<string>());
+            JArray attributes = (JArray)instances[2]["attributes"];
+            Assert.AreEqual(2, attributes.Count);
+            AssertGoldenAttribute(attributes[0], "Label", "String", "golden", 0d);
+            AssertGoldenAttribute(attributes[1], "Weight", "Number", null, 4.5d);
+            AssertGoldenNode(
+                instances[3], "9007199254740996", "9007199254740995", "Part", "GoldenPart",
+                "console:golden-invocation", "actor-golden", "Owned", "2");
+            Assert.AreEqual(JTokenType.Null, instances[3]["model"].Type);
+
+            for (int index = 0; index < 3; index++)
+            {
+                Assert.AreEqual(JTokenType.Null, instances[index]["part"].Type, "Only the Part carries Part state.");
+            }
+
+            JObject part = (JObject)instances[3]["part"];
+            CollectionAssert.AreEquivalent(
+                new[]
+                {
+                    "shape", "shape_value", "material", "material_value", "material_variant", "cframe",
+                    "size", "color", "color_was_explicitly_set", "anchored", "transparency", "can_collide"
+                },
+                PropertyNames(part));
+            Assert.AreEqual("Cylinder", (string)part["shape"]);
+            Assert.AreEqual(2, (int)part["shape_value"]);
+            Assert.AreEqual("Wood", (string)part["material"]);
+            Assert.AreEqual(512, (int)part["material_value"]);
+            Assert.AreEqual(JTokenType.Null, part["material_variant"].Type);
+            AssertJsonNumbers(part["cframe"], 2d, 3d, -4d, 0d, 0d, 1d, 0d, 1d, 0d, -1d, 0d, 0d);
+            AssertJsonNumbers(part["size"], 4d, 1.5d, 2d);
+            AssertJsonNumbers(part["color"], 0.25d, 0.5d, 0.75d);
+            Assert.IsTrue((bool)part["color_was_explicitly_set"]);
+            Assert.IsTrue((bool)part["anchored"]);
+            Assert.AreEqual(0.25d, part["transparency"].Value<double>(), 0d);
+            Assert.IsFalse((bool)part["can_collide"]);
+        }
+
+        /// <summary>
+        /// Golden reader: a hand-written package (no writer involved) restores literal ids, parents,
+        /// revisions and Part state. Every id is an odd number above 2^53, which a double would round.
+        /// </summary>
+        [Test]
+        public void ReadPackage_HandWrittenLiteralPackage_RestoresLiteralIdsParentsRevisionsAndPartState()
+        {
+            byte[] package = BuildLiteralPackage(
+                ("manifest.json", HandWrittenManifestJson),
+                ("world.json", HandWrittenWorldJson),
+                ("Mods/0000/manifest.json", HandWrittenModManifestJson),
+                ("Mods/0000/main.lua", "return 42"));
+
+            RbxWorldPackagePayload decoded = RbxWorldPackageSerializer.ReadPackage(package);
+
+            Assert.AreEqual(new DateTime(2026, 9, 1, 6, 7, 8, DateTimeKind.Utc), decoded.CapturedAtUtc);
+            Assert.AreEqual(DateTimeKind.Utc, decoded.CapturedAtUtc.Kind);
+            Assert.AreEqual("mvp3-handwritten", decoded.Settings.WorldId);
+            Assert.AreEqual(0.5f, decoded.Settings.MetersPerStud);
+            Assert.AreEqual(144.5d, decoded.Settings.GravityStudsPerSecondSquared);
+            Assert.IsFalse(decoded.CameraCFrame.HasValue);
+
+            float appliedScale = 1f;
+            RbxWorldPackageRestoreResult restored = RbxWorldPackageSerializer.RestoreFresh(
+                decoded,
+                new RbxWorldPackageRestoreOptions
+                {
+                    BeginMetersPerStudRestore = metersPerStud =>
+                    {
+                        float previousScale = appliedScale;
+                        appliedScale = metersPerStud;
+                        return () => appliedScale = previousScale;
+                    }
+                });
+            _games.Add(restored.Game);
+            InstanceRegistry registry = restored.Registry;
+
+            Assert.AreEqual(0.5f, appliedScale);
+            Assert.AreEqual("mvp3-handwritten", registry.WorldId);
+            Assert.AreEqual(InstanceRegistry.CurrentWorldAclVersion, registry.WorldAclVersion);
+            Assert.AreEqual(4, registry.Count);
+            Assert.AreEqual(9007199254740993UL, restored.Game.Id.Value);
+            Assert.AreEqual("Game", restored.Game.Name);
+            Assert.IsNull(restored.Game.Parent);
+            Assert.AreEqual(9007199254740995UL, registry.WorldRoot.Id.Value);
+            AssertLiteralRecord(
+                registry, 9007199254740993UL, "DataModel", 0UL, 3L,
+                null, null, InstanceAccessScope.HostProtected);
+            AssertLiteralRecord(
+                registry, 9007199254740995UL, "Workspace", 9007199254740993UL, 5L,
+                null, null, InstanceAccessScope.HostProtected);
+            RbxModel model = (RbxModel)AssertLiteralRecord(
+                registry, 9007199254740997UL, "Model", 9007199254740995UL, 9007199254740999L,
+                "console:hand-written", "actor-hand", InstanceAccessScope.Owned);
+            RbxInstance part = AssertLiteralRecord(
+                registry, 9007199254741001UL, "Part", 9007199254740997UL, 7L,
+                "console:hand-written", "actor-hand", InstanceAccessScope.Owned);
+
+            Assert.AreEqual("HandModel", model.Name);
+            Assert.IsTrue(model.Archivable);
+            Assert.AreEqual("hand", model.GetAttribute("Label"));
+            Assert.IsTrue(model.HasTag("Golden"));
+            Assert.AreEqual(9007199254741001UL, model.PrimaryPart.Id.Value);
+            Assert.IsTrue(model.HasStoredWorldPivot);
+            CollectionAssert.AreEqual(
+                new[] { 1f, 2f, 3f, 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f },
+                model.StoredWorldPivot.GetComponents());
+            Assert.AreEqual("HandPart", part.Name);
+            Assert.IsFalse(part.Archivable);
+
+            Assert.IsTrue(restored.PartSink.TryGetPartProperties(part.Id, out PartProperties properties));
+            Assert.AreEqual(RbxPartShape.Cylinder, properties.Shape);
+            Assert.AreEqual("Wood", properties.Material.Name);
+            Assert.AreEqual(512, properties.Material.Value);
+            Assert.IsNull(properties.MaterialVariant);
+            CollectionAssert.AreEqual(
+                new[] { 2f, 3f, -4f, 0f, 0f, 1f, 0f, 1f, 0f, -1f, 0f, 0f },
+                properties.CFrame.GetComponents());
+            Assert.AreEqual(new RbxVector3(4f, 1.5f, 2f), properties.Size);
+            Assert.AreEqual(new RbxColor3(0.25f, 0.5f, 0.75f), properties.Color);
+            Assert.IsTrue(properties.ColorWasExplicitlySet);
+            Assert.IsTrue(properties.Anchored);
+            Assert.AreEqual(0.25f, properties.Transparency);
+            Assert.IsFalse(properties.CanCollide);
+
+            Assert.AreEqual(1, restored.Mods.Count);
+            Assert.AreEqual("golden-mod", restored.Mods[0].Manifest.Id);
+            Assert.AreEqual("Golden Mod", restored.Mods[0].Manifest.Name);
+            Assert.IsFalse(restored.Mods[0].Manifest.Active);
+            Assert.AreEqual("return 42", restored.Mods[0].Source);
+
+            Assert.AreEqual(
+                9007199254741002UL,
+                registry.Create("Folder").Id.Value,
+                "The allocator must continue past the highest restored id, never reuse one.");
+        }
+
+        /// <summary>
+        /// Pins the production durability hook. Off WebGL every hook answers true, so a default replaced by
+        /// <c>_ =&gt; true</c> passes every behavioural test; only the hook's own identity can tell them apart.
+        /// </summary>
+        [Test]
+        public void FileStores_WithoutInjectedHook_DefaultToCoreAiWebGlPersistenceSyncAsync()
+        {
+            MethodInfo syncAsync = typeof(CoreAI.Infrastructure.CoreAiWebGlPersistence).GetMethod(
+                nameof(CoreAI.Infrastructure.CoreAiWebGlPersistence.SyncAsync),
+                BindingFlags.Public | BindingFlags.Static);
+            Assert.IsNotNull(syncAsync);
+            string root = NewTemporaryDirectory();
+
+            FileRbxWorldPackageStore defaultPackageStore = new(root);
+            FileRbxWorldPackageStore injectedPackageStore = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true));
+            using CoreAI.Infrastructure.Lua.FileLuaModSourceStore defaultSourceStore =
+                new(Path.Combine(root, "DefaultMods"));
+            using CoreAI.Infrastructure.Lua.FileLuaModSourceStore injectedSourceStore = new(
+                Path.Combine(root, "InjectedMods"),
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true));
+
+            Assert.IsTrue(
+                ForwardsTo(defaultPackageStore.PersistenceSyncForTests, syncAsync),
+                "FileRbxWorldPackageStore must default to CoreAiWebGlPersistence.SyncAsync.");
+            Assert.IsTrue(
+                ForwardsTo(defaultSourceStore.PersistenceSyncForTests, syncAsync),
+                "FileLuaModSourceStore must default to CoreAiWebGlPersistence.SyncAsync.");
+            Assert.IsFalse(
+                ForwardsTo(injectedPackageStore.PersistenceSyncForTests, syncAsync),
+                "An injected hook is used as given; the check must be able to fail.");
+            Assert.IsFalse(
+                ForwardsTo(injectedSourceStore.PersistenceSyncForTests, syncAsync),
+                "An injected hook is used as given; the check must be able to fail.");
+        }
+
+        [Test]
+        public async Task FileStore_DefaultAutosaveCapacity_IsTenAndRotatesOnlyTheOldest()
+        {
+            Assert.AreEqual(10, FileRbxWorldPackageStore.DefaultAutoBackupCapacity);
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore store = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => CapturedAtUtc);
+            RbxWorldPackagePayload payload = CreateMinimalPayload(CapturedAtUtc);
+
+            for (int index = 0; index < 10; index++)
+            {
+                RbxWorldPackageWriteResult result = await store.CreateAutoAsync(
+                    "ring-" + index.ToString("D2", System.Globalization.CultureInfo.InvariantCulture),
+                    payload);
+                Assert.IsTrue(result.Success, result.Error);
+            }
+
+            Assert.AreEqual(10, store.ListAutoFiles().Count, "Ten autosaves fit before any rotation.");
+
+            RbxWorldPackageWriteResult eleventh = await store.CreateAutoAsync("ring-10", payload);
+
+            Assert.IsTrue(eleventh.Success, eleventh.Error);
+            IReadOnlyList<string> files = store.ListAutoFiles();
+            Assert.AreEqual(10, files.Count);
+            Assert.AreEqual("20260901T060708000Z-0001-ring-01.world", files[0]);
+            Assert.AreEqual("20260901T060708000Z-0010-ring-10.world", files[9]);
+        }
+
+        [Test]
+        public async Task ConfirmedBackup_GatedExecuteLua_WritesExactlyOneExecuteLuaAutosaveToFileStore()
+        {
+            RbxWorldPackagePayload payload = CreateMinimalPayload(CapturedAtUtc);
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore store = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => CapturedAtUtc);
+            ConfirmedWorldMutationGate gate = new(
+                cancellationToken => UniTask.FromResult(payload),
+                store);
+            RecordingLuaCsBindings bindings = new();
+            LuaCsGameToolExecutor executor = new(
+                new LuaCsSecureEnvironment(),
+                bindings,
+                new NullLuaExecutionObserver(),
+                null,
+                gate);
+            Assert.AreEqual(0, store.ListAutoSaves().Count);
+
+            LuaTool.LuaResult result = await executor.ExecuteAsync(
+                "mutate_world()",
+                CancellationToken.None);
+
+            Assert.IsTrue(result.Success, result.Error);
+            Assert.AreEqual("new-tree", bindings.TreeState);
+            IReadOnlyList<RbxAutoSaveInfo> autosaves = store.ListAutoSaves();
+            Assert.AreEqual(1, autosaves.Count);
+            Assert.AreEqual("execute_lua", autosaves[0].Trigger);
+            Assert.AreEqual(LuaCsGameToolExecutor.ExecuteLuaBackupTrigger, autosaves[0].Trigger);
+            Assert.AreEqual("20260901T060708000Z-0000-execute_lua.world", autosaves[0].FileName);
+            Assert.AreEqual(CapturedAtUtc, autosaves[0].TimestampUtc);
+            CollectionAssert.AreEqual(
+                RbxWorldPackageSerializer.WritePackage(payload),
+                File.ReadAllBytes(Path.Combine(root, "Auto", autosaves[0].FileName)),
+                "The autosave must hold exactly the pre-mutation capture.");
+            Assert.AreEqual(0, store.ListManualSlots().Count);
+        }
+
+        [Test]
+        public async Task ConfirmedBackup_GatedExecuteLua_UnconfirmedFileStoreBackupLeavesNoAutosaveAndNoMutation()
+        {
+            RbxWorldPackagePayload payload = CreateMinimalPayload(CapturedAtUtc);
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore store = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(false),
+                utcNow: () => CapturedAtUtc);
+            ConfirmedWorldMutationGate gate = new(
+                cancellationToken => UniTask.FromResult(payload),
+                store);
+            RecordingLuaCsBindings bindings = new();
+            LuaCsGameToolExecutor executor = new(
+                new LuaCsSecureEnvironment(),
+                bindings,
+                new NullLuaExecutionObserver(),
+                null,
+                gate);
+
+            LuaTool.LuaResult result = await executor.ExecuteAsync(
+                "mutate_world()",
+                CancellationToken.None);
+
+            Assert.IsFalse(result.Success, result.Output);
+            StringAssert.Contains("Confirmed pre-mutation backup 'execute_lua' failed", result.Error);
+            StringAssert.Contains("durable persistence was not confirmed", result.Error);
+            Assert.AreEqual("old-tree", bindings.TreeState);
+            Assert.AreEqual(0, store.ListAutoSaves().Count);
+            Assert.AreEqual(0, store.ListManualSlots().Count);
         }
 
         private RuntimeWorld BuildAuthoredWorld()
@@ -1970,6 +2488,339 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
 
             return output.ToArray();
+        }
+
+        /// <summary>
+        /// A four-node world whose every id, revision and Part value is known from its build steps:
+        /// DataModel 2^53+1 (rev 1: Workspace parented), Workspace 2^53+2 (rev 2: parented, Model added),
+        /// Model 2^53+3 (rev 8: Name, Part added, PrimaryPart, WorldPivot, two attributes, tag, parented),
+        /// Part 2^53+4 (rev 2: Name, parented). Access control and ACL versioning do not advance revisions.
+        /// </summary>
+        private GoldenWorld BuildGoldenWorld()
+        {
+            InstanceIdAllocator allocator = new();
+            allocator.EnsureNotBelow(new InstanceId(GoldenFirstId - 1UL));
+            InstanceRegistry registry = new(allocator: allocator, worldId: GoldenWorldId);
+            RbxDataModel game = (RbxDataModel)registry.Create("DataModel");
+            _games.Add(game);
+            registry.SetSceneRoot(game);
+            RbxInstance workspace = registry.Create("Workspace");
+            workspace.Parent = game;
+            registry.SetWorldRoot(workspace);
+            string originTag = OriginTag.FromConsole("golden-invocation");
+            RbxModel model = (RbxModel)registry.Create("Model", originTag: originTag);
+            model.Name = "GoldenModel";
+            RbxInstance part = registry.Create("Part", originTag: originTag);
+            part.Name = "GoldenPart";
+            part.Parent = model;
+            model.SetPrimaryPart(part);
+            model.SetWorldPivot(RbxCFrame.FromPosition(1f, 2f, 3f));
+            model.SetAttribute("Label", "golden");
+            model.SetAttribute("Weight", 4.5d);
+            model.AddTag("Golden");
+            model.Parent = workspace;
+            registry.ConfigureWorldAclVersion(InstanceRegistry.CurrentWorldAclVersion);
+            registry.SetAccessControl(model, "actor-golden", InstanceAccessScope.Owned, true);
+            Assert.AreEqual(GoldenFirstId, game.Id.Value, "Fixture precondition: ids start at 2^53 + 1.");
+            Assert.AreEqual(GoldenFirstId + 3UL, part.Id.Value, "Fixture precondition: ids are sequential.");
+
+            InMemoryPartPropertySink partSink = new();
+            PartProperties properties = new()
+            {
+                Shape = RbxPartShape.Cylinder,
+                Material = new RbxMaterialId("Wood", 512),
+                MaterialVariant = null,
+                CFrame = new RbxCFrame(2f, 3f, -4f, 0f, 0f, 1f, 0f, 1f, 0f, -1f, 0f, 0f),
+                Size = new RbxVector3(4f, 1.5f, 2f),
+                Color = new RbxColor3(0.25f, 0.5f, 0.75f),
+                ColorWasExplicitlySet = true,
+                Anchored = true,
+                Transparency = 0.25f,
+                CanCollide = false
+            };
+            partSink.SetPartProperties(part.Id, in properties);
+            InMemoryCameraRig cameraRig = new();
+            cameraRig.SetCFrame(RbxCFrame.FromPosition(10f, 5f, -4f));
+            MemorySourceStore sourceStore = new();
+            sourceStore.Save(
+                "beta-mod",
+                "return 'beta'",
+                new LuaModManifest { Id = "beta-mod", Name = "Beta", Active = false });
+            sourceStore.Save(
+                "alpha-mod",
+                "return 'alpha'",
+                new LuaModManifest { Id = "alpha-mod", Name = "Alpha", Active = true });
+            return new GoldenWorld(registry, game, partSink, cameraRig, sourceStore);
+        }
+
+        private static List<string> ReadEntryNames(byte[] package)
+        {
+            using MemoryStream input = new(package, false);
+            using ZipArchive archive = new(input, ZipArchiveMode.Read, false);
+            List<string> names = new(archive.Entries.Count);
+            foreach (ZipArchiveEntry entry in archive.Entries)
+            {
+                names.Add(entry.FullName);
+            }
+
+            return names;
+        }
+
+        private static string ReadEntryText(byte[] package, string entryName)
+        {
+            using MemoryStream input = new(package, false);
+            using ZipArchive archive = new(input, ZipArchiveMode.Read, false);
+            ZipArchiveEntry entry = archive.GetEntry(entryName);
+            Assert.IsNotNull(entry, "Missing package entry '" + entryName + "'.");
+            using Stream stream = entry.Open();
+            using StreamReader reader = new(stream, new UTF8Encoding(false, true));
+            return reader.ReadToEnd();
+        }
+
+        /// <summary>Parses JSON without turning ISO-8601 strings into dates, so literal text compares exactly.</summary>
+        private static JObject ParseJsonLiteral(string json)
+        {
+            using StringReader text = new(json);
+            using Newtonsoft.Json.JsonTextReader reader = new(text)
+            {
+                DateParseHandling = Newtonsoft.Json.DateParseHandling.None,
+                FloatParseHandling = Newtonsoft.Json.FloatParseHandling.Double
+            };
+            return JObject.Load(reader);
+        }
+
+        private static List<string> PropertyNames(JToken token)
+        {
+            Assert.AreEqual(JTokenType.Object, token.Type);
+            List<string> names = new();
+            foreach (JProperty property in ((JObject)token).Properties())
+            {
+                names.Add(property.Name);
+            }
+
+            return names;
+        }
+
+        private static void AssertJsonNumbers(JToken token, params double[] expected)
+        {
+            Assert.AreEqual(JTokenType.Array, token.Type);
+            JArray array = (JArray)token;
+            Assert.AreEqual(expected.Length, array.Count);
+            for (int index = 0; index < expected.Length; index++)
+            {
+                Assert.IsTrue(
+                    array[index].Type == JTokenType.Float || array[index].Type == JTokenType.Integer,
+                    "Component " + index + " must be a JSON number.");
+                Assert.AreEqual(expected[index], array[index].Value<double>(), 0d, "Component " + index);
+            }
+        }
+
+        private static void AssertGoldenModIndex(JToken entry, string id, string prefix)
+        {
+            CollectionAssert.AreEquivalent(
+                new[] { "id", "manifest_entry", "source_entry" },
+                PropertyNames(entry));
+            Assert.AreEqual(id, (string)entry["id"]);
+            Assert.AreEqual(prefix + "manifest.json", (string)entry["manifest_entry"]);
+            Assert.AreEqual(prefix + "main.lua", (string)entry["source_entry"]);
+        }
+
+        private static void AssertGoldenNode(
+            JToken node,
+            string id,
+            string parentId,
+            string className,
+            string name,
+            string originTag,
+            string ownerActorId,
+            string accessScope,
+            string revision)
+        {
+            CollectionAssert.AreEquivalent(
+                new[]
+                {
+                    "id", "parent_id", "class_name", "name", "archivable", "owner_mod_id", "origin_tag",
+                    "owner_actor_id", "access_scope", "revision", "tags", "attributes", "model", "part",
+                    "click_detector", "material_variant", "value", "humanoid"
+                },
+                PropertyNames(node));
+            Assert.AreEqual(JTokenType.String, node["id"].Type, className + " id must be a decimal string.");
+            Assert.AreEqual(id, (string)node["id"]);
+            Assert.AreEqual(JTokenType.String, node["parent_id"].Type, className + " parent id must be a decimal string.");
+            Assert.AreEqual(parentId, (string)node["parent_id"]);
+            Assert.AreEqual(className, (string)node["class_name"]);
+            Assert.AreEqual(name, (string)node["name"]);
+            Assert.IsTrue((bool)node["archivable"]);
+            Assert.AreEqual(JTokenType.Null, node["owner_mod_id"].Type);
+            Assert.AreEqual(originTag, (string)node["origin_tag"]);
+            Assert.AreEqual(ownerActorId, (string)node["owner_actor_id"]);
+            Assert.AreEqual(accessScope, (string)node["access_scope"]);
+            Assert.AreEqual(JTokenType.String, node["revision"].Type, className + " revision must be a decimal string.");
+            Assert.AreEqual(revision, (string)node["revision"]);
+            Assert.AreEqual(JTokenType.Null, node["click_detector"].Type);
+            Assert.AreEqual(JTokenType.Null, node["material_variant"].Type);
+            Assert.AreEqual(JTokenType.Null, node["value"].Type);
+            Assert.AreEqual(JTokenType.Null, node["humanoid"].Type);
+            if (!string.Equals(className, "Model", StringComparison.Ordinal))
+            {
+                CollectionAssert.IsEmpty((JArray)node["tags"]);
+                CollectionAssert.IsEmpty((JArray)node["attributes"]);
+            }
+        }
+
+        private static void AssertGoldenModelState(JToken model, string primaryPartId, double[] storedWorldPivot)
+        {
+            CollectionAssert.AreEquivalent(
+                new[] { "primary_part_id", "has_stored_world_pivot", "stored_world_pivot" },
+                PropertyNames(model));
+            Assert.AreEqual(JTokenType.String, model["primary_part_id"].Type);
+            Assert.AreEqual(primaryPartId, (string)model["primary_part_id"]);
+            Assert.AreEqual(storedWorldPivot != null, (bool)model["has_stored_world_pivot"]);
+            if (storedWorldPivot == null)
+            {
+                Assert.AreEqual(JTokenType.Null, model["stored_world_pivot"].Type);
+            }
+            else
+            {
+                AssertJsonNumbers(model["stored_world_pivot"], storedWorldPivot);
+            }
+        }
+
+        private static void AssertGoldenAttribute(
+            JToken attribute,
+            string name,
+            string kind,
+            string stringValue,
+            double numberValue)
+        {
+            CollectionAssert.AreEquivalent(
+                new[] { "name", "kind", "string_value", "number_value", "bool_value" },
+                PropertyNames(attribute));
+            Assert.AreEqual(name, (string)attribute["name"]);
+            Assert.AreEqual(kind, (string)attribute["kind"]);
+            Assert.AreEqual(stringValue, (string)attribute["string_value"]);
+            Assert.AreEqual(numberValue, attribute["number_value"].Value<double>(), 0d);
+            Assert.IsFalse((bool)attribute["bool_value"]);
+        }
+
+        private static byte[] BuildLiteralPackage(params (string Name, string Text)[] entries)
+        {
+            using MemoryStream output = new();
+            using (ZipArchive archive = new(output, ZipArchiveMode.Create, true))
+            {
+                foreach ((string name, string text) in entries)
+                {
+                    ZipArchiveEntry entry = archive.CreateEntry(name, CompressionLevel.Optimal);
+                    byte[] bytes = new UTF8Encoding(false, true).GetBytes(text);
+                    using Stream stream = entry.Open();
+                    stream.Write(bytes, 0, bytes.Length);
+                }
+            }
+
+            return output.ToArray();
+        }
+
+        private static RbxInstance AssertLiteralRecord(
+            InstanceRegistry registry,
+            ulong id,
+            string className,
+            ulong parentId,
+            long revision,
+            string originTag,
+            string ownerActorId,
+            InstanceAccessScope accessScope)
+        {
+            Assert.IsTrue(registry.TryGet(new InstanceId(id), out RbxInstance instance), "Missing instance " + id);
+            Assert.IsTrue(registry.TryGetRecord(new InstanceId(id), out InstanceRecord record));
+            Assert.AreEqual(className, instance.ClassName);
+            Assert.AreEqual(parentId, instance.Parent?.Id.Value ?? 0UL, className + " parent");
+            Assert.AreEqual(revision, record.Revision, className + " revision");
+            Assert.IsNull(record.OwnerModId);
+            Assert.AreEqual(originTag, record.OriginTag);
+            Assert.AreEqual(ownerActorId, record.OwnerActorId);
+            Assert.AreEqual(accessScope, record.AccessScope);
+            return instance;
+        }
+
+        /// <summary>
+        /// True when <paramref name="hook"/> is <paramref name="target"/> or a method whose body calls it
+        /// directly (a method-group wrapper or a forwarding lambda). Read from IL, because invoking the hook
+        /// cannot tell: off WebGL both the real default and a stub answer true.
+        /// </summary>
+        private static bool ForwardsTo(Delegate hook, MethodInfo target)
+        {
+            MethodInfo method = hook.Method;
+            if (IsSameMethod(method, target))
+            {
+                return true;
+            }
+
+            byte[] il = method.GetMethodBody()?.GetILAsByteArray();
+            if (il == null)
+            {
+                return false;
+            }
+
+            byte callOpcode = (byte)System.Reflection.Emit.OpCodes.Call.Value;
+            for (int index = 0; index + 4 < il.Length; index++)
+            {
+                if (il[index] != callOpcode)
+                {
+                    continue;
+                }
+
+                MethodBase callee;
+                try
+                {
+                    callee = method.Module.ResolveMethod(BitConverter.ToInt32(il, index + 1));
+                }
+                catch (Exception)
+                {
+                    // WHY: a byte equal to the call opcode inside another instruction's operand is not a
+                    // WHY: call; the four bytes after it are no method token, so there is nothing to compare.
+                    continue;
+                }
+
+                if (callee is MethodInfo calleeMethod && IsSameMethod(calleeMethod, target))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsSameMethod(MethodInfo left, MethodInfo right)
+        {
+            return left.MetadataToken == right.MetadataToken
+                   && left.Module.ModuleVersionId == right.Module.ModuleVersionId;
+        }
+
+        private sealed class GoldenWorld
+        {
+            public GoldenWorld(
+                InstanceRegistry registry,
+                RbxDataModel game,
+                InMemoryPartPropertySink partSink,
+                InMemoryCameraRig cameraRig,
+                MemorySourceStore sourceStore)
+            {
+                Registry = registry;
+                Game = game;
+                PartSink = partSink;
+                CameraRig = cameraRig;
+                SourceStore = sourceStore;
+            }
+
+            public InstanceRegistry Registry { get; }
+
+            public RbxDataModel Game { get; }
+
+            public InMemoryPartPropertySink PartSink { get; }
+
+            public InMemoryCameraRig CameraRig { get; }
+
+            public MemorySourceStore SourceStore { get; }
         }
 
         private sealed class VariantWorld

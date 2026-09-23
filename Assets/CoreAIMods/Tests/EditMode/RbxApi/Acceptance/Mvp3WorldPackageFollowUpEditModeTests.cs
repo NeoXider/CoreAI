@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -256,9 +257,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             IReadOnlyList<RbxAutoSaveInfo> infos = fileStore.ListAutoSaves();
             Assert.AreEqual(1, infos.Count);
             Assert.IsTrue(infos[0].FileName.EndsWith(".world", StringComparison.Ordinal));
-            StringAssert.Contains("execute_lua", infos[0].Trigger);
+            Assert.AreEqual("20260902T120000000Z-0000-execute_lua.world", infos[0].FileName);
+            Assert.AreEqual(Path.GetFileName(autosave.Path), infos[0].FileName);
+            Assert.AreEqual("execute_lua", infos[0].Trigger);
             Assert.IsTrue(infos[0].SizeBytes > 0L);
-            Assert.AreNotEqual(default(DateTime), infos[0].TimestampUtc);
+            Assert.AreEqual(new FileInfo(autosave.Path).Length, infos[0].SizeBytes);
+            Assert.AreEqual(fixedNow, infos[0].TimestampUtc);
+            Assert.AreEqual(DateTimeKind.Utc, infos[0].TimestampUtc.Kind);
 
             InMemoryAutosaveStore stubStore = new(payload, infos[0]);
             HeadlessRbxWorldSessionHost host = CreateHeadlessHost();
@@ -278,8 +283,23 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(0, controller.GetPendingManualLoads().Count);
 
             RbxWorldLoadRequest request2 = await controller.RequestAutoLoadAsync(actor, infos[0].FileName, CancellationToken.None);
+            Assert.AreNotEqual(request.RequestId, request2.RequestId, "A consumed request id is never reissued.");
+            IReadOnlyList<RbxPendingWorldLoadRequest> pending = controller.GetPendingManualLoads();
+            Assert.AreEqual(1, pending.Count);
+            Assert.AreEqual(request2.RequestId, pending[0].RequestId);
+            Assert.AreEqual(infos[0].FileName, pending[0].Slot);
             RbxWorldLoadResult expired = await controller.ConfirmManualLoadAsync("unknown-id", true, CancellationToken.None);
             Assert.IsFalse(expired.Success);
+            Assert.AreEqual(0, expired.ActiveModsStarted);
+            Assert.AreEqual(
+                1,
+                controller.GetPendingManualLoads().Count,
+                "An unknown id must neither consume nor evict another pending request.");
+            Assert.AreEqual(request2.RequestId, controller.GetPendingManualLoads()[0].RequestId);
+            Assert.AreSame(
+                host.Registry,
+                controller.CurrentRbxApi.Registry,
+                "Without a player confirmation the live world must not be swapped.");
         }
 
         [Test]
@@ -702,6 +722,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             public int Calls => SavedSlots.Count + RequestedSlots.Count + RequestedAutoFiles.Count;
 
+            /// <summary>When set, <see cref="RequestAutoLoadAsync"/> completes faulted with this exception.</summary>
+            public Exception AutoLoadFault { get; set; }
+
             public event Action<RbxPendingWorldLoadRequest> ManualLoadConfirmationRequested
             {
                 add { }
@@ -748,6 +771,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 CancellationToken cancellationToken = default)
             {
                 RequestedAutoFiles.Add(autoFileName);
+                if (AutoLoadFault != null)
+                {
+                    return UniTask.FromException<RbxWorldLoadRequest>(AutoLoadFault);
+                }
+
                 return UniTask.FromResult(new RbxWorldLoadRequest(
                     "request-" + RequestedAutoFiles.Count, autoFileName, "world", CapturedAtUtc,
                     CapturedAtUtc.AddMinutes(1d)));
@@ -779,6 +807,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         /// blank or malformed slot straight through, so the model got an exception crossing the invocation
         /// boundary (traced as possibly executed, retries suppressed). Now the tool refuses first.
         /// </summary>
+        [TestCase((string)null)]
         [TestCase("")]
         [TestCase("   ")]
         [TestCase("a/b")]
@@ -800,6 +829,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(0, service.Calls, "an invalid slot must never reach the service");
         }
 
+        [TestCase((string)null)]
         [TestCase("")]
         [TestCase("   ")]
         [TestCase("a/b")]
@@ -817,11 +847,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual("invalid_argument", (string)json["status"]);
             Assert.IsFalse((bool)json["player_confirmation_required"]);
             Assert.AreEqual("", (string)json["request_id"]);
+            Assert.AreEqual(slot ?? "", (string)json["slot"], "The refused slot is echoed verbatim.");
+            Assert.AreEqual("", (string)json["world_id"]);
             StringAssert.Contains("Parameter 'slot' is invalid", (string)json["error"]);
             StringAssert.Contains("NOT executed", (string)json["error"]);
             Assert.AreEqual(0, service.Calls, "an invalid slot must never reach the service");
         }
 
+        [TestCase((string)null)]
         [TestCase("")]
         [TestCase("   ")]
         [TestCase("nested/save.world")]
@@ -837,6 +870,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.IsFalse((bool)json["success"]);
             Assert.AreEqual("invalid_argument", (string)json["status"]);
             Assert.IsFalse((bool)json["player_confirmation_required"]);
+            Assert.AreEqual("", (string)json["request_id"]);
+            Assert.AreEqual(name ?? "", (string)json["slot"], "The refused name is echoed verbatim.");
+            Assert.AreEqual("", (string)json["world_id"]);
             StringAssert.Contains("Parameter 'name' is invalid", (string)json["error"]);
             StringAssert.Contains(".world file name without a path", (string)json["error"]);
             StringAssert.Contains("NOT executed", (string)json["error"]);
@@ -907,6 +943,557 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.IsTrue(RbxWorldPackageNames.TryValidateAutoFileName("x.WORLD", out error), error);
             Assert.IsFalse(RbxWorldPackageNames.TryValidateAutoFileName(null, out error));
             Assert.AreEqual("Auto package name must be one .world file name without a path.", error);
+        }
+
+        private const string ValidAutoName = "20260902T120000000Z-0000-execute_lua.world";
+
+        private static readonly DateTime AutosaveClockUtc = new(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc);
+
+        /// <summary>
+        /// save_world through the real tool, runtime controller and file store: the second call to the same
+        /// slot carries a DIFFERENT world, so an overwriting store would change the bytes on disk.
+        /// </summary>
+        [Test]
+        public async Task SaveWorldTool_SecondSaveToSameSlot_IsRefusedAsResultAndKeepsFirstBytes()
+        {
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore fileStore = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => AutosaveClockUtc);
+            HeadlessRbxWorldSessionHost host = CreateHeadlessHost();
+            RbxWorldRuntimeSessionController controller =
+                CreateController(host, fileStore, new DelegateModSourceStore());
+            SaveWorldLlmTool tool = new(controller, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+            string expectedPath = Path.Combine(Path.GetFullPath(root), "Manual", "golden-slot.world");
+
+            JObject first = JObject.Parse(await tool.ExecuteAsync("golden-slot"));
+
+            Assert.IsTrue((bool)first["success"], first.ToString());
+            Assert.AreEqual(expectedPath, (string)first["path"]);
+            byte[] original = File.ReadAllBytes(expectedPath);
+            RbxInstance marker = host.Registry.Create("Folder");
+            marker.Name = "AddedAfterFirstSave";
+            marker.Parent = host.Registry.WorldRoot;
+            CollectionAssert.AreNotEqual(
+                original,
+                RbxWorldPackageSerializer.WritePackage(controller.CaptureCurrent()),
+                "The second save must carry a different world, or an overwrite would leave identical bytes.");
+
+            JObject second = JObject.Parse(await tool.ExecuteAsync("golden-slot"));
+
+            Assert.IsFalse((bool)second["success"], second.ToString());
+            Assert.AreEqual(expectedPath, (string)second["path"]);
+            StringAssert.Contains("already exists and cannot be overwritten", (string)second["error"]);
+            CollectionAssert.AreEqual(original, File.ReadAllBytes(expectedPath));
+            CollectionAssert.AreEqual(
+                new[] { expectedPath },
+                Directory.GetFiles(Path.GetDirectoryName(expectedPath)),
+                "A refused save must leave no second file or temporary behind.");
+            CollectionAssert.AreEqual(new[] { "golden-slot" }, fileStore.ListManualSlots());
+        }
+
+        /// <summary>
+        /// Pins "no delete path for AI tools": neither persistence seam nor any world tool exposes a member
+        /// named Delete*/Overwrite*/Remove*/Replace* or a parameter that could ask for one.
+        /// </summary>
+        [Test]
+        public void WorldPersistenceSurface_ExposesNoDeleteOverwriteRemoveOrReplacePath()
+        {
+            Type[] surfaces =
+            {
+                typeof(IRbxWorldPackageStore),
+                typeof(IRbxWorldRuntimeService),
+                typeof(SaveWorldLlmTool),
+                typeof(LoadWorldLlmTool),
+                typeof(ListAutoSavesLlmTool),
+                typeof(LoadAutoSaveLlmTool)
+            };
+            List<string> violations = new();
+            foreach (Type surface in surfaces)
+            {
+                violations.AddRange(FindDestructiveMembers(surface));
+            }
+
+            CollectionAssert.IsEmpty(violations, string.Join(", ", violations));
+            CollectionAssert.IsNotEmpty(
+                FindDestructiveMembers(typeof(ILuaModSourceStore)),
+                "The scan must detect a real delete member (ILuaModSourceStore.Delete), or it proves nothing.");
+        }
+
+        [Test]
+        public void WorldTools_SchemasExposeOnlyTheirNameArgument()
+        {
+            RecordingRuntimeService service = new();
+            IActorIdentityProvider identity = ToolIdentity();
+
+            AssertToolSchema(
+                new SaveWorldLlmTool(service, identity, BuiltInAgentRoleIds.Programmer), "save_world", "slot");
+            AssertToolSchema(
+                new LoadWorldLlmTool(service, identity, BuiltInAgentRoleIds.Programmer), "load_world", "slot");
+            AssertToolSchema(
+                new ListAutoSavesLlmTool(service, identity, BuiltInAgentRoleIds.Programmer), "list_autosaves");
+            AssertToolSchema(
+                new LoadAutoSaveLlmTool(service, identity, BuiltInAgentRoleIds.Programmer), "load_autosave", "name");
+        }
+
+        [Test]
+        public async Task ListAutoSaves_HyphenatedTriggers_RoundTripExactly()
+        {
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore store = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => AutosaveClockUtc);
+            RbxWorldPackagePayload payload = CreateMinimalPayload(CapturedAtUtc);
+            Assert.AreEqual("manage_mods-load", LuaModsLlmTool.LoadBackupTrigger);
+            Assert.AreEqual("manage_mods-revert", LuaModsLlmTool.RevertBackupTrigger);
+            string[] triggers =
+            {
+                LuaModsLlmTool.LoadBackupTrigger,
+                "load_world-pre",
+                LuaCsGameToolExecutor.ExecuteLuaBackupTrigger,
+                LuaModsLlmTool.RevertBackupTrigger
+            };
+            foreach (string trigger in triggers)
+            {
+                RbxWorldPackageWriteResult result = await store.CreateAutoAsync(trigger, payload);
+                Assert.IsTrue(result.Success, result.Error);
+            }
+
+            IReadOnlyList<RbxAutoSaveInfo> infos = store.ListAutoSaves();
+
+            string[] expectedNames =
+            {
+                "20260902T120000000Z-0000-manage_mods-load.world",
+                "20260902T120000000Z-0001-load_world-pre.world",
+                "20260902T120000000Z-0002-execute_lua.world",
+                "20260902T120000000Z-0003-manage_mods-revert.world"
+            };
+            string[] expectedTriggers = { "manage_mods-load", "load_world-pre", "execute_lua", "manage_mods-revert" };
+            Assert.AreEqual(expectedNames.Length, infos.Count);
+            for (int index = 0; index < expectedNames.Length; index++)
+            {
+                Assert.AreEqual(expectedNames[index], infos[index].FileName);
+                Assert.AreEqual(expectedTriggers[index], infos[index].Trigger);
+                Assert.AreEqual(AutosaveClockUtc, infos[index].TimestampUtc);
+            }
+        }
+
+        [Test]
+        public async Task ListAutoSavesTool_ReturnsExactNameTriggerTimestampAndSize()
+        {
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore fileStore = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => AutosaveClockUtc);
+            RbxWorldPackageWriteResult first = await fileStore.CreateAutoAsync(
+                "execute_lua", CreateMinimalPayload(CapturedAtUtc));
+            RbxWorldPackageWriteResult second = await fileStore.CreateAutoAsync(
+                "manage_mods-load", CreateMinimalPayload(CapturedAtUtc.AddSeconds(1d)));
+            Assert.IsTrue(first.Success, first.Error);
+            Assert.IsTrue(second.Success, second.Error);
+            RbxWorldRuntimeSessionController controller =
+                CreateController(CreateHeadlessHost(), fileStore, new DelegateModSourceStore());
+            ListAutoSavesLlmTool tool = new(controller, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            JObject json = ParseJsonLiteral(await tool.ExecuteAsync());
+
+            CollectionAssert.AreEqual(new[] { "autosaves" }, PropertyNames(json));
+            JArray autosaves = (JArray)json["autosaves"];
+            Assert.AreEqual(2, autosaves.Count);
+            AssertAutosaveRow(
+                autosaves[0],
+                "20260902T120000000Z-0000-execute_lua.world",
+                "execute_lua",
+                "2026-09-02T12:00:00.0000000Z",
+                new FileInfo(first.Path).Length);
+            AssertAutosaveRow(
+                autosaves[1],
+                "20260902T120000000Z-0001-manage_mods-load.world",
+                "manage_mods-load",
+                "2026-09-02T12:00:00.0000000Z",
+                new FileInfo(second.Path).Length);
+        }
+
+        [Test]
+        public async Task ListAutoSavesTool_StoreFailure_IsReturnedAsJsonFailure()
+        {
+            ThrowingListStore failingStore = new(new IOException("Injected listing failure."));
+            RbxWorldRuntimeSessionController controller =
+                CreateController(CreateHeadlessHost(), failingStore, new DelegateModSourceStore());
+            ListAutoSavesLlmTool tool = new(controller, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            JObject json = JObject.Parse(await tool.ExecuteAsync());
+
+            Assert.IsFalse((bool)json["success"], json.ToString());
+            Assert.AreEqual("list_failed", (string)json["status"]);
+            CollectionAssert.IsEmpty((JArray)json["autosaves"]);
+            StringAssert.Contains("Injected listing failure.", (string)json["error"]);
+            StringAssert.Contains("No autosave was changed", (string)json["error"]);
+            Assert.AreEqual(1, failingStore.ListCalls);
+        }
+
+        [Test]
+        public void ListAutoSavesTool_StoreCancellation_PropagatesInsteadOfBecomingAResult()
+        {
+            ThrowingListStore cancelledStore = new(new OperationCanceledException("Injected listing cancellation."));
+            RbxWorldRuntimeSessionController controller =
+                CreateController(CreateHeadlessHost(), cancelledStore, new DelegateModSourceStore());
+            ListAutoSavesLlmTool tool = new(controller, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            Assert.CatchAsync<OperationCanceledException>(async () => await tool.ExecuteAsync());
+            Assert.AreEqual(1, cancelledStore.ListCalls);
+        }
+
+        [Test]
+        public async Task LoadAutoSaveTool_RotatedAwayName_IsRefusedAsNotFoundResult()
+        {
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore fileStore = new(
+                root,
+                1,
+                cancellationToken => UniTask.FromResult(true),
+                () => AutosaveClockUtc);
+            RbxWorldPackageWriteResult rotated = await fileStore.CreateAutoAsync(
+                "execute_lua", CreateMinimalPayload(CapturedAtUtc));
+            RbxWorldPackageWriteResult kept = await fileStore.CreateAutoAsync(
+                "manage_mods-load", CreateMinimalPayload(CapturedAtUtc.AddSeconds(1d)));
+            Assert.IsTrue(rotated.Success, rotated.Error);
+            Assert.IsTrue(kept.Success, kept.Error);
+            string rotatedName = Path.GetFileName(rotated.Path);
+            CollectionAssert.AreEqual(
+                new[] { Path.GetFileName(kept.Path) },
+                fileStore.ListAutoFiles(),
+                "Precondition: the first autosave was rotated out of the ring.");
+            RbxWorldRuntimeSessionController controller =
+                CreateController(CreateHeadlessHost(), fileStore, new DelegateModSourceStore());
+            LoadAutoSaveLlmTool tool = new(controller, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            JObject json = JObject.Parse(await tool.ExecuteAsync(rotatedName));
+
+            AssertUnloadableAutosave(json, rotatedName, "not_found");
+            StringAssert.Contains("rotated out of the autosave ring", (string)json["error"]);
+            StringAssert.Contains("list_autosaves", (string)json["error"]);
+            Assert.AreEqual(0, controller.GetPendingManualLoads().Count);
+        }
+
+        [Test]
+        public async Task LoadAutoSaveTool_PackageAboveReadLimit_IsRefusedAsInvalidPackageResult()
+        {
+            string root = NewTemporaryDirectory();
+            string autoDirectory = Path.Combine(root, "Auto");
+            Directory.CreateDirectory(autoDirectory);
+            const string oversizedName = "20260902T120000000Z-0000-oversized.world";
+            using (FileStream stream = new(
+                       Path.Combine(autoDirectory, oversizedName),
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None))
+            {
+                stream.SetLength((long)RbxWorldPackageSerializer.MaximumPackageBytes + 1L);
+            }
+
+            FileRbxWorldPackageStore fileStore = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true));
+            RbxWorldRuntimeSessionController controller =
+                CreateController(CreateHeadlessHost(), fileStore, new DelegateModSourceStore());
+            LoadAutoSaveLlmTool tool = new(controller, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            JObject json = JObject.Parse(await tool.ExecuteAsync(oversizedName));
+
+            AssertUnloadableAutosave(json, oversizedName, "invalid_package");
+            StringAssert.Contains("format version 1 limit", (string)json["error"]);
+            Assert.AreEqual(0, controller.GetPendingManualLoads().Count);
+        }
+
+        /// <summary>
+        /// A coroutine because the store yields one PlayerLoop frame after reading a package, before
+        /// decoding it; the intact autosave in the same ring is the negative twin.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator LoadAutoSaveTool_CorruptOrTruncatedPackage_IsRefusedAsInvalidPackageResult()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                string root = NewTemporaryDirectory();
+                FileRbxWorldPackageStore fileStore = new(
+                    root,
+                    persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                    utcNow: () => AutosaveClockUtc);
+                RbxWorldPackageWriteResult intact = await fileStore.CreateAutoAsync(
+                    "execute_lua", CreateMinimalPayload(CapturedAtUtc));
+                Assert.IsTrue(intact.Success, intact.Error);
+                byte[] intactBytes = File.ReadAllBytes(intact.Path);
+                byte[] truncatedBytes = new byte[intactBytes.Length / 2];
+                Array.Copy(intactBytes, truncatedBytes, truncatedBytes.Length);
+                string autoDirectory = Path.GetDirectoryName(intact.Path);
+                Dictionary<string, byte[]> corrupt = new(StringComparer.Ordinal)
+                {
+                    ["20260902T120000000Z-0001-truncated.world"] = truncatedBytes,
+                    ["20260902T120000000Z-0002-empty.world"] = Array.Empty<byte>(),
+                    ["20260902T120000000Z-0003-garbage.world"] =
+                        System.Text.Encoding.UTF8.GetBytes("this is not a world package")
+                };
+                foreach (KeyValuePair<string, byte[]> entry in corrupt)
+                {
+                    File.WriteAllBytes(Path.Combine(autoDirectory, entry.Key), entry.Value);
+                }
+
+                RbxWorldRuntimeSessionController controller =
+                    CreateController(CreateHeadlessHost(), fileStore, new DelegateModSourceStore());
+                LoadAutoSaveLlmTool tool = new(controller, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+                foreach (string corruptName in corrupt.Keys)
+                {
+                    JObject json = JObject.Parse(await tool.ExecuteAsync(corruptName));
+                    AssertUnloadableAutosave(json, corruptName, "invalid_package");
+                    StringAssert.Contains("is not a loadable world package", (string)json["error"]);
+                }
+
+                Assert.AreEqual(0, controller.GetPendingManualLoads().Count);
+                JObject control = JObject.Parse(await tool.ExecuteAsync(Path.GetFileName(intact.Path)));
+                Assert.AreEqual("player_confirmation_required", (string)control["status"], control.ToString());
+                Assert.AreEqual(1, controller.GetPendingManualLoads().Count);
+            });
+        }
+
+        [TestCase("file-not-found", "not_found")]
+        [TestCase("directory-not-found", "not_found")]
+        [TestCase("invalid-package", "invalid_package")]
+        [TestCase("io", "read_failed")]
+        [TestCase("unauthorized", "read_failed")]
+        public async Task LoadAutoSaveTool_ReadPhaseFailures_AreReturnedAsJsonResults(
+            string fault,
+            string expectedStatus)
+        {
+            RecordingRuntimeService service = new() { AutoLoadFault = CreateReadFault(fault) };
+            LoadAutoSaveLlmTool tool = new(service, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            JObject json = JObject.Parse(await tool.ExecuteAsync(ValidAutoName));
+
+            AssertUnloadableAutosave(json, ValidAutoName, expectedStatus);
+            if (!string.Equals(expectedStatus, "not_found", StringComparison.Ordinal))
+            {
+                StringAssert.Contains("Injected", (string)json["error"], "The cause is reported to the model.");
+            }
+
+            CollectionAssert.AreEqual(new[] { ValidAutoName }, service.RequestedAutoFiles);
+        }
+
+        [Test]
+        public void LoadAutoSaveTool_ServiceCancellation_PropagatesInsteadOfBecomingAResult()
+        {
+            RecordingRuntimeService service = new()
+            {
+                AutoLoadFault = new OperationCanceledException("Injected cancellation.")
+            };
+            LoadAutoSaveLlmTool tool = new(service, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            Assert.CatchAsync<OperationCanceledException>(async () => await tool.ExecuteAsync(ValidAutoName));
+        }
+
+        [Test]
+        public async Task LoadAutoSaveTool_CancelledToken_PropagatesThroughTheFileStore()
+        {
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore fileStore = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => AutosaveClockUtc);
+            RbxWorldPackageWriteResult autosave = await fileStore.CreateAutoAsync(
+                "execute_lua", CreateMinimalPayload(CapturedAtUtc));
+            Assert.IsTrue(autosave.Success, autosave.Error);
+            RbxWorldRuntimeSessionController controller =
+                CreateController(CreateHeadlessHost(), fileStore, new DelegateModSourceStore());
+            LoadAutoSaveLlmTool tool = new(controller, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+            using CancellationTokenSource cancellation = new();
+            cancellation.Cancel();
+
+            Assert.CatchAsync<OperationCanceledException>(
+                async () => await tool.ExecuteAsync(Path.GetFileName(autosave.Path), cancellation.Token));
+            Assert.AreEqual(0, controller.GetPendingManualLoads().Count);
+        }
+
+        private static Exception CreateReadFault(string fault)
+        {
+            switch (fault)
+            {
+                case "file-not-found":
+                    return new FileNotFoundException("Injected missing package.", ValidAutoName);
+                case "directory-not-found":
+                    return new DirectoryNotFoundException("Injected missing directory.");
+                case "invalid-package":
+                    return new RbxWorldPackageException("Injected corrupt package.");
+                case "io":
+                    return new IOException("Injected read failure.");
+                case "unauthorized":
+                    return new UnauthorizedAccessException("Injected permission failure.");
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(fault), fault, "Unknown injected fault.");
+            }
+        }
+
+        private static void AssertUnloadableAutosave(JObject json, string name, string status)
+        {
+            Assert.IsFalse((bool)json["success"], json.ToString());
+            Assert.AreEqual(status, (string)json["status"]);
+            Assert.IsFalse((bool)json["player_confirmation_required"]);
+            Assert.AreEqual("", (string)json["request_id"]);
+            Assert.AreEqual(name, (string)json["slot"]);
+            Assert.AreEqual("", (string)json["world_id"]);
+            StringAssert.Contains("'" + name + "'", (string)json["error"], "The error names the file.");
+            StringAssert.Contains("The tool was NOT executed.", (string)json["error"]);
+        }
+
+        private static void AssertAutosaveRow(JToken row, string name, string trigger, string timestamp, long size)
+        {
+            CollectionAssert.AreEquivalent(new[] { "name", "trigger", "timestamp", "size" }, PropertyNames(row));
+            Assert.AreEqual(name, (string)row["name"]);
+            Assert.AreEqual(trigger, (string)row["trigger"]);
+            Assert.AreEqual(JTokenType.String, row["timestamp"].Type);
+            Assert.AreEqual(timestamp, (string)row["timestamp"]);
+            Assert.AreEqual(JTokenType.Integer, row["size"].Type);
+            Assert.AreEqual(size, (long)row["size"]);
+            Assert.IsTrue(size > 0L);
+        }
+
+        private static void AssertToolSchema(ILlmTool tool, string name, params string[] parameters)
+        {
+            Assert.AreEqual(name, tool.Name);
+            JObject schema = JObject.Parse(tool.ParametersSchema);
+            CollectionAssert.AreEqual(
+                parameters,
+                PropertyNames(schema["properties"]),
+                name + " must take no argument that could overwrite, delete or force a save.");
+        }
+
+        private static List<string> FindDestructiveMembers(Type surface)
+        {
+            string[] forbiddenPrefixes = { "Delete", "Overwrite", "Remove", "Replace" };
+            string[] forbiddenParameterWords = { "delete", "overwrite", "remove", "replace", "force" };
+            List<string> violations = new();
+            foreach (MemberInfo member in surface.GetMembers(
+                         BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static))
+            {
+                MethodBase method = member as MethodBase;
+                // WHY: accessor methods (add_/remove_ of an event, get_ of a property) and constructors are
+                // WHY: named by the compiler; the event or property they belong to is scanned by its own name.
+                if (method == null || !method.IsSpecialName)
+                {
+                    foreach (string prefix in forbiddenPrefixes)
+                    {
+                        if (member.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        {
+                            violations.Add(surface.Name + "." + member.Name);
+                        }
+                    }
+                }
+
+                if (method == null)
+                {
+                    continue;
+                }
+
+                foreach (ParameterInfo parameter in method.GetParameters())
+                {
+                    foreach (string word in forbiddenParameterWords)
+                    {
+                        if (parameter.Name != null
+                            && parameter.Name.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            violations.Add(surface.Name + "." + member.Name + "(" + parameter.Name + ")");
+                        }
+                    }
+                }
+            }
+
+            return violations;
+        }
+
+        /// <summary>Parses JSON without turning ISO-8601 strings into dates, so literal text compares exactly.</summary>
+        private static JObject ParseJsonLiteral(string json)
+        {
+            using StringReader text = new(json);
+            using Newtonsoft.Json.JsonTextReader reader = new(text)
+            {
+                DateParseHandling = Newtonsoft.Json.DateParseHandling.None
+            };
+            return JObject.Load(reader);
+        }
+
+        private static List<string> PropertyNames(JToken token)
+        {
+            Assert.AreEqual(JTokenType.Object, token.Type);
+            List<string> names = new();
+            foreach (JProperty property in ((JObject)token).Properties())
+            {
+                names.Add(property.Name);
+            }
+
+            return names;
+        }
+
+        /// <summary>A package store whose ring listing fails with a chosen exception.</summary>
+        private sealed class ThrowingListStore : IRbxWorldPackageStore
+        {
+            private readonly Exception _fault;
+
+            public ThrowingListStore(Exception fault)
+            {
+                _fault = fault;
+            }
+
+            public int ListCalls { get; private set; }
+
+            public UniTask<RbxWorldPackageWriteResult> CreateManualAsync(
+                string slot,
+                RbxWorldPackagePayload payload,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> CreateAutoAsync(
+                string trigger,
+                RbxWorldPackagePayload payload,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public UniTask<RbxWorldPackagePayload> LoadManualAsync(
+                string slot,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public UniTask<RbxWorldPackagePayload> LoadAutoAsync(
+                string fileName,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public IReadOnlyList<string> ListManualSlots()
+            {
+                return Array.Empty<string>();
+            }
+
+            public IReadOnlyList<string> ListAutoFiles()
+            {
+                ListCalls++;
+                throw _fault;
+            }
+
+            public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+            {
+                ListCalls++;
+                throw _fault;
+            }
         }
     }
 }

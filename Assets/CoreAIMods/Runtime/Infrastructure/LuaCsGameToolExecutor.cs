@@ -577,6 +577,9 @@ namespace CoreAI.Mods.WorldPackages
     /// <summary>AI tool that lists autosave packages with metadata.</summary>
     public sealed class ListAutoSavesLlmTool : LlmToolBase, IAIFunctionLlmTool
     {
+        /// <summary>The <c>status</c> reported when the autosave ring could not be listed.</summary>
+        internal const string ListFailedStatus = "list_failed";
+
         private readonly IRbxWorldRuntimeService _service;
         private readonly IActorIdentityProvider _identityProvider;
         private readonly string _roleId;
@@ -611,16 +614,41 @@ namespace CoreAI.Mods.WorldPackages
         public Task<string> ExecuteAsync(CancellationToken cancellationToken = default)
         {
             _identityProvider.GetActorContext(_roleId);
-            IReadOnlyList<RbxAutoSaveInfo> autosaves = _service.ListAutoSaves();
+            List<object> rows;
+            // WHY: every failure except cancellation becomes a result. Listing is read-only, so an I/O,
+            // WHY: permission or disposed-session fault changed nothing and the model can retry; thrown,
+            // WHY: it crossed the tool invocation boundary and was traced as possibly executed.
+            try
+            {
+                IReadOnlyList<RbxAutoSaveInfo> autosaves = _service.ListAutoSaves()
+                    ?? throw new InvalidOperationException("The world service returned no autosave list.");
+                rows = new List<object>(autosaves.Count);
+                foreach (RbxAutoSaveInfo info in autosaves)
+                {
+                    rows.Add(new
+                    {
+                        name = info.FileName,
+                        trigger = info.Trigger,
+                        timestamp = info.TimestampUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                        size = info.SizeBytes
+                    });
+                }
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                return Task.FromResult(Newtonsoft.Json.JsonConvert.SerializeObject(new
+                {
+                    success = false,
+                    status = ListFailedStatus,
+                    autosaves = Array.Empty<object>(),
+                    error = "Listing the autosave ring failed: " + ex.Message
+                            + " No autosave was changed. Retry list_autosaves."
+                }));
+            }
+
             return Task.FromResult(Newtonsoft.Json.JsonConvert.SerializeObject(new
             {
-                autosaves = System.Linq.Enumerable.Select(autosaves, info => new
-                {
-                    name = info.FileName,
-                    trigger = info.Trigger,
-                    timestamp = info.TimestampUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
-                    size = info.SizeBytes
-                })
+                autosaves = rows
             }));
         }
     }
@@ -628,6 +656,15 @@ namespace CoreAI.Mods.WorldPackages
     /// <summary>AI tool that requests a confirmed load of a named autosave.</summary>
     public sealed class LoadAutoSaveLlmTool : LlmToolBase, IAIFunctionLlmTool
     {
+        /// <summary>The <c>status</c> reported when the named autosave does not exist (e.g. rotated out).</summary>
+        internal const string NotFoundStatus = "not_found";
+
+        /// <summary>The <c>status</c> reported when the named autosave is corrupt or above the read limits.</summary>
+        internal const string InvalidPackageStatus = "invalid_package";
+
+        /// <summary>The <c>status</c> reported when the named autosave exists but could not be read.</summary>
+        internal const string ReadFailedStatus = "read_failed";
+
         private readonly IRbxWorldRuntimeService _service;
         private readonly IActorIdentityProvider _identityProvider;
         private readonly string _roleId;
@@ -680,7 +717,40 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             CoreAI.Authority.ActorContext actor = _identityProvider.GetActorContext(_roleId);
-            RbxWorldLoadRequest request = await _service.RequestAutoLoadAsync(actor, name, cancellationToken);
+            RbxWorldLoadRequest request;
+            // WHY: only failures raised while the package is being read are converted. They happen before
+            // WHY: any request is queued, so "not executed" is true, and a rotated-away name or a corrupt,
+            // WHY: oversized or unreadable file is an outcome the model can correct. Thrown, it crossed the
+            // WHY: tool invocation boundary and was traced as possibly executed. Cancellation propagates.
+            try
+            {
+                request = await _service.RequestAutoLoadAsync(actor, name, cancellationToken);
+            }
+            catch (System.IO.FileNotFoundException)
+            {
+                return RefuseUnloadable(name, NotFoundStatus, DescribeNotFound(name));
+            }
+            catch (System.IO.DirectoryNotFoundException)
+            {
+                return RefuseUnloadable(name, NotFoundStatus, DescribeNotFound(name));
+            }
+            catch (RbxWorldPackageException ex)
+            {
+                return RefuseUnloadable(
+                    name,
+                    InvalidPackageStatus,
+                    "Autosave '" + name + "' is not a loadable world package: " + ex.Message
+                    + " The tool was NOT executed. Pick another autosave from list_autosaves.");
+            }
+            catch (System.IO.IOException ex)
+            {
+                return RefuseUnloadable(name, ReadFailedStatus, DescribeReadFailure(name, ex));
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return RefuseUnloadable(name, ReadFailedStatus, DescribeReadFailure(name, ex));
+            }
+
             return Newtonsoft.Json.JsonConvert.SerializeObject(new
             {
                 success = false,
@@ -689,6 +759,32 @@ namespace CoreAI.Mods.WorldPackages
                 request_id = request.RequestId,
                 slot = request.Slot,
                 world_id = request.WorldId
+            });
+        }
+
+        private static string DescribeNotFound(string name)
+        {
+            return "Autosave '" + name + "' was not found; it may have been rotated out of the autosave ring."
+                   + " The tool was NOT executed. Call list_autosaves and retry with a listed 'name'.";
+        }
+
+        private static string DescribeReadFailure(string name, Exception exception)
+        {
+            return "Autosave '" + name + "' could not be read: " + exception.Message
+                   + " The tool was NOT executed. Retry, or pick another autosave from list_autosaves.";
+        }
+
+        private static string RefuseUnloadable(string name, string status, string error)
+        {
+            return Newtonsoft.Json.JsonConvert.SerializeObject(new
+            {
+                success = false,
+                status,
+                player_confirmation_required = false,
+                request_id = "",
+                slot = name,
+                world_id = "",
+                error
             });
         }
     }

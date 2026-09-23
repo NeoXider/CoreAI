@@ -251,6 +251,13 @@ namespace CoreAI.Mods.WorldPackages
             _fileSystem = fileSystem ?? new SystemRbxWorldPackageFileSystem();
         }
 
+        /// <summary>
+        /// The durability hook this store awaits after every write: the injected delegate, or the
+        /// production default that asks <see cref="CoreAiWebGlPersistence.SyncAsync"/>. Read-only; tests
+        /// use it to pin that default, which no EditMode run can observe through behaviour.
+        /// </summary>
+        internal Func<CancellationToken, UniTask<bool>> PersistenceSyncForTests => _persistenceSyncAsync;
+
         public async UniTask<RbxWorldPackageWriteResult> CreateManualAsync(
             string slot,
             RbxWorldPackagePayload payload,
