@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    WHY this mirrors CoreAI.RbxApi.Instances.asmdef (noEngineReferences, references only Datatypes):
+    see ../CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj. The glob takes the Scheduling,
+    Networking and Replication subfolders because they carry no asmdef of their own.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AssemblyName>CoreAI.RbxApi.Instances</AssemblyName>
+    <RootNamespace>CoreAI.Mods.Rbx.Instances</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Assets/CoreAIMods/Runtime/RbxApi/Instances/**/*.cs" />
+    <ProjectReference Include="../CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj" />
+  </ItemGroup>
+</Project>

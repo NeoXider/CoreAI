@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    WHY one project per asmdef, each in its own folder: the assembly names and boundaries must match
+    Unity's (CoreAI.RbxApi.Datatypes.asmdef), so InternalsVisibleTo grants and cross-assembly
+    `internal` access behave exactly as in the editor; and two SDK projects in one folder would share
+    obj/project.assets.json.
+    WHY LangVersion 9 and nullable disabled: Unity compiles this asmdef as C# 9 with nullable off, so a
+    newer language feature has to fail here too instead of passing on Linux and breaking the editor.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AssemblyName>CoreAI.RbxApi.Datatypes</AssemblyName>
+    <RootNamespace>CoreAI.Mods.Rbx.Datatypes</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Assets/CoreAIMods/Runtime/RbxApi/Datatypes/**/*.cs" />
+  </ItemGroup>
+</Project>

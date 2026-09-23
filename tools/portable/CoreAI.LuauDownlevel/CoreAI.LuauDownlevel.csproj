@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    WHY this mirrors CoreAI.LuauDownlevel.asmdef (noEngineReferences, no references):
+    see ../CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AssemblyName>CoreAI.LuauDownlevel</AssemblyName>
+    <RootNamespace>CoreAI.Infrastructure.Luau</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Assets/CoreAIMods/Runtime/LuauDownlevel/**/*.cs" />
+  </ItemGroup>
+</Project>

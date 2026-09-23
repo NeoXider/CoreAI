@@ -123,6 +123,7 @@ FirebaseCppApp-*.so
 
 # Roslyn analyzer tool projects (Unity .gitignore ignores *.sln / *.csproj globally)
 !Tools/**/*.csproj
+!tools/**/*.csproj
 !Tools/**/*.sln
 !examples/dotnet/*.csproj
 /Docs/Local/

@@ -35,6 +35,16 @@ The [portable NUnit suite](Tests/README.md) runs existing engine-free tests agai
 
 It is the **first** CI job (`portable-core`, `ubuntu-latest`, no Unity license) and must finish with 0 failures. That is what makes "the core does not depend on Unity" checkable rather than aspirational: this project references no Unity assembly at all, so one `using UnityEngine;` in `Assets/CoreAI/Runtime/Core/**` breaks the build. Re-run the command above to see the current case count yourself; it is not a badge.
 
+The same job also builds and tests the three engine-free assemblies of the Mods package, each from its own project next to this one:
+
+| Project | Sources (Unity asmdef) | What its tests cover |
+|---|---|---|
+| [`CoreAI.RbxApi.Datatypes`](CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj) | `Assets/CoreAIMods/Runtime/RbxApi/Datatypes` | `Vector3`, `Vector2`, `CFrame` golden fixtures, `Color3`, `UDim`/`UDim2`, `Random` and the enum registry |
+| [`CoreAI.RbxApi.Instances`](CoreAI.RbxApi.Instances/CoreAI.RbxApi.Instances.csproj) | `Assets/CoreAIMods/Runtime/RbxApi/Instances` (with `Scheduling`, `Networking`, `Replication`) | instance tree, attributes, tags, `Destroy`, the world ACL, the mod scheduler, replication, network intents and write grants |
+| [`CoreAI.LuauDownlevel`](CoreAI.LuauDownlevel/CoreAI.LuauDownlevel.csproj) | `Assets/CoreAIMods/Runtime/LuauDownlevel` | the Luau-to-Lua 5.2 source rewriter (`LuauDownleveler`) |
+
+Each project keeps the Unity assembly name and references only what the asmdef references, and compiles as C# 9 with nullable off, like Unity does. A C# 10 feature or a `UnityEngine` reference in those folders therefore breaks the Linux build too. They exist for this gate, not as a library for plain .NET apps: in a game the Rbx API is only reachable through the Lua binding and the Unity world backing, which stay in the Unity packages.
+
 The test project lists its sources file by file rather than by glob, so a new engine-free fixture must be added to `Tests/CoreAI.Portable.Tests.csproj` explicitly or it never runs in this leg.
 
 ## Referencing it from an app

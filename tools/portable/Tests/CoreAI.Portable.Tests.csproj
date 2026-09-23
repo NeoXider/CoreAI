@@ -2,7 +2,13 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>CoreAI.Core.Tests</AssemblyName>
+    <!--
+      WHY CoreAI.Mods.Tests: it is the one name both linked runtimes already trust. CoreAI.Core and
+      CoreAI.RbxApi.Instances each grant it InternalsVisibleTo, and the scheduler, registry and
+      replication fixtures reach internal seams (SpawnSignal, BindScheduler, SetReplicatedRevision).
+      Borrowing an existing friend name keeps the runtime friend lists exactly as Unity ships them.
+    -->
+    <AssemblyName>CoreAI.Mods.Tests</AssemblyName>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <DefineConstants>$(DefineConstants);COREAI_LLM</DefineConstants>
     <IsPackable>false</IsPackable>
@@ -11,6 +17,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CoreAI.Core.csproj" />
+    <ProjectReference Include="../CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj" />
+    <ProjectReference Include="../CoreAI.RbxApi.Instances/CoreAI.RbxApi.Instances.csproj" />
+    <ProjectReference Include="../CoreAI.LuauDownlevel/CoreAI.LuauDownlevel.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="NUnit" Version="3.14.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
@@ -104,5 +113,38 @@
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/WaitLlmToolEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/WaitLlmToolEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/Audit/AuditEntryEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/Audit/AuditEntryEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/Audit/AuditHashEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/Audit/AuditHashEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/AiLuaPayloadParserEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/AiLuaPayloadParserEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/LuauDownlevelSeamHonestyEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuauDownlevelSeamHonestyEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/LuauDownlevelerEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuauDownlevelerEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/RungZeroAclEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/RungZeroAclEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxCFrameGoldenFixtureEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxCFrameGoldenFixtureEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxDatatypeMiscEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxDatatypeMiscEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxRandomEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxRandomEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxVector3EditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxVector3EditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/BackingBinderSeamEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/BackingBinderSeamEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceHierarchyEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceHierarchyEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceIdAuthorityPartitionEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceIdAuthorityPartitionEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceTreeSerializationEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceTreeSerializationEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_2_DestroyEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_2_DestroyEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_7_AttributesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_7_AttributesEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_8_TagsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_8_TagsEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/RbxErrorAndLoudStubEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/RbxErrorAndLoudStubEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/RbxScriptSignalEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/RbxScriptSignalEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/RungZeroAclEngineFreeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/RungZeroAclEngineFreeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/ServiceProviderGetServiceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/ServiceProviderGetServiceEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/ClientWritePolicyEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/ClientWritePolicyEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/IntentGatewayEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/IntentGatewayEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/NetworkBridgeEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/NetworkBridgeEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/NetworkRateLimiterEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/NetworkRateLimiterEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/ReplicationFilterEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/ReplicationFilterEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/WriteGrantLedgerEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/WriteGrantLedgerEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/GuardedReplicationFilterEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/GuardedReplicationFilterEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/InstanceRegistryAuthorityEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/InstanceRegistryAuthorityEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicatedWorldHarness.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicatedWorldHarness.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicationApplierEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicationApplierEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicationApplierPlayerAndReferenceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicationApplierPlayerAndReferenceEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scheduling/ModSchedulerEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scheduling/ModSchedulerEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scheduling/ModSchedulerRecordPoolEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scheduling/ModSchedulerRecordPoolEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxShaderClusterLightLoopEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxShaderClusterLightLoopEditModeTests.cs" />
   </ItemGroup>
 </Project>
