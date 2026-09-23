@@ -1,8 +1,7 @@
 # CoreAI Lua Access Modes
 
-Date: 2026-07-15. Related implementation: `LuaCapabilities`,
-`LuaCsGameplayBindings`, `LuaCsFullUnityRuntimeBindings`,
-`CoreAiLuaWorldModule`.
+Related implementation: `LuaCapabilities`, `LuaCsGameplayBindings`,
+`LuaCsFullUnityRuntimeBindings`, `CoreAiModsLifetimeScope`.
 
 ## Concept
 
@@ -25,17 +24,22 @@ These are not game bindings gated by `LuaCsGameplayBindings`; `LuaCsModRuntime` 
 them unconditionally when it builds a mod's script. The capability tier only controls which *game*
 APIs (`coreai_world_*`, `time_*`, `input_*`, `unity_*`, ...) a mod's hooks and timers can then call.
 
-`LuaCapabilities.All` includes standard tiers except `Full`. Full mode is enabled explicitly through:
-
-- the **Enable Full Access** checkbox on the optional `CoreAiLuaWorldModule` child of
-  `CoreAILifetimeScope`;
-- `LoadMod(..., caps | Full)` or `manage_mods` with host-granted capabilities.
+`LuaCapabilities.All` includes standard tiers except `Full`. Full mode is enabled explicitly through
+the **Enable Full Lua Access** checkbox (`enableFullLuaAccess`) on `CoreAiModsLifetimeScope`. That
+host grant is what `execute_lua`, `manage_mods` and rehydrated mods receive; a C#
+`LoadMod(caller, id, code, caps | Full)` gets `Full` only when the host grant already contains it,
+because every requested tier is intersected with the host grant. Read the grant back through
+`CoreAiModsLifetimeScope.FullLuaAccessEnabled` / `FullLuaPrivateAccessEnabled`. `CoreAiLuaWorldModule`
+no longer shows a Full checkbox: its legacy serialized flags never granted `Full`, and their accessors
+(and `CoreAILifetimeScope.FullLuaAccessEnabled`) are `[Obsolete]`.
 
 **Persisted and shared mods are non-Full by default.** A mod that is rehydrated from the source store
 on startup, imported from a bundle, or copied between players never auto-acquires `Full`:
 `LuaCsModRuntime.RehydrateFromStore` and `ImportMod` intersect the mod's requested capabilities with the
-host grant and then strip `Full` unless the host explicitly passes `allowFull: true`. A shared
-capability set is only ever a request; the receiving host decides. See
+host grant and then strip `Full` unless the host explicitly passes `allowFull: true`. The Unity
+composition passes it on startup rehydrate only when **Enable Full Lua Access** is on, and the
+`manage_mods import` action never passes it. A shared capability set is only ever a request; the
+receiving host decides. See
 [LUA_GAME_API.md § Persistence & Sharing](LUA_GAME_API.md) and [FIRST_MOD.md](FIRST_MOD.md).
 
 ### Hub Mods tab
@@ -45,13 +49,15 @@ The live **Mods** tab (`CoreAiModsHubBinder`) carries the same rule. Its `allowF
 the tab has `Full` stripped, so an untrusted mod can never self-escalate to reflection from its own
 `@coreai` header. Granting `Full` is a deliberate host decision, never derived from the mod. To run
 trusted, first-party, or singleplayer content at Full tier, tick **Allow Full Tier** on the binder in
-the Inspector — this is the only way `Full` reaches a mod loaded through the Mods tab.
+the Inspector — this is the only way `Full` reaches a mod loaded through the Mods tab, and it still
+takes effect only on a host whose `CoreAiModsLifetimeScope` grants `Full`.
 
 ## Full Mode
 
 Full mode exposes public component fields and methods by default. Non-public members require the
-host's private-access opt-in. Hosts can register `IFullLuaAccessBlacklistPolicy` to deny component
-types or specific members.
+host's private-access opt-in (**Enable Full Lua Private Access** on `CoreAiModsLifetimeScope`). Hosts
+can assign an `IFullLuaAccessBlacklistPolicy` (the scope's **Blacklist Policy** field) to deny
+component types or specific members.
 
 ```csharp
 public interface IFullLuaAccessBlacklistPolicy
@@ -68,7 +74,7 @@ file APIs that a host game exposes through components.
 
 ## Full API Surface
 
-- `unity_find(name)` -> instance id
+- `unity_find(name)` / `unity_id(name)` -> instance id (`0` when nothing matches)
 - `unity_list_objects(max)`
 - `unity_find_all(pattern, max)`
 - `unity_find_by_tag(tag, max)`
@@ -76,14 +82,18 @@ file APIs that a host game exposes through components.
 - `unity_describe_object(id)`
 - `unity_get_transform(id)`
 - `unity_get_children(id)`
+- `unity_set_active(id, active)`
 - `unity_get_position(id)` / `unity_set_position(id, x, y, z)`
 - `unity_set_rotation_euler(id, x, y, z)`
 - `unity_set_scale(id, x, y, z)`
-- `unity_parent(childId, parentId)`
+- `unity_parent(childId, parentId, worldPositionStays)`
 - `unity_list_components(id)`
+- `unity_list_members(id, componentType)`
 - `unity_get_member(id, componentType, memberName)`
 - `unity_set_member(id, componentType, memberName, value)`
 - `unity_call(id, componentType, methodName, ...)`
+- `unity_add_component(id, componentType)`
+- `unity_destroy(id)`
 
 ## Runtime Guardrails
 
@@ -92,7 +102,9 @@ file APIs that a host game exposes through components.
 - `LuaCsFullUnityRuntimeBindings` caches `Type` and `MemberInfo` lookups, but does not bypass
   sandbox limits.
 - Mod error budget still applies to persistent mods: repeated failures quarantine the mod (kept loaded, dispatch suspended; reload clears it).
-- `Allowed Scenes` on `CoreAiLuaWorldModule` constrains scene-loading commands.
+- **Allowed Scenes** on `CoreAiLuaWorldModule` constrains every `load_scene` world command;
+  **Allowed Lua Scenes** on `CoreAiModsLifetimeScope` constrains the Lua `coreai_world_load_scene`
+  binding (withheld in the default composition).
 - **Runtime lifecycle is scope-bound.** The `DontDestroyOnLoad` `CoreAI_LuaModTicker` that drives
   `hooks_on`/`hooks_every` handlers is destroyed via the owning container's dispose callback, so mod
   ticking stops when the scope is disposed instead of leaking a live runtime into later scenes. The
@@ -104,8 +116,9 @@ file APIs that a host game exposes through components.
 `manage_mods` (`list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`,
 `versions`, `revert`, `diagnostics`) and `execute_lua` are attached to the built-in Programmer role by
 `CoreAiModsInstaller.RegisterCoreAiMods`. Mod source is retrieved through
-`LuaCsModRuntime.TryGetModSource`; `export`/`import`/`forget` move mods between players through the
-source store.
+`ILuaModRuntime.TryGetModSource(caller, id, out source)`; `export`/`import`/`forget` move mods between
+players through the source store. `execute_lua` refuses empty or whitespace-only `code` before
+anything runs.
 
 Programmer guidance keeps these tools direct: run a one-shot `execute_lua` diagnostic first, inspect
 `Success` / `Output` / `Error`, then use `manage_mods` for persistent hook/timer behavior.
@@ -113,7 +126,9 @@ Programmer guidance keeps these tools direct: run a one-shot `execute_lua` diagn
 ## Extending World Commands
 
 `ICoreAiCustomWorldCommandHandler` and `CoreAiWorldCommandExecutor.RegisterCustomHandler` let a game
-add its own actions without modifying the package.
+add its own actions without modifying the package. `RegisterCustomHandler` is on the concrete
+executor; see [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) for how that interacts with the default
+composition.
 
 ## Demos
 

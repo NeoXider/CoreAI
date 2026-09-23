@@ -76,12 +76,13 @@ namespace CoreAI.Infrastructure.Llm
             // WHY: a primary whose transport failed while the caller was cancelling reports the fallout (a
             // disposed socket, an aborted request), not the cause. The caller asked to stop, so the caller gets a
             // cancellation - never the secondary, and never a provider error it would count as an outage.
+            // WHY this wrap comes BEFORE the permanent-refusal branch below: the caller gets one answer, the
+            // cancellation (LlmCancellation). Endpoint health still learns a permanent refusal that raced the
+            // cancel - the fault stays attached as InnerException and RoutingLlmClient looks through it
+            // (LlmCancellation.FindClientException) - so nothing is lost by not exempting it here.
             catch (Exception ex) when (cancellationToken.IsCancellationRequested)
             {
-                throw new OperationCanceledException(
-                    $"The request was cancelled by the caller; the primary then failed with {ex.GetType().Name}.",
-                    ex,
-                    cancellationToken);
+                throw LlmCancellation.WrapAsCancellation(ex, cancellationToken, "the primary");
             }
             // WHY: OperationCanceledException with an un-cancelled caller token is an internal provider/transport
             // timeout (e.g. MeaiOpenAiChatClient's transport-level timeout), not a user cancellation.
@@ -151,13 +152,11 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         throw;
                     }
-                    // WHY: see CompleteAsync - a failure after the caller cancelled is the cancellation.
+                    // WHY: see CompleteAsync - a failure after the caller cancelled is the cancellation, and a
+                    // permanent refusal inside it still reaches endpoint health through the InnerException.
                     catch (Exception ex) when (cancellationToken.IsCancellationRequested)
                     {
-                        throw new OperationCanceledException(
-                            $"The request was cancelled by the caller; the primary stream then failed with {ex.GetType().Name}.",
-                            ex,
-                            cancellationToken);
+                        throw LlmCancellation.WrapAsCancellation(ex, cancellationToken, "the primary stream");
                     }
                     catch (OperationCanceledException ex)
                     {
@@ -292,8 +291,9 @@ namespace CoreAI.Infrastructure.Llm
         /// permanent refusals — <see cref="LlmErrorCode.PaymentRequired"/>,
         /// <see cref="LlmErrorCode.AuthExpired"/>, <see cref="LlmErrorCode.InvalidRequest"/>,
         /// <see cref="LlmErrorCode.PermanentProviderError"/> — from costing a second round trip.
+        /// <see cref="RoutingLlmClient"/> reuses it as the transient/permanent line for endpoint health.
         /// </summary>
-        private static bool IsRetryableError(LlmErrorCode code)
+        internal static bool IsRetryableError(LlmErrorCode code)
         {
             return code == LlmErrorCode.ProviderError ||
                    code == LlmErrorCode.BackendUnavailable ||

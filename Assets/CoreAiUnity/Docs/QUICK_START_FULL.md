@@ -1,7 +1,5 @@
 # 🚀 Quick Start: Run LM Studio → Run the scene → Send a command
 
-**Document version:** 1.0 | **Date:** April 2026
-
 A step-by-step guide from zero to a working AI agent in **10 minutes**.
 
 ---
@@ -97,7 +95,7 @@ Invoke-RestMethod -Uri "http://localhost:1234/v1/models"
 
 # Sample request
 $body = @{
-    model = "qwen3.5-4b"
+    model = "qwen3.5-4b"   # the model id listed by /v1/models
     messages = @(@{ role = "user"; content = "Say hello" })
 } | ConvertTo-Json -Depth 3
 
@@ -115,17 +113,23 @@ Invoke-RestMethod -Uri "http://localhost:1234/v1/chat/completions" `
 2. Open the project (Unity **6000.0+**; custom UI Toolkit elements use `[UxmlElement]` / `[UxmlAttribute]`,
    the only UXML path left in Unity 6.6+)
 
-### 4.2 Open the scene
+### 4.2 Open a scene
+
+For the chat panel:
 
 ```
-Menu: CoreAI → Development → Open _mainCoreAI scene
+Menu: CoreAI → Setup → Create Chat Demo Scene
 ```
 
-Or in the Project window:
+It creates `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with `CoreAILifetimeScope` and the chat panel.
+
+For the F9 Programmer hotkey used in §5.2 Option B, open the example game instead:
 
 ```
-Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
+Menu: CoreAI → Development → Example Game → Open RogueliteArena scene
 ```
+
+(`Assets/CoreAiUnity/Scenes/_mainCoreAI.unity` is an internal development harness, not a starting point.)
 
 ### 4.3 Configure CoreAISettings
 
@@ -139,19 +143,18 @@ Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
 ┌─────────────────────────────────────────────┐
 │  CoreAI Settings                             │
 │                                              │
-│  🎯 LLM Backend:    [OpenAiHttp]      ▼     │
-│                                              │
-│  🌐 HTTP API:                                │
+│  Essentials                                  │
+│     LLM Backend: [OpenAiHttp]         ▼     │
 │     Base URL:    http://localhost:1234/v1     │
 │     API Key:     (empty)                     │
-│     Model:       qwen3.5-4b                  │
-│     Temperature: 0.2                         │
-│     Max Tokens:  off (provider decides)      │
-│     Timeout:     120                         │
+│     Model:       qwen3.5-4b  (required)      │
 │                                              │
-│  ⚙️ General:                                 │
-│     LLM Timeout: 30                          │
-│     Max Concurrent: 2                        │
+│  Advanced Settings                           │
+│   HTTP:    Timeout (sec): 120                │
+│   General: Temperature 0.1 (override off)    │
+│            Max Output Tokens (override off)  │
+│            LLM Timeout (sec): 120            │
+│            Max Concurrent: 2                 │
 │                                              │
 │  [🔗 Test Connection]                        │
 │                                              │
@@ -165,10 +168,11 @@ Click **🔗 Test Connection** in the Inspector.
 Expected result:
 
 ```
-✅ HTTP API: Connected
-   Model: qwen3.5-4b
-   Response: "OK"
-   Latency: 0.3s
+Connection succeeded.
+
+Base URL: http://localhost:1234/v1
+Model: qwen3.5-4b
+Response: "OK"
 ```
 
 ---
@@ -182,17 +186,18 @@ In Unity, click **Play** (▶).
 In the Unity Console you should see:
 
 ```
-[CoreAI] VContainer + MessagePipe... ready.
-[CoreAI] Backend: OpenAiHttp → http://localhost:1234/v1
-[CoreAI] Registered tools: memory, execute_lua, world_command, get_inventory, ...
+VContainer + MessagePipe (GlobalMessagePipe) + filtered ILog are registered.
 ```
+
+(With category and CoreAI prefixes enabled in `GameLogSettings`, the line carries the `[CoreAI]` prefix.)
 
 ### 5.2 Send a command from code
 
 **Option A: From your own script**
 
 ```csharp
-using CoreAI;
+using CoreAI.Ai;
+using UnityEngine;
 using VContainer;
 
 public class MyGameController : MonoBehaviour
@@ -213,16 +218,18 @@ public class MyGameController : MonoBehaviour
 }
 ```
 
-**Option B: Via hotkey (already on the scene)**
+**Option B: Via hotkey (RogueliteArena example scene)**
 
-1. In Play Mode, press **F9**
-2. That invokes the **Programmer** agent via `CoreAiLuaHotkey`
-3. Check the logs:
+1. Open the `RogueliteArena` scene (§4.2); its `ExampleRogueliteEntry` adds `CoreAiLuaHotkey` at runtime
+2. In Play Mode, press **F9** — that queues a **Programmer** task
+3. The Programmer runs Lua through the `execute_lua` tool (needs `com.neoxider.coreaimods` and `COREAI_LUA`)
+4. Check the logs (turn on **Log Tool Calls** in CoreAISettings → Advanced Settings → Debug):
 
 ```
-[LLM ▶] traceId=abc123 role=Programmer
-[LLM ◀] traceId=abc123 312 tokens, 1.8s
-[Lua] Execution succeeded: "Hello from AI!"
+LLM > traceId=abc123 role=Programmer backend=…
+[ToolCall] traceId=abc123 role=Programmer tool=execute_lua status=OK dur=…ms
+[Lua report] lua from game F9
+LLM < traceId=abc123 role=Programmer backend=… wallMs=… | …
 ```
 
 **Option C: Create a custom agent**
@@ -254,12 +261,10 @@ merchant.AskWithCallback("Show me swords", (response) => {
 ```
 ┌─ Unity Console ──────────────────────────────────────────────┐
 │                                                               │
-│ [CoreAI] Backend: OpenAiHttp → http://localhost:1234/v1       │
-│ [LLM ▶] traceId=abc123 role=Programmer                       │
-│ [LLM ◀] traceId=abc123 247 tokens, 1.2s                      │
-│ [MEAI] Tool call detected: name=execute_lua                   │
-│ [Lua] Executing: report("Hello from AI!")                     │
-│ [Lua] Execution succeeded                                     │
+│ LLM > traceId=abc123 role=Programmer backend=…                │
+│ [ToolCall] traceId=abc123 tool=execute_lua status=OK          │
+│ [Lua report] Hello from AI!                                   │
+│ LLM < traceId=abc123 role=Programmer wallMs=1200 | …          │
 │ ✅ AI task completed!                                         │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
@@ -269,10 +274,10 @@ merchant.AskWithCallback("Show me swords", (response) => {
 
 | Issue | Quick fix |
 |----------|----------------|
-| `Backend: Stub` | Confirm LM Studio is running |
+| No `LLM >` line / stub replies | Confirm LM Studio is running and LLM Backend + Model are set; run **CoreAI → Setup → Validate Scene** |
 | `Connection refused` | Check port 1234 in LM Studio |
-| `Empty response` | Raise Timeout to 120 s |
-| `Tool call not recognized` | Model too small; use 4B+ |
+| `Empty response` / timeout | Raise **LLM Timeout (sec)** (default 120) |
+| `[ToolCall] … status=FAIL` repeatedly | Model too small; use 4B+ |
 
 > 📖 Details: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
@@ -308,11 +313,11 @@ merchant.AskWithCallback("Show me swords", (response) => {
 ✅ Model downloaded (Qwen3.5-4B Q4_K_M)
 ✅ Server running on port 1234
 ✅ Unity project open
-✅ _mainCoreAI scene loaded
-✅ CoreAISettings → Backend = OpenAiHttp
-✅ CoreAISettings → Base URL = http://localhost:1234/v1
-✅ Test Connection = ✅ Connected
-✅ Play → F9 → "Hello from AI!" in the logs
+✅ Chat demo scene (or RogueliteArena) loaded
+✅ CoreAISettings → LLM Backend = OpenAiHttp
+✅ CoreAISettings → Base URL = http://localhost:1234/v1, Model set
+✅ Test Connection = "Connection succeeded."
+✅ Play → send a chat message (or F9 in RogueliteArena) → LLM > / LLM < in the logs
 
 🎉 Done! Move on to building your own agents.
 ```
@@ -325,17 +330,17 @@ merchant.AskWithCallback("Show me swords", (response) => {
 
 To run a model **inside Unity** (no external server):
 
-1. CoreAISettings → Backend = **LlmUnity** (or **Auto**)
-2. On the scene, find **LlmManager** with `LLM` + `LLMAgent`
-3. In the **LLM** Inspector, download a model (LLMUnity Download button)
+1. Install LLMUnity: **CoreAI → Setup → Modules → LLMUnity → Enable + Update to latest** (it is not installed with CoreAI)
+2. CoreAISettings → LLM Backend = **LlmUnity** (or **Auto**)
+3. Pick a model in **GGUF Model**, or add a host with **CoreAI → Setup → Create LLMUnity Objects (LLM + LLMAgent)** and download a model in the **LLM** Inspector
 4. Press Play
 
-> ⚠️ LLMUnity runs the model inside the Unity process — slower, but no external tools.
+> ⚠️ LLMUnity runs the model inside the Unity process (through its built-in OpenAI-compatible server) — no external tools, but it shares the machine with the game.
 
 ### Option C: Cloud API (OpenAI, Qwen API)
 
 ```
-CoreAISettings → Backend = OpenAiHttp
+CoreAISettings → LLM Backend = OpenAiHttp
    Base URL: https://api.openai.com/v1
    API Key: sk-xxxxxxxxxxxxx
    Model: gpt-4o-mini
@@ -344,7 +349,7 @@ CoreAISettings → Backend = OpenAiHttp
 or
 
 ```
-CoreAISettings → Backend = OpenAiHttp
+CoreAISettings → LLM Backend = OpenAiHttp
    Base URL: https://dashscope.aliyuncs.com/compatible-mode/v1
    API Key: sk-xxxxxxxxxxxxx
    Model: qwen-max

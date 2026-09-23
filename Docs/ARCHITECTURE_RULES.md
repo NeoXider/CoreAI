@@ -2,8 +2,8 @@
 
 Status: **normative** for all Roblox-API-track work (MVP1+) and for every new CoreAI module.
 Existing code is grandfathered until touched; when a module is reworked it must be brought to
-this spec. Benchmark: the RedoSchool codebase (feature-based Clean Architecture); where this
-spec and RedoSchool differ, this spec is deliberately stricter (§4).
+this spec. Benchmark: a production host codebase built on feature-based Clean Architecture; where
+this spec and that benchmark differ, this spec is deliberately stricter (§4).
 
 Related: `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` (what to build), `Docs/ROADMAP.md` (why),
 `Docs/CoreAIMods/SCRIPT_ENGINE_SEAM.md` (the first module already built to these rules).
@@ -40,7 +40,7 @@ Every substantial feature ships as up to three assemblies with references pointi
 - Exactly **one composition root per scope**, purely declarative: it calls installers and
   build callbacks, nothing else. No business logic in roots.
 - **Forbidden**: `static Instance` singletons in feature code; static service locators
-  (RedoSchool's `GameScopeResolver` is explicitly NOT imported as a pattern); reflection
+  (the benchmark's static scope resolver is explicitly NOT imported as a pattern); reflection
   scene wiring (`FindObjectsByType` inside installers) — use explicit registration or
   entry-point components.
 - Cross-feature coupling: features never reference sibling feature internals. Shared
@@ -61,7 +61,7 @@ Every substantial feature ships as up to three assemblies with references pointi
 - Structured logging through the injected log seams (`ILuaLogService` for mod output,
   CoreAI logger seams for C#) — no raw `Debug.Log` in logic paths.
 
-## 4. Where we are deliberately stricter than RedoSchool
+## 4. Where we are deliberately stricter than the benchmark
 
 1. **Zero service-locator escape hatches** (they allow one; we allow none).
 2. **No reflection scene wiring** in installers.
@@ -98,9 +98,6 @@ Every substantial feature ships as up to three assemblies with references pointi
     add a `WHY:` for every edit, and never write one that just restates what the code, the method
     signature, or an adjacent doc already says (e.g. "// set X to 10 for Roblox parity" next to a
     constant already XML-documented as Roblox parity) — delete it instead. If in doubt, leave it out.
-    <!-- TODO: one-time cleanup refactor pass — strip the over-applied/redundant `WHY:` comments that
-         accumulated across the mods/RbxApi code (keep only genuinely non-obvious ones). Do this after
-         the pending commit, alongside the Roblox->Rbx identifier rename (see BACKLOG). -->
 
 - Folder-per-feature, layer-per-subfolder. One README per feature explaining purpose,
   layer map, and any recorded deviations.
@@ -113,5 +110,7 @@ Already in `Packages/manifest.json` — use these, do not hand-roll equivalents:
 `jp.hadashikick.vcontainer` 1.17.0 (DI), `com.cysharp.unitask` (async),
 `com.cysharp.messagepipe` + `.vcontainer` (events), `com.cysharp.r3` (reactive),
 `com.neoxider.tools` (gameplay modules), `com.unity.dedicated-server`,
-`com.unity.multiplayer.*` (topology work lands MVP11+). Mirror is added at MVP11, not
-before. New third-party dependencies require an explicit decision recorded in the roadmap.
+`com.unity.multiplayer.*` (topology work lands MVP11+). Mirror is deliberately not a manifest
+dependency: the optional `com.neoxider.coreaimirror` package compiles only in a project that installs
+Mirror itself (`MIRROR` define). New third-party dependencies require an explicit decision recorded in
+the roadmap.

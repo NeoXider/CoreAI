@@ -97,8 +97,9 @@ report("Endless waves armed.")
 ## Safety
 
 `forge_*` lives behind the **WorldEdit** tier — read-only mods cannot spawn anything.
-The Lua-CSharp sandbox (no `io`/`os`/`load`), per-call instruction/time limits and the
-automatic unload-after-repeated-errors policy all still apply. Spawns are capped (`MaxUnits`)
+The Lua-CSharp sandbox (no `io`/`load`, `os` limited to `os.time`/`os.clock`), per-call
+instruction/time limits and the quarantine-after-repeated-errors policy (the mod stays loaded with
+dispatch suspended until a reload) all still apply. Spawns are capped (`MaxUnits`)
 and positions are clamped to the arena. Unit visuals are created on Unity's main thread
 during mod ticks, which the mod-runtime ticker guarantees.
 

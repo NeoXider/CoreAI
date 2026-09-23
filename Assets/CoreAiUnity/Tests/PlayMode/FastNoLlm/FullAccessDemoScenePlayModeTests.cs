@@ -43,10 +43,16 @@ namespace CoreAI.Tests.PlayMode
 
             CoreAiLuaWorldModule luaModule = scope.GetComponentInChildren<CoreAiLuaWorldModule>(true);
             Assert.IsNotNull(luaModule,
-                "FullAccessDemo must own Lua configuration in a child module.");
-            Assert.IsTrue(luaModule.FullAccessEnabled,
+                "FullAccessDemo must own world-command configuration in a child module.");
+
+            // WHY: only the mods scope grants the Full tier to execute_lua and manage_mods; the module's
+            // legacy Full flags are ignored, so asserting them would not prove the demo works.
+            CoreAiModsLifetimeScope modsScope =
+                Object.FindFirstObjectByType<CoreAiModsLifetimeScope>(FindObjectsInactive.Include);
+            Assert.IsNotNull(modsScope, "FullAccessDemo must contain a CoreAiModsLifetimeScope.");
+            Assert.IsTrue(modsScope.FullLuaAccessEnabled,
                 "FullAccessDemo must grant Full Lua so Programmer can inspect and modify scene objects.");
-            Assert.IsFalse(luaModule.FullPrivateAccessEnabled,
+            Assert.IsFalse(modsScope.FullLuaPrivateAccessEnabled,
                 "FullAccessDemo should keep private reflection access off by default.");
 
             Assert.IsNotNull(FindBehaviour("CoreAI.Demos.FullAccessHubDemoController"),

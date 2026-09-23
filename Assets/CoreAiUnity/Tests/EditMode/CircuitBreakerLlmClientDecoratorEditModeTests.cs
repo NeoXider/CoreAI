@@ -101,6 +101,105 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(LlmErrorCode.BackendUnavailable, (await breaker.CompleteAsync(Req())).ErrorCode);
         }
 
+        [TestCase(LlmErrorCode.Timeout, true)]
+        [TestCase(LlmErrorCode.ProviderError, true)]
+        [TestCase(LlmErrorCode.Timeout, false)]
+        [TestCase(LlmErrorCode.ProviderError, false)]
+        public async Task Streaming_TerminalFailureChunk_IsAVerdictOnlyWhileTheCallerListens(LlmErrorCode code, bool cancel)
+        {
+            ProgrammableLlmClient inner = new();
+            inner.NextStreams.Enqueue(new[] { new LlmStreamChunk { Text = "partial" }, ErrChunk(code) });
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, () => 0);
+            using CancellationTokenSource caller = new();
+
+            await foreach (LlmStreamChunk chunk in breaker.CompleteStreamingAsync(Req(), caller.Token))
+            {
+                if (cancel && !string.IsNullOrEmpty(chunk.Text))
+                {
+                    caller.Cancel();
+                }
+            }
+
+            Assert.AreEqual(cancel ? "Closed" : "Open", breaker.StateName,
+                cancel
+                    ? "A failure chunk that arrived after the caller cancelled is the cancellation, not a backend verdict."
+                    : "The same chunk with the caller still listening is a transient failure.");
+        }
+
+        [TestCase(true, true)]
+        [TestCase(false, true)]
+        [TestCase(true, false)]
+        [TestCase(false, false)]
+        public async Task ThrownFault_IsAVerdictOnlyWhileTheCallerListens(bool typed, bool cancel)
+        {
+            GatedLlmClient inner = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, () => 0);
+            using CancellationTokenSource caller = new();
+            Exception fault = typed
+                ? new LlmClientException("503", LlmErrorCode.BackendUnavailable, 503)
+                : new InvalidOperationException("socket disposed");
+
+            Task<LlmCompletionResult> call = breaker.CompleteAsync(Req(), caller.Token);
+            if (cancel)
+            {
+                caller.Cancel();
+            }
+
+            inner.Pending.Dequeue().SetException(fault);
+            Exception thrown = await CaptureExceptionAsync<Exception>(() => call);
+
+            Assert.AreSame(fault, thrown, "The breaker rethrows the fault unchanged either way.");
+            Assert.AreEqual(cancel ? "Closed" : "Open", breaker.StateName,
+                cancel
+                    ? "A fault thrown after the caller cancelled is the cancellation, not a backend verdict."
+                    : "The same fault with the caller still listening is a transient failure.");
+        }
+
+        [TestCase(true, true)]
+        [TestCase(false, true)]
+        [TestCase(true, false)]
+        [TestCase(false, false)]
+        public async Task Streaming_ThrownFault_IsAVerdictOnlyWhileTheCallerListens(bool typed, bool cancel)
+        {
+            Exception fault = typed
+                ? new LlmClientException("503", LlmErrorCode.BackendUnavailable, 503)
+                : new InvalidOperationException("socket disposed");
+            CircuitBreakerLlmClientDecorator breaker = new(new ChunkThenThrowLlmClient(fault), 1, 1000, () => 0);
+            using CancellationTokenSource caller = new();
+            List<LlmStreamChunk> chunks = new();
+            Exception thrown = null;
+
+            try
+            {
+                await foreach (LlmStreamChunk chunk in breaker.CompleteStreamingAsync(Req(), caller.Token))
+                {
+                    chunks.Add(chunk);
+                    if (cancel)
+                    {
+                        caller.Cancel();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                thrown = ex;
+            }
+
+            if (cancel)
+            {
+                Assert.AreSame(fault, thrown,
+                    "After the caller cancelled the fault propagates unchanged - it is the cancellation, not a chunk to classify.");
+                Assert.AreEqual("Closed", breaker.StateName);
+            }
+            else
+            {
+                Assert.IsNull(thrown);
+                Assert.AreEqual(typed ? LlmErrorCode.BackendUnavailable : LlmErrorCode.ProviderError,
+                    chunks[chunks.Count - 1].ErrorCode);
+                Assert.AreEqual("Open", breaker.StateName);
+            }
+        }
+
         [Test]
         public async Task Streaming_ErrorWithoutTypedCode_TripsBreaker()
         {
@@ -737,6 +836,34 @@ namespace CoreAI.Tests.EditMode
             {
                 await Task.Yield();
                 yield return new LlmStreamChunk { Text = "ok", IsDone = true };
+            }
+        }
+
+        /// <summary>Streams one visible chunk, then throws the configured fault on the next move.</summary>
+        private sealed class ChunkThenThrowLlmClient : ILlmClient
+        {
+            private readonly Exception _fault;
+
+            public ChunkThenThrowLlmClient(Exception fault)
+            {
+                _fault = fault;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException("streaming only");
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                await Task.Yield();
+                yield return new LlmStreamChunk { Text = "partial" };
+                await Task.Yield();
+                throw _fault;
             }
         }
 

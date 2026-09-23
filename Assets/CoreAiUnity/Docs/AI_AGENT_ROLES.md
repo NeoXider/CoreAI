@@ -2,9 +2,7 @@
 
 **Purpose:** a single vocabulary of **agent types** (AI behaviors), their goals, typical inputs/outputs, and **placement** rules (host / local / hybrid). A game on the template **enables only the roles it needs**; the orchestrator is not required to spin up all of them. Recommendations on **model size/type** (local vs API) — §6.
 
-**Document version:** 1.8 | **Date:** May 2026 — doc sync with UPM **1.7.1** (chat typing after tool-hint marker; **`LoggingLlmClientDecorator`** **`BackendUnavailable`** EditMode test). **1.7.0:** WebGL **`FileAgentMemoryStore`**, jslib logging, chat **`StreamingToolProgressHint`** / **`LlmStreamChunk`** typing markers.
-
-**Related docs:** [QUICK_START.md](QUICK_START.md), [DGF_SPEC.md](DGF_SPEC.md) (networking, authority, NGO by default), [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) (code map, Lua, tests, **traceId** / **Llm** logs), [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) (LLMUnity, Qwen, OpenAI-compatible, request timeout), [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) (demo scene setup).
+**Related docs:** [QUICK_START.md](QUICK_START.md), [DGF_SPEC.md](DGF_SPEC.md) (networking, authority, Mirror transport), [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) (code map, Lua, tests, **traceId** / **Llm** logs), [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) (LLMUnity, Qwen, OpenAI-compatible, request timeout), [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) (demo scene setup).
 
 ---
 
@@ -27,7 +25,7 @@ The game developer **explicitly** assigns placement for each enabled role in con
 
 ### 1.3.5 Universal system prompt (Universal System Prompt Prefix)
 
-Starting with **v0.11.0**, CoreAI supports a **universal opening prompt** — text prepended to the **start** of the system prompt for **every** agent (built-in and custom).
+CoreAI supports a **universal opening prompt** — text prepended to the **start** of the system prompt for **every** agent (built-in and custom).
 
 **Why:**
 - Shared rules for all models (safety, style, format)
@@ -35,7 +33,7 @@ Starting with **v0.11.0**, CoreAI supports a **universal opening prompt** — te
 - Change global behavior without editing per-role prompts
 
 **Where to configure:**
-- **Inspector:** `CoreAISettings` → **General settings** → **Universal System Prompt Prefix**
+- **Inspector:** `CoreAISettings` → **Advanced Settings** → **General** → **Universal Prompt Prefix**
 - **Code:** `CoreAISettings.UniversalSystemPromptPrefix = "..."`
 
 **How it works:**
@@ -79,7 +77,7 @@ This is a **logical** diagram: physically all tasks go through the **orchestrato
 
 ### 1.4 Builds without AI models on the host (core roadmap)
 
-If **all** LLM is on the host (**HostAuthoritative** for every role), the template should eventually allow **builds without neural weights**: host DI uses an **`ILlmClient` stub** (deterministic or tabular responses per role), without Ollama or weights in the build. **NGO** and state replication work as usual; only the decision source changes. Details: [DGF_SPEC.md §5.2](DGF_SPEC.md).
+If **all** LLM is on the host (**HostAuthoritative** for every role), the template should eventually allow **builds without neural weights**: host DI uses an **`ILlmClient` stub** (deterministic or tabular responses per role), without Ollama or weights in the build. Networking (Mirror or another transport) and state replication work as usual; only the decision source changes. Details: [DGF_SPEC.md §5.2](DGF_SPEC.md).
 
 ---
 
@@ -137,9 +135,9 @@ If **all** LLM is on the host (**HostAuthoritative** for every role), the templa
 |--|--|
 | **ID** | `Programmer` |
 | **Goal** | From **Creator** spec (rarely others) **write, fix, and narrow** **Lua** snippets for the sandbox. |
-| **Behavior** | Loop: prompt with whitelist API → generation → static check → dry-run → host execution → on error self-heal (limited). |
+| **Behavior** | Loop: prompt with whitelist API → `execute_lua` tool call → host execution → the error (if any) returns to the model as the tool result, and the model may fix the code in the next roundtrip. |
 | **Inputs** | Spec from Creator, Lua error context, current APIRegistry version. |
-| **Outputs** | Signed **UseCaseScript** (string/hash) + “attach/replace” command via bus. Or JSON: `{"tool": "memory", "action": "write", "content": "..."}`. |
+| **Outputs** | `execute_lua` / `manage_mods` tool calls (`com.neoxider.coreaimods`) and memory tool calls: `{"name": "memory", "arguments": {"action": "append", "content": "..."}}`. |
 | **Placement** | Almost always **HostAuthoritative** (code affects simulation). |
 | **Examples** | “Ambush spawn script for forest”; “reward logic patch on boss death”. |
 | **Relations** | Reports to **Creator**; does not initiate global rules without a request. |
@@ -295,14 +293,14 @@ Format: normalized **events** on MessagePipe + periodic **SessionSnapshot** for 
 - **2B** — works but sometimes wrong on multi-step scenarios. Balance between speed and reliability.
 - **4B** — **recommended minimum for production.** Passes **all** CoreAI PlayMode tests. Good balance for **AINpc**, reports, and most tasks.
 - **9B** — “quality” for **Creator** / **Programmer** on machines with spare VRAM/RAM; raise **GPU layers** on the **LLM** Inspector.
-- Switch **local ↔ OpenAI-compatible HTTP** via `OpenAiHttpLlmSettings` on `CoreAILifetimeScope` (see [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)).
+- Switch **local ↔ OpenAI-compatible HTTP** on `CoreAISettingsAsset` (LLM Backend / LLM Mode), per role through an `LlmRoutingManifest` profile, or at runtime with `CoreAiBackend` (see [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)).
 - **Gemma 4 26B** (via LM Studio / HTTP API) — works well with all tests.
 
 ---
 
-## 7. NGO and stack swap
+## 7. Network stack swap
 
-Repository recommendation: **NGO** (DGF_SPEC §5.1). Roles and placement are **not** tied to the NGO name: `INetworkAuthority` remains the swap point for Mirror, etc.
+Shipped transport: **Mirror** via `com.neoxider.coreaimirror` behind `INetworkBridge` (DGF_SPEC §5.1). Roles and placement are **not** tied to a transport: `INetworkAuthority` remains the swap point for NGO or another stack.
 
 ---
 
@@ -320,7 +318,7 @@ Starting with **v0.5.0**, each role has a **specialized validation policy**. Thi
 | **Analyzer** | `AnalyzerResponsePolicy` | JSON with `metric` / `recommendation` / `analysis` | ✅ Yes |
 | **AINpc** | `AINpcResponsePolicy` | JSON OR non-empty text (soft) | ✅ Yes |
 | **PlainChat** / **SmartChat** | `PlayerChatResponsePolicy` | No validation (free text) | ❌ No |
-| **Merchant** | `NoOpRoleStructuredResponsePolicy` | Tool call `get_inventory` + text | ✅ Tool call retry (3 attempts) |
+| **Merchant** | `NoOpRoleStructuredResponsePolicy` | Tool call `get_inventory` + text | ❌ No (tool failures follow the tool-loop rules below) |
 
 ### 8.2 How retry works
 
@@ -332,15 +330,14 @@ Starting with **v0.5.0**, each role has a **specialized validation policy**. Thi
    ```
 4. Metric `RecordStructuredRetry(roleId, traceId, failureReason)` is logged
 
-### Tool call retry
+### Tool call failures
 
-For tool calls (memory, execute_lua, get_inventory) a separate retry path applies:
-1. If the model returned a tool call in the wrong format
-2. The system returns an error: "ERROR: Tool call not recognized. Use this format: {\"name\": \"...\", \"arguments\": {...}}"
-3. The model gets another attempt (up to `CoreAISettings.MaxToolCallRetries`, default 3)
-4. If all attempts are exhausted — the response is accepted as-is
+Tool calls (memory, execute_lua, get_inventory) follow the tool loop's own rules:
+1. A failed call (unknown tool, missing or mistyped argument, tool error) is returned to the model as the tool result, so the model can correct itself in the next roundtrip.
+2. `CoreAISettings.MaxToolCallRetries` (default 3) counts consecutive batches in which **every** call failed.
+3. When that limit or the roundtrip cap is reached, the loop makes one final tools-disabled summary turn instead of returning empty text.
 
-This helps small models (Qwen3.5-0.8B/2B) that sometimes forget the tool call format.
+This helps small models (Qwen3.5-0.8B/2B) that sometimes get the arguments wrong.
 
 ### 8.3 Custom roles
 
@@ -357,7 +354,7 @@ composite.RegisterPolicy("MyRole", new NoOpRoleStructuredResponsePolicy());
 
 ### 8.4 Tests
 
-All policies are covered by **20 EditMode tests**:
+All policies are covered by EditMode tests:
 - `RoleStructuredResponsePolicyEditModeTests.cs` — validation per role
 - Valid / invalid response checks
 - `failureReason` message checks

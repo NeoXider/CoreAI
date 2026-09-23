@@ -1,7 +1,5 @@
 # 🎬 Preparing CoreAI demo video / GIF
 
-**Document version:** 1.0 | **Date:** April 2026
-
 Guide for recording demo videos and GIF animations to showcase CoreAI.
 
 ---
@@ -10,8 +8,8 @@ Guide for recording demo videos and GIF animations to showcase CoreAI.
 
 ### Environment setup
 - [ ] LM Studio running, model loaded (Qwen3.5-4B recommended)
-- [ ] CoreAISettings → Backend = OpenAiHttp, URL verified
-- [ ] Scene `_mainCoreAI` open
+- [ ] CoreAISettings → LLM Backend = OpenAiHttp, Base URL and Model verified
+- [ ] Scene open: `CoreAiChatDemo` (chat demos) or the example game's `RogueliteArena` (F9 Programmer hotkey); Lua demos need `com.neoxider.coreaimods` and `COREAI_LUA`
 - [ ] Console Window visible (for demo logs)
 - [ ] Game Window set to 1920×1080
 
@@ -30,13 +28,12 @@ Guide for recording demo videos and GIF animations to showcase CoreAI.
 
 **Recording script:**
 ```
-0:00 — Open Unity with CoreAI project
+0:00 — Open Unity with CoreAI project (RogueliteArena scene)
 0:05 — Open CoreAISettings → Show HTTP API settings
 0:10 — Click "Test Connection" → ✅ Connected
 0:15 — Press Play
-0:18 — Show logs: "Backend: OpenAiHttp..."
-0:22 — Press F9 (Programmer hotkey)
-0:25 — Console: LLM ▶, LLM ◀, Lua executed ✅
+0:22 — Press F9 (CoreAiLuaHotkey → Programmer task)
+0:25 — Console: LLM >, [ToolCall] tool=execute_lua status=OK, [Lua report] …, LLM < ✅
 0:30 — Stop
 ```
 
@@ -83,19 +80,18 @@ Guide for recording demo videos and GIF animations to showcase CoreAI.
 
 ---
 
-### Demo 4: Auto-repair Lua (30–45 sec)
+### Demo 4: The model repairs its own Lua (30–45 sec)
 
-**Goal:** Show the AI fixing its own Lua.
+**Goal:** Show the AI fixing its own Lua after reading the tool error. Turn on **Log Tool Calls** and **Log Results** first.
 
 **Recording script:**
 ```
 0:00 — Run Programmer with a task
-0:05 — Console: LLM ▶ (attempt 1)
-0:08 — Console: ❌ Lua FAILED: "attempt to call..."
-0:10 — Console: "Programmer repair: retry 1/3"
-0:13 — Console: LLM ▶ (attempt 2, repair context)
-0:16 — Console: ✅ Lua succeeded!
-0:20 — Highlight: 2 attempts, automatic repair
+0:05 — Console: LLM > traceId=…
+0:08 — Console: [ToolCall] tool=execute_lua status=FAIL … result=…attempt to call a nil value…
+0:13 — Console: [ToolCall] tool=execute_lua status=OK (the model rewrote the code)
+0:16 — Console: [Lua report] …, LLM < traceId=…
+0:20 — Highlight: same traceId, the error was fed back to the model
 0:25 — Stop
 ```
 
@@ -103,17 +99,15 @@ Guide for recording demo videos and GIF animations to showcase CoreAI.
 
 ### Demo 5: Full crafting pipeline (45–60 sec)
 
-**Goal:** Show multi-agent workflow: CoreMechanicAI → Programmer → Memory.
+**Goal:** Show multi-agent workflow: CoreMechanicAI → Programmer → Memory. `create_item` / `add_effect` are game functions you register through `ILuaCsGameRuntimeBindings` (see [EXAMPLES.md](EXAMPLES.md) Example 2).
 
 **Recording script:**
 ```
 0:00 — Start craft: "Iron + Fire Crystal"
 0:05 — Console: CoreMechanicAI → recipe analysis
-0:10 — Console: Memory: "Craft#1: Flame Sword..."
-0:15 — Console: Programmer → execute_lua
-0:20 — Console: Lua: create_item("Flame Sword", 45)
-0:25 — Console: Lua: add_effect("fire_damage", 15)
-0:30 — Console: ✅ "crafted Flame Sword"
+0:10 — Console: [ToolCall] role=CoreMechanicAI tool=memory status=OK
+0:15 — Console: [ToolCall] role=Programmer tool=execute_lua status=OK
+0:30 — Console: ✅ [Lua report] crafted Flame Sword
 0:35 — Game View: show result (if UI exists)
 0:40 — Stop
 ```
@@ -160,7 +154,7 @@ Assets/CoreAiUnity/Docs/
 │   ├── demo_quickstart.gif         — Quick Start demo
 │   ├── demo_merchant.gif           — NPC merchant
 │   ├── demo_enemy_spawn.gif        — Enemy spawn
-│   ├── demo_auto_repair.gif        — Auto-repair Lua
+│   ├── demo_auto_repair.gif        — Lua self-repair
 │   ├── demo_crafting_pipeline.gif  — Crafting (full pipeline)
 │   └── demo_full_overview.mp4      — Full video (YouTube)
 ```
@@ -188,7 +182,7 @@ Add `DemoRunner.cs` to the scene for easier recording:
 
 ```csharp
 using UnityEngine;
-using CoreAI;
+using CoreAI.Ai;
 using VContainer;
 
 /// <summary>
@@ -213,7 +207,7 @@ public class DemoRunner : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.F3))
             RunCraftingDemo();
         
-        // F4 — Auto-repair demo
+        // F4 — Lua self-repair demo
         if (Input.GetKeyDown(KeyCode.F4))
             RunAutoRepairDemo();
     }
@@ -253,7 +247,7 @@ public class DemoRunner : MonoBehaviour
 
     async void RunAutoRepairDemo()
     {
-        Debug.Log("=== 🔧 DEMO: Auto-repair Lua ===");
+        Debug.Log("=== 🔧 DEMO: Lua self-repair ===");
         await _orchestrator.RunTaskAsync(new AiTaskRequest
         {
             RoleId = "Programmer",

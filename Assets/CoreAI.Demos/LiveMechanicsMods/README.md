@@ -13,13 +13,14 @@ inspect and modify live GameObjects after a diagnostic `execute_lua` call.
 
 | Scene | Purpose | UI |
 |---|---|---|
-| `LiveMechanicsModsChatDemo.unity` | Boss-rule sandbox based on `LiveMechanicsDemo`: quick mods for boss reward and attack interval. | UITK chat panel + IMGUI mod manager (`F9`) and Token Budget overlay (`F10`) |
+| `LiveMechanicsModsChatDemo.unity` | Boss-rule sandbox based on `LiveMechanicsDemo`: quick mods for boss reward and attack interval. | UITK chat panel + uGUI mod manager (`F9`) + IMGUI Token Budget overlay (`F10`) |
 | `WaveAutoBattlerModsDemo.unity` | Full auto-battler: our hero fights scaling enemy waves, levels up, earns gold, and Lua mods change real combat rules. | UI Toolkit Hub only — no IMGUI |
 
 ## On-screen surfaces
 
 The two scenes no longer share one UI. `WaveAutoBattlerModsDemo` was migrated to the UI Toolkit Hub;
-`LiveMechanicsModsChatDemo` still uses the legacy IMGUI windows.
+`LiveMechanicsModsChatDemo` keeps two hotkey panels: the mod manager, drawn on the shared uGUI
+`CoreAiDemoPanel`, and the IMGUI Token Budget overlay.
 
 ### `WaveAutoBattlerModsDemo` — UI Toolkit Hub tabs
 
@@ -35,32 +36,32 @@ The scene hosts `CoreAiHubWindow` with `CoreAiHubDemo` (built-in Chat / Settings
 
 There are no `F9` / `F10` hotkeys and no draggable IMGUI windows in this scene.
 
-### `LiveMechanicsModsChatDemo` — chat panel plus IMGUI windows
+### `LiveMechanicsModsChatDemo` — chat panel plus hotkey panels
 
 | Panel | Hotkey | Purpose |
 |---|---|---|
 | Mod manager | `F9` | Active / saved mods, with `active N / inactive N` in the title bar. |
 | Token Budget / usage overlay | `F10` | Model, token counts and estimated session cost. |
-| Prompt buttons | n/a | Bottom-anchored next to the chat, so they do not overlap the other panels. |
+| Prompt buttons | n/a | Not shown: the scene's `ChatPromptButtonsController` is a GUI-less driver that nothing renders, and this scene does not enable the chat's example menu. Type requests into the chat. |
 
-Both windows can be dragged by their title bar and toggled with their hotkey.
+Both panels are toggled with their hotkey.
 
 ## Mod Manager Panel (`LiveMechanicsModsChatDemo`)
 
-- Toggle: `F9` (drag by the title bar to move it).
-- The title bar shows a live `active N / inactive N` summary.
-- Active mods carry an `[ACTIVE]` badge and show name, id, description, capabilities,
-  handler/timer counts and error count; saved/unloaded mods carry an `[ inactive ]` badge.
+- Toggle: `F9`.
+- The panel header shows a live `active N / inactive N` summary and the auto-repair status.
+- Active mods carry an `[ACTIVE]` badge and show name, id, capabilities, error count and the log
+  state; saved/unloaded mods carry an `[ inactive ]` badge.
 - Active mods also have a `Logs` toggle. It is off by default: Lua `report()` calls from persistent
   mods are muted unless this toggle is enabled, so timer mods do not flood the Unity Console.
 - `Deactivate` moves an active mod to the saved/unloaded list; the source is not lost.
 - Saved/unloaded mods can be activated again from the panel.
 - Deactivated mods stay inactive across scene restarts until the user presses `Activate`.
 - `Forget` removes a saved source from the demo list.
-- `Edit` opens a closable window with the mod's source in a text area (a private buffer, not the live
-  source): `Save` reloads a running mod with the edited code, or updates the stored source of an
-  inactive one — a compile error keeps the old mod running and the window open with the error;
-  `Close` discards the edit.
+- `Edit` opens an editor field in the panel with the mod's source (a private buffer, not the live
+  source): **Save &lt;id&gt;** reloads a running mod with the edited code, or updates the stored source
+  of an inactive one — a compile error keeps the old mod running and the editor open with the error;
+  **Close editor** discards the edit.
 - Name and description come from Lua metadata comments:
 
 ```lua
@@ -68,8 +69,9 @@ Both windows can be dragged by their title bar and toggled with their hotkey.
 -- description: Makes waves denser, enemies tougher, and rewards higher.
 ```
 
-The generic `LuaModRuntime` still does not autoload arbitrary source by itself. These scenes are
-host policies: they decide which saved sources are trusted enough to restore.
+The composition already rehydrates the mods that are active in each scene's own source store
+(`storeId`). This demo adds its own saved list on top, as a host policy: on start it reloads or loads
+the saved sources it trusts, skips transient ids, and keeps deactivated mods inactive.
 
 Validation-only mod ids such as `auto_repair_smoke` are treated as transient artifacts. The demo
 clears and skips them during autoload so smoke-test mods do not reappear in a playable scene.
@@ -144,19 +146,18 @@ Visible spawn path:
 
 Scene: `Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity`
 
-This is still useful as a small boss-rule sandbox. Prompt buttons insert ready requests for:
-
-- Boss Reward 1000.
-- Modifying the existing boss reward mod.
-- Fast Attacks.
+This is still useful as a small boss-rule sandbox. Its `ChatPromptButtonsController` still carries
+ready requests (Boss Reward 1000, modifying the existing boss reward mod, Fast Attacks), but nothing
+renders those buttons any more; type such requests into the chat.
 
 This is the scene that keeps the `F9` mod manager panel described above; the auto-battler uses the
 Hub **Mods** tab instead.
 
 ## Persistence
 
-Saved sources are stored through `ILuaScriptVersionStore`, normally backed by
-`persistentDataPath/CoreAI/LuaScriptVersions`.
+The demo's own saved list is stored through `ILuaScriptVersionStore`, normally backed by
+`persistentDataPath/CoreAI/LuaScriptVersions`. Independently, every mod loaded through `manage_mods`
+is persisted by the composition's source store for the scene's `storeId`.
 
 Only ordinary saved mod ids are restored. Transient validation ids are ignored, and deactivated mods
 remain saved but inactive until the user activates them from the `F9` panel.

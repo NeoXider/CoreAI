@@ -1,7 +1,8 @@
 # CoreAI Unity (`com.neoxider.coreaiunity`)
 
 The Unity host for [CoreAI](../CoreAI/README.md): DI wiring, a drop-in UI Toolkit chat panel,
-streaming HTTP/SSE and LLMUnity clients, WebGL transports, persistence, and Editor setup menus.
+streaming HTTP/SSE clients (remote APIs and LLMUnity's local server), WebGL transports, persistence, and
+Editor setup menus.
 
 The agent logic itself lives in the engine-free [`com.neoxider.coreai`](../CoreAI/README.md). This
 package is the adapter layer that puts it on a scene.
@@ -62,6 +63,9 @@ await foreach (string chunk in CoreAi.StreamAsync("Tell a story", "SmartChat"))
 **4. Build an agent that calls your code:**
 
 ```csharp
+using System;
+using System.Collections.Generic;
+using CoreAI;
 using CoreAI.Ai;
 
 Dictionary<string, int> stock = new() { ["fire sword"] = 0, ["iron sword"] = 3 };
@@ -69,7 +73,8 @@ Dictionary<string, int> stock = new() { ["fire sword"] = 0, ["iron sword"] = 3 }
 AgentConfig blacksmith = new AgentBuilder("Blacksmith")
     .WithSystemPrompt("You are a blacksmith. Sell weapons and remember purchases.")
     .WithTool(new DelegateLlmTool("stock_of", "How many of an item are in stock.",
-        (string item) => stock.TryGetValue(item, out int count) ? count.ToString() : "0"))
+        // Unity compiles C# 9: a lambda passed as Delegate must be wrapped in a concrete delegate type.
+        new Func<string, string>(item => stock.TryGetValue(item, out int count) ? count.ToString() : "0")))
     .WithMemory()
     .WithChatHistory()
     .WithMode(AgentMode.ToolsAndChat)
@@ -94,7 +99,7 @@ Reference: [AGENT_BUILDER](../CoreAI/Docs/AGENT_BUILDER.md) · [COREAI_SINGLETON
 | **Composition** | `CoreAILifetimeScope` (VContainer), `CoreServicesInstaller`, MessagePipe brokers, `link.xml` for IL2CPP |
 | **Static facade** | `CoreAi.AskAsync` / `StreamAsync` / `StreamChunksAsync` / `OrchestrateAsync`, tool-call events, `AddSkillForRole` |
 | **Chat UI** | `CoreAiChatPanel` (UI Toolkit), `CoreAiChatService`, typing indicator, cancel, error presentation split between player and log |
-| **Providers** | `MeaiLlmClient` (streaming tool loop), `LlmUnityMeaiChatClient` (on-device GGUF), routing/timeout/retry decorators |
+| **Providers** | `MeaiLlmClient` (streaming tool loop), `OpenAiChatLlmClient` (HTTP APIs, and on-device GGUF through LLMUnity's built-in OpenAI-compatible server via `LlmUnityServerHttpSettings`), routing/timeout/retry/fallback decorators |
 | **WebGL** | `FetchSseOpenAiTransport` + `CoreAiSseFetch.jslib` for real incremental SSE, `UnityWebRequestOpenAiTransport` fallback, `UnityMainThreadLlmAsyncMarshaler` |
 | **Persistence** | `FileAgentMemoryStore`, `FileConversationSummaryStore`, `FileSkillStore`, `persistentDataPath`; on WebGL the engine persists (`config.autoSyncPersistentDataPath = true`) and `CoreAiWebGlPersistence` only reports whether it is armed |
 | **Unity-only tools** | `world_command` (`WorldLlmTool`), `component_command` (`ComponentLlmTool`), `scene_tool` (`SceneLlmTool`), `camera` (`CameraLlmTool`) |

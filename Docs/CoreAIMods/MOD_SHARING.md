@@ -21,8 +21,8 @@ That is section 4.
 
 ### 2.1 Bundle shape
 
-`ExportMod(id)` (on `LuaCsModRuntime`, the Lua-CSharp VM) produces one JSON object with
-exactly two keys:
+`ExportMod(caller, id)` (on `ILuaModRuntime`, implemented by `LuaCsModRuntime`) produces one JSON
+object with exactly two keys:
 
 ```json
 { "manifest": { ... }, "source": "..." }
@@ -123,7 +123,7 @@ release number.
     "UpdateAvailable": false,
     "Entry": "main.lua"
   },
-  "source": "--[[@coreai\nid: night_ambience\nname: Night Ambience\nversion: 1.0.0\ncapabilities: Read, Gameplay\ncategory: Ambience\nauthor: yourname\ntags: audio, day-night\ndescription: Dims the world and plays crickets while the in-game clock says night.\n]]\n\nhooks_every(5.0, function()\n    local hour = tonumber(store_get(\"clock_hour\")) or 12\n    if hour >= 21 or hour < 6 then\n        time_set_scale(0.9)\n        play_sound(\"crickets\", 0.4)\n    end\nend)\n"
+  "source": "--[[@coreai\nid: night_ambience\nname: Night Ambience\nversion: 1.0.0\ncapabilities: Read, Gameplay\ncategory: Ambience\nauthor: yourname\ntags: audio, day-night\ndescription: Dims the world and plays crickets while the in-game clock says night.\n]]\n\nhooks_every(5.0, function()\n    local hour = tonumber(store_get(\"clock_hour\")) or 12\n    if hour >= 21 or hour < 6 then\n        time_set_scale(0.9)\n    end\nend)\n"
 }
 ```
 
@@ -211,7 +211,7 @@ Conventions:
       `description` (and `category`/`tags` where sensible).
 - [ ] `Id` is namespaced with your author name and matches the folder name.
 - [ ] `capabilities:` requests the **minimum** tiers the mod needs — and never `Full`.
-- [ ] README states which game bindings the mod calls (e.g. `coreai_world_*`, `time_*`) so
+- [ ] README states which game bindings the mod calls (e.g. `Instance.new`, `time_*`) so
       hosts know whether their game exposes them.
 - [ ] Mod was tested via Hub Import on a clean project/profile (fresh store, no leftover
       `store_*` state) and loads without errors.
@@ -247,13 +247,13 @@ tier system makes it granular. Full details:
 A bundle's `Capabilities` is only a **request**. On import it is intersected with the host's
 grant, and `Full` is stripped unless the host explicitly passes `allowFull: true` (the Hub
 service is constructed with this ceiling; see `HubModServiceBase` /
-`LuaCsModRuntime.ImportMod`). A shared mod can therefore never escalate itself.
+`ILuaModRuntime.ImportMod`). A shared mod can therefore never escalate itself.
 
 | Tier | What it reaches | Import stance |
 |---|---|---|
 | `Read` | World queries, logging — no side effects | Safe |
-| `Gameplay` | Time scale, sounds, UI text, read-only input | Safe (cosmetic annoyance at worst) |
-| `WorldEdit` | Spawn/move/destroy, scenes, batch world commands | **The sensible default ceiling for imported mods** — visible, revertible game-world effects |
+| `Gameplay` | Time scale, read-only input | Safe (cosmetic annoyance at worst) |
+| `WorldEdit` | Creating, changing and destroying Rbx instances (`Instance.new`, properties, `:Destroy()`); the classic `coreai_world_*` build calls only on hosts that opt in | **The sensible default ceiling for imported mods** — visible, revertible game-world effects |
 | `LogicOverride` | Redefines logic slots (formulas, loot tables) | Review what it overrides before granting |
 | `Full` | Reflection over GameObjects/components (`unity_*`) | **Dev-only. Never grant to untrusted imports.** Not part of `All`; opt-in per host |
 
@@ -262,12 +262,14 @@ Functions outside the granted tiers are *physically absent* from the mod's globa
 
 ### What the sandbox removes outright
 
-Regardless of tier, mod Lua has **no network, filesystem, process, or OS access** — there is
-nothing to steal and nowhere to send it. Per the sandbox security doc, the environment
-removes `io`, `os`, `debug`, `package`, `require`, `loadfile`, `dofile`, and all arbitrary
+Regardless of tier, mod Lua has **no filesystem, process, or OS access**, and no network access
+unless the host installs an `HttpService` request policy and transport
+(`LuaCsModStackOptions.RbxHttpPolicy` / `RbxHttpTransport`; the default is deny-all). Per the sandbox
+security doc, the environment removes `io`, `debug`, `package`, `require`, `load`, `loadfile`,
+`dofile`, the stock `os` library (the Rbx API provides only `os.time`/`os.clock`), and all arbitrary
 CLR/Unity reflection entry points; hosts only ever add narrow, validated C# bindings. Runaway
 code is bounded by instruction budgets, wall-clock timeouts, a per-execution total-allocation
-budget (default 64 MB), `string.rep`/`table.concat` output caps, coroutine lifetime budgets,
+budget (default 256 MB), `string.rep`/`table.concat` output caps, coroutine lifetime budgets,
 and a mod error budget with quarantine (a repeatedly failing mod stays loaded but stops dispatching
 until it is reloaded).
 
@@ -275,8 +277,8 @@ until it is reloaded).
 
 Since exfiltration and system damage are off the table, review for in-game abuse:
 
-- Griefing via granted tiers: mass `coreai_world_*` destruction, scene loads, time-scale
-  or audio spam.
+- Griefing via granted tiers: mass `Instance` creation or `:Destroy()` calls, time-scale spam, or
+  (on hosts that opt into the classic build bindings) `coreai_world_*` destruction and scene loads.
 - Resource pressure: tight `hooks_every` intervals, allocation-heavy loops (bounded but
   still a frame-time tax), unbounded `store_set` growth.
 - Deception: a `description` that does not match the code, `report` output that imitates
@@ -289,8 +291,9 @@ Since exfiltration and system damage are off the table, review for in-game abuse
 
 Every load/reload of changed source records a revision. If an imported mod (or an update to
 one) misbehaves: disable it with the row toggle (unload, kept dormant), roll back via the
-version history (`manage_mods` `versions`/`revert`, or `TryRevertMod` — a non-destructive
-revert that reloads an older revision as the new current one), or **Delete** to remove the
+version history (`manage_mods` `versions`/`revert`, or `TryRevertMod(caller, id, revisionIndex, out
+restored)` — a non-destructive revert that reloads an older revision as the new current one), or
+**Delete** to remove the
 package entirely. A failed revert/reload leaves the running mod untouched.
 
 ## 6. Related documents

@@ -13,7 +13,7 @@ whole CLR, and reuse what the VM already provides where it is safe.
 
 | Area | CoreAI solution | Why it is native / justified |
 |---|---|---|
-| **Secured environment** | `LuaCsSecureEnvironment` builds a curated global table (string/math/table subset, no io/os/load/debug) | Lua-CSharp lets the host own `LuaState.Environment`; we only add what is safe |
+| **Secured environment** | `LuaCsSecureEnvironment` builds a curated global table (basic/string/table/math/coroutine/bitwise libraries, with io/os/load/debug/package removed) | Lua-CSharp lets the host own `LuaState.Environment`; we only add what is safe |
 | **One-shot limits** | `LuaCsExecutionGuard` (instruction / time budget) | Hard step/time cap for untrusted AI scripts; yields back to Unity |
 | **Frame coroutines** | `coroutine.yield()` in Lua + `LuaCsCoroutineHandle` ticking Resume | Standard Lua coroutine pattern; the handle only drives Resume per frame |
 | **API registration** | `LuaCsApiRegistry.Register(name, delegate)` / `RegisterCallback` | Typed host delegates marshalled to `LuaFunction`; no CLR surface leaks |
@@ -24,7 +24,7 @@ whole CLR, and reuse what the VM already provides where it is safe.
 
 | Capability | Reason |
 |---|---|
-| `io`, `os`, `debug`, `package`, `require`, `load`/`loadstring` | Files, processes, eval, introspection, module loading — all removed from the secured environment |
+| `io`, `os`, `debug`, `package`, `require`, `load`/`loadstring`, `loadfile`/`dofile`, `collectgarbage`, `string.dump`, `coroutine.wrap` | Files, processes, eval, introspection, module loading, unguarded coroutine resumes — all removed from the secured environment. With the Rbx API attached, `os` comes back as a CoreAI table holding only `os.time` and `os.clock` |
 | Arbitrary metatables on host tables | Complicates escapes through `__index`/`__newindex`; world APIs are explicit functions |
 | Raw CLR object access | Only registered host callbacks are visible; the Full tier (opt-in) is the sole reflection path |
 
@@ -33,12 +33,13 @@ whole CLR, and reuse what the VM already provides where it is safe.
 The native binding concept is `LuaCsApiRegistry`:
 
 ```csharp
-var registry = new LuaCsApiRegistry();
+LuaCsApiRegistry registry = new();
 
 // 1. Typed delegate — arguments are coerced to the delegate's parameter types,
 //    the return value is marshalled back to a Lua value automatically.
+//    Register takes System.Delegate, and Unity compiles C# 9, so name the delegate type.
 registry.Register("forge_spawn",
-    (string kind, double x, double y) => forge.Spawn(kind, (float)x, (float)y));
+    new Func<string, double, double, int>((kind, x, z) => forge.Spawn(kind, x, z)));
 
 // 2. Custom callback — when you need full control over Lua arguments/returns.
 registry.RegisterCallback("forge_count", (ctx, ct) =>
@@ -57,7 +58,7 @@ forge_spawn("knight", -5, 0)
 local n = forge_count("enemy")
 ```
 
-Argument coercion (`LuaCsApiRegistry.CoerceArgument`) handles `string`, `bool`, `double`/`float`,
+Argument coercion (`LuaCsValueMarshaller.CoerceArgument`) handles `string`, `bool`, `double`/`float`,
 `int`/`long`, enums, `LuaTable`, and `LuaValue`; return values (numbers, strings, bools, dictionaries,
 `IEnumerable`) are converted back to Lua values. Host exceptions become `LuaRuntimeException` prefixed
 with the API name.
@@ -66,8 +67,9 @@ with the API name.
 
 The Full tier (`unity_find`, `unity_get_member`, …) in `LuaCsFullUnityRuntimeBindings` is a curated
 reflection wrapper (public members by default) gated behind explicit access modes and a
-type/member denial policy (`IFullLuaAccessBlacklistPolicy`, see `LUA_ACCESS_MODES.md`). It stays
-disabled on WebGL. Prefer registering explicit typed APIs over the Full tier for anything shipped.
+type/member denial policy (`IFullLuaAccessBlacklistPolicy`, see `LUA_ACCESS_MODES.md`). It follows the
+host's **Enable Full Lua Access** grant on `CoreAiModsLifetimeScope` on every platform (there is no
+WebGL-specific switch). Prefer registering explicit typed APIs over the Full tier for anything shipped.
 
 ## Lua Language Level (Lua-CSharp)
 
@@ -76,9 +78,11 @@ disabled on WebGL. Prefer registering explicit typed APIs over the Full tier for
   division `//`, Luau-only number literals — are rewritten to Lua 5.2 equivalents by the
   `LuauDownleveler` preprocessor before compilation (default-on; plain Lua 5.2 passes through
   byte-identically), so mod authors can write Roblox-style Luau.
-- A curated subset of the standard library is exposed (`string`, `math`, `table`, `coroutine`, …);
-  `io`/`os`/`debug`/`package` are withheld from the secured environment.
-- Standard `coroutine.*` is available; long-lived scripts should `coroutine.yield()` across frames
+- A curated subset of the standard library is exposed (`string`, `math`, `table`, `coroutine`, bitwise,
+  …); `io`/`os`/`debug`/`package` are withheld from the secured environment (the Rbx API re-adds a
+  two-member `os` with `os.time`/`os.clock`).
+- `coroutine.create`/`resume`/`yield`/`status` are available; `coroutine.wrap` is removed and
+  `coroutine.resume` is budget-guarded. Long-lived scripts should `coroutine.yield()` across frames
   rather than busy-loop inside a one-shot chunk.
 
 ## Checklist for New Bindings

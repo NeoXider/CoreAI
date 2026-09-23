@@ -110,6 +110,14 @@ namespace CoreAI.Tests.EditMode
             {
                 return _profileByRole.TryGetValue(roleId, out string profileId) ? profileId : "fallback";
             }
+
+            /// <summary>Every route-health report, in order: (profile, code, error). Successes report None.</summary>
+            public List<(string ProfileId, LlmErrorCode Code, string Error)> HealthReports { get; } = new();
+
+            public void ReportRouteFailure(string profileId, long generation, LlmErrorCode errorCode, string error)
+            {
+                HealthReports.Add((profileId, errorCode, error));
+            }
         }
 
         private sealed class CapturingPublisher<T> : IPublisher<T>
@@ -391,6 +399,315 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, chunks.Count);
             Assert.AreEqual(LlmErrorCode.Cancelled, chunks[0].ErrorCode);
             Assert.AreEqual(LlmErrorCode.Cancelled, completed.Messages[0].ErrorCode);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task ThrownFaultAfterCallerCancelled_PublishesCancelled_AndDoesNotDegradeRouteHealth(bool streaming)
+        {
+            // WHY: a typed transient fault (a 503 the teardown provoked) after the caller cancelled used to be
+            // published under its own code and marked the endpoint degraded on a request nobody was waiting for.
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            LlmClientException fault = new("HTTP 503", LlmErrorCode.BackendUnavailable, 503);
+            FakeRegistry registry = new(new ThrowingLlm(fault));
+            registry.Register("X", new ThrowingLlm(fault));
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(registry, null, null, completed, null);
+
+            Exception thrown = await CaptureAsync(() => Run(routing, streaming, caller.Token));
+
+            Assert.AreSame(fault, thrown, "The routing client publishes and rethrows unchanged.");
+            Assert.AreEqual(1, completed.Messages.Count);
+            Assert.AreEqual(LlmErrorCode.Cancelled, completed.Messages[0].ErrorCode);
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, completed.Messages[0].Error);
+            Assert.IsEmpty(registry.HealthReports, "A transient fault after the stop says nothing about the endpoint.");
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task UntypedFaultAfterCallerCancelled_PublishesCancelled(bool streaming)
+        {
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            FakeRegistry registry = new(new ThrowingLlm(new InvalidOperationException("socket disposed")));
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(registry, null, null, completed, null);
+
+            await CaptureAsync(() => Run(routing, streaming, caller.Token));
+
+            Assert.AreEqual(LlmErrorCode.Cancelled, completed.Messages[0].ErrorCode);
+            Assert.IsEmpty(registry.HealthReports);
+        }
+
+        [TestCase(LlmErrorCode.AuthExpired, 401, true)]
+        [TestCase(LlmErrorCode.PaymentRequired, 402, true)]
+        [TestCase(LlmErrorCode.AuthExpired, 401, false)]
+        [TestCase(LlmErrorCode.PaymentRequired, 402, false)]
+        public async Task PermanentRefusalWrappedInCancellation_StillDegradesRouteHealth(
+            LlmErrorCode refusalCode, int status, bool streaming)
+        {
+            // WHY: FallbackLlmClientDecorator turns any post-cancel fault into OperationCanceledException with the
+            // fault attached. The caller gets the cancellation; the endpoint still has an expired key or an
+            // exhausted balance, and the next request would be refused the same way - health must learn it.
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            LlmClientException refusal = new($"HTTP {status}", refusalCode, status);
+            OperationCanceledException wrapped = LlmCancellation.WrapAsCancellation(refusal, caller.Token, "the primary");
+            FakeRegistry registry = new(new ThrowingLlm(wrapped));
+            registry.Register("X", new ThrowingLlm(wrapped));
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(registry, null, null, completed, null);
+
+            Exception thrown = await CaptureAsync(() => Run(routing, streaming, caller.Token));
+
+            Assert.AreSame(wrapped, thrown);
+            Assert.AreEqual(LlmErrorCode.Cancelled, completed.Messages[0].ErrorCode, "The caller sees the stop.");
+            Assert.AreEqual(1, registry.HealthReports.Count);
+            Assert.AreEqual("XProfile", registry.HealthReports[0].ProfileId);
+            Assert.AreEqual(refusalCode, registry.HealthReports[0].Code, "Endpoint health sees the refusal.");
+        }
+
+        [Test]
+        public async Task TransientFaultWrappedInCancellation_DoesNotDegradeRouteHealth()
+        {
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            OperationCanceledException wrapped = LlmCancellation.WrapAsCancellation(
+                new LlmClientException("HTTP 503", LlmErrorCode.BackendUnavailable, 503), caller.Token, "the primary");
+            FakeRegistry registry = new(new ThrowingLlm(wrapped));
+            registry.Register("X", new ThrowingLlm(wrapped));
+            RoutingLlmClient routing = new(registry, null, null, null, null);
+
+            await CaptureAsync(() => Run(routing, false, caller.Token));
+
+            Assert.IsEmpty(registry.HealthReports);
+        }
+
+        [TestCase(LlmErrorCode.PaymentRequired, 402)]
+        [TestCase(LlmErrorCode.AuthExpired, 401)]
+        [TestCase(LlmErrorCode.BackendUnavailable, 503)]
+        public async Task EndpointLevelFailureWithLiveCaller_DegradesRouteHealth(LlmErrorCode code, int status)
+        {
+            LlmClientException fault = new($"HTTP {status}", code, status);
+            FakeRegistry registry = new(new ThrowingLlm(fault));
+            registry.Register("X", new ThrowingLlm(fault));
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(registry, null, null, completed, null);
+
+            await CaptureAsync(() => Run(routing, false, CancellationToken.None));
+
+            Assert.AreEqual(code, completed.Messages[0].ErrorCode);
+            Assert.AreEqual(1, registry.HealthReports.Count);
+            Assert.AreEqual(code, registry.HealthReports[0].Code);
+        }
+
+        [Test]
+        public async Task TimeoutResultAfterCallerCancelled_IsReissuedAsACopy_TheInnerInstanceIsUntouched()
+        {
+            // WHY: inner clients may reuse result instances; the rewrite must not mutate what they handed out,
+            // and the Error text must agree with the rewritten code.
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            LlmCompletionResult inner = new() { Ok = false, Error = "timed out", ErrorCode = LlmErrorCode.Timeout, HttpStatus = 504 };
+            RoutingLlmClient routing = new(new FakeRegistry(new FixedResultLlm(inner)), null, null, null, null);
+
+            LlmCompletionResult result = await routing.CompleteAsync(
+                new LlmCompletionRequest { AgentRoleId = "X", UserPayload = "y" }, caller.Token);
+
+            Assert.AreNotSame(inner, result);
+            Assert.AreEqual(LlmErrorCode.Timeout, inner.ErrorCode);
+            Assert.AreEqual("timed out", inner.Error);
+            Assert.AreEqual(LlmErrorCode.Cancelled, result.ErrorCode);
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, result.Error);
+            Assert.AreEqual(504, result.HttpStatus, "Everything else is carried over.");
+        }
+
+        [Test]
+        public async Task TimeoutChunkAfterCallerCancelled_IsReissuedAsACopy_TheInnerInstanceIsUntouched()
+        {
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            LlmStreamChunk inner = new() { IsDone = true, Error = "LLM request timed out.", ErrorCode = LlmErrorCode.Timeout, Model = "m" };
+            RoutingLlmClient routing = new(new FakeRegistry(new FixedResultLlm(null, inner)), null, null, null, null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in routing.CompleteStreamingAsync(
+                               new LlmCompletionRequest { AgentRoleId = "X", UserPayload = "y" }, caller.Token))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(1, chunks.Count);
+            Assert.AreNotSame(inner, chunks[0]);
+            Assert.AreEqual(LlmErrorCode.Timeout, inner.ErrorCode);
+            Assert.AreEqual("LLM request timed out.", inner.Error);
+            Assert.AreEqual(LlmErrorCode.Cancelled, chunks[0].ErrorCode);
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, chunks[0].Error);
+            Assert.AreEqual("m", chunks[0].Model, "Everything else is carried over.");
+        }
+
+        [Test]
+        public async Task FailureChunkWithLiveCaller_IsPassedThroughUnchanged()
+        {
+            LlmStreamChunk inner = new() { IsDone = true, Error = "HTTP 503", ErrorCode = LlmErrorCode.BackendUnavailable };
+            FakeRegistry registry = new(new FixedResultLlm(null, inner));
+            registry.Register("X", new FixedResultLlm(null, inner));
+            RoutingLlmClient routing = new(registry, null, null, null, null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in routing.CompleteStreamingAsync(
+                               new LlmCompletionRequest { AgentRoleId = "X", UserPayload = "y" }))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreSame(inner, chunks[0], "No rewrite, no copy.");
+            Assert.AreEqual(1, registry.HealthReports.Count);
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, registry.HealthReports[0].Code);
+        }
+
+        [Test]
+        public async Task TransientFailureChunkAfterCallerCancelled_DoesNotDegradeRouteHealth()
+        {
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            LlmStreamChunk inner = new() { IsDone = true, Error = "HTTP 503", ErrorCode = LlmErrorCode.BackendUnavailable };
+            FakeRegistry registry = new(new FixedResultLlm(null, inner));
+            registry.Register("X", new FixedResultLlm(null, inner));
+            RoutingLlmClient routing = new(registry, null, null, null, null);
+
+            await foreach (LlmStreamChunk _ in routing.CompleteStreamingAsync(
+                               new LlmCompletionRequest { AgentRoleId = "X", UserPayload = "y" }, caller.Token))
+            {
+            }
+
+            Assert.IsEmpty(registry.HealthReports);
+        }
+
+        [TestCase(LlmErrorCode.ProviderError, false)]
+        [TestCase(LlmErrorCode.BackendUnavailable, false)]
+        [TestCase(LlmErrorCode.AuthExpired, false)]
+        [TestCase(LlmErrorCode.ProviderError, true)]
+        [TestCase(LlmErrorCode.BackendUnavailable, true)]
+        [TestCase(LlmErrorCode.AuthExpired, true)]
+        public async Task FailureReturnedAfterCallerCancelled_IsPublishedAsCancelled_RouteHealthJudgesTheRawCode(
+            LlmErrorCode code,
+            bool streaming)
+        {
+            // WHY: a THROWN fault after the stop was already published as the cancellation, a RETURNED one kept
+            // its own code - the same Stop reached subscribers two ways. Route health still reads the code the
+            // endpoint reported: a permanent refusal is a fact about the endpoint, a transient one is not.
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            LlmCompletionResult innerResult = new() { Ok = false, Error = "HTTP refusal", ErrorCode = code, HttpStatus = 499 };
+            LlmStreamChunk innerChunk = new() { IsDone = true, Error = "HTTP refusal", ErrorCode = code, HttpStatus = 499 };
+            FixedResultLlm inner = new(innerResult, innerChunk);
+            FakeRegistry registry = new(inner);
+            registry.Register("X", inner);
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(registry, null, null, completed, null);
+            LlmCompletionRequest request = new() { AgentRoleId = "X", UserPayload = "y" };
+
+            LlmErrorCode seenCode;
+            string seenError;
+            int? seenStatus;
+            if (streaming)
+            {
+                List<LlmStreamChunk> chunks = new();
+                await foreach (LlmStreamChunk chunk in routing.CompleteStreamingAsync(request, caller.Token))
+                {
+                    chunks.Add(chunk);
+                }
+
+                Assert.AreEqual(1, chunks.Count);
+                seenCode = chunks[0].ErrorCode;
+                seenError = chunks[0].Error;
+                seenStatus = chunks[0].HttpStatus;
+            }
+            else
+            {
+                LlmCompletionResult result = await routing.CompleteAsync(request, caller.Token);
+                seenCode = result.ErrorCode;
+                seenError = result.Error;
+                seenStatus = result.HttpStatus;
+            }
+
+            Assert.AreEqual(LlmErrorCode.Cancelled, seenCode, "The caller sees the stop.");
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, seenError, "The text follows the code.");
+            Assert.AreEqual(499, seenStatus, "Everything else is carried over.");
+            Assert.AreEqual(code, innerResult.ErrorCode, "The inner instances are not mutated.");
+            Assert.AreEqual(code, innerChunk.ErrorCode);
+            Assert.AreEqual(1, completed.Messages.Count);
+            Assert.AreEqual(LlmErrorCode.Cancelled, completed.Messages[0].ErrorCode);
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, completed.Messages[0].Error);
+            if (code == LlmErrorCode.AuthExpired)
+            {
+                Assert.AreEqual(1, registry.HealthReports.Count, "A permanent refusal still reaches route health.");
+                Assert.AreEqual("XProfile", registry.HealthReports[0].ProfileId);
+                Assert.AreEqual(LlmErrorCode.AuthExpired, registry.HealthReports[0].Code);
+            }
+            else
+            {
+                Assert.IsEmpty(registry.HealthReports,
+                    "A transient failure after the stop says nothing about the endpoint.");
+            }
+        }
+
+        [Test]
+        public async Task CodelessErrorChunkAfterCallerCancelled_IsPublishedAsCancelled()
+        {
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            LlmStreamChunk inner = new() { IsDone = true, Error = "socket closed" };
+            FakeRegistry registry = new(new FixedResultLlm(null, inner));
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(registry, null, null, completed, null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in routing.CompleteStreamingAsync(
+                               new LlmCompletionRequest { AgentRoleId = "X", UserPayload = "y" }, caller.Token))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(1, chunks.Count);
+            Assert.AreEqual(LlmErrorCode.Cancelled, chunks[0].ErrorCode);
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, chunks[0].Error);
+            Assert.AreEqual(LlmErrorCode.Cancelled, completed.Messages[0].ErrorCode);
+            Assert.IsEmpty(registry.HealthReports);
+        }
+
+        private static async Task Run(RoutingLlmClient routing, bool streaming, CancellationToken token)
+        {
+            LlmCompletionRequest request = new() { AgentRoleId = "X", UserPayload = "y" };
+            if (streaming)
+            {
+                await foreach (LlmStreamChunk _ in routing.CompleteStreamingAsync(request, token))
+                {
+                }
+
+                return;
+            }
+
+            await routing.CompleteAsync(request, token);
+        }
+
+        private static async Task<Exception> CaptureAsync(Func<Task> action)
+        {
+            // WHY not Assert.ThrowsAsync: it blocks the calling thread, which deadlocks under Unity's
+            // SynchronizationContext while the awaited delegate's continuation waits for that same thread.
+            try
+            {
+                await action();
+            }
+            catch (Exception ex)
+            {
+                return ex;
+            }
+
+            Assert.Fail("Expected an exception.");
+            return null;
         }
 
         /// <summary>Returns one fixed result, and streams one fixed chunk, ignoring the token on purpose.</summary>

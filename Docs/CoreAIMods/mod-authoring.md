@@ -36,7 +36,7 @@ description: one line.
 | Function | Meaning |
 |---|---|
 | `mods_export(name, value)` | publish a value OR function under this mod's id. |
-| `mods_get(modId, name)` | read another mod's exported **plain data** (nil for a function export). |
+| `mods_get(modId, name)` | read another mod's exported **plain data** (throws for a function export — use `mods_call`). |
 | `mods_call(modId, name, ...)` | call another mod's exported **function** on its own state; returns a copied result. |
 | `mods_list_exports(modId)` | list export names (introspection — the AI discovers callable APIs). |
 
@@ -48,10 +48,15 @@ depth is capped (`MaxCrossCallDepth = 8`). See `shared_stats_provider.lua` + `sh
 ## Capability tiers — gate the GAME bindings
 The mod-core + inter-mod API above is always present. Tiers gate the **game** bindings:
 - **Read** — query only.
-- **WorldEdit** — `coreai_world_*` (spawn/change/destroy/scene/animation/sound) via the authoritative command channel.
+- **Gameplay** — `time_*` (time scale) and read-only `input_*`.
+- **WorldEdit** — `Instance.new` and the rest of the Rbx API (see
+  [RBX_API.md](../../Assets/CoreAI/Docs/RBX_API.md)): creating, changing and destroying instances. The classic
+  `coreai_world_*` build calls (spawn/change/destroy/scene/animation/sound) are withheld stubs in the default
+  composition; they raise an error that points at the Rbx API.
 - **LogicOverride** — `logic_*` formulas.
-- **Full** — `unity_*` generic reflection (get/set fields, call methods on ANY component). Host/singleplayer-only,
-  stripped on network clients. Opt-in ("Enable Full Lua Access"); NOT part of `All`.
+- **Full** — `unity_*` generic reflection (get/set fields, call methods on ANY component). Host/singleplayer-only;
+  never grant it to a networked client. Opt-in (**Enable Full Lua Access** on `CoreAiModsLifetimeScope`); NOT part
+  of `All`.
 A binding absent from your tier simply doesn't exist in the sandbox (calling it errors).
 
 ## Roblox-style signals and scheduling
@@ -126,7 +131,8 @@ An unknown, unregistered name still fails immediately at `GetService()` with `UN
 [Sandbox & limits](#sandbox--limits).
 
 ## Coroutines (work across frames, WebGL-safe)
-`coroutine.create/resume/yield/status` are available. A coroutine lets a mod spread a sequence over time
+`coroutine.create/resume/yield/status` are available (`coroutine.wrap` is removed; `coroutine.resume` runs under
+the per-resume budget). A coroutine lets a mod spread a sequence over time
 without blocking — it yields, the host advances the frame, and you resume it next tick. Under Lua-CSharp this
 is frame-pumped, so `coroutine.yield` works on WebGL too (a blocking wait would deadlock single-threaded WASM;
 this needs the bundled VM at v0.5.6 or newer — older builds froze the player on the first yield).
@@ -140,7 +146,8 @@ authoritative channel) over direct mutation — it stays deterministic and multi
 `day_night_cycle.lua`.
 
 ## Sandbox & limits
-- No `io`/`os`/`debug`; `load`/`loadstring`/`dofile`/`loadfile` are removed.
+- No `io`/`debug`/`package`/`require`; `load`/`loadstring`/`dofile`/`loadfile` are removed. The stock `os` library is
+  removed too; the Rbx API provides an `os` table with only `os.time()` and `os.clock()`.
 - Every resume of your code — the main chunk, a signal handler, a `task.*` resume, a one-off `execute_lua`
   chunk — runs under a **per-resume budget** with two halves: an instruction-step cap and a wall-clock cap
   (CoreAI's defaults: 10,000 steps / 500 ms; a mod's own `coroutine.resume` gets a larger bound derived from
@@ -168,8 +175,9 @@ library function errors, so keep to common `string`/`table`/`math` calls.
 Drop `.lua` files (each with an `@coreai` header) into a **`Resources/CoreAIMods/`** folder. On the first
 run `BundledModSeeder` (wired in `CoreAiModsInstaller`, runs before rehydrate) installs them into the
 persistent store; `active: true` mods load immediately, `active: false` ones ship dormant (enable from the
-Hub Mods tab). Two samples live in `Assets/CoreAIMods/Runtime/Resources/CoreAIMods/`
-(`sample_welcome.lua`, `sample_camera_pulse.lua`).
+Hub Mods tab). Five samples live in `Assets/CoreAIMods/Runtime/Resources/CoreAIMods/`:
+`sample_welcome.lua` (active) and the opt-in `sample_lane_racer.lua`, `sample_tetris3d.lua`,
+`sample_clicker.lua` and `sample_castle3d.lua`.
 
 Updates are version-driven and player-respectful:
 - Bump the header `version:` and re-ship → the seeder **updates** an unmodified copy, keeping the player's

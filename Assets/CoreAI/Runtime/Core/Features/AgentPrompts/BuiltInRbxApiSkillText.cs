@@ -99,7 +99,8 @@ buttons live at 1000+).
 
 - `Instance.new(""Class""[, parent])` — creatable classes are ""Part"", ""Folder"", ""Model"",
   ""ClickDetector"", ""RemoteEvent"", ""UnreliableRemoteEvent"", ""RemoteFunction"",
-  ""MaterialVariant"". Any other name
+  ""MaterialVariant"", ""Humanoid"" (section 7), ""Backpack"" (a plain container), and the value
+  objects of section 9. Any other name
   errors (a Camera is not creatable — reach the world camera through `workspace.CurrentCamera`).
   The parent argument is deprecated (logs once); set `.Parent` after configuring instead.
 - `RemoteEvent`/`UnreliableRemoteEvent` fire one-way. `RemoteFunction:InvokeServer/InvokeClient`

@@ -18,7 +18,8 @@ It is the in-game Command Bar surfaced over MCP: `execute_lua`, `get_mod_logs`, 
 
 Install `com.neoxider.coreaimcp` (it depends on `com.neoxider.coreaimods` and
 `com.neoxider.coreaiunity`), then either add a **CoreAI MCP Server** component to a scene that also has
-a `CoreAILifetimeScope`, or start it from code:
+a `CoreAILifetimeScope` and tick **Start On Enable** (or call `StartListening()` on it), or start it
+from code. The component alone starts nothing — **Start On Enable** is off by default:
 
 ```csharp
 using CoreAI.Mcp.Server;
@@ -81,7 +82,7 @@ So the server enforces all of the following, in this order, on every request:
 
 | Layer | Rule | Stops |
 |-------|------|-------|
-| **Off by default** | nothing starts until you add the component or call `StartServer()` | everything, until you opt in |
+| **Off by default** | nothing starts until **Start On Enable** is ticked or `StartListening()` / `StartServer()` is called | everything, until you opt in |
 | **Loopback bind + `IsLocal`** | listener bound to `127.0.0.1`; remote sockets refused | off-box callers |
 | **`Host` check** | must be `127.0.0.1`/`localhost`/`[::1]` on the server's port → else `403` | DNS rebinding |
 | **`Origin` check** | absent (a real MCP client) or loopback-on-this-port → else `403` | browser CSRF |
@@ -122,10 +123,11 @@ that on a machine you fully trust — the server logs a warning for the whole se
    the MCP tools wrap those services.
 2. Add a **CoreAI MCP Server** component to any GameObject in a scene that also has a
    `CoreAILifetimeScope` (and, for the Lua tools, a `CoreAiModsLifetimeScope`).
-3. Set the port (default **8590**) and, optionally, tick **Start On Enable**. Set **Auth Token** (or
-   `COREAI_MCP_TOKEN`) if you want the same token every run.
-4. Enter play mode. The console logs `CoreAI MCP server listening on http://127.0.0.1:8590/mcp` followed
-   by the auth token line.
+3. Set the port (default **8590**) and tick **Start On Enable** — required unless you start the server
+   from code (`StartListening()` on the component, or `CoreAiMcpServer.StartServer()`). Set
+   **Auth Token** (or `COREAI_MCP_TOKEN`) if you want the same token every run.
+4. Enter play mode. With **Start On Enable** ticked, the console logs
+   `CoreAI MCP server listening on http://127.0.0.1:8590/mcp` followed by the auth token line.
 
 Or, from code:
 

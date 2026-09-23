@@ -28,7 +28,7 @@ The endpoint here is an example address of a local server that you run yourself.
 
 ## What the sample does
 
-`DelegateLlmTool` describes `get_stock`. `SkillSet.FromTextParts` bundles a full `SKILL.md` with `references/items.md`; `read_skill` reads the main document, an extra file, or everything at once. `call_skill_tool` invokes only this catalog's tool. Two meta-tools are exposed in the public schemas.
+`DelegateLlmTool` describes `get_stock`. `SkillSet.FromTextParts` bundles a full `SKILL.md` with `references/items.md`; `read_skill` reads the main document, an extra file, or everything at once. `call_skill_tool` invokes only this catalog's tool, and refuses a call before binding when the required `item` argument is missing or `null`, or when an argument has the wrong type; the model then gets the expected parameters and a note that the tool did not run. An empty string is a present value and reaches the tool, which answers it as an unknown item. Two meta-tools are exposed in the public schemas.
 
 `MeaiOpenAiChatClient` performs the HTTP requests. `SmartToolCallingChatClient` runs the turn through MEAI and CoreAI policy: up to eight roundtrips, five seconds per tool, 60 seconds per HTTP request, 90 seconds overall. `Ctrl+C` cancels the turn. The screen shows the last assistant reply and the number of executed calls.
 

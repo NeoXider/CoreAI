@@ -43,8 +43,12 @@ Use stable snake_case names and compact parameter names:
 new DelegateLlmTool(
     "get_inventory",
     "Return item ids and counts for an actor.",
-    (string actor_id) => ...);
+    new Func<string, string>(actor_id => ...));
 ```
+
+Unity compiles C# 9, where a lambda has no natural type. `DelegateLlmTool` and
+`AgentBuilder.WithAction` take a `System.Delegate`, so wrap the lambda in an explicit delegate type
+(`new Func<...>(...)`, `new Action(...)`); a bare lambda fails with CS1660.
 
 Prefer:
 
@@ -78,15 +82,19 @@ the HTTP retry loop or the fallback provider chain.
 
 Only calls the policy rejected **before** the invocation boundary count as
 never-invoked and stay retry-eligible: an echo-suppressed duplicate, unparseable
-argument JSON, an unknown tool name, a declared tool with no binding, and a
-missing required argument caught by schema validation. Everything that reached
-`AIFunction.InvokeAsync` is treated as invoked — **including a failure MEAI raised
-while binding the arguments**. That boundary cannot prove the body was never
-entered, and the previous attempt to prove it by reading the exception's stack
-frames is unusable on IL2CPP/WebGL, where frames can be stripped: a body exception
-then looked like a binding failure and the retry replayed a mutation that had
-already happened. The conservative verdict costs a retry; the precise one cost
-correctness.
+argument JSON, an unknown tool name, a declared tool with no binding, a missing
+required argument caught by schema validation, and an argument whose value cannot
+be converted to the parameter type. The type check is a structural preflight: it
+runs MEAI's own conversion for each argument before `AIFunction.InvokeAsync`, so a
+refusal proves the body never ran. `call_skill_tool` applies the same missing-argument
+and type checks to its target tool before binding. Everything that reached
+`AIFunction.InvokeAsync` is treated as invoked — **including a binding failure the
+preflight could not prove**, for example in a hand-written `AIFunction` with no
+underlying .NET method. That boundary cannot prove the body was never entered, and
+the previous attempt to prove it by reading the exception's stack frames is unusable
+on IL2CPP/WebGL, where frames can be stripped: a body exception then looked like a
+binding failure and the retry replayed a mutation that had already happened. The
+conservative verdict costs a retry; the precise one cost correctness.
 
 ## Result Envelope
 
@@ -197,6 +205,33 @@ its name is one of the built-in mutating names above.
 - Include only the fields needed for repair.
 - Do not return stack traces, secrets, local file paths, or provider responses.
 - Do not hide domain failures as successful prose.
+
+**Required arguments: missing means absent or `null`.** A required argument counts
+as missing only when its key is absent or its value is `null` / JSON `null`; such a
+call is refused before the tool runs, with the expected schema in the error. The
+required names come from the tool's `ParametersSchema` and from the bound
+function's own schema (`AIFunction.JsonSchema`), so a tool that declares `{}` as its
+metadata schema is still checked. An empty or whitespace-only string is a
+**present** value and reaches your tool — validate it yourself when `""` is not
+meaningful, and return a structured error instead of acting on it.
+
+**`call_skill_tool` refuses before binding.** When the model calls a skill tool
+through `call_skill_tool` with a missing required argument or an argument of the
+wrong type (for example `"yes"` for a `bool`), the proxy refuses the call before the
+tool is bound. The refusal names the tool and the argument, lists the expected
+parameters, states that the tool was **not** executed, and shows how to retry; it
+is traced as a schema-validation failure, so the turn may still be retried. Enum
+names and JSON-object arguments bind exactly as MEAI binds them.
+
+**Multi-function tools are called by function name.** A tool that implements
+`IAIFunctionsLlmTool` (for example `camera` → `camera_capture` / `screenshot` /
+`camera_look` / `camera_list`, or `scene_tool` → `find_objects` / `get_hierarchy` /
+`get_transform` / `set_transform`) is exposed to the model as its functions. The
+model calls those names, and each call runs under the wrapper's
+`ToolTimeoutMsOverride`, `EndsTurn`, `IsMutating` and `AllowDuplicates`. Casing
+repair covers the function names, the "Available tools" list in the prompt and in
+refusals shows them instead of the wrapper name, and text-shaped calls to them are
+extracted and stripped like any other tool call.
 
 **Exceptions in `DelegateLlmTool` bodies never escape the pipeline.** If your
 delegate body throws, `DelegateLlmTool` converts the exception into an

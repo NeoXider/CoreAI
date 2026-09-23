@@ -19,15 +19,17 @@ No pip packages. Python 3 standard library only (developed and tested on Python 
 
 ## Start it
 
+From the repository root:
+
 ```
-python D:\Git\CoreAI\tools\G11Proxy\g11_proxy.py --port 8811 --upstream http://127.0.0.1:1234/v1 --log-file D:\Git\CoreAI\artifacts\g11-proxy.log
+python tools/G11Proxy/g11_proxy.py --port 8811 --upstream http://127.0.0.1:1234/v1 --log-file artifacts/g11-proxy.log
 ```
 
 Defaults are `--host 127.0.0.1 --port 8811 --upstream http://127.0.0.1:1234/v1`, so the short
 form is enough when LM Studio is on its default port:
 
 ```
-python D:\Git\CoreAI\tools\G11Proxy\g11_proxy.py
+python tools/G11Proxy/g11_proxy.py
 ```
 
 | Flag | Default | Meaning |
@@ -65,7 +67,7 @@ Everything else in the asset stays as-is. The values that matter for §6.5, as c
 | --- | --- | --- |
 | `requestTimeoutSeconds` | `120` | the "outer timeout + 5 s" budget in §6.5 is **125 s** |
 | `maxLlmRequestRetries` | `3` | one injected `503` is retried automatically |
-| `modelName` | committed `qwen3.5-4b-mtp`; working tree currently `ling-3.0-tiny` | must be a model LM Studio can actually load (see *Limitations*) |
+| `modelName` | whatever the asset names | must be a model LM Studio can actually load (see *Limitations*) |
 
 Two details the proxy exists to handle:
 
@@ -246,9 +248,10 @@ than doing nothing.
 
 ## Tests
 
+From the repository root:
+
 ```
-cd D:\Git\CoreAI
-python tools\G11Proxy\test_g11_proxy.py
+python tools/G11Proxy/test_g11_proxy.py
 ```
 
 21 tests, no network and no LM Studio required: they spin up a fake upstream (delayed three-frame
@@ -280,12 +283,10 @@ injected errors, the counters, and the log-line format.
   one turn at a time.
 - **No auth.** Any `Authorization` header the player sends is forwarded verbatim; the proxy adds
   none. §6.5 requires no provider key in the player, so the header is normally absent.
-- **Observed on this machine:** LM Studio's `GET /v1/models` and streaming completions proxy
-  correctly end to end. The committed `qwen3.5-4b-mtp` fails to load
-  (`LM Link connection entered error state peer_keepalive_timeout`) and returns HTTP 400 — a known
-  local blocker unrelated to this proxy — while `ling-3.0-tiny` streamed a nonce back through the
-  proxy in 26 separate relayed reads. Verify the configured model actually loads before starting the
-  G11 run, or the nonce turn will fail for the wrong reason.
+- **The model must load.** LM Studio's `GET /v1/models` and streaming completions proxy correctly
+  end to end, but a model LM Studio cannot load answers HTTP 400 through the proxy like any other
+  upstream error. Verify the configured model actually loads before starting the G11 run, or the
+  nonce turn will fail for the wrong reason.
 
 ## Scripted replies (deterministic native tool calls)
 

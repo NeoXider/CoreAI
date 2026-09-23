@@ -91,7 +91,7 @@ Symptom (historical): Lua tools or Lua envelope processing reported that Lua exe
 
 Cause (historical): v2.6.0 explicitly disabled the then-current Lua sandbox (a different third-party interpreter, since replaced) in WebGL player builds. That path could initialize reflection-based loader code that aborts WebGL/IL2CPP before managed exception handling.
 
-Resolution: the Lua VM was replaced end-to-end by **Lua-CSharp**, a managed, AOT-safe runtime that works on IL2CPP and WebGL without reflection-based loading. WebGL Lua execution through `SecureLuaEnvironment` is supported on WebGL player builds and **on by default**; toggle with `CoreAISettingsAsset.EnableLuaOnWebGl`. See ARCHITECTURE.md.
+Resolution: the Lua VM was replaced end-to-end by **Lua-CSharp**, a managed, AOT-safe runtime that works on IL2CPP and WebGL without reflection-based loading. WebGL Lua execution through `LuaCsSecureEnvironment` (`com.neoxider.coreaimods`) is supported on WebGL player builds whenever `COREAI_LUA` is compiled in. `CoreAISettingsAsset.EnableLuaOnWebGl` is serialized but not currently read by the Lua runtime. See ARCHITECTURE.md.
 
 Recommended follow-up:
 

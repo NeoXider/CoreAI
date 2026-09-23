@@ -43,7 +43,7 @@ Done. The `"SmartChat"` role must match `AgentBuilder` / chat config if you conf
 
 | How you interact | What you press / write | Where the request goes |
 |------------------|------------------------|------------------|
-| **Chat window** (`CoreAiChatPanel`) | Send button, **Shift+Enter** (default) or **Enter** — depending on `CoreAiChatConfig.SendOnShiftEnter` | `CoreAiChatService` → same `ILlmClient` as `CoreAi` |
+| **Chat window** (`CoreAiChatPanel`) | Send button or **Enter** (default; **Shift+Enter** inserts a newline). With `CoreAiChatConfig.SendOnShiftEnter` on, **Shift+Enter** sends instead | `CoreAiChatService` → same `ILlmClient` as `CoreAi` |
 | **Script** (NPC, quest, “Ask” button) | `CoreAi.AskAsync("text")` or `CoreAi.StreamAsync` — that is how a user request is sent to the LLM | Same `CoreAiChatService` inside `CoreAi` |
 
 Both paths use **one** `CoreAILifetimeScope` registered on the scene and **one** backend configuration. The only difference is UX: in the panel you type in a field; in code you pass a string to a method. Brushes/streaming/roles — see [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) and [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md).

@@ -1795,6 +1795,162 @@ namespace CoreAI.Tests.EditMode
                 "An injected AdditionalGameplayBindings API must be callable from a loaded mod's handler.");
         }
 
+        private const string PrivilegedProbeApi = "host_privileged_probe";
+
+        /// <summary>
+        /// Stack whose host extension records every capability set it is handed and, like a real host
+        /// integration, registers a privileged API only when that set carries the Full bit.
+        /// </summary>
+        private static LuaCsModStack BuildCapabilityProbeStack(
+            LuaCapabilities ceiling,
+            LuaCapabilities oneOffCeiling,
+            List<LuaCapabilities> seen,
+            ILuaModStore store = null,
+            LuaCsRbxApiBindings rbxApi = null)
+        {
+            return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = ceiling,
+                OneOffCapabilities = oneOffCeiling,
+                RbxApi = rbxApi,
+                AdditionalGameplayBindings = (registry, caps) =>
+                {
+                    lock (seen)
+                    {
+                        seen.Add(caps);
+                    }
+
+                    if ((caps & LuaCapabilities.Full) != 0)
+                    {
+                        registry.Register(PrivilegedProbeApi, new Action(() => { }));
+                    }
+                }
+            });
+        }
+
+        private static void AssertExtensionSawOnly(List<LuaCapabilities> seen, LuaCapabilities expected,
+            string because)
+        {
+            lock (seen)
+            {
+                Assert.IsNotEmpty(seen, "The AdditionalGameplayBindings callback never ran.");
+                foreach (LuaCapabilities caps in seen)
+                {
+                    Assert.AreEqual(expected, caps, because);
+                }
+            }
+        }
+
+        private const string PrivilegedProbeModSource =
+            "store_set('privileged', (" + PrivilegedProbeApi + " ~= nil) and 'yes' or 'no')";
+
+        [Test]
+        public void LuaCs_AdditionalGameplayBindings_FullRequestAboveCeiling_ExtensionSeesNoFull()
+        {
+            MemoryStore store = new();
+            List<LuaCapabilities> seen = new();
+            LuaCsModStack stack = BuildCapabilityProbeStack(
+                LuaCapabilities.All, LuaCapabilities.All, seen, store);
+
+            stack.Runtime.LoadMod("asks-full", PrivilegedProbeModSource,
+                LuaCapabilities.All | LuaCapabilities.Full, persistToStore: false);
+
+            AssertExtensionSawOnly(seen, LuaCapabilities.All,
+                "A mod that merely REQUESTS Full under a ceiling without Full must hand the host extension "
+                + "the ceiling-trimmed tiers, exactly what the built-in surface registered.");
+            Assert.AreEqual("no", store.Get("asks-full", "privileged"),
+                "A host API gated on the Full bit must stay out of reach when the host ceiling withholds Full.");
+        }
+
+        [Test]
+        public void LuaCs_AdditionalGameplayBindings_FullWithinCeiling_ExtensionSeesFullAndOnlyTheCeiling()
+        {
+            MemoryStore store = new();
+            List<LuaCapabilities> seen = new();
+            LuaCapabilities ceiling =
+                LuaCapabilities.Read | LuaCapabilities.WorldEdit | LuaCapabilities.Full;
+            LuaCsModStack stack = BuildCapabilityProbeStack(ceiling, LuaCapabilities.All, seen, store);
+
+            stack.Runtime.LoadMod("granted-full", PrivilegedProbeModSource,
+                LuaCapabilities.All | LuaCapabilities.Full, persistToStore: false);
+
+            AssertExtensionSawOnly(seen, ceiling,
+                "The extension must see Full when the host grants it, and nothing the ceiling withholds.");
+            Assert.AreEqual(ceiling,
+                stack.GameplayBindings.EffectiveCapabilities(LuaCapabilities.All | LuaCapabilities.Full),
+                "The extension's tiers must equal what the built-in surface registered.");
+            Assert.AreEqual("yes", store.Get("granted-full", "privileged"),
+                "A host API gated on the Full bit must stay reachable when the host grants Full.");
+        }
+
+        [Test]
+        public void LuaCs_AdditionalGameplayBindings_ReadOnlyMod_ExtensionSeesNoGameplayOrFull()
+        {
+            MemoryStore store = new();
+            List<LuaCapabilities> seen = new();
+            LuaCsModStack stack = BuildCapabilityProbeStack(
+                LuaCapabilities.All | LuaCapabilities.Full, LuaCapabilities.All, seen, store);
+
+            stack.Runtime.LoadMod("reader", PrivilegedProbeModSource, LuaCapabilities.Read,
+                persistToStore: false);
+
+            AssertExtensionSawOnly(seen, LuaCapabilities.Read,
+                "A Read-only mod must hand the extension Read alone, never the wider host ceiling.");
+            Assert.AreEqual("no", store.Get("reader", "privileged"));
+        }
+
+        [TestCase(LuaCapabilities.All, LuaCapabilities.All | LuaCapabilities.Full,
+            LuaCapabilities.All)]
+        [TestCase(LuaCapabilities.All | LuaCapabilities.Full, LuaCapabilities.Read | LuaCapabilities.Gameplay,
+            LuaCapabilities.Read | LuaCapabilities.Gameplay)]
+        [TestCase(LuaCapabilities.Read | LuaCapabilities.WorldEdit | LuaCapabilities.Full,
+            LuaCapabilities.Read | LuaCapabilities.Gameplay | LuaCapabilities.Full,
+            LuaCapabilities.Read | LuaCapabilities.Full)]
+        public void LuaCs_AdditionalGameplayBindings_OneOffExecutor_ExtensionSeesCeilingAndOneOffTier(
+            LuaCapabilities ceiling, LuaCapabilities oneOffCeiling, LuaCapabilities expected)
+        {
+            List<LuaCapabilities> seen = new();
+            LuaCsModStack stack = BuildCapabilityProbeStack(ceiling, oneOffCeiling, seen);
+
+            LuaTool.LuaResult result = stack.ToolExecutor
+                .ExecuteAsync("return 1", CancellationToken.None)
+                .GetAwaiter().GetResult();
+
+            Assert.IsTrue(result.Success, result.Error);
+            AssertExtensionSawOnly(seen, expected,
+                "The one-off extension must see the host ceiling AND the one-off tier applied, "
+                + "exactly like the built-in one-off surface.");
+        }
+
+        [Test]
+        public void LuaCs_AdditionalGameplayBindings_OneOffMutationEnvelope_ExtensionSeesNoFullAboveCeiling()
+        {
+            InstanceRegistry registry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            LuaCsRbxApiBindings rbxApi = new(registry: registry);
+            List<LuaCapabilities> seen = new();
+            LuaCsModStack stack = BuildCapabilityProbeStack(
+                LuaCapabilities.All, LuaCapabilities.All | LuaCapabilities.Full, seen, rbxApi: rbxApi);
+            RbxInstance target = CreateMutationTarget(registry, "CapabilityProbeTarget");
+            ActorContext actor = MutationActor("capability-probe", "session-1");
+            MutationEnvelope envelope = new(
+                actor.ActorId, target.Id, "capability-probe-operation",
+                MutationRecord(registry, target).Revision);
+
+            LuaTool.LuaResult result = ExecuteMutation(stack, actor, envelope,
+                "local t=workspace:FindFirstChild('CapabilityProbeTarget'); "
+                + "t:SetAttribute('Probe','seen'); "
+                + "return (" + PrivilegedProbeApi + " ~= nil) and 'yes' or 'no'");
+
+            Assert.IsTrue(result.Success, result.Error);
+            AssertExtensionSawOnly(seen, LuaCapabilities.All,
+                "The actor-scoped one-off path must hand the extension the ceiling-trimmed tiers too.");
+            Assert.AreEqual("no", result.Output,
+                "A one-off tier wider than the host ceiling must not expose a Full-gated host API.");
+        }
+
         [Test]
         [Timeout(30000)]
         public void LuaCs_PcallSwallowedMemoryTrip_DoesNotLaunderLaterRealError()

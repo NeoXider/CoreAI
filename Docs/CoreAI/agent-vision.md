@@ -95,7 +95,7 @@ Design rationale — **secure by default**:
 
 ## 4. Tool surface (decision)
 
-One `ILlmTool` named **`camera`** (`IAIFunctionsLlmTool`) expanding to three native MEAI functions:
+One `ILlmTool` named **`camera`** (`IAIFunctionsLlmTool`) expanding to four native MEAI functions (one of them an alias):
 
 | Function | Purpose | Params |
 | --- | --- | --- |
@@ -106,11 +106,15 @@ One `ILlmTool` named **`camera`** (`IAIFunctionsLlmTool`) expanding to three nat
 
 Why three functions instead of one function with an `action` discriminator: the codebase and the LLM
 tool-calling path rely on **native** per-function JSON schemas built from `[Description]`-annotated
-parameters (see `Docs/tool-description-native-schema`). Splitting into three functions gives each action a
+parameters (see [MEAI_TOOL_CALLING.md](../../Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md)). Splitting into three functions gives each action a
 clean, unambiguous schema instead of a pile of conditionally-relevant optional params on a single
 function. It is still "one tool" in the sense of one registered `ILlmTool`, mirroring `SceneLlmTool`
 (one `scene_tool` → `find_objects`/`get_hierarchy`/…). The tradeoff (three schema entries instead of one)
 is small because each schema is tiny.
+
+The model calls the **function** names (`camera_look`, not `camera`). The tool policy accepts them, runs
+each call under the wrapper's `ToolTimeoutMsOverride` / `EndsTurn` / `IsMutating` / `AllowDuplicates`, and
+lists the function names under "Available tools" in the prompt and in refusals.
 
 **`camera_capture` result.** Because OpenAI tool-result messages cannot carry images (see §5), the function
 returns a compact JSON **string**:

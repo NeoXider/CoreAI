@@ -185,35 +185,68 @@ namespace CoreAI.Chat
         /// Exceptions are NOT swallowed; callers (e.g. <c>CoreAiChatPanel</c>) are responsible
         /// for catching and displaying errors to the user.
         /// </remarks>
-        public async System.Threading.Tasks.Task<string> SendMessageAsync(
+        public System.Threading.Tasks.Task<string> SendMessageAsync(
             AiTaskRequest request,
             CancellationToken ct = default) =>
-            await SendMessageCoreAsync(request, token => _orchestrator.RunTaskAsync(request, token), ct) ?? "";
+            SendMessageAsync(request, ct, CancellationToken.None);
+
+        /// <summary>
+        /// <see cref="SendMessageAsync(AiTaskRequest, CancellationToken)"/> with a deadline the host runs on its own
+        /// token, kept apart from <paramref name="ct"/>: when <paramref name="deadlineToken"/> fires while
+        /// <paramref name="ct"/> is alive, the turn ends as <see cref="LlmOperationTimeoutException"/> exactly like
+        /// the idle deadline, and the orchestrator records it as <see cref="AiLlmCompletionOutcome.DeadlineCancellation"/>.
+        /// A fired <paramref name="ct"/> is a cancellation whatever the deadline says.
+        /// </summary>
+        public async System.Threading.Tasks.Task<string> SendMessageAsync(
+            AiTaskRequest request,
+            CancellationToken ct,
+            CancellationToken deadlineToken) =>
+            await SendMessageCoreAsync(request, token => _orchestrator.RunTaskAsync(request, token), ct,
+                deadlineToken) ?? "";
 
         /// <summary>Preserves typed task completion; a legacy string-only orchestrator is explicitly unsupported.</summary>
         public System.Threading.Tasks.Task<LlmCompletionResult> SendMessageResultAsync(
             AiTaskRequest request, CancellationToken ct = default)
         {
+            return SendMessageResultAsync(request, ct, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// <see cref="SendMessageResultAsync(AiTaskRequest, CancellationToken)"/> with a separate host deadline; see
+        /// <see cref="SendMessageAsync(AiTaskRequest, CancellationToken, CancellationToken)"/>.
+        /// </summary>
+        public System.Threading.Tasks.Task<LlmCompletionResult> SendMessageResultAsync(
+            AiTaskRequest request, CancellationToken ct, CancellationToken deadlineToken)
+        {
             if (_orchestrator is not IAiTaskResultService typed || !typed.SupportsTaskResults)
                 throw new NotSupportedException("The orchestrator does not expose typed task results.");
-            return SendMessageCoreAsync(request, token => typed.RunTaskResultAsync(request, token), ct);
+            return SendMessageCoreAsync(request, token => typed.RunTaskResultAsync(request, token), ct,
+                deadlineToken);
         }
 
         private async System.Threading.Tasks.Task<TResult> SendMessageCoreAsync<TResult>(AiTaskRequest request,
-            Func<CancellationToken, System.Threading.Tasks.Task<TResult>> send, CancellationToken ct)
+            Func<CancellationToken, System.Threading.Tasks.Task<TResult>> send, CancellationToken ct,
+            CancellationToken hostDeadlineToken)
         {
             if (request == null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
 
+            // WHY the caller's token alone goes into CallerCancellationToken: the orchestrator attributes a cancelled
+            // turn by asking "did the caller stop it?" first (AiCancellationAttributionContext.Resolve), so a host
+            // deadline merged into that token was counted as a user cancellation in the metrics. The idle deadline and
+            // the host deadline are joined into DeadlineCancellationToken instead, and the operation token links all
+            // three.
             request.CallerCancellationToken = ct;
-            request.DeadlineCancellationToken = CancellationToken.None;
+            request.DeadlineCancellationToken = hostDeadlineToken;
 
             float timeoutSec = 0f;
             CancellationTokenSource timeoutCts = null;
+            CancellationTokenSource idleCts = null;
             CancellationTokenSource deadlineCts = null;
             IdleTimeoutDeadline deadline = null;
+            CancellationToken deadlineToken = hostDeadlineToken;
             CancellationToken effectiveCt = ct;
             Action<LlmToolCallStarted> onToolStarted = null;
             Action<LlmToolCallCompleted> onToolCompleted = null;
@@ -223,11 +256,12 @@ namespace CoreAI.Chat
                 timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
                 if (timeoutSec > 0)
                 {
-                    deadlineCts = new CancellationTokenSource();
-                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, deadlineCts.Token);
-                    deadline = new IdleTimeoutDeadline(deadlineCts, timeoutSec);
-                    request.DeadlineCancellationToken = deadlineCts.Token;
+                    idleCts = new CancellationTokenSource();
+                    deadlineToken = LinkDeadlines(idleCts.Token, hostDeadlineToken, out deadlineCts);
+                    request.DeadlineCancellationToken = deadlineToken;
+                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, deadlineToken);
                     effectiveCt = timeoutCts.Token;
+                    deadline = new IdleTimeoutDeadline(idleCts, timeoutSec);
 
                     // WHY: a tool-call for THIS turn's role is progress and re-arms the idle deadline. A
                     // start, a finish AND a failure all count — a tool that fails right before a long LLM
@@ -264,6 +298,11 @@ namespace CoreAI.Chat
                     CoreAi.OnToolCallCompleted += onToolCompleted;
                     CoreAi.OnToolCallFailed += onToolFailed;
                 }
+                else if (hostDeadlineToken.CanBeCanceled)
+                {
+                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, hostDeadlineToken);
+                    effectiveCt = timeoutCts.Token;
+                }
 
                 TResult result = await send(effectiveCt);
                 // Orchestrator + LLM stack use ConfigureAwait(false); marshal to player loop for UI.
@@ -271,13 +310,8 @@ namespace CoreAI.Chat
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 return result;
             }
-            catch (OperationCanceledException) when (
-                deadlineCts != null &&
-                deadlineCts.IsCancellationRequested &&
-                !ct.IsCancellationRequested)
+            catch (OperationCanceledException) when (IsDeadlineTimeout(deadlineToken, ct))
             {
-                // Linked-token / CancelAfterSlim may not set CTS.IsCancellationRequested in the same
-                // and the caller token instead of probing the linked source.
                 throw new LlmOperationTimeoutException();
             }
             finally
@@ -300,7 +334,38 @@ namespace CoreAI.Chat
                 deadline?.Dispose();
                 timeoutCts?.Dispose();
                 deadlineCts?.Dispose();
+                idleCts?.Dispose();
             }
+        }
+
+        /// <summary>
+        /// The token that stands for "a deadline fired": the idle deadline alone, or the idle deadline joined with the
+        /// host's. <paramref name="linked"/> is the joined source the caller owns and disposes; <c>null</c> when no
+        /// join was needed.
+        /// </summary>
+        private static CancellationToken LinkDeadlines(
+            CancellationToken idleToken,
+            CancellationToken hostDeadlineToken,
+            out CancellationTokenSource linked)
+        {
+            if (!hostDeadlineToken.CanBeCanceled)
+            {
+                linked = null;
+                return idleToken;
+            }
+
+            linked = CancellationTokenSource.CreateLinkedTokenSource(idleToken, hostDeadlineToken);
+            return linked.Token;
+        }
+
+        /// <summary>
+        /// A cancellation observed while a deadline (idle or host) had fired and the caller's token was still alive is
+        /// a timeout; the caller's own stop wins over a deadline that raced it. Reads token copies only - the filter
+        /// runs while the sources may already be on their way out.
+        /// </summary>
+        private static bool IsDeadlineTimeout(CancellationToken deadlineToken, CancellationToken callerToken)
+        {
+            return deadlineToken.IsCancellationRequested && !callerToken.IsCancellationRequested;
         }
 
         /// <summary>
@@ -342,23 +407,40 @@ namespace CoreAI.Chat
         /// for the full window) still times out.
         /// </para>
         /// </remarks>
+        public IAsyncEnumerable<LlmStreamChunk> SendMessageStreamingAsync(
+            AiTaskRequest request,
+            CancellationToken ct = default)
+        {
+            // WHY not an iterator itself: the three-token overload carries [EnumeratorCancellation], so a token
+            // handed to WithCancellation still merges into the same caller token this forwards.
+            return SendMessageStreamingAsync(request, ct, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// <see cref="SendMessageStreamingAsync(AiTaskRequest, CancellationToken)"/> with a separate host deadline; see
+        /// <see cref="SendMessageAsync(AiTaskRequest, CancellationToken, CancellationToken)"/>.
+        /// </summary>
         public async IAsyncEnumerable<LlmStreamChunk> SendMessageStreamingAsync(
             AiTaskRequest request,
             [System.Runtime.CompilerServices.EnumeratorCancellation]
-            CancellationToken ct = default)
+            CancellationToken ct,
+            CancellationToken deadlineToken)
         {
             if (request == null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
 
+            // WHY: same split as SendMessageCoreAsync - caller token alone, deadlines joined; see the comment there.
             request.CallerCancellationToken = ct;
-            request.DeadlineCancellationToken = CancellationToken.None;
+            request.DeadlineCancellationToken = deadlineToken;
 
             float timeoutSec = 0f;
             CancellationTokenSource timeoutCts = null;
+            CancellationTokenSource idleCts = null;
             CancellationTokenSource deadlineCts = null;
             IdleTimeoutDeadline deadline = null;
+            CancellationToken anyDeadlineToken = deadlineToken;
             CancellationToken effectiveCt = ct;
             IAsyncEnumerator<LlmStreamChunk> streamEnumerator = null;
             try
@@ -366,10 +448,16 @@ namespace CoreAI.Chat
                 timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
                 if (timeoutSec > 0)
                 {
-                    deadlineCts = new CancellationTokenSource();
-                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, deadlineCts.Token);
-                    deadline = new IdleTimeoutDeadline(deadlineCts, timeoutSec);
-                    request.DeadlineCancellationToken = deadlineCts.Token;
+                    idleCts = new CancellationTokenSource();
+                    anyDeadlineToken = LinkDeadlines(idleCts.Token, deadlineToken, out deadlineCts);
+                    request.DeadlineCancellationToken = anyDeadlineToken;
+                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, anyDeadlineToken);
+                    effectiveCt = timeoutCts.Token;
+                    deadline = new IdleTimeoutDeadline(idleCts, timeoutSec);
+                }
+                else if (deadlineToken.CanBeCanceled)
+                {
+                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, deadlineToken);
                     effectiveCt = timeoutCts.Token;
                 }
 
@@ -383,10 +471,7 @@ namespace CoreAI.Chat
                         {
                             hasNext = await streamEnumerator.MoveNextAsync();
                         }
-                        catch (OperationCanceledException) when (
-                            deadlineCts != null &&
-                            deadlineCts.IsCancellationRequested &&
-                            !ct.IsCancellationRequested)
+                        catch (OperationCanceledException) when (IsDeadlineTimeout(anyDeadlineToken, ct))
                         {
                             throw new LlmOperationTimeoutException();
                         }
@@ -397,20 +482,28 @@ namespace CoreAI.Chat
                         }
 
                         LlmStreamChunk chunk = streamEnumerator.Current;
-                        // WHY the Timeout arm: a terminal Timeout that arrives after the caller cancelled is
-                        // the caller's stop (LlmCancellation.ClassifyCode), and must not reach the panel as
-                        // "the service is not responding".
-                        if (chunk != null &&
-                            LlmCancellation.ClassifyCode(chunk.ErrorCode, ct) == LlmErrorCode.Cancelled)
+                        // WHY every failure code: an error chunk that arrives after the caller cancelled is the
+                        // caller's stop (LlmCancellation.ClassifyCode), and must reach the panel neither as
+                        // "the service is not responding" nor as a provider error.
+                        bool reportedCancelled = chunk != null && chunk.ErrorCode == LlmErrorCode.Cancelled;
+                        bool reportedCallerStop = chunk != null &&
+                                                  (chunk.ErrorCode != LlmErrorCode.None ||
+                                                   !string.IsNullOrEmpty(chunk.Error)) &&
+                                                  LlmCancellation.IsReportedCallerStop(chunk.ErrorCode, ct);
+                        if (reportedCancelled || reportedCallerStop)
                         {
-                            if (deadlineCts != null &&
-                                deadlineCts.IsCancellationRequested &&
-                                !ct.IsCancellationRequested)
+                            if (IsDeadlineTimeout(anyDeadlineToken, ct))
                             {
                                 throw new LlmOperationTimeoutException();
                             }
 
-                            throw new OperationCanceledException(chunk.Error ?? "cancelled", effectiveCt);
+                            // WHY the text follows the code: the chunk's own text describes the fault it
+                            // carried, not the stop it is reported as.
+                            throw new OperationCanceledException(
+                                reportedCancelled && !string.IsNullOrEmpty(chunk.Error)
+                                    ? chunk.Error
+                                    : LlmCancellation.CancelledErrorText,
+                                effectiveCt);
                         }
 
                         deadline?.Rearm();
@@ -430,6 +523,7 @@ namespace CoreAI.Chat
                 deadline?.Dispose();
                 timeoutCts?.Dispose();
                 deadlineCts?.Dispose();
+                idleCts?.Dispose();
             }
         }
 

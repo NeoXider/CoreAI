@@ -61,9 +61,12 @@ For the full picture of what has landed and what is planned, see
 
 Keep these in step with the runtime when the skill text is edited:
 
-- Creatable classes are `Part`, `Folder`, `Model`, `ClickDetector`, `MaterialVariant`, `RemoteEvent`,
-  `UnreliableRemoteEvent`, and `RemoteFunction`. `Camera` is not creatable — a mod reaches the
-  world camera through `workspace.CurrentCamera`.
+- Section 4 lists the core creatable classes: `Part`, `Folder`, `Model`, `ClickDetector`,
+  `MaterialVariant`, `RemoteEvent`, `UnreliableRemoteEvent`, and `RemoteFunction`. `Camera` is not
+  creatable — a mod reaches the world camera through `workspace.CurrentCamera`. `Humanoid` (section 7)
+  and the eight value objects `IntValue`, `NumberValue`, `StringValue`, `BoolValue`, `ObjectValue`,
+  `Vector3Value`, `CFrameValue`, `Color3Value` (section 9) are creatable too. `ClassCatalog` also marks
+  `Backpack` creatable, which the skill text does not mention.
 - `BasePart` exposes `Shape`, `Material`, `MaterialVariant` (string; `""` for none), `Orientation`, and `Rotation` in addition to the MVP1
   set. All 45 `Enum.Material` items render; an unmapped id resolves to a magenta diagnostic
   material. `Part.Color` stays an independent tint over the material's own albedo. `MaterialService` is a tree-backed service.
@@ -78,6 +81,9 @@ Keep these in step with the runtime when the skill text is edited:
   nothing (a dedicated server); solo and host both render.
 - `Players` exposes `CharacterAutoLoads` (default true), `RespawnTime` (default 5.0) and a
   read-only `MaxPlayers`; assigning `MaxPlayers` from a mod is refused rather than ignored.
+  `Player:LoadCharacterAsync()` (yielding; `LoadCharacter()` is its deprecated alias),
+  `CharacterAdded` / `CharacterRemoving`, `DistanceFromCharacter` and the respawn after
+  `RespawnTime` are described in section 8.
 - `BasePart`'s network-ownership family (`SetNetworkOwner`, `GetNetworkOwner`,
   `SetNetworkOwnershipAuto`, `GetNetworkOwnershipAuto`, `CanSetNetworkOwnership`) is a loud stub:
   the server simulates every part, and ownership is deferred to the replication rung.

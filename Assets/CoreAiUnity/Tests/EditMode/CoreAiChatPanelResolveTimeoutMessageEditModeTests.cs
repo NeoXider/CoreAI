@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Chat;
+using CoreAI.Messaging;
+using CoreAI.Session;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -189,6 +191,13 @@ namespace CoreAI.Tests.EditMode
 
                 Assert.IsTrue(result.Admitted);
                 Assert.AreEqual(LlmErrorCode.Timeout, result.Completion.ErrorCode);
+                // WHY: the orchestrator attributes a cancelled turn from these two request tokens, caller first.
+                // With the host deadline linked into the token the panel handed the service as the caller's, every
+                // host timeout was recorded as a user cancellation while the panel reported a timeout.
+                Assert.IsFalse(timedOut.LastRequest.CallerCancellationToken.IsCancellationRequested,
+                    "Nobody asked to stop: the caller token the orchestrator sees must still be alive.");
+                Assert.IsTrue(timedOut.LastRequest.DeadlineCancellationToken.IsCancellationRequested,
+                    "The host deadline must reach the orchestrator as the deadline token.");
             }
 
             ParkedOrchestrator bothFired = new();
@@ -211,7 +220,358 @@ namespace CoreAI.Tests.EditMode
 
                 Assert.AreEqual(LlmErrorCode.Cancelled, result.Completion.ErrorCode,
                     "When the caller has stopped the turn, the deadline firing too does not make it a timeout.");
+                Assert.IsTrue(bothFired.LastRequest.CallerCancellationToken.IsCancellationRequested,
+                    "The caller's stop must reach the orchestrator through the caller token.");
             }
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task ResultApi_HostDeadline_IsRecordedAsADeadlineCancellation_NotAsACallerCancellation(
+            bool streaming)
+        {
+            // WHY: AiOrchestrator records a cancelled turn through AiCancellationAttributionContext.Resolve, which
+            // reads AiTaskRequest.CallerCancellationToken first. The panel used to link the host deadline into the
+            // token it handed the service as the caller's, so the dashboard counted every host timeout as a user
+            // cancellation while the transcript showed the timeout notice.
+            InMemoryAiOrchestrationMetrics metrics = new();
+            ParkedLlmClient llm = new();
+            using PanelScope scope = NewPanelWithRealOrchestrator(llm, metrics, streaming);
+            using CancellationTokenSource deadline = new();
+
+            Task<CoreAiChatExternalSubmitResult> turn = scope.Panel.SubmitMessageFromExternalResultAsync(
+                "help payload",
+                new CoreAiChatExternalSubmitOptions
+                {
+                    AppendUserMessageToChat = false,
+                    DeadlineCancellationToken = deadline.Token
+                });
+            await llm.Started;
+            deadline.Cancel();
+            CoreAiChatExternalSubmitResult result = await turn;
+
+            Assert.IsTrue(result.Admitted);
+            Assert.AreEqual(LlmErrorCode.Timeout, result.Completion.ErrorCode);
+            Assert.AreEqual(1, metrics.DeadlineCancelledCompletions,
+                "A host deadline at a live caller is a deadline cancellation in the orchestration metrics.");
+            // WHY a difference and not zero: a deadline cancellation IS a cancellation in these counters
+            // (InMemoryAiOrchestrationMetrics increments both), so what must stay empty is the part of
+            // CancelledCompletions no deadline explains - the user cancellations.
+            Assert.AreEqual(0, metrics.CancelledCompletions - metrics.DeadlineCancelledCompletions,
+                "The metrics must not count the host's timeout as a user cancellation.");
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task ResultApi_CallerStop_IsRecordedAsACancellation_EvenWhenTheDeadlineFiredToo(bool streaming)
+        {
+            InMemoryAiOrchestrationMetrics metrics = new();
+            ParkedLlmClient llm = new();
+            using PanelScope scope = NewPanelWithRealOrchestrator(llm, metrics, streaming);
+            using CancellationTokenSource caller = new();
+            using CancellationTokenSource deadline = new();
+
+            Task<CoreAiChatExternalSubmitResult> turn = scope.Panel.SubmitMessageFromExternalResultAsync(
+                "help payload",
+                new CoreAiChatExternalSubmitOptions
+                {
+                    AppendUserMessageToChat = false,
+                    DeadlineCancellationToken = deadline.Token
+                },
+                caller.Token);
+            await llm.Started;
+            caller.Cancel();
+            deadline.Cancel();
+            CoreAiChatExternalSubmitResult result = await turn;
+
+            Assert.AreEqual(LlmErrorCode.Cancelled, result.Completion.ErrorCode);
+            Assert.AreEqual(1, metrics.CancelledCompletions, "The caller's stop wins over the deadline that raced it.");
+            Assert.AreEqual(0, metrics.DeadlineCancelledCompletions);
+        }
+
+        [Test]
+        public async Task StringApi_DeadlineAlreadyElapsed_ShowsTheTimeout_AndStartsNoTurn()
+        {
+            // WHY: the typed API rejected an elapsed deadline before admission, but the string API had no outcome
+            // to reject into and went on - user bubble, OnUserMessageSent, a turn the orchestrator recorded as
+            // unanswered - and only then showed the timeout bubble.
+            ParkedOrchestrator orchestrator = new();
+            using PanelScope scope = NewPanel(orchestrator, true);
+            using CancellationTokenSource deadline = new();
+            deadline.Cancel();
+            int userMessagesSent = 0;
+            scope.Panel.OnUserMessageSent += _ => userMessagesSent++;
+
+            string response = await scope.Panel.SubmitMessageFromExternalAsync(
+                "help payload",
+                new CoreAiChatExternalSubmitOptions { DeadlineCancellationToken = deadline.Token });
+
+            Assert.IsNull(response);
+            Assert.AreEqual(0, userMessagesSent, "An elapsed deadline admits nothing: no user message is recorded.");
+            Assert.AreEqual(0, orchestrator.Calls, "The service must not be called for a turn that is already over.");
+            Assert.AreEqual(1, scope.Panel.TimeoutCalls, "The host's timeout is presented exactly once.");
+            Assert.AreEqual(0, scope.Panel.CancelledCalls);
+            Assert.IsFalse(scope.Panel.IsBusy);
+        }
+
+        [Test]
+        public async Task StringApi_CallerAlreadyCancelled_DoesNothing()
+        {
+            ParkedOrchestrator orchestrator = new();
+            using PanelScope scope = NewPanel(orchestrator, true);
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            int userMessagesSent = 0;
+            scope.Panel.OnUserMessageSent += _ => userMessagesSent++;
+
+            string response = await scope.Panel.SubmitMessageFromExternalAsync(
+                "help payload",
+                new CoreAiChatExternalSubmitOptions(),
+                caller.Token);
+
+            Assert.IsNull(response);
+            Assert.AreEqual(0, userMessagesSent);
+            Assert.AreEqual(0, orchestrator.Calls);
+            Assert.AreEqual(0, scope.Panel.TimeoutCalls);
+            Assert.AreEqual(0, scope.Panel.CancelledCalls, "A caller that already cancelled asked for silence.");
+            Assert.IsFalse(scope.Panel.IsBusy);
+        }
+
+        [Test]
+        public async Task DisposedDeadlineSource_NeverLeavesTheRequestSourcePublished()
+        {
+            // WHY: the request source was published to _activeRequestCts before the turn's try, and the host
+            // deadline was linked to it right after. On a runtime where linking to a disposed source throws, the
+            // turn escaped with that source neither disposed nor cleared and the panel never recovered. Whether the
+            // runtime throws or lets the turn park, everything the turn owns must be released when it ends.
+            ParkedOrchestrator orchestrator = new();
+            using PanelScope scope = NewPanel(orchestrator, true);
+            using CancellationTokenSource caller = new();
+            CancellationTokenSource deadline = new();
+            CancellationToken disposedDeadline = deadline.Token;
+            deadline.Dispose();
+
+            try
+            {
+                // WHY: on the throwing runtime the turn ends as a logged provider failure; the log is not under test.
+                LogAssert.ignoreFailingMessages = true;
+                Task<string> turn = scope.Panel.SubmitMessageFromExternalAsync(
+                    "help payload",
+                    new CoreAiChatExternalSubmitOptions
+                    {
+                        AppendUserMessageToChat = false,
+                        DeadlineCancellationToken = disposedDeadline
+                    },
+                    caller.Token);
+                if (await Task.WhenAny(turn, orchestrator.Started) == orchestrator.Started)
+                {
+                    caller.Cancel();
+                }
+
+                Assert.IsNull(await turn);
+            }
+            finally
+            {
+                LogAssert.ignoreFailingMessages = false;
+            }
+
+            Assert.IsNull(GetActiveRequestSource(scope.Panel), "The turn's finally must release the request source.");
+            Assert.IsFalse(scope.Panel.IsBusy);
+            Assert.AreEqual(0, scope.Panel.TimeoutCalls, "A dead deadline source is not a timeout.");
+        }
+
+        [Test]
+        public async Task StopOrAbandon_AfterDestroy_ArmsNoRootSource()
+        {
+            // WHY: StopAgent and AbandonCurrentTurn replaced the root source unconditionally. After OnDestroy had
+            // released it they allocated a fresh one on a dead panel that nothing would ever cancel or dispose.
+            ParkedOrchestrator orchestrator = new();
+            using PanelScope scope = NewPanel(orchestrator, true);
+            Task<string> turn = scope.Panel.SubmitMessageFromExternalAsync(
+                "help payload",
+                new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+            await orchestrator.Started;
+            scope.Panel.SimulateDestroy();
+            Assert.IsNull(GetRootSource(scope.Panel), "OnDestroy releases the root source.");
+
+            scope.Panel.StopAgent();
+            Assert.IsNull(GetRootSource(scope.Panel), "A stop after destroy has nothing left to arm.");
+            Assert.IsFalse(scope.Panel.AbandonCurrentTurn(), "After destroy there is no turn left to abandon.");
+            Assert.IsNull(GetRootSource(scope.Panel));
+
+            Assert.IsNull(await turn);
+            Assert.IsFalse(scope.Panel.AbandonCurrentTurn());
+            Assert.IsNull(GetRootSource(scope.Panel));
+            Assert.IsNull(GetActiveRequestSource(scope.Panel));
+            Assert.IsFalse(scope.Panel.IsBusy);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task StopThenDestroy_LeavesNoSourceBehind_AndReachesNoHook(bool streaming)
+        {
+            // WHY: a stop followed by a scene change is the ordinary way a lesson ends. The stopped turn is stale,
+            // so it reaches no hook; the stop released the request source and OnDestroy the root, so neither may
+            // survive. Unity fails this test on any unexpected error log.
+            ParkedOrchestrator orchestrator = new();
+            using PanelScope scope = NewPanel(orchestrator, streaming);
+            Task<string> turn = scope.Panel.SubmitMessageFromExternalAsync(
+                "help payload",
+                new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+            await orchestrator.Started;
+
+            scope.Panel.StopAgent();
+            scope.Panel.SimulateDestroy();
+            Assert.IsNull(await turn);
+
+            Assert.AreEqual(0, scope.Panel.TimeoutCalls);
+            Assert.AreEqual(0, scope.Panel.CancelledCalls);
+            Assert.AreEqual(0, scope.Panel.StreamErrorCalls);
+            Assert.IsNull(GetActiveRequestSource(scope.Panel));
+            Assert.IsNull(GetRootSource(scope.Panel));
+            Assert.IsFalse(scope.Panel.IsBusy);
+        }
+
+        [Test]
+        public async Task StopThenResend_SecondTurnCompletesNormally_OnAFreshRootSource()
+        {
+            // WHY: stop + resend is the learner's usual retry. The stopped turn unwinds as stale while the new one
+            // runs on the root source the stop replaced; the first must reach no hook and leave no busy state, the
+            // second must answer.
+            ParkedThenReplyOrchestrator orchestrator = new("second answer");
+            using PanelScope scope = NewPanel(orchestrator, true);
+            Task<string> first = scope.Panel.SubmitMessageFromExternalAsync(
+                "first question",
+                new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+            await orchestrator.Started;
+            CancellationTokenSource rootBefore = GetRootSource(scope.Panel);
+            Assert.IsNotNull(rootBefore);
+
+            scope.Panel.StopAgent();
+            Task<string> second = scope.Panel.SubmitMessageFromExternalAsync(
+                "second question",
+                new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+            string response = await second;
+            Assert.IsNull(await first);
+
+            StringAssert.Contains("second answer", response);
+            Assert.AreEqual(0, scope.Panel.TimeoutCalls);
+            Assert.AreEqual(0, scope.Panel.CancelledCalls);
+            Assert.AreEqual(0, scope.Panel.StreamErrorCalls);
+            Assert.IsFalse(scope.Panel.IsBusy);
+            Assert.IsNull(GetActiveRequestSource(scope.Panel));
+            CancellationTokenSource rootAfter = GetRootSource(scope.Panel);
+            Assert.IsNotNull(rootAfter);
+            Assert.AreNotSame(rootBefore, rootAfter, "The stop replaced the root source the first turn was linked to.");
+            Assert.Throws<ObjectDisposedException>(() => { _ = rootBefore.Token; }, "The replaced root was disposed.");
+            Assert.IsFalse(rootAfter.IsCancellationRequested);
+        }
+
+        [Test]
+        public async Task StopWhileDisabled_ArmsNoRootSource_TheNextTurnCreatesItLazily()
+        {
+            // WHY: a stop on a disabled panel (a host that keeps the turn alive across OnDisable and then gives up
+            // on it) replaced the root source too, on a lifecycle that was not there to own it. The root now stays
+            // absent until the next turn asks GetOrCreateCancellationTokenSource for one.
+            ParkedThenReplyOrchestrator orchestrator = new("answer after re-enable");
+            using PanelScope scope = NewPanel(orchestrator, true);
+            Task<string> first = scope.Panel.SubmitMessageFromExternalAsync(
+                "first question",
+                new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+            await orchestrator.Started;
+
+            SetLifecycleActive(scope.Panel, false);
+            scope.Panel.StopAgent();
+            Assert.IsNull(await first);
+            Assert.IsNull(GetRootSource(scope.Panel), "A disabled panel has no lifecycle to own a new root source.");
+            Assert.IsFalse(scope.Panel.IsBusy);
+
+            SetLifecycleActive(scope.Panel, true);
+            string response = await scope.Panel.SubmitMessageFromExternalAsync(
+                "second question",
+                new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+
+            StringAssert.Contains("answer after re-enable", response);
+            Assert.IsNotNull(GetRootSource(scope.Panel), "The next turn created the root source it needed.");
+            Assert.AreEqual(0, scope.Panel.TimeoutCalls);
+            Assert.AreEqual(0, scope.Panel.CancelledCalls);
+            Assert.IsFalse(scope.Panel.IsBusy);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task UiStop_ReachesNeitherTheTimeoutNorTheCancelledHook(bool streaming)
+        {
+            // WHY: 7.44.0 documents a user stop as a superseded turn that reaches neither ResolveTimeoutMessage nor
+            // ResolveCancelledMessage - a host counting hook calls never sees its own stops. StopAgent() is the
+            // Stop button's path (StopActiveGeneration).
+            ParkedOrchestrator orchestrator = new();
+            using PanelScope scope = NewPanel(orchestrator, streaming);
+            Task turn = (Task)typeof(CoreAiChatPanel)
+                .GetMethod("SendToAIFromUiAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(scope.Panel, new object[] { "typed question" });
+            await orchestrator.Started;
+
+            scope.Panel.StopAgent();
+            await turn;
+
+            Assert.AreEqual(0, scope.Panel.TimeoutCalls, "A user stop is not a timeout.");
+            Assert.AreEqual(0, scope.Panel.CancelledCalls, "A user stop is a superseded turn, not a cancelled one.");
+            Assert.AreEqual(0, scope.Panel.StreamErrorCalls);
+            Assert.IsFalse(scope.Panel.IsBusy);
+            Assert.IsNull(GetActiveRequestSource(scope.Panel));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task DestroyMidTurn_TheTurnAloneDisposesItsRequestSource(bool streaming)
+        {
+            // WHY: 7.44.1 made the turn's finally the single owner of the request source. OnDestroy only cancels it;
+            // disposing there turned the unwinding turn's cancellation into ObjectDisposedException.
+            ParkedOrchestrator orchestrator = new();
+            using PanelScope scope = NewPanel(orchestrator, streaming);
+            Task<string> turn = scope.Panel.SubmitMessageFromExternalAsync(
+                "help payload",
+                new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+            await orchestrator.Started;
+            CancellationTokenSource active = GetActiveRequestSource(scope.Panel);
+            Assert.IsNotNull(active);
+
+            scope.Panel.SimulateDestroy();
+            Assert.IsTrue(active.IsCancellationRequested, "OnDestroy cancels the active request.");
+            if (!turn.IsCompleted)
+            {
+                Assert.DoesNotThrow(() => { _ = active.Token; },
+                    "OnDestroy must not dispose the request source: the turn is still unwinding on it.");
+            }
+
+            Assert.IsNull(await turn);
+            Assert.Throws<ObjectDisposedException>(() => { _ = active.Token; },
+                "The turn's finally disposes the request source it created.");
+            Assert.IsNull(GetActiveRequestSource(scope.Panel));
+            Assert.AreEqual(1, scope.Panel.CancelledCalls);
+        }
+
+        private static CancellationTokenSource GetActiveRequestSource(CoreAiChatPanel panel)
+        {
+            return (CancellationTokenSource)typeof(CoreAiChatPanel)
+                .GetField("_activeRequestCts", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(panel);
+        }
+
+        private static CancellationTokenSource GetRootSource(CoreAiChatPanel panel)
+        {
+            return (CancellationTokenSource)typeof(CoreAiChatPanel)
+                .GetField("_cts", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(panel);
+        }
+
+        /// <summary>EditMode runs no lifecycle callbacks; this is the flag OnEnable / OnDisable flip.</summary>
+        private static void SetLifecycleActive(CoreAiChatPanel panel, bool active)
+        {
+            typeof(CoreAiChatPanel)
+                .GetField("_lifecycleActive", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(panel, active);
         }
 
         [Test]
@@ -427,12 +787,40 @@ namespace CoreAI.Tests.EditMode
             PanelProbe panel = go.AddComponent<PanelProbe>();
             panel.SetActorIdentityProvider(new LocalActorIdentityProvider("interruption-panel-test"));
             // WHY: plain EditMode tests do not run the MonoBehaviour lifecycle; see CoreAiChatPanelBusyApiEditModeTests.
-            typeof(CoreAiChatPanel)
-                .GetField("_lifecycleActive", BindingFlags.Instance | BindingFlags.NonPublic)!
-                .SetValue(panel, true);
+            SetLifecycleActive(panel, true);
             panel.ChatService = new CoreAiChatService(
                 orchestrator,
                 settings: new StubSettings { EnableStreaming = streaming });
+            return new PanelScope(go, panel);
+        }
+
+        /// <summary>
+        /// A panel over the real <see cref="AiOrchestrator"/>, so the outcome it records into
+        /// <paramref name="metrics"/> is the production attribution, not a fake's.
+        /// </summary>
+        private static PanelScope NewPanelWithRealOrchestrator(
+            ILlmClient llm,
+            IAiOrchestrationMetrics metrics,
+            bool streaming)
+        {
+            const string roleId = "interruption-metrics";
+            StubSettings settings = new() { EnableStreaming = streaming };
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory(roleId, true, 8192, false, 10);
+            policy.DisableMemoryTool(roleId);
+            policy.SetToolsForRole(roleId, Array.Empty<ILlmTool>());
+            LocalActorIdentityProvider identity = new("interruption-panel-test");
+            AiOrchestrator orchestrator = new(
+                new SoloAuthorityHost(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                new NullAgentMemoryStore(), policy, null, metrics, settings, identity);
+
+            GameObject go = new("CoreAiChatPanel_Interruption_Metrics_Test");
+            PanelProbe panel = go.AddComponent<PanelProbe>();
+            panel.SetRuntimeOptions(new CoreAiChatOptions { RoleId = roleId, EnableStreaming = true });
+            panel.SetActorIdentityProvider(identity);
+            SetLifecycleActive(panel, true);
+            panel.ChatService = new CoreAiChatService(orchestrator, policy, settings);
             return new PanelScope(go, panel);
         }
 
@@ -466,9 +854,15 @@ namespace CoreAI.Tests.EditMode
 
             public Task Started => _started.Task;
 
+            /// <summary>How many turns reached the orchestrator at all.</summary>
+            public int Calls { get; private set; }
+
+            /// <summary>The request of the last turn, with the tokens the service put on it.</summary>
+            public AiTaskRequest LastRequest { get; private set; }
+
             public async Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
             {
-                _started.TrySetResult(true);
+                Observe(request);
                 await Task.Delay(Timeout.Infinite, ct);
                 return "unreachable";
             }
@@ -477,7 +871,7 @@ namespace CoreAI.Tests.EditMode
                 AiTaskRequest request,
                 CancellationToken ct = default)
             {
-                _started.TrySetResult(true);
+                Observe(request);
                 await Task.Delay(Timeout.Infinite, ct);
                 return new LlmCompletionResult { Ok = true, Content = "unreachable" };
             }
@@ -487,6 +881,8 @@ namespace CoreAI.Tests.EditMode
                 [System.Runtime.CompilerServices.EnumeratorCancellation]
                 CancellationToken ct = default)
             {
+                Calls++;
+                LastRequest = request;
                 yield return new LlmStreamChunk { Text = "partial" };
                 _started.TrySetResult(true);
                 await Task.Delay(Timeout.Infinite, ct);
@@ -495,6 +891,125 @@ namespace CoreAI.Tests.EditMode
 
             public void CancelTasks(string cancellationScope)
             {
+            }
+
+            private void Observe(AiTaskRequest request)
+            {
+                Calls++;
+                LastRequest = request;
+                _started.TrySetResult(true);
+            }
+        }
+
+        /// <summary>Parks the first turn until it is cancelled; every later turn answers with <c>reply</c>.</summary>
+        private sealed class ParkedThenReplyOrchestrator : IAiOrchestrationService
+        {
+            private readonly string _reply;
+            private readonly TaskCompletionSource<bool> _started =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+            private int _calls;
+
+            public ParkedThenReplyOrchestrator(string reply)
+            {
+                _reply = reply;
+            }
+
+            public Task Started => _started.Task;
+
+            public async Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                if (++_calls > 1)
+                {
+                    return _reply;
+                }
+
+                _started.TrySetResult(true);
+                await Task.Delay(Timeout.Infinite, ct);
+                return "unreachable";
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                if (++_calls > 1)
+                {
+                    await Task.Yield();
+                    yield return new LlmStreamChunk { Text = _reply };
+                    yield return new LlmStreamChunk { IsDone = true };
+                    yield break;
+                }
+
+                yield return new LlmStreamChunk { Text = "partial" };
+                _started.TrySetResult(true);
+                await Task.Delay(Timeout.Infinite, ct);
+                yield return new LlmStreamChunk { IsDone = true };
+            }
+
+            public void CancelTasks(string cancellationScope)
+            {
+            }
+        }
+
+        /// <summary>The model that never answers: parks until its token is cancelled; <see cref="Started"/> marks the wait.</summary>
+        private sealed class ParkedLlmClient : ILlmClient
+        {
+            private readonly TaskCompletionSource<bool> _started =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public Task Started => _started.Task;
+
+            public async Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                _started.TrySetResult(true);
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+                return new LlmCompletionResult { Ok = true, Content = "unreachable" };
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                _started.TrySetResult(true);
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+                yield return new LlmStreamChunk { Text = "unreachable", IsDone = true };
+            }
+        }
+
+        private sealed class TestSink : IAiGameCommandSink
+        {
+            public void Publish(ApplyAiGameCommand command)
+            {
+            }
+        }
+
+        private sealed class TestTelemetry : ISessionTelemetryProvider
+        {
+            public GameSessionSnapshot BuildSnapshot()
+            {
+                return new GameSessionSnapshot();
+            }
+        }
+
+        private sealed class NullSys : IAgentSystemPromptProvider
+        {
+            public bool TryGetSystemPrompt(string roleId, out string prompt)
+            {
+                prompt = null;
+                return false;
+            }
+        }
+
+        private sealed class NullUsr : IAgentUserPromptTemplateProvider
+        {
+            public bool TryGetUserTemplate(string roleId, out string template)
+            {
+                template = null;
+                return false;
             }
         }
 

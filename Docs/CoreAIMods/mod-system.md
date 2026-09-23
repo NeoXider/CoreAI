@@ -1,9 +1,8 @@
 # CoreAI Mod System & UI — Design Spec
 
-Status: DRAFT (implementation contract for subagents). All code, comments, identifiers,
-and commit messages are English. Guard every Lua/mod C# file with
-`#if COREAI_LUA`. Never hand-create Unity `.meta` files.
-Do not run `git commit` in subagent tasks — the orchestrator commits after review.
+Status: design spec. Sections marked **implemented** describe shipped behaviour; the rest is
+planned. The historical performance analysis and the phase plan live in
+`dev-docs/MOD_SYSTEM_DESIGN_NOTES.md`.
 
 ## 0. Goals
 
@@ -67,9 +66,9 @@ fields. It is a plain JSON DTO; new fields are backward-compatible (missing => d
 > **Status: implemented (PR1).** `IBundledModSource`, `BundledMod`, `ResourcesBundledModSource`, and
 > `BundledModSeeder` live in `Assets/CoreAIMods/Runtime/Infrastructure/`. `CoreAiModsInstaller` registers
 > `ResourcesBundledModSource` and runs the seeder in the play-mode build callback **before**
-> `RehydrateFromStore`. Two sample mods ship in `Assets/CoreAIMods/Runtime/Resources/CoreAIMods/`
-> (`sample_welcome.lua` active, `sample_camera_pulse.lua` opt-in). Unit-tested in
-> `BundledModSeederEditModeTests`.
+> `RehydrateFromStore`. Five sample mods ship in `Assets/CoreAIMods/Runtime/Resources/CoreAIMods/`
+> (`sample_welcome.lua` active; `sample_lane_racer.lua`, `sample_tetris3d.lua`, `sample_clicker.lua`
+> and `sample_castle3d.lua` opt-in). Unit-tested in `BundledModSeederEditModeTests`.
 
 ### 3.1 Sources (pluggable)
 
@@ -80,9 +79,9 @@ Implementations:
 - **PR1 (done):** `ResourcesBundledModSource` — `Resources.LoadAll<TextAsset>("CoreAIMods")` (the
   project's Lua scripted importer makes `.lua` a `TextAsset`). Synchronous, all platforms, built into the
   player. Base source. This is how a game ships with ready-made mods.
-- **PR2:** `StreamingAssetsBundledModSource` — scan `StreamingAssets/CoreAIMods/*.lua` via
+- **Planned:** `StreamingAssetsBundledModSource` — scan `StreamingAssets/CoreAIMods/*.lua` via
   `UnityWebRequest` (async; needed on Android/WebGL). Editable post-ship; path to Addressables.
-- **PR2:** `AddressablesBundledModSource` — load `.lua` TextAssets by label `coreai-mod`. Runtime/DLC
+- **Planned:** `AddressablesBundledModSource` — load `.lua` TextAssets by label `coreai-mod`. Runtime/DLC
   delivery.
 - **Future:** `RemoteBundledModSource` — download from a URL/manifest.
 
@@ -110,9 +109,10 @@ algorithm everywhere.
 
 ### 4.1 LLM
 
-`manage_mods` (`Assets/CoreAIMods/Runtime/LuaExecution/LuaModsLlmTool.cs`) already handles
-load/reload/unload/forget/export/import/versions/revert/diagnostics. Add: honor `category` (from the
-header or an explicit arg) and expose it in `list` output. No behavior change to existing actions.
+`manage_mods` (`Assets/CoreAIMods/Runtime/LuaExecution/LuaModsLlmTool.cs`) handles
+list/get_source/load/reload/unload/forget/export/import/versions/revert/diagnostics. The `category`
+from the `@coreai` header is persisted into the manifest; a `category` argument and a category column
+in `list` output are planned.
 
 ### 4.2 Player — CoreAI Hub (UI Toolkit, event-driven)
 
@@ -140,14 +140,16 @@ Mods tab requirements:
   **Refresh diagnostics** action bar above the code area; Save validates by running the mod (errors shown
   in the status line) and records a revision.
 
-Performance rule (critical): the Mods list/tree is built **once** and rebuilt only on
-`LuaModRuntime.ModSourceLoaded` / `ModSourceUnloaded` (and explicit user actions). NEVER call
-disk-backed stores (`ILuaScriptVersionStore.GetKnownKeys/TryGetSnapshot`, `ILuaModSourceStore.List`)
-from a per-frame path. See §6.
+Performance rule (critical): the Mods list/tree is built **once** and rebuilt only on the runtime's
+source-loaded / source-unloaded notifications (`AddModSourceLoadedListener` /
+`AddModSourceUnloadedListener`) and explicit user actions. NEVER call disk-backed stores
+(`ILuaScriptVersionStore.GetKnownKeys/TryGetSnapshot`, `ILuaModSourceStore.List`) from a per-frame
+path. See §6.
 
-## 5. Dynamic world event contract (PR2)
+## 5. Dynamic world event contract (planned)
 
-`CoreAiWorldEvents` — string constants the host emits into the mod runtime so mods hook a live world:
+`CoreAiWorldEvents` (not implemented yet) — string constants the host would emit into the mod runtime
+so mods hook a live world:
 `world_ready`, `scene_loaded` (payload: scene), `object_spawned`/`object_despawned` (payload: id, name),
 `tick` (~20 Hz, existing), `save`, `load`. Mods subscribe via `hooks_on`. Combine with existing world
 transactions (`coreai_world_begin/commit`), persistence (`store_set/get`), and capability tiers.
@@ -178,11 +180,15 @@ teardown of a mod instance's side effects (unload, reload pre-swap, quarantine e
 point. Logic-slot override failures are fail-open (reset to vanilla) but attributed: they are
 recorded into the mod's handler-error diagnostics with the owning mod id and slot name.
 
-## 5b. Multiplayer write policy (planned — lands with the Roblox API track, MVP12)
+## 5b. Multiplayer write policy (decision core implemented; not on the network yet)
 
 CoreAI is a framework, not one game: what clients may change in a shared world is **per-world
-configuration**, not a hardcoded rule. The world setting `ClientWritePolicy` (part of the host
-integration profile) selects one of three modes:
+configuration**, not a hardcoded rule. The engine-free decision core ships in
+`CoreAI.RbxApi.Instances` (`Replication/`): `ClientWritePolicy`, per-instance host grants in
+`WriteGrantLedger`, `ClientWriteAuthority.Resolve` and `IntentGateway`. The OnlineAuthority demo runs
+it in one process; nothing routes client writes over a transport yet. The design below is the plan it
+was built from — the shipped enum has only `RobloxParity` and `Strict`, and the "Open" behaviour is a
+host grant in `WriteGrantLedger` (a granted write is forwarded as an intent) rather than a third mode:
 
 - **`RobloxParity` (default):** a client write to a server-owned replicated instance applies
   locally, never replicates, and the server state overwrites it on the next sync. This mirrors
@@ -206,34 +212,26 @@ section for write policies ships together with MVP12. Details: `ROBLOX_API_ROADM
 
 ## 6. Performance / optimization
 
-Root cause of the observed 6 FPS with the mod panel open: `LiveMechanicsModsChatPersistenceController`
-calls disk-backed `ILuaScriptVersionStore` (`GetKnownKeys`/`TryGetSnapshot`) from `OnGUI`.
-`FileLuaScriptVersionStore.ReadFromDisk` re-reads and re-parses the whole JSON file on EVERY call
-(`LoadFromDisk` does `File.ReadAllText` + full deserialize). `GetInactiveSavedMods()` does ~2 reads per
-saved mod, is called twice per `OnGUI`, and `OnGUI` fires 2+ times per frame => dozens of full-file
-reads+parses per frame.
+Mod UI never enumerates disk-backed stores from a draw or per-frame path. Mod lists are cached and
+recomputed only when the runtime reports a source load/unload or the user acts; the Hub Mods tab and
+the demo mod manager both follow this rule. `FileLuaScriptVersionStore` still reads and parses its
+whole file on every synchronous call, which is exactly why it must stay off per-frame paths. The
+original 6 FPS investigation that produced this rule is recorded in
+`dev-docs/MOD_SYSTEM_DESIGN_NOTES.md`.
 
-Fixes:
-1. **Quick fix (PR-perf, independent):** in the F9 controller, cache the active/inactive lists and the
-   inactive-count; recompute only on `ModSourceLoaded`/`ModSourceUnloaded` and after user actions, not in
-   `OnGUI`. Remove all store enumeration and `ReadMetadata`/`Split` from the draw path.
-2. **Store-level:** `FileLuaScriptVersionStore` should keep an in-memory cache and reload from disk only
-   when the file changed (mtime/dirty flag), instead of `ClearAll` + full read on every `ReadFromDisk`.
-3. **Structural:** the CoreAI Hub (UI Toolkit, event-driven) removes per-frame IMGUI layout entirely.
+## 7. Delivery status
 
-## 7. Phasing / task graph
-
-- **Phase 1 — Mod Core:** §1 header parser, §2 manifest, §3 Resources source + seeder + wiring, §4.1
-  LLM category, tests. Plus perf quick-fix (§6.1) and store cache (§6.2) in parallel.
-- **Phase 2 — CoreAI Hub:** §4.2 UI Toolkit shell + tabs; Mods tab with Add/Paste/Copy/Update/tree; migrate
-  Backend/Tokens/Chat.
-- **Phase 3 (PR2):** §3.1 StreamingAssets + Addressables sources; §5 world event contract; store cache
-  finalization; retire IMGUI panels.
+Implemented: §1 header parser, §2 manifest fields, §3 Resources source + seeder + wiring, §4.2 the
+UI Toolkit Hub with the Mods tab, §5a quarantine. Planned: §3.1 StreamingAssets / Addressables /
+remote sources, the `category` argument of §4.1, an in-memory cache for `FileLuaScriptVersionStore`,
+§5 world event contract, and wiring the §5b write-policy core to a network transport.
 
 ## 8. Platform / compatibility notes
 
-- WebGL: `Resources` works; `StreamingAssets` needs `UnityWebRequest`; `FileLuaModSourceStore` already
-  flushes IDBFS. Keep the seeder synchronous only for the Resources source; async for the rest.
+- WebGL: `Resources` works; `StreamingAssets` needs `UnityWebRequest`. File stores such as
+  `FileLuaModSourceStore` confirm durability through `CoreAiWebGlPersistence` (the engine's automatic
+  `persistentDataPath` persistence) instead of driving IDBFS by hand. Keep the seeder synchronous only
+  for the Resources source; async for the rest.
 - Default builds omit Lua; `COREAI_LUA` builds include the guarded Lua surfaces
   (the Lua-CSharp runtime ships bundled as `Lua.dll`/`Lua.Annotations.dll`, so there is no
   external package to omit).

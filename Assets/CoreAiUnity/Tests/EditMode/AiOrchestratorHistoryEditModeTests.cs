@@ -9,31 +9,29 @@ using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Config;
-using CoreAI.Infrastructure.AiMemory;
 using CoreAI.Logging;
 using CoreAI.Messaging;
 using CoreAI.Session;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
-using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
     [TestFixture]
     public sealed class AiOrchestratorHistoryEditModeTests
     {
-        private static IActorIdentityProvider TestActorIdentityProvider =>
+        internal static IActorIdentityProvider TestActorIdentityProvider =>
             new LocalActorIdentityProvider("orchestrator-history-test");
 
-        private sealed class TestAuthority : IAuthorityHost
+        internal sealed class TestAuthority : IAuthorityHost
         {
             public bool CanRunAiTasks { get; set; } = true;
             public bool IsServer => true;
             public bool IsClient => true;
         }
 
-        private sealed class TestLlmClient : ILlmClient
+        internal sealed class TestLlmClient : ILlmClient
         {
             public LlmCompletionRequest LastRequest { get; private set; }
 
@@ -622,6 +620,9 @@ namespace CoreAI.Tests.EditMode
 
             public List<(string RoleId, string MessageRole, string Content, bool Persist)> Appended { get; } = new();
 
+            /// <summary>How many times <see cref="GetChatHistory"/> was called, whatever the cap.</summary>
+            public int HistoryReads { get; private set; }
+
             public void Seed(string roleId, string role, string content)
             {
                 GetOrCreate(roleId).Add(new Ai.ChatMessage { Role = role, Content = content });
@@ -655,6 +656,7 @@ namespace CoreAI.Tests.EditMode
 
             public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
+                HistoryReads++;
                 if (!_history.TryGetValue(roleId, out List<Ai.ChatMessage> messages))
                 {
                     return Array.Empty<Ai.ChatMessage>();
@@ -2195,14 +2197,14 @@ namespace CoreAI.Tests.EditMode
             return null;
         }
 
-        private sealed class TestSink : IAiGameCommandSink
+        internal sealed class TestSink : IAiGameCommandSink
         {
             public void Publish(ApplyAiGameCommand command)
             {
             }
         }
 
-        private sealed class TestTelemetry : ISessionTelemetryProvider
+        internal sealed class TestTelemetry : ISessionTelemetryProvider
         {
             public GameSessionSnapshot BuildSnapshot()
             {
@@ -2210,7 +2212,7 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-        private sealed class TestSettings : ICoreAISettings
+        internal sealed class TestSettings : ICoreAISettings
         {
             public float Temperature => 0.7f;
             public int ContextWindowTokens => 8192;
@@ -2230,14 +2232,14 @@ namespace CoreAI.Tests.EditMode
             public bool LogToolCalls => false;
             public bool LogToolCallArguments => false;
             public bool LogToolCallResults => false;
-            public bool EnableStreaming => true;
+            public bool EnableStreaming { get; set; } = true;
             public bool EnableConversationHistorySummarization { get; set; } = true;
             public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
             public int ConversationRolledSummaryMaxTokens { get; set; }
             public int MaxRetainedToolResultMessages { get; set; } = 3;
         }
 
-        private sealed class NullSys : IAgentSystemPromptProvider
+        internal sealed class NullSys : IAgentSystemPromptProvider
         {
             public bool TryGetSystemPrompt(string roleId, out string prompt)
             {
@@ -2246,7 +2248,7 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-        private sealed class NullUsr : IAgentUserPromptTemplateProvider
+        internal sealed class NullUsr : IAgentUserPromptTemplateProvider
         {
             public bool TryGetUserTemplate(string roleId, out string template)
             {
@@ -3886,51 +3888,623 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0, llm.LastRequest.Tools.Count);
         }
 
+        // The FileAgentMemoryStore round-trip lives in AiOrchestratorHistoryFileStoreEditModeTests: that store is
+        // a CoreAiUnity type, and this fixture is linked into the portable (engine-free) test project.
+
         [Test]
-        public async Task RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore()
+        public async Task RunTaskAsync_ReadsTheRoleHistoryOnce_TheResendDecisionComesFromThatRead()
         {
-            string roleId = "EditMode_OrchPersist_" + Guid.NewGuid().ToString("N");
-            string dir = Path.Combine(Application.persistentDataPath, "CoreAI", "AgentMemory");
-            string safeName = string.Join("_", roleId.Split(Path.GetInvalidFileNameChars()));
-            string filePath = Path.Combine(dir, $"{safeName}.json");
-            if (File.Exists(filePath))
+            // WHY: the resend rule used to read GetChatHistory(roleId, 1) on top of the full history read every
+            // turn makes; on a file store each read is a synchronous gate wait on the main thread. The one read
+            // that builds the prompt already ends with the store tail, so it decides.
+            CancelOnceThenSucceedLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            memory.Seed("Teacher", "assistant", "earlier answer");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, BuildToolResultPolicy("Teacher"));
+            const string payload = "[help] the learner is stuck on task 3";
+
+            await CaptureExceptionAsync<OperationCanceledException>(() => orchestrator.RunTaskAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = payload }));
+            Assert.AreEqual(1, memory.HistoryReads, "The cancelled attempt reads the history exactly once.");
+
+            string answer = await orchestrator.RunTaskAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = payload });
+
+            Assert.AreEqual("recovered", answer);
+            Assert.AreEqual(2, memory.HistoryReads, "The resend reads the history exactly once as well.");
+            CollectionAssert.AreEqual(new[] { "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray(),
+                "...and the resend rule still holds from that single read.");
+            Assert.IsFalse(
+                llm.Requests[1].ChatHistory != null &&
+                llm.Requests[1].ChatHistory.Any(m => (m.Text ?? "").Contains(payload)),
+                "The prompt filter follows the same decision.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_AuthorityDenied_StillReadsTheTailForTheResendRule()
+        {
+            // WHY: a turn that never built a request has no history read to reuse, so the teardown keeps its
+            // own one-message read - the resend rule must hold there too.
+            RoleScopedLiveMemoryStore memory = new();
+            memory.Seed("Teacher", "user", "unanswered");
+            TestSettings settings = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = new(
+                new TestAuthority { CanRunAiTasks = false }, new TestLlmClient(), new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "unanswered" });
+
+            Assert.AreEqual(1, memory.HistoryReads);
+            Assert.IsEmpty(memory.Appended, "The denied resend of the unanswered message is not stored twice.");
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_TimeoutChunk_RecordsDeadlineCancellation_LikeAThrownTimeout()
+        {
+            // WHY: the default pipeline's timeout decorator yields a Timeout CHUNK on the streaming path; it was
+            // recorded as a provider failure while the same timeout thrown on stream open was the deadline.
+            ScriptedStreamLlmClient llm = new(new LlmStreamChunk
             {
-                File.Delete(filePath);
-            }
+                IsDone = true, Error = "LLM request timed out.", ErrorCode = LlmErrorCode.Timeout
+            });
+            RecordingMetrics metrics = new();
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(llm, new RoleScopedLiveMemoryStore(), metrics);
 
-            try
-            {
-                FileAgentMemoryStore store1 = new();
-                AgentMemoryPolicy policy = new();
-                policy.ConfigureChatHistory(roleId, true, 8192, true, 50);
-                policy.DisableMemoryTool(roleId);
-                policy.SetToolsForRole(roleId, Array.Empty<ILlmTool>());
+            LlmStreamChunk terminal = await DrainToTerminalAsync(orchestrator.RunStreamingAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "slow" }));
 
-                TestLlmClient llm = new();
-                TestSettings settings = new();
-                AiOrchestrator orchestrator = new(
-                    new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                    new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                    store1, policy, null, null, settings, TestActorIdentityProvider);
+            Assert.AreEqual(LlmErrorCode.Timeout, terminal.ErrorCode);
+            CollectionAssert.AreEqual(new[] { AiLlmCompletionOutcome.DeadlineCancellation }, metrics.Completions);
+        }
 
-                await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = roleId, Hint = "persist hint" });
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task RunStreamingAsync_TimeoutAfterCallerCancel_EndsAsTheCancellation(bool viaChunk)
+        {
+            // WHY: a timer that raced the stop is still the stop - for the chunk the consumer sees and for the
+            // metric alike, whether the timeout arrived as a chunk or as a throw.
+            using CancellationTokenSource caller = new();
+            CancelThenFailStreamLlmClient llm = new(caller.Cancel,
+                viaChunk
+                    ? new LlmStreamChunk { IsDone = true, Error = "LLM request timed out.", ErrorCode = LlmErrorCode.Timeout }
+                    : null,
+                viaChunk ? null : new LlmOperationTimeoutException());
+            RecordingMetrics metrics = new();
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(llm, new RoleScopedLiveMemoryStore(), metrics);
 
-                Ai.ChatMessage[] h1 = store1.GetChatHistory(roleId);
-                Assert.GreaterOrEqual(h1.Length, 2,
-                    "After a successful turn the store should contain user + assistant lines.");
+            LlmStreamChunk terminal = await DrainToTerminalAsync(orchestrator.RunStreamingAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "slow" }, caller.Token));
 
-                FileAgentMemoryStore store2 = new();
-                Ai.ChatMessage[] h2 = store2.GetChatHistory(roleId);
-                Assert.AreEqual(h1.Length, h2.Length,
-                    "A new FileAgentMemoryStore should reload the same persisted chat from disk.");
-                Assert.AreEqual(h1[^1].Content, h2[^1].Content);
-            }
-            finally
-            {
-                if (File.Exists(filePath))
+            Assert.AreEqual(LlmErrorCode.Cancelled, terminal.ErrorCode);
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, terminal.Error, "The text agrees with the code.");
+            CollectionAssert.AreEqual(new[] { AiLlmCompletionOutcome.Cancelled }, metrics.Completions);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task RunStreamingAsync_FaultAfterCallerCancel_EndsAsTheCancellation(bool typed)
+        {
+            using CancellationTokenSource caller = new();
+            Exception fault = typed
+                ? new LlmClientException("socket disposed", LlmErrorCode.BackendUnavailable, 503)
+                : new IOException("socket disposed");
+            CancelThenFailStreamLlmClient llm = new(caller.Cancel, null, fault);
+            RecordingMetrics metrics = new();
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(llm, new RoleScopedLiveMemoryStore(), metrics);
+
+            LlmStreamChunk terminal = await DrainToTerminalAsync(orchestrator.RunStreamingAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "q" }, caller.Token));
+
+            Assert.AreEqual(LlmErrorCode.Cancelled, terminal.ErrorCode,
+                "A fault the stop caused is the stop, whatever its type.");
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, terminal.Error);
+            CollectionAssert.AreEqual(new[] { AiLlmCompletionOutcome.Cancelled }, metrics.Completions);
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_FaultOnOpenAfterCallerCancel_EndsAsTheCancellation()
+        {
+            using CancellationTokenSource caller = new();
+            caller.Cancel();
+            RecordingMetrics metrics = new();
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(
+                new ThrowOnOpenStreamLlmClient(new IOException("socket disposed")),
+                new RoleScopedLiveMemoryStore(), metrics);
+
+            LlmStreamChunk terminal = await DrainToTerminalAsync(orchestrator.RunStreamingAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "q" }, caller.Token));
+
+            Assert.AreEqual(LlmErrorCode.Cancelled, terminal.ErrorCode);
+            CollectionAssert.AreEqual(new[] { AiLlmCompletionOutcome.Cancelled }, metrics.Completions);
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_TimeoutOnOpenWithLiveCaller_RecordsDeadlineCancellation()
+        {
+            RecordingMetrics metrics = new();
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(
+                new ThrowOnOpenStreamLlmClient(new LlmOperationTimeoutException()),
+                new RoleScopedLiveMemoryStore(), metrics);
+
+            LlmStreamChunk terminal = await DrainToTerminalAsync(orchestrator.RunStreamingAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "q" }));
+
+            Assert.AreEqual(LlmErrorCode.Timeout, terminal.ErrorCode);
+            CollectionAssert.AreEqual(new[] { AiLlmCompletionOutcome.DeadlineCancellation }, metrics.Completions);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_LibraryTimeoutAfterCallerCancel_IsTheCallersCancellation_NotTheDeadline()
+        {
+            // WHY: the non-streaming attribution answered "deadline" for every LlmOperationTimeoutException
+            // without asking whether the caller had already stopped; the caller wins (LlmCancellation).
+            using CancellationTokenSource caller = new();
+            RecordingMetrics metrics = new();
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(
+                new CancelThenThrowLlmClient(caller.Cancel, new LlmOperationTimeoutException()),
+                new RoleScopedLiveMemoryStore(), metrics);
+
+            await CaptureExceptionAsync<OperationCanceledException>(() => orchestrator.RunTaskAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "slow" }, caller.Token));
+
+            CollectionAssert.AreEqual(new[] { AiLlmCompletionOutcome.Cancelled }, metrics.Completions);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_LibraryTimeoutWithLiveCaller_IsTheDeadline()
+        {
+            RecordingMetrics metrics = new();
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(
+                new CancelThenThrowLlmClient(() => { }, new LlmOperationTimeoutException()),
+                new RoleScopedLiveMemoryStore(), metrics);
+
+            await CaptureExceptionAsync<LlmOperationTimeoutException>(() => orchestrator.RunTaskAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "slow" }));
+
+            CollectionAssert.AreEqual(new[] { AiLlmCompletionOutcome.DeadlineCancellation }, metrics.Completions);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task RunTaskAsync_FaultAfterCallerCancel_SurfacesAsTheCancellation(bool typed)
+        {
+            using CancellationTokenSource caller = new();
+            Exception fault = typed
+                ? new LlmClientException("socket disposed", LlmErrorCode.BackendUnavailable, 503)
+                : new IOException("socket disposed");
+            RecordingMetrics metrics = new();
+            RoleScopedLiveMemoryStore memory = new();
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(
+                new CancelThenThrowLlmClient(caller.Cancel, fault), memory, metrics);
+
+            OperationCanceledException thrown = await CaptureExceptionAsync<OperationCanceledException>(() =>
+                orchestrator.RunTaskAsync(
+                    new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "q" }, caller.Token));
+
+            Assert.AreSame(fault, thrown.InnerException, "The fault stays attached for diagnostics.");
+            CollectionAssert.AreEqual(new[] { AiLlmCompletionOutcome.Cancelled }, metrics.Completions);
+            CollectionAssert.AreEqual(new[] { "user" }, memory.Appended.Select(m => m.MessageRole).ToArray(),
+                "The learner's words are still recorded on the cancelled path.");
+        }
+
+        [TestCase(LlmErrorCode.ProviderError, true)]
+        [TestCase(LlmErrorCode.BackendUnavailable, true)]
+        [TestCase(LlmErrorCode.AuthExpired, true)]
+        [TestCase(LlmErrorCode.None, true)]
+        [TestCase(LlmErrorCode.ProviderError, false)]
+        [TestCase(LlmErrorCode.BackendUnavailable, false)]
+        [TestCase(LlmErrorCode.AuthExpired, false)]
+        [TestCase(LlmErrorCode.None, false)]
+        public async Task RunTaskAsync_FailedResultAfterCallerCancel_SurfacesAsTheCancellation(
+            LlmErrorCode code,
+            bool streamingTransport)
+        {
+            // WHY: a THROWN fault after the stop already surfaced as the cancellation, while a RETURNED failure
+            // kept its own code and counted as a provider failure - one user Stop reported two ways. Both
+            // transports: the streaming one collapses the chunk into the result first.
+            using CancellationTokenSource caller = new();
+            RecordingMetrics metrics = new();
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(
+                new CancelThenReturnLlmClient(caller.Cancel, new LlmCompletionResult
                 {
-                    File.Delete(filePath);
+                    Ok = false, Error = "HTTP 503 from the provider", ErrorCode = code
+                }),
+                new RoleScopedLiveMemoryStore(), metrics, streamingTransport);
+
+            OperationCanceledException thrown = await CaptureExceptionAsync<OperationCanceledException>(() =>
+                orchestrator.RunTaskAsync(
+                    new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "q" }, caller.Token));
+
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, thrown.Message, "The text follows the code.");
+            CollectionAssert.AreEqual(new[] { AiLlmCompletionOutcome.Cancelled }, metrics.Completions);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task RunTaskResultAsync_FailedResultWithLiveCaller_KeepsItsOwnCode(bool streamingTransport)
+        {
+            RecordingMetrics metrics = new();
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(
+                new CancelThenReturnLlmClient(() => { }, new LlmCompletionResult
+                {
+                    Ok = false, Error = "HTTP 401", ErrorCode = LlmErrorCode.AuthExpired
+                }),
+                new RoleScopedLiveMemoryStore(), metrics, streamingTransport);
+
+            LlmCompletionResult result = await orchestrator.RunTaskResultAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "q" });
+
+            Assert.AreEqual(LlmErrorCode.AuthExpired, result.ErrorCode);
+            Assert.AreEqual("HTTP 401", result.Error);
+            CollectionAssert.AreEqual(new[] { AiLlmCompletionOutcome.ProviderFailure }, metrics.Completions);
+        }
+
+        /// <summary>
+        /// The non-streaming transport hands the orchestrator the client's own instance; normalizing an empty
+        /// answer into a failure must not reach back into it.
+        /// </summary>
+        [Test]
+        public async Task RunTaskResultAsync_EmptySuccess_FailureIsACopyThatLeavesTheClientResultUntouched()
+        {
+            LlmCompletionResult shared = new() { Ok = true, Content = "" };
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(
+                new CancelThenReturnLlmClient(() => { }, shared),
+                new RoleScopedLiveMemoryStore(), new RecordingMetrics(), streamingTransport: false);
+
+            LlmCompletionResult result = await orchestrator.RunTaskResultAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "q" });
+
+            Assert.AreNotSame(shared, result);
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.EmptyResponse, result.ErrorCode);
+            Assert.AreEqual("empty response", result.Error);
+            Assert.IsTrue(shared.Ok, "The client's instance is not mutated.");
+            Assert.AreEqual(LlmErrorCode.None, shared.ErrorCode);
+            Assert.AreEqual("", shared.Error);
+        }
+
+        [Test]
+        public async Task RunTaskResultAsync_StructuredRejectionAfterTools_IsACopyThatLeavesTheClientResultUntouched()
+        {
+            LlmToolCallTrace[] traces = { new("write_script", true, 4d, "native", "done") };
+            LlmCompletionResult shared = new() { Ok = true, Content = "not json", ExecutedToolCalls = traces };
+            AiOrchestrator orchestrator = BuildOrchestrator(
+                new CancelThenReturnLlmClient(() => { }, shared),
+                new TestMemoryStore(),
+                BuildToolResultPolicy("Programmer"),
+                structuredPolicy: new RejectingStructuredPolicy(),
+                settings: new TestSettings { EnableStreaming = false });
+
+            LlmCompletionResult result = await orchestrator.RunTaskResultAsync(
+                new AiTaskRequest { RoleId = "Programmer", Hint = "write a script" });
+
+            Assert.AreNotSame(shared, result);
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.InvalidRequest, result.ErrorCode);
+            Assert.AreEqual("Structured response validation failed after tool execution.", result.Error);
+            Assert.IsTrue(shared.Ok, "The client's instance is not mutated.");
+            Assert.AreEqual(LlmErrorCode.None, shared.ErrorCode);
+            Assert.AreEqual("", shared.Error);
+        }
+
+        private sealed class RejectingStructuredPolicy : IRoleStructuredResponsePolicy
+        {
+            public bool ShouldValidate(string roleId)
+            {
+                return true;
+            }
+
+            public bool TryValidate(string roleId, string rawContent, out string failureReason)
+            {
+                failureReason = "not a structured payload";
+                return false;
+            }
+        }
+
+        [TestCase(LlmErrorCode.ProviderError)]
+        [TestCase(LlmErrorCode.BackendUnavailable)]
+        [TestCase(LlmErrorCode.AuthExpired)]
+        [TestCase(LlmErrorCode.None)]
+        public async Task RunStreamingAsync_ErrorChunkAfterCallerCancel_EndsAsTheCancellation(LlmErrorCode code)
+        {
+            using CancellationTokenSource caller = new();
+            LlmStreamChunk inner = new() { IsDone = true, Error = "HTTP 503 from the provider", ErrorCode = code };
+            CancelThenFailStreamLlmClient llm = new(caller.Cancel, inner, null);
+            RecordingMetrics metrics = new();
+            AiOrchestrator orchestrator = BuildOrchestratorWithMetrics(llm, new RoleScopedLiveMemoryStore(), metrics);
+
+            LlmStreamChunk terminal = await DrainToTerminalAsync(orchestrator.RunStreamingAsync(
+                new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "q" }, caller.Token));
+
+            Assert.AreEqual(LlmErrorCode.Cancelled, terminal.ErrorCode);
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, terminal.Error, "The text follows the code.");
+            CollectionAssert.AreEqual(new[] { AiLlmCompletionOutcome.Cancelled }, metrics.Completions);
+            Assert.AreEqual(code, inner.ErrorCode, "The inner client's chunk is not mutated.");
+            Assert.AreEqual("HTTP 503 from the provider", inner.Error);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_AllowlistNamesOneWrapperFunction_ExposesOnlyThatFunction()
+        {
+            // WHY: the provider is offered a wrapper's functions, never the wrapper's name; an allowlist written
+            // from those names (the names Tool Availability lists) used to drop the whole wrapper.
+            TestLlmClient llm = new();
+            CameraFunctionsTool camera = new() { ToolTimeoutMsOverride = 4321, IsMutating = true };
+            AiOrchestrator orchestrator = BuildWrapperOrchestrator(llm, camera);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                AllowedToolNames = new[] { "camera_look" }
+            });
+
+            Assert.AreEqual(1, llm.LastRequest.Tools.Count);
+            ILlmTool exposed = llm.LastRequest.Tools[0];
+            Assert.AreNotSame(camera, exposed, "Only some functions are allowed: the wrapper is narrowed.");
+            Assert.AreEqual("camera", exposed.Name);
+            Assert.AreEqual(4321, exposed.ToolTimeoutMsOverride, "Per-tool settings are the wrapper's own.");
+            Assert.IsTrue(exposed.IsMutating);
+            CollectionAssert.AreEqual(new[] { "camera_look" },
+                ((IAIFunctionsLlmTool)exposed).CreateAIFunctions().Select(f => f.Name).ToArray(),
+                "The provider is offered only the allowed function.");
+            string availability = ToolAvailabilityOf(llm.LastRequest);
+            StringAssert.Contains("- camera_look", availability);
+            StringAssert.DoesNotContain("- camera_capture", availability);
+            StringAssert.DoesNotContain("- camera_list", availability);
+            StringAssert.DoesNotContain("- spawn_quiz", availability);
+        }
+
+        [TestCase("camera")]
+        [TestCase("camera_capture,camera_look,camera_list")]
+        public async Task RunTaskAsync_AllowlistCoversTheWholeWrapper_KeepsTheWrapperItself(string allowed)
+        {
+            TestLlmClient llm = new();
+            CameraFunctionsTool camera = new();
+            AiOrchestrator orchestrator = BuildWrapperOrchestrator(llm, camera);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                AllowedToolNames = allowed.Split(',')
+            });
+
+            Assert.AreEqual(1, llm.LastRequest.Tools.Count);
+            Assert.AreSame(camera, llm.LastRequest.Tools[0],
+                "The wrapper's own name, or every one of its functions, allows the whole wrapper.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_AllowlistNamesNoWrapperFunction_DropsTheWrapper()
+        {
+            TestLlmClient llm = new();
+            AiOrchestrator orchestrator = BuildWrapperOrchestrator(llm, new CameraFunctionsTool());
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                AllowedToolNames = new[] { "spawn_quiz" }
+            });
+
+            CollectionAssert.AreEqual(new[] { "spawn_quiz" }, llm.LastRequest.Tools.Select(t => t.Name).ToArray());
+        }
+
+        [Test]
+        public async Task RunTaskAsync_TextShapedCallOfAWrapperFunction_IsStrippedFromTheAnswer()
+        {
+            // WHY: the leak strip knew only registered names, so a text-shaped call to camera_look - the name the
+            // model actually uses for the camera wrapper - stayed in the visible answer.
+            const string leaked = "{\"name\":\"camera_look\",\"arguments\":{\"target\":\"door\"}}";
+            ToolTraceLlmClient llm = new(new LlmCompletionResult
+            {
+                Ok = true,
+                Content = "Let me look at the door.\n" + leaked
+            });
+            AiOrchestrator orchestrator = BuildWrapperOrchestrator(llm, new CameraFunctionsTool());
+
+            string answer = await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "look" });
+
+            StringAssert.Contains("Let me look at the door.", answer);
+            StringAssert.DoesNotContain("camera_look", answer);
+        }
+
+        private static AiOrchestrator BuildWrapperOrchestrator(ILlmClient llm, CameraFunctionsTool camera)
+        {
+            AgentMemoryPolicy policy = new();
+            policy.DisableMemoryTool("Teacher");
+            policy.SetToolsForRole("Teacher", new ILlmTool[] { new StubTool("spawn_quiz"), camera });
+            TestSettings settings = new();
+            return new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                new TestMemoryStore(), policy, null, null, settings, TestActorIdentityProvider);
+        }
+
+        private static string ToolAvailabilityOf(LlmCompletionRequest request)
+        {
+            Microsoft.Extensions.AI.ChatMessage message = request.ChatHistory?.FirstOrDefault(m =>
+                (m.Text ?? "").StartsWith("## Tool Availability (current request)", StringComparison.Ordinal));
+            Assert.IsNotNull(message, "precondition: the request carries its tool availability.");
+            return message.Text.Replace("\r\n", "\n");
+        }
+
+        private static AiOrchestrator BuildOrchestratorWithMetrics(
+            ILlmClient llm,
+            IAgentMemoryStore memory,
+            IAiOrchestrationMetrics metrics,
+            bool streamingTransport = true)
+        {
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            TestSettings settings = new() { EnableStreaming = streamingTransport };
+            return new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, metrics, settings, TestActorIdentityProvider);
+        }
+
+        /// <summary>A camera-like wrapper: registered as <c>camera</c>, offering three functions.</summary>
+        private sealed class CameraFunctionsTool : ILlmTool, IAIFunctionsLlmTool
+        {
+            public string Name => "camera";
+            public string Description => "Camera functions.";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+            public int? ToolTimeoutMsOverride { get; set; }
+            public bool IsMutating { get; set; }
+
+            public IEnumerable<AIFunction> CreateAIFunctions()
+            {
+                yield return AIFunctionFactory.Create((Func<string>)(() => "captured"),
+                    new AIFunctionFactoryOptions { Name = "camera_capture", Description = "Capture." });
+                yield return AIFunctionFactory.Create((Func<string, string>)(target => "looked:" + target),
+                    new AIFunctionFactoryOptions { Name = "camera_look", Description = "Look at a target." });
+                yield return AIFunctionFactory.Create((Func<string>)(() => "cameras:main"),
+                    new AIFunctionFactoryOptions { Name = "camera_list", Description = "List cameras." });
+            }
+        }
+
+        /// <summary>Cancels the caller's token, then RETURNS the configured failed result from CompleteAsync.</summary>
+        private sealed class CancelThenReturnLlmClient : ILlmClient
+        {
+            private readonly Action _cancelCaller;
+            private readonly LlmCompletionResult _result;
+
+            public CancelThenReturnLlmClient(Action cancelCaller, LlmCompletionResult result)
+            {
+                _cancelCaller = cancelCaller;
+                _result = result;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                _cancelCaller();
+                return Task.FromResult(_result);
+            }
+        }
+
+        private static async Task<LlmStreamChunk> DrainToTerminalAsync(IAsyncEnumerable<LlmStreamChunk> stream)
+        {
+            LlmStreamChunk terminal = null;
+            await foreach (LlmStreamChunk chunk in stream)
+            {
+                if (chunk.IsDone)
+                {
+                    terminal = chunk;
                 }
+            }
+
+            Assert.IsNotNull(terminal, "precondition: the stream ends with a terminal chunk.");
+            return terminal;
+        }
+
+        private sealed class RecordingMetrics : IAiOrchestrationMetrics
+        {
+            public List<AiLlmCompletionOutcome> Completions { get; } = new();
+
+            public void RecordLlmCompletion(
+                string actorId, string roleId, string traceId, AiLlmCompletionOutcome outcome, double wallMs)
+            {
+                Completions.Add(outcome);
+            }
+
+            public void RecordStructuredRetry(string actorId, string roleId, string traceId, string reason)
+            {
+            }
+
+            public void RecordCommandPublished(string actorId, string roleId, string traceId)
+            {
+            }
+        }
+
+        /// <summary>Cancels the caller's token, then throws the configured fault from CompleteAsync.</summary>
+        private sealed class CancelThenThrowLlmClient : ILlmClient
+        {
+            private readonly Action _cancelCaller;
+            private readonly Exception _fault;
+
+            public CancelThenThrowLlmClient(Action cancelCaller, Exception fault)
+            {
+                _cancelCaller = cancelCaller;
+                _fault = fault;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                _cancelCaller();
+                return Task.FromException<LlmCompletionResult>(_fault);
+            }
+        }
+
+        /// <summary>
+        /// Streams one visible chunk, cancels the caller's token, then either yields the configured terminal
+        /// chunk or throws the configured fault - the shape of a pipeline torn down by the stop.
+        /// </summary>
+        private sealed class CancelThenFailStreamLlmClient : ILlmClient
+        {
+            private readonly Action _cancelCaller;
+            private readonly LlmStreamChunk _terminal;
+            private readonly Exception _fault;
+
+            public CancelThenFailStreamLlmClient(Action cancelCaller, LlmStreamChunk terminal, Exception fault)
+            {
+                _cancelCaller = cancelCaller;
+                _terminal = terminal;
+                _fault = fault;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException("streaming only");
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                await Task.Yield();
+                yield return new LlmStreamChunk { Text = "partial" };
+                await Task.Yield();
+                _cancelCaller();
+                if (_fault != null)
+                {
+                    throw _fault;
+                }
+
+                yield return _terminal;
+            }
+        }
+
+        /// <summary>Throws synchronously when the stream is opened, before any chunk.</summary>
+        private sealed class ThrowOnOpenStreamLlmClient : ILlmClient
+        {
+            private readonly Exception _fault;
+
+            public ThrowOnOpenStreamLlmClient(Exception fault)
+            {
+                _fault = fault;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException("streaming only");
+            }
+
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                throw _fault;
             }
         }
     }

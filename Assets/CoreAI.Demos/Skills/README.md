@@ -43,7 +43,12 @@ This contract works with strings in a plain .NET application, with `TextAsset` i
 preserves structure across transfers. MCP reads the same skill via `name`, `section` and `all`.
 
 Schemas and execution share one allowed-tool set. Reading a skill alone
-grants no extra rights. Already created proxies see `MutableSkillCatalog` changes;
+grants no extra rights. `call_skill_tool` checks the call against the selected tool's schema before it
+binds anything: a missing required argument (key absent or `null`) or a value of the wrong type (for
+example `"yes"` for a boolean) is refused with a message that names the tool, the argument and the
+expected parameters, says the tool was not executed, and tells the model how to retry. An empty or
+whitespace-only string is a present value and reaches the tool, so a tool that cannot use one must
+reject it itself. Already created proxies see `MutableSkillCatalog` changes;
 a conflict of different tools with the same name fails registration.
 
 Details: [AgentBuilder](../../CoreAI/Docs/AGENT_BUILDER.md),

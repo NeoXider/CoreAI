@@ -1,4 +1,4 @@
-# Tool Calling Specification v0.14.0
+# Tool Calling Specification
 
 ## Unified MEAI tool call format
 
@@ -107,7 +107,7 @@ public Task<string> ExecuteAsync(
 
 ## Generation temperature
 
-**Global temperature:** `CoreAISettings.Temperature` (default **0.1**). Applies to all agents.
+**Global temperature:** `CoreAISettings.Temperature` (default **0.1**). Applies to all agents, and is sent to the backend only while **General → Enable temperature overriding** is on.
 
 **Per-agent override:**
 
@@ -157,13 +157,15 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 
 ### 2. Memory tool
 
-**Purpose:** Save, append, and clear agent memory.
+**Purpose:** Read and edit agent memory.
 
 **Format:**
 
 ```json
 {"name": "memory", "arguments": {"action": "write|append|clear", "content": "text"}}
 ```
+
+Actions: `read`, `write`, `append`, `clear`, `str_replace`, `insert`, `delete`, `rename` (see `MemoryTool`).
 
 **Code:**
 
@@ -180,7 +182,7 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 {"name": "execute_lua", "arguments": {"code": "Lua code"}}
 ```
 
-**Code:**
+**Code** (package `com.neoxider.coreaimods`):
 
 - `LuaTool.cs` — MEAI `AIFunction`
 - `LuaLlmTool.cs` — `ILlmTool` wrapper
@@ -198,13 +200,15 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 | Action | Description | Required parameters |
 |--------|-------------|---------------------|
 | `spawn` | Spawn a registered prefab or built-in primitive (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `empty`) | `prefabKey`, `targetName` |
+| `spawn_batch` | Spawn several prefabs/primitives in one call | see [WORLD_COMMANDS.md](WORLD_COMMANDS.md) |
+| `list_prefabs` | List the registered prefab keys available to `spawn` | none |
 | `change` | Apply only supplied position, rotation, scale, or parent fields | `targetName` |
 | `set_color` | Set renderer colour from HTML colour | `targetName`, `stringValue` |
 | `destroy` | Remove an object | `targetName` |
 | `list_objects` | List objects | optional: `stringValue` for search |
 | `load_scene` | Load a scene | `stringValue` (scene name) |
 | `reload_scene` | Reload the scene | none |
-| `set_active` | Enable / disable | `targetName` |
+| `set_active` | Enable (show) an object — the public action always activates; disable through Lua/WorldEdit | `targetName` |
 | `play_animation` | Play an animation | `targetName`, `animationName` |
 | `stop_animation` | Stop animation playback | `targetName` |
 | `list_animations` | List animations | `targetName` |
@@ -376,7 +380,7 @@ Merchant: "I have an Iron Sword for 50 coins..."
 
 ```csharp
 var agent = new AgentBuilder("Helper")
-    .WithAction("heal_player", "Heals the player fully", () => player.Heal())
+    .WithAction("heal_player", "Heals the player fully", new Action(() => player.Heal())) // C# 9: wrap lambdas passed as Delegate
     .WithEventTool("trigger_scare", "Use to scare the player") // Publishes to CoreAiEvents
     .Build();
 ```
@@ -402,23 +406,17 @@ CoreAISettings.LlmRequestTimeoutSeconds = 300; // LLM timeout
 
 ### Tool call retry
 
-On a failed tool call (model returned an invalid format):
+A failed tool call is not retried by the framework itself; the model sees the error in the `tool` message and
+decides what to do next (see [How tool success/failure is surfaced](#how-tool-successfailure-is-surfaced)).
 
-1. The system returns an error to the model: `"ERROR: Tool call not recognized. Use this format..."`.
-2. The model gets another attempt.
-3. Retries continue until `MaxToolCallRetries` consecutive failures (default 3); the counter resets on success.
-4. If all attempts are exhausted, the response is accepted as-is.
-
-This helps small models (e.g. Qwen3.5-2B) learn the correct format.
-
-**Logging:**
-
-```
-MeaiLlmUnityClient: Calling GetResponseAsync (attempt 1/4)
-MeaiLlmUnityClient: Tool call not recognized, retry 1/3
-MeaiLlmUnityClient: Calling GetResponseAsync (attempt 2/4)
-MeaiLlmUnityClient: Tool call parsed from JSON text
-```
+1. `MaxToolCallRetries` (default 3) counts **consecutive batches/turns in which every call failed**; a partly
+   successful batch resets the counter.
+2. When that limit is reached — or the roundtrip cap (`MaxToolCallRoundtrips`) is hit — the loop makes **one**
+   final tools-disabled roundtrip ("Tool budget exhausted. Do not call any more tools. Summarize in plain
+   text …") instead of returning empty or canned text. See
+   [DEVELOPER_GUIDE §3.3](DEVELOPER_GUIDE.md#33-tool-call-observability).
+3. If that final summary turn produces no text (or fails), the answer is
+   `Agent stopped: exceeded maximum of N tool-call roundtrips.`
 
 ### Tool-call result logging
 
@@ -441,8 +439,15 @@ A tool that throws is always logged as an error: `[ToolPolicy] <name> threw: <me
 ### How tool success/failure is surfaced
 
 - **To the model (always):** the tool result — including the failure reason — is returned in the
-  `tool` message, so the model can self-correct and retry. Unknown tool, malformed/missing arguments,
-  timeout, and thrown exceptions each return a descriptive error the model reads as-is.
+  `tool` message, so the model can self-correct and retry. Unknown tool, malformed JSON, timeout, and
+  thrown exceptions each return a descriptive error the model reads as-is. Arguments are checked **before**
+  the tool runs: a required argument that is absent or `null` is refused with
+  `Error: Tool '<name>' is missing required argument(s): …` plus the schema to retry with, and a value that
+  cannot bind to its parameter type (for example `"yes"` for a `bool`) is refused with the argument name and
+  the binder's reason (`LlmToolArgumentPreflight`). `call_skill_tool` applies the same two checks to skill tools
+  and says explicitly that the tool was **NOT executed** and how to retry. These refusals are traced as
+  schema errors, so the turn may retry. An empty or whitespace string is a present value and reaches the tool
+  (see [TOOL_AUTHORING_GUIDE](TOOL_AUTHORING_GUIDE.md#required-arguments-null-is-missing-empty-is-present)).
 
   `ToolExecutionPolicy` makes exactly **two** edits to a result, both deliberate and both visible:
 
@@ -493,8 +498,23 @@ merchant.ApplyToPolicy(policy);
 **1. Define a class:**
 
 ```csharp
-public class WeatherLlmTool : IAIFunctionLlmTool
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using CoreAI.Ai;
+using Microsoft.Extensions.AI;
+
+public interface IWeatherProvider
 {
+    Task<string> GetWeatherAsync(CancellationToken ct);
+}
+
+public sealed class WeatherLlmTool : IAIFunctionLlmTool
+{
+    private readonly IWeatherProvider _provider;
+
+    public WeatherLlmTool(IWeatherProvider provider) => _provider = provider;
+
     public string Name => "get_weather";
     public string Description => "Get current weather in game world.";
     public string ParametersSchema => "{}";
@@ -502,14 +522,13 @@ public class WeatherLlmTool : IAIFunctionLlmTool
 
     public AIFunction CreateAIFunction()
     {
-        return AIFunctionFactory.Create(
-            async (CancellationToken ct) => await _provider.GetWeatherAsync(ct),
-            "get_weather", "Get current weather.");
+        Func<CancellationToken, Task<string>> func = ct => _provider.GetWeatherAsync(ct);
+        return AIFunctionFactory.Create(func, new AIFunctionFactoryOptions { Name = Name, Description = Description });
     }
 }
 ```
 
-Use `IAIFunctionLlmTool` for one MEAI function and `IAIFunctionsLlmTool` when one logical tool exposes several functions. CoreAI no longer discovers `CreateAIFunction()` by reflection; custom tool classes must implement one of these explicit contracts or use `DelegateLlmTool`.
+Use `IAIFunctionLlmTool` for one MEAI function and `IAIFunctionsLlmTool` when one logical tool exposes several functions. CoreAI no longer discovers `CreateAIFunction()` by reflection; custom tool classes must implement one of these explicit contracts or use `DelegateLlmTool`. The functions of an `IAIFunctionsLlmTool` wrapper are called by their **function names** (the `camera` tool as `camera_capture`, `screenshot`, `camera_look`, `camera_list`): the policy maps them back to the wrapper, applies the wrapper's timeout / `EndsTurn` / `IsMutating` / `AllowDuplicates`, validates arguments against each function's own schema, and lists the function names under "Available tools".
 
 > **How a call is recognized (7.35.0+): by CHANNEL, never by the shape of the text.** On an endpoint with a
 > native tool channel CoreAI takes calls only from the provider's `FunctionCallContent`; the assistant's prose
@@ -524,8 +543,8 @@ Use `IAIFunctionLlmTool` for one MEAI function and `IAIFunctionsLlmTool` when on
 > **Authoring tools: parameter descriptions (read this).** On the native tool-calling path the JSON Schema is
 > generated from the C# **delegate signature**, so a parameter's description reaches the model **only** if the
 > delegate parameter carries `[System.ComponentModel.Description("...")]`. The `ParametersSchema` string is
-> injected into the prompt **only** on the text-shaped path (`AiToolContractPromptFormatter` early-returns for
-> native tool-calling) — on the native path it is invisible. Always add `[Description]` to every meaningful
+> injected into the prompt **only** on the text-shaped path (`AiToolContractPromptFormatter` prints the
+> definitions block only when the endpoint has no native tool channel) — on the native path it is invisible. Always add `[Description]` to every meaningful
 > parameter. Full guide, template, and checklist: **[TOOL_AUTHORING_GUIDE.md](./TOOL_AUTHORING_GUIDE.md)**.
 
 **2. Attach to an agent:**
@@ -549,13 +568,17 @@ var agent = new AgentBuilder("Farmer")
 ## Architecture
 
 ```
-AiOrchestrator → MeaiLlmUnityClient → FunctionInvokingChatClient
-                                         ↓
-                              LlmUnityMeaiChatClient.TryParseToolCallFromText()
-                                         ↓
-                    ┌────────────────────┼────────────────────┐
-                    ↓                    ↓                    ↓
-            MemoryTool           LuaTool           InventoryTool
+AiOrchestrator → ILlmClient (Timeout → Logging → RetryingStreaming → RoutingLlmClient)
+                     ↓
+              OpenAiChatLlmClient → MeaiLlmClient (HTTP API, or LLMUnity's local server)
+                     ↓
+   provider tool_calls (native)  |  LlmToolCallTextExtractor (no native channel only)
+                     ↓
+              ToolExecutionPolicy (argument preflight, dedup, parallel/serialized execution)
+                     ↓
+    ┌────────────────┼──────────────────┬───────────────────┐
+    ↓                ↓                  ↓                   ↓
+MemoryTool   execute_lua (Mods)   InventoryTool   world_command / your tools
 ```
 
 ## Recommended models
@@ -581,12 +604,12 @@ MoE models activate only ~3B parameters per inference step — fast like a 4B mo
 ### PlayMode tests
 
 - `AllToolCallsPlayModeTests.cs` — memory tool + execute Lua
-- `ChatWithToolCallingPlayModeTests.cs` — chat agent + inventory tool
+- `ChatWithToolCallingPlayModeTests.cs` (`MerchantWithToolCallingPlayModeTests`) — chat agent + inventory tool
 - `CraftingMemoryViaLlmUnityPlayModeTests.cs` — full crafting workflow
 
 ## System prompts
 
-### Universal system prompt prefix (v0.11.0+)
+### Universal system prompt prefix
 
 CoreAI supports a **universal prefix** — text prepended to the **start** of every agent’s system prompt. That lets you set shared rules for all models without duplicating them per agent.
 
@@ -611,7 +634,7 @@ CoreAI supports a **universal prefix** — text prepended to the **start** of ev
 
 **How to configure:**
 
-- **Inspector:** CoreAISettings → General settings → Universal System Prompt Prefix
+- **Inspector:** CoreAISettings → Advanced Settings → General → Universal Prompt Prefix
 - **Code:** `CoreAISettings.UniversalSystemPromptPrefix = "..."`
 
 The prefix applies to **all** agents: built-in (Creator, Programmer, Analyzer, …) and custom (`AgentBuilder`).

@@ -2,7 +2,7 @@
 
 Open **CoreAI > Agent Session Inspector** to inspect the prompt, memory, tools, chat history, and token budget for a role.
 
-Use **Copy stats**, **Copy session**, or **Copy both** to copy the readable text panes. Use **Copy JSON** to copy the full inspected `AgentSessionSnapshot` as indented JSON, including the same role config, budget, prompts, memory, tools, chat history, notes, and Edit Mode sentinel values shown in the text views.
+Use **Copy stats**, **Copy session**, **Copy system**, **Copy history**, or **Copy stats+session** to copy the readable text panes. Use **Copy JSON** to copy the full inspected `AgentSessionSnapshot` as indented JSON, including the same role config, budget, prompts, memory, tools, chat history, notes, and Edit Mode sentinel values shown in the text views.
 
 ## Saved vs Live turn
 

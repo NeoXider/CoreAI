@@ -380,6 +380,192 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("", response, "null result from orchestrator → empty string");
         }
 
+        // ===================== Host deadline, kept apart from the caller token =====================
+
+        [TestCase(true, true)]
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        [TestCase(false, false)]
+        public async Task HostDeadlineFires_CallerAlive_IsATimeout_AndTheOrchestratorSeesTheCallerAlive(
+            bool streaming,
+            bool idleDeadlineConfigured)
+        {
+            // WHY: the panel used to merge the host deadline into the token it handed the service as the caller's,
+            // so AiTaskRequest.CallerCancellationToken - the token the orchestrator's cancellation attribution reads
+            // first - fired on every host timeout and the metrics counted it as a user cancellation. The service
+            // now takes the deadline separately, joins it with its own idle deadline, and reports it as a timeout.
+            RequestProbeOrchestrator orchestrator = new();
+            CoreAiChatService service = idleDeadlineConfigured
+                ? new CoreAiChatService(orchestrator,
+                    settings: new StubSettings { LlmRequestTimeoutSecondsOverride = 30f })
+                : new CoreAiChatService(orchestrator);
+            AiTaskRequest request = new() { RoleId = "Role", Hint = "hi" };
+            using CancellationTokenSource caller = new();
+            using CancellationTokenSource deadline = new();
+
+            Task turn = streaming
+                ? DrainAsync(service.SendMessageStreamingAsync(request, caller.Token, deadline.Token))
+                : service.SendMessageAsync(request, caller.Token, deadline.Token);
+            await orchestrator.Started;
+            deadline.Cancel();
+            Exception failure = await CaptureFailureAsync(turn);
+
+            Assert.IsInstanceOf<LlmOperationTimeoutException>(failure,
+                "A host deadline at a live caller ends the turn exactly like the idle deadline.");
+            Assert.IsTrue(orchestrator.LastCancellationToken.IsCancellationRequested,
+                "The operation token the orchestrator runs on links the host deadline.");
+            Assert.AreEqual(caller.Token, orchestrator.LastRequest.CallerCancellationToken,
+                "CallerCancellationToken is the caller's own token and nothing else.");
+            Assert.IsFalse(orchestrator.LastRequest.CallerCancellationToken.IsCancellationRequested,
+                "Nobody asked to stop: the caller token must stay alive for the orchestrator's attribution.");
+            Assert.IsTrue(orchestrator.LastRequest.DeadlineCancellationToken.IsCancellationRequested,
+                "The host deadline reaches the orchestrator through DeadlineCancellationToken.");
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task CallerCancels_WithAHostDeadlineArmed_IsACancellation_NotATimeout(bool streaming)
+        {
+            RequestProbeOrchestrator orchestrator = new();
+            CoreAiChatService service = new(orchestrator,
+                settings: new StubSettings { LlmRequestTimeoutSecondsOverride = 30f });
+            AiTaskRequest request = new() { RoleId = "Role", Hint = "hi" };
+            using CancellationTokenSource caller = new();
+            using CancellationTokenSource deadline = new();
+
+            Task turn = streaming
+                ? DrainAsync(service.SendMessageStreamingAsync(request, caller.Token, deadline.Token))
+                : service.SendMessageAsync(request, caller.Token, deadline.Token);
+            await orchestrator.Started;
+            caller.Cancel();
+            Exception failure = await CaptureFailureAsync(turn);
+
+            Assert.IsInstanceOf<OperationCanceledException>(failure);
+            Assert.IsNotInstanceOf<LlmOperationTimeoutException>(failure, "The caller stopped the turn.");
+            Assert.IsTrue(orchestrator.LastRequest.CallerCancellationToken.IsCancellationRequested);
+            Assert.IsFalse(orchestrator.LastRequest.DeadlineCancellationToken.IsCancellationRequested,
+                "Neither deadline fired.");
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task CallerCancels_ThenTheHostDeadlineFires_StaysACancellation(bool streaming)
+        {
+            RequestProbeOrchestrator orchestrator = new();
+            CoreAiChatService service = new(orchestrator,
+                settings: new StubSettings { LlmRequestTimeoutSecondsOverride = 30f });
+            AiTaskRequest request = new() { RoleId = "Role", Hint = "hi" };
+            using CancellationTokenSource caller = new();
+            using CancellationTokenSource deadline = new();
+
+            Task turn = streaming
+                ? DrainAsync(service.SendMessageStreamingAsync(request, caller.Token, deadline.Token))
+                : service.SendMessageAsync(request, caller.Token, deadline.Token);
+            await orchestrator.Started;
+            caller.Cancel();
+            deadline.Cancel();
+            Exception failure = await CaptureFailureAsync(turn);
+
+            Assert.IsInstanceOf<OperationCanceledException>(failure);
+            Assert.IsNotInstanceOf<LlmOperationTimeoutException>(failure,
+                "A deadline that fires after the caller's stop does not turn the stop into a timeout.");
+        }
+
+        [Test]
+        public async Task LegacyOverload_KeepsTheCallerTokenAndTheIdleDeadlineApart()
+        {
+            RequestProbeOrchestrator orchestrator = new();
+            CoreAiChatService service = new(orchestrator,
+                settings: new StubSettings { LlmRequestTimeoutSecondsOverride = 30f });
+            AiTaskRequest request = new() { RoleId = "Role", Hint = "hi" };
+            using CancellationTokenSource caller = new();
+
+            Task turn = service.SendMessageAsync(request, caller.Token);
+            await orchestrator.Started;
+
+            Assert.AreEqual(caller.Token, orchestrator.LastRequest.CallerCancellationToken);
+            Assert.IsTrue(orchestrator.LastRequest.DeadlineCancellationToken.CanBeCanceled,
+                "With no host deadline the idle deadline alone is the deadline token.");
+            Assert.AreNotEqual(caller.Token, orchestrator.LastRequest.DeadlineCancellationToken);
+
+            caller.Cancel();
+            Assert.IsInstanceOf<OperationCanceledException>(await CaptureFailureAsync(turn));
+        }
+
+        [TestCase(LlmErrorCode.ProviderError)]
+        [TestCase(LlmErrorCode.BackendUnavailable)]
+        [TestCase(LlmErrorCode.AuthExpired)]
+        [TestCase(LlmErrorCode.None)]
+        public async Task Streaming_ErrorChunkAfterCallerCancel_EndsAsTheCancellation(LlmErrorCode code)
+        {
+            // WHY: only a Timeout chunk after the stop used to become the cancellation; any other error chunk
+            // reached the panel as a provider error, while the same fault thrown was the stop.
+            using CancellationTokenSource caller = new();
+            CancelThenErrorChunkOrchestrator orchestrator = new(caller.Cancel, new LlmStreamChunk
+            {
+                IsDone = true, Error = "HTTP 503 from the provider", ErrorCode = code
+            });
+            CoreAiChatService service = new(orchestrator);
+            List<LlmStreamChunk> seen = new();
+
+            Exception failure = await CaptureFailureAsync(CollectAsync(
+                service.SendMessageStreamingAsync(new AiTaskRequest { RoleId = "Role", Hint = "hi" }, caller.Token),
+                seen));
+
+            Assert.IsInstanceOf<OperationCanceledException>(failure);
+            Assert.IsNotInstanceOf<LlmOperationTimeoutException>(failure, "The caller stopped the turn.");
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, failure.Message, "The text follows the code.");
+            Assert.IsFalse(seen.Any(chunk => !string.IsNullOrEmpty(chunk.Error)),
+                "The error chunk must not reach the consumer as a provider error.");
+        }
+
+        [Test]
+        public async Task Streaming_ErrorChunkWithLiveCaller_IsPassedThrough()
+        {
+            CancelThenErrorChunkOrchestrator orchestrator = new(() => { }, new LlmStreamChunk
+            {
+                IsDone = true, Error = "HTTP 503", ErrorCode = LlmErrorCode.BackendUnavailable
+            });
+            CoreAiChatService service = new(orchestrator);
+            List<LlmStreamChunk> seen = new();
+
+            await CollectAsync(
+                service.SendMessageStreamingAsync(new AiTaskRequest { RoleId = "Role", Hint = "hi" }), seen);
+
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, seen.Last().ErrorCode);
+            Assert.AreEqual("HTTP 503", seen.Last().Error);
+        }
+
+        private static async Task CollectAsync(IAsyncEnumerable<LlmStreamChunk> stream, List<LlmStreamChunk> into)
+        {
+            await foreach (LlmStreamChunk chunk in stream)
+            {
+                into.Add(chunk);
+            }
+        }
+
+        private static async Task DrainAsync(IAsyncEnumerable<LlmStreamChunk> stream)
+        {
+            await foreach (LlmStreamChunk _ in stream)
+            {
+            }
+        }
+
+        private static async Task<Exception> CaptureFailureAsync(Task task)
+        {
+            try
+            {
+                await task;
+            }
+            catch (Exception ex)
+            {
+                return ex;
+            }
+
+            Assert.Fail("Expected the turn to fail.");
+            return null;
+        }
+
         /// <summary>
         /// <see cref="CoreAiChatService"/> uses UniTask <c>CancelAfterSlim</c> (player loop). A plain
         /// <see cref="Test"/> that blocks the main thread on <c>Task.Delay(Infinite, ct)</c> can deadlock
@@ -839,6 +1025,93 @@ namespace CoreAI.Tests.EditMode
                 LastCancellationToken = ct;
                 yield return new LlmStreamChunk { Text = "ok", IsDone = true };
                 await Task.CompletedTask;
+            }
+
+            public void CancelTasks(string scopeId)
+            {
+            }
+        }
+
+        /// <summary>
+        /// Parks until its token is cancelled and keeps the request (with the tokens the service put on it) and the
+        /// operation token it was handed.
+        /// </summary>
+        private sealed class RequestProbeOrchestrator : IAiOrchestrationService, IAiTaskResultService
+        {
+            private readonly TaskCompletionSource<bool> _started =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public Task Started => _started.Task;
+            public AiTaskRequest LastRequest { get; private set; }
+            public CancellationToken LastCancellationToken { get; private set; }
+
+            public async Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                Observe(request, ct);
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                return "unreachable";
+            }
+
+            public async Task<LlmCompletionResult> RunTaskResultAsync(
+                AiTaskRequest request,
+                CancellationToken ct = default)
+            {
+                Observe(request, ct);
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                return new LlmCompletionResult { Ok = true, Content = "unreachable" };
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                Observe(request, ct);
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                yield return new LlmStreamChunk { Text = "unreachable", IsDone = true };
+            }
+
+            public void CancelTasks(string scopeId)
+            {
+            }
+
+            private void Observe(AiTaskRequest request, CancellationToken ct)
+            {
+                LastRequest = request;
+                LastCancellationToken = ct;
+                _started.TrySetResult(true);
+            }
+        }
+
+        /// <summary>
+        /// Streams one visible chunk, runs <c>cancelCaller</c>, then yields the configured error chunk without
+        /// observing the token - a pipeline that reports a failure while it is being stopped.
+        /// </summary>
+        private sealed class CancelThenErrorChunkOrchestrator : IAiOrchestrationService
+        {
+            private readonly Action _cancelCaller;
+            private readonly LlmStreamChunk _terminal;
+
+            public CancelThenErrorChunkOrchestrator(Action cancelCaller, LlmStreamChunk terminal)
+            {
+                _cancelCaller = cancelCaller;
+                _terminal = terminal;
+            }
+
+            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                yield return new LlmStreamChunk { Text = "partial" };
+                await Task.Yield();
+                _cancelCaller();
+                yield return _terminal;
             }
 
             public void CancelTasks(string scopeId)

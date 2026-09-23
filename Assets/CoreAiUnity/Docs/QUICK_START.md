@@ -64,7 +64,7 @@ This creates `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with:
 - `CoreAiChatConfig_Demo.asset`
 - required default CoreAI assets
 - `LLM` + `LLMAgent` too, if `CoreAISettings` selects a local LLMUnity backend
-  (`ExecutionMode.LocalModel`, or `Auto` with `LlmUnityFirst` priority)
+  (`LlmExecutionMode.LocalModel`, or `Auto` with `LlmUnityFirst` priority)
 
 Press **Play** and type in the chat panel.
 
@@ -101,7 +101,7 @@ CoreAI -> Settings
 
 This selects `Assets/Resources/CoreAISettings.asset` and creates it if it is missing. Nothing is
 generated automatically on package import, so use this menu (or `CoreAI -> Setup -> Create Default
-Assets` for the full default set, or `Create -> CoreAI -> Core AI Settings` to place the asset
+Assets` for the full default set, or `Create -> CoreAI -> CoreAI Settings` to place the asset
 somewhere else and assign it on `CoreAILifetimeScope`).
 
 Then choose an `LLM Mode`.
@@ -119,7 +119,9 @@ Since v5.0.8 the local model runs as LLMUnity's **built-in OpenAI-compatible ser
 pipeline — so you get real structured tool-calls and streaming, exactly like LM Studio,
 with no external server to install.
 
-LLMUnity is a package dependency. Plugin reference:
+LLMUnity (`ai.undream.llm`) is optional and not installed with CoreAI; add it via
+`CoreAI -> Setup -> Modules -> LLMUnity -> Enable + Update to latest` (the LLM pipeline also needs the
+`COREAI_LLM` define). Plugin reference:
 [LLMUnity on GitHub](https://github.com/undreamai/LLMUnity).
 
 ### ClientOwnedApi: LM Studio, OpenAI, vLLM, Ollama
@@ -127,9 +129,9 @@ LLMUnity is a package dependency. Plugin reference:
 Use this when the Unity client calls an OpenAI-compatible endpoint directly.
 
 1. Set `LLM Mode` to `ClientOwnedApi`.
-2. Set `Api Base Url`, for example `http://localhost:1234/v1` for LM Studio.
-3. Set `Model` to the model name exposed by the server.
-4. Set `Api Key` only when the provider requires it — and only for editor/local work.
+2. Set `Base URL`, for example `http://localhost:1234/v1` for LM Studio.
+3. Set `Model` to the model name exposed by the server (required — there is no built-in default).
+4. Set `API Key` only when the provider requires it — and only for editor/local work.
 
 This is the quickest path for local development with LM Studio.
 
@@ -167,10 +169,11 @@ Creator -> LocalModel
 | Setting | Purpose |
 |---|---|
 | `LLM Mode` | Chooses local, client-owned HTTP, server-managed, auto, offline, or limited execution. |
-| `Model`, `Api Base Url`, `Api Key` | Backend model and connection fields. |
-| `Temperature`, `Max Tokens`, `Request Timeout` | Generation controls and timeout guardrails. |
-| `Enable Streaming` | Global streaming default. |
-| `Universal System Prompt Prefix` | Text prepended to every agent system prompt. |
+| `Model`, `Base URL`, `API Key` | Backend model and connection fields (Essentials). |
+| `Temperature`, `Max Output Tokens` (General tab) | Generation controls; each is sent only when its override toggle is on. |
+| `Timeout (sec)` (HTTP tab), `LLM Timeout (sec)` (General tab) | Per-HTTP-call and per-turn idle timeout guardrails (default 120 s each). |
+| `Global streaming` | Global streaming default. |
+| `Universal Prompt Prefix` (General tab) | Text prepended to every agent system prompt. |
 
 Streaming priority is:
 
@@ -220,9 +223,9 @@ Full reference: [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md).
 ## 8. Sanity Check In Play Mode
 
 1. Press **Play**.
-2. Confirm the console reports that VContainer and MessagePipe are ready.
+2. Confirm the console shows `VContainer + MessagePipe (GlobalMessagePipe) + filtered ILog are registered.`
 3. Send a chat message or call `CoreAi.AskAsync`.
-4. Confirm you see a request/response round trip in the console.
+4. Confirm you see a request/response round trip in the console (`LLM >` then `LLM <` with the same `traceId`).
 
 If no real backend is available, the offline/stub path may return canned replies.
 Configure `LocalModel` or `ClientOwnedApi` for real model output.

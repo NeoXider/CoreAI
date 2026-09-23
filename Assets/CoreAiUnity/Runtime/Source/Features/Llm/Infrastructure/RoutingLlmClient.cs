@@ -110,42 +110,33 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 LlmCompletionResult result = await inner.CompleteAsync(request, cancellationToken);
-                if (result != null && !result.Ok)
+                LlmErrorCode faultCode = result?.ErrorCode ?? LlmErrorCode.None;
+                // WHY: a failed result returned after the caller already cancelled is the caller's stop whatever
+                // its code; the result and the published event carry one classification
+                // (LlmCancellation.ClassifyCode), while route health below still judges faultCode, the code the
+                // endpoint reported. WHY copy-on-write: the inner client may reuse the instance; the Error text
+                // follows the code.
+                if (result != null && !result.Ok &&
+                    LlmCancellation.IsReportedCallerStop(result.ErrorCode, cancellationToken))
                 {
-                    // WHY: a Timeout reported after the caller already cancelled is the caller's stop; the result
-                    // and the published event carry one classification (LlmCancellation.ClassifyCode).
-                    result.ErrorCode = LlmCancellation.ClassifyCode(result.ErrorCode, cancellationToken);
+                    result = result.WithError(LlmCancellation.CancelledErrorText, LlmErrorCode.Cancelled);
                 }
 
                 PublishCompleted(request, capturedMode, capturedGeneration, false, result != null && result.Ok,
                     result?.Error ?? "",
-                    result?.ErrorCode ?? LlmErrorCode.None);
+                    result?.ErrorCode ?? LlmErrorCode.None,
+                    ResolveRouteHealthCode(faultCode, cancellationToken));
                 PublishUsage(request, capturedMode, false, result);
                 return result;
             }
-            catch (LlmOperationTimeoutException) when (!cancellationToken.IsCancellationRequested)
-            {
-                PublishCompleted(request, capturedMode, capturedGeneration, false, false, "timeout",
-                    LlmErrorCode.Timeout);
-                throw;
-            }
-            catch (OperationCanceledException)
-            {
-                PublishCompleted(request, capturedMode, capturedGeneration, false, false, "cancelled",
-                    LlmErrorCode.Cancelled);
-                throw;
-            }
-            catch (LlmClientException ex)
-            {
-                // WHY: collapsing to ProviderError would hide AuthExpired/BackendUnavailable from the
-                // degraded-health path and from diagnostics subscribers.
-                PublishCompleted(request, capturedMode, capturedGeneration, false, false, ex.Message, ex.ErrorCode);
-                throw;
-            }
             catch (Exception ex)
             {
-                PublishCompleted(request, capturedMode, capturedGeneration, false, false, ex.Message,
-                    LlmErrorCode.ProviderError);
+                // WHY one catch: LlmCancellation decides first (a cancelled caller owns every fault, a library
+                // timeout is a timeout), and only then the typed code - collapsing to ProviderError would hide
+                // AuthExpired/BackendUnavailable from the degraded-health path and from diagnostics subscribers.
+                LlmErrorCode code = ClassifyThrown(ex, cancellationToken, out LlmErrorCode faultCode);
+                PublishCompleted(request, capturedMode, capturedGeneration, false, false, DescribeThrown(ex, code),
+                    code, ResolveRouteHealthCode(faultCode, cancellationToken));
                 throw;
             }
         }
@@ -173,6 +164,9 @@ namespace CoreAI.Infrastructure.Llm
             bool ok = true;
             string error = "";
             LlmErrorCode errorCode = LlmErrorCode.None;
+            // WHY kept apart from errorCode: endpoint health judges the fault the endpoint reported, the
+            // published code what the caller sees after LlmCancellation had its say.
+            LlmErrorCode faultCode = LlmErrorCode.None;
             LlmStreamChunk lastUsageChunk = null;
             bool completedPublished = false;
             int streamedCompletionChars = 0;
@@ -189,40 +183,15 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         hasNext = await enumerator.MoveNextAsync();
                     }
-                    catch (LlmOperationTimeoutException) when (!cancellationToken.IsCancellationRequested)
-                    {
-                        completedPublished = true;
-                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, "timeout",
-                            LlmErrorCode.Timeout);
-                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars,
-                            lastSeenModel);
-                        throw;
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        completedPublished = true;
-                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, "cancelled",
-                            LlmErrorCode.Cancelled);
-                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars,
-                            lastSeenModel);
-                        throw;
-                    }
-                    catch (LlmClientException ex)
-                    {
-                        completedPublished = true;
-                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, ex.Message,
-                            ex.ErrorCode);
-                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars,
-                            lastSeenModel);
-                        throw;
-                    }
                     catch (Exception ex)
                     {
-                        // WHY: a transport exception other than timeout/cancel previously escaped with no
-                        // completion event at all — subscribers saw a request start and never finish.
+                        // WHY every exception publishes: a transport exception other than timeout/cancel
+                        // previously escaped with no completion event at all — subscribers saw a request
+                        // start and never finish. See CompleteAsync for the classification order.
                         completedPublished = true;
-                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, ex.Message,
-                            LlmErrorCode.ProviderError);
+                        LlmErrorCode code = ClassifyThrown(ex, cancellationToken, out LlmErrorCode thrownFaultCode);
+                        PublishCompleted(request, capturedMode, capturedGeneration, true, false,
+                            DescribeThrown(ex, code), code, ResolveRouteHealthCode(thrownFaultCode, cancellationToken));
                         PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars,
                             lastSeenModel);
                         throw;
@@ -234,9 +203,21 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     LlmStreamChunk chunk = enumerator.Current;
-                    if (chunk != null && chunk.ErrorCode != LlmErrorCode.None)
+                    if (chunk != null && (chunk.ErrorCode != LlmErrorCode.None || !string.IsNullOrEmpty(chunk.Error)))
                     {
-                        chunk.ErrorCode = LlmCancellation.ClassifyCode(chunk.ErrorCode, cancellationToken);
+                        // WHY: an error chunk after the caller cancelled is the caller's stop whatever its code
+                        // (LlmCancellation.ClassifyCode); route health keeps the code the endpoint reported.
+                        // WHY copy-on-write: the inner client may reuse the chunk instance (the timeout
+                        // decorator copies for the same rewrite); the Error text follows the code.
+                        if (chunk.ErrorCode != LlmErrorCode.None)
+                        {
+                            faultCode = chunk.ErrorCode;
+                        }
+
+                        if (LlmCancellation.IsReportedCallerStop(chunk.ErrorCode, cancellationToken))
+                        {
+                            chunk = chunk.WithError(LlmCancellation.CancelledErrorText, LlmErrorCode.Cancelled);
+                        }
                     }
 
                     if (chunk != null && !string.IsNullOrEmpty(chunk.Error))
@@ -269,7 +250,8 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 completedPublished = true;
-                PublishCompleted(request, capturedMode, capturedGeneration, true, ok, error, errorCode);
+                PublishCompleted(request, capturedMode, capturedGeneration, true, ok, error, errorCode,
+                    ResolveRouteHealthCode(faultCode, cancellationToken));
                 PublishUsage(request, capturedMode, true, lastUsageChunk, ok, streamedCompletionChars, lastSeenModel);
             }
             finally
@@ -281,13 +263,66 @@ namespace CoreAI.Infrastructure.Llm
                     // leaks an LlmRequestStarted with no matching LlmRequestCompleted.
                     PublishCompleted(request, capturedMode, capturedGeneration, true, false,
                         string.IsNullOrEmpty(error) ? "stream abandoned by consumer" : error,
-                        errorCode == LlmErrorCode.None ? LlmErrorCode.Cancelled : errorCode);
+                        errorCode == LlmErrorCode.None ? LlmErrorCode.Cancelled : errorCode,
+                        ResolveRouteHealthCode(faultCode, cancellationToken));
                     PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars,
                         lastSeenModel);
                 }
 
                 await enumerator.DisposeAsync();
             }
+        }
+
+        /// <summary>
+        /// The code the caller sees for a thrown fault: <see cref="LlmCancellation"/> first (a cancelled caller
+        /// owns every fault, a library timeout is a timeout), then the typed code of the
+        /// <see cref="LlmClientException"/> found in the fault or its inner chain, else a provider error.
+        /// <paramref name="faultCode"/> is what the endpoint itself reported, for route health.
+        /// </summary>
+        private static LlmErrorCode ClassifyThrown(
+            Exception exception,
+            CancellationToken callerToken,
+            out LlmErrorCode faultCode)
+        {
+            LlmClientException typed = LlmCancellation.FindClientException(exception);
+            faultCode = typed?.ErrorCode ?? LlmErrorCode.ProviderError;
+            LlmErrorCode classified = LlmCancellation.Classify(exception, callerToken);
+            return classified != LlmErrorCode.None ? classified : faultCode;
+        }
+
+        private static string DescribeThrown(Exception exception, LlmErrorCode code)
+        {
+            if (code == LlmErrorCode.Cancelled)
+            {
+                return LlmCancellation.CancelledErrorText;
+            }
+
+            return LlmCancellation.FindTimeout(exception) != null ? "timeout" : exception.Message;
+        }
+
+        /// <summary>
+        /// What endpoint health learns from a failed request whose endpoint reported <paramref name="faultCode"/>
+        /// (the code before <see cref="LlmCancellation"/> rewrote it for the caller); <see cref="LlmErrorCode.None"/>
+        /// means "nothing".
+        /// <para>
+        /// WHY the caller's token matters here: a transport, timeout or provider fault that happened while the
+        /// caller was cancelling says nothing about the endpoint, and marking it degraded on a request nobody
+        /// was waiting for is a false alarm. A permanent refusal (an expired key, an exhausted balance) is the
+        /// exception - the next request would be refused the same way, so it is reported even when a caller
+        /// cancel raced it. The refusal may sit behind a decorator's OperationCanceledException (see
+        /// FallbackLlmClientDecorator), which is why callers pass the code found through the inner chain.
+        /// </para>
+        /// </summary>
+        private static LlmErrorCode ResolveRouteHealthCode(LlmErrorCode faultCode, CancellationToken callerToken)
+        {
+            if (!IsEndpointLevelFailure(faultCode))
+            {
+                return LlmErrorCode.None;
+            }
+
+            return callerToken.IsCancellationRequested && FallbackLlmClientDecorator.IsRetryableError(faultCode)
+                ? LlmErrorCode.None
+                : faultCode;
         }
 
         private ILlmClient Prepare(
@@ -321,6 +356,10 @@ namespace CoreAI.Infrastructure.Llm
             return inner;
         }
 
+        /// <param name="routeHealthCode">
+        /// What endpoint health learns (<see cref="ResolveRouteHealthCode"/>); may differ from
+        /// <paramref name="errorCode"/>, which is what the caller sees.
+        /// </param>
         private void PublishCompleted(
             LlmCompletionRequest request,
             LlmExecutionMode capturedMode,
@@ -328,15 +367,16 @@ namespace CoreAI.Infrastructure.Llm
             bool streaming,
             bool success,
             string error,
-            LlmErrorCode errorCode)
+            LlmErrorCode errorCode,
+            LlmErrorCode routeHealthCode)
         {
-            if (!success && IsEndpointLevelFailure(errorCode))
+            if (!success && routeHealthCode != LlmErrorCode.None)
             {
                 // WHY: a Ready endpoint whose key expired or whose backend died mid-conversation must
                 // surface degraded health on its snapshot; otherwise the UI keeps reporting Ready
                 // until restart while every request fails.
                 _registry.ReportRouteFailure(
-                    request?.RoutingProfileId ?? "", capturedGeneration, errorCode, error);
+                    request?.RoutingProfileId ?? "", capturedGeneration, routeHealthCode, error);
             }
             else if (success)
             {
@@ -510,9 +550,14 @@ namespace CoreAI.Infrastructure.Llm
             return chars <= 0 ? 0 : Math.Max(1, (chars + estimatedCharsPerToken - 1) / estimatedCharsPerToken);
         }
 
+        /// <summary>
+        /// Failures that describe the ENDPOINT rather than one request: a key the provider no longer accepts,
+        /// an account that cannot pay, a backend that does not answer. Only these reach route health.
+        /// </summary>
         private static bool IsEndpointLevelFailure(LlmErrorCode errorCode)
         {
             return errorCode == LlmErrorCode.AuthExpired ||
+                   errorCode == LlmErrorCode.PaymentRequired ||
                    errorCode == LlmErrorCode.BackendUnavailable;
         }
 

@@ -64,6 +64,7 @@ namespace CoreAI.Infrastructure.Llm
         private readonly ILog _logger;
         private readonly ICoreAISettings _settings;
         private readonly IReadOnlyList<ILlmTool> _originalTools;
+        private readonly ToolNameIndex _toolNames;
         private readonly bool _allowDuplicateToolCalls;
         private readonly string _actorId;
         private readonly string _roleId;
@@ -126,6 +127,7 @@ namespace CoreAI.Infrastructure.Llm
             _logger = logger ?? NullLog.Instance;
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _originalTools = originalTools ?? new List<ILlmTool>();
+            _toolNames = new ToolNameIndex(_originalTools);
             _allowDuplicateToolCalls = allowDuplicateToolCalls;
             _actorId = actorId ?? "";
             _roleId = roleId ?? "Unknown";
@@ -149,6 +151,14 @@ namespace CoreAI.Infrastructure.Llm
         {
             Interlocked.Exchange(ref _toolNameRepairCount, 0);
         }
+
+        /// <summary>
+        /// Every name a call can resolve under: each registered <see cref="ILlmTool.Name"/> plus every
+        /// function name of an <see cref="IAIFunctionsLlmTool"/> wrapper. This is the registry the
+        /// text-shaped call extractors must be given, so a call to a wrapper's function is not dismissed
+        /// as a foreign name.
+        /// </summary>
+        internal IReadOnlyList<string> KnownToolNames => _toolNames.KnownNames;
 
         /// <summary>Current consecutive error count (for diagnostics/testing).</summary>
         public int ConsecutiveErrors => _consecutiveErrors;
@@ -428,7 +438,7 @@ namespace CoreAI.Infrastructure.Llm
             if (ambiguous)
             {
                 _logger.Warn(
-                    $"[ToolPolicy] Unknown tool name: '{fc.Name}' is ambiguous under case-insensitive repair. Available: [{string.Join(", ", _originalTools.Select(t => t.Name))}]",
+                    $"[ToolPolicy] Unknown tool name: '{fc.Name}' is ambiguous under case-insensitive repair. Available: [{string.Join(", ", _toolNames.CallableNames)}]",
                     LogTag.Llm);
                 return null;
             }
@@ -442,11 +452,16 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             _logger.Warn(
-                $"[ToolPolicy] Unknown tool name: '{fc.Name}' - no repair found. Available: [{string.Join(", ", _originalTools.Select(t => t.Name))}]",
+                $"[ToolPolicy] Unknown tool name: '{fc.Name}' - no repair found. Available: [{string.Join(", ", _toolNames.CallableNames)}]",
                 LogTag.Llm);
             return null;
         }
 
+        /// <summary>
+        /// The canonical callable name for <paramref name="name"/> (exact match first, then a unique
+        /// case-insensitive one) and, in <paramref name="match"/>, the tool whose metadata governs it - for a
+        /// wrapper's function that is the wrapper. <c>null</c> when the name is unknown or ambiguous.
+        /// </summary>
         private string GetCanonicalToolName(string name, out ILlmTool match, out bool ambiguous)
         {
             match = null;
@@ -457,25 +472,114 @@ namespace CoreAI.Infrastructure.Llm
                 return name;
             }
 
-            match = _originalTools.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.Ordinal));
-            if (match != null)
+            return _toolNames.Resolve(name, out match, out ambiguous);
+        }
+
+        /// <summary>
+        /// Name resolution over the role's tool list, built once per policy: expanding an
+        /// <see cref="IAIFunctionsLlmTool"/> builds its MEAI functions.
+        /// </summary>
+        /// <remarks>
+        /// WHY a wrapper's function names are indexed: the provider is offered the wrapper's FUNCTIONS
+        /// (<c>camera_look</c>), never the wrapper's own name (<c>camera</c>), so resolving by
+        /// <see cref="ILlmTool.Name"/> alone refused every such call as an unknown tool before it ran. A
+        /// function name resolves to its wrapper as the metadata tool, so the wrapper's per-tool settings
+        /// (timeout, <see cref="ILlmTool.EndsTurn"/>, <see cref="ILlmTool.IsMutating"/>, duplicates) govern
+        /// its functions. Registered names are indexed first and win an exact tie, and only the
+        /// multi-function wrapper is expanded, so every other tool resolves exactly as it did before and
+        /// builds nothing here.
+        /// </remarks>
+        private sealed class ToolNameIndex
+        {
+            private readonly List<(string Name, ILlmTool Tool)> _entries = new();
+
+            public ToolNameIndex(IReadOnlyList<ILlmTool> tools)
             {
-                return match.Name;
+                foreach (ILlmTool tool in tools)
+                {
+                    if (tool != null)
+                    {
+                        _entries.Add((tool.Name, tool));
+                    }
+                }
+
+                List<string> callable = new();
+                foreach (ILlmTool tool in tools)
+                {
+                    if (tool is not IAIFunctionsLlmTool)
+                    {
+                        if (tool != null)
+                        {
+                            callable.Add(tool.Name);
+                        }
+
+                        continue;
+                    }
+
+                    foreach (string name in SkillSetToolResolver.GetCallableToolNames(tool))
+                    {
+                        callable.Add(name);
+                        if (IndexOfExact(name) < 0)
+                        {
+                            _entries.Add((name, tool));
+                        }
+                    }
+                }
+
+                CallableNames = callable;
+                KnownNames = _entries.Select(entry => entry.Name).ToArray();
             }
 
-            List<ILlmTool> matches = _originalTools
-                .Where(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
-                .Take(2)
-                .ToList();
+            /// <summary>The names the model can actually call, in tool order - what a refusal lists.</summary>
+            public IReadOnlyList<string> CallableNames { get; }
 
-            if (matches.Count == 1)
+            /// <summary>Every name that resolves: registered tool names, then wrapper function names.</summary>
+            public IReadOnlyList<string> KnownNames { get; }
+
+            public string Resolve(string name, out ILlmTool match, out bool ambiguous)
             {
-                match = matches[0];
-                return match.Name;
+                ambiguous = false;
+                int exact = IndexOfExact(name);
+                if (exact >= 0)
+                {
+                    match = _entries[exact].Tool;
+                    return _entries[exact].Name;
+                }
+
+                int found = -1;
+                int count = 0;
+                for (int i = 0; i < _entries.Count && count < 2; i++)
+                {
+                    if (string.Equals(_entries[i].Name, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        found = i;
+                        count++;
+                    }
+                }
+
+                if (count == 1)
+                {
+                    match = _entries[found].Tool;
+                    return _entries[found].Name;
+                }
+
+                match = null;
+                ambiguous = count > 1;
+                return null;
             }
 
-            ambiguous = matches.Count > 1;
-            return null;
+            private int IndexOfExact(string name)
+            {
+                for (int i = 0; i < _entries.Count; i++)
+                {
+                    if (string.Equals(_entries[i].Name, name, StringComparison.Ordinal))
+                    {
+                        return i;
+                    }
+                }
+
+                return -1;
+            }
         }
 
         /// <summary>
@@ -556,7 +660,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 // Name not found even after case-insensitive search
                 string unknown =
-                    $"Error: Unknown tool '{fc.Name}'. Available tools: [{string.Join(", ", _originalTools.Select(t => t.Name))}]";
+                    $"Error: Unknown tool '{fc.Name}'. Available tools: [{string.Join(", ", _toolNames.CallableNames)}]";
                 // The failure event is published for a model-invented name too: a subscriber expecting
                 // LlmToolCallFailed "including for a missing tool" would otherwise never see it, even
                 // though the neighbouring branch (name known, no binding) does publish one.
@@ -627,7 +731,7 @@ namespace CoreAI.Infrastructure.Llm
                 _eventPublisher.PublishStarted(info);
                 Stopwatch sw = Stopwatch.StartNew();
 
-                string validationError = ValidateRequiredArguments(fc);
+                string validationError = ValidateRequiredArguments(fc, aiFunc);
                 if (!string.IsNullOrEmpty(validationError))
                 {
                     sw.Stop();
@@ -656,18 +760,22 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 // WHY: proves a binding failure STRUCTURALLY, before InvokeResolvedAsync is ever called, so
-                // only THIS failure may be tagged "arg-conversion" (see TryBindArgumentsStructurally below).
-                // Runs only for the raw AIFunction path (resolved.Invocation == null): a resolved delegated
-                // invocation already validated its own arguments in TryResolveInvocation.
+                // only THIS failure may be tagged "arg-conversion" (LlmToolArgumentPreflight). Runs only
+                // for the raw AIFunction path (resolved.Invocation == null): here aiFunc is the proxy's
+                // own function (tool_name/arguments_json - two strings that always bind), while the
+                // delegated TARGET was already checked in TryResolveInvocation against its own schema
+                // (required keys) and its own binder (the same structural preflight, on the exact
+                // arguments the invocation will bind); a refusal there surfaces as resolved.Error above.
                 if (resolved.Invocation == null &&
-                    !TryBindArgumentsStructurally(aiFunc, normalized, out string bindingError))
+                    !LlmToolArgumentPreflight.TryBindArgumentsStructurally(aiFunc, normalized,
+                        out string bindingError))
                 {
                     sw.Stop();
                     // WHY the schema hint is appended here too: the model's only way out of a rejected
                     // call is to retry with arguments that fit, and the MEAI-side rejection this
                     // preflight now pre-empts always carried that hint. Dropping it would make the
                     // stronger check the less useful one.
-                    string schemaHint = BuildSchemaRetryHint(fc.Name);
+                    string schemaHint = BuildSchemaRetryHint(fc.Name, aiFunc);
                     string bindError = "Error: " + bindingError
                         + (string.IsNullOrEmpty(schemaHint) ? "" : " " + schemaHint);
                     _logger.Warn($"[ToolPolicy] {fc.Name} rejected: {bindingError}", LogTag.Llm);
@@ -841,7 +949,7 @@ namespace CoreAI.Infrastructure.Llm
                 string errorMessage = ex.Message;
                 if (LooksLikeArgumentConversionError(ex))
                 {
-                    string schemaHint = BuildSchemaRetryHint(fc.Name);
+                    string schemaHint = BuildSchemaRetryHint(fc.Name, aiFunc);
                     if (!string.IsNullOrEmpty(schemaHint))
                     {
                         errorMessage = $"{errorMessage} {schemaHint}";
@@ -873,130 +981,6 @@ namespace CoreAI.Infrastructure.Llm
             return resolved.Invocation != null
                 ? await resolved.Invocation.InvokeAsync(cancellationToken)
                 : await function.InvokeAsync(arguments, cancellationToken);
-        }
-
-        /// <summary>
-        /// Proves an argument-binding failure STRUCTURALLY: round-trips each declared parameter's raw
-        /// value through the SAME <see cref="System.Text.Json.JsonSerializerOptions"/> MEAI itself binds
-        /// with (<see cref="MEAI.AIFunction.JsonSerializerOptions"/>), reflecting the target CLR type from
-        /// <see cref="MEAI.AIFunction.UnderlyingMethod"/> — entirely BEFORE <c>function.InvokeAsync</c> is
-        /// called, so a failure here can never have entered the tool body.
-        /// <para>
-        /// WHY not classify by the invocation exception's type/message instead: a tool body can legitimately
-        /// throw <see cref="ArgumentException"/> (or any exception whose text happens to contain "convert")
-        /// AFTER already mutating state, and that is indistinguishable from a true binding failure once it
-        /// has already crossed the invocation boundary. Running the SAME coercion the binder performs,
-        /// standalone, first, is the only way to prove "never entered the body" instead of guessing it.
-        /// </para>
-        /// <para>
-        /// Only possible when <see cref="MEAI.AIFunction.UnderlyingMethod"/> is non-null (reflection-based
-        /// functions, e.g. via <see cref="MEAI.AIFunctionFactory"/>). A hand-written <see cref="MEAI.AIFunction"/>
-        /// subclass with no underlying method cannot be proven this way; it is invoked normally and left to
-        /// the conservative "native" default in <see cref="ExecuteResolvedAsync"/> for whatever it throws.
-        /// </para>
-        /// <para>
-        /// WHY the <see cref="Type.IsInstanceOfType"/> shortcut: MEAI's own binder accepts a value already
-        /// assignable to the parameter type without going through JSON at all (e.g. a boxed <c>string</c>
-        /// for a <c>string</c> parameter, or ANY value for an <c>object</c> parameter). Forcing every value
-        /// through <c>SerializeToElement</c>/<c>Deserialize</c> regardless rejected shapes MEAI itself would
-        /// have accepted — this preflight must never be stricter than the binder it is proving.
-        /// </para>
-        /// <para>
-        /// WHY skip entirely when <see cref="MEAI.AIFunction.JsonSerializerOptions"/> is null: inventing a
-        /// default <see cref="System.Text.Json.JsonSerializerOptions"/> diverges from whatever options MEAI
-        /// actually binds with, and on IL2CPP with reflection metadata trimmed a fresh
-        /// <c>JsonSerializerOptions</c> throws <see cref="NotSupportedException"/> for every argument —
-        /// which would reject every tool call as "arg-conversion" before MEAI ever got a chance to run.
-        /// Absent real options this preflight cannot prove anything; the conservative answer is to let
-        /// MEAI decide, exactly as the code did before this preflight existed.
-        /// </para>
-        /// </summary>
-        private static bool TryBindArgumentsStructurally(MEAI.AIFunction function,
-            IDictionary<string, object> normalized, out string bindingError)
-        {
-            bindingError = null;
-            System.Reflection.MethodInfo method = function?.UnderlyingMethod;
-            System.Text.Json.JsonSerializerOptions options = function?.JsonSerializerOptions;
-            if (method == null || options == null || normalized == null || normalized.Count == 0)
-            {
-                return true;
-            }
-
-            foreach (System.Reflection.ParameterInfo parameter in method.GetParameters())
-            {
-                string name = parameter.Name;
-                if (string.IsNullOrEmpty(name) || parameter.ParameterType == typeof(CancellationToken) ||
-                    !normalized.TryGetValue(name, out object raw) || raw == null)
-                {
-                    continue;
-                }
-
-                if (parameter.ParameterType.IsInstanceOfType(raw))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    // WHY two routes, in THIS order: it is the binder's own order (AIFunctionFactory,
-                    // MarshallViaJsonRoundtrip). A string bound to a non-string parameter is read as JSON
-                    // CONTENT first (an object argument the normalizer handed over as compact JSON) and,
-                    // only when it is not JSON at all, as a JSON STRING VALUE - the route an enum name, a
-                    // Guid or a DateTime bind through. 7.41.2 kept the first route alone, so every bare
-                    // enum name was rejected with "'G' is an invalid start of a value" while MEAI bound it.
-                    // This is a second route, not a looser check: the value must still deserialize into
-                    // the parameter type by one of the binder's two exact readings, so an unknown enum
-                    // member fails both here exactly as it fails MEAI. The binder's "looks like JSON"
-                    // gate is not mirrored: a non-JSON string fails the content read at its first token
-                    // with the very JsonException the binder falls through on.
-                    bool boundAsJsonContent = raw is string rawJson && parameter.ParameterType != typeof(string) &&
-                                              BindsAsJsonContent(rawJson, parameter.ParameterType, options);
-                    if (!boundAsJsonContent)
-                    {
-                        System.Text.Json.JsonElement element =
-                            System.Text.Json.JsonSerializer.SerializeToElement(raw, raw.GetType(), options);
-                        System.Text.Json.JsonSerializer.Deserialize(element, parameter.ParameterType, options);
-                    }
-                }
-                catch (Exception ex) when (ex is System.Text.Json.JsonException || ex is FormatException ||
-                                            ex is InvalidCastException || ex is NotSupportedException)
-                {
-                    bindingError =
-                        $"Argument '{name}' does not match the expected type for tool '{function.Name}': {ex.Message}";
-                    return false;
-                }
-                catch (ArgumentException)
-                {
-                    // WHY: an ArgumentException/ArgumentNullException raised INSIDE the serializer is an
-                    // infrastructure failure (the observed one is ArgumentNullException("format")), not a
-                    // proof that the model's arguments are wrong. It must not reject a call MEAI may still
-                    // accept, and it must not leak past this preflight where it would be misread as a
-                    // conversion error. Leave the decision to MEAI.
-                    continue;
-                }
-            }
-
-            return true;
-        }
-
-        /// <summary>
-        /// The binder's first reading of a string bound to a non-string parameter: the string as JSON
-        /// CONTENT. <c>false</c> means "not JSON", the one failure the binder falls through on
-        /// (<c>catch (JsonException)</c> around its content read); any other exception propagates so the
-        /// caller classifies it exactly as it would coming from the string-value route.
-        /// </summary>
-        private static bool BindsAsJsonContent(string rawJson, Type parameterType,
-            System.Text.Json.JsonSerializerOptions options)
-        {
-            try
-            {
-                System.Text.Json.JsonSerializer.Deserialize(rawJson, parameterType, options);
-                return true;
-            }
-            catch (System.Text.Json.JsonException)
-            {
-                return false;
-            }
         }
 
         /// <summary>
@@ -1039,20 +1023,57 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Builds the same compact-schema retry suffix the missing-required-argument path emits,
-        /// or an empty string when no meaningful schema is registered for the tool.
+        /// or an empty string when no meaningful schema is known for the tool.
         /// </summary>
-        private string BuildSchemaRetryHint(string toolName)
+        private string BuildSchemaRetryHint(string toolName, MEAI.AIFunction aiFunc)
         {
+            string schema = ResolveSchemaForHint(toolName, aiFunc);
+            return string.IsNullOrEmpty(schema)
+                ? ""
+                : $"Retry the same tool call with JSON arguments matching this schema: {schema}";
+        }
+
+        /// <summary>
+        /// The schema worth showing the model: the tool's metadata schema when it says anything, else the
+        /// bound function's own schema when it declares properties, else nothing.
+        /// </summary>
+        /// <remarks>
+        /// WHY the function fallback: a wrapper that expands into several MEAI functions (Scene, Camera)
+        /// publishes <c>{}</c> as its metadata on purpose - each <c>AIFunction.JsonSchema</c> is the
+        /// authoritative one - and a plain tool may never have declared a schema at all. In both cases the
+        /// function's schema is the one the binder enforces, so it is the one a retry must match.
+        /// </remarks>
+        private string ResolveSchemaForHint(string toolName, MEAI.AIFunction aiFunc)
+        {
+            // WHY: looked up by registered name only, not GetCanonicalToolName - a wrapper's metadata schema
+            // describes the wrapper, never one of its functions, so a function call falls through to its own.
             ILlmTool tool = _originalTools.FirstOrDefault(t =>
                 string.Equals(t.Name, toolName, StringComparison.Ordinal));
-            if (tool == null || string.IsNullOrWhiteSpace(tool.ParametersSchema) ||
-                tool.ParametersSchema.Trim() == "{}")
+            if (IsMeaningfulSchema(tool?.ParametersSchema))
             {
-                return "";
+                return CompactSchema(tool.ParametersSchema, 1200);
             }
 
-            string schema = CompactSchema(tool.ParametersSchema, 1200);
-            return $"Retry the same tool call with JSON arguments matching this schema: {schema}";
+            return FunctionDeclaresProperties(aiFunc) ? CompactSchema(aiFunc.JsonSchema.GetRawText(), 1200) : "";
+        }
+
+        private static bool IsMeaningfulSchema(string schema)
+        {
+            return !string.IsNullOrWhiteSpace(schema) && schema.Trim() != "{}";
+        }
+
+        private static bool FunctionDeclaresProperties(MEAI.AIFunction aiFunc)
+        {
+            if (aiFunc == null)
+            {
+                return false;
+            }
+
+            System.Text.Json.JsonElement schema = aiFunc.JsonSchema;
+            return schema.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                   schema.TryGetProperty("properties", out System.Text.Json.JsonElement properties) &&
+                   properties.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                   properties.EnumerateObject().MoveNext();
         }
 
         private static string NormalizeToolResultText(object result)
@@ -1082,27 +1103,55 @@ namespace CoreAI.Infrastructure.Llm
             };
         }
 
-        private string ValidateRequiredArguments(MEAI.FunctionCallContent fc)
+        /// <summary>
+        /// Refuses a call that lacks a required argument BEFORE binding. Required names are the union of
+        /// the tool metadata schema's <c>required</c> and the bound function's own
+        /// <see cref="MEAI.AIFunction.JsonSchema"/> <c>required</c>.
+        /// </summary>
+        /// <remarks>
+        /// WHY the union: the metadata schema is <c>{}</c> for a wrapper that expands into several MEAI
+        /// functions (Scene, Camera) and for any tool that never declared one, so it alone found no
+        /// required names and a missing argument fell through to MEAI's binder, whose exception crossed the
+        /// invocation boundary and was traced "native" - possibly executed, retries suppressed. The
+        /// function's schema is the one the binder actually enforces; reading it here turns that failure
+        /// into a schema-validation refusal that provably never entered the body. The metadata schema is
+        /// still read too, so nothing it required before is required any less.
+        /// </remarks>
+        private string ValidateRequiredArguments(MEAI.FunctionCallContent fc, MEAI.AIFunction aiFunc)
         {
+            // WHY: looked up by registered name only, for the reason given in ResolveSchemaForHint.
             ILlmTool tool = _originalTools.FirstOrDefault(t =>
                 string.Equals(t.Name, fc?.Name, StringComparison.Ordinal));
-            if (tool == null || string.IsNullOrWhiteSpace(tool.ParametersSchema) ||
-                tool.ParametersSchema.Trim() == "{}")
+            List<string> required = IsMeaningfulSchema(tool?.ParametersSchema)
+                ? LlmToolRequiredArguments.Read(tool.ParametersSchema)
+                : new List<string>();
+            if (aiFunc != null)
+            {
+                foreach (string name in LlmToolRequiredArguments.Read(aiFunc.JsonSchema))
+                {
+                    if (!required.Contains(name))
+                    {
+                        required.Add(name);
+                    }
+                }
+            }
+
+            if (required.Count == 0)
             {
                 return "";
             }
 
-            List<string> missing = LlmToolRequiredArguments.FindMissing(
-                LlmToolRequiredArguments.Read(tool.ParametersSchema), fc?.Arguments);
+            List<string> missing = LlmToolRequiredArguments.FindMissing(required, fc?.Arguments);
             if (missing.Count == 0)
             {
                 return "";
             }
 
-            string schema = CompactSchema(tool.ParametersSchema, 1200);
-            return
-                $"Error: Tool '{tool.Name}' is missing required argument(s): {string.Join(", ", missing)}. " +
-                $"Retry the same tool call with JSON arguments matching this schema: {schema}";
+            string schema = ResolveSchemaForHint(fc?.Name, aiFunc);
+            string hint = string.IsNullOrEmpty(schema)
+                ? ""
+                : $" Retry the same tool call with JSON arguments matching this schema: {schema}";
+            return $"Error: Tool '{fc?.Name}' is missing required argument(s): {string.Join(", ", missing)}.{hint}";
         }
 
         private static string CompactSchema(string schema, int maxChars)

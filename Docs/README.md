@@ -34,7 +34,7 @@ Use these paths when you have a concrete task:
 | Debug LLM requests, streaming, or WebGL SSE | CoreAiUnity streaming docs -> CoreAI routing docs -> transport-specific source comments |
 | Add a new LLM tool | Tool-calling best practices -> AgentBuilder -> relevant tests |
 | Expose Lua or AI-authored scripts | Lua sandbox security -> runtime binding code -> sandbox tests |
-| Decide what to build next | Module audit -> TODO -> orchestration plan |
+| Decide what to build next | Roadmap -> TODO -> orchestration plan |
 
 ## Roblox-style mod API (Rbx)
 
@@ -44,8 +44,8 @@ The Lua surface a mod builds worlds with, and the artifacts it produces:
 |---|---|
 | [Assets/CoreAI/Docs/RBX_API.md](../Assets/CoreAI/Docs/RBX_API.md) | User-facing reference: `Instance.new`, datatypes, services, `BasePart.Material`/`MaterialVariant`, `MaterialService`, and `Part.Color`, saving/loading a world, the documented `RemoteFunction` timeout deviation. |
 | [CoreAIMods/WORLD_PACKAGE.md](CoreAIMods/WORLD_PACKAGE.md) | The `.world` package format, validation limits, manual slots vs. the autosave ring, the confirm/reject load flow, and runtime session replacement. |
-| [Assets/CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md](../Assets/CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md) | The procedural shader catalog behind `Enum.Material`: it defines all 45 items and the magenta diagnostic fallback; six of them are overridden by the texture catalog at runtime. |
-| [Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md](../Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md) | Catalog-driven texture materials: six packaged CC0 sets, project-local override catalog for any of the 45 items (ambientCG downloader, Quixel Bridge / Fab importer), projection and tint rules. |
+| [Assets/CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md](../Assets/CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md) | The procedural shader catalog behind `Enum.Material`: it defines all 45 items and the magenta diagnostic fallback; the packaged texture catalog overrides thirty-six of them at runtime, and the other nine stay procedural. |
+| [Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md](../Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md) | Catalog-driven texture materials: thirty-six packaged CC0 sets, project-local override catalog for any of the 45 items (ambientCG downloader, Quixel Bridge / Fab importer), projection and tint rules. |
 | [CoreAIMods/RBX_API_SKILL.md](CoreAIMods/RBX_API_SKILL.md) | How the agent-facing `Rbx API` skill text is produced and kept in sync. |
 | [CoreAIMods/ROBLOX_API_ROADMAP.md](CoreAIMods/ROBLOX_API_ROADMAP.md) | The definitive MVP0–MVP17 ladder and every locked API decision. |
 | [CoreAIMods/mod-authoring.md](CoreAIMods/mod-authoring.md) | Writing a CoreAI Lua mod: the `@coreai` header, the always-available mod API, capability tiers, Roblox-style signals and services, the per-resume execution budget, bundled mods. |
@@ -58,7 +58,7 @@ The Lua surface a mod builds worlds with, and the artifacts it produces:
 
 | Document | Purpose |
 |---|---|
-| [CoreAI/AGENT_ROLES_AND_TOOLS.md](CoreAI/AGENT_ROLES_AND_TOOLS.md) | The built-in agent roles, the tools each one has wired by default, and what that lets it do; every claim cited to source. |
+| [CoreAI/AGENT_ROLES_AND_TOOLS.md](CoreAI/AGENT_ROLES_AND_TOOLS.md) | The built-in agent roles, the tools each one has wired by default, and what that lets it do; every claim names the type or method behind it. |
 | [CoreAI/agent-vision.md](CoreAI/agent-vision.md) | Agent vision: capturing what a camera renders for the LLM, and the rule that the player's camera is never hijacked. |
 
 ## Product And Planning
@@ -81,7 +81,7 @@ technical decision into a public package document instead.
 
 ## Documentation Rules
 
-- Keep detailed package docs in English unless the file is explicitly marked `_RU`.
+- Write all documentation in English; quoted model inputs may stay verbatim and are marked as quoted.
 - Keep changelogs historical; move current user guidance into stable docs.
 - Link every new stable guide from the nearest package index and, when it is
   repository-wide, from this file.

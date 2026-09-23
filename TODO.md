@@ -1,6 +1,6 @@
 # TODO
 
-> Updated 2026-09-10. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-09-24. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
 > Released: 7.3.1 (2026-09-02, all six packages in lockstep — WebGL tool-turn fix); 7.3.0 (2026-09-02, lockstep — MVP2.5 persistence release); 7.2.0 (2026-09-02, `com.neoxider.coreai` + `.coreaiunity` only); 7.1.1 (2026-08-31, `com.neoxider.coreai` + `.coreaiunity`); 7.1.0 (2026-08-30, all six packages
 > in lockstep); 7.0.7 (2026-08-27); 7.0.0 (2026-08-01) added `McpServerInfo.Version`. The browser gate passed on 2026-09-02; see the section below.
@@ -9,6 +9,44 @@
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
+
+## 7.45.0 audit wave: 7.44.x re-audited, pipeline cancellation unified, docs swept (2026-09-24)
+
+Five audits (7.44.2 `call_skill_tool`; 7.44.0/7.44.1 cancellation; 7.44.0/7.44.1 chat panel; English docs,
+two passes) and the fixes they led to — see both CHANGELOGs, 7.45.0. Verified in Unity 6000.3.14f1:
+full EditMode 5133 total / 5122 passed / 0 failed / 11 skipped (2026-09-19); full PlayMode 157 total against
+the local muse bridge, then every failing case re-run against LM Studio (`huihui-ai/qwen3.8-27b-abliterated`):
+all pass except the castle showcase (below); both real-model Stop tests pass (2026-09-24); portable
+1518 / 1518. The two EditMode failures of the first run and one PlayMode failure were test setups, not code:
+a panel built on an inactive object never reaches `OnEnable`, and `DeadlineCancellation` counts in both
+`CancelledCompletions` and `DeadlineCancelledCompletions` by design.
+
+- [ ] **Castle showcase live test** (`RbxCastleMaterialsShowcaseLivePlayModeTests`) times out after 3000 s on
+      a local 27B model at ~25 tok/s, and the muse bridge produced no tool calls at all. Model speed and
+      capability, not a CoreAI defect; re-run it on a fast tool-calling endpoint (OpenRouter free tier is an
+      option once a key is configured) before claiming the scenario green.
+- [ ] **Owner decisions raised by the audits (code unchanged, docs describe today's behaviour):**
+      remove the deprecated `CoreAiLuaWorldModule` Full flags and the ignored `RegisterWorldCommands`
+      parameters entirely; wire `LuaCsAiEnvelopeProcessor` into a composition or delete it (nothing constructs
+      it); expose custom world-command handlers and `LuaCsModStackOptions.AdditionalGameplayBindings` through
+      the standard composition (`TODO(moddableunits-binding-seam)`); `ICoreAISettings.EnableLuaOnWebGl` is
+      serialized but read by nothing; `CircuitBreakerLlmClientDecorator` is public but not composed by the
+      default pipeline; `LoggingLlmClientDecorator.Unwrap` stops at `TimeoutLlmClientDecorator`, not at the
+      backend; the default chat UI strings (stop/send/clear tooltips) are Russian;
+      `conversationRolledSummaryMaxTokens` is 0 on the asset but 2048 in the portable defaults; `Max Concurrent`
+      below 4 is raised to 4 by `LlmPipelineInstaller`.
+- [ ] **Stale XML docs and comments** found during the docs sweep: `LuaCsGameToolExecutor`,
+      `LuaCsAiEnvelopeProcessor` and `LuaCsModRuntimeFactory` still name MoonSharp-era types
+      (`IGameLuaRuntimeBindings`, `CoreAI.Sandbox.LuaApiRegistry`, `GameLuaToolExecutor`);
+      `CoreAIBuildMenu.TryCreateLlmUnityObjects` still says LLMUnity is called through `Chat(...)`;
+      `CoreAIG11WebGlBuild.Build` says "frozen 15-scene set" while `FrozenScenePaths` holds 17.
+- [ ] **In-place mutation of a client's result outside failure re-classification (low):** `AiOrchestrator`
+      rewrites `Content` of a successful result, `StartsNewMessage` and `Text` of streamed chunks, and
+      `CoreAiChatPanel.SetExternalFailure` / the formatted-content path rewrite `outcome.Completion` in place.
+      Failure rewrites are copies since 7.45.0 (`WithError`); these are the remaining sites.
+- [ ] **`FileLuaScriptVersionStore` re-reads its file on every synchronous call** (the planned cache was never
+      built) — see `dev-docs/MOD_SYSTEM_DESIGN_NOTES.md`.
+- [ ] **CI Unity jobs** still stop at "UNITY_LICENSE is required" — the secret has to be added by the owner.
 
 ## 7.44.2 skill-tool required arguments (2026-09-17)
 
@@ -21,16 +59,16 @@ demands `read_skill` when the exact call is given. Verified in Unity 6000.3.14f1
 suite on 2026-09-17: 4949 total, 4938 passed, 0 failed, 11 skipped (new cases in
 `SkillToolAvailabilityEditModeTests` and `ToolExecutionPolicyEditModeTests`).
 
-- [ ] **Release:** commit, push, tag `v7.44.2` (all seven packages already bumped by
-      `tools/bump_version.py`), then move RedoSchool's manifest pins to `#v7.44.2` and refresh its
-      `packages-lock.json` hashes.
-- [x] **Built-in tools and the empty-string change:** `execute_lua` must not run blank code, and it had
-      relied on the policy refusing it; `LuaTool` now refuses whitespace-only code itself
-      (`LuaToolEditModeTests.ExecuteAsync_WhitespaceOnlyCode_ReturnsErrorWithoutCallingExecutor`).
+- [x] **Release:** committed, pushed, tagged `v7.44.2`.
+- [ ] Move RedoSchool's manifest pins to the current tag and refresh its `packages-lock.json` hashes.
+- [x] **Built-in tools and the empty-string change:** `execute_lua` refuses whitespace-only code itself
+      (`LuaToolEditModeTests.ExecuteAsync_WhitespaceOnlyCode_ReturnsErrorWithoutCallingExecutor`). The 7.45.0
+      audit found three more built-ins that relied on the policy refusing `""` — `save_world`, `load_world`
+      and `load_autosave` threw from inside the tool body; they now refuse an invalid name as a JSON result.
 - [ ] **Watch the empty-string change in consumer tools:** tools outside this repo that relied on the
       policy refusing `""` for a required parameter now receive it. A consumer-reported case goes here.
 
-## 7.44.0 timeout-vs-cancel wave: EditMode gate still owed (2026-09-17)
+## 7.44.0 timeout-vs-cancel wave (2026-09-17; gate run 2026-09-19)
 
 The fix (`LlmCancellation`, the panel's `ResolveCancelledMessage`, resend dedupe in `AiOrchestrator`,
 caller-token guards in fallback/retry) was verified only by `dotnet build` of `CoreAI.Core`,
@@ -39,7 +77,9 @@ history, streaming-timeout, `EndsTurn` and classifier scenarios against the buil
 green; a mutation that disabled the dedupe and the streaming classification turned five of them red).
 The Unity-side fixtures never ran.
 
-- [ ] **Verification gate (next editor session):** run `CoreAiChatPanelResolveTimeoutMessageEditModeTests`,
+- [x] **Verification gate — ran with 7.45.0:** the full EditMode suite is green (5133 / 5122 / 0 / 11) and
+      `AiOrchestratorHistoryEditModeTests` now runs in the portable CI leg as well. Originally listed:
+      run `CoreAiChatPanelResolveTimeoutMessageEditModeTests`,
       `AiOrchestratorHistoryEditModeTests`, `MeaiStreamingToolCallEditModeTests`,
       `ResilienceFeaturesEditModeTests`, `LoggingLlmClientDecoratorEditModeTests`,
       `RoutingLlmClientEditModeTests` (assembly `CoreAI.Tests`, namespace `CoreAI.Tests.EditMode`) and the core

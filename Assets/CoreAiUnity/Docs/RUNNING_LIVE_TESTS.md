@@ -185,11 +185,11 @@ Live tests skip with a clear, actionable reason:
 ## Picking a model for the building tests
 
 The castle showcase asks for 40+ parts across eight sections, which is a long agentic run. Measured on
-this machine against LM Studio (timings from a logging proxy in front of the server):
+a development machine against LM Studio (timings from a logging proxy in front of the server):
 
 | Model | Result |
 |---|---|
-| `claude-sonnet-5` via `agent.sh openai-server -e claude` | passes — 86 parts, 15 materials, all 5 shapes, ~11 turns |
+| `claude-sonnet-5` through a local CLI subscription bridge ([SUBSCRIPTION_BRIDGE](SUBSCRIPTION_BRIDGE.md)) | passes — 86 parts, 15 materials, all 5 shapes, ~11 turns |
 | `qwen_qwen3.5-2b` | fast (~27 s/turn) but too weak: Luau syntax errors, burns its error budget on exploration |
 | `ling-3.0-tiny` | native tool calls work, but 376–602 s per turn on the ~5k-token Programmer prompt — it cannot finish inside any sane budget |
 | `qwen3.8-27b-*`, `ornith-1.5-35b-a3b-*` | fail to load in LM Studio (`LM Link peer_keepalive_timeout`, `Engine protocol startup was aborted`) |

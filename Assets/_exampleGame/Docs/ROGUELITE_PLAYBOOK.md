@@ -18,7 +18,7 @@
 
 ## Lessons from GameDev-Last-War (Reference Architecture)
 
-The `D:\Git\GameDev-Last-War` project is a large production codebase: **Clean Architecture**, **VContainer**, **MessagePipe**, **R3**, **UniTask**, **ECS (Entities)** for heavy visual parts, **gRPC / MagicOnion**, **PlayFab**, **SQLite**, **Serilog/ZLogger** logging, and **NSubstitute** tests.
+The GameDev-Last-War reference project (kept outside this repository) is a large production codebase: **Clean Architecture**, **VContainer**, **MessagePipe**, **R3**, **UniTask**, **ECS (Entities)** for heavy visual parts, **gRPC / MagicOnion**, **PlayFab**, **SQLite**, **Serilog/ZLogger** logging, and **NSubstitute** tests.
 
 For a **lightweight** roguelite example in CoreAI, pulling in the whole stack is **not required**: it is enough to reuse the **layering idea** (Domain -> UseCases -> Presentation) and DI, then add networking/backend pieces only when needed.
 
@@ -26,7 +26,7 @@ For a **lightweight** roguelite example in CoreAI, pulling in the whole stack is
 
 This example is already wired up in the monorepo. The pieces below are in place today:
 
-1. **CoreAI** is available via UPM **`com.neoxider.coreai`** (`Assets/CoreAI` in the monorepo; external project - Git URL **`?path=Assets/CoreAI`**) for AI orchestration, Lua sandbox, and events; the **`CoreAiUnity`** host provides tests, prompts in **Resources**, and the **`_mainCoreAI`** scene.
+1. **CoreAI** is available via UPM **`com.neoxider.coreai`** (`Assets/CoreAI` in the monorepo; external project - Git URL **`?path=Assets/CoreAI`**) for AI orchestration and events; the **`CoreAiUnity`** host (`com.neoxider.coreaiunity`) provides the Unity composition, tests, prompts in **Resources**, and the **`_mainCoreAI`** scene; the Lua sandbox and mod runtime are the optional **`com.neoxider.coreaimods`** package (`Assets/CoreAIMods`).
 2. **VContainer + MessagePipe + R3** are already dependencies in **`Packages/manifest.json`** (a minimal set compared to Last-War). Composition uses `RogueliteArenaLifetimeScope`.
 3. Playable scenes live in **`Assets/_exampleGame/Scenes/`**: **`RogueliteArena.unity`** (main arena, entry via `ExampleRogueliteEntry`), **`SymbiosisArena.unity`** (symbiosis mode), and **`New Scene.unity`** (scratch). See [UNITY_SETUP.md](UNITY_SETUP.md) for how the `RogueliteArena` hierarchy and `CoreAILifetimeScope` are set up.
 4. The prototype loop (spawn wave -> damage -> run loot/currency -> death screen -> hub with unlocks) runs locally without networking. Progression/meta details: [ARENA_PROGRESSION.md](ARENA_PROGRESSION.md).

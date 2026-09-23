@@ -15,9 +15,8 @@ Complete test suite for all MEAI tool calls: Memory and Execute Lua.
 | `LuaTool_CreateAIFunction_ReturnsNonNull` | AIFunction creation for Lua | `MeaiToolCallsEditModeTests.cs` |
 | `LuaTool_ExecuteAsync_EmptyCode_ReturnsError` | Empty-code validation | `MeaiToolCallsEditModeTests.cs` |
 | `LuaTool_ExecuteAsync_ValidCode_CallsExecutor` | Lua code execution | `MeaiToolCallsEditModeTests.cs` |
-| `TryParseToolCallFromText_MemoryTool_ParsesCorrectly` | memory tool call parsing | `MeaiToolCallsEditModeTests.cs` |
-| `TryParseToolCallFromText_LuaTool_ParsesCorrectly` | execute_lua tool call parsing | `MeaiToolCallsEditModeTests.cs` |
-| `TryParseToolCallFromText_NoToolCall_ReturnsFalse` | No tool call | `MeaiToolCallsEditModeTests.cs` |
+| `MemoryTool_ExecuteAsync_StrReplace_ReplacesFirstExactMatch` (and `Insert` / `Delete` / `Rename`) | Granular memory edits | `MeaiToolCallsEditModeTests.cs` |
+| `MemoryTool_ExecuteAsync_Versioning_RevertRestoresPriorSnapshot` | Memory versions and revert | `MeaiToolCallsEditModeTests.cs` |
 | `CompleteStreamingAsync_ToolJsonInStream_ExecutesToolAndReturnsFinalText` | Streaming tool cycle: tool JSON -> execute -> continued text | `MeaiLlmClientEditModeTests.cs` |
 | `CompleteStreamingAsync_ToolJsonWithVisiblePrefix_KeepsPrefixAndHidesJson` | Prefix + final text; with live SSE, the prefix chunk may temporarily contain JSON before tool extraction | `MeaiLlmClientEditModeTests.cs` |
 | `CompleteStreamingAsync_TooManyToolIterations_ReturnsTerminalError` | Protection against an infinite streaming tool loop | `MeaiLlmClientEditModeTests.cs` |
@@ -42,11 +41,11 @@ Complete test suite for all MEAI tool calls: Memory and Execute Lua.
 
 | Test | What it tests | File |
 |------|---------------|------|
-| `CheckDuplicate_FirstCall_ReturnsNull` | First call is not blocked | `ToolExecutionPolicyEditModeTests.cs` |
-| `CheckDuplicate_SameSignatureTwice_BlocksSecond` | Repeated identical call is blocked | `ToolExecutionPolicyEditModeTests.cs` |
-| `CheckDuplicate_DifferentArgs_Allowed` | Different arguments are not a duplicate | `ToolExecutionPolicyEditModeTests.cs` |
-| `CheckDuplicate_AllowDuplicatesGlobal_NeverBlocks` | Global AllowDuplicates=true | `ToolExecutionPolicyEditModeTests.cs` |
-| `CheckDuplicate_PerToolAllowDuplicates_Respected` | Per-tool AllowDuplicates flag | `ToolExecutionPolicyEditModeTests.cs` |
+| `Echo_FirstCall_Executes` | First call is not blocked | `ToolExecutionPolicyEditModeTests.cs` |
+| `Echo_SameSignatureNextTurn_IsNoOpNotExecuted` | A call repeated in a later turn is a no-op | `ToolExecutionPolicyEditModeTests.cs` |
+| `Echo_DifferentArgs_BothExecute` | Different arguments are not a duplicate | `ToolExecutionPolicyEditModeTests.cs` |
+| `Echo_AllowDuplicatesGlobal_NeverSuppresses` | Global AllowDuplicates=true | `ToolExecutionPolicyEditModeTests.cs` |
+| `Echo_PerToolAllowDuplicates_Respected` | Per-tool AllowDuplicates flag | `ToolExecutionPolicyEditModeTests.cs` |
 | `RecordSuccess_ResetsCounter` | Success resets the error counter | `ToolExecutionPolicyEditModeTests.cs` |
 | `RecordFailure_IncrementsCounter` | Failure increments the counter | `ToolExecutionPolicyEditModeTests.cs` |
 | `IsMaxErrorsReached_AtThreshold_ReturnsTrue` | Error threshold works | `ToolExecutionPolicyEditModeTests.cs` |
@@ -54,8 +53,8 @@ Complete test suite for all MEAI tool calls: Memory and Execute Lua.
 | `ExecuteSingle_ToolFound_ReturnsResult` | Found tool returns a result | `ToolExecutionPolicyEditModeTests.cs` |
 | `ExecuteSingle_ToolNotFound_ReturnsFailed` | Missing tool -> failed | `ToolExecutionPolicyEditModeTests.cs` |
 | `ExecuteBatch_AllSucceed_ResetsErrorCounter` | Batch success resets errors | `ToolExecutionPolicyEditModeTests.cs` |
-| `ExecuteBatch_DuplicateBlocked_ReturnsFailed` | Batch duplicate is blocked | `ToolExecutionPolicyEditModeTests.cs` |
-| `BuildMaxErrorsResponse_ContainsErrorText` | Max-errors response contains error text | `ToolExecutionPolicyEditModeTests.cs` |
+| `ExecuteBatch_Echo_ReturnsStructuredNoOp_NotAFailure` | A cross-turn echo in a batch returns a structured no-op, not a failure | `ToolExecutionPolicyEditModeTests.cs` |
+| `ExecuteBatch_IntraBatchIdenticalCalls_CrossTurnEchoStillBlocked` | Identical calls in one batch all run; the echo in a later turn is blocked | `ToolExecutionPolicyEditModeTests.cs` |
 
 ### EditMode Tests (Composition Reliability)
 
@@ -69,7 +68,7 @@ Complete test suite for all MEAI tool calls: Memory and Execute Lua.
 | Test | What it tests | Backend | File |
 |------|---------------|--------|------|
 | `AllToolCalls_MemoryTool_WriteAppendClear` | Write/Append/Clear memory | LLMUnity or HTTP | `AllToolCallsPlayModeTests.cs` |
-| `AllToolCalls_ExecuteLuaTool_Programmer` | Execute Lua from Programmer | LLMUnity or HTTP | `AllToolCallsPlayModeTests.cs` |
+| `ProgrammerLuaModsLivePlayModeTests` | Programmer runs Lua through `execute_lua` / mods | Configured live backend | `ProgrammerLuaModsLivePlayModeTests.cs` |
 | `CraftingMemoryLlmUnity_ThreeCrafts_AllUnique` | Crafting combat test with memory | LLMUnity | `CraftingMemoryViaLlmUnityPlayModeTests.cs` |
 
 ## Running Tests
@@ -187,14 +186,17 @@ Switch through `COREAI_PLAYMODE_LLM_BACKEND`:
 
 ## Troubleshooting
 
-### Configuring Programmer Retry Limit
+### Configuring the Tool Failure Limit
 
-Default: **3 attempts** after a Lua error. You can change it:
+A failed `execute_lua` call returns the Lua error to the model, which may retry in the same turn. The loop stops
+after **3** consecutive all-failed tool batches by default. You can change it:
 
 ```csharp
 // Before system initialization:
-CoreAISettings.MaxLuaRepairRetries = 5; // Increase to 5
+CoreAISettings.MaxToolCallRetries = 5; // Increase to 5
 ```
+
+`CoreAISettings.MaxLuaRepairRetries` applies only to the opt-in `LuaCsAiEnvelopeProcessor` repair path.
 
 ### LLMUnity Does Not Load
 - Check that the GGUF model exists

@@ -2,6 +2,89 @@
 
 ## [Unreleased]
 
+## [7.45.0] - 2026-09-24
+
+### Security
+
+- **A host Lua binding could be handed a capability tier the host withheld.** `LuaCsModStackOptions.AdditionalGameplayBindings`
+  — the seam a scene uses to register its own Lua functions — received the tiers the SCRIPT ASKED FOR, while the
+  built-in surface next to it registered `host ceiling & request`. A mod whose manifest said `capabilities: All, Full`
+  under a composition without `enableFullLuaAccess` therefore handed the `Full` bit to every host extension that
+  gates privileged APIs on it, and the one-off `execute_lua` path passed `OneOffCapabilities` without applying the
+  ceiling at all. The seam now always receives the effective set, computed in one place
+  (`LuaCsGameplayBindings.EffectiveCapabilities`): the ceiling intersected with the request for a persistent mod, and
+  the ceiling intersected with the one-off tier for `execute_lua` (all three actor/envelope registrations included).
+  The built-in surface was never affected — it withheld those APIs correctly.
+
+### Fixed
+
+- **`call_skill_tool` refuses a type-mismatched argument BEFORE binding.** `{"accepted": "yes"}` for a `bool` used to
+  fail inside MEAI's binder — the same failure 7.44.2 fixed for a MISSING argument: a bare binder message, and a call
+  the policy had to treat as possibly executed, so the turn could not retry. `TryResolveInvocation` now runs the same
+  structural preflight as the direct path (`LlmToolArgumentPreflight`) against the binder that will actually bind, and
+  the refusal names the tool, the argument, the expected parameters and says the tool was NOT executed. An enum name
+  and a JSON object argument still bind exactly as MEAI binds them.
+- **A missing required argument is refused from the bound function's own schema too.** `ValidateRequiredArguments` read
+  only the tool's metadata schema, so a tool publishing `{}` (a multi-function wrapper, or a tool that never declared
+  one) let a missing argument reach the binder and fail inside the invocation. Required names are now the union of the
+  metadata schema and `AIFunction.JsonSchema`; the retry hint falls back to the function schema.
+- **Multi-function tool wrappers are callable again.** Since the fail-closed name repair in 5.6.0, a call to a function
+  of an `IAIFunctionsLlmTool` (`camera_look`, `camera_list`, `screenshot`, `find_objects`, `get_hierarchy`,
+  `get_transform`, `set_transform`, `capture_camera`) was refused before execution with
+  `Unknown tool 'camera_look'. Available tools: [camera]` — the provider is offered the functions, the policy knew only
+  the wrapper. `ToolExecutionPolicy` now resolves every callable function name to its wrapper (built once per policy),
+  so those calls run, under the wrapper's `ToolTimeoutMsOverride` / `EndsTurn` / `IsMutating` / `AllowDuplicates`, with
+  the existing casing repair and ambiguity rule. The "Available tools" list in the prompt and in refusals, the
+  text-shaped call extraction and the stripping of a leaked text call all use the same names.
+- **`AiTaskRequest.AllowedToolNames` understands wrapper function names.** Allowing `camera_look` used to drop the whole
+  `camera` wrapper; it now keeps the wrapper narrowed to the allowed functions, while the wrapper's own name still
+  allows all of them.
+- **A failure reported after the caller cancelled is the caller's cancellation, everywhere.** `LlmCancellation.Classify`
+  said so for a thrown fault, but `ClassifyCode` rewrote only `Timeout`, so a failed result or terminal chunk kept its
+  own code and the same user Stop was reported two ways — and a non-`OperationCanceledException` fault raced by a Stop
+  was still classified `None` and surfaced as a provider error. Both now follow one rule: once the caller's token is
+  cancelled, any fault and any failure code is `Cancelled` (`"cancelled"` text), for the user-facing code, the
+  completion metric and the circuit breaker alike. Endpoint health is the documented exception — see
+  `com.neoxider.coreaiunity`.
+- **`CircuitBreakerLlmClientDecorator` no longer counts a cancelled turn as a backend failure.** A `Timeout` or
+  `ProviderError` chunk, or a typed/untyped throw, arriving after the caller cancelled was recorded as a failure and
+  could open the breaker on a backend nobody was waiting for; the half-open probe slot is released instead. Transport
+  timeouts with the caller alive (typed `LlmClientException(Timeout)`) still count.
+- **`DeadlineCancellation` is recorded for a library timeout however it arrived.** The default pipeline's
+  `TimeoutLlmClientDecorator` yields a `Timeout` CHUNK on the streaming path and throws only on the other one, so the
+  same dead backend produced two different metrics — the chunk counted as `ProviderFailure`. Stream open and the pump
+  loop now agree. A library timeout that the caller's own Stop had already raced is attributed to the caller.
+- **Decorators no longer mutate a result the inner client returned.** `TimeoutLlmClientDecorator` (non-streaming) and
+  `AiOrchestrator.NormalizeTaskFailure` rewrote `ErrorCode`/`Error` in place on an instance an inner client may reuse
+  or cache; they now return a `WithError` copy. A `Cancelled` result rewritten to `Timeout` also carries the
+  "LLM request timed out." text, matching the streaming path.
+- **The role history is read once per request.** The resend-of-an-unanswered-turn rule added a second
+  `GetChatHistory(roleId, 1)` on every request — on `FileAgentMemoryStore` a synchronous gate wait on the Unity main
+  thread behind any in-flight append. The decision now comes from the same read that builds the prompt, and is still
+  made once and consumed by both the prompt and the teardown append. The one-message read remains only for teardown
+  paths that never built a request.
+- **The world-package tools refuse an invalid name as a tool result, not an exception.** `save_world`, `load_world` and
+  `load_autosave` passed the name straight to the store, which threw `ArgumentException` from inside the tool body —
+  traced "native", so the turn could not retry. They now validate first (blank or whitespace, 1-64 characters of
+  letters, digits, `-` and `_`, no reserved Windows device name; autosaves: exactly one `.world` file name without a
+  path) and return `success:false` with an actionable `error` (`status:"invalid_argument"` for the load tools) without
+  calling the service. `FileRbxWorldPackageStore` still throws the same messages for direct callers.
+- **The "Rbx API" skill listed neither `Humanoid` nor `Backpack`** among the classes `Instance.new` can create, although
+  `ClassCatalog` marks them creatable — the section closes with "any other name errors", so the omission read as a ban.
+
+### Changed
+
+- `LlmCancellation` gained `WrapAsCancellation` (raise the caller's cancellation with the fault attached),
+  `FindClientException` (the typed refusal behind such a cancellation) and `CancelledErrorText`;
+  `LlmCompletionResult.WithError` / `LlmStreamChunk.WithError` are the copy-on-write rewrites every layer now uses.
+  `ClassifyCode` applies the rule above — **behaviour change** for a host that read a provider code off a result whose
+  caller had already cancelled.
+- `LlmToolRequiredArguments` moved to its own file and `ToolExecutionPolicy`'s structural preflight became the shared
+  `LlmToolArgumentPreflight`; a `SkillToolDescriptor` parses its schema once, and a wrapper's callable function names
+  are built once per wrapper instance instead of on every prompt, policy and allowlist pass (an `IAIFunctionsLlmTool`
+  must therefore keep a fixed function set per instance — now documented, as is the allowlist proxy that forwards only
+  the `ILlmTool` members).
+
 ## [7.44.2] - 2026-09-17
 
 ### Fixed

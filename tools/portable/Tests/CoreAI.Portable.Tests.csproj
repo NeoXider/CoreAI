@@ -40,6 +40,7 @@
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/AgentSkillInjectionEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/AgentSkillInjectionEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/AiAttachmentEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/AiAttachmentEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/AiOrchestrationQueueSizingEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/AiOrchestrationQueueSizingEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/AiOrchestratorHistoryEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/AiOrchestratorHistoryEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/AiOrchestratorRefactorEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/AiOrchestratorRefactorEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/AiOrchestratorStreamingEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/AiOrchestratorStreamingEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/AiPromptComposerRepairEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/AiPromptComposerRepairEditModeTests.cs" />

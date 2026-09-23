@@ -60,6 +60,9 @@ the commit boundary: cleanup never authorizes replay after that boundary.
 `ErrorCode` classifies a streaming failure even when its optional `Error` text is empty, including
 chunks emitted by the default `ILlmClient` completion-to-stream adapter. Permanent codes are never
 retried; retry exhaustion preserves the original transient error chunk and HTTP/retry metadata.
+Once the caller's token is cancelled nothing is retried or sent to the fallback backend: every fault,
+error chunk included, is reported as the caller's cancellation (`LlmCancellation`); a layer that has to
+throw raises `OperationCanceledException` with the original fault as its `InnerException`.
 Null control entries are ignored before commit. A stream containing only null entries still reaches
 the bounded empty-response retry policy when its enumeration ends.
 

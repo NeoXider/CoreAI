@@ -8,10 +8,11 @@ can reach arbitrary scene `GameObject`s and components via reflection bindings
 (`unity_find`, `unity_set_position`, `unity_set_member`, `unity_get_member`,
 `unity_list_components`, `unity_call`) and scene helpers (`unity_list_objects`,
 `unity_find_by_component`, `unity_describe_object`, transform/hierarchy setters), when
-**Enable Full Lua Access** is on for the `CoreAILifetimeScope`.
+**Enable Full Lua Access** is on for the scene's `CoreAiModsLifetimeScope` (the child scope that
+installs the mod runtime).
 
-The scene `FullAccessDemo.unity` ships ready to run: Full access is enabled on the scope and the
-prompt buttons load real mods. The scene starts with an **empty world** — nothing is auto-spawned.
+The scene `FullAccessDemo.unity` ships ready to run: Full access is enabled on the mods scope and the
+chat's `≡` example-prompt menu loads real mods. The scene starts with an **empty world** — nothing is auto-spawned.
 The `unity_*` reflection examples below target a GameObject named `TargetCube`; assign one on the
 `FullAccessHubDemoController` in the inspector (or have a mod spawn it) before running them.
 
@@ -21,22 +22,27 @@ Full access is split by member visibility:
 
 - **Default** — reflection exposes only **public** fields, properties and methods. Private
   internals stay hidden.
-- **Opt-in** — turn on **Enable Full Lua Private Access** on the `CoreAILifetimeScope` to
+- **Opt-in** — turn on **Enable Full Lua Private Access** on the `CoreAiModsLifetimeScope` to
   additionally reach non-public members. This is a strictly stronger grant; leave it off
   unless a tool genuinely needs private state.
 
-(The split is implemented in `CoreAiFullUnityLuaRuntimeBindings`; the DI flag is
-`enableFullLuaPrivateAccess`, wired through `WorldCommandsInstaller.RegisterWorldCommands`.)
+(The split is implemented in `LuaCsFullUnityRuntimeBindings`; the flag is the scope's
+`enableFullLuaPrivateAccess`, passed to `CoreAiModsInstaller.RegisterCoreAiMods` and readable through
+`CoreAiModsLifetimeScope.FullLuaPrivateAccessEnabled`. The scene's `CoreAiLuaWorldModule` no longer
+shows Full-access checkboxes; its legacy serialized values have no effect.)
 
 ## Requirements
 
 - `COREAI_LUA` defined.
 - LM Studio / OpenAI-compatible endpoint in `Resources/CoreAISettings`.
-- On the `CoreAI` scope: **Enable Full Lua Access = true** (already set in the demo scene).
+- On the scene's `CoreAiModsLifetimeScope`: **Enable Full Lua Access = true** (already set in the
+  demo scene).
 
 ## Try it
 
-Press Play and use the **Full Access mod prompts** buttons:
+Press Play, assign a `TargetCube` (see above), open the chat and type requests like these — the
+scene has no prompt buttons for them. The chat's `≡` examples menu offers the generic Tetris, Clicker,
+castle and broken-arena prompts:
 
 1. **Lift the cube** — `unity_find('TargetCube')` + `unity_set_position(id, 0, 2, 0)`.
 2. **Grow the cube** — writes `Transform.localScale` via `unity_set_member`.
@@ -90,16 +96,22 @@ built-in Chat / Settings / Statistics and the live Mods page.
 WebGL builds can drive the same controller via `SendMessage("LuaPlatformExample", "RunSelfTest" |
 "StartTetris" | "StopTetris" | "DumpStatus")`. The same player-only harness also accepts string
 arguments for `CreateWorldMarker(name)`, `SaveWorld(slot)`, `RequestWorldLoad(slot)`, and
-`DumpWorldMarker(name)`. Marker names and slots accept only ASCII letters, digits, `-`, and `_`;
-stable `WORLD_MARKER_*`, `WORLD_SAVE`, and `WORLD_LOAD_REQUEST` log markers report each request and
-outcome. `CreateWorldMarker` executes through the production `execute_lua` backup gate, while save
+`DumpWorldMarker(name)`. The harness trims each argument and accepts only ASCII letters, digits, `-`,
+and `_` — 1-32 characters for marker names, 1-64 for slots; anything else is logged as
+`failure reason=invalid-name` / `invalid-slot` and never reaches the world service. Slots then pass the
+world service's own rules, which also refuse reserved Windows device names such as `CON`: the harness
+calls `IRbxWorldRuntimeService` directly rather than the `save_world` / `load_world` tools, so such a
+refusal is logged as `failure reason=ArgumentException` instead of the tools' JSON
+`invalid_argument` result. Stable `WORLD_MARKER_*`, `WORLD_SAVE`, and `WORLD_LOAD_REQUEST` log markers
+report each request and outcome. `CreateWorldMarker` executes through the production `execute_lua` backup gate, while save
 and load-request calls use `IRbxWorldRuntimeService`. There is deliberately no confirmation command:
 after `RequestWorldLoad`, approve or reject the metadata-only request in Hub → **World Loads**.
 
 ## Safety
 
 Full access is **opt-in** and gated behind the Full capability tier. Public-only is the
-default member surface (see above). The Lua-CSharp sandbox (no `io`/`os`/`load`),
+default member surface (see above). The Lua-CSharp sandbox (no `io`/`load`, and `os` limited to
+`os.time`/`os.clock`),
 instruction and time limits, and the quarantine-on-repeated-errors policy still apply.
 A type/member blacklist is available through `IFullLuaAccessBlacklistPolicy`; see
 `Assets/CoreAI/Docs/LUA_ACCESS_MODES.md`.

@@ -124,9 +124,11 @@ namespace CoreAI
 
         /// <summary>
         /// Run the Lua sandbox on the WebGL player. Default <c>true</c>.
-        /// Lua works on all other players regardless of this flag; it gates only the WebGL/IL2CPP path,
-        /// which additionally requires link.xml stripping protection (shipped). The Full reflection tier
-        /// (<c>unity_*</c>) is always force-disabled on WebGL even when this is <c>true</c>.
+        /// Lua works on all other players regardless of this flag; it is meant to gate only the WebGL/IL2CPP
+        /// path, which additionally requires link.xml stripping protection (shipped). No Lua runtime reads the
+        /// flag yet, so <c>false</c> does not currently stop Lua on WebGL. The Full reflection tier
+        /// (<c>unity_*</c>) has no WebGL-specific block: it is granted only by the mods composition
+        /// (<c>CoreAiModsLifetimeScope</c>, "Enable Full Lua Access"), on WebGL as on every other player.
         /// </summary>
         bool EnableLuaOnWebGl => true;
 

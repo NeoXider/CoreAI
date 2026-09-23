@@ -126,34 +126,47 @@ namespace CoreAI.Ai
     /// The one rule every layer uses to tell a library timeout from a cancellation.
     /// <list type="number">
     /// <item>The caller's own token was cancelled: <see cref="LlmErrorCode.Cancelled"/>, whatever the
-    /// exception says. The caller asked to stop; a timer that raced it does not change that.</item>
+    /// exception is - an <see cref="OperationCanceledException"/>, a library timeout, a typed
+    /// <see cref="LlmClientException"/> or an untyped transport fault. The caller asked to stop; whatever the
+    /// pipeline reported while stopping is the stop, for the user-facing code, the completion metric and the
+    /// circuit breaker alike. Endpoint health is the one consumer that still looks at the fault itself: a
+    /// permanent refusal that raced the cancel is found through <see cref="FindClientException"/>.</item>
     /// <item>An <see cref="LlmOperationTimeoutException"/> (also inside an <see cref="AggregateException"/>):
     /// <see cref="LlmErrorCode.Timeout"/>. The library raises that type only when its own deadline fired
     /// while the caller's token was alive.</item>
-    /// <item>Any other <see cref="OperationCanceledException"/>: <see cref="LlmErrorCode.Cancelled"/> -
-    /// someone other than the caller stopped the work (<c>CoreAi.StopAgent</c>, a cancellation scope,
-    /// a disposed orchestrator). It is not a timeout, and it must not be presented as one.</item>
+    /// <item>Any other <see cref="OperationCanceledException"/> (also inside an <see cref="AggregateException"/>):
+    /// <see cref="LlmErrorCode.Cancelled"/> - someone other than the caller stopped the work
+    /// (<c>CoreAi.StopAgent</c>, a cancellation scope, a disposed orchestrator). It is not a timeout, and it
+    /// must not be presented as one.</item>
+    /// <item>Anything else while the caller is alive: <see cref="LlmErrorCode.None"/> - a failure the layer
+    /// classifies by its own means (the typed code of an <see cref="LlmClientException"/>, or a provider error).</item>
     /// </list>
     /// </summary>
     public static class LlmCancellation
     {
+        /// <summary>Error text every layer uses for a failure it reports as the caller's cancellation.</summary>
+        public const string CancelledErrorText = "cancelled";
+
         /// <summary>
         /// Classifies <paramref name="exception"/> against the caller's token (see the class summary). Returns
-        /// <see cref="LlmErrorCode.None"/> when the exception is neither a timeout nor a cancellation.
+        /// <see cref="LlmErrorCode.None"/> only while the caller is alive and the exception is neither a timeout
+        /// nor a cancellation.
         /// </summary>
         public static LlmErrorCode Classify(Exception exception, CancellationToken callerToken)
         {
-            if (exception == null)
-            {
-                return callerToken.IsCancellationRequested ? LlmErrorCode.Cancelled : LlmErrorCode.None;
-            }
-
-            // WHY the InnerException chain is walked only for a cancelled caller: then any error that grew out of
-            // the cancellation IS the cancellation. While the token is alive, a transport error with a nested
-            // TaskCanceledException is a failure, and reading it as a stop hid real outages.
-            if (callerToken.IsCancellationRequested && IsCancellationLike(exception, followInnerExceptions: true))
+            // WHY no look at the exception once the caller has cancelled: a transport that is being torn down
+            // reports the fallout (a disposed socket, an aborted request, a timer that raced the stop), not the
+            // cause. Reading the fault instead of the token made the layers disagree - one presented a
+            // provider error, the next counted an outage, a third retried - about a request nobody was
+            // waiting for.
+            if (callerToken.IsCancellationRequested)
             {
                 return LlmErrorCode.Cancelled;
+            }
+
+            if (exception == null)
+            {
+                return LlmErrorCode.None;
             }
 
             if (FindTimeout(exception) != null)
@@ -161,9 +174,65 @@ namespace CoreAI.Ai
                 return LlmErrorCode.Timeout;
             }
 
-            return IsCancellationLike(exception, followInnerExceptions: false)
-                ? LlmErrorCode.Cancelled
-                : LlmErrorCode.None;
+            // WHY the InnerException chain is NOT walked here: while the token is alive, a transport error
+            // with a nested TaskCanceledException is a failure, and reading it as a stop hid real outages.
+            return IsCancellationLike(exception) ? LlmErrorCode.Cancelled : LlmErrorCode.None;
+        }
+
+        /// <summary>
+        /// The <see cref="OperationCanceledException"/> a layer raises for a fault it observed after the caller
+        /// cancelled: the caller's cancellation, with the fault attached as <see cref="Exception.InnerException"/>
+        /// so diagnostics and endpoint health (<see cref="FindClientException"/>) can still see what happened.
+        /// </summary>
+        /// <param name="fault">The exception the inner layer raised.</param>
+        /// <param name="callerToken">The caller's (cancelled) token.</param>
+        /// <param name="source">What failed, for the message: "the primary", "the committed stream".</param>
+        public static OperationCanceledException WrapAsCancellation(
+            Exception fault,
+            CancellationToken callerToken,
+            string source)
+        {
+            return new OperationCanceledException(
+                $"The request was cancelled by the caller; {source} then failed with {fault?.GetType().Name ?? "an unknown fault"}.",
+                fault,
+                callerToken);
+        }
+
+        /// <summary>
+        /// The first <see cref="LlmClientException"/> carried by <paramref name="exception"/>: the exception
+        /// itself, its <see cref="Exception.InnerException"/> chain, or the members of an
+        /// <see cref="AggregateException"/>; <c>null</c> when there is none.
+        /// <para>
+        /// WHY the chain is walked here, unlike in <see cref="Classify(Exception, CancellationToken)"/>: this is
+        /// for endpoint health, not for the caller. A layer that turned a post-cancel fault into
+        /// <see cref="OperationCanceledException"/> (<see cref="WrapAsCancellation"/>) keeps the refusal
+        /// attached, and an expired key or an exhausted balance is a fact about the endpoint whether or not the
+        /// caller was still listening.
+        /// </para>
+        /// </summary>
+        public static LlmClientException FindClientException(Exception exception)
+        {
+            for (Exception current = exception; current != null; current = current.InnerException)
+            {
+                if (current is LlmClientException typed)
+                {
+                    return typed;
+                }
+
+                if (current is AggregateException aggregate)
+                {
+                    foreach (Exception inner in aggregate.InnerExceptions)
+                    {
+                        LlmClientException found = FindClientException(inner);
+                        if (found != null)
+                        {
+                            return found;
+                        }
+                    }
+                }
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -185,19 +254,44 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Normalizes a terminal chunk or result code: a <see cref="LlmErrorCode.Timeout"/> reported after the
-        /// caller already cancelled is the caller's cancellation, not a timeout. Other codes pass through.
+        /// The rule of <see cref="Classify(Exception, CancellationToken)"/> for a failure reported as DATA - the
+        /// code of a failed result or of a terminal chunk: once the caller's token is cancelled, every failure
+        /// code is <see cref="LlmErrorCode.Cancelled"/>; while the caller is alive the code passes through
+        /// unchanged. <see cref="LlmErrorCode.None"/> means "no failure" and always passes through.
+        /// <para>
+        /// WHY the same rule as for a thrown fault: a pipeline that is being torn down reports the stop either
+        /// way, and a returned provider error that kept its code while the thrown one read as the stop showed
+        /// one user action as two different outcomes. A layer that rewrites the code reissues the item with
+        /// <see cref="CancelledErrorText"/> through <c>WithError</c>; endpoint health keeps judging the code the
+        /// endpoint itself reported, before the rewrite.
+        /// </para>
         /// </summary>
         public static LlmErrorCode ClassifyCode(LlmErrorCode code, CancellationToken callerToken)
         {
-            return code == LlmErrorCode.Timeout && callerToken.IsCancellationRequested
+            return code != LlmErrorCode.None && callerToken.IsCancellationRequested
                 ? LlmErrorCode.Cancelled
                 : code;
         }
 
         /// <summary>
+        /// True when a failure reported as data (a failed result, an error chunk) whose own code is
+        /// <paramref name="reported"/> must reach the caller as the caller's cancellation and does not already
+        /// say so: <see cref="ClassifyCode(LlmErrorCode, CancellationToken)"/>, with a failure that carries no
+        /// code read as the <see cref="LlmErrorCode.ProviderError"/> every layer takes it for. Call it only for
+        /// an item that failed.
+        /// </summary>
+        internal static bool IsReportedCallerStop(LlmErrorCode reported, CancellationToken callerToken)
+        {
+            LlmErrorCode failure = reported == LlmErrorCode.None ? LlmErrorCode.ProviderError : reported;
+            return reported != LlmErrorCode.Cancelled &&
+                   ClassifyCode(failure, callerToken) == LlmErrorCode.Cancelled;
+        }
+
+        /// <summary>
         /// <see cref="ClassifyCode(LlmErrorCode, CancellationToken)"/> with a separate host deadline, by the same
-        /// rule as <see cref="Classify(Exception, CancellationToken, CancellationToken)"/>.
+        /// rule as <see cref="Classify(Exception, CancellationToken, CancellationToken)"/>: a caller that cancelled
+        /// owns every failure, and a <see cref="LlmErrorCode.Cancelled"/> seen while only the deadline fired is
+        /// that deadline's <see cref="LlmErrorCode.Timeout"/>.
         /// </summary>
         public static LlmErrorCode ClassifyCode(
             LlmErrorCode code,
@@ -260,30 +354,25 @@ namespace CoreAI.Ai
             }
         }
 
-        private static bool IsCancellationLike(Exception exception, bool followInnerExceptions)
+        private static bool IsCancellationLike(Exception exception)
         {
-            for (Exception current = exception;
-                 current != null;
-                 current = followInnerExceptions ? current.InnerException : null)
+            switch (exception)
             {
-                if (current is OperationCanceledException)
-                {
+                case OperationCanceledException:
                     return true;
-                }
-
-                if (current is AggregateException aggregate)
-                {
+                case AggregateException aggregate:
                     foreach (Exception inner in aggregate.InnerExceptions)
                     {
-                        if (IsCancellationLike(inner, followInnerExceptions))
+                        if (IsCancellationLike(inner))
                         {
                             return true;
                         }
                     }
-                }
-            }
 
-            return false;
+                    return false;
+                default:
+                    return false;
+            }
         }
     }
 
@@ -411,7 +500,11 @@ namespace CoreAI.Ai
             Detail = detail ?? "";
         }
 
-        /// <summary>Tool name (matches <see cref="ILlmTool.Name"/>).</summary>
+        /// <summary>
+        /// The name the call was made under: <see cref="ILlmTool.Name"/> for an ordinary tool, the function name
+        /// (<c>camera_look</c>) for a function of an <see cref="IAIFunctionsLlmTool"/> wrapper, whose own name
+        /// (<c>camera</c>) the provider never sees.
+        /// </summary>
         public string Name { get; }
 
         /// <summary>True if the tool returned a non-error result (no <c>"success":false</c>) and did not throw.</summary>
@@ -495,6 +588,34 @@ namespace CoreAI.Ai
         /// to log <c>tools=[name(ok,12ms),name(fail,4ms)]</c>.
         /// </summary>
         public IReadOnlyList<LlmToolCallTrace> ExecutedToolCalls { get; set; } = Array.Empty<LlmToolCallTrace>();
+
+        /// <summary>
+        /// A copy with the failure rewritten to <paramref name="error"/> / <paramref name="errorCode"/>; every
+        /// other field is carried over. WHY a copy: an inner client may reuse or cache the instance it returned,
+        /// so a decorator that re-classifies a failure must not mutate what it received.
+        /// </summary>
+        public LlmCompletionResult WithError(string error, LlmErrorCode errorCode)
+        {
+            return new LlmCompletionResult
+            {
+                Ok = false,
+                Content = Content,
+                ReasoningContent = ReasoningContent,
+                Error = error ?? "",
+                ErrorCode = errorCode,
+                HttpStatus = HttpStatus,
+                RetryAfterSeconds = RetryAfterSeconds,
+                ProviderErrorBody = ProviderErrorBody,
+                Model = Model,
+                PromptTokens = PromptTokens,
+                LastRoundtripPromptTokens = LastRoundtripPromptTokens,
+                CompletionTokens = CompletionTokens,
+                TotalTokens = TotalTokens,
+                CacheReadTokens = CacheReadTokens,
+                CacheWriteTokens = CacheWriteTokens,
+                ExecutedToolCalls = ExecutedToolCalls
+            };
+        }
     }
 
     /// <summary>One streaming chunk: text fragment and completion markers.</summary>
@@ -589,6 +710,36 @@ namespace CoreAI.Ai
         /// Whether streaming text is buffered when tool declarations have no runtime binding.
         /// </summary>
         public bool BufferedStreamingNoToolBinding { get; set; }
+
+        /// <summary>
+        /// A copy with the failure rewritten to <paramref name="error"/> / <paramref name="errorCode"/>; every
+        /// other field is carried over. WHY a copy: the chunk instance may be cached or reused by the inner
+        /// client, so a decorator that re-classifies a terminal failure must not mutate what it received.
+        /// </summary>
+        public LlmStreamChunk WithError(string error, LlmErrorCode errorCode)
+        {
+            return new LlmStreamChunk
+            {
+                Text = Text,
+                StartsNewMessage = StartsNewMessage,
+                ReasoningText = ReasoningText,
+                IsDone = IsDone,
+                Error = error,
+                ErrorCode = errorCode,
+                HttpStatus = HttpStatus,
+                RetryAfterSeconds = RetryAfterSeconds,
+                Model = Model,
+                PromptTokens = PromptTokens,
+                LastRoundtripPromptTokens = LastRoundtripPromptTokens,
+                CompletionTokens = CompletionTokens,
+                TotalTokens = TotalTokens,
+                CacheReadTokens = CacheReadTokens,
+                CacheWriteTokens = CacheWriteTokens,
+                ExecutedToolCalls = ExecutedToolCalls,
+                BufferedStreamingUseToolProgressHint = BufferedStreamingUseToolProgressHint,
+                BufferedStreamingNoToolBinding = BufferedStreamingNoToolBinding
+            };
+        }
     }
 
     /// <summary>

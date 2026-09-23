@@ -211,8 +211,8 @@ namespace CoreAI.Mods.WorldPackages
         public const int MaximumWebGlSafeCollectionItems = 32768;
         public const int MaximumWebGlSafeTextCharacters = 2 * 1024 * 1024;
 
-        private const string Extension = ".world";
-        private const int MaximumNameLength = 64;
+        private const string Extension = RbxWorldPackageNames.Extension;
+        private const int MaximumNameLength = RbxWorldPackageNames.MaximumNameLength;
 
         private readonly string _manualDirectory;
         private readonly string _autoDirectory;
@@ -819,61 +819,19 @@ namespace CoreAI.Mods.WorldPackages
 
         private static string ValidateAutoFileName(string fileName)
         {
-            if (string.IsNullOrWhiteSpace(fileName)
-                || !string.Equals(fileName, Path.GetFileName(fileName), StringComparison.Ordinal)
-                || !fileName.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
+            if (!RbxWorldPackageNames.TryValidateAutoFileName(fileName, out string error))
             {
-                throw new ArgumentException(
-                    "Auto package name must be one .world file name without a path.",
-                    nameof(fileName));
+                throw new ArgumentException(error, nameof(fileName));
             }
 
             return fileName;
         }
 
-        private static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "CON", "PRN", "AUX", "NUL",
-            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
-        };
-
         private static string ValidateName(string value, string field)
         {
-            string trimmed = value?.Trim();
-            if (string.IsNullOrEmpty(trimmed) || trimmed.Length > MaximumNameLength)
+            if (!RbxWorldPackageNames.TryValidateManualSlot(value, field, out string trimmed, out string error))
             {
-                throw new ArgumentException(
-                    field + " must contain 1-" + MaximumNameLength + " characters.",
-                    nameof(value));
-            }
-
-            string baseName = trimmed;
-            int dotIndex = trimmed.IndexOf('.');
-            if (dotIndex >= 0)
-            {
-                baseName = trimmed.Substring(0, dotIndex);
-            }
-
-            if (ReservedDeviceNames.Contains(baseName))
-            {
-                throw new ArgumentException(
-                    field + " '" + trimmed + "' is a reserved device name.",
-                    nameof(value));
-            }
-
-            for (int index = 0; index < trimmed.Length; index++)
-            {
-                char character = trimmed[index];
-                bool allowed = char.IsLetterOrDigit(character)
-                               || character == '-'
-                               || character == '_';
-                if (!allowed)
-                {
-                    throw new ArgumentException(
-                        field + " may contain only letters, digits, '-' and '_'.",
-                        nameof(value));
-                }
+                throw new ArgumentException(error, nameof(value));
             }
 
             return trimmed;
@@ -904,6 +862,95 @@ namespace CoreAI.Mods.WorldPackages
             return value.Kind == DateTimeKind.Local
                 ? value.ToUniversalTime()
                 : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        }
+    }
+
+    /// <summary>
+    /// The pure naming rules of the package store, callable without touching the store: the AI tools
+    /// refuse a bad name here, before any service call, so an invalid name is an ordinary tool result
+    /// and never an exception crossing the tool invocation boundary. The store keeps throwing the same
+    /// messages for callers that bypass the tools.
+    /// </summary>
+    internal static class RbxWorldPackageNames
+    {
+        public const string Extension = ".world";
+        public const int MaximumNameLength = 64;
+
+        /// <summary>The <c>status</c> a load tool reports when it refused the call on its argument alone.</summary>
+        public const string InvalidArgumentStatus = "invalid_argument";
+
+        /// <summary>The tool-result text for a refused argument: the parameter, the rule, and that nothing ran.</summary>
+        public static string DescribeInvalidArgument(string parameter, string ruleError)
+        {
+            return "Parameter '" + parameter + "' is invalid: " + ruleError
+                   + " The tool was NOT executed. Retry with a valid '" + parameter + "'.";
+        }
+
+        private static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+        };
+
+        /// <summary>
+        /// Accepts 1-64 letters, digits, '-' and '_' (surrounding whitespace trimmed) that are not a
+        /// reserved Windows device name; <paramref name="field"/> names the value in the error text.
+        /// </summary>
+        public static bool TryValidateManualSlot(string value, string field, out string normalized, out string error)
+        {
+            normalized = null;
+            error = null;
+            string trimmed = value?.Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.Length > MaximumNameLength)
+            {
+                error = field + " must contain 1-" + MaximumNameLength + " characters.";
+                return false;
+            }
+
+            string baseName = trimmed;
+            int dotIndex = trimmed.IndexOf('.');
+            if (dotIndex >= 0)
+            {
+                baseName = trimmed.Substring(0, dotIndex);
+            }
+
+            if (ReservedDeviceNames.Contains(baseName))
+            {
+                error = field + " '" + trimmed + "' is a reserved device name.";
+                return false;
+            }
+
+            for (int index = 0; index < trimmed.Length; index++)
+            {
+                char character = trimmed[index];
+                bool allowed = char.IsLetterOrDigit(character)
+                               || character == '-'
+                               || character == '_';
+                if (!allowed)
+                {
+                    error = field + " may contain only letters, digits, '-' and '_'.";
+                    return false;
+                }
+            }
+
+            normalized = trimmed;
+            return true;
+        }
+
+        /// <summary>Accepts exactly one <c>.world</c> file name with no directory part.</summary>
+        public static bool TryValidateAutoFileName(string fileName, out string error)
+        {
+            error = null;
+            if (string.IsNullOrWhiteSpace(fileName)
+                || !string.Equals(fileName, Path.GetFileName(fileName), StringComparison.Ordinal)
+                || !fileName.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
+            {
+                error = "Auto package name must be one .world file name without a path.";
+                return false;
+            }
+
+            return true;
         }
     }
 }

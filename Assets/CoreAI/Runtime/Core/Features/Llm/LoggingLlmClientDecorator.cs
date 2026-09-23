@@ -231,9 +231,10 @@ namespace CoreAI.Infrastructure.Llm
                     // its banner by ErrorCode, and a lost code turned the "teacher unavailable" banner
                     // into raw English text inside the chat bubble.
                     sw.Stop();
-                    LlmCompletionResult failure = BuildThrownFailure(nonRetryEx);
+                    LlmCompletionResult failure = BuildThrownFailure(nonRetryEx, cancellationToken);
                     _logger.Warn(
-                        $"LLM x traceId={trace} role={role} backend={backendLine} | {failure.Error}", LogTag.Llm);
+                        $"LLM x traceId={trace} role={role} backend={backendLine} | {failure.Error}" +
+                        DescribeFaultBehindCancellation(failure.ErrorCode, nonRetryEx), LogTag.Llm);
                     return failure;
                 }
             }
@@ -486,19 +487,36 @@ namespace CoreAI.Infrastructure.Llm
             };
         }
 
-        /// <summary>A structured failure built from an exception thrown during a retry attempt.</summary>
-        private static LlmCompletionResult BuildThrownFailure(Exception exception)
+        /// <summary>
+        /// A structured failure built from an exception thrown during a retry attempt; after a caller cancel
+        /// it is the cancellation, whatever was thrown (<see cref="LlmCancellation"/>).
+        /// </summary>
+        private static LlmCompletionResult BuildThrownFailure(Exception exception, CancellationToken cancellationToken)
         {
             LlmClientException typed = exception as LlmClientException;
+            LlmErrorCode code = ResolveErrorCode(exception, cancellationToken);
             return new LlmCompletionResult
             {
                 Ok = false,
-                Error = typed != null ? $"{typed.ErrorCode}: {typed.Message}" : exception.Message,
-                ErrorCode = ResolveErrorCode(exception),
+                Error = code == LlmErrorCode.Cancelled
+                    ? LlmCancellation.CancelledErrorText
+                    : typed != null ? $"{typed.ErrorCode}: {typed.Message}" : exception.Message,
+                ErrorCode = code,
                 HttpStatus = typed?.HttpStatus,
                 RetryAfterSeconds = typed?.RetryAfterSeconds,
                 ProviderErrorBody = typed?.ProviderErrorBody ?? ""
             };
+        }
+
+        /// <summary>
+        /// Log-line suffix naming the fault a caller cancel absorbed; empty for every other code. The chunk or
+        /// result says "cancelled" - the log still has to say what actually broke while stopping.
+        /// </summary>
+        private static string DescribeFaultBehindCancellation(LlmErrorCode code, Exception fault)
+        {
+            return code == LlmErrorCode.Cancelled && fault != null && fault is not OperationCanceledException
+                ? $" (after the caller cancelled: {fault.GetType().Name}: {fault.Message})"
+                : "";
         }
 
         /// <summary>
@@ -573,8 +591,8 @@ namespace CoreAI.Infrastructure.Llm
             catch (Exception ex)
             {
                 sw.Stop();
-                initError = ex.Message;
-                initErrorCode = ResolveErrorCode(ex);
+                initErrorCode = ResolveErrorCode(ex, cancellationToken);
+                initError = initErrorCode == LlmErrorCode.Cancelled ? LlmCancellation.CancelledErrorText : ex.Message;
                 _logger.Warn(
                     $"LLM x (stream) traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | init failed: {ex.Message}",
                     LogTag.Llm);
@@ -608,16 +626,28 @@ namespace CoreAI.Infrastructure.Llm
                         hasNext = await enumerator.MoveNextAsync();
                         current = hasNext ? enumerator.Current : null;
                     }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        terminalError = "cancelled";
-                        wasCancelled = true;
-                        hasNext = false;
-                    }
                     catch (Exception ex)
                     {
-                        exceptionMessage = ex.Message;
-                        exceptionCode = ResolveErrorCode(ex);
+                        exceptionCode = ResolveErrorCode(ex, cancellationToken);
+                        if (exceptionCode == LlmErrorCode.Cancelled)
+                        {
+                            // WHY: after a caller cancel every fault is the cancellation (LlmCancellation);
+                            // the log keeps what actually broke, the chunk says what the caller did.
+                            terminalError = LlmCancellation.CancelledErrorText;
+                            wasCancelled = true;
+                            string absorbed = DescribeFaultBehindCancellation(exceptionCode, ex);
+                            if (absorbed.Length > 0)
+                            {
+                                _logger.Info(
+                                    $"LLM ~ (stream) traceId={trace} role={role} backend={backendLine} | cancelled{absorbed}",
+                                    LogTag.Llm);
+                            }
+                        }
+                        else
+                        {
+                            exceptionMessage = ex.Message;
+                        }
+
                         hasNext = false;
                     }
 
@@ -1007,17 +1037,19 @@ namespace CoreAI.Infrastructure.Llm
         /// Maps a thrown fault to a stable <see cref="LlmErrorCode"/> so consumers never receive a
         /// terminal chunk or a failed result that reports a failure with <see cref="LlmErrorCode.None"/>.
         /// One table for the streaming and the non-streaming path: the error category must not depend on
-        /// which of the two paths reported it.
+        /// which of the two paths reported it. <see cref="LlmCancellation"/> decides first (a cancelled
+        /// caller owns every fault, a library timeout is a timeout); only a fault it leaves unclassified
+        /// keeps its typed code or becomes a provider error.
         /// </summary>
-        private static LlmErrorCode ResolveErrorCode(Exception ex)
+        private static LlmErrorCode ResolveErrorCode(Exception ex, CancellationToken callerToken)
         {
-            return ex switch
+            LlmErrorCode classified = LlmCancellation.Classify(ex, callerToken);
+            if (classified != LlmErrorCode.None)
             {
-                LlmClientException typed => typed.ErrorCode,
-                LlmOperationTimeoutException => LlmErrorCode.Timeout,
-                OperationCanceledException => LlmErrorCode.Cancelled,
-                _ => LlmErrorCode.ProviderError
-            };
+                return classified;
+            }
+
+            return ex is LlmClientException typed ? typed.ErrorCode : LlmErrorCode.ProviderError;
         }
 
         private static string Preview(string text, int maxChars)

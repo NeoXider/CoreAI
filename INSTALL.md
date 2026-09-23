@@ -18,7 +18,7 @@ Mirror is connected via URL `https://github.com/NeoXider/CoreAI.git?path=Assets/
 
 A Git URL without `#tag` tracks the branch. For a reproducible install, pin the packages to one existing tag from the repository. Current versions are in `package.json`, published changes in the [changelog](Assets/CoreAI/CHANGELOG.md); Unreleased is not a finished release.
 
-Detailed Unity installation steps follow below; part of the guide is still in English.
+Detailed Unity installation steps follow below.
 Mods and Hub are installed independently — neither requires the other. When both are present, Mods'
 Hub integration assembly (`CoreAI.Mods.Hub`) auto-enables via the `COREAI_HAS_HUB` version define and
 adds a Mods page to the Hub window; without Hub, that assembly compiles out and Mods still works
@@ -59,6 +59,11 @@ CoreAI → Setup → Install Git Dependencies
 ```
 
 It merges only the *missing* keys into `Packages/manifest.json` (your pinned versions stay untouched).
+Besides the four entries below, the menu also adds **LLMUnity** (`ai.undream.llm`, see
+[§2.4](#24-local-on-device-models-optional)), which brings native libraries and sets
+`COREAI_HAS_LLMUNITY`. The preview dialog applies all missing entries at once, so if you only call an
+OpenAI-compatible HTTP API, remove the `ai.undream.llm` line from `Packages/manifest.json` afterwards —
+or use the manual list below.
 
 **Manual alternative** — add these under `"dependencies"` in `Packages/manifest.json`:
 
@@ -166,7 +171,9 @@ CoreAI → Setup → Modules → LLMUnity → Enable + Update to latest
 ```
 
 (or manifest: `"ai.undream.llm": "https://github.com/undreamai/LLMUnity.git"`). Its presence sets
-`COREAI_HAS_LLMUNITY`. Skip it if you only call an OpenAI-compatible HTTP API.
+`COREAI_HAS_LLMUNITY`. Skip it if you only call an OpenAI-compatible HTTP API — and note that
+`Install Git Dependencies` (§1.1) adds it anyway, so remove the entry from `Packages/manifest.json`
+after running that menu.
 
 ---
 
@@ -253,7 +260,7 @@ local multi-model sweep.
 | Mods (Lua) | `com.neoxider.coreaimods` (Lua-CSharp bundled) | — | `COREAI_LUA` (positive enable; absent by default) |
 | Hub (UI Toolkit) | `com.neoxider.coreaihub` | `COREAI_HAS_HUB` (consumed by Mods' Hub integration) | — |
 | Benchmark | `com.neoxider.coreaibenchmark` (needs Mods) | — | dev/test-only, not referenced by runtime code |
-| MCP server | `com.neoxider.coreaimcp` (needs Mods) — git URL `https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIMcp` | — | off until a `CoreAiMcpServer` component is added to a scene; loopback-only, no auth — see [its README](Assets/CoreAIMcp/README.md) |
+| MCP server | `com.neoxider.coreaimcp` (needs Mods) — git URL `https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIMcp` | — | off until you tick **Start On Enable** on a `CoreAiMcpServer` component or call `CoreAiMcpServer.StartServer()`; loopback-only, bearer-token auth on by default (the token is printed to the console) — see [its README](Assets/CoreAIMcp/README.md) |
 | Local LLM | `ai.undream.llm` | `COREAI_HAS_LLMUNITY` | also requires `COREAI_LLM` |
 | Provider-backed LLM implementations | NuGet `Microsoft.Extensions.AI` (required by Core contracts) | — | `COREAI_LLM` (positive enable; absent by default) |
 

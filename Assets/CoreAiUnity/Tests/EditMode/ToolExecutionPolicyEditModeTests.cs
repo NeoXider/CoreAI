@@ -2589,6 +2589,285 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(policy.TurnEndingToolSucceeded,
                 "Execute-as-you-stream must report a successful turn-ending tool exactly like a batch.");
         }
+
+        // ==================== Delegated type preflight / function-schema required names ====================
+
+        /// <summary>
+        /// A call_skill_tool call whose arguments_json carries a value of the wrong type is refused before
+        /// the delegate binds - traced schema-validation (never executed, the turn may retry), not "native".
+        /// </summary>
+        [Test]
+        public async Task ExecuteSingle_DelegatedTypeMismatch_IsRefusedAsSchemaValidation_NotNative()
+        {
+            int calls = 0;
+            DelegateLlmTool verdict = new("submit_task_verdict", "Verdict",
+                new Func<string, bool, string, string>((task_id, accepted, reason) =>
+                {
+                    calls++;
+                    return "{\"success\":true}";
+                }));
+            ILlmTool proxy = CallSkillToolLlmTool.Create(new[] { new SkillSet("briefing", "", "", verdict) });
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { proxy }, false, "test", 3);
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(((IAIFunctionLlmTool)proxy).CreateAIFunction());
+
+            ToolExecutionPolicy.ToolCallResult result = await policy.ExecuteSingleAsync(
+                MakeToolCall("call_skill_tool", new Dictionary<string, object?>
+                {
+                    ["tool_name"] = "submit_task_verdict",
+                    ["arguments_json"] = "{\"task_id\":\"t1\",\"accepted\":\"yes\",\"reason\":\"fine\"}"
+                }),
+                opts,
+                CancellationToken.None);
+
+            string text = result.Result.Result.ToString();
+            Assert.IsFalse(result.Succeeded);
+            Assert.AreEqual(0, calls, "the delegate body must never run on a value that cannot bind");
+            StringAssert.Contains("Argument 'accepted' does not match the expected type for tool 'submit_task_verdict'", text);
+            StringAssert.Contains("Expected parameters: task_id (string, required)", text);
+            StringAssert.Contains("NOT executed", text);
+            Assert.AreEqual("schema-validation", policy.ExecutedTraces.Single().Source);
+            Assert.AreNotEqual("native", policy.ExecutedTraces.Single().Source);
+        }
+
+        private sealed class CameraWrapperTool : ILlmTool, IAIFunctionsLlmTool
+        {
+            public int Looks;
+            public int Lists;
+            public string Name => "camera";
+            public string Description => "Camera functions.";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+            public int? ToolTimeoutMsOverride { get; set; }
+
+            public IEnumerable<MEAI.AIFunction> CreateAIFunctions()
+            {
+                yield return MEAI.AIFunctionFactory.Create(
+                    (Func<string, string>)(target =>
+                    {
+                        Looks++;
+                        return "looked:" + target;
+                    }),
+                    new MEAI.AIFunctionFactoryOptions { Name = "camera_look", Description = "Look at a target." });
+                yield return MEAI.AIFunctionFactory.Create(
+                    (Func<string>)(() =>
+                    {
+                        Lists++;
+                        return "cameras:main";
+                    }),
+                    new MEAI.AIFunctionFactoryOptions { Name = "camera_list", Description = "List cameras." });
+            }
+        }
+
+        /// <summary>Records the per-call deadline the policy schedules; the deadline itself never fires.</summary>
+        private sealed class DeadlineRecordingMarshaler : ILlmAsyncMarshaler
+        {
+            public readonly List<int> Deadlines = new();
+            public Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken) => factory();
+
+            public Task DelayAsync(int milliseconds, CancellationToken cancellationToken)
+            {
+                Deadlines.Add(milliseconds);
+                return Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+        }
+
+        private static ToolExecutionPolicy CameraPolicy(CameraWrapperTool wrapper, StubLogger logger = null,
+            StubSettings settings = null, params ILlmTool[] others)
+        {
+            List<ILlmTool> tools = new(others) { wrapper };
+            return new ToolExecutionPolicy(logger ?? new StubLogger(), settings ?? new StubSettings(), tools,
+                false, "test", 3);
+        }
+
+        /// <summary>
+        /// A wrapper that expands into several MEAI functions publishes <c>{}</c> as its metadata schema,
+        /// so the metadata alone knows no required names. The function's own schema is what the binder
+        /// enforces; a missing required argument is refused from it, before the body, as schema-validation.
+        /// The wrapper is registered, so this also proves a function name is not refused as unknown.
+        /// </summary>
+        [Test]
+        public async Task ExecuteSingle_MultiFunctionWrapper_MissingRequiredArgument_IsSchemaValidation()
+        {
+            CameraWrapperTool wrapper = new();
+            ToolExecutionPolicy policy = CameraPolicy(wrapper);
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>(wrapper.CreateAIFunctions()) };
+
+            ToolExecutionPolicy.ToolCallResult refused = await policy.ExecuteSingleAsync(
+                MakeToolCall("camera_look", new Dictionary<string, object?>()), opts, CancellationToken.None);
+
+            string text = refused.Result.Result.ToString();
+            Assert.IsFalse(refused.Succeeded);
+            Assert.AreEqual(0, wrapper.Looks, "the function body must not run without its required argument");
+            StringAssert.Contains("Tool 'camera_look' is missing required argument(s): target", text);
+            StringAssert.Contains("matching this schema", text);
+            StringAssert.Contains("\"target\"", text, "the hint must show the function's own schema, the metadata one is {}");
+            Assert.AreEqual("schema-validation", policy.ExecutedTraces[0].Source);
+
+            ToolExecutionPolicy.ToolCallResult ran = await policy.ExecuteSingleAsync(
+                MakeToolCall("camera_look", new Dictionary<string, object?> { ["target"] = "tree" }),
+                opts, CancellationToken.None);
+
+            Assert.IsTrue(ran.Succeeded, ran.Result.Result.ToString());
+            Assert.AreEqual(1, wrapper.Looks);
+            Assert.AreEqual("looked:tree", ran.Result.Result.ToString());
+            Assert.AreEqual("camera_look", policy.ExecutedTraces[1].Name);
+            Assert.AreEqual("native", policy.ExecutedTraces[1].Source);
+        }
+
+        /// <summary>
+        /// Case repair covers a wrapper's function names: <c>Camera_Look</c> is repaired to the function
+        /// the provider was offered and runs, instead of being refused as an unknown tool.
+        /// </summary>
+        [Test]
+        public async Task ExecuteSingle_MultiFunctionWrapper_WrongCaseFunctionName_IsRepairedAndRuns()
+        {
+            CameraWrapperTool wrapper = new();
+            ToolExecutionPolicy policy = CameraPolicy(wrapper);
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>(wrapper.CreateAIFunctions()) };
+
+            MEAI.FunctionCallContent repaired = policy.TryRepairToolName(MakeToolCall("Camera_Look"));
+            ToolExecutionPolicy.ToolCallResult ran = await policy.ExecuteSingleAsync(
+                MakeToolCall("Camera_Look", new Dictionary<string, object?> { ["target"] = "tree" }),
+                opts, CancellationToken.None);
+
+            Assert.IsNotNull(repaired);
+            Assert.AreEqual("camera_look", repaired.Name);
+            Assert.IsTrue(ran.Succeeded, ran.Result.Result.ToString());
+            Assert.AreEqual(1, wrapper.Looks);
+            Assert.AreEqual("camera_look", policy.ExecutedTraces.Single().Name);
+        }
+
+        /// <summary>
+        /// A genuinely unknown name is still refused, and the refusal lists the names the model can
+        /// actually call - the wrapper's functions, in tool order - rather than the wrapper itself.
+        /// </summary>
+        [Test]
+        public async Task ExecuteSingle_MultiFunctionWrapper_UnknownName_ListsCallableFunctionNames()
+        {
+            CameraWrapperTool wrapper = new();
+            StubLogger logger = new();
+            ToolExecutionPolicy policy = CameraPolicy(wrapper, logger, null, new StubTool { Name = "greet" });
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>(wrapper.CreateAIFunctions()) };
+
+            ToolExecutionPolicy.ToolCallResult refused = await policy.ExecuteSingleAsync(
+                MakeToolCall("camera_zoom"), opts, CancellationToken.None);
+
+            Assert.IsFalse(refused.Succeeded);
+            Assert.AreEqual(
+                "Error: Unknown tool 'camera_zoom'. Available tools: [greet, camera_look, camera_list]",
+                refused.Result.Result.ToString());
+            Assert.AreEqual("unknown-tool", policy.ExecutedTraces.Single().Source);
+            Assert.AreEqual(0, wrapper.Looks + wrapper.Lists);
+            Assert.IsTrue(logger.Logs.Any(line =>
+                    line.Contains("'camera_zoom' - no repair found. Available: [greet, camera_look, camera_list]")),
+                string.Join("\n", logger.Logs));
+        }
+
+        /// <summary>
+        /// A wrapper's function runs under the wrapper's per-tool settings: its
+        /// <see cref="ILlmTool.ToolTimeoutMsOverride"/> is the deadline scheduled for the call.
+        /// </summary>
+        [Test]
+        public async Task ExecuteSingle_MultiFunctionWrapper_FunctionUsesWrapperTimeoutOverride()
+        {
+            CameraWrapperTool wrapper = new() { ToolTimeoutMsOverride = 4321 };
+            DeadlineRecordingMarshaler marshaler = new();
+            ToolExecutionPolicy policy = CameraPolicy(wrapper, null, new StubSettings().WithToolMarshaler(marshaler));
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>(wrapper.CreateAIFunctions()) };
+
+            ToolExecutionPolicy.ToolCallResult ran = await policy.ExecuteSingleAsync(
+                MakeToolCall("camera_list", new Dictionary<string, object?>()), opts, CancellationToken.None);
+
+            Assert.IsTrue(ran.Succeeded, ran.Result.Result.ToString());
+            Assert.AreEqual(1, wrapper.Lists);
+            CollectionAssert.AreEqual(new[] { 4321 }, marshaler.Deadlines);
+        }
+
+        /// <summary>
+        /// The ambiguity rule is unchanged and spans registered names and function names alike: an exact
+        /// name still resolves, a case-only variant matching both is refused rather than guessed.
+        /// </summary>
+        [Test]
+        public void TryRepairToolName_CaseVariantOfToolAndWrapperFunction_IsAmbiguous()
+        {
+            CameraWrapperTool wrapper = new();
+            ToolExecutionPolicy policy = CameraPolicy(wrapper, null, null, new StubTool { Name = "Camera_List" });
+
+            Assert.AreEqual("camera_list", policy.TryRepairToolName(MakeToolCall("camera_list"))?.Name);
+            Assert.AreEqual("Camera_List", policy.TryRepairToolName(MakeToolCall("Camera_List"))?.Name);
+            Assert.IsNull(policy.TryRepairToolName(MakeToolCall("CAMERA_LIST")));
+        }
+
+        /// <summary>
+        /// A wrapper narrowed by a request allowlist (<c>camera_look</c> allowed, <c>camera_list</c> not) runs
+        /// the allowed function under the wrapper's own settings and refuses the other as an unknown tool, listing
+        /// only what the request may call.
+        /// </summary>
+        [Test]
+        public async Task ExecuteSingle_WrapperNarrowedByAllowlist_RunsOnlyTheAllowedFunction()
+        {
+            CameraWrapperTool wrapper = new() { ToolTimeoutMsOverride = 4321 };
+            ILlmTool narrowed = SkillSetToolResolver.RestrictToAllowedFunctions(wrapper, new[] { "camera_look" });
+            DeadlineRecordingMarshaler marshaler = new();
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings().WithToolMarshaler(marshaler),
+                new List<ILlmTool> { narrowed }, false, "test", 3);
+            MEAI.ChatOptions opts = new()
+            {
+                Tools = new List<MEAI.AITool>(((IAIFunctionsLlmTool)narrowed).CreateAIFunctions())
+            };
+
+            ToolExecutionPolicy.ToolCallResult refused = await policy.ExecuteSingleAsync(
+                MakeToolCall("camera_list", new Dictionary<string, object?>()), opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult ran = await policy.ExecuteSingleAsync(
+                MakeToolCall("camera_look", new Dictionary<string, object?> { ["target"] = "tree" }),
+                opts, CancellationToken.None);
+
+            Assert.IsFalse(refused.Succeeded);
+            Assert.AreEqual("Error: Unknown tool 'camera_list'. Available tools: [camera_look]",
+                refused.Result.Result.ToString());
+            Assert.AreEqual(0, wrapper.Lists, "the function the allowlist left out never runs");
+            Assert.IsTrue(ran.Succeeded, ran.Result.Result.ToString());
+            Assert.AreEqual(1, wrapper.Looks);
+            CollectionAssert.AreEqual(new[] { 4321 }, marshaler.Deadlines,
+                "the narrowed function runs under the wrapper's timeout override");
+        }
+
+        /// <summary>
+        /// Same rule for a tool registered under its own name that never declared a metadata schema
+        /// (<c>LlmToolBase</c> defaults to <c>{}</c>): the required names come from the bound function.
+        /// </summary>
+        [Test]
+        public async Task ExecuteSingle_ToolWithEmptyMetadataSchema_MissingRequiredArgument_IsSchemaValidation()
+        {
+            int calls = 0;
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "grant_item", ParametersSchema = "{}" } },
+                false, "test", 3);
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<int, string>)(count =>
+                {
+                    calls += count;
+                    return "granted";
+                }),
+                new MEAI.AIFunctionFactoryOptions { Name = "grant_item", Description = "Grant items." }));
+
+            ToolExecutionPolicy.ToolCallResult refused = await policy.ExecuteSingleAsync(
+                MakeToolCall("grant_item", new Dictionary<string, object?>()), opts, CancellationToken.None);
+
+            Assert.IsFalse(refused.Succeeded);
+            Assert.AreEqual(0, calls);
+            StringAssert.Contains("missing required argument(s): count", refused.Result.Result.ToString());
+            Assert.AreEqual("schema-validation", policy.ExecutedTraces[0].Source);
+
+            ToolExecutionPolicy.ToolCallResult ran = await policy.ExecuteSingleAsync(
+                MakeToolCall("grant_item", new Dictionary<string, object?> { ["count"] = 2 }),
+                opts, CancellationToken.None);
+
+            Assert.IsTrue(ran.Succeeded);
+            Assert.AreEqual(2, calls);
+        }
     }
 }
 #endif

@@ -506,7 +506,6 @@ namespace CoreAI.Infrastructure.Llm
                 yield break;
             }
 
-            string[] declaredToolNames = request.Tools?.Select(tool => tool.Name).ToArray() ?? Array.Empty<string>();
             MEAI.ChatOptions chatOptions = new()
             {
                 MaxOutputTokens = ResolveMaxOutputTokens(request.MaxOutputTokens)
@@ -576,6 +575,9 @@ namespace CoreAI.Infrastructure.Llm
                 roleId, _settings.MaxToolCallRetries, request.TraceId,
                 MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance,
                 request.ActorId);
+            // WHY: the policy's registry rather than ILlmTool.Name - the provider is offered a wrapper's
+            // functions, so a text-shaped call to one must be recognised, executed and stripped like any other.
+            IReadOnlyList<string> declaredToolNames = policy.KnownToolNames;
             string? pendingFailedToolRetryInstruction = null;
             int emptyResponsesAfterToolFailure = 0;
             int emptyResponsesAfterToolSuccess = 0;

@@ -6,7 +6,7 @@ not depend on Unity scene objects.
 
 Canonical language is English because this package ships as `com.neoxider.coreai`.
 Unity-specific setup lives under [`Assets/CoreAiUnity/Docs/`](../../CoreAiUnity/Docs/).
-Russian files are kept only when the filename is explicitly marked `_RU`.
+Every document here is in English.
 
 ## Pick A Path
 

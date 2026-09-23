@@ -32,14 +32,22 @@ nil value".
 | `UDim`, `UDim2` | Scale/offset pairs |
 | `Random` | Seedable RNG |
 | `Enum` | `Enum.CameraType.Scriptable`, `Enum.KeyCode.A`, … |
+| `TweenInfo`, `RaycastParams` | `.new(...)` for `TweenService:Create` and `workspace:Raycast` |
 | `task` | `task.wait`, `task.spawn`, `task.delay` |
+| `wait`, `spawn`, `delay` | Roblox's legacy scheduler globals |
+| `time`, `tick` | `time()` is scaled game time; `tick()` is deprecated (logs once per mod) |
+| `os` | Only `os.time()` and `os.clock()` — the stock `os` library stays removed by the sandbox |
+| `script` | The running mod's own script instance (mods only, not one-off `execute_lua`) |
 | `camera_set_cframe`, `camera_follow` | CoreAI convenience shorthands for camera control |
 
 ## Classes
 
 `Instance.new` accepts: **`Part`**, **`Folder`**, **`Model`**, **`ClickDetector`**, **`MaterialVariant`**,
-**`RemoteEvent`**, **`UnreliableRemoteEvent`**, and **`RemoteFunction`**. `Camera` is not
-creatable — the world's one camera is `workspace.CurrentCamera`.
+**`RemoteEvent`**, **`UnreliableRemoteEvent`**, **`RemoteFunction`**, **`Humanoid`**, **`Backpack`**, and
+the value objects **`IntValue`**, **`NumberValue`**, **`StringValue`**, **`BoolValue`**,
+**`ObjectValue`**, **`Vector3Value`**, **`CFrameValue`** and **`Color3Value`** (each with one
+type-checked `Value`). `Camera` is not creatable — the world's one camera is
+`workspace.CurrentCamera`.
 The class ancestry (`BasePart`, `PVInstance`, `WorldRoot`, …) is data-driven through `ClassCatalog`,
 so `IsA` works the way it does in Roblox.
 
@@ -90,9 +98,14 @@ instead until named render-step binding lands.
 `MaxPlayers` — assigning `MaxPlayers` from a mod is refused rather than silently ignored, because
 the host owns the capacity.
 
-The character pipeline itself — `LoadCharacterAsync`, `LoadCharacter`, `CharacterAdded`,
-`CharacterRemoving`, `DistanceFromCharacter` — is **not delivered yet** and raises the loud stub
-naming its rung. `Player.Character` therefore stays nil unless a host assigns one.
+While `CharacterAutoLoads` is true, a joining player gets a minimal character: a `Model` named after
+the player holding a `Humanoid` and a `HumanoidRootPart`. `Player:LoadCharacterAsync()` builds or
+replaces it and yields until the deferred `CharacterRemoving` / `CharacterAdded` handlers have run;
+`Player:LoadCharacter()` is its deprecated alias. `Player.Character` is that model (assigning it
+directly fires no signals, as in Roblox), and `Player:DistanceFromCharacter(point)` returns studs from
+the root part, or `0` without a character. A character whose `Humanoid` dies is reloaded
+`RespawnTime` seconds later while `CharacterAutoLoads` is still true. Avatar rigs, animation and
+appearance loading are not modelled.
 
 `BasePart`'s network-ownership family (`SetNetworkOwner`, `GetNetworkOwner`,
 `SetNetworkOwnershipAuto`, `GetNetworkOwnershipAuto`, `CanSetNetworkOwnership`) is a loud stub too:
@@ -248,7 +261,7 @@ single owned root makes that deterministic.
 
 ## Bundled sample mods
 
-Four mods ship inside the Mods package at
+Five mods ship inside the Mods package at
 `Assets/CoreAIMods/Runtime/Resources/CoreAIMods/` and are the reference for idiomatic usage:
 
 | Mod | Ships | What it demonstrates |
@@ -257,8 +270,9 @@ Four mods ship inside the Mods package at
 | `sample_lane_racer` | disabled | `RunService.Heartbeat`, `UserInputService` rising edges, scripted camera |
 | `sample_tetris3d` | disabled | Grid logic in plain Lua tables, smooth part motion, restart |
 | `sample_clicker` | disabled | `ClickDetector` 3D click-picking, no UI at all |
+| `sample_castle3d` | disabled | A castle built from every `Enum.PartType` shape and 25+ `Enum.Material` values — a reference scene for materials, tiling and `Part.Color` tints |
 
-The three playable ones ship `active: false`; the player turns them on from the **Hub → Mods** tab.
+The four opt-in ones ship `active: false`; the player turns them on from the **Hub → Mods** tab.
 
 ## Execution budget and `ScriptContext`
 
@@ -338,12 +352,22 @@ place is saved. The CoreAI world package keeps them (the flag round-trips as dur
 runtime restart reproduces the exact world an AI built; nothing is silently dropped on the way to
 disk. Filter such instances yourself before `save_world` if you rely on the Roblox behaviour.
 
-Two AI-facing tools live on that format:
+Four AI-facing tools on the Programmer role live on that format:
 
 | Tool | What it does |
 |---|---|
 | `save_world` | Writes a **create-once** manual slot. It never overwrites or deletes an existing slot. |
 | `load_world` | Cannot apply a package. It only returns `player_confirmation_required` plus a one-use request id. |
+| `list_autosaves` | Lists the autosave ring: file `name`, `trigger`, UTC `timestamp` and `size` in bytes. |
+| `load_autosave` | Same confirmation flow as `load_world`, for one autosave file `name` from that list. |
+
+A manual slot name must be 1-64 letters, digits, `-` or `_` (surrounding whitespace is trimmed) and
+must not be a reserved Windows device name such as `CON` or `LPT1`; an autosave name must be exactly
+one `.world` file name with no directory part. The tools check the name before they touch the world
+service: an invalid one comes back as an ordinary JSON result with `success: false` and an `error`
+that names the parameter, states the rule and says the tool was not executed — the load tools also
+set `status: "invalid_argument"` — so the model can correct the name and retry. `FileRbxWorldPackageStore`
+still throws `ArgumentException` with the same rule text for C# callers that bypass the tools.
 
 The load flow is deliberately fail-closed: host or UI code subscribes to
 `ManualLoadConfirmationRequested` (or reads `GetPendingManualLoads`) and calls
@@ -353,7 +377,8 @@ after two minutes by default, a newer request for the same slot replaces the old
 unknown, rejected, or reused ids never touch the live session.
 
 **Autosaves are separate and automatic.** `ConfirmedWorldMutationGate` sits in front of every
-`execute_lua` call (trigger `execute_lua`) and every *mutating* `manage_mods` action — `load`,
+`execute_lua` call that carries code (trigger `execute_lua`; an empty or whitespace-only `code` is
+refused with `Lua code is required` before any capture) and every *mutating* `manage_mods` action — `load`,
 `reload`, `unload`, `import`, `forget`, `revert` (trigger `manage_mods-<action>`). It captures the
 world and writes an autosave *before* the mutation runs; if the capture or the write fails, the
 mutation does not happen and the tool returns a structured failure. Read-only `manage_mods` actions

@@ -19,7 +19,8 @@ audience** for game agents - the **director / ambient pattern**, where there is 
 - The director may **act through tools** - it gets the standard `world_command` tool (spawn / move /
   recolor / destroy objects through the same audited world-command pipeline the chat demos use) - or
   reply with a **short directive** line. Replying `PASS` means "nothing needed right now".
-- Directives are written to the Console (`[DirectorAiDemo] ...`) and shown as one cached OnGUI line.
+- Directives are written to the Console (`[DirectorAiDemo] ...`) and shown as one cached line in a
+  uGUI `CoreAiDemoPanel`.
 
 Safety rails built in:
 
@@ -48,7 +49,7 @@ Safety rails built in:
 
 - The model either calls `world_command` (you will see objects spawn / move / recolor in the scene)
   and replies with a one-line directive, or replies `PASS` when the world needs nothing. The last
-  directive is shown in the top-left OnGUI line and logged to the Console.
+  directive is shown in the demo panel and logged to the Console.
 
 Inspector fields: observation interval, director role id (`Director`), max output tokens, enabled
 toggle, max actions per minute, tracked tags.

@@ -7,14 +7,16 @@ Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used 
 
 ## What Is Inside
 
-- **`LuaModsDemoController`** resolves `ILuaModRuntime` and `LuaCsLogicSlots` from DI and draws an OnGUI panel.
+- **`LuaModsDemoController`** resolves `ILuaModRuntime`, `LuaCsLogicSlots` and the host actor
+  (`IActorIdentityProvider`) from DI and draws a uGUI `CoreAiDemoPanel`.
 - **`WaveDirectorMod.lua.txt`** is a mod with the `Read | WorldEdit` level:
   - `hooks_on("wave_started", ...)` spawns a wave of enemies as Rbx parts
     (`Instance.new("Part")`, an upright cylinder matching the old `enemy.basic` capsule),
     and stores the wave counter in persistent store (`store_set/get`);
   - `hooks_every(4.0, ...)` recolors `Boss` through an Rbx overlay part (the scene Boss is
     not an Rbx instance, so the mod covers it with a same-spot part it owns and colors that);
-  - `events_emit("wave_spawned", n)` sends an event back to the game (`ModEventEmitted`).
+  - `events_emit("wave_spawned", n)` sends an event back to the game, which the controller receives
+    through `AddModEventEmittedListener`.
 
   > The mod builds exclusively through the Rbx API: `CoreAiModsInstaller` sets
   > `RegisterWorldEditBuildBindings = false`, so the `coreai_world_*` build APIs are withheld
@@ -23,8 +25,9 @@ Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used 
 - **`DamageTunerMod.lua.txt`** is a mod with the `Read | LogicOverride` level: on load it calls
   `logic_define("damage_formula", ...)`. The controller calls `slots.TryInvokeNumber(...)` every
   frame and shows which formula is active: Lua override or C# default.
-- **`Lua and World Commands` child module** owns the scene's prefab whitelist and Lua access tier;
-  `CoreAILifetimeScope` only composes the optional module into the runtime container.
+- **`Lua and World Commands` child module** (`CoreAiLuaWorldModule`) owns the scene's prefab
+  whitelist; the Lua access tier (no Full) and the isolated mod store (`storeId = lua-mods-demo`) are
+  set on the scene's `CoreAiModsLifetimeScope`.
 
 ## How to Use It
 

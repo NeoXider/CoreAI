@@ -5,8 +5,8 @@ reading the controller scripts it references — not from the per-demo prose.
 
 Scope: `Assets/CoreAI.Demos/*/*.unity` and `Assets/CoreAiUnity/Scenes/*.unity`.
 
-The published player QA matrix is the frozen 15-scene G11 list in `CoreAIG11WebGlBuild.FrozenScenePaths`
-(`Assets/CoreAiUnity/Editor/CoreAIBuildMenu.cs`): the 14 scenes under `Assets/CoreAI.Demos` plus
+The published player QA matrix is the frozen 17-scene G11 list in `CoreAIG11WebGlBuild.FrozenScenePaths`
+(`Assets/CoreAiUnity/Editor/CoreAIBuildMenu.cs`): the 16 scenes under `Assets/CoreAI.Demos` plus
 `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity`. It is pinned again in
 `CoreAiDemoScenesSmokePlayModeTests`, which fails if the two lists or the scenes on disk drift apart.
 Internal scenes such as `_mainCoreAI.unity` and controller-only recipes are documented below but are not
@@ -51,7 +51,8 @@ and never rehydrate in another demo.
 | Qwen Genie | `QwenDemo/QwenGenieDemo.unity` | On-device **Qwen 0.8B** maps a free-form wish to one guarded native tool call (C# owns wish charges/clamps). | uGUI — `CoreAiDemoPanel` | Preset buttons + HUD (latency/tokens/tool calls) | No |
 | Qwen Spellcraft | `QwenDemo/QwenSpellcraftDemo.unity` | On-device Qwen 0.8B maps spell text to element/power; C# owns mana + a `×5` determinism self-test. | uGUI — `CoreAiDemoPanel` | Preset buttons, RU/EN aliases, determinism button, HUD | No |
 | MiniRpg | `MiniRpg/MiniRpgModsDemo.unity` | Compact **first-person** environment with the UITK Hub and a mod-ready embedded chat. | mixed — UITK Hub + mod manager (F9, uGUI — `CoreAiDemoPanel`) + IMGUI Token Budget overlay (F10) | Hub tabs + F9 mod manager | Yes — `mini-rpg-demo` |
-| Procedural Materials | `ProceduralMaterials/ProceduralMaterialsShowcase.unity` | Runtime `Enum.Material` catalog under one controlled URP setup: all **45** items (six CC0 texture-backed, the rest procedural) plus the explicit invalid-id magenta fallback, across opaque, neon, transparent, and textured shader paths. | scene labels (no IMGUI) | Material judging grid; **Q**/**E** or arrows cycle, **Space** and **1**–**5** switch views | No |
+| Procedural Materials | `ProceduralMaterials/ProceduralMaterialsShowcase.unity` | Runtime `Enum.Material` catalog under one controlled URP setup: all **45** items (36 CC0 texture-backed, the other nine procedural) plus the explicit invalid-id magenta fallback, across opaque, neon, transparent, and textured shader paths. | scene labels (no IMGUI) | Material judging grid; **Q**/**E** or arrows cycle, **Space** and **1**–**5** switch views | No |
+| Gameplay Services | `GameplayServices/GameplayServicesDemo.unity` | One Roblox-style Lua tour mod driving several services live (a door, a kill brick, a scoring coin, a floor raycast), so "Roblox code runs here" can be checked by looking. | uGUI (scene `Canvas`, `GameplayServicesDemoController`) | Run / drop / low-gravity buttons + status and hint labels | Yes — `gameplay-services-demo` |
 
 ### P3 — Supporting / infrastructure reference
 
@@ -60,6 +61,7 @@ and never rehydrate in another demo.
 | Skills | `Skills/SkillsDemo.unity` | `SkillSet` + `AgentBuilder`: a `DemoGameMaster` agent with Crafting/Combat skills exposed as only two meta-tools (`read_skill`, `call_skill_tool`); on-demand tool-schema loading. | uGUI — `CoreAiDemoPanel` | "Ask the Game Master" button + response panel | No |
 | World Commands | `WorldCommands/WorldCommandsDemo.unity` | The raw AI-command pipeline (`IAiGameCommandSink` → `AiGameCommandRouter` → `CoreAiWorldCommandExecutor`) — the same path LLM agents and Lua bindings use. **No LLM, no Lua.** | uGUI — `CoreAiDemoPanel` | Buttons that publish spawn/move/recolor/destroy envelopes | No (shared pipeline only) |
 | Live Mechanics Mods Chat | `LiveMechanicsMods/LiveMechanicsModsChatDemo.unity` | Chat-driven persistent `manage_mods` workflow (boss-rule sandbox) with a runtime mod manager and auto-repair. | mixed — `CoreAiChatPanel` (UITK) + mod manager (F9, uGUI — `CoreAiDemoPanel`) + IMGUI Token Budget overlay (F10) | F9 mod manager / F10 usage panels | Yes — `live-mechanics-chat-demo` |
+| Online Authority | `OnlineAuthority/OnlineAuthorityDemo.unity` | MVP11/MVP12 write authority made visible: a guest's move request is refused, allowed after a host grant, refused again after a revoke — in one process, with no network transport claimed. | uGUI (scene `Canvas`, `OnlineAuthorityDemoController`) | Guest-move / grant / revoke / host-move buttons + status and grant labels | Yes — `online-authority-demo` |
 
 ### P4 — Low priority (aspirational or internal)
 
@@ -95,15 +97,16 @@ and never rehydrate in another demo.
   WebGL Lua self-test, WorldCommands) now draw on the shared uGUI `CoreAiDemoPanel`. Hub, CoreAiChatDemo,
   Full Access, Wave Auto-Battler and Multiplayer Foundation stay pure UITK; MiniRpg and Live Mechanics
   Mods Chat are UITK/uGUI mixed with one remaining IMGUI overlay each (`CoreAiTokenBudgetOverlay`, F10 —
-  tracked as an open item in root `TODO.md`); Procedural Materials uses neither.
+  tracked as an open item in root `TODO.md`); Gameplay Services and Online Authority draw on their own
+  scene `Canvas`; Procedural Materials uses neither.
 - **Remaining IMGUI: 3 files, all runtime diagnostics overlays** under `CoreAiUnity/Runtime`
   (`AiDashboardPresenter.cs`, `CoreAiTokenBudgetOverlay.cs`, `OrchestrationDashboard.cs`) — none under
   `CoreAI.Demos` any more. That is exactly the `ImguiBanRatchetEditModeTests` whitelist; nothing outside
   it uses IMGUI. Every migration deletes a line. (Verified 2026-09-09 by re-running the ratchet's own scan.)
-- **Isolated mod-store fix — DONE**: all nine mods scenes (Live Mechanics, both LiveMechanicsMods scenes,
-  MiniRpg, Full Access, Moddable Units, Lua Mods, Hub, Multiplayer Foundation) set a distinct
-  `CoreAiModsLifetimeScope.storeId`; an empty `storeId` (the main-game default) keeps the original shared
-  location.
+- **Isolated mod-store fix — DONE**: all eleven mods scenes with a store (Live Mechanics, both
+  LiveMechanicsMods scenes, MiniRpg, Full Access, Moddable Units, Lua Mods, Hub, Multiplayer Foundation,
+  Gameplay Services, Online Authority) set a distinct `CoreAiModsLifetimeScope.storeId`; an empty
+  `storeId` (the main-game default) keeps the original shared location.
 - **Known wiring gap**: `ChatPromptButtonsController` is a GUI-less driver that nothing renders any more.
   Prompt templates moved into the chat's own example menu (`CoreAiChatPanel.EnableExamplePrompts`), which
   is enabled only by `FullAccessHubDemoController` and `DemoHubPagesBinder`. The component is still

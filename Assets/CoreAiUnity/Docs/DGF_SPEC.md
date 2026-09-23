@@ -4,7 +4,7 @@
 **Repository:** CoreAI · **Author:** Neoxider (handle neoxider) — [github.com/NeoXider](https://github.com/NeoXider)
 **UPM:** **`com.neoxider.coreai`** (`Assets/CoreAI`) — portable **`CoreAI.Core`** only: pure **C# without an engine** (`noEngineReferences`). **`com.neoxider.coreaiunity`** (`Assets/CoreAiUnity`) — **`CoreAI.Source`** (implementation for **Unity**), plus `Docs/`, `Tests/`, `Editor/`, `Resources/`, scene **`_mainCoreAI`**.
 **Sample game:** `Assets/_exampleGame` (see also `Docs/ROGUELITE_PLAYBOOK.md` in the sample)
-**Reference architecture (do not copy wholesale):** `D:\Git\GameDev-Last-War`
+**Reference architecture (do not copy wholesale):** the author's earlier project "Last War" (Lua + MessagePipe bridge; see §8.3)
 **AI role catalog (orchestration, placement, models):** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md)
 **Developer practical guide (code map, Lua, tests):** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)
 **Quick start and Docs table of contents:** [QUICK_START.md](QUICK_START.md), [DOCS_INDEX.md](DOCS_INDEX.md) · **Example game in Unity:** [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md)
@@ -47,11 +47,12 @@
 
 ## 3. Current repository state (normative snapshot)
 
-> **Current architecture note (7.0.1):** the repository ships **six UPM packages** —
+> **Current architecture note:** the repository ships **seven lockstep UPM packages** —
 > `com.neoxider.coreai` (portable core, no Lua), `com.neoxider.coreaiunity` (Unity host),
 > `com.neoxider.coreaimods` (optional Lua sandbox + mod runtime, depends on the first two),
 > `com.neoxider.coreaihub` (optional UI Toolkit Hub window), `com.neoxider.coreaibenchmark`
-> (dev/test-only benchmark harness), and `com.neoxider.coreaimcp` (optional in-game MCP server). `CoreAI.Core` has no Lua VM reference at all — the Lua-CSharp sandbox
+> (dev/test-only benchmark harness), `com.neoxider.coreaimcp` (optional in-game MCP server), and
+> `com.neoxider.coreaimirror` (optional Mirror transport, `defineConstraints: ["MIRROR"]`). `CoreAI.Core` has no Lua VM reference at all — the Lua-CSharp sandbox
 > and `execute_lua`/`manage_mods` tools live entirely in `CoreAI.Mods`. See [INSTALL.md](../../../INSTALL.md)
 > and the root [README.md §Packages](../../../README.md#packages-and-what-is-optional) for the current
 > package/dependency graph. The package boundary and positive-module contract below are normative.
@@ -88,7 +89,7 @@
 
 ### 3.4 Composition and scene
 
-- **`CoreAILifetimeScope`**: `RegisterCore()` — logger, MessagePipe, **`ApplyAiGameCommand`** broker, `IAiGameCommandSink`; portable routing contracts, chat/orchestration, queueing and scripted/stub clients are always registered. With **`COREAI_LLM`**, concrete provider-backed **OpenAI HTTP / MEAI / LLMUnity** clients, transports, readiness probes and resilience decorators compile and can be selected by **`LlmRoutingManifest`** + **`LlmClientRegistry`**. Before **`RegisterCorePortable(...)`**: **`AiOrchestrationQueueOptions`**, **`IAiOrchestrationMetrics`** (Null or **`LoggingAiOrchestrationMetrics`** when **`GameLogFeature.Metrics`**); **`IConversationSummaryStore`** is registered on the builder, then **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true)`** — portable orchestration remains active in every configuration, while Lua sandbox and **`LuaAiEnvelopeProcessor`** require **`COREAI_LUA`**. The same `IAgentMemoryScopeProvider` partitions persistence and queue cancellation. **`ApplyAiGameCommand`** carries **`TraceId`**. Entry points: first **`AiGameCommandRouter`**, then **`CoreAIGameEntryPoint`**. Game feature scopes use **Parent** to this root.
+- **`CoreAILifetimeScope`**: `RegisterCore()` — logger, MessagePipe, **`ApplyAiGameCommand`** broker, `IAiGameCommandSink`; portable routing contracts, chat/orchestration, queueing and scripted/stub clients are always registered. With **`COREAI_LLM`**, concrete provider-backed **OpenAI HTTP / MEAI / LLMUnity** clients, transports, readiness probes and resilience decorators compile and can be selected by **`LlmRoutingManifest`** + **`LlmClientRegistry`**. Before **`RegisterCorePortable(...)`**: **`AiOrchestrationQueueOptions`**, **`IAiOrchestrationMetrics`** (Null or **`LoggingAiOrchestrationMetrics`** when **`GameLogFeature.Metrics`**); the summary and memory backings are registered on the builder, then **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`** — portable orchestration remains active in every configuration, while the Lua sandbox (`com.neoxider.coreaimods`, including the opt-in **`LuaCsAiEnvelopeProcessor`**) requires **`COREAI_LUA`**. The same `IAgentMemoryScopeProvider` partitions persistence and queue cancellation. **`ApplyAiGameCommand`** carries **`TraceId`**. Entry points: first **`AiGameCommandRouter`**, then **`CoreAIGameEntryPoint`**. Game feature scopes use **Parent** to this root.
 - **v1.5.x additions to composition:** **`IContextBudgetPolicy`** (`DefaultContextBudgetPolicy`) + **`ITokenEstimator`** (`HeuristicTokenEstimator`) allocate **`HistoryTokenBudget`** per role. **`ICoreAISettings.EnableLlmContextCompaction`** (default false) gates optional **`LlmAssistedConversationContextManager`** — auxiliary LLM call to fold evicted history into a rolling summary (per-role toggle via **`AgentMemoryPolicy.RoleMemoryConfig.UseLlmContextCompaction`**; **`Programmer`** defaults off). **`ConversationContextManagerFactories.Create(...)`** wires **`SelectingConversationContextManager`** when enabled. Timeout in WebGL: **`CancelAfterSlim`** (UniTask PlayerLoop) replaces `CancelAfter` (non-functional in Emscripten). Network retries: exclusively in **`LoggingLlmClientDecorator`** (no orchestrator-level retry multiplier).
 - **`CoreAIGameEntryPoint`**: start + test orchestrator invocation (bootstrap).
 - Core scene: **`Assets/CoreAiUnity/Scenes/_mainCoreAI.unity`** (editor display name may be `_mainCoreAI`; add to Build Settings as **startup** for template development if needed).
@@ -124,7 +125,7 @@ The template sets defaults:
 
 The game may, as needed:
 - replace `ILlmClient` / enable `LlmRoutingManifest`
-- replace/extend `IGameLuaRuntimeBindings`
+- add Lua functions through `ILuaCsGameRuntimeBindings` (`LuaCsApiRegistry`) — see [DEVELOPER_GUIDE §6](DEVELOPER_GUIDE.md#6-lua-for-the-programmer-agent)
 - subscribe to `ApplyAiGameCommand` or `AiGameCommandRouter.CommandReceived` with its own logic
 
 **Data flow (normative):**
@@ -199,14 +200,14 @@ flowchart LR
 ## 5. Networking and authority (policy)
 
 - The **client is not treated as authoritative** for **global** AI outcomes (session rules, world, shared loot/craft in co-op): it shall not execute raw model output as truth for others.
-- The **host** (or solo) is the **reference** for orchestration and for roles with **HostAuthoritative**; clients receive **replicated state** (NGO, etc.).
+- The **host** (or solo) is the **reference** for orchestration and for roles with **HostAuthoritative**; clients receive **replicated state** (Mirror via `com.neoxider.coreaimirror`, or another transport behind `INetworkBridge`).
 - **Not all roles must exist in the game:** only **AINpc**, only **CoreMechanicAI**, or any subset is permitted — see [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) §5–6.
 - **Placement:** some roles (e.g. **CoreMechanicAI** or visual **AINpc**) may be **LocalPerClient** or **Hybrid** per developer decision; the core defines the **contract** for policy; the game chooses (co-op fairness vs local “flavor”).
 - Telemetry for **Analyzer** and **Creator** in multiplayer shall by default be collected **on the authority**; local metrics that do not affect rules — per game policy.
 
 ### 5.1 Recommended network stack for the template (library choice)
 
-**Historical recommendation (superseded): Netcode for GameObjects (NGO).** The project decision recorded in `Docs/ROADMAP.md` Track B and `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §2 is **Mirror, designed-first and stubbed** behind the engine-free `INetworkBridge` seam; NGO remains an alternative transport behind the same seam. The paragraph below is kept as the original comparison. — Unity package (`com.unity.netcode.gameobjects`), free, evolves with editor versions, fits **host / server + clients**. For CoreAI: **on the host** run the AI orchestrator and LLM; clients receive **agreed** `NetworkVariable` / RPC / custom messages with wave and rule parameters. Optionally later — **Unity Gaming Services** (Relay, Lobby) without changing the base authority model.
+**Historical recommendation (superseded): Netcode for GameObjects (NGO).** The project decision recorded in `Docs/ROADMAP.md` Track B and `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §2 is **Mirror** behind the engine-free `INetworkBridge` seam, now shipped as `com.neoxider.coreaimirror`; NGO remains an alternative transport behind the same seam. The paragraph below is kept as the original comparison. — Unity package (`com.unity.netcode.gameobjects`), free, evolves with editor versions, fits **host / server + clients**. For CoreAI: **on the host** run the AI orchestrator and LLM; clients receive **agreed** `NetworkVariable` / RPC / custom messages with wave and rule parameters. Optionally later — **Unity Gaming Services** (Relay, Lobby) without changing the base authority model.
 
 | Option | Pros for the template | Cons / when not to use |
 |--------|----------------------|------------------------|
@@ -216,9 +217,9 @@ flowchart LR
 | **Photon (Fusion / PUN2)** | Ready relay/cloud, convenient for quick internet multiplayer | **Not fully free** at scale; Photon pricing and cloud coupling; often excessive at start for “AI on host only” |
 | **Photon Quantum** | Fixed-tick simulation | Separate paradigm (ECS-like), licensing; often heavy for first `_exampleGame` pass |
 
-**Conclusion:** for **free**, **capable within Unity**, and aligned with “**host authority for AI**” — **NGO**. **Mirror** is a reasonable alternative if you deliberately avoid the Unity Multiplayer ecosystem. **Photon** makes sense when you need **managed relay/matchmaking** and accept limits/pricing, not as a “simple free NGO replacement.”
+**Original conclusion (superseded by the Mirror decision above):** for **free**, **capable within Unity**, and aligned with “**host authority for AI**” — **NGO**. **Mirror** is a reasonable alternative if you deliberately avoid the Unity Multiplayer ecosystem. **Photon** makes sense when you need **managed relay/matchmaking** and accept limits/pricing, not as a “simple free NGO replacement.”
 
-Core interfaces (`INetworkAuthority` / `IsServer` / `IsHost`) shall allow **substituting** transport if strictly necessary (e.g. tests or a Mirror-based project), but the **reference implementation** planned for the repository is **Mirror** (see `Docs/ROADMAP.md` Track B); today only `NullNetworkBridge` (loopback) exists.
+Core interfaces (`INetworkAuthority` / `IsServer` / `IsHost`) shall allow **substituting** transport if strictly necessary (e.g. tests or another networking stack). **Networking today:** Mirror via `com.neoxider.coreaimirror` (`MirrorNetworkBridge`, `CoreAiMirrorNetworkBridgeProvider`) behind `INetworkBridge`; `NullNetworkBridge` is the solo loopback.
 
 ### 5.2 Builds without AI models (roadmap, HostAuthoritative)
 
@@ -229,7 +230,7 @@ When **all** LLM roles are concentrated on the **host**, the template shall even
   - DI registration of **`ILlmClient`** as a **stub** (the shipped `StubLlmClient`, or a custom heuristic client) yielding **deterministic** or **tabular** responses per role (fallback from ScriptableObject / seed).
   - Optional compile symbol (**Scripting Define**) **`COREAI_LLM`** — manual positive opt-in only for provider-backed HTTP/MEAI and optional LLMUnity implementations. Without it, portable orchestration/chat, scripted/stub clients and MEAI public contracts remain. Symbol **`COREAI_HAS_LLMUNITY`** is set **automatically** via `versionDefines` in asmdef when package `ai.undream.llm` is present — code depending on LLMUnity types compiles only when both symbols are present.
   - Orchestrator in “no LLM” mode **shall not fail:** tasks map to heuristics or are marked “skipped” with logging; **MessagePipe** and game logic remain operational.
-  - NGO clients still receive **replicated state**; the only difference is that the **source** of decisions on the host is not a neural net but a stub/designer data.
+  - Network clients still receive **replicated state**; the only difference is that the **source** of decisions on the host is not a neural net but a stub/designer data.
 - Fallback contract details shall follow `ILlmClient` in code; this subclause records a **template design requirement**.
 
 ---
@@ -264,7 +265,7 @@ When **all** LLM roles are concentrated on the **host**, the template shall even
 
 ### 8.2 Limits
 
-- **MaxInstructions** (or equivalent in the Lua-CSharp version used). In the template this is implemented via a pluggable debugger hook (`InstructionLimitDebugger`) in `LuaExecutionGuard` (best-effort step limit + wall clock).
+- **MaxInstructions** (or equivalent in the Lua-CSharp version used). In the template this is implemented by an instruction-count hook in `LuaCsExecutionGuard` (step limit, executed wall-clock time and an allocation budget).
 - **Timeout** policy for Lua chunk execution aligned with §10 (main thread).
 
 ### 8.3 Bridge to MessagePipe (Last-War motivation)
@@ -280,7 +281,7 @@ In Last-War (`Assets/Scripts/LuaBehaviour/`, including the **`LuaMessagePipeAdap
 ### 8.4 Tests
 
 - EditMode: forbidden API call, instruction overrun, invalid event type — expected errors.
-- EditMode: World Commands — Lua publishes `WorldCommand`, JSON envelope check (see `WorldCommandLuaBindingsEditModeTests`).
+- EditMode: World Commands — Lua publishes `WorldCommand`, JSON envelope check (see `WorldBindingsStudUnitsEditModeTests` and `LuaToolEditModeTests` in `CoreAI.Mods.Tests`).
 
 ---
 
@@ -311,7 +312,7 @@ Assembly **`CoreAI.Core`** does not reference Unity; main-thread marshaling is p
    Any **`UnityEngine.*`** calls, work with **`GameObject` / `Component` / `Transform`**, **`Object.FindObjectsByType`**, **`Instantiate`**, scene state changes, and typical game structures (`Dictionary` + scene objects in one scenario) **shall** run on the **main** editor/player thread.
 
 3. **What the template in the repository does**
-   Subscriber **`AiGameCommandRouter`** on **`ApplyAiGameCommand`**, after delivery from MessagePipe, **does not** handle the command on the current thread immediately: it schedules work via **`UniTask.SwitchToMainThread()`**, then on the **main thread** calls **`LuaAiEnvelopeProcessor.Process`**, static event **`CommandReceived`**, and log **`GameLogFeature.MessagePipe`**. Thus listeners such as **`ArenaCompanionAiListener`**, **`ArenaCreatorWavePlanner`**, and UI subscribed to **`CommandReceived`** receive callbacks in a Unity-safe context.
+   Subscriber **`AiGameCommandRouter`** on **`ApplyAiGameCommand`**, after delivery from MessagePipe, **does not** handle the command on the current thread immediately: it schedules work via **`UniTask.SwitchToMainThread()`**, then on the **main thread** calls **`ICoreAiWorldCommandExecutor.TryExecute`**, the static event **`CommandReceived`**, and log **`GameLogFeature.MessagePipe`**. It does not execute Lua from the envelope; Lua runs through the `execute_lua` tool, or through a host-registered `LuaCsAiEnvelopeProcessor`. Thus listeners such as **`ArenaCompanionAiListener`**, **`ArenaCreatorWavePlanner`**, and UI subscribed to **`CommandReceived`** receive callbacks in a Unity-safe context.
 
 4. **For custom subscribers**
    - **Preferred:** subscribe to **`AiGameCommandRouter.CommandReceived`** (after router marshaling) **or** duplicate the same pattern (`await UniTask.SwitchToMainThread()` at the start of the handler).
@@ -417,7 +418,7 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 
 | Id | Criterion |
 |----|-----------|
-| **F0** | **Done:** **`Assets/CoreAI/package.json`** — **`com.neoxider.coreai`**, no required package dependencies (Lua moved to `com.neoxider.coreaimods`, bundled as `Lua.dll`); **`Assets/CoreAiUnity/package.json`** — **`com.neoxider.coreaiunity`**, dependencies: **`com.neoxider.coreai`**, MessagePipe, UniTask, LLMUnity, etc. |
+| **F0** | **Done:** **`Assets/CoreAI/package.json`** — **`com.neoxider.coreai`**, no required package dependencies (Lua moved to `com.neoxider.coreaimods`, bundled as `Lua.dll`); **`Assets/CoreAiUnity/package.json`** — **`com.neoxider.coreaiunity`**, dependencies: **`com.neoxider.coreai`** only; VContainer / MessagePipe / UniTask via **CoreAI → Setup → Install Git Dependencies**; LLMUnity (`ai.undream.llm`) is optional (**CoreAI → Setup → Modules**). |
 | **F1** | **Done:** monorepo — sources in **`Assets/CoreAI`** and **`Assets/CoreAiUnity`**; **do not** register them in **`manifest.json`** via **`file:`** to a path inside **`Assets/`** (Unity UPM rejects). External project: Git UPM **`?path=Assets/CoreAI`** / **`?path=Assets/CoreAiUnity`**. |
 | **F2** | **Done:** **`CoreAI.Core`** in **`Assets/CoreAI/Runtime/Core/`**; **`CoreAI.Source`** in **`Assets/CoreAiUnity/Runtime/Source/`**; tests, **`Assets/CoreAiUnity/Resources`**, **Editor**, **Docs** — in package **`CoreAiUnity`**. |
 | F3 | Publish: git URL with **`?path=Assets/CoreAI`**, tags per `version`, optional OpenUPM; sync `package.json` version with releases. |
@@ -426,7 +427,7 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 
 ## 14. Summary for context (copy-paste)
 
-**CoreAI 7.0.1:** six UPM packages: `coreai`, `coreaiunity`, optional `coreaimods`, `coreaihub`, `coreaibenchmark`, `coreaimcp`. **`CoreAI.Core`** in **`Assets/CoreAI`** keeps portable orchestration/chat/tool contracts, queueing, scripted/stub clients and required MEAI references in every build. **`CoreAI.Source`** in **`Assets/CoreAiUnity`** supplies Unity composition, persistence, chat UI and, under **`COREAI_LLM`**, provider-backed HTTP/MEAI/LLMUnity implementations. Lua-CSharp lives only in `coreaimods` and requires **`COREAI_LUA`**. **Networking:** NGO (§5.1). **Roles:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Guide:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Tests:** four EditMode matrix legs (`core`, `llm`, `lua`, `full`) plus non-live PlayMode. **Defines:** `COREAI_LLM` (providers), `COREAI_LUA` (Lua), `COREAI_HAS_LLMUNITY` (automatic package presence). **UI Toolkit:** custom elements use `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+; the only UXML path left in Unity 6.6+).
+**Current packages:** seven lockstep UPM packages: `coreai`, `coreaiunity`, optional `coreaimods`, `coreaihub`, `coreaibenchmark`, `coreaimcp`, `coreaimirror`. **`CoreAI.Core`** in **`Assets/CoreAI`** keeps portable orchestration/chat/tool contracts, queueing, scripted/stub clients and required MEAI references in every build. **`CoreAI.Source`** in **`Assets/CoreAiUnity`** supplies Unity composition, persistence, chat UI and, under **`COREAI_LLM`**, provider-backed HTTP/MEAI/LLMUnity implementations. Lua-CSharp lives only in `coreaimods` and requires **`COREAI_LUA`**. **Networking:** Mirror via `com.neoxider.coreaimirror` behind `INetworkBridge`; `NullNetworkBridge` is the solo loopback (§5.1). **Roles:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Guide:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Tests:** four EditMode matrix legs (`core`, `llm`, `lua`, `full`) plus non-live PlayMode. **Defines:** `COREAI_LLM` (providers), `COREAI_LUA` (Lua), `COREAI_HAS_LLMUNITY` (automatic package presence). **UI Toolkit:** custom elements use `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+; the only UXML path left in Unity 6.6+).
 
 ---
 

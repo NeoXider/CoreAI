@@ -33,11 +33,15 @@ namespace CoreAI.Composition
         /// everything else is rejected. Pinned by CoreAiWorldCommandExecutorLoadSceneEditModeTests.
         /// </param>
         /// <param name="enableFullLuaAccess">
-        /// When true, scripts with the Full capability tier receive reflection bindings to arbitrary
-        /// GameObjects/components (the Lua-CSharp <c>LuaCsFullUnityRuntimeBindings</c>). Off by default.
+        /// Obsolete, ignored. It never granted the Full Lua tier: that grant is the
+        /// <c>enableFullLuaAccess</c> argument of <c>CoreAiModsInstaller.RegisterCoreAiMods</c>
+        /// (package <c>com.neoxider.coreaimods</c>), set in scenes by
+        /// <c>CoreAiModsLifetimeScope.FullLuaAccessEnabled</c>.
         /// </param>
         /// <param name="enableFullLuaPrivateAccess">
-        /// When true, Full-tier Lua reflection may access non-public members. Off by default.
+        /// Obsolete, ignored. Full-tier private access is the <c>enableFullLuaPrivateAccess</c> argument of
+        /// <c>CoreAiModsInstaller.RegisterCoreAiMods</c>, set in scenes by
+        /// <c>CoreAiModsLifetimeScope.FullLuaPrivateAccessEnabled</c>.
         /// </param>
         public static void RegisterWorldCommands(
             this IContainerBuilder builder,
@@ -46,6 +50,9 @@ namespace CoreAI.Composition
             bool enableFullLuaAccess = false,
             bool enableFullLuaPrivateAccess = false)
         {
+            // WHY: the two Full-tier flags stay in the signature only because existing callers compile
+            // against it (named arguments included). This package cannot reference the Lua mods package
+            // that owns the tier, so nothing here can honour them; CoreAiModsInstaller reads its own copies.
             CoreAiPrefabRegistryAsset registry;
             if (worldPrefabRegistry != null)
             {

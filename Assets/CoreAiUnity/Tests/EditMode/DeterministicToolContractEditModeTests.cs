@@ -117,6 +117,93 @@ namespace CoreAI.Tests.EditMode
                 "Roles without the memory tool must not receive memory guidance.");
         }
 
+        /// <summary>
+        /// The availability list ends with "do not call any tool not listed", so a multi-function wrapper
+        /// must be listed under the function names the provider is offered, not under its own name.
+        /// </summary>
+        [Test]
+        public void BuildRequestToolAvailabilityMessage_MultiFunctionWrapper_ListsItsFunctionNames()
+        {
+            string message = AiToolContractPromptFormatter.BuildRequestToolAvailabilityMessage(
+                new ILlmTool[] { new StubTool("greet"), new MultiFunctionStubTool() },
+                new AiTaskRequest { RoleId = "Teacher" });
+
+            StringAssert.Contains("Available tools:\n- camera_look\n- camera_list\n- greet\n",
+                message.Replace("\r\n", "\n"));
+            StringAssert.DoesNotContain("- camera\n", message.Replace("\r\n", "\n"));
+        }
+
+        /// <summary>
+        /// WHY: the prompt formatter, every <c>ToolExecutionPolicy</c> and the request allowlist ask for a
+        /// wrapper's names on each request, and every ask ran <c>AIFunctionFactory.Create</c> (reflection and
+        /// schema generation) for every function. The names are built once per wrapper instance.
+        /// </summary>
+        [Test]
+        public void GetCallableToolNames_Wrapper_BuildsItsFunctionsOncePerInstance()
+        {
+            CountingWrapperTool wrapper = new();
+            ILlmTool[] tools = { new StubTool("greet"), wrapper };
+            for (int i = 0; i < 3; i++)
+            {
+                AiToolContractPromptFormatter.BuildRequestToolAvailabilityMessage(
+                    tools, new AiTaskRequest { RoleId = "Teacher" });
+                _ = new CoreAI.Infrastructure.Llm.ToolExecutionPolicy(null, new TestSettings(), tools, false, "Teacher");
+                SkillSetToolResolver.RestrictToAllowedFunctions(wrapper, new[] { "camera_look" });
+                CollectionAssert.AreEqual(new[] { "camera_look", "camera_list" },
+                    SkillSetToolResolver.GetCallableToolNames(wrapper));
+            }
+
+            Assert.AreEqual(1, wrapper.Enumerations);
+
+            CountingWrapperTool another = new();
+            CollectionAssert.AreEqual(new[] { "camera_look", "camera_list" },
+                SkillSetToolResolver.GetCallableToolNames(another));
+            Assert.AreEqual(1, another.Enumerations, "The cache is per instance.");
+        }
+
+        [Test]
+        public void GetCallableToolNames_FailedEnumeration_KeepsPartialNames_AndIsNotCached()
+        {
+            CountingWrapperTool wrapper = new() { FailuresLeft = 1 };
+
+            CollectionAssert.AreEqual(new[] { "camera_look" }, SkillSetToolResolver.GetCallableToolNames(wrapper),
+                "The functions built before the failure are still reported.");
+            CollectionAssert.AreEqual(new[] { "camera_look", "camera_list" },
+                SkillSetToolResolver.GetCallableToolNames(wrapper),
+                "A failed enumeration is not cached; the next ask builds the names again.");
+            CollectionAssert.AreEqual(new[] { "camera_look", "camera_list" },
+                SkillSetToolResolver.GetCallableToolNames(wrapper));
+            Assert.AreEqual(2, wrapper.Enumerations, "The complete enumeration is cached.");
+        }
+
+        [Test]
+        public void RestrictToAllowedFunctions_NarrowsOnlyWhenSomeFunctionsAreAllowed()
+        {
+            CountingWrapperTool wrapper = new() { TimeoutOverride = 4321 };
+
+            Assert.IsNull(SkillSetToolResolver.RestrictToAllowedFunctions(wrapper, new[] { "greet" }));
+            Assert.AreSame(wrapper,
+                SkillSetToolResolver.RestrictToAllowedFunctions(wrapper, new[] { "camera_list", "camera_look" }));
+
+            ILlmTool narrowed = SkillSetToolResolver.RestrictToAllowedFunctions(wrapper, new[] { "camera_list", "greet" });
+
+            Assert.IsNotNull(narrowed);
+            Assert.AreNotSame(wrapper, narrowed);
+            Assert.AreEqual("camera", narrowed.Name);
+            Assert.AreEqual(wrapper.Description, narrowed.Description);
+            Assert.AreEqual(4321, narrowed.ToolTimeoutMsOverride);
+            Assert.IsTrue(narrowed.EndsTurn);
+            Assert.IsTrue(narrowed.IsMutating);
+            Assert.IsTrue(narrowed.AllowDuplicates);
+            CollectionAssert.AreEqual(new[] { "camera_list" }, SkillSetToolResolver.GetCallableToolNames(narrowed));
+            CollectionAssert.AreEqual(new[] { "camera_list" },
+                ((IAIFunctionsLlmTool)narrowed).CreateAIFunctions().Select(f => f.Name).ToArray());
+            string message = AiToolContractPromptFormatter.BuildRequestToolAvailabilityMessage(
+                new[] { narrowed }, new AiTaskRequest { RoleId = "Teacher" }).Replace("\r\n", "\n");
+            StringAssert.Contains("Available tools:\n- camera_list\n", message);
+            StringAssert.DoesNotContain("camera_look", message);
+        }
+
         private static AgentMemoryPolicy BuildPolicy(params ILlmTool[] tools)
         {
             AgentMemoryPolicy policy = new();
@@ -165,6 +252,55 @@ namespace CoreAI.Tests.EditMode
             public string Description => "stub tool";
             public string ParametersSchema { get; }
             public bool AllowDuplicates => false;
+        }
+
+        private sealed class MultiFunctionStubTool : ILlmTool, IAIFunctionsLlmTool
+        {
+            public string Name => "camera";
+            public string Description => "camera functions";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+
+            public IEnumerable<Microsoft.Extensions.AI.AIFunction> CreateAIFunctions()
+            {
+                yield return Microsoft.Extensions.AI.AIFunctionFactory.Create((Func<string>)(() => "looked"),
+                    new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "camera_look" });
+                yield return Microsoft.Extensions.AI.AIFunctionFactory.Create((Func<string>)(() => "listed"),
+                    new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "camera_list" });
+            }
+        }
+
+        /// <summary>
+        /// A <c>camera</c> wrapper that counts how often its functions are built; while
+        /// <see cref="FailuresLeft"/> is positive an enumeration throws after the first function.
+        /// </summary>
+        private sealed class CountingWrapperTool : ILlmTool, IAIFunctionsLlmTool
+        {
+            public int Enumerations;
+            public int FailuresLeft;
+            public int? TimeoutOverride;
+            public string Name => "camera";
+            public string Description => "camera functions";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => true;
+            public int? ToolTimeoutMsOverride => TimeoutOverride;
+            public bool EndsTurn => true;
+            public bool IsMutating => true;
+
+            public IEnumerable<Microsoft.Extensions.AI.AIFunction> CreateAIFunctions()
+            {
+                Enumerations++;
+                yield return Microsoft.Extensions.AI.AIFunctionFactory.Create((Func<string>)(() => "looked"),
+                    new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "camera_look" });
+                if (FailuresLeft > 0)
+                {
+                    FailuresLeft--;
+                    throw new InvalidOperationException("the second function cannot be built yet");
+                }
+
+                yield return Microsoft.Extensions.AI.AIFunctionFactory.Create((Func<string>)(() => "listed"),
+                    new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "camera_list" });
+            }
         }
 
         private sealed class CapturingLlmClient : ILlmClient

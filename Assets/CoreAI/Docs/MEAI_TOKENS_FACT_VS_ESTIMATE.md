@@ -37,7 +37,8 @@ If the provider does not send `usage` while streaming, facts may exist only on t
 
 ## 3. Two timeouts: orchestrator and HTTP
 
-- **`ICoreAISettings.LlmRequestTimeoutSeconds`** — chat/orchestrator cancel window: `CoreAiChatService` links a token cancelled with **`CancelAfterSlim`** (WebGL-friendly).
+- **`ICoreAISettings.LlmRequestTimeoutSeconds`** — chat/orchestrator cancel window: `CoreAiChatService` links a token cancelled with **`CancelAfterSlim`** (WebGL-friendly). It is an idle budget: progress (a streamed chunk, a tool call) re-arms it.
+- **Host deadline** — a host that runs its own deadline passes it as the separate `deadlineToken` argument of `CoreAiChatService.SendMessageAsync` / `SendMessageResultAsync` / `SendMessageStreamingAsync` (see [`LLM_ROUTING.md`](LLM_ROUTING.md), *Host deadline*).
 - **`IOpenAiHttpSettings.RequestTimeoutSeconds`** — per round-trip HTTP limit in the transport.
 
 On Unity, **`CoreAISettingsAsset.EffectiveHttpRequestTimeoutSeconds`** is:
@@ -50,10 +51,10 @@ so a single HTTP call **cannot outlive** the orchestrator cancel (important for 
 
 ## 4. Timeout vs user cancellation
 
-- If **only** the chat timeout token fires (`timeoutCts`) and the **outer** user `ct` is **not** cancelled, `CoreAiChatService` throws **`LlmOperationTimeoutException`** (subclass of `OperationCanceledException`) to distinguish library timeout from explicit user cancel.
-- **`RoutingLlmClient`** maps non-streaming failures to `LlmRequestCompleted` with **`LlmErrorCode.Timeout`** vs **`Cancelled`** based on exception type.
+- If **only** the chat timeout or the host deadline fires and the **outer** user `ct` is **not** cancelled, `CoreAiChatService` throws **`LlmOperationTimeoutException`** (subclass of `OperationCanceledException`) on both the streaming and the buffered path, to distinguish a timeout from an explicit user cancel; the orchestrator records it as `DeadlineCancellation`. A cancelled `ct` stays a cancellation even if the deadline fired too.
+- **`RoutingLlmClient`** maps failures — thrown exceptions, failed results and terminal stream chunks — to `LlmRequestCompleted` through **`LlmCancellation`**: once the caller's token is cancelled, every failure is **`Cancelled`**, whatever the transport reported; with the caller still waiting, `LlmOperationTimeoutException` (also inside an `AggregateException`) is **`Timeout`**, any other `OperationCanceledException` is **`Cancelled`** (someone else stopped the work — `CoreAi.StopAgent`, a cancellation scope, a disposed orchestrator), and anything else keeps the layer's own typed code, otherwise `ProviderError`.
 
-**Transport/internal timeouts are typed `Timeout`, never `Cancelled`:** a transport-internal timeout (e.g. a backend that never sends response headers) or the timeout decorator's own linked token firing surfaces as a typed timeout on **both** the streaming and non-streaming paths — an inner `Cancelled` result/terminal chunk caused by the decorator's timeout is reclassified to `Timeout`, and `TimeoutException` maps to `LlmErrorCode.Timeout`. `Cancelled` is reported **only when the caller's own token was cancelled**, so timeouts stay retry/fallback-eligible while explicit user cancels are never retried. For UI, see patterns like `ResolveTimeoutMessage` on `CoreAiChatPanel` (empty message = do not duplicate a system line).
+**Transport/internal timeouts are typed `Timeout`, never `Cancelled`:** a transport-internal timeout (e.g. a backend that never sends response headers) or the timeout decorator's own linked token firing surfaces as a typed timeout on **both** the streaming and non-streaming paths — an inner `Cancelled` result/terminal chunk caused by the decorator's timeout is reclassified to `Timeout`, and `TimeoutException` maps to `LlmErrorCode.Timeout`. A timeout is never reported as `Cancelled` while the caller is still waiting, so timeouts stay retry/fallback-eligible, while a cancelled request is never retried or failed over. Details and the full list of layers that follow this rule: [`LLM_ROUTING.md`](LLM_ROUTING.md), *Typed timeout vs cancel*. For UI, see patterns like `ResolveTimeoutMessage` on `CoreAiChatPanel` (empty message = do not duplicate a system line).
 
 ---
 

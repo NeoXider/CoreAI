@@ -26,7 +26,9 @@ the part that holds the logic — the Unity layer is adapters around it.
 
 **A plain .NET host, no Unity.** Reference the portable project and run one turn with a tool and a
 two-document skill. Every type and signature below is the one used by the compiled
-[console sample](../../examples/dotnet/Program.cs).
+[console sample](../../examples/dotnet/Program.cs). The tool's lambda is wrapped in an explicit
+`Func<...>` so the same line also compiles in Unity, which uses C# 9 (a bare lambda passed to a
+`System.Delegate` parameter fails there with CS1660).
 
 ```xml
 <ItemGroup>
@@ -50,7 +52,7 @@ using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 Dictionary<string, int> stock = new(StringComparer.OrdinalIgnoreCase) { ["iron"] = 12, ["wood"] = 30 };
 
 DelegateLlmTool getStock = new("get_stock", "Read stock by item id: iron or wood.",
-    (string item) => stock.TryGetValue(item, out int count) ? $"{item}: {count}" : "Unknown item.");
+    new Func<string, string>(item => stock.TryGetValue(item, out int count) ? $"{item}: {count}" : "Unknown item."));
 
 SkillSet inventory = SkillSet.FromTextParts("Inventory", "Read the application's supply stock.",
     new KeyValuePair<string, string>[]
@@ -109,15 +111,20 @@ In Unity you normally do not assemble the pipeline by hand — see the
 Always present in this assembly:
 
 - **Agents** — `AgentBuilder` (fluent, ~26 options) → `AgentConfig` → `AgentMemoryPolicy`.
-- **Tools** — `ILlmTool`, `DelegateLlmTool`, `MemoryTool`, `WaitLlmTool`, `ToolExecutionPolicy`
-  (timeouts, duplicate detection, retry-with-feedback, tool-name repair, bounded parallelism).
+- **Tools** — `ILlmTool` with the binding interfaces `IAIFunctionLlmTool` / `IAIFunctionsLlmTool`,
+  `DelegateLlmTool`, `MemoryTool`, `WaitLlmTool`, `ToolExecutionPolicy` (timeouts, duplicate detection,
+  required-argument and argument-type checks before the body runs, retry-with-feedback, tool-name repair,
+  bounded parallelism).
 - **Skills** — `SkillSet`, `SkillSection`, `read_skill`, `call_skill_tool`, `manage_skills`.
 - **Memory and context** — `AgentMemoryScope`, the `Scoped*StoreDecorator` family,
   `DeterministicConversationContextManager`, `LlmAssistedConversationContextManager`,
   `IContextBudgetPolicy`, `IConversationSummaryStore`.
 - **Orchestration** — `IAiOrchestrationService`, `AiOrchestrator`, `QueuedAiOrchestrator`.
 - **LLM plumbing** — `MeaiOpenAiChatClient` (OpenAI-compatible HTTP + SSE),
-  `SmartToolCallingChatClient`, routing/timeout/retry/circuit-breaker decorators, `ILlmEndpointRegistry`.
+  `SmartToolCallingChatClient`, routing/timeout/retry decorators, an opt-in circuit-breaker decorator
+  (not composed by the Unity pipeline; hosts add it), `LlmCancellation` (the one rule that keeps a
+  caller's cancellation from being reported, retried or counted as a timeout or an outage),
+  `ILlmEndpointRegistry`.
 - **Audit contracts** — `IAuditLog`, `AuditEntry`, `AuditHash`.
 
 Deliberately **not** here: Unity UI and DI, file-backed Unity stores, LLMUnity, the Lua sandbox, the
@@ -173,7 +180,7 @@ serialized against each other and result order is preserved. Proof:
 `SkillSet.FromFiles` keep each document addressable as a `SkillSection`; `read_skill` returns the entry
 document plus an index of the rest, and a second call fetches one section or `all`. The model's schema
 cost stays at two meta-tools plus a one-line catalog entry per skill regardless of how many tools a
-skill holds. Proof: `SkillSectionDisclosureEditModeTests` (15 cases, including
+skill holds. Proof: `SkillSectionDisclosureEditModeTests` (including
 `ReadSkill_StagedAnswer_IsSmallerThanTheWholeSkill`), `SkillSetEditModeTests`.
 
 **Memory has real isolation boundaries.** `AgentMemoryScope(tenantId, userId, sessionId, topicId)`
@@ -183,15 +190,17 @@ filename or an error log. Proof: `ScopedAgentMemoryStoreDecoratorEditModeTests` 
 `ScopedKeys_LowercaseGuid_IsNotPersistedInPlaintext`), `AgentMemoryActorScopeKeyEditModeTests`.
 
 **The engine-free claim is a gate, not a wish.** `dotnet test tools/portable/Tests/CoreAI.Portable.Tests.csproj -c Release`
-runs the existing EditMode fixtures against the real `netstandard2.1` DLL with no Unity present —
-**1,317 cases, 0 failures** on 2026-09-09 — and runs on every push as the CI job `portable-core`.
+runs the existing EditMode fixtures against the real `netstandard2.1` DLL with no Unity present, and runs
+on every push as the CI job `portable-core`. Run it yourself for the current case count.
 
 ---
 
 ## Limits — read before you plan around them
 
-- **The core has no storage and no scheduler.** `FileConversationSummaryStore` and the Unity file
-  stores live outside it. In a plain .NET host you supply persistence, or memory dies with the process.
+- **The core has one file store and no scheduler.** It ships `FileConversationSummaryStore` (rolling
+  conversation summaries). Agent memory, chat history and skills need your own `IAgentMemoryStore` /
+  `ISkillStore` in a plain .NET host, or they die with the process; the Unity file stores live in
+  `com.neoxider.coreaiunity`.
 - **`SmartToolCallingChatClient` does not run the tool loop in streaming mode.** Its
   `GetStreamingResponseAsync` passes tool calls through unexecuted and logs that it did. The
   execute-as-you-stream path is `MeaiLlmClient.CompleteStreamingAsync` (Unity layer). Use the

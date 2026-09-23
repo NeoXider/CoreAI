@@ -234,10 +234,13 @@ namespace CoreAI.Ai
             HashSet<string> seen = new(StringComparer.Ordinal);
             foreach (ILlmTool tool in AiToolOrder.Canonical(tools))
             {
-                string name = tool?.Name?.Trim();
-                if (!string.IsNullOrEmpty(name) && seen.Add(name))
+                foreach (string listed in ListedToolNames(tool))
                 {
-                    sb.Append("- ").AppendLine(name);
+                    string name = listed?.Trim();
+                    if (!string.IsNullOrEmpty(name) && seen.Add(name))
+                    {
+                        sb.Append("- ").AppendLine(name);
+                    }
                 }
             }
 
@@ -245,6 +248,22 @@ namespace CoreAI.Ai
             {
                 sb.AppendLine("- (none)");
             }
+        }
+
+        /// <summary>
+        /// The names a tool is listed under as available: a multi-function wrapper's function names, any
+        /// other tool's own name.
+        /// </summary>
+        /// <remarks>
+        /// WHY: the provider is offered a wrapper's functions (<c>camera_look</c>), never the wrapper's own
+        /// name (<c>camera</c>), and this list closes with "do not call any tool not listed" - listing the
+        /// wrapper told the model to stay away from exactly the functions it can call.
+        /// </remarks>
+        private static IEnumerable<string> ListedToolNames(ILlmTool tool)
+        {
+            return tool is IAIFunctionsLlmTool
+                ? SkillSetToolResolver.GetCallableToolNames(tool)
+                : new[] { tool?.Name };
         }
 
         private static void AppendCanonicalNames(StringBuilder sb, IReadOnlyList<string> names)

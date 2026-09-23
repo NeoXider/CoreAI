@@ -91,21 +91,35 @@ A mod loaded this way is **auto-persisted**: its source and manifest are written
 so it **survives a restart** (see "How persistence works"). The agent can never raise the capability
 tier — the host fixes the tier when it registers the tool.
 
-### (b) In C# — `LuaCsModRuntime.LoadMod`
+### (b) In C# — `ILuaModRuntime.LoadMod`
+
+Every management call takes the calling actor (`ActorContext`) as its first argument. Resolve the
+runtime and the actor from the `CoreAiModsLifetimeScope` container, the way
+`Assets/CoreAI.Demos/LuaMods/Scripts/LuaModsDemoController.cs` does:
 
 ```csharp
+// using CoreAI.Ai; using CoreAI.Ai.LuaCs; using CoreAI.Authority; using VContainer;
+ILuaModRuntime modRuntime = modsContainer.Resolve<ILuaModRuntime>();
+ActorContext host = modsContainer.Resolve<IActorIdentityProvider>()
+    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
 modRuntime.LoadMod(
+    host,
     "greeter",
     luaSource,
     LuaCapabilities.Read | LuaCapabilities.LogicOverride);
 // Drive game -> mod events:
-modRuntime.EmitEvent("wave_started", "3");
-// Observe mod -> game events:
-modRuntime.ModEventEmitted += (mod, evt, payload) => { /* ... */ };
+modRuntime.EmitEvent(host, "wave_started", "3");
+// Observe mod -> game events (unsubscribe with RemoveModEventEmittedListener):
+modRuntime.AddModEventEmittedListener(host, OnModEvent);
+
+void OnModEvent(string modId, string eventName, string payload) { /* ... */ }
 ```
 
-`LoadMod` auto-persists by default (the runtime is constructed with `autoPersistMods: true`). Pass a
-restricted capability set; a mod can never widen the host tier.
+`EmitEvent` and the listener methods require an unrestricted host actor; the default Unity
+composition issues one for the local player. `LoadMod` auto-persists by default (its
+`persistToStore` parameter defaults to `true`). Pass a restricted capability set; a mod can never
+widen the host tier.
 
 ### (c) Assign a `.lua` TextAsset to a demo controller
 
@@ -114,7 +128,7 @@ asset so you can author a mod with a real `.lua` extension (editor recognition, 
 of the old `.lua.txt` workaround. `myLuaAsset.text` returns the source.
 
 Author `greeter.lua` under `Assets/`, then drag it onto a demo controller's `TextAsset` field; the
-controller passes `asset.text` to `LoadMod` on start.
+controller passes `asset.text` to `LoadMod` (the LuaMods demo does it from its **Load mod** button).
 
 ## How persistence works
 
@@ -129,14 +143,17 @@ package out as:
     main.lua        -- the mod source (entry-point file)
 ```
 
-On startup the host calls `LuaCsModRuntime.RehydrateFromStore(hostGrant)`: every stored package whose
+The default Unity composition (`CoreAiModsLifetimeScope` → `CoreAiModsInstaller`) wires a
+`FileLuaModSourceStore` (under a per-scene subfolder when the scope sets a `storeId`) and, on
+startup, first seeds the bundled mods and then rehydrates the store for you: every stored package whose
 manifest is `Active` is re-loaded automatically, with its requested capabilities masked down to the
 host grant (and stripped of `Full` unless the host explicitly allows it). So a mod you loaded once via
-chat is back the next time you press Play — no manual reload.
+chat is back the next time you press Play — no manual reload, and a host must not add its own
+autoload on top. A host that builds its own `LuaCsModRuntime` calls
+`RehydrateFromStore(host, hostGrant, allowFull)` itself; it requires an unrestricted host actor.
 
-If no source store is wired the runtime falls back to `NullLuaModSourceStore`: everything still works,
-but mods live only in memory (exactly the pre-persistence behavior). `RehydrateFromStore` then
-returns `0`.
+A bare `LuaCsModRuntime` constructed without a `sourceStore` falls back to `NullLuaModSourceStore`:
+everything still works, but mods live only in memory. `RehydrateFromStore` then returns `0`.
 
 Note: this is separate from per-mod **`store_set`/`store_get`** key/value data, which is persisted by
 `FileLuaModStore` (`persistentDataPath/CoreAI/LuaMods`). The source store persists the *mod itself*;
@@ -146,11 +163,11 @@ the mod store persists the *mod's runtime variables*.
 
 Two ways:
 
-1. **Export / import a bundle.** `manage_mods export` (or `LuaCsModRuntime.ExportMod(id)`) returns a
-   single JSON bundle of the shape `{"manifest":{...},"source":"..."}`. Send that string to another
-   player; they run `manage_mods import` with it (or `LuaCsModRuntime.ImportMod(bundleJson, hostGrant)`)
-   and the mod loads on their machine. Use `manage_mods forget` (`LuaCsModRuntime.ForgetMod(id)`) to
-   permanently delete a stored package.
+1. **Export / import a bundle.** `manage_mods export` (or `ILuaModRuntime.ExportMod(host, id)`)
+   returns a single JSON bundle of the shape `{"manifest":{...},"source":"..."}`. Send that string to
+   another player; they run `manage_mods import` with it (or
+   `ILuaModRuntime.ImportMod(host, bundleJson, hostGrant)`) and the mod loads on their machine. Use
+   `manage_mods forget` (`ILuaModRuntime.ForgetMod(host, id)`) to permanently delete a stored package.
 
    ```json
    { "action": "export", "mod_id": "greeter" }
@@ -178,7 +195,7 @@ name: Light Dimmer
 description: Halves the directional light intensity once on load (Full mode).
 ]]
 local id = unity_find("Directional Light")
-if id then
+if id ~= 0 then -- unity_find returns 0 on a miss, and 0 is truthy in Lua
   local intensity = unity_get_member(id, "Light", "intensity")
   unity_set_member(id, "Light", "intensity", intensity * 0.5)
   print("light_dimmer: dimmed the sun")
@@ -188,9 +205,12 @@ end
 **Security note — Full is OFF by default for persisted and shared mods.** A persisted, rehydrated,
 imported, or copied mod can never silently escalate to `Full`: on rehydrate and import the requested
 capabilities are masked to the host grant and then stripped of `Full` unless the host explicitly
-passes `allowFull: true`. Full reflection is only granted when the host turns on **Enable Full Lua
-Access** (or passes `caps | LuaCapabilities.Full` to `LoadMod` in the same session). This keeps a
-shared bundle from arriving with reflection powers the receiving game never intended to grant.
+passes `allowFull: true` (the Unity composition does so on startup rehydrate only when Full is
+enabled on the host; `manage_mods import` never does). Full reflection is only granted when the host turns on **Enable Full Lua
+Access** on `CoreAiModsLifetimeScope`; a `LoadMod(..., caps | LuaCapabilities.Full)` call receives
+`Full` only on such a host, because the requested tier is always intersected with the host grant.
+This keeps a shared bundle from arriving with reflection powers the receiving game never intended to
+grant.
 
 ## Next steps
 

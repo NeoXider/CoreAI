@@ -78,6 +78,21 @@ namespace CoreAI.Composition
         [SerializeField]
         private string storeId;
 
+        /// <summary>
+        /// Whether this composition grants the Full Lua tier (reflection over arbitrary
+        /// GameObjects/components) to <c>execute_lua</c>, <c>manage_mods</c> and the mods they load.
+        /// This is the only inspector switch that grants Full: <see cref="Configure"/> passes it to
+        /// <see cref="CoreAiModsInstaller.RegisterCoreAiMods"/>. Scene helpers that load persisted mods
+        /// themselves read it so they request the same tier the host grants.
+        /// </summary>
+        public bool FullLuaAccessEnabled => enableFullLuaAccess;
+
+        /// <summary>
+        /// Whether Full-tier Lua reflection in this composition may touch non-public members.
+        /// Has an effect only while <see cref="FullLuaAccessEnabled"/> is on.
+        /// </summary>
+        public bool FullLuaPrivateAccessEnabled => enableFullLuaPrivateAccess;
+
         // WHY: Parenting to the CoreAI scope is done via VContainer's `parentReference` (set in the scene to
         // CoreAILifetimeScope). That path defers this child's build until the parent container exists —
         // overriding FindParent to return the parent directly would bypass the deferral and NRE when this

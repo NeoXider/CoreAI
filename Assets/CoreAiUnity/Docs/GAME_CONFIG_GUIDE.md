@@ -30,7 +30,7 @@
 
 | Component | Purpose | Where |
 |-----------|------------|-----|
-| `IGameConfigStore` | Interface: `TryLoad(key)`, `TrySave(key, json)` | CoreAI |
+| `IGameConfigStore` | Interface: `TryLoad(key, out json)`, `TrySave(key, json)`, `GetKnownKeys()` | CoreAI |
 | `GameConfigTool` | `ILlmTool` for AI function calling (read/update) | CoreAI |
 | `GameConfigPolicy` | Which roles may read/write which keys | CoreAI |
 | `UnityGameConfigStore` | ScriptableObject implementation | CoreAIUnity |
@@ -155,29 +155,45 @@ configPolicy.RevokeAccess("SmartChat"); // No access
 ## 🧪 Testing
 
 ```csharp
-// EditMode test
-[Test]
-public void ConfigTool_ReadModifyWrite_Works()
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using CoreAI.Config;
+using Newtonsoft.Json;
+using NUnit.Framework;
+
+public sealed class MyConfigToolTests
 {
-    var store = new InMemoryConfigStore();
-    store.Save("session", "{\"difficulty\":1}");
-    
-    var policy = new GameConfigPolicy();
-    policy.GrantFullAccess("Creator");
-    
-    var tool = new GameConfigTool(store, policy, "Creator");
-    
-    // Read
-    var readResult = tool.ExecuteAsync("read").Result;
-    Assert.IsTrue(readResult.Success);
-    
-    // Update
-    var writeResult = tool.ExecuteAsync("update", "{\"difficulty\":3}").Result;
-    Assert.IsTrue(writeResult.Success);
-    
-    // Verify
-    store.TryLoad("session", out var json);
-    Assert.IsTrue(json.Contains("3"));
+    // Test double: a dictionary-backed store (the package's own tests use a private one like this).
+    private sealed class InMemoryConfigStore : IGameConfigStore
+    {
+        private readonly Dictionary<string, string> _configs = new();
+        public bool TryLoad(string key, out string json) => _configs.TryGetValue(key, out json);
+        public bool TrySave(string key, string json) { _configs[key] = json; return true; }
+        public string[] GetKnownKeys() => _configs.Keys.ToArray();
+    }
+
+    [Test]
+    public async Task ConfigTool_ReadModifyWrite_Works()
+    {
+        var store = new InMemoryConfigStore();
+        store.TrySave("session", "{\"difficulty\":1}");
+
+        var policy = new GameConfigPolicy();
+        policy.ConfigureRole("Creator", new[] { "session" }, new[] { "session" }); // read keys, write keys
+
+        var tool = new GameConfigTool(store, policy, "Creator");
+
+        // ExecuteAsync returns the serialized GameConfigTool.GameConfigResult
+        string readJson = await tool.ExecuteAsync("read");
+        Assert.IsTrue(JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(readJson).Success);
+
+        string writeJson = await tool.ExecuteAsync("update", "{\"difficulty\":3}");
+        Assert.IsTrue(JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(writeJson).Success);
+
+        store.TryLoad("session", out string json);
+        Assert.IsTrue(json.Contains("3"));
+    }
 }
 ```
 

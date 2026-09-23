@@ -122,7 +122,7 @@ Toggles in `CoreAISettingsAsset`:
 | `LogToolCallArguments` | the `args=` portion |
 | `LogToolCallResults` | a 240-char preview of the result |
 
-The `LLM ◀` summary line also gets a tail like `tools=[memory(ok,12ms),get_inventory(ok,4ms)]` listing every tool that ran in the turn.
+The `LLM <` summary line also gets a tail like `tools=[memory(ok,12ms),get_inventory(ok,4ms)]` listing every tool that ran in the turn.
 
 ### Defense-in-depth
 

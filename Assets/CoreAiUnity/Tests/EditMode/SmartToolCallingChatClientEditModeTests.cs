@@ -922,6 +922,31 @@ namespace CoreAI.Tests.EditMode
             Assert.IsEmpty(disabled.LastExecutedToolCalls);
         }
 
+        /// <summary>
+        /// A text-shaped call to a function of a multi-function wrapper is extracted and executed: the
+        /// provider was offered the wrapper's functions, so the extractor's registry must hold their names,
+        /// not only the wrapper's own name.
+        /// </summary>
+        [Test]
+        public async Task TextShapedCall_ToMultiFunctionWrapperFunction_IsExtractedAndExecuted()
+        {
+            MultiFunctionWrapperTool wrapper = new();
+            ScriptedChatClient provider = new(iteration => iteration == 1
+                ? MakeTextResponse("{\"name\":\"camera_look\",\"arguments\":{\"target\":\"tree\"}}")
+                : MakeTextResponse("I see a tree."));
+            SmartToolCallingChatClient client = new(provider, NullLog.Instance, new CoreAISettingsOptions(),
+                false, new List<Ai.ILlmTool> { wrapper }, "test", allowTextShapedToolCalls: true);
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool>(wrapper.CreateAIFunctions()) };
+
+            MEAI.ChatResponse response = await client.GetResponseAsync(Array.Empty<MEAI.ChatMessage>(), options);
+
+            Assert.AreEqual(1, wrapper.Looks, "the wrapper's function must run exactly once");
+            Assert.AreEqual(2, provider.ObservedMessages.Count);
+            Assert.AreEqual("camera_look", client.LastExecutedToolCalls.Single().Name);
+            Assert.IsTrue(client.LastExecutedToolCalls.Single().Success);
+            StringAssert.Contains("I see a tree.", SmartToolCallingChatClient.ConcatenateAssistantTextContents(response));
+        }
+
         // The user-approval API is marked MEAI001 ("evaluation purposes only") by MEAI itself.
         // The suppression covers exactly the three approval fixtures below and is restored right
         // after them, so any other experimental API in this file still fails the build.
@@ -1472,6 +1497,29 @@ namespace CoreAI.Tests.EditMode
             public string ParametersSchema => "{}";
             public bool AllowDuplicates => true;
             public bool EndsTurn => true;
+        }
+
+        /// <summary>
+        /// Wrapper registered as <c>camera</c> that offers the provider only its function <c>camera_look</c>.
+        /// </summary>
+        private sealed class MultiFunctionWrapperTool : Ai.ILlmTool, Ai.IAIFunctionsLlmTool
+        {
+            public int Looks;
+            public string Name => "camera";
+            public string Description => "Camera functions.";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+
+            public IEnumerable<MEAI.AIFunction> CreateAIFunctions()
+            {
+                yield return MEAI.AIFunctionFactory.Create(
+                    (Func<string, string>)(target =>
+                    {
+                        Looks++;
+                        return "looked:" + target;
+                    }),
+                    new MEAI.AIFunctionFactoryOptions { Name = "camera_look", Description = "Look at a target." });
+            }
         }
 
         #region Helpers

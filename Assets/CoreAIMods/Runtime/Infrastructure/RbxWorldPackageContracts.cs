@@ -446,6 +446,19 @@ namespace CoreAI.Mods.WorldPackages
             [Description("Create-once manual save slot name.")] string slot,
             CancellationToken cancellationToken = default)
         {
+            // WHY first: the store validates the slot too, but by throwing - from inside the tool body,
+            // where the policy must treat the call as possibly executed. Refused here it is an ordinary
+            // result the model can correct and retry.
+            if (!RbxWorldPackageNames.TryValidateManualSlot(slot, "manual slot", out _, out string slotError))
+            {
+                return JsonConvert.SerializeObject(new
+                {
+                    success = false,
+                    path = "",
+                    error = RbxWorldPackageNames.DescribeInvalidArgument("slot", slotError)
+                });
+            }
+
             ActorContext actor = _identityProvider.GetActorContext(_roleId);
             RbxWorldPackageWriteResult result = await _service.SaveManualAsync(
                 actor,
@@ -501,6 +514,21 @@ namespace CoreAI.Mods.WorldPackages
             [Description("Existing manual save slot name.")] string slot,
             CancellationToken cancellationToken = default)
         {
+            // WHY first: see SaveWorldLlmTool - a slot the store would throw on is refused as a result.
+            if (!RbxWorldPackageNames.TryValidateManualSlot(slot, "manual slot", out _, out string slotError))
+            {
+                return JsonConvert.SerializeObject(new
+                {
+                    success = false,
+                    status = RbxWorldPackageNames.InvalidArgumentStatus,
+                    player_confirmation_required = false,
+                    request_id = "",
+                    slot = slot ?? "",
+                    world_id = "",
+                    error = RbxWorldPackageNames.DescribeInvalidArgument("slot", slotError)
+                });
+            }
+
             ActorContext actor = _identityProvider.GetActorContext(_roleId);
             RbxWorldLoadRequest request = await _service.RequestManualLoadAsync(
                 actor,

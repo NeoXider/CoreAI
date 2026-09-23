@@ -11,13 +11,13 @@ context, so the host adds them explicitly (the same pattern as a game's own tool
 | `memory` | `MemoryLlmTool` | Agent memory (read/append/edit), added by `AgentBuilder` / per-role policy. |
 | `execute_lua` | `LuaLlmTool` / `LuaTool` | Sandboxed Lua, attached to the built-in Programmer role by `CoreAiModsInstaller.RegisterCoreAiMods`. |
 | `manage_mods` | `LuaModsLlmTool` | Persistent Lua mods (list/get_source/load/reload/unload/export/import/forget/versions/revert/diagnostics). |
-| skills | `DelegateLlmTool` + `SkillSet` / `read_skill` / `call_skill_tool` | Self-service skills (meta-tools), progressive disclosure. |
+| skills | `DelegateLlmTool` + `SkillSet` / `read_skill` / `call_skill_tool` | Self-service skills (meta-tools), progressive disclosure. `call_skill_tool` refuses a call with a missing required argument or a type-mismatched one (e.g. `"yes"` for a bool) before the tool runs; the refusal names the tool, the argument and the expected parameters, says the tool was not executed, and the model may retry. |
 | `manage_skills` | `ManageSkillsLlmTool` | Agent-authored skills (create/update/list/get/delete). Opt-in via `AgentBuilder.WithSkillAuthoring(...)`. |
 | `wait` | `WaitLlmTool` | Opt-in via `AgentBuilder.WithWaitTool()`. |
-| `world_command` | `WorldLlmTool` | Auto-attached to the built-in **Creator** and **Builder** roles by `WorldCommandsInstaller.RegisterWorldBuildingRolesTool` (`Assets/CoreAiUnity/Runtime/Source/Composition/WorldCommandsInstaller.cs:109-167`) whenever `RegisterWorldCommands` runs on the container — not host-wired for those two roles. See the table below for other roles. |
-| `execute_lua` | `LuaLlmTool` | Auto-attached to the built-in **Programmer** role only, by `CoreAiModsInstaller.RegisterCoreAiMods` (`Assets/CoreAIMods/Runtime/Composition/CoreAiModsInstaller.cs:236-239`). |
+| `world_command` | `WorldLlmTool` | Auto-attached to the built-in **Creator** and **Builder** roles by `WorldCommandsInstaller.RegisterWorldBuildingRolesTool` whenever `RegisterWorldCommands` runs on the container — not host-wired for those two roles. See the table below for other roles. |
+| `execute_lua` | `LuaLlmTool` | Auto-attached to the built-in **Programmer** role only, by `CoreAiModsInstaller.RegisterCoreAiMods`. |
 | `manage_mods` | `LuaModsLlmTool` | Auto-attached to the built-in **Programmer** role only, by the same `CoreAiModsInstaller` callback as `execute_lua`. |
-| `camera` (`camera_capture`/`screenshot`/`camera_look`/`camera_list`) | `CoreAI.Vision.CameraLlmTool` (`Assets/CoreAiUnity/Runtime/Source/Features/Vision/CameraLlmTool.cs`) | Auto-attached to the built-in **Programmer** role by `WorldCommandsInstaller.RegisterAgentVision` (`WorldCommandsInstaller.cs:169-200`). The **chat panel** can also attach it to whichever role is the active chat role at runtime via `CoreAiChatService.TryEnsureCameraToolForRole` → `CoreAiChatCameraTools.TryAttachCameraTool` (`Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs:359-362`, `CoreAiChatCameraTools.cs`), gated on vision support. Do not confuse this with the older, differently-named `CameraLlmTool` in `Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CameraLlmTool.cs` (tool name `camera_tool`, single function `capture_camera`) described further below — that one is the host-wired variant, not auto-registered anywhere. |
+| `camera` (`camera_capture`/`screenshot`/`camera_look`/`camera_list`) | `CoreAI.Vision.CameraLlmTool` (`Assets/CoreAiUnity/Runtime/Source/Features/Vision/CameraLlmTool.cs`) | Auto-attached to the built-in **Programmer** role by `WorldCommandsInstaller.RegisterAgentVision`. The **chat panel** can also attach it to whichever role is the active chat role at runtime via `CoreAiChatService.TryEnsureCameraToolForRole` → `CoreAiChatCameraTools.TryAttachCameraTool`, gated on vision support. The model sees and calls the four function names; `camera` itself is only the registered wrapper. Do not confuse this with the older, differently-named `CameraLlmTool` in `Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CameraLlmTool.cs` (tool name `camera_tool`, single function `capture_camera`) described further below — that one is the host-wired variant, not auto-registered anywhere. |
 
 ## Optional / host-wired (add via `AgentBuilder.WithTool(...)` when your game provides the context)
 
@@ -29,18 +29,24 @@ agent.WithTool(new WorldLlmTool(worldExecutor, settings, logger));
 agent.WithTool(new ComponentLlmTool(componentExecutor, settings, logger));
 ```
 
+> A tool that expands into several functions (`IAIFunctionsLlmTool` — `camera`, `scene_tool`, the
+> host-wired `camera_tool`) is called by its **function** names (`camera_look`, `find_objects`,
+> `capture_camera`, …). Those calls run under the wrapper's `ToolTimeoutMsOverride`, `EndsTurn`,
+> `IsMutating` and `AllowDuplicates`; the "Available tools" list in the prompt and in refusals shows the
+> function names, not the wrapper name.
+
 > A tool body that can actually suspend must return its task through `MeaiToolTaskBridge.Publish(...)`
 > and must not use `ConfigureAwait(false)`; otherwise the model turn never resumes in a WebGL player.
 > See `MEAI_TOOL_CALLING.md` §3.2.
 
 | Tool | Class | Requires | Notes |
 |---|---|---|---|
-| `inventory` | `InventoryLlmTool` | `IInventoryProvider` | Game inventory read/grant. |
-| compatibility | `CompatibilityLlmTool` | `CompatibilityChecker` | Crafting compatibility. |
-| game config | `GameConfigLlmTool` | `GameConfigPolicy.CreateLlmTool(store, roleId)` | Per-role config slots. |
+| `get_inventory` | `InventoryLlmTool` | `InventoryTool.IInventoryProvider` | Read-only listing of an NPC's or merchant's inventory. |
+| `check_compatibility` | `CompatibilityLlmTool` | `CompatibilityChecker` | Crafting compatibility. |
+| `game_config` | `GameConfigLlmTool` | `GameConfigPolicy.CreateLlmTool(store, roleId)` | Per-role config slots. |
 | `world_command` | `WorldLlmTool` | `ICoreAiWorldCommandExecutor` | Native world edits. `spawn` accepts registered prefab keys or built-in primitives (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `empty`) when `AllowWorldPrimitives` is on; spawn can set transform and parent in one call. Parented coordinates are local by default; `worldPositionStays=true` preserves world space. **Note:** for the built-in **Creator**/**Builder** roles this is registered automatically by `WorldCommandsInstaller` — see the built-in table above. Wire it manually with `AgentBuilder.WithTool(...)` only for a *custom* role. The Programmer role instead edits the world via the Lua Rbx surface (`Instance.new('Part')`, `instance:Destroy()`); the classic `coreai_world_*` build bindings are disabled in the default production composition. |
 | `component_command` | `ComponentLlmTool` | `ICoreAiComponentCommandExecutor` | Add/remove/configure supported Unity components through a curated catalog, no reflection. |
-| scene query | `SceneLlmTool` | scene | `unity_*`-style scene inspection as a native tool (alternative to Full-tier Lua). |
+| `scene_tool` (`find_objects` / `get_hierarchy` / `get_transform` / `set_transform`) | `SceneLlmTool` | scene | `unity_*`-style scene inspection as a native tool (alternative to Full-tier Lua). |
 | `capture_camera` | `CameraLlmTool` (`Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CameraLlmTool.cs`, tool name `camera_tool`) | a `Camera` + a **vision-capable model** | Renders a camera to JPEG. Attach the captured `DataContent` (`CameraLlmTool.CaptureCameraImageContent`) to a user message; `MeaiOpenAiChatClient` serializes it to OpenAI `image_url`. This is a distinct, purely host-wired tool from the auto-registered `camera` tool (`camera_capture`/`screenshot`/`camera_look`/`camera_list`) described above — see **Vision / multimodal** below for the host send path and autonomous-tool wiring of this one. |
 
 ### World and component commands
@@ -92,9 +98,12 @@ is allowed and still readable via `read_skill`.
 
 **Persistence & versioning.** `ISkillStore` (portable; `SkillRecord` = id, description, instructions,
 tool-name allowlist, version) is implemented by `FileSkillStore` in the Unity layer — one atomic
-`<id>.json` per skill under `persistentDataPath/CoreAI/Skills/`. Revisions reuse `ILuaScriptVersionStore`
-keyed by `skill:<id>` (exactly like Lua mods), so edits are auditable. `NullSkillStore` is the in-memory
-default for tests/headless/WebGL.
+`skill-v2-<SHA-256>.json` per skill under `persistentDataPath/CoreAI/Skills/` (the hash is taken over the
+skill's persisted id; see [AGENT_BUILDER.md](AGENT_BUILDER.md) for the naming and legacy-file rules).
+`FileSkillStore` works on every Unity platform, WebGL included. Revisions reuse `ILuaScriptVersionStore`
+keyed by `skill:<id>` (exactly like Lua mods), so edits are auditable. `NullSkillStore` is what
+`WithSkillAuthoring` uses when no store is passed: skills then live in memory only and do not survive a
+restart (useful for tests and headless runs).
 
 **Surfacing & rehydrate.** With authoring on, `read_skill`/`call_skill_tool` read from a live
 `MutableSkillCatalog`, so a just-created skill is instantly visible to the same agent. On build,

@@ -1,6 +1,6 @@
 # CoreAI Backlog
 
-This document tracks future work that should not block the current CoreAI/RedoSchool MVP gate.
+This document tracks future work that should not block the current CoreAI MVP gate for production hosts.
 Items here are intentionally not active TODO checkboxes.
 
 ## Provider-Specific Work
@@ -33,16 +33,15 @@ Items here are intentionally not active TODO checkboxes.
 - Add role-configured Lua capability tiers and optional player confirmation for dangerous capabilities such as
   `WorldEdit` and `Full`.
 
-> **Shipped:** Lua now runs on the WebGL/IL2CPP player via **Lua-CSharp**, a managed, AOT-safe VM.
-> `SecureLuaEnvironment.IsSupported` is gated by
-> the `SecureLuaEnvironment.WebGlLuaOptIn` capability flag (wired from `ICoreAISettings.EnableLuaOnWebGl` /
-> `CoreAISettingsAsset.EnableLuaOnWebGl`, on by default for new assets) instead of a hard `false`. IL2CPP
-> stripping is held off by the package `link.xml` (`Assets/CoreAiUnity/link.xml`, preserving the `Lua` / `Lua.Annotations` assemblies plus the WebGL-active Lua
-> binding types). Lua-CSharp uses source-generated marshalling rather than a reflection-based interpreter fallback,
-> so host-callback marshalling works without emitted IL. The `Full` reflection tier (`unity_*` bindings) stays disabled on WebGL —
-> `CoreAILifetimeScope` forces `effectiveFullLuaAccess = false` under `UNITY_WEBGL && !UNITY_EDITOR`. See the
-> `WebGlLuaSelfTest` demo and `SecureLuaEnvironment.TryRunSelfTest` for an in-player smoke test. Remaining open
-> question: binary-size impact and how a host can prune unused bindings for the smallest web build.
+> **Shipped:** Lua now runs on the WebGL/IL2CPP player via **Lua-CSharp** (`LuaCsSecureEnvironment`), a
+> managed, AOT-safe VM; `LuaCsGameToolExecutor.IsSupported` is always `true`. IL2CPP stripping is held off by the
+> package `link.xml` (`Assets/CoreAiUnity/link.xml`, preserving the `Lua` / `Lua.Annotations` assemblies plus the
+> WebGL-active Lua binding types). Lua-CSharp uses source-generated marshalling rather than a reflection-based
+> interpreter fallback, so host-callback marshalling works without emitted IL. The `Full` reflection tier
+> (`unity_*` bindings) is granted only by `CoreAiModsLifetimeScope.FullLuaAccessEnabled`. See the
+> `WebGlLuaSelfTest` demo (`WebGlLuaSelfTest.TryRunSelfTest`) for an in-player smoke test. Open questions:
+> `ICoreAISettings.EnableLuaOnWebGl` is serialized but not read by the Lua runtime (wire it or remove it);
+> binary-size impact and how a host can prune unused bindings for the smallest web build.
 
 ## Skill System (before MVP2)
 
@@ -69,15 +68,15 @@ Items here are intentionally not active TODO checkboxes.
 
 ## Rbx API gaps surfaced by the sample games (2026-07-24)
 
-- **3D picking: `workspace:Raycast`, `Camera:ScreenPointToRay`/`ViewportPointToRay`, and `ClickDetector`.**
-  None exist yet, so a mod cannot tell WHICH 3D part the mouse clicked — the Block Clicker sample had to
-  drive its upgrade blocks with the U/P keys instead of clicking them. Needed for any point-and-click 3D
-  game. (`UserInputService` already gives mouse position + button state.)
+- **3D picking.** ~~`workspace:Raycast` and `ClickDetector`~~ **DONE** (`LuaCsRbxInstanceBindings`,
+  `RbxClickDetector`). Still open: the Lua binding for `Camera:ScreenPointToRay` / `ViewportPointToRay`, so a
+  mod can build its own ray from the mouse position (`UserInputService` already gives mouse position + button
+  state).
 - **Physics velocity for parts** (`AssemblyLinearVelocity` / a `BodyVelocity`-like impulse). Today a burst
   effect (Tetris line-clear, racer crash) is hand-animated in Heartbeat because there is no way to fling an
   unanchored part with an initial velocity.
-- **`RunService` newer aliases** `PreSimulation`/`PostSimulation`/`PreRender` (Roblox renamed
-  Stepped/Heartbeat/RenderStepped); the classic names work, add the aliases for full parity.
+- ~~**`RunService` newer aliases** `PreSimulation`/`PostSimulation`/`PreRender`~~ **DONE** (together with
+  `PreAnimation`; the classic names still work).
 
 ## Architecture Hardening (before MVP2 — from the 2026-07-24 architecture audit)
 
@@ -98,10 +97,8 @@ Items here are intentionally not active TODO checkboxes.
   view-model logic behind the existing `CoreAiChatService` seam) and `AiOrchestrator` (~1866 LOC, 15
   ctor deps: extract a context/compaction collaborator + a telemetry facade). Also large:
   `MeaiOpenAiChatClient`, `MeaiLlmClient`, `LuaCsModRuntime`, `ToolExecutionPolicy`.
-- **[MEDIUM] Reconcile Rbx-vs-Roblox naming at the adapter edge** — domain assemblies are clean `Rbx*`,
-  but binding/scripting public types are still `Roblox*` (`RobloxSpace`, `IRobloxCameraRig`,
-  `RobloxWorldHost`, `LuaCsRobloxApiBindings`, …; ~315 `Roblox` vs ~1152 `Rbx` in Mods). Rename to
-  `Rbx*` or record the exception in the Rbx roadmap the way FullAccess/`unity_*` is recorded.
+- ~~**[MEDIUM] Reconcile Rbx-vs-Roblox naming at the adapter edge**~~ **DONE** — the binding/scripting
+  public types were renamed to `Rbx*` (`RbxWorldHost`, `LuaCsRbxApiBindings`, …).
 - **[MEDIUM] Fitness-test + contract-boundary gaps** — no architecture-fitness test for `CoreAI.Hub.UI`
   (and it ships no tests at all); Hub pages reach into infrastructure namespaces
   (`HubSettingsPage` → `CoreAI.Infrastructure.Llm`, `WorldStateHubPage` → `CoreAI.Infrastructure.World`)

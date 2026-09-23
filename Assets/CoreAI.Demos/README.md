@@ -19,6 +19,9 @@ minimal scripts, and a README.
 | [ModdableUnits](ModdableUnits/README.md) | `ModdableUnits/ModdableUnitsDemo.unity` | _Aspirational — the `forge_*` scene bindings are not yet wired to the mod runtime (see the demo README); the intended design has mods build armies via `forge_define`/`forge_spawn` with `hooks_every`/`hooks_on` driving an auto-battle_ | Yes |
 | [LiveMechanics Mods Chat](LiveMechanicsMods/README.md) | `LiveMechanicsMods/LiveMechanicsModsChatDemo.unity` | Chat-driven persistent `manage_mods` workflow | Yes |
 | [WaveAutoBattler](LiveMechanicsMods/README.md) | `LiveMechanicsMods/WaveAutoBattlerModsDemo.unity` | Playable wave loop whose rules and rewards are changed by persistent Lua mods | Yes |
+| [MultiplayerFoundation](MultiplayerFoundation/README.md) | `MultiplayerFoundation/MultiplayerFoundationDemo.unity` | Several durable actors share one world; the Hub proof board shows the production path refusing every cross-actor mod, world, chat and quota violation | No (only its per-actor chat replies need one) |
+| GameplayServices | `GameplayServices/GameplayServicesDemo.unity` | One Roblox-style Lua tour mod (`Mods/GameplayServicesTour.lua.txt`) driving several services live — a door that opens, a brick that kills, a coin that scores, a ray that finds the floor — with uGUI buttons | No |
+| OnlineAuthority | `OnlineAuthority/OnlineAuthorityDemo.unity` | Who may change an online world: a guest's move request is refused, allowed after the host grants access, and refused again after a revoke, with the reason each time (one process — no network transport) | No |
 | [WebGlLuaSelfTest](WebGlLuaSelfTest/README.md) | script only (attach to any scene) | Runtime PASS/FAIL check that the Lua sandbox survives IL2CPP stripping in a WebGL player build (Lua-CSharp `LuaCsSecureEnvironment` invariants) | No |
 
 ## Common requirements
@@ -32,8 +35,8 @@ minimal scripts, and a README.
   **full behaviour** requires a configured backend in `CoreAISettings` (an LLMUnity model or
   HTTP API): Skills, LiveMechanics, FullAccess, and ModdableUnits drive their gameplay through
   a live model, so without one you can load the scene but the AI-driven part stays idle.
-  The remaining demos (LuaMods, WorldCommands) exercise the Lua/command pipeline directly and
-  run fully offline.
+  The demos marked "No" (LuaMods, WorldCommands, Material Judging Rig, MultiplayerFoundation,
+  GameplayServices, OnlineAuthority) exercise their pipelines directly and run fully offline.
 
 The two Qwen scenes are stricter live-model verification demos: their controls stay disabled until native
 LLMUnity startup completes and its `/v1/chat/completions` route accepts connections. Each turn is
@@ -52,8 +55,8 @@ multiple calls are rejected.
   persist loaded mod sources, and autoload them on next scene start.
 - Main scene: `LiveMechanicsMods/WaveAutoBattlerModsDemo.unity`
 - Purpose: full wave auto-battler demo where the hero levels up, enemy waves scale, and Lua mods
-  are managed through a draggable active/saved mod panel (`F9`) plus a Token Budget / usage
-  overlay (`F10`) and ready prompt buttons.
+  are managed from the UI Toolkit Hub (Auto-Battler, Token Budget and Mods tabs; ready prompts in
+  the chat's `≡` examples menu).
 
 ## Controller recipes
 

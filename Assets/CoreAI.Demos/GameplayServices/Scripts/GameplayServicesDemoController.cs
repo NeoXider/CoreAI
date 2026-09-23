@@ -1,3 +1,5 @@
+using UnityEngine;
+#if COREAI_LUA
 using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
@@ -8,9 +10,9 @@ using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Replication;
 using TMPro;
-using UnityEngine;
 using UnityEngine.UI;
 using VContainer;
+#endif
 
 namespace CoreAI.Demos.GameplayServices
 {
@@ -31,6 +33,7 @@ namespace CoreAI.Demos.GameplayServices
     [AddComponentMenu("CoreAI/Demos/Gameplay Services Demo Controller")]
     public sealed class GameplayServicesDemoController : MonoBehaviour
     {
+#if COREAI_LUA
         private const string ModId = "gameplay-services-tour";
         private const string StatusAttribute = "DemoStatus";
 
@@ -217,5 +220,15 @@ namespace CoreAI.Demos.GameplayServices
                 _statusLabel.text = string.Join("\n", _log);
             }
         }
+#else
+        // WHY: the tour is one Lua script; CoreAiDemoScope and the mods runtime it drives exist only
+        // with COREAI_LUA, like every other Lua demo controller.
+        private void Start()
+        {
+            Debug.LogWarning(
+                "[GameplayServicesDemo] COREAI_LUA is not set; demo is inactive.");
+            enabled = false;
+        }
+#endif
     }
 }

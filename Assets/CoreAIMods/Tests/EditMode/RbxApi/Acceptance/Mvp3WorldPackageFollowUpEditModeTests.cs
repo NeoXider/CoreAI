@@ -12,6 +12,7 @@ using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.WorldPackages;
 using Cysharp.Threading.Tasks;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
@@ -683,6 +684,229 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             {
                 return new[] { _info };
             }
+        }
+
+        // ==================== World tools refuse an invalid name before the service ====================
+
+        private const string OverlongSlot =
+            "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789";
+
+        /// <summary>Counts service calls; every call is a test failure when the tool should have refused first.</summary>
+        private sealed class RecordingRuntimeService : IRbxWorldRuntimeService
+        {
+            public List<string> SavedSlots { get; } = new();
+
+            public List<string> RequestedSlots { get; } = new();
+
+            public List<string> RequestedAutoFiles { get; } = new();
+
+            public int Calls => SavedSlots.Count + RequestedSlots.Count + RequestedAutoFiles.Count;
+
+            public event Action<RbxPendingWorldLoadRequest> ManualLoadConfirmationRequested
+            {
+                add { }
+                remove { }
+            }
+
+            public RbxWorldPackagePayload CaptureCurrent()
+            {
+                return null;
+            }
+
+            public IReadOnlyList<RbxPendingWorldLoadRequest> GetPendingManualLoads()
+            {
+                return Array.Empty<RbxPendingWorldLoadRequest>();
+            }
+
+            public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+            {
+                return Array.Empty<RbxAutoSaveInfo>();
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> SaveManualAsync(
+                ActorContext caller,
+                string slot,
+                CancellationToken cancellationToken = default)
+            {
+                SavedSlots.Add(slot);
+                return UniTask.FromResult(new RbxWorldPackageWriteResult(true, slot + ".world", ""));
+            }
+
+            public UniTask<RbxWorldLoadRequest> RequestManualLoadAsync(
+                ActorContext caller,
+                string slot,
+                CancellationToken cancellationToken = default)
+            {
+                RequestedSlots.Add(slot);
+                return UniTask.FromResult(new RbxWorldLoadRequest(
+                    "request-" + RequestedSlots.Count, slot, "world", CapturedAtUtc, CapturedAtUtc.AddMinutes(1d)));
+            }
+
+            public UniTask<RbxWorldLoadRequest> RequestAutoLoadAsync(
+                ActorContext caller,
+                string autoFileName,
+                CancellationToken cancellationToken = default)
+            {
+                RequestedAutoFiles.Add(autoFileName);
+                return UniTask.FromResult(new RbxWorldLoadRequest(
+                    "request-" + RequestedAutoFiles.Count, autoFileName, "world", CapturedAtUtc,
+                    CapturedAtUtc.AddMinutes(1d)));
+            }
+
+            public UniTask<RbxWorldLoadResult> ConfirmManualLoadAsync(
+                string requestId,
+                bool playerConfirmed,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public UniTask<RbxWorldLoadResult> LoadConfirmedAsync(
+                RbxWorldPackagePayload payload,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+        }
+
+        private static IActorIdentityProvider ToolIdentity()
+        {
+            return new LocalActorIdentityProvider("world-tool-actor");
+        }
+
+        /// <summary>
+        /// The store validates the slot by THROWING, from inside the tool body; the tool used to pass a
+        /// blank or malformed slot straight through, so the model got an exception crossing the invocation
+        /// boundary (traced as possibly executed, retries suppressed). Now the tool refuses first.
+        /// </summary>
+        [TestCase("")]
+        [TestCase("   ")]
+        [TestCase("a/b")]
+        [TestCase("..\\up")]
+        [TestCase("CON")]
+        [TestCase(OverlongSlot)]
+        public async Task SaveWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService(string slot)
+        {
+            RecordingRuntimeService service = new();
+            SaveWorldLlmTool tool = new(service, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            JObject json = JObject.Parse(await tool.ExecuteAsync(slot));
+
+            Assert.IsFalse((bool)json["success"]);
+            Assert.AreEqual("", (string)json["path"]);
+            StringAssert.Contains("Parameter 'slot' is invalid", (string)json["error"]);
+            StringAssert.Contains("manual slot", (string)json["error"]);
+            StringAssert.Contains("NOT executed", (string)json["error"]);
+            Assert.AreEqual(0, service.Calls, "an invalid slot must never reach the service");
+        }
+
+        [TestCase("")]
+        [TestCase("   ")]
+        [TestCase("a/b")]
+        [TestCase("..\\up")]
+        [TestCase("CON")]
+        [TestCase(OverlongSlot)]
+        public async Task LoadWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService(string slot)
+        {
+            RecordingRuntimeService service = new();
+            LoadWorldLlmTool tool = new(service, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            JObject json = JObject.Parse(await tool.ExecuteAsync(slot));
+
+            Assert.IsFalse((bool)json["success"]);
+            Assert.AreEqual("invalid_argument", (string)json["status"]);
+            Assert.IsFalse((bool)json["player_confirmation_required"]);
+            Assert.AreEqual("", (string)json["request_id"]);
+            StringAssert.Contains("Parameter 'slot' is invalid", (string)json["error"]);
+            StringAssert.Contains("NOT executed", (string)json["error"]);
+            Assert.AreEqual(0, service.Calls, "an invalid slot must never reach the service");
+        }
+
+        [TestCase("")]
+        [TestCase("   ")]
+        [TestCase("nested/save.world")]
+        [TestCase("save.txt")]
+        [TestCase("save")]
+        public async Task LoadAutoSave_InvalidName_IsRefusedAsResult_WithoutCallingService(string name)
+        {
+            RecordingRuntimeService service = new();
+            LoadAutoSaveLlmTool tool = new(service, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            JObject json = JObject.Parse(await tool.ExecuteAsync(name));
+
+            Assert.IsFalse((bool)json["success"]);
+            Assert.AreEqual("invalid_argument", (string)json["status"]);
+            Assert.IsFalse((bool)json["player_confirmation_required"]);
+            StringAssert.Contains("Parameter 'name' is invalid", (string)json["error"]);
+            StringAssert.Contains(".world file name without a path", (string)json["error"]);
+            StringAssert.Contains("NOT executed", (string)json["error"]);
+            Assert.AreEqual(0, service.Calls, "an invalid autosave name must never reach the service");
+        }
+
+        /// <summary>The check is the store's own rule, no stricter: a valid name still reaches the service.</summary>
+        [Test]
+        public async Task WorldTools_ValidNames_ReachTheService()
+        {
+            RecordingRuntimeService service = new();
+            IActorIdentityProvider identity = ToolIdentity();
+
+            JObject saved = JObject.Parse(await new SaveWorldLlmTool(service, identity, BuiltInAgentRoleIds.Programmer)
+                .ExecuteAsync("valid-slot_1"));
+            JObject load = JObject.Parse(await new LoadWorldLlmTool(service, identity, BuiltInAgentRoleIds.Programmer)
+                .ExecuteAsync("valid-slot_1"));
+            JObject auto = JObject.Parse(await new LoadAutoSaveLlmTool(service, identity, BuiltInAgentRoleIds.Programmer)
+                .ExecuteAsync("20260902T120000000Z-0000-execute_lua.world"));
+
+            Assert.IsTrue((bool)saved["success"]);
+            Assert.AreEqual("player_confirmation_required", (string)load["status"]);
+            Assert.AreEqual("player_confirmation_required", (string)auto["status"]);
+            CollectionAssert.AreEqual(new[] { "valid-slot_1" }, service.SavedSlots);
+            CollectionAssert.AreEqual(new[] { "valid-slot_1" }, service.RequestedSlots);
+            CollectionAssert.AreEqual(new[] { "20260902T120000000Z-0000-execute_lua.world" }, service.RequestedAutoFiles);
+        }
+
+        /// <summary>The store keeps throwing the same messages for callers that bypass the tools.</summary>
+        [Test]
+        public void Store_StillThrowsSameMessages_ForInvalidNames()
+        {
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore store = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true));
+            RbxWorldPackagePayload payload = CreateMinimalPayload(CapturedAtUtc);
+
+            ArgumentException blank = Assert.Throws<ArgumentException>(
+                () => store.CreateManualAsync("   ", payload).GetAwaiter().GetResult());
+            StringAssert.Contains("manual slot must contain 1-64 characters.", blank.Message);
+
+            ArgumentException path = Assert.Throws<ArgumentException>(
+                () => store.CreateManualAsync("a/b", payload).GetAwaiter().GetResult());
+            StringAssert.Contains("manual slot may contain only letters, digits, '-' and '_'.", path.Message);
+
+            ArgumentException reserved = Assert.Throws<ArgumentException>(
+                () => store.LoadManualAsync("CON").GetAwaiter().GetResult());
+            StringAssert.Contains("manual slot 'CON' is a reserved device name.", reserved.Message);
+
+            ArgumentException extension = Assert.Throws<ArgumentException>(
+                () => store.LoadAutoAsync("save.txt").GetAwaiter().GetResult());
+            StringAssert.Contains("Auto package name must be one .world file name without a path.", extension.Message);
+        }
+
+        [Test]
+        public void PackageNames_TrimAndNameTheField()
+        {
+            Assert.IsTrue(RbxWorldPackageNames.TryValidateManualSlot("  slot-1 ", "manual slot",
+                out string normalized, out string error), error);
+            Assert.AreEqual("slot-1", normalized);
+
+            Assert.IsFalse(RbxWorldPackageNames.TryValidateManualSlot("lpt1.world", "backup slot",
+                out normalized, out error));
+            Assert.IsNull(normalized);
+            Assert.AreEqual("backup slot 'lpt1.world' is a reserved device name.", error);
+
+            Assert.IsTrue(RbxWorldPackageNames.TryValidateAutoFileName("x.WORLD", out error), error);
+            Assert.IsFalse(RbxWorldPackageNames.TryValidateAutoFileName(null, out error));
+            Assert.AreEqual("Auto package name must be one .world file name without a path.", error);
         }
     }
 }

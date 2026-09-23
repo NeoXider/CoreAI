@@ -146,8 +146,7 @@ Implementation: `Microsoft.Extensions.AI.AIFunctionFactory.Create()`
 
 | File | Description |
 |------|-------------|
-| `AiCraftingMechanicIntegrationEditModeTests.cs` | Crafting with a mock LLM |
-| `MemoryToolMeaiEditModeTests.cs` | MemoryTool tests (write/append/clear) |
+| `MeaiToolCallsEditModeTests.cs` | MemoryTool tests (write/append/clear and granular edits) |
 
 ---
 

@@ -18,12 +18,17 @@
         /// <summary>
         /// The host's own deadline for this turn, kept apart from the caller's cancellation token. When it
         /// fires while the caller's token is still alive, the turn is stopped and reported as a
-        /// <see cref="CoreAI.Ai.LlmErrorCode.Timeout"/> (the panel shows <c>ResolveTimeoutMessage</c>);
-        /// when the caller's token fires, the turn is a cancellation.
+        /// <see cref="CoreAI.Ai.LlmErrorCode.Timeout"/> (the panel shows <c>ResolveTimeoutMessage</c>) and the
+        /// orchestration metrics record a <see cref="CoreAI.Ai.AiLlmCompletionOutcome.DeadlineCancellation"/>,
+        /// the same outcome as the service's idle deadline; when the caller's token fires, the turn is a
+        /// cancellation (<see cref="CoreAI.Ai.AiLlmCompletionOutcome.Cancelled"/>), whatever the deadline says.
+        /// A deadline that has already elapsed admits nothing: no user message is recorded, the typed result is
+        /// rejected with <c>Timeout</c>, and the string API shows the timeout presentation once.
         /// <para>
         /// WHY a separate token: a deadline armed on the caller's token itself (<c>CancelAfter</c> on the
         /// token passed to <c>SubmitMessageFromExternalAsync</c>) cannot be told apart from a stop, so since
-        /// 7.44.0 it is reported as a cancellation. Pass the deadline here instead.
+        /// 7.44.0 it is reported as a cancellation. Pass the deadline here instead. The token's source must
+        /// outlive the turn: the panel links it for the whole turn.
         /// </para>
         /// </summary>
         public System.Threading.CancellationToken DeadlineCancellationToken { get; set; }

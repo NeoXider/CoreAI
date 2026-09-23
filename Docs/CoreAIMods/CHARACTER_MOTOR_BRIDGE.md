@@ -30,32 +30,36 @@ conversion; nothing calls it for you.
 | `Jump(double jumpPower, double jumpHeight, bool useJumpPower)` | One jump request. `useJumpPower` (default `true`) selects which of the two arguments governs. `JumpPower` (default 50) is not a force — the reference motor sets it directly as the character's vertical launch speed the instant the jump fires. `JumpHeight` (default 7.2 studs) is a target apex height and must be solved into a launch speed against gravity (`v = √(2·g·h)`) — see Gravity below. |
 | `MoveTo(RbxVector3? targetStuds)` | Walk toward a point; `null` stops the walk. This is Roblox's classic `Humanoid:MoveTo`, not a raw per-frame direction — see Input ownership below. |
 | `Position { get; }` | Where the character is now, **converted through `RbxSpace`** (studs, Z-mirrored) — not just a scaled Unity position. `Humanoid.Advance` diffs this against the walk target every step to decide arrival (2-stud radius) and the 8-second `MoveToFinished` timeout; a coordinate that skips the Z-mirror reports arrival in the wrong place. |
-| `MoveDirection { get; }` | A **unit** direction, zero when standing still — not a raw velocity vector. Feeds `Running(speed)`; see "The `Running(speed)` signal" below for what that actually reports. |
+| `TryJump(double jumpPower, double jumpHeight, bool useJumpPower)` | Optional (default body calls `Jump` and returns `true`). `Humanoid` calls this, not `Jump`, for every jump request. Return `false` to refuse a jump (no head clearance, mid-animation, on a ladder); the Humanoid then stays out of `Jumping` instead of announcing a jump the character never makes. |
+| `MoveDirection { get; }` | A **unit** direction, zero when standing still — not a raw velocity vector. It is the fallback source of `Running(speed)` when `MeasuredSpeed` is `null`; see "The `Running(speed)` signal" below. |
+| `MeasuredSpeed { get; }` | Optional (default `null`). The horizontal speed the body actually covers, in studs per second. `Humanoid.Running` reports it; when it is `null` the Humanoid falls back to `MoveDirection.Magnitude * WalkSpeed`. CoreAI's own motor implements it. |
 | `IsGrounded { get; }` | Drives the `Running` / `Jumping` / `Freefall` / `Landed` state machine and the `StateChanged` / `FreeFalling` signals directly (`RbxHumanoid.UpdateGroundedState`). It must be honest on every read, not cached from the last physics step. |
 | `IsAvailable { get; }` | Default `true`. Whether this motor can still drive its character. The pipeline checks it on every fixed-step refresh and rebuilds — calls `IRbxCharacterMotorProvider.TryCreate` again for the same character — the moment it reads `false`; that rebuild is also the only supported way to get asked again after declining a character (see `IRbxCharacterMotorProvider`'s remarks). A motor that resolves its body fresh on every call, rather than caching a reference that can go stale, has nothing to answer and can leave the default. CoreAI's own motor answers `false` once its Rigidbody is destroyed (e.g. a script anchors the root part). |
 | `Step(double deltaSeconds)` | Called once per fixed step for every motor, host or CoreAI's own, by `LuaCsRbxApiBindings.StepCharacterMotors` (driven by [`LuaModRuntimeTickDriver`](../../Assets/CoreAIMods/Runtime/Infrastructure/LuaModRuntimeTickDriver.cs)). It has a no-op default body, so a controller that already runs its own `FixedUpdate` can ignore it entirely; implement it if you want CoreAI's cadence for advancing a `MoveTo` walk. The reference motor ignores the step length because it drives velocity and lets the physics step integrate. Stepping is unconditional for every motor, host or CoreAI's own — the pump no longer special-cases CoreAI's own motor by concrete type. |
+| `Release()` | Optional (no-op default). Called exactly once when the pipeline stops using the motor for good, after the Humanoid no longer points at it. Override it to stop reading input, drop registrations, and end the motor's own in-flight walk. |
 
-## The `Running(speed)` signal: configured WalkSpeed, once, not a live readout
+## The `Running(speed)` signal: a live speed report
 
-`RbxHumanoid.UpdateGroundedState` fires `Running(speed)` as `MoveDirection.Magnitude * WalkSpeed`.
-Both halves of that matter more than they look, and neither is what the signal's name suggests:
+`RbxHumanoid.UpdateGroundedState` reports `Running(speed)` on every grounded step while the state is
+`Running`, the way Roblox describes the signal — it fires when the running speed changes, and with `0`
+when the character stops:
 
-- **`WalkSpeed` is `Humanoid.WalkSpeed` — the CONFIGURED value a script last set**, not anything the
-  motor measured. A controller that physically accelerates from a standstill still reports the full
-  configured speed the instant `MoveDirection` becomes a non-zero unit vector, not a ramp that climbs
-  with the character's real velocity. There is no member on `IRbxCharacterMotor` today through which a
-  motor can report its own measured speed back to `Humanoid` — `Running(speed)` cannot be made to carry
-  one.
-- **It fires once, on entering the `Running` state — not on every speed change.** The fire is guarded
-  by "was the previous state something other than `Running`"; a character already in `Running` that
-  starts walking, stops, or changes speed gets no further `Running` event until it next leaves and
-  re-enters that state (typically a jump or a fall). A script listening for `Running(speed)` is reading
-  a landing-edge snapshot, not a continuous speed feed.
+- **The speed is measured when the motor can measure it.** The Humanoid reads
+  `MeasuredSpeed ?? MoveDirection.Magnitude * WalkSpeed`. A motor that implements `MeasuredSpeed`
+  reports the speed its body really covers — a ramp while accelerating, less against a wall. A motor
+  that leaves it `null` reports the configured `WalkSpeed` scaled by its direction, which jumps to full
+  speed the moment `MoveDirection` becomes non-zero.
+- **Small changes are filtered.** While moving, a change smaller than
+  `RbxHumanoid.RunningSpeedResolutionStuds` (0.1 stud/s) is not reported. A moving character whose
+  speed drops under `RunningStopSpeedStuds` (0.1 stud/s) is reported once as stopped (`0`), and a
+  stopped one must exceed `RunningStartSpeedStuds` (0.2 stud/s) to be reported as moving again, so a
+  body resting on a physics contact does not flicker.
+- **The report is bracketed by the state.** Entering `Running` (landing) always reports the current
+  speed, even when it is unchanged; leaving `Running` (a jump, a fall, death) first reports `0` if the
+  character was moving, before `StateChanged` and the airborne signals fire.
 
-Consequence for a bridge: do not wire animation blends or footstep cadence to `Running(speed)`
-expecting it to track live speed — it will not, on either count. Drive those from your own motor's
-actual velocity (you already have the Rigidbody or controller state that produces it), or from `Step`,
-not from this signal.
+Consequence for a bridge: implement `MeasuredSpeed` if animation blends or footstep cadence should
+follow `Running(speed)`; without it the signal carries the configured speed, not the body's.
 
 The pump also calls `MoveTo(null)` on every motor once `Humanoid.IsDead`, so implement that as a
 cheap, idempotent stop: a corpse that keeps walking to its last order is a bug this repository has

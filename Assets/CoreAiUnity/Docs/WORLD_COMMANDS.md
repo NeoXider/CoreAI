@@ -11,7 +11,7 @@ child `CoreAiLuaWorldModule` component:
 
 1. Select the `CoreAILifetimeScope` object.
 2. Click **Add Lua / World Commands Module** in its Inspector.
-3. Configure the prefab registry, allowed scenes, Full access, and private-member access on the child.
+3. Configure the prefab registry and allowed scenes on the child. (The Full Lua tier and private-member access are granted only by `CoreAiModsLifetimeScope` in `com.neoxider.coreaimods`; the legacy flags on this module are hidden and have no effect.)
 
 The root automatically discovers a child module at runtime, so the serialized reference may be left
 empty. The explicit reference wins when more than one hierarchy is being authored. Existing scenes that
@@ -19,8 +19,8 @@ still contain the former flat root fields continue to load through `FormerlySeri
 button copies those values to the child module and clears the legacy storage. This path works in a built
 player and does not depend on `AssetDatabase` or editor-only migration code.
 
-Omitting the child module keeps the legacy-safe defaults: an empty prefab registry, unrestricted Build
-Settings scene list, and Full/private reflection disabled. Compile-time `COREAI_LUA` is required to
+Omitting the child module keeps the legacy-safe defaults: an empty prefab registry and an unrestricted
+Build Settings scene list. Compile-time `COREAI_LUA` is required to
 enable Lua itself in a build.
 
 ## 1. Data flow
@@ -170,7 +170,7 @@ Accepted primitive keys:
 - `plane`
 - `empty`
 
-Primitive fallback is gated by `ICoreAISettings.AllowWorldPrimitives` (default `true`), surfaced on the CoreAI Settings asset as **World Commands -> Allow World Primitives**. Registered prefab keys still take precedence.
+Primitive fallback is gated by `ICoreAISettings.AllowWorldPrimitives` (default `true`), serialized on the CoreAI Settings asset as `allowWorldPrimitives` (not shown in the custom inspector; set it in code or through the Debug inspector). Registered prefab keys still take precedence.
 
 ## 5. Scene tools are separate
 
@@ -292,5 +292,5 @@ If the saved scene name differs from the current scene, load is skipped. This pr
 
 ## 8. Tests
 
-- EditMode: `WorldCommandLuaBindingsEditModeTests` verifies Lua publishes valid `WorldCommand` JSON.
+- EditMode (`CoreAI.Mods.Tests`): `WorldBindingsStudUnitsEditModeTests` verifies that Lua `coreai_world_*` calls publish valid `WorldCommand` JSON.
 - PlayMode: world-command executor and public world-tool tests should cover spawn/change/colour/destroy/listing plus runtime actions such as animation, audio, physics, and UI.

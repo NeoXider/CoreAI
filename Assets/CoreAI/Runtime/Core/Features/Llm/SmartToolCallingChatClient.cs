@@ -523,7 +523,7 @@ namespace CoreAI.Infrastructure.Llm
                     if (_owner._allowTextShapedToolCalls && _calls.Count == 0 && !finalSummary &&
                         (requestOptions?.Tools?.Count ?? 0) > 0 &&
                         TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> extracted,
-                            out string cleaned, _owner._logger, _owner._originalTools.Select(tool => tool.Name).ToArray()))
+                            out string cleaned, _owner._logger, _policy.KnownToolNames))
                     {
                         _calls = extracted;
                         List<MEAI.AIContent> contents = extracted.Cast<MEAI.AIContent>().ToList();
@@ -756,7 +756,7 @@ namespace CoreAI.Infrastructure.Llm
                         string assistantText = ConcatenateAssistantTextContents(response);
                         if (!string.IsNullOrEmpty(assistantText) &&
                             TryExtractToolCallsFromText(assistantText, out textCalls, out cleanedAssistantText,
-                                _logger, _originalTools.Select(tool => tool.Name).ToArray()))
+                                _logger, policy.KnownToolNames))
                         {
                             hasTextExtraction = true;
                             if (_settings.LogMeaiToolCallingSteps)

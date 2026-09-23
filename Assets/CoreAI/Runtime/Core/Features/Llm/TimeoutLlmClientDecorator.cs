@@ -27,7 +27,8 @@ namespace CoreAI.Infrastructure.Llm
     /// thrown while the caller's token is still alive becomes an <see cref="LlmOperationTimeoutException"/>
     /// (non-streaming) or a terminal chunk with <see cref="LlmErrorCode.Timeout"/> (streaming); a
     /// result/chunk carrying <see cref="LlmErrorCode.Cancelled"/> received after the timer fired is
-    /// rewritten to <see cref="LlmErrorCode.Timeout"/>. An inner client that never observes the token it
+    /// reissued as a copy with <see cref="LlmErrorCode.Timeout"/> and the timeout text - the instance the
+    /// inner client returned is never mutated. An inner client that never observes the token it
     /// was given may keep working in the background: its late failure is observed, and disposing the
     /// iterator waits for the in-flight MoveNext without holding up the caller. Cancellation coming from
     /// the caller itself always passes through unchanged.
@@ -43,6 +44,8 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     public sealed class TimeoutLlmClientDecorator : ILlmClient
     {
+        private const string TimedOutErrorText = "LLM request timed out.";
+
         private readonly ILlmClient _inner;
         private readonly Func<float> _timeoutSecondsProvider;
         private readonly ILlmAsyncMarshaler _asyncMarshaler;
@@ -660,11 +663,13 @@ namespace CoreAI.Infrastructure.Llm
                 // decorator is the OUTERMOST layer (the retry/fallback decorators inside have already seen
                 // the Cancelled result, and retrying on a token that already fired is useless anyway);
                 // only the typing visible to the caller is rewritten, so that a library timeout does not
-                // look like a user cancellation.
+                // look like a user cancellation. The text is rewritten with the code: a "cancelled" message
+                // under a Timeout code reads as if the user had pressed Stop.
+                // WHY a copy: the inner client may reuse or cache the instance it returned.
                 if (result != null && !result.Ok && result.ErrorCode == LlmErrorCode.Cancelled &&
                     deadline.Elapsed && !cancellationToken.IsCancellationRequested)
                 {
-                    result.ErrorCode = LlmErrorCode.Timeout;
+                    result = result.WithError(TimedOutErrorText, LlmErrorCode.Timeout);
                 }
 
                 completed = result;
@@ -885,7 +890,7 @@ namespace CoreAI.Infrastructure.Llm
                         yield return new LlmStreamChunk
                         {
                             IsDone = true,
-                            Error = "LLM request timed out.",
+                            Error = TimedOutErrorText,
                             ErrorCode = LlmErrorCode.Timeout
                         };
                         yield break;
@@ -906,27 +911,7 @@ namespace CoreAI.Infrastructure.Llm
                     if (current != null && current.IsDone && current.ErrorCode == LlmErrorCode.Cancelled &&
                         timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                     {
-                        current = new LlmStreamChunk
-                        {
-                            Text = current.Text,
-                            ReasoningText = current.ReasoningText,
-                            IsDone = current.IsDone,
-                            Error = "LLM request timed out.",
-                            ErrorCode = LlmErrorCode.Timeout,
-                            HttpStatus = current.HttpStatus,
-                            RetryAfterSeconds = current.RetryAfterSeconds,
-                            Model = current.Model,
-                            PromptTokens = current.PromptTokens,
-                            LastRoundtripPromptTokens = current.LastRoundtripPromptTokens,
-                            CompletionTokens = current.CompletionTokens,
-                            TotalTokens = current.TotalTokens,
-                            CacheReadTokens = current.CacheReadTokens,
-                            CacheWriteTokens = current.CacheWriteTokens,
-                            ExecutedToolCalls = current.ExecutedToolCalls,
-                            StartsNewMessage = current.StartsNewMessage,
-                            BufferedStreamingUseToolProgressHint = current.BufferedStreamingUseToolProgressHint,
-                            BufferedStreamingNoToolBinding = current.BufferedStreamingNoToolBinding
-                        };
+                        current = current.WithError(TimedOutErrorText, LlmErrorCode.Timeout);
                     }
 
                     yield return current;

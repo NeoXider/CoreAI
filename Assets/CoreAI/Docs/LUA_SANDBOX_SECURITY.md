@@ -48,11 +48,18 @@ deliberately enable scripting.
 
 ### Unity scene module
 
-Runtime Lua/world-command scene permissions are owned by an optional `CoreAiLuaWorldModule` child of
-`CoreAILifetimeScope`. The module contains the prefab whitelist, scene whitelist, Full-tier grant, and
-private-member grant. This keeps security-sensitive Lua configuration out of the root CoreAI Inspector
-unless the host deliberately adds the module. Existing scenes with the former flat fields migrate without
-losing serialized values; new scenes should configure only the child module.
+The Lua capability grant is owned by `CoreAiModsLifetimeScope`, the child scope that installs the mod
+runtime: **Enable Full Lua Access** (Full tier for `execute_lua`, `manage_mods` and rehydrated mods),
+**Enable Full Lua Private Access** (non-public members), **Allowed Lua Scenes** (the Lua
+`coreai_world_load_scene` whitelist), **Blacklist Policy** and the coroutine resume budget.
+
+World-command permissions are owned by an optional `CoreAiLuaWorldModule` child of
+`CoreAILifetimeScope`: the prefab whitelist and the scene whitelist the world-command executor
+enforces. The module no longer shows a Full-access checkbox: its legacy serialized Full flags never
+granted `Full` to Lua, stay only so old scenes load unchanged, and their accessors are `[Obsolete]`
+(read `CoreAiModsLifetimeScope.FullLuaAccessEnabled` / `FullLuaPrivateAccessEnabled`). Existing scenes
+with the former flat fields on `CoreAILifetimeScope` migrate into the module without losing serialized
+values.
 
 ### CI matrix
 
@@ -68,14 +75,15 @@ the suite. The workflow needs the standard GameCI secrets (`UNITY_LICENSE`,
 
 Lua generation is constrained at multiple stages:
 
-- `LuaAiEnvelopeProcessor` enforces a sliding-window limiter (`LuaGenerationRateLimiter`, default 20 per 60 s) for envelope runs and scheduled Programmer repair generations.
-- `LuaTool`/`execute_lua` also enforces rate limiting in the tool path. The
-  envelope and `execute_lua` share a limiter when the same limiter is injected,
-  so a busy model or repair loop is blocked consistently across both layers.
+- `LuaTool`/`execute_lua` enforces a sliding-window limiter (`LuaGenerationRateLimiter`, default 20 per 60 s) in the tool path; the Unity composition registers one limiter per `CoreAiModsLifetimeScope`.
+- `LuaCsAiEnvelopeProcessor` (a component a host composes itself; the default Unity composition does
+  not construct it) enforces the same limiter for envelope runs and scheduled Programmer repair
+  generations. The envelope and `execute_lua` share a limiter when the same limiter is injected, so a
+  busy model or repair loop is blocked consistently across both layers.
 
 `LuaGenerationRateLimiter` is default-on. `maxPerWindow <= 0` still disables it.
 
-When the limiter is saturated, the envelope fails with `Lua rate limit exceeded` and repair is skipped, so a failing script cannot spin a runaway generate→fail→repair loop against the LLM.
+When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (... per ...s); call rejected.` without running the chunk, and a composed envelope processor fails the envelope and skips repair, so a failing script cannot spin a runaway generate→fail→repair loop against the LLM.
 
 ## Additional hardening (current implementation)
 
@@ -129,11 +137,14 @@ When the limiter is saturated, the envelope fails with `Lua rate limit exceeded`
   moves the wall-clock half live and is gated to the unrestricted host actor (`NOT_AUTHORITY` for an
   ordinary mod); the instruction half has no Lua-facing setter. A trip is classified by a typed trip
   kind and reported as `BUDGET_EXCEEDED` with the bound and the author's line.
-- Coroutine abuse has a total-lifetime budget through `LuaCoroutineHandle`.
-  `LuaCoroutineHandle.DefaultTotalLifetimeSteps` is `1_000_000` across all resumes
+- Coroutine abuse has a total-lifetime budget through `LuaCsCoroutineHandle`.
+  `LuaCsCoroutineHandle.DefaultTotalLifetimeSteps` is `1_000_000` across all resumes
   for one handle, and the handle is forcibly killed when exceeded.
-- `LuaCsAiEnvelopeProcessor` normalizes and truncates results:
-  result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** before entering the payload/repair path.
+- `coroutine.wrap` is removed from the secured environment (its resumer would bypass the guard hook);
+  `coroutine.resume` is replaced by a budget-guarded wrapper that arms the per-resume step, time and
+  allocation limits on the coroutine's own state.
+- `execute_lua` (`LuaCsGameToolExecutor`) and `LuaCsAiEnvelopeProcessor` normalize and truncate results:
+  the result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** (`LuaCsAiEnvelopeProcessor.MaxResultSummaryLength` / `MaxErrorMessageLength`) before they reach the model or the repair path.
 - `LuaCsApiRegistry` wraps host callbacks and converts host validation exceptions into `LuaRuntimeException`, so Lua callers see script errors instead of raw CLR exception types.
 - `coreai_world_load_scene` supports an optional scene whitelist check. (This is one of the classic
   build bindings: in the default production composition it is **disabled** — a stub raises an error
@@ -148,9 +159,10 @@ When the limiter is saturated, the envelope fails with `Lua rate limit exceeded`
 
 When `COREAI_LUA` is compiled in, runtime Lua execution is supported on all platforms,
 including WebGL player builds. On WebGL, execution is **on by default** — toggle with
-`CoreAISettingsAsset.EnableLuaOnWebGl`. The Full `unity_*` reflection tier
-stays disabled on WebGL; IL2CPP stripping protection (`link.xml` preserving
-`Lua.dll` / `Lua.Annotations.dll`) ships in the package.
+`CoreAISettingsAsset.EnableLuaOnWebGl`. CoreAI has no WebGL-specific switch for the Full `unity_*`
+reflection tier: it follows the host's **Enable Full Lua Access** grant on every platform, and in an
+IL2CPP player it reaches only the members stripping kept. IL2CPP stripping protection (`link.xml`
+preserving `Lua.dll` / `Lua.Annotations.dll`) ships in the package.
 
 ## Recommended Flow
 
@@ -165,7 +177,10 @@ stays disabled on WebGL; IL2CPP stripping protection (`link.xml` preserving
 The sandbox must not expose APIs that allow file, process, reflection, or runtime
 escape by default:
 
-- `io`, `os`, `debug`, `package`, `require`, `loadfile`, and `dofile`.
+- `io`, `os`, `debug`, `package`, `require`, `load`, `loadstring`, `loadfile`, `dofile`,
+  `collectgarbage`, and `string.dump`.
+- The stock `os` library stays removed. With the Rbx API attached (the default Unity composition), `os`
+  is a CoreAI table that holds only `os.time` and `os.clock`.
 - Arbitrary CLR/Unity reflection entry points.
 - Direct filesystem, networking, shell, or environment access.
 - Host object references that expose broad mutable state without a narrow wrapper.

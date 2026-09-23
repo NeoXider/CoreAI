@@ -139,6 +139,17 @@ namespace CoreAI.Ai.LuaCs
         public LuaCapabilities Capabilities => _capabilities;
 
         /// <summary>
+        /// The tiers the built-in surface actually registers for a <paramref name="requested"/> grant: the
+        /// host ceiling (<see cref="Capabilities"/>) intersected with the request. Anything registered next
+        /// to the built-in surface for the same registry (host extensions) must gate on this value, never on
+        /// the raw request, or a script could reach a tier the host withheld just by asking for it.
+        /// </summary>
+        internal LuaCapabilities EffectiveCapabilities(LuaCapabilities requested)
+        {
+            return _capabilities & requested;
+        }
+
+        /// <summary>
         /// Shared logic-override slots (<c>logic_define</c>/<c>logic_reset</c>/<c>logic_list</c>). The host
         /// declares slots and reads them via <see cref="LuaCsLogicSlots.TryInvokeNumber"/>; mods override
         /// them. Both the persistent runtime and the one-off executor register through this one instance,
@@ -179,7 +190,7 @@ namespace CoreAI.Ai.LuaCs
         private void RegisterCore(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
             string ownerModId, ActorContext? actorContext, MutationEnvelope? mutationEnvelope)
         {
-            LuaCapabilities effective = _capabilities & capabilities;
+            LuaCapabilities effective = EffectiveCapabilities(capabilities);
 
             _default.Register(registry, effective);
 

@@ -21,24 +21,27 @@ How CoreAI streams tokens from LLMs into your UI — end-to-end, with every laye
                                   ▼
                    ┌──────────────────────────────────────────┐
                    │        MeaiLlmClient (wrapper)           │
-                   │  • routing (LLMUnity / OpenAI HTTP)      │
+                   │  • tool loop + ToolExecutionPolicy       │
                    │  • ThinkBlockStreamFilter (stateful)     │
                    │  • yields final IsDone=true chunk        │
                    └──────────────┬───────────────────────────┘
                                   │  MEAI ChatResponseUpdate
                                   ▼
+                   ┌──────────────────────────────────────────┐
+                   │   MeaiOpenAiChatClient (HTTP, SSE)       │
+                   │  • IOpenAiHttpTransport                  │
+                   │    – HttpClient (default)                │
+                   │    – fetch SSE / UnityWebRequest (WebGL) │
+                   │  • SSE + simulated stream (see §2)       │
+                   └──────────────┬───────────────────────────┘
+                                  │  POST /v1/chat/completions
+                                  ▼
           ┌───────────────────────┴───────────────────────┐
           │                                               │
- ┌────────▼─────────┐                         ┌───────────▼──────────┐
- │ MeaiOpenAiChat   │                         │ LlmUnityMeaiChatClient│
- │  Client (HTTP)   │                         │  (local GGUF)         │
- │ • IOpenAiHttpTransport                      │ • LLMAgent.Chat       │
- │   – HttpClient (default)                   │ • ConcurrentQueue     │
- │   – UnityWebRequest (WebGL player)        │ • frame callbacks     │
- │ • SSE + simulated stream (see §2)          │                       │
- └────────┬─────────┘                         └───────────┬──────────┘
-          │                                               │
-          └──────────────► LLM backend ◄──────────────────┘
+ ┌────────▼─────────────────┐              ┌──────────────▼─────────────┐
+ │ Remote / local HTTP API  │              │ LLMUnity built-in server   │
+ │ (OpenAI, LM Studio, ...) │              │ (local GGUF, port 13333)   │
+ └──────────────────────────┘              └────────────────────────────┘
 ```
 
 Key files:
@@ -49,7 +52,7 @@ Key files:
 | Wrapper | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs` |
 | HTTP client + transport | `Assets/CoreAI/Runtime/Core/Features/Llm/MeaiOpenAiChatClient.cs` |
 | HTTP transports | `HttpClientOpenAiTransport.cs`, `UnityWebRequestOpenAiTransport.cs` (Unity) |
-| LLMUnity | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/LlmUnityMeaiChatClient.cs` |
+| LLMUnity endpoint adapter | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/LlmUnityServerHttpSettings.cs` (wired in `LlmPipelineInstaller`, `LlmClientRegistry`, `LlmEndpointClientFactory`) |
 | Tool execution policy (portable) | `Assets/CoreAI/Runtime/Core/Features/Llm/ToolExecutionPolicy.cs` |
 | Non-streaming tool loop (portable) | `Assets/CoreAI/Runtime/Core/Features/Llm/SmartToolCallingChatClient.cs` |
 | UI | `Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatPanel.cs` |
@@ -72,10 +75,10 @@ Key files:
 
 ### Local (LLMUnity GGUF)
 
-`LlmUnityMeaiChatClient.GetStreamingResponseAsync` calls `LLMAgent.Chat(prompt, callback)`. The delta is pushed onto a `ConcurrentQueue<string>` from LLMUnity's worker and drained on the Unity main thread via `await foreach`.
+LLMUnity runs the GGUF as its built-in OpenAI-compatible server (`llm.remote = true`, `LlmUnityServerPort`, default 13333). CoreAI talks to it through `OpenAiChatLlmClient` over `LlmUnityServerHttpSettings` (`POST /v1/chat/completions`), so local streaming is ordinary SSE through the HTTP path above — the same parser, cancellation and think-block filtering as a remote API. The server exposes no `/v1/models`, so the model name is passed explicitly. Not available on WebGL.
 
-- **Cancellation** → cooperative; the async loop checks the token every iteration.
-- **Think blocks** — the `<think>` regex-per-chunk that used to live here was removed in 0.20.2; filtering happens centrally in `MeaiLlmClient`.
+- **Tool channel** → from `LlmUnityToolChannel` on the settings asset (legacy client) or `LlmEndpointDescriptor.ToolChannel` (runtime endpoints); `Auto` resolves to native `tool_calls`, `Text` forces text-shaped extraction for a server build that rejects `tools`.
+- **Think blocks** → filtered centrally in `MeaiLlmClient`.
 
 ---
 
@@ -118,7 +121,7 @@ string tail = filter.Flush(); // empty in normal termination
 if (!string.IsNullOrEmpty(tail)) ui.Append(tail);
 ```
 
-Covered by **24 EditMode tests** (`ThinkBlockStreamFilterEditModeTests`) including split-tag boundary cases.
+Covered by `ThinkBlockStreamFilterEditModeTests`, including split-tag boundary cases.
 
 ### Response and persistence boundary (7.0.7+)
 
@@ -127,7 +130,7 @@ Covered by **24 EditMode tests** (`ThinkBlockStreamFilterEditModeTests`) includi
   those replies arrive as one continuous chunk sequence. `LlmStreamChunk.StartsNewMessage` marks the
   first visible chunk of each reply after the first. Concatenating chunks blindly glues the end of one
   reply to the start of the next — in production a student read
-  `…Проверь себя:**Ход завершён — ждём ответ ученика на карточке.**`, two messages fused into one.
+  `…Check yourself:**Turn finished — waiting for the student's answer on the card.**`, two messages fused into one.
   Use `StreamedMessageJoiner.Append(...)`: it is the single owner of the separation rule (blank line
   between replies, nothing before the first, no third blank line when the reply already ended with a
   paragraph). Never infer the boundary from punctuation — a reply may legitimately end with a colon
@@ -211,17 +214,16 @@ await foreach (string chunk in CoreAi.StreamAsync("Hello", "SmartChat"))
 
 ## 6. Orchestrator streaming
 
-Streaming is not limited to `CoreAiChatService`; it flows through the full AI pipeline (`IAiOrchestrationService`) for **both** interactive chat (`RunStreamingAsync`) **and** non-interactive task execution (`RunTaskAsync`, via the `CompleteForTaskAsync` helper) — streaming is the default path whenever `EnableStreaming` is on. Differences between the two chat-facing entry points:
+Streaming is not limited to `CoreAiChatService`; it flows through the full AI pipeline (`IAiOrchestrationService`) for **both** interactive chat (`RunStreamingAsync`) **and** non-interactive task execution (`RunTaskAsync`, via the `CompleteForTaskAsync` helper) — streaming is the default path whenever `EnableStreaming` is on.
 
-| Layer | `CoreAiChatService.SendMessageStreamingAsync` | `IAiOrchestrationService.RunStreamingAsync` |
-|-------|-----------------------------------------------|---------------------------------------------|
-| Prompt composer | No (explicit system + user) | Yes — 3-layer prompt composer |
-| Authority check | No | Yes — `IAuthorityHost.CanRunAiTasks` |
-| Queue + `MaxConcurrent` | No | Yes — `QueuedAiOrchestrator` (fair, by priority) |
-| `CancellationScope` (cancel prior task with same key) | No | Yes |
-| Structured validation | No | Yes (after stream completes) |
-| Publish `ApplyAiGameCommand` | No | Yes (after full response) |
-| Metrics | No | Yes — `IAiOrchestrationMetrics` |
+`CoreAiChatService.SendMessageStreamingAsync` is a thin layer **over** `IAiOrchestrationService.RunStreamingAsync` (the registered `QueuedAiOrchestrator`), so a chat turn gets the full pipeline — 4-layer prompt prefix and ordered tail, `IAuthorityHost.CanRunAiTasks`, the priority queue with `MaxConcurrent` and `CancellationScope`, structured validation, `ApplyAiGameCommand` publication and `IAiOrchestrationMetrics`. What the service adds:
+
+| Service adds | Detail |
+|--------------|--------|
+| Chat request defaults | `SourceTag = "Chat"`, the actor context of the role, `CancellationScope` = the actor's session id (string overloads) |
+| Idle deadline | `LlmRequestTimeoutSeconds`, re-armed by every chunk and tool-call event (§8) |
+| Host deadline | optional `deadlineToken`, kept apart from the caller token (§8) |
+| Interruption mapping | a fired deadline at a live caller becomes `LlmOperationTimeoutException`; an error chunk after a caller stop becomes `OperationCanceledException` |
 
 Use `CoreAi.OrchestrateStreamAsync(task)` for agent workflows (Creator / Programmer / Mechanic) and `CoreAi.StreamAsync("text")` for simple chat.
 
@@ -241,16 +243,16 @@ Inside `AiOrchestrator.RunStreamingAsync`:
 
 Since v0.24.0, streaming tool-calling uses a **dual-path architecture**:
 
-### Path 1: Text-based extraction (primary)
+### Path 1: Text-based extraction (fallback)
 
-The primary mechanism, designed for local models (Ollama, llama.cpp, LM Studio) that output tool calls as text.
+The fallback for endpoints without a native tool channel (a local server whose model writes tool calls as text) — see [Prose is interpreted only on the fallback path](#prose-is-interpreted-only-on-the-fallback-path-7350).
 `MeaiLlmClient.TryExtractToolCallsFromText` delegates to the portable `LlmToolCallTextExtractor`, which recognises **four** text shapes, not only JSON. They differ in how much evidence of a *call* the shape itself carries, and the guards differ accordingly:
 
 | Shape | Example | Evidence it is a call | Recognised |
 |-------|---------|-----------------------|------------|
 | JSON | `{"name":"memory","arguments":{…}}` (`arguments_json` string accepted too; multiple objects per reply) | the `name` + `arguments` structure | by shape; with a registry only for a declared name |
 | XML (Hermes / Qwen-Agent) | `<function=memory><parameter=action>clear</parameter></function>` | the XML tags | by shape; with a registry only for a declared name |
-| Function call | `read_skill("Alchemy")`, `world_command(action='spawn', x=1)` — the **whole** reply | **none**: `print("Привет, мир!")` is the same string | **only with a registry, and only for a declared name** |
+| Function call | `read_skill("Alchemy")`, `world_command(action='spawn', x=1)` — the **whole** reply | **none**: `print("Hello, world!")` is the same string | **only with a registry, and only for a declared name** |
 | Memory pseudo-write | `Action=write content="…"` ending its line | the `Action=write` keyword | by shape; maps to `memory`, so with a registry only if `memory` is declared |
 
 Guards common to every shape:
@@ -260,9 +262,9 @@ Guards common to every shape:
 - placeholder names (`<tool_name>`) are rejected;
 - partial/malformed JSON is skipped here; truncation repair lives in `TryBuildMalformedTextToolCall`, behind the same channel gate.
 
-**Registry of declared tool names (7.35.0).** `LlmToolCallTextExtractor.TryExtract(text, knownToolNames, …)` and `StripForDisplay(text, knownToolNames)` take the names of the tools the request declared (`ILlmTool.Name`). Invariant: **a call is an address to a declared tool** — any other name stays visible text in every shape, because it cannot execute anyway and hiding it takes a line of the lesson away from the learner. Without a registry (the legacy overloads) JSON, XML and the pseudo-write are still recognised by shape, but **function-call syntax never fires**: with no registry `read_skill("x")` and `print("x")` are indistinguishable, and a Python tutor's one-line answer used to become a call to a non-existent tool `print` — the model got `Unknown tool`, the learner an empty bubble. There is deliberately no stop-list of Python names (`print`/`input`/`len`); it would end at the first new lesson. The current call sites (`MeaiLlmClient.TryPortableToolExtract`, `SmartToolCallingChatClient.TryExtractToolCallsFromText`) still use the legacy overload; to re-enable function-call syntax for local Qwen builds pass `request.Tools.Select(t => t.Name)` there.
+**Registry of declared tool names (7.35.0).** `LlmToolCallTextExtractor.TryExtract(text, knownToolNames, …)` and `StripForDisplay(text, knownToolNames)` take the names of the tools the request declared (`ILlmTool.Name`). Invariant: **a call is an address to a declared tool** — any other name stays visible text in every shape, because it cannot execute anyway and hiding it takes a line of the lesson away from the learner. Without a registry (the legacy overloads) JSON, XML and the pseudo-write are still recognised by shape, but **function-call syntax never fires**: with no registry `read_skill("x")` and `print("x")` are indistinguishable, and a Python tutor's one-line answer used to become a call to a non-existent tool `print` — the model got `Unknown tool`, the learner an empty bubble. There is deliberately no stop-list of Python names (`print`/`input`/`len`); it would end at the first new lesson. The runtime call sites pass the registry: `MeaiLlmClient` hands its policy's `KnownToolNames` (`declaredToolNames`) to `TryPortableToolExtract`, the hybrid hold and the display strip, `SmartToolCallingChatClient` passes `KnownToolNames`, and `AiOrchestrator` strips leaked calls against the request's tools. Function-call syntax is therefore recognised for declared tools on the fallback path. The names include the function names of `IAIFunctionsLlmTool` wrappers (for example `camera_look`), so text-shaped calls to them are extracted and stripped too.
 
-### Path 2: Native SSE `delta.tool_calls` (enhancement)
+### Path 2: Native SSE `delta.tool_calls`
 
 For cloud providers (OpenAI, Anthropic via OpenRouter) that emit `delta.tool_calls` in SSE chunks.
 `MeaiOpenAiChatClient.ExtractDeltaUpdate` parses `choices[0].delta.tool_calls` and emits `FunctionCallContent` in `ChatResponseUpdate`.
@@ -273,14 +275,14 @@ If the SSE stream contains `FunctionCallContent`, `MeaiLlmClient` uses native de
 
 **One decision, taken by CHANNEL, governs everything the loop does with the model's prose:** holding it back, reading tool calls out of it, and repairing truncated JSON in it. Since 7.35.0 all three run only when **`Tools`** is non-empty **and** the endpoint has no native tool channel (**`SupportsNativeToolCalling == false`**) **or** the declared tools bound nothing (**`aiTools.Count == 0`**). A remote OpenAI-compatible endpoint is native, so its text streams live, delta by delta, and is never parsed.
 
-**The channel is declared where the endpoint is created, never guessed.** `MeaiLlmClient.CreateHttp` and the `OpenAiChatLlmClient` constructors take `supportsNativeToolCalling` (default `true` — that is what an OpenAI-compatible server means), and every place that builds a **local llama.cpp / LLMUnity** endpoint passes **`false`** explicitly: `LlmEndpointClientFactory.ActivateLlmUnityAsync`, the LlmUnity profile in `LlmClientRegistry`, and `LlmPipelineInstaller`'s LLMUnity client. That server speaks the same HTTP dialect *without* a tool channel — its model calls a tool by writing JSON in the answer — so for it prose interpretation must stay ON. Wrong in that direction and every local-model tool stops working with no error anywhere; wrong in the other and a teacher's JSON example is executed as a command.
+**The channel is declared where the endpoint is created, never guessed.** `MeaiLlmClient.CreateHttp` and the `OpenAiChatLlmClient` constructors take a **required** `supportsNativeToolCalling` (no default). Remote OpenAI-compatible clients pass `true`; every place that builds a **local llama.cpp / LLMUnity** endpoint passes the resolved channel decision (`LlmToolChannelResolution`, `toolChannel.Native`): `LlmEndpointClientFactory` (runtime endpoints probe the server on activation when `ToolChannel = Auto`), the LlmUnity profile in `LlmClientRegistry`, and `LlmPipelineInstaller`'s LLMUnity client (no probe — the client is built before the server exists, so `LlmUnityToolChannel = Auto` means native, because the bundled LlamaLib server has a native channel). Set the channel to `Text` for a server build that rejects `tools`: its model then calls a tool by writing JSON in the answer, and prose interpretation stays ON. Wrong in that direction and every local-model tool stops working with no error anywhere; wrong in the other and a teacher's JSON example is executed as a command. See [HTTP_TRANSPORT_SPEC](HTTP_TRANSPORT_SPEC.md).
 
 Two reasons, both from real use:
 
 - **Correctness.** Reading prose for calls means acting on what the model *said* instead of on the channel it said it through. A tutor explaining JSON — the everyday job of a programming teacher — writes an object shaped exactly like a call, and the engine executed the example instead of showing it. Shape can never separate an example from a command; the channel can. The malformed-JSON repair is the sharpest case: it *reconstructs* a truncated object out of prose and runs it.
 - **Feel.** The hold begins at the first still-open `{`, which a Python teacher types constantly (a dict, a set, an f-string), so prose froze mid-sentence and then arrived in a lump.
 
-Behind this gate: the hybrid hold and its span scanning (`GetHybridSafeSegments`, `GetFirstIncompleteBraceStart`, `FindToolCallJsonSpans`), `TryExtractToolCallsFromText` (Path 2), `TryBuildMalformedTextToolCall`, the `<think>`-block tool-call diagnostic, `SmartToolCallingChatClient`'s own text extraction on the non-streaming path (constructor flag `allowTextShapedToolCalls`, default **false**), and in `AiOrchestrator` both `LlmToolCallTextExtractor.StripForDisplay` and the tool-result repetition filter. Deliberately NOT behind it: execution of `FunctionCallContent` that arrived on the provider's own channel, and `LlmResponseSanitizer.StripLeadingSystemPromptEcho` (an identity match against the prompt we sent, not a guess about content).
+Behind this gate: the hybrid hold and its span scanning (`GetHybridSafeSegments`, `GetFirstIncompleteBraceStart`, `FindToolCallJsonSpans`), `TryExtractToolCallsFromText` (Path 1), `TryBuildMalformedTextToolCall`, the `<think>`-block tool-call diagnostic, `SmartToolCallingChatClient`'s own text extraction on the non-streaming path (constructor flag `allowTextShapedToolCalls`, default **false**), and in `AiOrchestrator` both `LlmToolCallTextExtractor.StripForDisplay` and the tool-result repetition filter. Deliberately NOT behind it: execution of `FunctionCallContent` that arrived on the provider's own channel, and `LlmResponseSanitizer.StripLeadingSystemPromptEcho` (an identity match against the prompt we sent, not a guess about content).
 
 **Escape hatch:** **`LlmCompletionRequest.AllowTextShapedToolCallsOnNativeEndpoint = true`** restores prose interpretation for an endpoint that advertises a native channel and then answers with JSON in the text (proxies in front of local models do this). The symptom that calls for it is a tool that never runs while the reply contains its call. Off by default; nothing in the runtime sets it.
 
@@ -313,8 +315,9 @@ Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
 
 | Guarantee | Description |
 |-----------|-------------|
-| Duplicate detection | Signature-based (name + arguments hash). Blocks repeated identical calls within one request cycle. Per-tool `AllowDuplicates` flag overrides. |
-| Consecutive error tracking | Counter resets on success, increments on failure. Agent aborts at `MaxToolCallRetries` threshold. |
+| Argument preflight | Missing / `null` required arguments and arguments that cannot bind to the parameter type are refused before the tool body runs (retry allowed); see [TOOL_AUTHORING_GUIDE](TOOL_AUTHORING_GUIDE.md#required-arguments-null-is-missing-empty-is-present). |
+| Duplicate detection | Signature-based (name + arguments hash). Only a **cross-turn echo** is suppressed — a call whose signature an *earlier* turn of the same request already registered after making progress. Identical calls issued together in one batch all execute. Per-tool `AllowDuplicates` flag overrides. |
+| Consecutive error tracking | Counts batches/turns in which **every** call failed; a partly successful batch resets it. When `MaxToolCallRetries` is reached (or the roundtrip cap is hit) the loop makes one final tools-disabled summary turn. |
 | Notification | Every tool execution fires `IToolCallEventPublisher.PublishStarted/Completed/Failed` (portable) → `MessagePipeToolCallEventPublisher` adapter → `GlobalMessagePipe`. Also calls `IToolExecutionNotifier.NotifyToolExecuted` → `CoreAiToolExecutionNotifier` adapter → `CoreAi.NotifyToolExecuted`. |
 
 ### Stop / clear guarantees
@@ -335,43 +338,47 @@ Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
 
 The active arrangement is:
 - `AiOrchestrator` **passes `cancellationToken` through** without adding a timer.
-- `CoreAiChatService.SendMessageAsync` and `SendMessageStreamingAsync` create a linked `CancellationTokenSource` guarded by an **idle watchdog** (`CoreAiChatService.IdleTimeoutDeadline`): one `UniTask.Delay(DelayType.Realtime)` per idle window, driven by the PlayerLoop. Every streamed chunk and every tool-call start/finish/failure for the turn's role **re-arms** it with a single timestamp write (no allocation, safe from any thread), so a multi-step turn is cancelled only after a real stall of `LlmRequestTimeoutSeconds`, never because its steps add up. The vision path (`AskWithCameraAsync`) still uses a plain `CancelAfterSlim` because it is a single provider call.
+- `CoreAiChatService.SendMessageAsync`, `SendMessageResultAsync` and `SendMessageStreamingAsync` create a linked `CancellationTokenSource` guarded by an **idle watchdog** (`CoreAiChatService.IdleTimeoutDeadline`): one `UniTask.Delay(DelayType.Realtime)` per idle window, driven by the PlayerLoop. Every streamed chunk and every tool-call start/finish/failure for the turn's role **re-arms** it with a single timestamp write (no allocation, safe from any thread), so a multi-step turn is cancelled only after a real stall of `LlmRequestTimeoutSeconds`, never because its steps add up. The vision path (`AskWithCameraAsync`) still uses a plain `CancelAfterSlim` because it is a single provider call.
+- The caller's token and the deadlines are kept apart. `AiTaskRequest.CallerCancellationToken` is the caller's token only; `AiTaskRequest.DeadlineCancellationToken` is the idle deadline joined with an optional **host deadline** (the overloads that take a `deadlineToken`, which `CoreAiChatPanel` feeds from `CoreAiChatExternalSubmitOptions.DeadlineCancellationToken`); the operation token links all of them. A deadline that fires while the caller's token is alive ends the turn with `LlmOperationTimeoutException` (buffered and streaming) and the orchestrator records `DeadlineCancellation`; a caller stop stays a cancellation even when a deadline fired too.
 - `TimeoutLlmClientDecorator` provides the portable pipeline bound; `LlmPipelineInstaller` injects `UnityMainThreadLlmAsyncMarshaler`, whose `DelayAsync` is also UniTask PlayerLoop-driven.
 - `LoggingLlmClientDecorator` and `RetryingStreamingLlmClientDecorator` use that same injected delay for retry backoff.
-- The timeout value comes from `ICoreAISettings.LlmRequestTimeoutSeconds` (default: 300s).
+- The timeout value comes from `ICoreAISettings.LlmRequestTimeoutSeconds` (`CoreAISettingsAsset` default: 120 s; the static `CoreAISettings` fallback without an asset is 300 s).
 
 ```csharp
-// Inside CoreAiChatService.SendMessageStreamingAsync (simplified)
+// Inside CoreAiChatService.SendMessageStreamingAsync(request, ct, deadlineToken) (simplified)
+request.CallerCancellationToken = ct;              // the caller's token only
+request.DeadlineCancellationToken = deadlineToken; // host deadline (may be None)
 float timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
 if (timeoutSec > 0)
 {
-    deadlineCts = new CancellationTokenSource();
-    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, deadlineCts.Token);
-    deadline = new IdleTimeoutDeadline(deadlineCts, timeoutSec); // one PlayerLoop watchdog per turn
+    idleCts = new CancellationTokenSource();
+    anyDeadline = LinkDeadlines(idleCts.Token, deadlineToken, out deadlineCts); // idle + host deadline
+    request.DeadlineCancellationToken = anyDeadline;
+    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, anyDeadline);
+    deadline = new IdleTimeoutDeadline(idleCts, timeoutSec); // one PlayerLoop watchdog per turn
     effectiveCt = timeoutCts.Token;
 }
-await foreach (LlmStreamChunk chunk in _orchestrator.RunStreamingAsync(request, effectiveCt))
-{
-    deadline?.Rearm(); // timestamp write, allocation-free
-    yield return chunk;
-}
+// for each chunk of _orchestrator.RunStreamingAsync(request, effectiveCt):
+//   a cancellation while a deadline fired and ct is alive -> throw new LlmOperationTimeoutException();
+//   an error chunk after ct was cancelled                 -> OperationCanceledException (caller stop)
+deadline?.Rearm(); // per chunk: timestamp write, allocation-free
 ```
 
 ### Retry centralization
 
-> **Rule:** Network-level retries (HTTP 429, 5xx, exponential backoff) are handled **exclusively** by `LoggingLlmClientDecorator`. The orchestrator invokes the LLM client exactly once per request.
+> **Rule:** Network-level retries (HTTP 429, 5xx, exponential backoff) are handled **exclusively** by `LoggingLlmClientDecorator` (plus the pre-commit streaming retry in `RetryingStreamingLlmClientDecorator`). The orchestrator invokes the LLM client exactly once per request. No retry — and no `FallbackLlmClientDecorator` hop — happens after the caller cancelled; the fault propagates as that cancellation (`LlmCancellation`). `CircuitBreakerLlmClientDecorator` is not in the default Unity chain; when a host adds it, a caller cancel records no failure and releases its half-open probe slot.
 
 Before v1.5.1, `AiOrchestrator.RunTaskAsync` had its own `for (attempt...)` retry loop, creating an `M × N` retry multiplier (e.g., 2 orchestrator retries × 3 decorator retries = 6 actual network requests on a single failure).
 
 ### Error propagation
 
-`CoreAiChatService` no longer swallows exceptions. Errors from `AiOrchestrator` → `LoggingLlmClientDecorator` → `ILlmClient` propagate to `CoreAiChatPanel`, which catches `Exception` and displays the error message to the user.
+`CoreAiChatService` no longer swallows exceptions. Errors from `AiOrchestrator` → `LoggingLlmClientDecorator` → `ILlmClient` propagate to `CoreAiChatPanel`, which classifies them with `LlmCancellation`: a timeout goes to `ResolveTimeoutMessage(false)`, a cancellation to `ResolveCancelledMessage()` (default: nothing is added to the chat), and any other failure to `ResolveErrorMessage` / `ResolveStreamErrorMessage`, which shows `LlmErrorPresentation.ToUserMessage` while the log gets the diagnostic text. See [ARCHITECTURE — Timeout & Retry Rule](ARCHITECTURE.md#timeout--retry-rule-v151).
 
 ## 9. Known limitations
 
 - **No output-length timeout** — there is a per-request cancellation token but no *total response length* guard. Add one externally if you need it.
 - **Mobile** — HTTP streaming behaviour depends on the OS / Mono / IL2CPP stack; measure before shipping.
 - **Partial SSE `tool_calls`** — Cloud providers may split tool call arguments across multiple SSE chunks. Split-argument accumulation across chunks **is implemented**: `MeaiOpenAiChatClient.SseToolCallAccumulator` buffers per-index argument fragments (each `delta.tool_calls[index]` keeps its own `StringBuilder`, with `Feed` appending fragments and `Flush` emitting a `FunctionCallContent` per index). Remaining caveats are handled defensively: parallel/duplicate index entries each accumulate independently, and malformed-JSON arguments are caught and surfaced as an empty argument dictionary rather than throwing.
-- **WebGL — incremental SSE** — In the **WebGL player**, use **`CoreAISettingsAsset.WebGlNativeStreaming`** (**on** by default for new assets since **v1.6.13**) so **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** deliver real **`fetch`** streaming. If **`false`**, **`UnityWebRequest`** may buffer the body (`LLM ◀ (stream) chunks=1` or non-streaming path). Legacy workaround (**`CoreAiChatConfig.EnableStreaming = false`**) is only for hosts that cannot support fetch/CORS — see **`STREAMING_WEBGL_TODO.md`**.
+- **WebGL — incremental SSE** — In the **WebGL player**, use **`CoreAISettingsAsset.WebGlNativeStreaming`** (**on** by default for new assets since **v1.6.13**) so **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** deliver real **`fetch`** streaming. If **`false`**, **`UnityWebRequest`** may buffer the body (`LLM < (stream) ... chunks=1` or the non-streaming path). Legacy workaround (**`CoreAiChatConfig.EnableStreaming = false`**) is only for hosts that cannot support fetch/CORS — see **`STREAMING_WEBGL_TODO.md`**.
 
 Related deep dives: [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) · [TOOL_CALLING_BEST_PRACTICES](../../CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md).

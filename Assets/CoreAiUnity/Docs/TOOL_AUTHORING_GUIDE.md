@@ -11,18 +11,19 @@ A tool is described to the model on one of two paths, chosen by the backend:
 - **Native tool-calling path** (LM Studio, OpenAI-compatible servers, most modern providers). The JSON Schema
   for each tool is generated from the C# **delegate signature** by `AIFunctionFactory.Create(delegate, options)`,
   exposed as `AIFunction.JsonSchema`, and forwarded **verbatim** as the tool `parameters` in the request body
-  (`MeaiOpenAiChatClient.BuildToolsPayload`, `MeaiOpenAiChatClient.cs:1800` — `af.JsonSchema` is serialized
-  straight into the payload). **Parameter descriptions reach the model only if the delegate parameters carry
+  (`MeaiOpenAiChatClient.BuildToolsPayload` serializes `AIFunction.JsonSchema` straight into the payload). **Parameter descriptions reach the model only if the delegate parameters carry
   `[System.ComponentModel.Description("...")]` attributes** — that is where `AIFunctionFactory` reads them from.
 
 - **Text-shaped path** (older / non-native backends). Here the tool contract is injected into the system prompt
-  by `AiToolContractPromptFormatter.AppendToolContract`. This is the **only** consumer of a tool's
-  `ParametersSchema` string: it prints `schema: <ParametersSchema>` per tool
-  (`AiToolContractPromptFormatter.cs:103-107`).
+  by `AiToolContractPromptFormatter` (`AppendStableRoleToolContract` for the cacheable role prefix,
+  `AppendToolContract` for diagnostics). This is the only place a tool's `ParametersSchema` string reaches the
+  model: the definitions block prints `schema: <ParametersSchema>` per tool.
 
-Crucially, `AppendToolContract` **early-returns for native tool-calling**
-(`AiToolContractPromptFormatter.cs:71-75`) — it returns *before* the `Available tools:` loop that would emit
-`ParametersSchema`. So on the native path, your `ParametersSchema` text is **never sent**.
+Crucially, the definitions block is printed **only when the endpoint has no native tool channel** (the
+formatter passes `includeFullDefinitions = !supportsNativeToolCalling`). So on the native path, your
+`ParametersSchema` text is **never sent** to the model. (The tool policy still reads it on every path — its
+`required` list feeds the missing-argument check and the retry hint; see
+[Required arguments](#required-arguments-null-is-missing-empty-is-present).)
 
 > **The single most important rule:**
 > **Every meaningful delegate parameter MUST carry `[Description(...)]`. The `ParametersSchema` string alone
@@ -36,15 +37,25 @@ From `ILlmTool.cs`:
 |--------|--------|-------|
 | `Name` | abstract | Tool name the model emits. Self-explanatory (e.g. `world_command`). |
 | `Description` | abstract | One short paragraph; list the actions. Reaches the model on **both** paths. |
-| `ParametersSchema` | virtual, default `"{}"` | Text-path only. Keep in sync with the attributes. `JsonParams(...)` helper builds it. |
+| `ParametersSchema` | virtual, default `"{}"` | Reaches the model on the text path only; the policy also reads its `required` list. Keep in sync with the attributes. `JsonParams(...)` helper builds it. |
 | `AllowDuplicates` | virtual, default `false` | `false` is correct for almost every tool — see below. |
 | `IsMutating` | virtual, default `false` | `true` = the tool writes shared state; the policy never runs it concurrently with another mutating call — see below. |
 | `ToolTimeoutMsOverride` | virtual, default `null` | `null` = the global `DefaultToolTimeoutMs`. Only a tool that **waits for a human** needs its own — see below. |
 | `EndsTurn` | virtual, default `false` | `true` = a successful call is the LAST thing in the turn; the loop does not send the result back to the model — see below. |
 | `CreateAIFunction()` | `IAIFunctionLlmTool` | Builds the `AIFunction` via `AIFunctionFactory.Create`. |
 
-Implement `IAIFunctionLlmTool` for one function, or `IAIFunctionsLlmTool` when one tool exposes several
-functions. CoreAI does **not** discover `CreateAIFunction()` by reflection — implement the explicit contract.
+Implement `IAIFunctionLlmTool` for one function, or `IAIFunctionsLlmTool` (`CreateAIFunctions()`) when one
+tool exposes several functions. CoreAI does **not** discover `CreateAIFunction()` by reflection — implement the
+explicit contract.
+
+**Multi-function wrappers (`IAIFunctionsLlmTool`).** The model calls the *functions*, not the wrapper: the
+built-in `camera` tool is called as `camera_capture`, `screenshot`, `camera_look` or `camera_list`, and
+`scene_tool` as `find_objects`, `get_hierarchy`, `get_transform`, `set_transform`. The policy maps each function
+name back to its wrapper, so the wrapper's `ToolTimeoutMsOverride`, `EndsTurn`, `IsMutating` and
+`AllowDuplicates` apply to every function; casing repair covers the function names; the "Available tools" list
+(in the prompt and in refusals) shows the function names; and text-shaped calls to them are extracted and
+stripped like any other call. Arguments are validated against each function's own `AIFunction.JsonSchema`, so a
+wrapper may keep its metadata `ParametersSchema` as `{}`.
 
 ## Minimal template for a new tool
 
@@ -53,6 +64,7 @@ parameter, a `ParametersSchema` kept in sync, and `CreateAIFunction()` using `AI
 A trimmed skeleton:
 
 ```csharp
+using System;                         // Func<>
 using System.ComponentModel;          // [Description]
 using System.Threading;
 using System.Threading.Tasks;
@@ -84,6 +96,12 @@ public sealed class WeatherLlmTool : LlmToolBase, IAIFunctionLlmTool
         string preset = null,
         CancellationToken cancellationToken = default)
     {
+        // A missing or null action never gets here (the policy refuses it), but "" does.
+        if (string.IsNullOrWhiteSpace(action))
+        {
+            return "{\"success\":false,\"error\":\"action is required: get, set\"}";
+        }
+
         // ... do the work, return a serializable result string ...
         return "{\"success\":true}";
     }
@@ -100,6 +118,32 @@ public sealed class WeatherLlmTool : LlmToolBase, IAIFunctionLlmTool
 The trailing `CancellationToken` is bound automatically and is not exposed to the model — it needs no
 `[Description]`. Every other parameter does.
 
+### Required arguments: null is missing, empty is present
+
+Before your method runs, `ToolExecutionPolicy` checks the call's arguments against the tool's schema:
+
+- **Missing required argument** — the key is absent, or its value is `null` / JSON `null`. The call is refused
+  without entering your method. Required names are the union of your `ParametersSchema` `required` list and the
+  bound function's own `AIFunction.JsonSchema` `required` list. The model receives
+  `Error: Tool '<name>' is missing required argument(s): <keys>.` plus the schema to retry with.
+- **Argument of the wrong type** — a value that cannot bind to the parameter type (for example `"yes"` for a
+  `bool`). The same structural preflight MEAI's binder performs (`LlmToolArgumentPreflight`) runs first, so the
+  refusal names the tool, the argument and the binder's reason, and the tool body is never entered. Enum names
+  and JSON-object arguments still bind exactly as MEAI would bind them.
+- **Empty or whitespace string** — counts as a **present** value and reaches your tool. Tools legitimately give
+  `""` a meaning ("the current item"), so the policy does not reject it. If an empty value is invalid for you,
+  reject it yourself and return a normal result (as the template above does with `action`); do not throw.
+
+Tools behind the skill proxy get the same checks: `call_skill_tool` refuses a missing, `null` or type-mismatched
+argument **before binding**, and its refusal names the tool, the missing (and unknown, usually misspelled) keys
+or the mismatched argument, the expected parameter list, says the tool was **NOT executed**, and tells the model
+how to retry (`tool_name` plus an `arguments_json` object with exactly those names and types).
+
+Both refusals are traced as schema errors (`schema-validation` / `arg-conversion`), not as "possibly executed",
+so the turn may retry them. An exception thrown from inside your tool body is different: it is conservatively
+treated as possibly executed and not retried automatically — another reason to return a result for invalid
+input instead of throwing.
+
 ## New-tool checklist
 
 - [ ] **`[Description]` on every meaningful delegate parameter.** This is the only thing that reaches the
@@ -115,6 +159,7 @@ The trailing `CancellationToken` is bound automatically and is not exposed to th
       so you do not set it `true` "to allow many calls".
 - [ ] **Set `IsMutating => true` if the tool writes anything shared** (world, save, memory, files, a server).
       The default is `false` and means "safe to run concurrently with everything else in the turn".
+- [ ] **Validate empty strings yourself.** Missing/`null` required arguments never reach you; `""` does.
 - [ ] `using System.ComponentModel;` is present (for `[Description]`).
 - [ ] Implement `IAIFunctionLlmTool` (or `IAIFunctionsLlmTool`); build the function with
       `AIFunctionFactory.Create`.
@@ -244,10 +289,10 @@ Rules of thumb:
 **1. The description-less native schema (the rotation/scale bug — worked example).**
 `world_command` exposes `fx/fy/fz` (rotation degrees) and `scale` for inline use on `spawn`. The
 `ParametersSchema` explained all of them clearly — but on the native path `ParametersSchema` is never sent
-(early-return above), and the delegate parameters had **no `[Description]`**. So the model saw `fx`, `fy`,
+(see the two paths above), and the delegate parameters had **no `[Description]`**. So the model saw `fx`, `fy`,
 `fz`, `scale` as bare unlabeled numbers and simply never used them: every spawned object came out axis-aligned
 and default-sized. The fix was to add `[Description]` to every `ExecuteAsync` parameter — across ~13 tools —
-so the native schema actually describes them (see `WorldLlmTool.cs:105-142`). Models then started using inline
+so the native schema actually describes them (see `WorldLlmTool.ExecuteAsync`). Models then started using inline
 rotation and scale. If a model "ignores" a parameter on a modern backend, check the `[Description]` first.
 
 **2. Setting `AllowDuplicates => true` to "allow many calls" → spam loops.** Because distinct args are already
@@ -255,7 +300,7 @@ never deduped, the only thing `true` buys you is letting the model repeat the *i
 tool that invites infinite loops on the same object. Keep it `false` unless repeating the exact same call is
 deliberately meaningful.
 
-**3. Relying on `ParametersSchema` for descriptions.** `ParametersSchema` is a **text-path-only** courtesy.
+**3. Relying on `ParametersSchema` for descriptions.** For the model, `ParametersSchema` is a **text-path-only** courtesy.
 Treat it as documentation for legacy backends and keep it in sync, but never assume it reaches a modern
 provider. The attributes are the source of truth on the native path.
 

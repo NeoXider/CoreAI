@@ -11,8 +11,8 @@ Lua-CSharp `LuaCsSecureEnvironment` sandbox invariants (host callback marshallin
 globals, `string.rep` / `string.format` caps) and then:
 
 - logs `PASS` (or `FAIL` as an error) with the report to the Unity console, and
-- renders the same PASS/FAIL report on screen via `OnGUI`, so the result is visible inside a
-  built WebGL player without a console.
+- renders the same PASS/FAIL report on screen in a uGUI `CoreAiDemoPanel`, so the result is visible
+  inside a built WebGL player without a console.
 
 When Lua is not enabled (`COREAI_LUA` absent), the script compiles
 to a no-op fallback that just shows
@@ -22,7 +22,7 @@ to a no-op fallback that just shows
 
 1. Attach `WebGlLuaSelfTest` to a GameObject in a scene.
 2. Ensure `COREAI_LUA` is defined.
-3. Set `CoreAISettingsAsset.EnableLuaOnWebGl = true`.
+3. Keep `CoreAISettingsAsset.EnableLuaOnWebGl` on (the default).
 4. Build to WebGL and open the player — the on-screen box reports PASS/FAIL.
 
 ## Requirements

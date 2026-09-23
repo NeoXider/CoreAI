@@ -53,8 +53,12 @@ namespace CoreAI.Tests.EditMode
 
                 Assert.AreSame(registry, module.WorldPrefabRegistry);
                 CollectionAssert.AreEqual(new[] { "Arena", "Hub" }, module.AllowedScenes);
+                // WHY: migration must still carry the deprecated values over so old scenes lose no data;
+                // reading them is what this test checks, not a use of a grant.
+#pragma warning disable CS0618
                 Assert.IsTrue(module.FullAccessEnabled);
                 Assert.IsTrue(module.FullPrivateAccessEnabled);
+#pragma warning restore CS0618
 
                 AssertFormerName("worldPrefabRegistry", "legacyWorldPrefabRegistry");
                 AssertFormerName("legacyLuaAllowedScenes", "luaAllowedScenes");
@@ -82,7 +86,10 @@ namespace CoreAI.Tests.EditMode
                 CoreAiLuaWorldModule module = child.AddComponent<CoreAiLuaWorldModule>();
                 scope.SetLuaWorldModuleForMigration(module);
 
+                // WHY: pins the value the deprecated accessor still returns to callers that have not migrated.
+#pragma warning disable CS0618
                 Assert.IsFalse(scope.FullLuaAccessEnabled);
+#pragma warning restore CS0618
             }
             finally
             {
@@ -139,13 +146,91 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsNotNull(module, scenePath);
                 Assert.AreEqual(scope.transform, module.transform.parent, scenePath);
                 Assert.IsNotNull(module.WorldPrefabRegistry, scenePath);
-                Assert.AreEqual(fullAccess, module.FullAccessEnabled, scenePath);
-                Assert.AreEqual(fullAccess, scope.FullLuaAccessEnabled, scenePath);
+
+                // WHY: only the mods scope grants the Full tier, so that is the flag a demo must set.
+                CoreAiModsLifetimeScope modsScope = FindModsScope(scene);
+                if (fullAccess)
+                {
+                    Assert.IsNotNull(modsScope, scenePath + " must contain a CoreAiModsLifetimeScope to grant Full.");
+                    Assert.IsTrue(modsScope.FullLuaAccessEnabled, scenePath);
+                }
+                else
+                {
+                    Assert.IsFalse(modsScope != null && modsScope.FullLuaAccessEnabled, scenePath);
+                }
             }
             finally
             {
                 EditorSceneManager.CloseScene(scene, true);
             }
+        }
+
+        [TestCase("enableFullAccess")]
+        [TestCase("enableFullPrivateAccess")]
+        public void Module_LegacyFullFlags_StaySerializedButHidden(string fieldName)
+        {
+            FieldInfo field = typeof(CoreAiLuaWorldModule).GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.IsNotNull(field, fieldName);
+            Assert.IsNotNull(field.GetCustomAttribute<SerializeField>(),
+                fieldName + " must stay serialized so existing scenes keep their data.");
+            Assert.IsNotNull(field.GetCustomAttribute<HideInInspector>(),
+                fieldName + " grants nothing and must not be offered in the inspector.");
+        }
+
+        [TestCase(typeof(CoreAiLuaWorldModule), "FullAccessEnabled")]
+        [TestCase(typeof(CoreAiLuaWorldModule), "FullPrivateAccessEnabled")]
+        [TestCase(typeof(CoreAILifetimeScope), "FullLuaAccessEnabled")]
+        public void LegacyFullAccessors_AreObsoleteWarningsPointingAtModsScope(System.Type type, string propertyName)
+        {
+            PropertyInfo property = type.GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+            Assert.IsNotNull(property, propertyName);
+
+            System.ObsoleteAttribute obsolete = property.GetCustomAttribute<System.ObsoleteAttribute>();
+            Assert.IsNotNull(obsolete, propertyName + " never grants Full and must be marked obsolete.");
+            Assert.IsFalse(obsolete.IsError, propertyName + " must stay a warning so existing callers compile.");
+            StringAssert.Contains("CoreAiModsLifetimeScope", obsolete.Message, propertyName);
+        }
+
+        [Test]
+        public void ModsScope_FullLuaAccessors_ReadTheSerializedGrant()
+        {
+            GameObject root = new("CoreAI Mods Scope");
+            try
+            {
+                root.SetActive(false);
+                CoreAiModsLifetimeScope modsScope = root.AddComponent<CoreAiModsLifetimeScope>();
+                Assert.IsFalse(modsScope.FullLuaAccessEnabled);
+                Assert.IsFalse(modsScope.FullLuaPrivateAccessEnabled);
+
+                UnityEditor.SerializedObject serialized = new(modsScope);
+                serialized.FindProperty("enableFullLuaAccess").boolValue = true;
+                serialized.FindProperty("enableFullLuaPrivateAccess").boolValue = true;
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+
+                Assert.IsTrue(modsScope.FullLuaAccessEnabled);
+                Assert.IsTrue(modsScope.FullLuaPrivateAccessEnabled);
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        private static CoreAiModsLifetimeScope FindModsScope(Scene scene)
+        {
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                CoreAiModsLifetimeScope modsScope = root.GetComponentInChildren<CoreAiModsLifetimeScope>(true);
+                if (modsScope != null)
+                {
+                    return modsScope;
+                }
+            }
+
+            return null;
         }
 
         private static void SetLegacy(CoreAILifetimeScope scope, string fieldName, object value)

@@ -239,11 +239,24 @@ namespace CoreAI.Ai
                 // expected parameters, nothing about the name it used instead), and the policy had to
                 // treat the call as possibly executed. Checked here it is a schema error that provably
                 // never entered the tool body, and the text says how to retry in one step.
-                string missingError = SkillSetToolResolver.DescribeMissingRequiredArguments(
-                    descriptor.Name, descriptor.ParametersSchema, parsed);
+                string missingError = SkillSetToolResolver.DescribeMissingRequiredArguments(descriptor, parsed);
                 if (missingError != null)
                 {
                     error = missingError;
+                    return false;
+                }
+
+                // WHY the same structural preflight as the direct path: a value of the wrong type
+                // ("yes" for a bool, "many" for an int) used to fail inside MEAI's binder just like a
+                // missing key did, with the same consequences - a bare binder message and a call the
+                // policy had to treat as possibly executed. Run against the binder that will actually
+                // bind (PreflightFunction) with the very arguments the invocation will hand it, so a
+                // refusal here is a proof and never stricter than MEAI.
+                if (descriptor.PreflightFunction != null &&
+                    !LlmToolArgumentPreflight.TryBindArgumentsStructurally(descriptor.PreflightFunction,
+                        SkillSetToolResolver.CreateArguments(parsed), out string bindingError))
+                {
+                    error = SkillSetToolResolver.DescribeArgumentTypeMismatch(descriptor, bindingError);
                     return false;
                 }
 

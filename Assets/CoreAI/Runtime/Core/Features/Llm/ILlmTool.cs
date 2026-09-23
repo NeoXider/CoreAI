@@ -119,6 +119,19 @@ namespace CoreAI.Ai
     /// LLM tool that expands into several Microsoft.Extensions.AI functions without reflection.
     /// Each returned function must complete with a serializable result for the model; null or empty payloads
     /// are normalized by the tool execution policy into an explicit tool-result message.
+    /// <para>
+    /// The set of functions <see cref="CreateAIFunctions"/> returns (their names) must stay the same for the
+    /// lifetime of the instance. The callable names are built once and cached per instance
+    /// (<c>SkillSetToolResolver</c>), so a function added or removed later is neither offered to the model nor
+    /// matched by a request allowlist. A wrapper whose set changes must be registered as a new instance.
+    /// </para>
+    /// <para>
+    /// A request allowlist that names only some of the functions exposes the wrapper through a narrowing proxy.
+    /// The proxy implements this interface and nothing else: it forwards every <see cref="ILlmTool"/> member
+    /// and <see cref="CreateAIFunctions"/> filtered to the allowed names. Any other interface the wrapper
+    /// implements (for example <see cref="IJsonInvocableLlmTool"/>) is not visible on the proxy, so a wrapper
+    /// must not rely on a caller finding one there.
+    /// </para>
     /// </summary>
     public interface IAIFunctionsLlmTool : ILlmTool
     {

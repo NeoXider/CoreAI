@@ -1,9 +1,9 @@
 # Runtime Backend Switching (`CoreAiBackend`)
 
-Switch the active LLM backend **at runtime** — between an OpenAI-compatible HTTP API, the LLMUnity local model, and Offline mode — without restarting the scene or rebuilding the DI container. Includes hot model / key / URL changes, a health probe with latency, and a drop-in uGUI settings panel. **Index of all Docs:** [DOCS_INDEX.md](DOCS_INDEX.md).
+Switch the active LLM backend **at runtime** — between an OpenAI-compatible HTTP API, the LLMUnity local model, and Offline mode — without restarting the scene or rebuilding the DI container. Includes hot model / key / URL changes and a health probe with latency. **Index of all Docs:** [DOCS_INDEX.md](DOCS_INDEX.md).
 
 - **API:** static facade **`CoreAiBackend`** (namespace `CoreAI`) — `Assets/CoreAiUnity/Runtime/Source/Api/CoreAiBackend.cs`.
-- **UI:** **`CoreAiBackendPanel`** component + prefab `Assets/CoreAiUnity/Prefabs/CoreAiBackendPanel.prefab`.
+- **Runtime UI:** the Hub **AI Settings** page (`com.neoxider.coreaihub`, see [§2](#2-hub-ai-settings-editor)) edits the same settings through `CoreAiBackend`. The former uGUI `CoreAiBackendPanel` component and prefab were removed in 6.0.0.
 - **Backend modes reference:** [DEVELOPER_GUIDE.md §4](DEVELOPER_GUIDE.md) and [../../CoreAI/Docs/LLM_ROUTING.md](../../CoreAI/Docs/LLM_ROUTING.md).
 
 ---
@@ -37,11 +37,15 @@ many endpoints, HTTP APIs and separately hosted LLMUnity endpoints can serve dif
   `SupportsNativeToolCallingForRole(roleId, profileId)` and `ResolveContextWindowTokensForRole(roleId,
   profileId)` on the routed client, so an agent re-routed mid-conversation adopts the new endpoint's
   native/text tool contract and its context window (min-ed with the role's configured budget).
-- **Endpoint health is not sticky.** When a routed request fails with `AuthExpired` or
-  `BackendUnavailable`, the routing client calls `ILlmClientRegistry.ReportRouteFailure(profileId,
-  generation, errorCode, error)` and the endpoint snapshot reports a `Degraded: …` error while staying Ready
-  (routable — a transient outage needs no manual re-activation); `Changed` fires for UI refresh, and the next
-  successful request clears the note. Reports are **generation-stamped**: the client echoes the
+- **Endpoint health is not sticky.** When a routed request fails with an endpoint-level code —
+  `AuthExpired`, `PaymentRequired` or `BackendUnavailable` — the routing client calls
+  `ILlmClientRegistry.ReportRouteFailure(profileId, generation, errorCode, error)` and the endpoint snapshot
+  reports a `Degraded: …` error while staying Ready (routable — a transient outage needs no manual
+  re-activation); `Changed` fires for UI refresh, and the next successful request clears the note. Health
+  judges the code the **endpoint** reported, not the code the caller sees: a permanent refusal (`AuthExpired`,
+  `PaymentRequired`) is reported even when a caller cancel raced it (the refusal is found through the
+  `InnerException` chain of the cancellation, `LlmCancellation.FindClientException`), while a transport,
+  timeout or provider fault that happened after the caller cancelled is never reported. Reports are **generation-stamped**: the client echoes the
   `LlmRoleRouteSnapshot.Generation` the request started on, so a late failure from a replaced endpoint cannot
   degrade its successor (mismatched or `0` generations are dropped). Both streaming and non-streaming
   completion paths publish the report.
@@ -141,7 +145,7 @@ CoreAiBackend.ApplyAuto();
 Mutate the current backend configuration without changing mode; the next request uses the new value:
 
 ```csharp
-CoreAiBackend.SetModel("qwen3.5-4b-mtp");
+CoreAiBackend.SetModel("your-model-id");
 CoreAiBackend.SetApiKey(newKey);
 CoreAiBackend.SetApiBaseUrl("http://localhost:1234/v1");
 ```
@@ -180,35 +184,13 @@ CoreAiBackend.OnBackendChanged += s => Debug.Log($"Backend switched to: {s}");
 
 `OnBackendChanged` fires after every successful `Apply*` / `Set*` call — including settings-only changes when no live scope exists (the settings **did** change). Handler exceptions are caught and logged, never propagated to the caller.
 
----
-
-## 2. Canvas panel (`CoreAiBackendPanel`)
-
-A ship-ready uGUI/TextMeshPro settings panel over the same API:
-
-- **Dropdown:** Auto / LLMUnity (local) / HTTP API / Offline (the three HTTP flavours collapse onto the single "HTTP API" entry).
-- **Fields:** base URL, API key, model. Fields enable/disable with the selected mode (URL/key for HTTP only, model for HTTP and LLMUnity).
-- **API key is write-only:** the configured key is never echoed back into the field; leaving it **empty** on Apply keeps the currently configured key.
-- **Apply** button: calls the matching `CoreAiBackend.Apply*` and reports "Applied (live)" vs "Saved to settings (no live scope yet)".
-- **Test** button: runs `VerifyAsync` (timeout via the `verifyTimeoutSeconds` serialized field, default 30) and shows OK + latency or the error in the status label.
-- **Close button:** a corner "x" hides the panel (`CoreAiBackendPanel.Close()`, wired via the `close` parameter of `Wire(...)`). Re-enable the GameObject to show the panel again.
-- **Background:** the regenerated prefab uses a translucent (0.6-alpha) panel background.
-- The panel subscribes to `CoreAiBackend.OnBackendChanged` and stays in sync when the backend is switched from code elsewhere. It also raises its own `OnApplied` event after a user-driven switch.
-
-### Drop-in usage
-
-1. Drag `Assets/CoreAiUnity/Prefabs/CoreAiBackendPanel.prefab` into a scene (it is a Canvas-rooted panel), **or**
-2. Use the menu **GameObject → CoreAI → Backend Panel (Canvas)** to create one in the open scene.
-
-No wiring needed — the prefab has all references pre-assigned. For custom UIs, add the `CoreAiBackendPanel` component and either assign the serialized references in the Inspector or call `Wire(dropdown, baseUrl, apiKey, model, apply, test, status, close)` from code (this is also what the prefab builder and tests use; `close` is optional).
-
-### Regenerating the prefab
-
-After changing the builder (`Assets/CoreAiUnity/Editor/CoreAiBackendPanelBuilder.cs`), rebuild the prefab via **CoreAI → UI → Regenerate Backend Panel Prefab**.
+For your own in-game settings UI (uGUI, UI Toolkit, anything), call the same `CoreAiBackend.Apply*` /
+`Set*` / `VerifyAsync` members from your buttons and subscribe to `OnBackendChanged` to stay in sync with
+switches made elsewhere. Keep the API key field write-only: never echo the configured key back into the UI.
 
 ---
 
-## 3. Hub AI Settings editor
+## 2. Hub AI Settings editor
 
 The runtime **AI Settings** Hub page (see [`../../CoreAIHub/README.md`](../../CoreAIHub/README.md)) hosts a
 UITK editor over the same endpoint registry. Two conveniences reduce guesswork when pointing it at an
@@ -234,7 +216,7 @@ The endpoint editor itself:
 
 ---
 
-## 4. Semantics and caveats
+## 3. Semantics and caveats
 
 - **Takes effect on the next request.** A switch mutates the shared `CoreAISettingsAsset` and hot-swaps the routed primary client inside the live `LlmClientRegistry` (rebuilt via `LlmPipelineInstaller.BuildRoutedPrimaryClient`). **In-flight requests keep the old client** and finish on it; only requests started after the switch use the new backend.
 - **Per-role routing manifest profiles are NOT touched.** Only the **legacy-fallback primary client** is swapped. Roles pinned to explicit `LlmRoutingManifest` profiles keep resolving to those profiles; if you use per-role routing, `CoreAiBackend` changes what the fallback path uses, not your manifest mapping.

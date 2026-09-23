@@ -40,7 +40,7 @@ separate host, wait for Ready, then change the agent/profile assignment.
 - Repository (README, Quick start, **LLM model management**): [github.com/undreamai/LLMUnity](https://github.com/undreamai/LLMUnity)  
 
 **Quick start (short):** GameObject → **LLM** component → **Download model** or **Load model** (.gguf) → separate (or same) object → **LLMAgent** → in the Inspector, **LLM** reference to the server → in code `await llmAgent.Chat("...")`.  
-Before the first request in builds with **Download on Start**, the docs recommend `await LLM.WaitUntilModelSetup();` — **MeaiLlmUnityClient** in CoreAI waits for global model setup and the **LLM** server to be ready before **Chat**.
+Before the first request in builds with **Download on Start**, the docs recommend `await LLM.WaitUntilModelSetup();`. In CoreAI, **`LlmUnityAutostartEntryPoint`** waits for the native `LLM` to start and then probes its OpenAI-compatible route before declaring it ready; runtime endpoints make an early request await the same shared activation. CoreAI itself never calls `LLMAgent.Chat`: it talks to LLMUnity's built-in OpenAI-compatible server (`LlmUnityServerPort`, default 13333) through `OpenAiChatLlmClient` over `LlmUnityServerHttpSettings` (`POST /v1/chat/completions`).
 
 **Model Manager (LLM Inspector):** the model list is copied into the build; the **Build** checkbox excludes a specific model from the build; the **radio** selection writes the path into **`LLM.model`** (save it **in the scene**). If several models have files on disk and `model` is empty, CoreAI may **auto-pick** one (see `LlmUnityModelBootstrap`: priority to entries with **Build** checked).
 
@@ -58,7 +58,7 @@ Before the first request in builds with **Download on Start**, the docs recommen
 
 1. GameObject with **`LLM`** (server/inference): a **Qwen3.5 2B** (or other) GGUF model selected; optionally **Num GPU Layers** &gt; 0 on GPU.
 2. Child (or linked) object with **`LLMAgent`**: Inspector references this **`LLM`**, **Remote** off for a purely local setup.
-3. **`CoreAILifetimeScope`** on the composition root: **Open Ai Http Llm Settings** empty **or** the asset has **Use Open Ai Compatible Http** disabled — then `ILlmClient` = **MeaiLlmUnityClient** → your `LLMAgent`.
+3. **`CoreAILifetimeScope`** on the composition root with **Core AI Settings** → **LLM Backend** = **LLM Unity** (or **Auto** with LLMUnity first) — then the routed `ILlmClient` is **`OpenAiChatLlmClient`** over **`LlmUnityServerHttpSettings`**, talking to your `LLM`'s local server (the `LLMAgent` is resolved by **Agent Name** to find that `LLM`). The tool channel comes from `LlmUnityToolChannel` (see §4.1).
 
 CoreAI still applies **GGUF Model** from **`CoreAISettingsAsset`** to the resolved **`LLM`** when **`LLM.model`** is empty, so the Inspector asset and the scene stay aligned.
 
@@ -67,15 +67,16 @@ CoreAI still applies **GGUF Model** from **`CoreAISettingsAsset`** to the resolv
 **LLMUnity logs:** on the **LLM** component set **Log Level = All** while debugging (as in your screenshot).
 
 **CoreAI logs (model request/response, agent role):** `CoreAILifetimeScope` registers `ILlmClient` via **`LoggingLlmClientDecorator`**. In the console look for **`[Llm]`** inside **`[CoreAI]`**:
-- **`LLM ▶`** — `traceId`, role, `backend`, preview of **system** / **user** (length in characters);
-- **`LLM ◀`** — same `traceId`, **`wallMs`**, tokens and **tok/s** for OpenAI-compatible HTTP (if JSON includes `usage`); for **LLMUnity**, token counts in `Chat()` are unavailable — the log shows “tokens n/a”;
+- **`LLM >`** — `traceId`, role, `backend`, preview of **system** / **user** (length in characters); `LLM > (stream)` on the streaming path;
+- **`LLM <`** — same `traceId`, **`wallMs`**, tokens and **tok/s** when the response carries `usage`; when the backend returns no usage (common for streaming and local servers) the line shows `tokens n/a`;
+- **`LLM x`** — a failed request; **`LLM ~`** — a retry, or a cancelled stream;
 - the next **`ApplyAiGameCommand`** line in **`[MessagePipe]`** carries the **same `traceId`** — trace “model → in-game command”.
 
 Long text is truncated — limits are in `LoggingLlmClientDecorator.cs`. Legacy **Game Log Settings** without the **Llm** bit: opening the asset in the Inspector runs `OnValidate` migration (adds **Llm**), or enable it manually.
 
-**Bottom line:** if the memory parser runs, `JsonPayload` in the router may differ from the raw **LLM ◀** block.
+**Bottom line:** `JsonPayload` in the router is the visible assistant text after tool-call JSON and reasoning were stripped, so it may differ from the raw **`LLM <`** content preview.
 
-**Model request timeout:** on **`CoreAILifetimeScope`**, **Llm Request Timeout Seconds** (default **15**). **0** disables. The decorator passes a linked `CancellationToken`; OpenAI HTTP cancels the request; LLMUnity cancels where the code checks the token — full cancellation of a stuck native call without package support is not guaranteed.
+**Model request timeout:** **`CoreAISettingsAsset`** → **Advanced Settings → General → LLM Timeout (sec)** (default **120**; **0** disables). `CoreAiChatService` runs it as an idle deadline and `TimeoutLlmClientDecorator` bounds calls outside the chat service; both pass a linked `CancellationToken`, and the HTTP request to the local server is cancelled with it. The per-call HTTP limit is **Timeout (sec)** on the HTTP tab, capped by the LLM timeout.
 
 ---
 
@@ -105,20 +106,24 @@ For **OpenAI-compatible** (`/v1/chat/completions`) use section 4.
 
 ## 4. OpenAI-compatible API (replace or complement local)
 
-1. **Create → CoreAI → LLM → OpenAI-compatible HTTP** — ScriptableObject.
-2. Fill **Api Base Url** (no trailing slash), for example:
+**Project-wide (one backend):** on **`CoreAISettingsAsset`** (the **Core AI Settings** field of `CoreAILifetimeScope`):
+
+1. **LLM Backend** = **OpenAiHttp** (or **LLM Mode** = **ClientOwnedApi** / **ClientLimited** / **ServerManagedApi**).
+2. **Base URL** (no trailing slash), for example:
    - `https://api.openai.com/v1`
    - `http://127.0.0.1:1234/v1` (typical LM Studio)
-3. **Api Key** — required for OpenAI; often empty for a local proxy.
-4. **Model** — server-side model name (`gpt-4o-mini`, `qwen2.5-7b-instruct`, …).
-5. Enable **Use Open Ai Compatible Http**.
-6. Drag the asset onto **`CoreAILifetimeScope` → Open Ai Http Llm Settings**.
+3. **API Key** — required for OpenAI; often empty for a local proxy. Do not commit it: a key on an asset under `Resources/` fails the build; inject it at runtime.
+4. **Model** — server-side model name (`gpt-4o-mini`, …). Required; there is no built-in default.
 
-Then **`ILlmClient` = OpenAiChatLlmClient**; scene `LLMAgent` is **not** used for core calls (you can leave it disabled).
+Or call `CoreAISettingsAsset.ConfigureHttpApi(...)` / `CoreAiBackend.ApplyHttpApi(...)` from code ([RUNTIME_BACKEND_SWITCHING.md](RUNTIME_BACKEND_SWITCHING.md)).
 
-**Wire-level parity with cloud APIs:** GGUF via in-process **`LLMAgent`** goes through **`LlmUnityMeaiChatClient`** (flattened transcript + text-shaped tool JSON, aligned between streaming and non-streaming). For the same HTTP semantics as OpenAI-compatible **`/chat/completions`** (role-separated `messages`, native `tools`, SSE streaming), keep **Use Open Ai Compatible Http** enabled and point the asset at a local server URL such as **`http://127.0.0.1:1234/v1`** (LM Studio, Ollama’s OpenAI shim, llama.cpp server). CoreAI then uses **`MeaiOpenAiChatClient`** instead of the LLMUnity adapter.
+**Per role:** create **Create → CoreAI → LLM → OpenAI-compatible HTTP** (`OpenAiHttpLlmSettings`), reference it from an **`LlmRoutingManifest`** profile's `httpSettings`, map roles to that profile, and assign the manifest to **`CoreAILifetimeScope` → Llm Routing Manifest**. Runtime endpoints (`ILlmEndpointRegistry`, Hub **AI Settings**) are the newer alternative.
 
-**Important:** calls run on Unity’s **main thread** (same as the LLMUnity adapter). Do not store keys in a public repository.
+Then the routed **`ILlmClient`** is **`OpenAiChatLlmClient`**; a scene `LLMAgent` is **not** used for those roles.
+
+**Wire-level parity:** LLMUnity and external servers go through the same **`MeaiOpenAiChatClient`** HTTP path (role-separated `messages`, native `tools` when the channel allows, SSE streaming). An external llama.cpp / LM Studio / Ollama shim is simply another base URL such as **`http://127.0.0.1:1234/v1`**.
+
+**Important:** do not store keys in a public repository.
 
 ---
 
@@ -176,7 +181,7 @@ tool-use if needed) — and connect it as a regular HTTP endpoint `http://127.0.
 
 Chain: manifest (if set) → `Resources/AgentPrompts/System` → **built-in** strings in `BuiltInDefaultAgentSystemPromptProvider` / `BuiltInAgentSystemPromptTexts` (already registered in `RegisterAgentPrompts`).
 
-Roles: **Creator, Analyzer, Programmer, AINpc, CoreMechanicAI, PlainChat, SmartChat** — see `AgentRolesAndPromptsTests`.
+Roles: **Creator, Builder, Analyzer, Programmer, AINpc, CoreMechanicAI, PlainChat, SmartChat, Merchant** (`BuiltInAgentRoleIds.AllBuiltInRoles`) — see `AgentRolesAndPromptsTests`.
 
 ---
 
@@ -191,34 +196,26 @@ Roles: **Creator, Analyzer, Programmer, AINpc, CoreMechanicAI, PlainChat, SmartC
 
 ## 7. Play Mode tests (runtime in the editor)
 
-**How to test end-to-end behavior:** (1) **Play:** Play Mode, console filter `[Llm]` — what went to the model and what came back; `[MessagePipe]` — what was published to the game. (2) **No GPU/model:** EditMode orchestrator/parser tests (`AgentMemoryEditModeTests`, `AgentRolesAndPromptsTests`, …) with **Stub**. (3) **Real model in Play Mode:** shared helper **`PlayModeProductionLikeLlmFactory.TryCreate`** — same order as **`CoreAILifetimeScope`**: when OpenAI-compatible **HTTP** is configured (env, see below), **`OpenAiChatLlmClient`** is used; otherwise **LLMUnity** (runtime **LLM + LLMAgent**, GGUF from Model Manager: prefer **qwen** + **0.8** in the filename, else `LlmUnityModelBootstrap`). Optionally **`COREAI_PLAYMODE_LLM_BACKEND`** = `auto` | `http` | `llmunity` overrides choice for all tests that pass `preference: null` to the factory. (4) **Prompt regression:** after changing system/user templates, run the matching EditMode tests.
+**How to test end-to-end behavior:** (1) **Play:** Play Mode, console filter `[Llm]` — what went to the model and what came back; `[MessagePipe]` — what was published to the game. (2) **No GPU/model:** EditMode orchestrator/parser tests (`AgentMemoryConcurrencyEditModeTests`, `AgentRolesAndPromptsTests`, …) with **Stub**. (3) **Real model in Play Mode:** shared helper **`PlayModeProductionLikeLlmFactory.TryCreate`** — same order as **`CoreAILifetimeScope`**: when OpenAI-compatible **HTTP** is configured (env, see below), **`OpenAiChatLlmClient`** is used; otherwise **LLMUnity** (runtime **LLM + LLMAgent**, GGUF from Model Manager: prefer **qwen** + **0.8** in the filename, else `LlmUnityModelBootstrap`). Optionally **`COREAI_PLAYMODE_LLM_BACKEND`** = `auto` | `http` | `llmunity` overrides choice for all tests that pass `preference: null` to the factory. (4) **Prompt regression:** after changing system/user templates, run the matching EditMode tests.
 
-**`CoreAI.PlayModeTests`** assembly (in the current Unity setup some `[UnityTest]` methods also appear under **EditMode** in Test Runner — use the full class name):
+PlayMode assemblies are **`CoreAI.Tests.PlayMode.FastNoLlm`** (stubs, no model) and **`CoreAI.Tests.PlayMode.LlmVerification`** (live model; helpers in **`CoreAI.Tests.PlayMode.LlmInfra`**):
 
 | Test | Meaning |
 |------|--------|
-| `AiOrchestratorAllRolesPlayModeTests` | **`Orchestrator_EachBuiltInRole_PublishesEnvelope_WithStub`** — **StubLlmClient**. **`Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto`** — same scenario via **`PlayModeProductionLikeLlmFactory`** (HTTP or LLMUnity). |
-| `OpenAiLmStudioPlayModeTests` | Smoke **`CompleteAsync`** through the factory with forced **HTTP**; without env — **Ignored**. |
-| `AgentMemoryWithRealModelPlayModeTests` | **`…_ViaProductionLikeBackend_Auto`** — Creator memory via factory (**Auto**). Separate **HTTP-only** / **LLMUnity-only** paths for narrow debugging. |
+| `AiOrchestratorBuiltInRolesStubPlayModeTests` (FastNoLlm) | **`Orchestrator_EachBuiltInRole_PublishesEnvelope_WithStub`** — **StubLlmClient**. |
+| `AiOrchestratorBuiltInRolesProductionLlmPlayModeTests` (LlmVerification) | **`Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto`** — same scenario via **`PlayModeProductionLikeLlmFactory`** (HTTP or LLMUnity). |
+| `AgentMemoryWithRealModelPlayModeTests` (LlmVerification) | **`…_ViaProductionLikeBackend_Auto`** — Creator memory via factory (**Auto**). Separate **HTTP-only** / **LLMUnity-only** paths for narrow debugging. |
 
 **LM Studio / OpenAI-compatible (PowerShell, before Play Mode tests):**
 
-Explicit variables:
-
 ```powershell
-$env:COREAI_OPENAI_TEST_BASE = "http://<LM_STUDIO_HOST>:1234/v1"
-$env:COREAI_OPENAI_TEST_MODEL = "<id from GET http://<LM_STUDIO_HOST>:1234/v1/models>"
+$env:COREAI_TEST_BASE_URL = "http://<LM_STUDIO_HOST>:1234/v1"
+$env:COREAI_TEST_MODEL = "<id from GET http://<LM_STUDIO_HOST>:1234/v1/models>"
 # if needed:
-# $env:COREAI_OPENAI_TEST_API_KEY = "..."
+# $env:COREAI_TEST_API_KEY = "..."
 ```
 
-Or a single flag (handy on a fixed dev machine; **do not enable in CI** without an explicit network policy):
-
-```powershell
-$env:COREAI_OPENAI_TEST_USE_PROJECT_DEFAULTS = "1"
-```
-
-That pulls constants from `PlayModeOpenAiTestConfig` in the **CoreAI.PlayModeTests** build (example: `http://192.168.56.1:1234/v1` and model `qwen3.5-35b-a3b-uncensored-hauhaucs-aggressive`). Change constants in code to match your LM Studio.
+`PlayModeOpenAiTestConfig` resolves each field from environment variables (the canonical `COREAI_TEST_*` names; the older `COREAI_OPENAI_TEST_*` names are still read), then the project's `CoreAISettingsAsset`, then the gitignored `coreai-live-tests.local.json`. The legacy opt-in `COREAI_OPENAI_TEST_USE_PROJECT_DEFAULTS=1` falls back to the hard-coded `FallbackLmStudioBaseUrl` / `FallbackLmStudioModelId` constants (do not enable it in CI). Full guide: [RUNNING_LIVE_TESTS.md](RUNNING_LIVE_TESTS.md).
 
 Force backend for tests using `TryCreate(preference: null)`:
 
@@ -226,7 +223,7 @@ Force backend for tests using `TryCreate(preference: null)`:
 $env:COREAI_PLAYMODE_LLM_BACKEND = "http"    # or llmunity, auto
 ```
 
-Then **Window → General → Test Runner → PlayMode** → run **CoreAI.PlayModeTests**.
+Then **Window → General → Test Runner → PlayMode** → run **CoreAI.Tests.PlayMode.LlmVerification**.
 
 **Important:** base URL must end with **`/v1`** (LM Studio OpenAI-compatible API).
 
@@ -234,11 +231,9 @@ Then **Window → General → Test Runner → PlayMode** → run **CoreAI.PlayMo
 
 ## 8. Programmer and Lua (runtime execution)
 
-- The orchestrator publishes **`AiEnvelope`** with **`JsonPayload`** = raw LLM response plus **`SourceRoleId`**, **`SourceTaskHint`**, **`LuaRepairGeneration`**, **`TraceId`** (correlation id for logs and Lua repair).
-- **`LuaCsAiEnvelopeProcessor`** (Mods) + **`AiGameCommandRouter`**: Lua is taken from the envelope (fenced `lua` block or JSON **ExecuteLua**) and run in **`LuaCsSecureEnvironment`** under the mod runtime's bindings.
+- The Programmer runs Lua through the **`execute_lua`** tool (and persistent mods through **`manage_mods`**) of `com.neoxider.coreaimods`; the tool result, including any Lua error, goes back to the model in the same turn.
+- The orchestrator publishes **`AiEnvelope`** with **`JsonPayload`** = the visible LLM response plus **`SourceRoleId`**, **`SourceTaskHint`**, **`LuaRepairGeneration`**, **`TraceId`** (correlation id for logs). **`AiGameCommandRouter`** only runs world commands and raises `CommandReceived`; it does not execute Lua from the envelope.
+- Opt-in envelope path: **`LuaCsAiEnvelopeProcessor`** takes Lua from the envelope (fenced `lua` block or JSON **ExecuteLua**), runs it in **`LuaCsSecureEnvironment`**, publishes **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** and, for **Programmer**, re-runs the orchestrator with **`lua_error`** / **`fix_this_lua`** in the user payload (bounded by `MaxLuaRepairRetries`, default **3**). It is not registered by default — construct it and call `Process` from your own `ApplyAiGameCommand` subscriber.
 - Limits: `LuaCsExecutionGuard` applies wall-clock, step and allocation limits so infinite Lua loops cannot hang forever; the per-resume coroutine budget is the game's to set (`LuaCsCoroutineBudgetSettings` on `CoreAiModsLifetimeScope`).
-- Success / failure publish **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`**. On failure with **Programmer**, the orchestrator is invoked again with **`lua_error`** / **`fix_this_lua`** in the user payload (up to **4** repair generations).
 - **EditMode:** `AiLuaPayloadParserEditModeTests`; **PlayMode (live provider):** `ProgrammerLuaModsLivePlayModeTests`.
 - Sample game: **`CoreAiLuaHotkey`** on the object with **`ExampleRogueliteEntry`** — **F9** queues a Programmer task.
-
-**This file’s version:** aligned with the core (April 2026): TraceId, timeout, `GameLogFeature.Llm`, arena sample (Creator waves).

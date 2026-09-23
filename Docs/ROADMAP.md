@@ -5,11 +5,8 @@
 > [`TODO.md`](../TODO.md); shipped work in the package changelogs
 > (e.g. [`Assets/CoreAI/CHANGELOG.md`](../Assets/CoreAI/CHANGELOG.md)).
 
-Last updated: 2026-09-02. Released tags: **v7.1.0** and **v7.1.1**. Package manifests currently read
-**7.1.1** for `com.neoxider.coreai` / `com.neoxider.coreaiunity` and **7.1.0** for the other four; the
-next release bumps all six back into lockstep. Work landed since v7.1.1 — the MVP2 scheduler, the full
-45-item material catalog, and the MVP3 world package — is in the tree and unreleased (`TODO.md` carries
-its status).
+Last updated: 2026-09-17. All seven package manifests carry the same release version (see §2); release
+history lives in the package changelogs and open work in `TODO.md`.
 
 ---
 
@@ -49,25 +46,27 @@ shareable place package anyone can host next.
 CoreAI is a **framework, not a game**. Behavior that could be an opinion ships as configuration:
 the per-world `ClientWritePolicy` (RobloxParity default / Strict / Open, behind a single
 authority-resolver seam so partial `(instance, property)` authority is a later resolver swap),
-the `RobloxSpace` scale constant (1 stud = 0.28 m default, 1:1 available), capability tiers,
+the `RbxSpace` scale constant (1 stud = 0.28 m default, 1:1 available), capability tiers,
 LLM endpoint routing profiles, and the host integration profile. Everything created at runtime —
 world state, mods, memories, (soon) UI — is versioned, persisted, revertible, and shareable.
 
 ## 2. Package map
 
-Seven UPM packages, released in lockstep (all currently 7.44.2):
+Seven UPM packages, released in lockstep (all currently 7.45.0):
 
 | Package | What it is |
 |---|---|
-| `com.neoxider.coreai` (`Assets/CoreAI`) | Portable C# core, no UnityEngine dependency: orchestration, function-calling tools, agent memory, `AgentBuilder`, skills, resilience decorators (retry/timeout/fallback/circuit-breaker), multi-endpoint LLM routing contracts. |
+| `com.neoxider.coreai` (`Assets/CoreAI`) | Portable C# core, no UnityEngine dependency: orchestration, function-calling tools, agent memory, `AgentBuilder`, skills, resilience decorators (retry/timeout/circuit-breaker; the fallback decorator lives in the Unity layer), multi-endpoint LLM routing contracts. |
 | `com.neoxider.coreaiunity` (`Assets/CoreAiUnity`) | Unity layer: always-available chat UI, orchestration wiring and persistence; provider-backed HTTP/MEAI/LLMUnity implementations compile with `COREAI_LLM`; world commands, settings and demo glue. |
 | `com.neoxider.coreaimods` (`Assets/CoreAIMods`) | Lua modding layer: Lua-CSharp sandbox (AOT/WebGL-safe), script-engine seam, mod runtime + stores, Luau downleveler, Lua log service, `execute_lua` / `manage_mods` tools, the Roblox-like API (in progress). |
 | `com.neoxider.coreaihub` (`Assets/CoreAIHub`) | UI Toolkit Hub window: tabbed pages (Chat, Settings, Statistics, Mods, C#/Lua-authored pages) over `HubPageRegistry`. |
 | `com.neoxider.coreaibenchmark` (`Assets/CoreAIBenchmark`) | Game-creation benchmark harness (G1–G8 PlayMode scenarios), scoring, model leaderboard. |
 | `com.neoxider.coreaimcp` (`Assets/CoreAIMcp`) | Optional in-game MCP server for loopback-only control of the running game by an external MCP client. |
+| `com.neoxider.coreaimirror` (`Assets/CoreAIMirror`) | Optional Mirror transport (compiles only with the `MIRROR` define): authenticated admission, `RemoteEvent`/`RemoteFunction` traffic over the wire, server-side kick, server clock offset. |
 
 Dependency direction: `coreai` ← `coreaiunity` ← (`coreaimods`, `coreaihub`);
-`coreaibenchmark` and `coreaimcp` depend on `coreai` + `coreaiunity` + `coreaimods` (not on the hub).
+`coreaibenchmark` and `coreaimcp` depend on `coreai` + `coreaiunity` + `coreaimods` (not on the hub);
+`coreaimirror` depends on `coreai` + `coreaimods` plus Mirror itself, which is never vendored.
 Provider implementations and Lua are independent positive opt-in modules: `COREAI_LLM` enables
 provider-backed HTTP/MEAI/LLMUnity clients/transports, while `COREAI_LUA` enables Lua. Portable
 orchestration/chat, scripted/stub clients, tool contracts and required MEAI references remain in Core
@@ -82,7 +81,7 @@ Parallel workstreams. Each lists goal, current state, next milestones, and the o
 **Goal.** Mods are written in Roblox-shaped Lua (`game`, `workspace`, `Instance.new`, `task.*`,
 services, datatypes) so the in-game LLM authors them from its training priors. Luau syntax is
 downleveled to Lua 5.2 for the bundled Lua-CSharp VM; studs/right-handed math live inside mods,
-with exactly one conversion boundary (`RobloxSpace`).
+with exactly one conversion boundary (`RbxSpace`).
 
 **Current state.** MVP0 (engine abstraction seam: neutral `CoreAI.Scripting` contracts, `LuaCs*`
 adapters as the single VM layer, seam-honesty tests) has landed, plus the quarantine error
@@ -116,17 +115,20 @@ Track C.
 Mirror (via NeoxiderTools `Neo.Network`); topology order is Null loopback (solo) → host mode
 (listen server) → dedicated server. WebGL is solo or pure client only — it never hosts.
 
-**Current state.** Designed-first, and the first layers now exist. `INetworkBridge` is
-topology-agnostic; `NullNetworkBridge` is the solo loopback; the optional
-`com.neoxider.coreaimirror` package carries `MirrorNetworkBridge` behind the `MIRROR` define, with
-no claim yet that bytes cross a real socket (`TODO.md`). `RemoteEvent`/`UnreliableRemoteEvent`/
-`RemoteFunction` are creatable and loopback-delivered, `InstanceRegistry` binds instance ids to
-`netId`s, and the engine-free replication core under MVP12 — member-level change reporting, a
-dirty set, per-recipient Spawn/Patch/Remove planning and a replica-side applier — is built and
-tested registry-to-registry; nothing in production constructs it yet.
+**Current state.** Designed-first, and the transport layer now runs. `INetworkBridge` is
+topology-agnostic; `NullNetworkBridge` is the solo loopback. Since 7.42.0 a scene can switch Mirror
+on: the optional `com.neoxider.coreaimirror` package (`MIRROR` define) provides
+`CoreAiMirrorNetworkBridgeProvider`, which `CoreAiModsLifetimeScope` registers as the
+`INetworkBridge`, so `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction` traffic crosses a real
+socket; since 7.43.0 a kick (`INetworkBridge.DisconnectActor`) closes the connection. The game still
+calls `AttachWorld` and sets `Players.IdentitySource` itself. `InstanceRegistry` binds instance ids to
+`netId`s, and the engine-free replication core under MVP12 — member-level change reporting, a dirty
+set, per-recipient Spawn/Patch/Remove planning and a replica-side applier — is built and tested
+registry-to-registry, but world-state replication does not cross the wire yet, and host mode is
+still open.
 
-**Next milestones.** MVP11 (Mirror bridge core, host mode, the join snapshot over the wire), MVP12
-(replication on top of the phase-0 core + `ClientWritePolicy` enforcement through the
+**Next milestones.** MVP11 (the rest of the Mirror bridge: host mode, the join snapshot over the
+wire), MVP12 (replication on top of the phase-0 core + `ClientWritePolicy` enforcement through the
 authority-resolver seam), MVP13 (dedicated headless server). Mod-facing APIs do not change when
 the loopback is replaced.
 
@@ -154,8 +156,10 @@ masking) are shipped. **MVP3 has landed:** the `.world` ZIP place package (deter
 manual slots and a two-phase-durable autosave ring, `ConfirmedWorldMutationGate` in front of every
 `execute_lua` and every mutating `manage_mods` action, `RbxWorldRuntimeSessionController` for
 transactional session replacement, the `save_world`/`load_world` tools with the
-confirm-before-restore flow, and the built-player **Hub → World Loads** page. Unity and browser
-acceptance runs for that rung are owned outside this document. RBXL is not built.
+confirm-before-restore flow, the `list_autosaves`/`load_autosave` tools over the autosave ring
+(`save_world`, `load_world` and `load_autosave` refuse an invalid slot or autosave name as a JSON error
+result), and the built-player **Hub → World Loads** page. Unity and browser acceptance runs for that
+rung are owned outside this document. RBXL is not built.
 
 **Next milestones.** MVP4 (RBXL import/export), MVP9 (DataStoreService on the shared JSON
 contract); persisting world selection/autoload across a process restart (the W3.5 tail).
@@ -199,7 +203,7 @@ plus R4, R5–R9) ·
 ### Track E — Host-game embedding
 
 **Goal.** Dropping CoreAI into an existing meter-scale Unity game is a first-class scenario:
-one **host integration profile** (ScriptableObject: `RobloxSpace` scale — 0.28 default —
+one **host integration profile** (ScriptableObject: `RbxSpace` scale — 0.28 default —
 capability defaults, host service/object bindings, per-world `ClientWritePolicy`) and it works.
 Assets are never rescaled; only numbers convert at the API boundary; mod physics uses per-body
 gravity so Roblox-feel mods coexist with a host running Earth gravity.
@@ -269,7 +273,12 @@ ROBLOX_API_ROADMAP §MVP17/§6.5.
 
 ## 4. Release plan
 
-- **7.1.1 (latest released, 2026-08-31).** Patch release for `com.neoxider.coreai` /
+- **Current release.** The version in §2 is the latest release. Every release is described in the
+  package changelogs ([core](../Assets/CoreAI/CHANGELOG.md),
+  [Unity host](../Assets/CoreAiUnity/CHANGELOG.md)); the milestones below are kept as history.
+- **7.42.0–7.43.0 (2026-09-16).** Mirror multiplayer can be switched on from a scene; remotes cross
+  the socket; a kick closes the connection.
+- **7.1.1 (2026-08-31).** Patch release for `com.neoxider.coreai` /
   `com.neoxider.coreaiunity`: `call_skill_tool` now falls through to the role's own top-level tools
   instead of answering a miss with a plain "not found" result, and a rejected tool call is logged.
 - **7.1.0 (2026-08-30).** MVP1 tails closed and the MVP2 scheduler core laid in: Roblox-shaped

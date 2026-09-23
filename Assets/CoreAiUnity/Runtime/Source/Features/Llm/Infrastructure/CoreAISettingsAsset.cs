@@ -397,7 +397,9 @@ namespace CoreAI.Infrastructure.Llm
         private bool webGlNativeStreaming = true;
 
         [Tooltip("WebGL-only: run the Lua sandbox on the WebGL player. On by default; " +
-                 "requires link.xml stripping protection in the build (shipped). Full unity_* tier stays disabled on WebGL regardless.")]
+                 "requires link.xml stripping protection in the build (shipped). No Lua runtime reads this flag yet, " +
+                 "so turning it off does not stop Lua on WebGL. The Full unity_* tier has no WebGL-specific block: " +
+                 "only 'Enable Full Lua Access' on CoreAiModsLifetimeScope grants it, on WebGL as on every player.")]
         [SerializeField]
         private bool enableLuaOnWebGl = true;
 

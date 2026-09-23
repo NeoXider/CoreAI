@@ -23,7 +23,9 @@ namespace CoreAI.Infrastructure.Llm
     /// another moment will not help. Such exceptions are rethrown as they are, with their type, code and
     /// HTTP status intact, so that outer decorators (retry/fallback) see the same classification they
     /// would without the breaker. A stream that ends without a single chunk is a failure: the backend
-    /// answered nothing.
+    /// answered nothing. After the caller cancelled, nothing that arrives - a Timeout or ProviderError
+    /// chunk, a typed or untyped throw - is a verdict (<see cref="LlmCancellation"/>): the half-open probe
+    /// slot is released and no failure is recorded.
     /// </para>
     /// <para>
     /// Time is supplied as a monotonic millisecond source, which makes the breaker fully deterministic
@@ -115,15 +117,18 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     result = await _inner.CompleteAsync(request, cancellationToken);
                 }
-                catch (LlmOperationTimeoutException) when (!cancellationToken.IsCancellationRequested)
+                catch (Exception ex) when (LlmCancellation.IsCancellation(ex, cancellationToken))
+                {
+                    // WHY: a cancellation is the caller's intent, not a backend failure, and after the caller
+                    // cancelled EVERY fault is the cancellation (LlmCancellation) - a socket the teardown
+                    // disposed says nothing about the backend. Neither count it nor swallow it; the finally
+                    // releases the probe slot.
+                    throw;
+                }
+                catch (LlmOperationTimeoutException)
                 {
                     RecordFailure(lease);
                     classified = true;
-                    throw;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    // WHY: cancellation is the caller's intent, not a backend failure: neither count it nor swallow it.
                     throw;
                 }
                 catch (LlmClientException ex)
@@ -208,7 +213,12 @@ namespace CoreAI.Infrastructure.Llm
 
                         chunk = e.Current;
                     }
-                    catch (LlmOperationTimeoutException) when (!cancellationToken.IsCancellationRequested)
+                    catch (Exception ex) when (LlmCancellation.IsCancellation(ex, cancellationToken))
+                    {
+                        // WHY: see CompleteAsync - after a caller cancel no fault is a health verdict.
+                        throw;
+                    }
+                    catch (LlmOperationTimeoutException)
                     {
                         RecordFailure(lease);
                         classified = true;
@@ -217,10 +227,6 @@ namespace CoreAI.Infrastructure.Llm
                             IsDone = true, Error = "LLM request timed out.", ErrorCode = LlmErrorCode.Timeout
                         };
                         chunk = null;
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        throw;
                     }
                     catch (LlmClientException ex)
                     {
@@ -285,9 +291,11 @@ namespace CoreAI.Infrastructure.Llm
                     // its probe slot. Abandonment without a backend error is not a health failure.
                     if (!classified)
                     {
-                        if (cancellationToken.IsCancellationRequested &&
-                            (!sawTerminalFailure || terminalCode == LlmErrorCode.Cancelled))
+                        if (cancellationToken.IsCancellationRequested)
                         {
+                            // WHY the terminal code is not consulted: a Timeout or ProviderError chunk that
+                            // arrived after the caller cancelled is the cancellation (LlmCancellation), and
+                            // counting it opened the breaker on a backend nobody was waiting for.
                             ReleaseHalfOpenProbe(lease);
                         }
                         else if (sawTerminalFailure)

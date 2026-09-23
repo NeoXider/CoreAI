@@ -14,6 +14,7 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - MVP_CLOSURE_AUDIT_2026-09-06.md — closure audit of MVP1 / MVP2 / MVP2.5 with post-fix verification; kept because the open `TODO.md` rows cite its sections
 - REPLICATION_PHASE0.md — the engine-free replication core as it exists after 7.39.0: what is built and tested registry-to-registry, what is not wired, the two named limits
 - MOD_INSTANCE_OWNERSHIP_PLAN.md — mod-owned instances + cleanup-on-unload design
+- MOD_SYSTEM_DESIGN_NOTES.md — the mod-panel 6 FPS investigation and the original mod-system phase plan (moved here from `Docs/CoreAIMods/mod-system.md`)
 - PERF_VS_ROBLOX.md — can CoreAI's runtime be faster than Roblox: an engineering assessment
 - LUA_VM_BENCHMARK_PLAN.md — Lua-CSharp vs Roblox Luau micro-benchmark kit and results table
 
@@ -42,3 +43,7 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - MATERIAL_TEXTURE_SOURCES_2026-09-04.md — the verified CC0 texture-set mapping (source of truth: `RbxCc0TextureSets.cs`)
 - MATERIAL_VARIANT_2026-09-04.md — custom materials and runtime swapping through `MaterialVariant`
 - FORWARD_PLUS_LIGHTING_FIX_2026-09-04.md — Rbx parts received no direct light: the Forward+ keyword was missing from the shaders
+
+## Housekeeping
+
+- MOVED_FROM_USER_DOCS.md — internal notes and TODOs moved out of the user documentation, each with the document it came from

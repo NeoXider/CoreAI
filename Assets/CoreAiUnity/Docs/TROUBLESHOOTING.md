@@ -1,7 +1,5 @@
 # 🔧 Troubleshooting Guide — CoreAI
 
-**Document version:** 1.0 | **Date:** May 2026
-
 A guide to resolving typical issues when working with CoreAI.
 
 ---
@@ -14,7 +12,7 @@ A guide to resolving typical issues when working with CoreAI.
 - [🔧 Problem: Tool call does not work](#-problem-tool-call-does-not-work)
 - [🌍 Problem: World command is not executed](#-problem-world-command-is-not-executed)
 - [⏳ Problem: Tests hang](#-problem-tests-hang)
-- [⏳ PlayMode: HTTP 500 from LM Studio / local API](#playmode-http-500-from-lm-studio--local-api)
+- [⏳ PlayMode: HTTP 500 from LM Studio / local API](#-playmode-http-500-from-lm-studio--local-api)
 - [🌐 WebGL: HTTP API blocked (CORS)](#-webgl-http-api-blocked-cors)
 - [🚫 Build fails: `[CoreAI] Build aborted: … API key`](#-build-fails-coreai-build-aborted--api-key)
 - [🔌 Problem: DI / VContainer errors](#-problem-di--vcontainer-errors)
@@ -28,25 +26,24 @@ A guide to resolving typical issues when working with CoreAI.
 - Empty response from the LLM (`"Empty response from LLM"`)
 - Request timeout
 - `StubLlmClient` instead of a real model
-- No `LLM ▶` / `LLM ◀` logs in the console
+- No `LLM >` / `LLM <` lines in the console
 - In **Offline** or **stub** fallback, the chat shows huge JSON or echoes the full system-style payload — expected from **`1.5.18`**: conversational roles (chat, `Teacher`-style ids, etc.) get a **single line** from **Offline Custom Response** (or `[stub] Offline…`); **Chat** requests with `SourceTag = Chat` receive a **trimmed error message** from the orchestrator when the model returns `Ok: false`, instead of an empty string.
 
 ### Diagnostics
 
 **Step 1: Check which backend is selected**
 
-On Unity startup the console should show a backend message:
+CoreAI does not print a single "backend" line at startup. Check it one of these ways:
+
+- **CoreAI → Setup → Validate Scene** warns `neither OpenAI HTTP settings nor LLMAgent found (will fallback to StubLlmClient)`.
+- **🔗 Test Connection** on the `CoreAISettings` asset probes the configured backend.
+- In code, `CoreAiBackend.Status` returns the active mode, base URL and model (`IsLive` tells whether a scope is running), and every routed request publishes `LlmBackendSelected` (MessagePipe) with `ExecutionMode` and `ClientType` — a `StubLlmClient` or `OfflineLlmClient` there means the silent fallback below.
+
+```csharp
+Debug.Log(CoreAiBackend.Status);   // e.g. "ClientOwnedApi (my-model @ http://localhost:1234/v1)"
 ```
-[CoreAI] Backend: OpenAiHttp → http://localhost:1234/v1
-```
-or
-```
-[CoreAI] Backend: LlmUnity → Qwen3.5-4B
-```
-or
-```
-[CoreAI] Backend: Stub (offline mode)  ← ❌ Problem!
-```
+
+Every request also logs `LLM > traceId=… role=… backend=…` when it is sent; no such line means the request never reached the LLM pipeline.
 
 **Step 2: Narrow down by backend**
 
@@ -59,12 +56,12 @@ or
 | LLMAgent on scene? | Hierarchy → look for an object with `LLMAgent` | Create an `LLMAgent` on the scene |
 | LLM component present? | Inspector LLMAgent → is there an `LLM`? | Add the `LLM` component |
 | GGUF file exists? | Inspector LLM → Model Path | Download the model via LLMUnity or LM Studio |
-| Service running? | Logs for `LLMUnity: started` | Increase `Startup Timeout` in CoreAISettings |
-| Enough VRAM? | Task Manager → GPU Memory | Use a smaller model (4B instead of 9B) or lower `numGPULayers` |
+| Service running? | `LLM.started` is `true` (see the snippet below) | Increase **Startup Timeout (sec)** in CoreAISettings → LLMUnity |
+| Enough VRAM? | Task Manager → GPU Memory | Use a smaller model (4B instead of 9B) or lower **GPU Layers** |
 
 ```csharp
 // Programmatic check:
-var agent = FindObjectOfType<LLMAgent>();
+var agent = Object.FindFirstObjectByType<LLMAgent>();
 Debug.Log($"LLMAgent found: {agent != null}");
 Debug.Log($"LLM started: {agent?.llm?.started}");
 ```
@@ -82,7 +79,8 @@ CoreAISettings → LLMUnity → Startup Timeout = 120
 | Check | How to verify | Fix |
 |----------|--------------|---------|
 | Server running? | Browser → `http://localhost:1234/v1/models` | Start LM Studio / Ollama |
-| URL correct? | CoreAISettings → HTTP API → Base URL | No trailing `/`: `http://localhost:1234/v1` |
+| URL correct? | CoreAISettings → Essentials → Base URL | No trailing `/`: `http://localhost:1234/v1` |
+| Model set? | CoreAISettings → Essentials → Model | Required for client-owned modes — an empty model fails the request with a configuration error |
 | Model loaded? | LM Studio → Status = "Loaded" | Load the model in LM Studio |
 | API key required? | OpenAI → yes, LM Studio → no | For LM Studio leave API Key **empty** |
 | Port open? | `Test-NetConnection localhost -Port 1234` | Check the firewall |
@@ -94,7 +92,7 @@ Invoke-RestMethod -Uri "http://localhost:1234/v1/models" -Method GET
 
 # Sample request
 $body = @{
-    model = "qwen3.5-4b"
+    model = "your-model-id"
     messages = @(@{ role = "user"; content = "Say OK" })
 } | ConvertTo-Json -Depth 3
 
@@ -105,10 +103,10 @@ Invoke-RestMethod -Uri "http://localhost:1234/v1/chat/completions" `
 **Typical fix:**
 ```
 1. Start LM Studio
-2. Load the model (Qwen3.5-4B)
+2. Load the model
 3. Enable Local Server (port 1234)
-4. CoreAISettings → Backend = OpenAiHttp
-5. CoreAISettings → Base URL = http://localhost:1234/v1
+4. CoreAISettings → LLM Backend = OpenAiHttp (or LLM Mode = ClientOwnedApi)
+5. CoreAISettings → Base URL = http://localhost:1234/v1, Model = the loaded model id
 6. Click "🔗 Test Connection"
 ```
 
@@ -124,12 +122,12 @@ Invoke-RestMethod -Uri "http://localhost:1234/v1/chat/completions" `
 
 **Fix:**
 ```
-CoreAISettings → Backend Type = OpenAiHttp (or LlmUnity)
+CoreAISettings → LLM Backend = OpenAiHttp (or LlmUnity)
 ```
 
 Or ensure Auto mode has at least one available backend:
 ```
-CoreAISettings → Backend Type = Auto
+CoreAISettings → LLM Backend = Auto
 CoreAISettings → Auto Priority = HTTP First  ← if HTTP is primary
 ```
 
@@ -138,69 +136,70 @@ CoreAISettings → Auto Priority = HTTP First  ← if HTTP is primary
 ### ⏱️ Request timeout
 
 ```
-[Error] LLM request timed out after 15 seconds
+[CoreAiChatPanel] Turn interrupted (reason=timeout): LLM request timed out.
 ```
 
-**Fix:** Increase the timeout:
+On the streaming path the pipeline also logs `LLM ~ (stream) traceId=… | cancelled`; a transport-level timeout with the caller still waiting is logged as `LLM x traceId=… | …`.
+
+**Fix:** Increase the timeout (default `120`):
 ```
-CoreAISettings → ⚙️ General → LLM Timeout = 120
+CoreAISettings → Advanced Settings → General → LLM Timeout (sec) = 300
 ```
 
-For large models (9B+) or weaker hardware you may need 120–300 seconds.
+For large models (9B+) or weaker hardware you may need 120–300 seconds. The HTTP-level **Timeout (sec)** on the HTTP tab is capped by this value.
 
-> **v1.5.1 note:** Timeout is now enforced by `CoreAiChatService` via a UniTask PlayerLoop-driven idle watchdog (`IdleTimeoutDeadline`, re-armed by every streamed chunk and tool-call event), which is fully compatible with **WebGL**. The portable layer (`AiOrchestrator`, `LoggingLlmClientDecorator`) no longer uses `CancellationTokenSource.CancelAfter()`, which relied on `System.Threading.Timer` and caused indefinite hangs in WebGL/Emscripten builds. See [`STREAMING_ARCHITECTURE.md`](STREAMING_ARCHITECTURE.md) §8.
+> **How the deadline works:** `CoreAiChatService` enforces an idle watchdog (`IdleTimeoutDeadline`, UniTask PlayerLoop-driven and WebGL-safe, re-armed by every streamed chunk and tool-call event), and `TimeoutLlmClientDecorator` bounds calls made outside the chat service. A host deadline must be passed on its own token (`CoreAiChatExternalSubmitOptions.DeadlineCancellationToken`, or the `CoreAiChatService` overloads with a `deadlineToken`) to be reported as a timeout; a `CancelAfter` on the caller's token is reported as a cancellation (`reason=cancelled`, no bubble by default). See [`STREAMING_ARCHITECTURE.md`](STREAMING_ARCHITECTURE.md) §8.
 
 ---
 
 ## 📜 Problem: Lua failed
 
+Lua runs through the `execute_lua` / `manage_mods` tools of `com.neoxider.coreaimods` (Lua-CSharp, `LuaCsSecureEnvironment` + `LuaCsExecutionGuard`). The tool result — including the Lua error — goes back to the model, which may fix the code and call the tool again. One-off `execute_lua` chunks have no separate automatic repair loop (unless your host wires `LuaCsAiEnvelopeProcessor` itself); for persistent mods, the optional `CoreAiLuaModAutoRepair` component schedules a bounded Programmer repair of a mod that keeps failing.
+
 ### Symptoms
-- `LuaExecutionFailed` in logs
-- `[Error] Lua execution failed: ...` in the model output
-- Endless self-heal loops (up to 3 attempts)
-- `LuaExecutionGuard: step limit exceeded`
+- `[ToolCall] … tool=execute_lua status=FAIL …` in the log, with the Lua error in `result=` (enable **Log Results**)
+- The model repeats `execute_lua` with corrected code, or gives up
+- `LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (…)` or `Lua exceeded … ms.` in the tool result
 
 ### Diagnostics
 
 **Type 1: Lua syntax error**
-```
-[Error] Lua execution failed: chunk_1:(3,0-4): unexpected symbol near 'end'
-```
+
+The tool result carries the parser message (for example `unexpected symbol near 'end'`).
 
 **Cause:** The model generated invalid Lua.
 
 **Fix:**
-- The system automatically retries self-heal up to 3 times
+- The model sees the error and may retry on its own; the consecutive-failure guard (`MaxToolCallRetries`, default 3) ends the loop with a final summary turn
 - If that fails → improve the Programmer prompt with examples of valid Lua
 - Or use a stronger model (4B+ instead of 2B)
 
 ---
 
 **Type 2: Calling a non-existent function**
-```
-[Error] Lua execution failed: attempt to call 'custom_function' (a nil value)
-```
+
+The tool result says the script tried to call a `nil` value (for example `custom_function`).
 
 **Cause:** Lua tries to call a function that is not in the whitelist API.
 
-**Fix:** Register via `GameLuaBindingsExtensibility` (recommended) or implement `IGameLuaRuntimeBindings`:
+**Fix:** Implement `CoreAI.Ai.LuaCs.ILuaCsGameRuntimeBindings` and register the function on `LuaCsApiRegistry`:
 
 ```csharp
-public sealed class MyGameBindings : IGameLuaRuntimeBindings
+using System;
+using CoreAI.Ai.LuaCs;
+using CoreAI.Sandbox.LuaCs;
+using UnityEngine;
+
+public sealed class MyGameBindings : ILuaCsGameRuntimeBindings
 {
-    public void RegisterGameplayApis(LuaApiRegistry registry)
+    public void RegisterGameplayApis(LuaCsApiRegistry registry)
     {
-        registry.Register("custom_function", new Action<string>(msg =>
-        {
-            GameLoggerUnscopedFallback.Instance.LogInfo(
-                GameLogFeature.Core, $"Custom: {msg}");
-        }));
+        registry.Register("custom_function", new Action<string>(msg => Debug.Log($"Custom: {msg}")));
     }
 }
-
-// Before scene load / early bootstrap:
-GameLuaBindingsExtensibility.Register(new MyGameBindings(), LuaCapabilities.Gameplay);
 ```
+
+Pass the bindings to the Lua surface you construct (`LuaCsGameToolExecutor` / `LuaCsAiEnvelopeProcessor`), or, for a mod stack built with `LuaCsModRuntimeFactory.Create`, register the same functions through `LuaCsModStackOptions.AdditionalGameplayBindings`. Reference implementation: `Assets/CoreAI.Demos/ModdableUnits/Scripts/UnitForgeLuaBindings.cs`. The default `RegisterCoreAiMods` composition does not accept custom bindings yet.
 
 See [LUA_BEST_PRACTICES.md](../../CoreAI/Docs/LUA_BEST_PRACTICES.md) for capability gating and anti-patterns.
 
@@ -214,7 +213,8 @@ Do NOT use any other functions.
 
 **Type 3: Infinite loop (step limit)**
 ```
-[Warning] LuaExecutionGuard: step limit exceeded (10000 steps)
+LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (<max steps>)
+Lua exceeded <N> ms.
 ```
 
 **Cause:** Lua contains an infinite loop or a very heavy operation.
@@ -226,18 +226,15 @@ Do NOT use any other functions.
 
 ---
 
-**Type 4: Lua repair exhausted retries**
-```
-[Warning] Programmer repair: max retries (3) exceeded for traceId=abc123
-```
+**Type 4: Repeated failures end the turn**
 
-**Cause:** 3 self-heal attempts were not enough.
+**Cause:** Every `execute_lua` call in several consecutive tool batches failed (`MaxToolCallRetries`, default 3), or the host-wired `LuaCsAiEnvelopeProcessor` used up `MaxLuaRepairRetries` (default 3).
 
 **Fix:**
-1. Increase `CoreAISettings.MaxLuaRepairRetries` (default 3)
-2. Improve the Programmer system prompt (add examples)
-3. Use a stronger model
-4. Verify the whitelist API is correct
+1. Improve the Programmer system prompt (add examples)
+2. Use a stronger model
+3. Verify the whitelist API is correct
+4. Raise `CoreAISettings.MaxToolCallRetries` (or `MaxLuaRepairRetries` for the envelope path) only after the above
 
 ---
 
@@ -245,34 +242,32 @@ Do NOT use any other functions.
 
 ### Symptoms
 - The agent “forgets” information between calls
-- File `persistentDataPath/CoreAI/AgentMemory/<RoleId>.json` is empty or not created
-- Memory does not appear in the system prompt
+- File `persistentDataPath/CoreAI/AgentMemory/<stem>.json` (memory document; the conversation is in `<stem>.history.jsonl`) is empty or not created — `<stem>` is the role id, or `scope-v1-<sha256>` when a memory scope provider is set
+- Memory does not appear in the request (it is sent in the ordered tail of the chat history, not in the system prompt)
 
 ### Diagnostics
 
 **Step 1: Check that memory is enabled for the role**
 
 ```csharp
-// By default memory is ON for:
-// Creator, Analyzer, Programmer, CoreMechanicAI
-// OFF for:
-// PlainChat / SmartChat, AINpc (they use ChatHistory)
+// By default the memory tool is ON (default action: append) for every built-in role
+// (Creator, Builder, Analyzer, Programmer, AINpc, CoreMechanicAI, SmartChat, Merchant)
+// and OFF for PlainChat. Custom roles get it through AgentBuilder.WithMemory().
 
 var policy = container.Resolve<AgentMemoryPolicy>();
-Debug.Log($"Memory enabled for Creator: {policy.IsMemoryToolEnabled("Creator")}");
+Debug.Log($"Memory enabled for Creator: {policy.IsMemoryEnabled("Creator")}");
 ```
 
 **Step 2: Check that the model calls the tool**
 
-Enable MEAI Debug Logging:
+Enable tool-call logging:
 ```
-CoreAISettings → 🔧 Debug → MEAI Debug Logging = ✅
+CoreAISettings → Advanced Settings → Debug → Log Tool Calls / Log Arguments / Log Results = ✅
 ```
 
 You should see in logs:
 ```
-[MEAI] Tool call detected: name=memory, arguments={action: write, content: ...}
-[MEAI] Tool result: Memory saved
+[ToolCall] traceId=… role=Creator tool=memory status=OK dur=…ms args={"action":"write",…} result=…
 ```
 
 If the tool is never called — the issue is the prompt. Add an explicit instruction:
@@ -316,7 +311,7 @@ Debug.Log($"Memory path: {Application.persistentDataPath}/CoreAI/AgentMemory/");
 | Model does not call tool | Add instruction to the prompt |
 | NullAgentMemoryStore | Expected when using **`RegisterCorePortable()`** without **`suppressDefaultAgentMemoryStore: true`** and no host **`IAgentMemoryStore`**. With **`CoreAILifetimeScope`**, `Persistent` resolves a scoped facade over **`FileAgentMemoryStore`** on all players (WebGL included), while `SessionOnly` resolves it over **`InMemoryAgentMemoryStore`**. If you still see **`NullAgentMemoryStore`**, check custom DI / duplicate registrations. |
 | File not created | Check permissions on `persistentDataPath` |
-| ChatHistory not working | Ensure `useChatHistory: true` and backend = LLMUnity |
+| ChatHistory not working | Chat history works on every backend. Check `AgentMemoryPolicy` for the role (`WithChatHistory`, default on except for Programmer) and, for restore after restart, `PersistChatHistory` (`AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`) |
 | WebGL: nothing survives a page reload, or the console shows `[CoreAiWebGlPersistence] This page did not enable automatic persistentDataPath synchronization` | The web template does not pass **`config.autoSyncPersistentDataPath = true`** to `createUnityInstance()`. Unity's stock templates ship that line **commented out**, and since Unity 6.3 it is the only channel that persists `persistentDataPath` — CoreAI no longer drives the deprecated manual `FS.syncfs`. Add the line to your own template or run **`CoreAI/Setup/Install WebGL Template`** (copies the template shipped in the package into `Assets/WebGLTemplates/CoreAI` and selects it); `CoreAIWebGlPersistentDataSyncBuildGuard` fails the build when it is missing, unless the project defines **`COREAI_WEBGL_NO_PERSISTENCE`** for the Web platform. |
 | WebGL: `memory action=write` fails after ~30 s while the data is actually saved | Fixed. CoreAI used to await an `FS.syncfs` completion callback that Unity 6.3 never delivers, so every durability wait ran into the caller's timeout. Durability is now answered immediately; rebuild the player after upgrading **`com.neoxider.coreaiunity`**. |
 
@@ -330,31 +325,25 @@ To reset **everything** CoreAI stores under `persistentDataPath` (memory, persis
 
 ### Symptoms
 - Model returns text instead of a tool call
-- `Tool call not recognized` in logs
-- Tool call retries exhausted
+- `[ToolCall] … status=FAIL` lines in the log
+- The turn ends with a tools-disabled summary after repeated failures
 - **`SmartToolCallingChatClientEditModeTests`** (or runtime) stops after **3 LLM rounds** despite successful tools — fixed in **`com.neoxider.coreai` 1.5.15**: MEAI **`ChatMessage.Contents`** is a non-generic **`IList`**; enumerating native **`FunctionCallContent`** must not rely on **`SelectMany` + `Enumerable.Empty<AIContent>()`** over that property.
 - Edit Mode logs show tools **`status=FAIL`** with **`get_isPlaying can only be called from the main thread`** (execution count stays **0**) — fixed from **`com.neoxider.coreaiunity` 1.5.16** onward; current hardening uses the **`UnityMainThreadLlmAsyncMarshaler`** Editor play-state mirror (`RuntimeInitializeOnLoadMethod`, **`Application.onBeforeRender`**, and **`EditorApplication.update`**) plus **`ManagedThreadId`** gate so worker threads never call **`Application.isPlaying`** directly.
 
 ### Diagnostics
 
-**Type 1: Wrong format from the model**
-```
-[Warning] Tool call not recognized, retry 1/3
-```
+**Type 1: The call arrives as text**
 
-**Cause:** The model returned a tool call in an invalid format.
+**Cause:** On an endpoint with a native tool channel CoreAI takes calls only from the provider's `tool_calls`; JSON written into the answer is shown as text. A local server whose model writes calls as text needs the text channel.
 
-**Fix:** CoreAI retries automatically up to 3 times. If that fails:
-1. Use a larger model (4B+ recommended)
-2. Add format to the prompt:
-```
-ALWAYS use this exact format for tool calls:
-{"name": "tool_name", "arguments": {"param": "value"}}
-```
+**Fix:**
+1. For LLMUnity or a runtime endpoint whose server rejects `tools`, set the tool channel to `Text` (`LlmUnityToolChannel` on the settings asset, or `LlmEndpointDescriptor.ToolChannel`).
+2. For a proxy that advertises native tools but answers with JSON text, set `LlmCompletionRequest.AllowTextShapedToolCallsOnNativeEndpoint = true`.
+3. Use a larger model (4B+ recommended).
 
 **Type 2: Tool not registered**
 ```
-[Error] No AIFunction found for tool name: my_custom_tool
+Error: Unknown tool 'my_custom_tool'. Available tools: [memory, world_command, ...]
 ```
 
 **Fix:** Ensure the tool is added to the agent:
@@ -364,16 +353,23 @@ var agent = new AgentBuilder("MyAgent")
     .Build();
 ```
 
-**Type 3: Infinite tool-call loop**
+The list shows callable names: for a multi-function wrapper such as `camera` it lists the function names (`camera_capture`, `camera_look`, …), which are the names the model must use.
+
+**Type 3: Missing or mistyped arguments**
 ```
-[Warning] SmartToolCallingChatClient: duplicate tool_call detected, breaking loop
+Error: Tool 'weather_command' is missing required argument(s): action. Retry the same tool call with JSON arguments matching this schema: {...}
+Error: Argument 'enabled' does not match the expected type for tool 'toggle_light': ...
 ```
 
-**Cause:** The model looped calling the same tool.
+**Cause:** The model omitted a required argument, sent `null`, or sent a value that cannot bind to the parameter type. The tool body did not run and the model may retry. An empty string is **not** refused — validate it in the tool (see [TOOL_AUTHORING_GUIDE](TOOL_AUTHORING_GUIDE.md#required-arguments-null-is-missing-empty-is-present)).
 
-**Fix:** `SmartToolCallingChatClient` detects and breaks the loop automatically. If it keeps happening — improve the prompt.
+**Type 4: The model repeats the same call**
 
-**Type 4: Agent stopped: exceeded maximum of N tool-call roundtrips**
+**Cause:** The model re-emits a call that already succeeded in an earlier turn of the same request.
+
+**Fix:** `ToolExecutionPolicy` does not execute such a cross-turn echo; the model receives `{"ok": true, "duplicate": true, …}` instead. If it keeps happening — improve the prompt.
+
+**Type 5: Agent stopped: exceeded maximum of N tool-call roundtrips**
 ```
 [SmartToolCall] Role 'X' hit the tool-call roundtrip cap (20, from global ICoreAISettings.MaxToolCallRoundtrips) and was stopped …
 Agent stopped: exceeded maximum of 20 tool-call roundtrips
@@ -386,7 +382,7 @@ Agent stopped: exceeded maximum of 20 tool-call roundtrips
 - Per call: `new AiTaskRequest { MaxToolCallRoundtrips = 0 }`.
 - Global: `CoreAISettings.MaxToolCallRoundtrips = 40;` or raise it in the CoreAI settings asset.
 
-Priority is per-call → per-agent → per-role policy (`AgentMemoryPolicy`) → global. The built-in **Programmer** and **Creator** roles set the per-role step to `0` = unlimited, so they are uncapped by default.
+Priority is per-call → per-agent → per-role policy (`AgentMemoryPolicy`) → global. The built-in **Programmer**, **Creator** and **Builder** roles set the per-role step to `0` = unlimited, so they are uncapped by default.
 
 ---
 
@@ -394,24 +390,24 @@ Priority is per-call → per-agent → per-role policy (`AgentMemoryPolicy`) →
 
 ### Symptoms
 - Objects do not spawn
-- `[Warning] Spawn rejected: prefab key 'X' not found` in logs
-- `coreai_world_spawn returned false`
+- `[World] Unknown prefabKey 'X'. Available primitives: …` (or `[World] prefab not found: 'X'.`) in logs
+- The object named in `coreai_world_spawn({ prefab = ..., name = ... })` never appears (the call only publishes a command; the executor logs why it failed)
 
 ### Diagnostics
 
 **Issue 1: Prefab registry not assigned**
 ```
-[Warning] World prefab registry not assigned
+[World] prefab registry not assigned
 ```
 
 **Fix:**
 1. Create → CoreAI → World → Prefab Registry
 2. Add prefabs with keys
-3. CoreAILifetimeScope → World Prefab Registry → assign the asset
+3. Select `CoreAILifetimeScope` → **Add Lua / World Commands Module**, then assign the asset on the child `CoreAiLuaWorldModule` (see [WORLD_COMMANDS.md](WORLD_COMMANDS.md))
 
 **Issue 2: Prefab key not found**
 ```
-[Warning] Spawn rejected: prefab key 'Boss' not found in registry
+[World] Unknown prefabKey 'Boss'. Available primitives: …
 ```
 
 **Fix:** Add the key in `CoreAiPrefabRegistryAsset`:
@@ -457,7 +453,7 @@ CoreAISettings → LLMUnity → Keep Alive = ✅ true
 2. Set env vars:
 ```powershell
 $env:COREAI_OPENAI_TEST_BASE = "http://localhost:1234/v1"
-$env:COREAI_OPENAI_TEST_MODEL = "qwen3.5-4b"
+$env:COREAI_OPENAI_TEST_MODEL = "your-model-id"
 ```
 
 ### ⏳ PlayMode: HTTP 500 from LM Studio / local API
@@ -521,12 +517,13 @@ VContainerException: Type 'ILlmClient' is not registered
    - Core AI Settings
    - Agent Prompts Manifest (optional)
    - Game Log Settings (optional)
-   - World Prefab Registry (optional)
+   - Llm Routing Manifest (optional)
+   - Lua / World Commands module with its prefab registry (optional child `CoreAiLuaWorldModule`)
 
 ```
 Hierarchy:
 └── CoreAILifetimeScope  ← Root LifetimeScope
-    ├── LlmManager (LLM + LLMAgent)
+    ├── LLM (LLM + LLMAgent)
     ├── GameManager
     └── ... your objects
 ```
@@ -538,7 +535,9 @@ Hierarchy:
 ### Turn on full diagnostics quickly
 
 ```
-CoreAISettings → 🔧 Debug:
+CoreAISettings → Advanced Settings → Debug:
+  ✅ Log LLM Input / Log LLM Output — prompt and response previews
+  ✅ Log Tool Calls / Log Arguments / Log Results — one [ToolCall] line per call
   ✅ MEAI Debug Logging      — MEAI pipeline logs
   ✅ HTTP Debug Logging       — raw HTTP requests
   ✅ Log Orchestration Metrics — orchestrator metrics
@@ -548,16 +547,16 @@ CoreAISettings → 🔧 Debug:
 
 | Pattern | Meaning |
 |---------|----------|
-| `LLM ▶ [traceId=...]` | Request sent |
-| `LLM ◀ [traceId=...] 247 tokens, 1.2s` | Response received |
-| `LLM ⏱ timeout` | Timeout |
-| `[MessagePipe] traceId=...` | Command routing |
-| `[MEAI] Tool call detected` | Tool call recognized |
-| `[MEAI] Tool result` | Tool call result |
-| `[Lua] Execution succeeded` | Lua succeeded |
-| `[Lua] Execution failed` | Lua error |
-| `[World] Spawn: Enemy at (10,0,5)` | World command |
-| `SmartToolCallingChatClient: duplicate` | Loop detected |
+| `LLM > traceId=… role=… backend=…` | Request sent (`LLM > (stream)` on the streaming path) |
+| `LLM < traceId=… wallMs=… \| tokens…` | Response received |
+| `LLM x traceId=… \| <error>` | Request failed (including transport timeouts; a caller or deadline cancel is not logged here) |
+| `LLM ~ traceId=… \| … retry n/m` | Retry after a recoverable failure; `LLM ~ (stream) … \| cancelled` for a cancelled stream |
+| `[ToolCall] traceId=… tool=<name> status=OK\|FAIL` | One tool call (with `args=` / `result=` when enabled) |
+| `[ToolPolicy] <name> rejected: …` | Arguments refused before the tool ran |
+| `ApplyAiGameCommand traceId=… type=…` | Command routed by `AiGameCommandRouter` |
+| `[Lua report] …` | `report(...)` called from Lua |
+| `[World] …` | World command diagnostics (`[World] prefab registry not assigned`, `[World] list_prefabs: …`) |
+| `[CoreAiChatPanel] Turn interrupted (reason=timeout\|cancelled)` | Chat turn ended by a deadline or a stop |
 
 ### Filter by TraceId
 
@@ -566,10 +565,10 @@ Each request gets a unique `TraceId`. Use it to trace the command path:
 ```
 Unity console filter: "abc123"
 
-[abc123] LLM ▶ role=Programmer hint="Create ambush script"
-[abc123] LLM ◀ 312 tokens, 2.1s
-[abc123] [MessagePipe] ApplyAiGameCommand type=AiEnvelope
-[abc123] [Lua] Execution succeeded: "Ambush created"
+LLM > traceId=abc123 role=Programmer backend=…
+[ToolCall] traceId=abc123 role=Programmer tool=execute_lua status=OK dur=12ms
+LLM < traceId=abc123 role=Programmer backend=… wallMs=2100 | …
+ApplyAiGameCommand traceId=abc123 type=AiEnvelope role=Programmer …
 ```
 
 ---
@@ -578,24 +577,24 @@ Unity console filter: "abc123"
 
 ```
 ❓ Model silent?
-  → Check Backend Type in CoreAISettings
+  → Check LLM Backend / LLM Mode and Model in CoreAISettings
   → Check that LM Studio / LLMAgent is running
   → Click "🔗 Test Connection"
 
 ❓ Empty response?
   → Increase LLM Timeout (120+)
   → Enable Keep Alive for LLMUnity
-  → Check LLM ▶ / LLM ◀ logs
+  → Check LLM > / LLM < / LLM x logs
 
 ❓ Tool call not firing?
-  → Enable MEAI Debug Logging
+  → Enable Log Tool Calls (Debug tab)
   → Check that the tool is added to the agent
   → Use a 4B+ model for reliable tool calling
 
 ❓ Lua failing?
   → Check whitelist API in the prompt
-  → Self-heal runs up to 3 attempts
-  → Increase MaxLuaRepairRetries if needed
+  → Read the execute_lua result in the [ToolCall] line
+  → Register missing functions via ILuaCsGameRuntimeBindings
 
 ❓ Memory not saving?
   → Check AgentMemoryPolicy for the role
@@ -603,7 +602,7 @@ Unity console filter: "abc123"
   → Check persistentDataPath
 
 ❓ Object not spawning?
-  → Assign CoreAiPrefabRegistryAsset
+  → Assign CoreAiPrefabRegistryAsset on CoreAiLuaWorldModule
   → Add prefab key to the registry
   → Check [World] logs
 
@@ -631,7 +630,7 @@ Some Qwen/DeepSeek-style thinking models can spend the whole output budget on re
 
 1. In `CoreAISettings.asset`, leave **Reasoning Mode** as **Provider Default** unless the provider needs an explicit override.
 2. For Qwen OpenAI-compatible endpoints that support it, set **Reasoning Mode** to **Disabled**. CoreAI sends `enable_thinking=false` and `chat_template_kwargs.enable_thinking=false`.
-3. Keep `Max Tokens` high enough for the scenario. The local 27B Qwen test profile uses `20000` output tokens and a `128000` context-window hint.
+3. Keep **Max Output Tokens** high enough for the scenario (or leave **Override Max Output Tokens** off). The local 27B Qwen test profile uses `20000` output tokens and a `128000` context-window hint.
 4. If the provider supports it, use **Thinking Budget Tokens** to cap reasoning. `0` omits the field.
 
 ---

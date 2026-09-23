@@ -34,8 +34,8 @@ In a **built WebGL player**, with streaming enabled (`CoreAiChatConfig.EnableStr
 Example WebGL log:
 
 ```
-[CoreAI] [Llm] LLM ▶ (stream) traceId=… role=Teacher backend=RoutingLlmClient→OpenAiHttp
-[CoreAI] [Llm] LLM ◀ (stream) wallMs=15848 chunks=1 | tokens n/a | outChars=85
+[CoreAI] [Llm] LLM > (stream) traceId=… role=Teacher backend=…
+[CoreAI] [Llm] LLM < (stream) traceId=… role=Teacher backend=… wallMs=15848 chunks=1 | tokens n/a … | outChars=85
   content (85 chars): Hello! Happy to help with Python…
 [CoreAI] [MessagePipe] ApplyAiGameCommand … payload=Hello! Happy to help…
 ```
@@ -137,10 +137,11 @@ Additionally adjust `CoreAiChatPanel.SendStreamingAsync` so that when `chunks=1 
 
 ## 5. Related files
 
-- `Runtime/Source/Features/Llm/Infrastructure/MeaiOpenAiChatClient.cs` — SSE parser implementation
+- `Assets/CoreAI/Runtime/Core/Features/Llm/MeaiOpenAiChatClient.cs` — SSE parser implementation
 - `Runtime/Source/Features/Chat/CoreAiChatPanel.cs` — consumer of `IAsyncEnumerable<LlmStreamChunk>`
 - `Runtime/Source/Features/Chat/CoreAiChatService.cs` — `SendMessageStreamingAsync`,
   thin wrapper over `IAiOrchestrationService.RunStreamingAsync`
 - `Docs/STREAMING_ARCHITECTURE.md` — **WebGL SSE** subsection (fetch bridge + when **`UnityWebRequest`** path applies)
-- `Assets/_source/Features/ChatUI/Presentation/Controllers/ChatPanelController.cs` (RedoSchool) —
-  example client workaround forcing non-streaming via reflection on `_enableStreaming`
+- A production host once worked around this by forcing non-streaming through reflection on the private
+  `_enableStreaming` field; use `CoreAiChatConfig.EnableStreaming` or `CoreAiChatPanel.SetRuntimeOptions(...)`
+  instead, or enable `WebGlNativeStreaming`

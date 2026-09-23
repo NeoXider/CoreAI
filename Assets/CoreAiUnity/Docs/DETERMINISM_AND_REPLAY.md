@@ -21,7 +21,7 @@ records a SHA-256-chained, append-only stream of:
 | `LlmRequest` / `LlmResponse` | Every model call and its outcome |
 | `ToolCall` | Every executed tool invocation (name, args digest, result status) |
 | `WorldMutation` | Every world-affecting effect that went through the command boundary |
-| `PolicyDecision` | Duplicate suppression / serialization decisions by `ToolExecutionPolicy` |
+| `PolicyDecision` | Reserved for duplicate-suppression / serialization decisions — the entry kind exists, but nothing writes it yet |
 | `ChainReset`, `RotationMarker`, `RotationAnchor` | Chain integrity and log rotation bookkeeping |
 
 Combined with the serialized mutation chain (mutating tools execute strictly one at a time, in

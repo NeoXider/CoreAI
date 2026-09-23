@@ -65,7 +65,8 @@ namespace CoreAI.Composition
 
         [Header("Optional Modules")]
         [Tooltip(
-            "Optional child module that owns Lua and world-command configuration. A child component is auto-discovered when this reference is empty.")]
+            "Optional child module that owns world-command configuration (prefab and scene whitelists). A child " +
+            "component is auto-discovered when this reference is empty. The Lua tier is set on CoreAiModsLifetimeScope.")]
         [SerializeField]
         private CoreAiLuaWorldModule luaWorldModule;
 
@@ -85,13 +86,25 @@ namespace CoreAI.Composition
         private bool legacyEnableFullLuaAccess;
 
         /// <summary>
-        /// Whether this composition grants the Full Lua tier (unity_* reflection). Exposed so
-        /// scene helpers that autoload persisted mods (e.g. the mods-chat persistence demo)
-        /// can grant the SAME tier the host does instead of hardcoding a lower one.
+        /// Deprecated. Returns the legacy Full flag of <see cref="LuaWorldModule"/> (or of this scope's
+        /// pre-module fields), which never granted the Full Lua tier: <c>execute_lua</c> and
+        /// <c>manage_mods</c> honour only <c>CoreAiModsLifetimeScope.FullLuaAccessEnabled</c>
+        /// (package <c>com.neoxider.coreaimods</c>), so this value can disagree with what the host grants.
         /// </summary>
-        public bool FullLuaAccessEnabled => ResolveLuaWorldModule() != null
-            ? ResolveLuaWorldModule().FullAccessEnabled
-            : legacyEnableFullLuaAccess;
+        [System.Obsolete("Never decided the Full Lua tier. Use CoreAiModsLifetimeScope.FullLuaAccessEnabled " +
+                         "(com.neoxider.coreaimods), the only flag execute_lua and manage_mods honour.")]
+        public bool FullLuaAccessEnabled
+        {
+            get
+            {
+                CoreAiLuaWorldModule module = ResolveLuaWorldModule();
+                // WHY: the module member is obsolete for the same reason as this one; reading it keeps the
+                // deprecated value unchanged for callers that have not migrated yet.
+#pragma warning disable CS0618
+                return module != null ? module.FullAccessEnabled : legacyEnableFullLuaAccess;
+#pragma warning restore CS0618
+            }
+        }
 
         [HideInInspector]
         [FormerlySerializedAs("enableFullLuaPrivateAccess")]
@@ -325,12 +338,9 @@ namespace CoreAI.Composition
             else
             {
                 // WHY: no optional Lua world module resolved — register the legacy world-command
-                // defaults directly so existing and new scenes without the module keep working.
-                builder.RegisterWorldCommands(
-                    worldPrefabRegistry,
-                    legacyLuaAllowedScenes,
-                    legacyEnableFullLuaAccess,
-                    legacyEnableFullLuaPrivateAccess);
+                // defaults directly so existing and new scenes without the module keep working. The legacy
+                // Full flags are not passed: RegisterWorldCommands ignores them.
+                builder.RegisterWorldCommands(worldPrefabRegistry, legacyLuaAllowedScenes);
             }
 
             builder.RegisterLlmPipeline(settings, llmRoutingManifest);

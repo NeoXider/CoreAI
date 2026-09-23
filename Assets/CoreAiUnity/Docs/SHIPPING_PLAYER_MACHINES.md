@@ -22,7 +22,7 @@ These map directly to the `LLM Mode` values on `CoreAISettingsAsset` (see [COREA
 Notes on the hybrid row:
 
 - `CoreAISettingsAsset` **Auto** mode chains backends (`LLMUnity → HTTP API → Offline` or `HTTP → LLMUnity → Offline`, see "Auto priority" in [COREAI_SETTINGS.md](COREAI_SETTINGS.md)).
-- **`FallbackLlmClientDecorator`** (`Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/FallbackLlmClientDecorator.cs`) wraps a primary and a secondary `ILlmClient` and automatically retries retryable failures (timeouts, `RateLimited`, `BackendUnavailable`) on the secondary. Configure it via **Fallback Backend (secondary)** in the settings asset (`Enable Fallback Backend` + `Secondary Base URL` + `Secondary Model`). On the streaming path, fallback only happens *before* the primary stream has produced visible text or a tool call, so output is never duplicated.
+- **`FallbackLlmClientDecorator`** (`Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/FallbackLlmClientDecorator.cs`) wraps a primary and a secondary `ILlmClient` and automatically retries retryable failures (`Timeout`, `RateLimited`, `BackendUnavailable`, `ProviderError`, `ContextLengthExceeded`) on the secondary. Configure it on the **Fallback** tab of the settings asset (`Enable Fallback Backend` + `Secondary Base URL` + `Secondary Model`). Auth, invalid-request and quota failures never fall back, a turn whose tools already ran is not replayed, and nothing falls back after the caller cancelled. On the streaming path, fallback only happens *before* the primary stream has produced visible text or a tool call, so output is never duplicated.
 - `Offline` mode (deterministic stub responses per role) is the floor of every chain — the game keeps running even with no model at all.
 
 **Rules of thumb:**
@@ -42,7 +42,7 @@ Two supported options (details in [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_
 | Option | How | Trade-off |
 |---|---|---|
 | **Bundle with the game** | LLMUnity Model Manager: each model has a **Build** checkbox; checked models are copied into the build (StreamingAssets) | Predictable offline behavior from first launch; bigger installer. Recommended for release. |
-| **First-run download** | LLMUnity **Download on Start**; call `await LLM.WaitUntilModelSetup();` before the first request (CoreAI's `MeaiLlmUnityClient` already waits for model setup and server readiness) | Small installer; but first launch needs internet, a progress UI, and a failure path. Handy in development. |
+| **First-run download** | LLMUnity **Download on Start**; call `await LLM.WaitUntilModelSetup();` before the first request (CoreAI's `LlmUnityAutostartEntryPoint` waits for the native server to start and probes its HTTP route before declaring it ready) | Small installer; but first launch needs internet, a progress UI, and a failure path. Handy in development. |
 
 For production the repo recommendation is **one primary bundled model** (2B class) plus optional separate "HD" packs with 4B/9B, rather than forcing every model into one distribution.
 
@@ -60,11 +60,11 @@ Remember the model is also **read into memory** at load time — disk size is a 
 
 ### 2.3 RAM / VRAM guidance
 
-- Budget roughly **model file size + 1–2 GB** of working memory (KV cache grows with context window). For local GGUF, size the KV cache from the `LLM` component's own context size; the `CoreAISettingsAsset` **Context Window** setting is a client-side history budget that is **OFF by default** since 5.9.0 (unlimited sentinel). If you enable **Enable context window overriding**, its default is 128K — far more than a small local model needs, so lower it to bound client-side budgeting.
+- Budget roughly **model file size + 1–2 GB** of working memory (KV cache grows with context window). For local GGUF, size the KV cache from the `LLM` component's own context size; the `CoreAISettingsAsset` **Context Window** setting is a client-side history budget that is **OFF by default** since 5.9.0 (unlimited sentinel). If you enable **Override Context Window**, its default is 131072 tokens — far more than a small local model needs, so lower it to bound client-side budgeting.
 - **Num GPU Layers > 0** on the `LLM` component offloads layers to VRAM; with no or weak GPU, llama.cpp runs on CPU (slower, uses system RAM).
 - Align **Num GPU layers** and **context size** with your *minimum* target hardware — this is already a line item in the pre-release checklist of [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md).
 
-**Suggested min-spec starting point** (validate on your own content): 8 GB system RAM for a 2B Q4 model on CPU; 16 GB RAM or a GPU with 4+ GB VRAM for a 4B Q4 model with GPU offload. Ship the smallest model that passes your gameplay tests (see the "PlayMode Test Results by Model Size" snapshot in the root `README.md` — 0.8B passes most single-tool tests but struggles with multi-step work; 2B is the pragmatic floor for tool calling; 4B is the recommended local quality tier).
+**Suggested min-spec starting point** (validate on your own content): 8 GB system RAM for a 2B Q4 model on CPU; 16 GB RAM or a GPU with 4+ GB VRAM for a 4B Q4 model with GPU offload. Ship the smallest model that passes your gameplay tests (as a rough guide from the model table in [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md#recommended-models): 0.8B passes most single-tool tests but struggles with multi-step work; 2B is the pragmatic floor for tool calling; 4B is the recommended local quality tier).
 
 ### 2.4 Latency expectations (sample measurements)
 
@@ -89,7 +89,7 @@ Design the shipped build so every rung failing lands on the next one, never on a
 4. **Offline stub** — `Offline` mode returns deterministic per-role responses (configurable via **Custom Response**), so AI-driven features visibly degrade ("The model is temporarily unavailable") instead of breaking. If no model resolves at all, `LlmUnityAutoDisableIfNoModel` disables LLMUnity and DI falls back to `StubLlmClient` automatically.
 5. **Design floor:** make sure core gameplay is playable when every AI feature is answering from stubs — treat LLM features as enhancement, and gate quest-critical logic on tool results you validate, not on free-form model text.
 
-Timeouts are the other half of degradation: `LLM Timeout` (orchestrator window, default 15 s) and the HTTP request timeout are linked so a stuck call cannot outlive the cancel window (see [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) §3). Wire your UI to the typed error codes (`Timeout`, `RateLimited`, `BackendUnavailable`, …) rather than raw provider strings.
+Timeouts are the other half of degradation: **LLM Timeout (sec)** (orchestrator/chat idle window, default 120 s) and the HTTP request timeout are linked so a stuck call cannot outlive the cancel window (see [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) §3). Wire your UI to the typed error codes (`Timeout`, `RateLimited`, `BackendUnavailable`, …) rather than raw provider strings.
 
 ---
 

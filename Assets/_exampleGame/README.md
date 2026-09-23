@@ -50,7 +50,7 @@ Plugins in `Assets/Plugins` (for example debug utilities) are included as they e
 |-----------|------------|
 | **LLMUnity** + **OpenAI-compatible HTTP** | Implementations of **`ILlmClient`**; see [`LLMUNITY_SETUP_AND_MODELS.md`](../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md) |
 | **Orchestration** | **`IAiOrchestrationService`** / **`AiOrchestrator`**, roles from **`BuiltInAgentRoleIds`** |
-| **Lua** | **`LuaAiEnvelopeProcessor`**, Lua-CSharp sandbox (bundled, no external package), Programmer repair on error |
+| **Lua** (package `com.neoxider.coreaimods`, `COREAI_LUA`) | Lua-CSharp sandbox (bundled, no external package), the `execute_lua` / `manage_mods` tools on the Programmer role, `LuaCsAiEnvelopeProcessor` for hosts that compose an envelope pipeline |
 
 The example game **depends** on the public **CoreAI** API (**`com.neoxider.coreai`**), not the other way around: `_exampleGame` contains only game-specific scenes, prefabs, presenters, and use cases for the "arena + hub" mode.
 
@@ -63,7 +63,7 @@ Normative document: **`Assets/CoreAiUnity/Docs/DGF_SPEC.md`**.
 1. **Boundaries:** the core provides DI, events, Lua sandbox, LLM facade, and orchestrator; the game provides content, prefabs, balance, and mode rules.
 2. **Security:** Lua only through a whitelist API, instruction/time limits, dry-run when needed; the client does not execute raw LLM output as truth in multiplayer.
 3. **Networking:** AI and run "law" changes happen on the **host**; final events and parameters are replicated.
-4. **Layers (guideline):** Domain -> UseCases -> Presentation; infrastructure (save, network) is behind interfaces - in the spirit of [GameDev-Last-War](D:\Git\GameDev-Last-War), but without copying the whole monolith.
+4. **Layers (guideline):** Domain -> UseCases -> Presentation; infrastructure (save, network) is behind interfaces - in the spirit of the GameDev-Last-War reference project (kept outside this repository), but without copying the whole monolith.
 5. **Observability:** AI decision logs, optional developer panel (request queue, active agents).
 
 Root product idea of the repository: [README.md](../../README.md) at the CoreAI root.
@@ -75,7 +75,7 @@ Root product idea of the repository: [README.md](../../README.md) at the CoreAI 
 **Required order** when adding any nontrivial capability (networking, DI, pools, UI patterns, saves, enemy waves, meta inventory, etc.):
 
 1. **Search for an existing solution on GitHub** (UPM package, proven repository, official Unity/Cysharp documentation, and so on).
-2. **Search for and adapt patterns in the reference project [GameDev-Last-War](D:\Git\GameDev-Last-War)** - it already has production-level VContainer, MessagePipe, R3, UniTask, feature splitting, ECS for heavy areas, and integrations. Take **ideas and approach fragments**, not the entire repository, when the task is narrow.
+2. **Search for and adapt patterns in the reference project GameDev-Last-War** (kept outside this repository) - it already has production-level VContainer, MessagePipe, R3, UniTask, feature splitting, ECS for heavy areas, and integrations. Take **ideas and approach fragments**, not the entire repository, when the task is narrow.
 3. **Only if** no suitable open solution or close Last-War analogue is found, write a **custom** implementation from scratch (or minimal glue code).
 
 **Goal:** fewer bugs, faster iteration, consistency with the template stack. Custom code is a deliberate exception, not the first reaction.
@@ -90,6 +90,6 @@ Root product idea of the repository: [README.md](../../README.md) at the CoreAI 
 | `RogueliteArena/Features/` | **Example** features (waves, hub, run UI) - their own installers / child `LifetimeScope` |
 | `Docs/` | Game concept and notes (`ROGUELITE_PLAYBOOK.md`) |
 
-Entry point: `RogueliteArena/Features/ArenaBootstrap/ExampleRogueliteEntry.cs` (arena + **`CoreAiLuaHotkey`**). Scene **`RogueliteArena`**: **`CompositionRoot`** has **`CoreAILifetimeScope`** + **`ExampleRogueliteEntry`**. Run state: **`ArenaSurvivalSession`** (no singleton), waves: **`ArenaSurvivalDirector`** + **`IArenaWaveSchedule`**, node role: **`ArenaSimulationRole`**. See [`../CoreAiUnity/README.md`](../CoreAiUnity/README.md) and [`../CoreAI/Docs/README.md`](../CoreAI/Docs/README.md) (UPM).
+Entry point: `RogueliteArena/Features/ArenaBootstrap/Infrastructure/ExampleRogueliteEntry.cs` (arena + **`CoreAiLuaHotkey`**). Scene **`RogueliteArena`**: **`CompositionRoot`** has **`CoreAILifetimeScope`** + **`ExampleRogueliteEntry`**. Run state: **`ArenaSurvivalSession`** (no singleton), waves: **`ArenaSurvivalDirector`** + **`IArenaWaveSchedule`**, node role: **`ArenaSimulationRole`**. See [`../CoreAiUnity/README.md`](../CoreAiUnity/README.md) and [`../CoreAI/Docs/README.md`](../CoreAI/Docs/README.md) (UPM).
 
 Pattern: root `CoreAILifetimeScope` (CoreAI core) +, if needed, a child `LifetimeScope` in this folder only for roguelite-example code.

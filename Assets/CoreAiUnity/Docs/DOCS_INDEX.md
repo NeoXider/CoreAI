@@ -96,7 +96,7 @@ Package manifests:
 | [SCRIPTABLE_OBJECTS.md](SCRIPTABLE_OBJECTS.md) | ScriptableObject assets used by the package and their roles. |
 | [GAME_CONFIG_GUIDE.md](GAME_CONFIG_GUIDE.md) | Letting AI change game parameters through GameConfig assets. |
 | [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | Accepted warning debt and known project-level issues. |
-| [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Pre-commit and pre-release checklist for the five-package graph. |
+| [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Pre-commit and pre-release checklist for the seven-package graph. |
 | [SHIPPING_PLAYER_MACHINES.md](SHIPPING_PLAYER_MACHINES.md) | What the player's machine needs per deployment mode: local GGUF, cloud, proxy, hybrid fallback. |
 | [CLOUD_COST_BUDGETING.md](CLOUD_COST_BUDGETING.md) | Token anatomy of a turn, measuring real usage, spend caps, and a designer budget worksheet. |
 | [AUDIT_LOG.md](AUDIT_LOG.md) | Immutable append-only audit log for tool calls, LLM requests, world mutations. |
@@ -114,11 +114,12 @@ Package manifests:
 | [../Tests/PlayMode/Scenarios/CraftingMemory_README.md](../Tests/PlayMode/Scenarios/CraftingMemory_README.md) | Crafting memory workflow scenario. |
 | [TESTING_TOOL_CALLING.md](TESTING_TOOL_CALLING.md) | How to run and extend tool-calling tests. |
 | `ThinkBlockStreamFilterEditModeTests` | Streaming `<think>` filter and split-tag cases. |
-| `SecureLuaSandboxEditModeTests` | Lua sandbox escape coverage. |
+| `LuaCsSecureSandboxEditModeTests` (`CoreAI.Mods.Tests`) | Lua sandbox escape coverage. |
 | `SmartToolCallingChatClientEditModeTests` | Duplicate detection, missing tools, exceptions, retry behavior. |
 | `InGameLlmChatServiceEditModeTests` | Sliding-window rate limiter. |
 | `CoreAiChatServiceEditModeTests` | Streaming enablement hierarchy. |
-| `LuaExecutionPipelineEditModeTests` | Lua success/failure, repair loop, role isolation. |
+| `LuaToolEditModeTests` (`CoreAI.Mods.Tests`) | `execute_lua` tool contract and results. |
+| `LuaModAutoRepairPolicyEditModeTests` | Mod auto-repair thresholds and cooldown. |
 
 ## Example Game And Media
 

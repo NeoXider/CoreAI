@@ -46,6 +46,7 @@ namespace CoreAI.Demos
 
 
         private ILuaModRuntime _mods;
+        private CoreAiModsLifetimeScope _modsScope;
         private ActorContext _actorContext;
         private ILuaScriptVersionStore _versions;
         private CoreAiLuaModAutoRepair _autoRepair;
@@ -53,9 +54,9 @@ namespace CoreAI.Demos
         private int _autoloadedCount;
         private bool _isAutoloading;
 
-        // Cached mod lists. Rebuilt only on ModSourceLoaded/ModSourceUnloaded and after user actions
-        // in this panel (Activate/Deactivate/Forget/Save) — never while the panel is being built. See
-        // Docs/coreai-mod-system.md §6.
+        // WHY: cached mod lists, rebuilt only on ModSourceLoaded/ModSourceUnloaded and after user actions
+        // in this panel (Activate/Deactivate/Forget/Save) — never while the panel is being built, because
+        // the disk-backed stores must stay off per-frame paths. See Docs/CoreAIMods/mod-system.md §6.
         private List<LuaModInfo> _cachedActiveMods = new();
         private List<ModDescriptor> _cachedActiveDescriptors = new();
         private List<ModDescriptor> _cachedInactiveMods = new();
@@ -237,12 +238,7 @@ namespace CoreAI.Demos
                         }
                         else
                         {
-                            // Grant the same tier the host composition grants: a Full-tier mod
-                            // (unity_* APIs) autoloaded with a hardcoded All silently no-ops.
-                            LuaCapabilities autoloadCaps = coreAiScope != null && coreAiScope.FullLuaAccessEnabled
-                                ? LuaCapabilities.All | LuaCapabilities.Full
-                                : LuaCapabilities.All;
-                            _mods.LoadMod(_actorContext, modId, record.CurrentLua, autoloadCaps);
+                            _mods.LoadMod(_actorContext, modId, record.CurrentLua, ResolveModLoadCapabilities());
                         }
 
                         _autoloadedCount++;
@@ -259,6 +255,27 @@ namespace CoreAI.Demos
             {
                 _isAutoloading = false;
             }
+        }
+
+        /// <summary>
+        /// Tier this controller requests when it loads a saved mod itself (autoload and the panel's Activate).
+        /// It is the tier the mods composition grants <c>execute_lua</c> and <c>manage_mods</c>
+        /// (<see cref="CoreAiModsLifetimeScope.FullLuaAccessEnabled"/>): a Full-tier mod (unity_* APIs)
+        /// loaded with plain All silently no-ops, and Full must never be requested where the host does not
+        /// grant it.
+        /// </summary>
+        private LuaCapabilities ResolveModLoadCapabilities()
+        {
+            if (_modsScope == null)
+            {
+                // WHY: the lookup CoreAiDemoScope.ResolveModsContainer uses, so the tier is read from the
+                // scope whose container serves _mods.
+                _modsScope = FindFirstObjectByType<CoreAiModsLifetimeScope>(FindObjectsInactive.Include);
+            }
+
+            return _modsScope != null && _modsScope.FullLuaAccessEnabled
+                ? LuaCapabilities.All | LuaCapabilities.Full
+                : LuaCapabilities.All;
         }
 
         private void OnModSourceLoaded(string modId, string source, LuaCapabilities capabilities)
@@ -589,13 +606,7 @@ namespace CoreAI.Demos
                 }
                 else
                 {
-                    // WHY: Grant the SAME tier the autoload path grants (see LoadSavedMods). A Full-tier mod
-                    // (unity_* APIs) loaded with a hardcoded All silently no-ops here, so a mod activated from
-                    // the panel button would lose the unity_* calls it has when autoloaded at scene start.
-                    LuaCapabilities activateCaps = coreAiScope != null && coreAiScope.FullLuaAccessEnabled
-                        ? LuaCapabilities.All | LuaCapabilities.Full
-                        : LuaCapabilities.All;
-                    _mods.LoadMod(_actorContext, descriptor.Id, descriptor.Source, activateCaps);
+                    _mods.LoadMod(_actorContext, descriptor.Id, descriptor.Source, ResolveModLoadCapabilities());
                 }
 
                 _status = $"Activated mod '{descriptor.Id}'.";

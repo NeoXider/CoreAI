@@ -17,12 +17,13 @@ WorldCommandsDemoController
   -> CoreAiWorldCommandExecutor (spawn / move / set_color / destroy ...)
 ```
 
-The OnGUI buttons publish `CoreAiWorldCommandEnvelope` envelopes (spawn an enemy from
-`CoreAiPrefabRegistryAsset`, move and recolor `Boss`, destroy).
+The buttons on the uGUI `CoreAiDemoPanel` publish `CoreAiWorldCommandEnvelope` envelopes (spawn an
+enemy from `CoreAiPrefabRegistryAsset`, move and recolor `Boss`, destroy the last spawn).
 
 The scene demonstrates the modular composition layout: `CoreAILifetimeScope` has a child
-`Lua and World Commands` object whose `CoreAiLuaWorldModule` owns the prefab whitelist and scene-access
-configuration. The root scope contains no primary Lua/world settings.
+`Lua and World Commands` object whose `CoreAiLuaWorldModule` owns the prefab whitelist and the scene
+whitelist the executor enforces. The root scope contains no primary world settings, and this scene has
+no mod scope, so no Lua runs here.
 
 ## Why It Exists
 

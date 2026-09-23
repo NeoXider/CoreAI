@@ -25,13 +25,13 @@ DI via installers, UniTask + CancellationToken discipline, and a per-module
 architecture-fitness test (the seam-honesty test is the template). Reviewers reject work
 that violates it.
 
-**Versioning (LOCKED)**: the Roblox-like Lua mod API is a breaking change to the mod contract,
-so it ships as a **major** bump — the CoreAI package family goes **5.9.0 → 6.0.0**. All **five**
-lockstep packages (`com.neoxider.coreai`, `com.neoxider.coreaiunity`, `com.neoxider.coreaimods`,
-`com.neoxider.coreaihub`, `com.neoxider.coreaibenchmark` — ROADMAP.md §4, mod-system.md §8) are
-pinned and bumped together at the first Roblox-API release commit, with changelog
-entries. `mod.json` `api_version` is a **separate contract line starting at 1**, independent of
-the package version (§MVP5).
+**Versioning (LOCKED; historical record)**: the Roblox-like Lua mod API was a breaking change to the
+mod contract, so it shipped as a **major** bump — the CoreAI package family went **5.9.0 → 6.0.0**,
+with the five packages that existed then bumped together. Today all **seven** packages
+(`com.neoxider.coreai`, `coreaiunity`, `coreaimods`, `coreaihub`, `coreaibenchmark`, `coreaimcp`,
+`coreaimirror`) move in lockstep (ROADMAP.md §4, mod-system.md §8); the current release is in each
+package's `package.json` and the changelogs. `mod.json` `api_version` is a **separate contract line
+starting at 1**, independent of the package version (§MVP5).
 
 **Roblox API parity (LOCKED — user, 2026-07-23):** the Lua-facing API replicates Roblox **1:1** —
 identical class / method / property / event / enum names and semantics — so copy-paste Roblox
@@ -107,7 +107,7 @@ Derived rules:
   The existing `LuaCs*` classes (`LuaCsModRuntime`, `LuaCsSecureEnvironment`,
   `LuaCsExecutionGuard`, `LuaCsCoroutineHandle`/`Runner`) become the single adapter layer. The
   Roblox API layer in this roadmap is written **only** against the neutral interfaces.
-- **Multiplayer transport**: **Mirror**, via NeoxiderTools `Neo.Network` (D:\Git\NeoxiderTools),
+- **Multiplayer transport**: **Mirror**, via NeoxiderTools `Neo.Network` (a separate repository),
   which already has a solo fallback when the `MIRROR` define is absent. Proven mappings:
   `NetworkEventDispatcher` ≈ `FireServer`→`FireAllClients`; `NetworkActionRelay` TargetRpc scopes
   ≈ `FireClient`; `NetworkPropertySync` ≈ replicated properties;
@@ -829,11 +829,13 @@ Ordering changes vs. the seed roadmap, with justification:
 
 ### MVP11 — Mirror bridge core (host mode)
 
-- **Current state (2026-09-10)**: `com.neoxider.coreaimirror` ships `MirrorNetworkBridge :
+- **Current state (7.44.x)**: `com.neoxider.coreaimirror` ships `MirrorNetworkBridge :
   INetworkBridge` behind the `MIRROR` define, `CoreAiMirrorAuthenticator` and
-  `CoreAiMirrorSessionHost`; the bridge's rules are gated against its receive paths directly and no
-  claim is made that bytes cross a real socket. The join snapshot over the wire is still open —
-  `TODO.md`, "MVP2.5 rungs".
+  `CoreAiMirrorSessionHost`. Since 7.42.0 a scene switches it on through
+  `CoreAiMirrorNetworkBridgeProvider` on `CoreAiModsLifetimeScope`, and `RemoteEvent` /
+  `RemoteFunction` traffic crosses the socket; since 7.43.0 `Player:Kick()` closes the connection.
+  Host mode, world-state replication and the join snapshot over the wire are still open — see
+  `Assets/CoreAIMirror/README.md` (Known limits) and `TODO.md`, "MVP2.5 rungs".
 - **Goal**: real multiplayer transport under the *unchanged* mod-facing API, in the **host mode**
   topology first (desktop listen server — fastest dev loop, mirrors Roblox Studio play-testing).
   Wire behavior per M-rules (`02_MULTIPLAYER_REPLICATION.md`, incl. serialization/limits

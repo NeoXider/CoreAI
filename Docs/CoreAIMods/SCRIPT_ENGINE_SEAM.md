@@ -37,7 +37,8 @@ All interpreter access in `Assets/CoreAIMods/Runtime` goes through engine-neutra
 ## Rules
 
 - Composition root: `LuaCsModRuntimeFactory` creates the runtime's `LuaCsScriptEngine`; the one-off tool
-  executor, the AI envelope processor and the Rbx scheduler adapter each build their own engine over the
+  executor, the AI envelope processor (when a host composes one; the default Unity composition does
+  not) and the Rbx scheduler adapter each build their own engine over the
   same sandbox and receive the same `LuaCsCoroutineBudgetSettings` instance, so a budget change reaches
   all of them. Nothing else touches `LuaState` directly.
 - Consumers (`LuaCsModRuntime`, `LuaCsLogicSlots`, `LuaCsGameToolExecutor`, `LuaCsAiEnvelopeProcessor`,

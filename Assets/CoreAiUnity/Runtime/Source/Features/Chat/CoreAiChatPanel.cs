@@ -184,6 +184,13 @@ namespace CoreAI.Chat
         private bool _lifecycleActive;
 
         /// <summary>
+        /// Set once by <see cref="OnDestroy"/>. Unlike <see cref="_lifecycleActive"/> it never comes back: a stop or
+        /// abandon that arrives afterwards has nothing left to cancel and must not arm a new root source that
+        /// nobody would dispose.
+        /// </summary>
+        private bool _destroyed;
+
+        /// <summary>
         /// Monotonic counter incremented when turn/lifecycle ownership changes: start, Stop/abandon, or
         /// panel disable. Turn code captures the value at start and compares it before mutating shared
         /// UI/busy state, so a superseded turn that is still unwinding (e.g. after an agent switch or an
@@ -809,6 +816,7 @@ namespace CoreAI.Chat
         protected virtual void OnDestroy()
         {
             _lifecycleActive = false;
+            _destroyed = true;
             CoreAiRoutingUi.ControllerChanged -= HandleRoutingControllerChanged;
             AttachRoutingController(null);
             // WHY cancel-only for the request source: the turn that created it may still be unwinding (a scene
@@ -2398,10 +2406,18 @@ namespace CoreAI.Chat
         /// </remarks>
         /// <returns>
         /// <c>true</c> if a turn was in flight and got abandoned; <c>false</c> if there was nothing to
-        /// abandon (nothing was cancelled, but busy state is still safely reset).
+        /// abandon (nothing was cancelled, but busy state is still safely reset). After <see cref="OnDestroy"/>
+        /// this is a no-op that returns <c>false</c>: the destroy already cancelled the request.
         /// </returns>
         public bool AbandonCurrentTurn()
         {
+            // WHY: OnDestroy already cancelled the request and released the root source; the turn that may still
+            // be unwinding owns its own teardown. Going on from here would arm a fresh root on a dead panel.
+            if (_destroyed)
+            {
+                return false;
+            }
+
             bool wasInProgress = IsRequestInProgress;
 
             // WHY: bump first and unconditionally. Every IsStaleTurn check the (possibly still unwinding)
@@ -2623,6 +2639,16 @@ namespace CoreAI.Chat
                 return null;
             }
 
+            // WHY before the message is shaped: a caller token or host deadline that already fired must produce no
+            // side effect at all - no OnMessageSending, no user bubble, no OnUserMessageSent, no turn the
+            // orchestrator would record as unanswered. Both APIs take the same exit here; the string one presents the
+            // interruption the way a turn stopped at this point would.
+            if (RejectInterruptedBeforeAdmission(outcome, cancellationToken, options.DeadlineCancellationToken,
+                    "External submit was cancelled before admission."))
+            {
+                return null;
+            }
+
             if (string.IsNullOrWhiteSpace(messageText))
             {
                 if (outcome != null) outcome.Rejection = CoreAiChatExternalSubmitRejection.EmptyInput;
@@ -2645,11 +2671,6 @@ namespace CoreAI.Chat
 
             if (outcome != null)
             {
-                if (RejectInterruptedBeforeAdmission(outcome, cancellationToken, options.DeadlineCancellationToken,
-                        "External submit was cancelled before admission."))
-                {
-                    return null;
-                }
                 if (!CanStartAgentTurn() || IsActionInProgress())
                 {
                     outcome.Rejection = CanStartAgentTurn() ? CoreAiChatExternalSubmitRejection.Busy : CoreAiChatExternalSubmitRejection.Inactive;
@@ -2676,25 +2697,44 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Rejects an external submit whose caller token or host deadline already fired, with the matching code:
+        /// Rejects a submit whose caller token or host deadline already fired, with the matching code:
         /// <see cref="LlmErrorCode.Cancelled"/> for the caller, <see cref="LlmErrorCode.Timeout"/> for the deadline.
+        /// The typed result carries the rejection; without one (the string API, the UI path) the panel presents it
+        /// as the turn would have: the timeout bubble from <see cref="ResolveTimeoutMessage"/> for an elapsed
+        /// deadline, nothing for a cancelled caller. Either way no turn starts and no user message is recorded.
         /// </summary>
-        private static bool RejectInterruptedBeforeAdmission(
+        private bool RejectInterruptedBeforeAdmission(
             CoreAiChatExternalSubmitResult outcome,
             CancellationToken callerToken,
             CancellationToken deadlineToken,
             string cancelledMessage)
         {
-            if (outcome == null ||
-                (!callerToken.IsCancellationRequested && !deadlineToken.IsCancellationRequested))
+            if (!callerToken.IsCancellationRequested && !deadlineToken.IsCancellationRequested)
             {
                 return false;
             }
 
-            outcome.Rejection = CoreAiChatExternalSubmitRejection.Cancelled;
             LlmErrorCode code = LlmCancellation.ClassifyCode(LlmErrorCode.Cancelled, callerToken, deadlineToken);
-            SetExternalFailure(outcome, code,
-                code == LlmErrorCode.Timeout ? "The host deadline elapsed before admission." : cancelledMessage);
+            string detail = code == LlmErrorCode.Timeout ? "The host deadline elapsed before admission." : cancelledMessage;
+            if (outcome != null)
+            {
+                outcome.Rejection = CoreAiChatExternalSubmitRejection.Cancelled;
+                SetExternalFailure(outcome, code, detail);
+                return true;
+            }
+
+            LogTurnInterruption(code, detail);
+            if (code == LlmErrorCode.Timeout)
+            {
+                // WHY not PresentTurnInterruption: that path is gated on the stop flag of a turn, and no turn exists
+                // yet - a stale flag from an earlier UI stop must not swallow the host's timeout notice.
+                string bubble = ResolveTimeoutMessage(false);
+                if (!string.IsNullOrEmpty(bubble))
+                {
+                    AddMessage(bubble, false);
+                }
+            }
+
             return true;
         }
 
@@ -2849,23 +2889,25 @@ namespace CoreAI.Chat
             }
             _toolRoundIterationInTurn = 1;
             _stopRequestedByUser = false;
-            CancellationTokenSource requestCts =
-                CancellationTokenSource.CreateLinkedTokenSource(GetOrCreateCancellationTokenSource().Token,
-                    cancellationToken);
-            // WHY the tokens are read once, here: a CancellationTokenSource's Token getter throws once the source
+            // WHY declared outside, created inside the try: the finally below is the single owner of the request
+            // source, and it has to be able to release a source that was published to _activeRequestCts even when a
+            // later step of the setup throws.
+            CancellationTokenSource requestCts = null;
+            // WHY the token is read once, here: a CancellationTokenSource's Token getter throws once the source
             // is disposed, while a token copy keeps answering IsCancellationRequested. Everything after the first
-            // await - the catch included - uses these copies, never the sources.
-            CancellationToken requestToken = requestCts.Token;
-            _activeRequestCts = requestCts;
-            // WHY a separate source: the host deadline stops the turn like any cancellation, but it must not be
-            // part of requestCts - that token is the "somebody asked to stop" side of the classification below.
-            CancellationTokenSource deadlineLinkedCts = deadlineToken.CanBeCanceled
-                ? CancellationTokenSource.CreateLinkedTokenSource(requestToken, deadlineToken)
-                : null;
-            CancellationToken turnToken = deadlineLinkedCts?.Token ?? requestToken;
+            // await - the catch included - uses this copy, never the source.
+            CancellationToken requestToken = CancellationToken.None;
 
             try
             {
+                requestCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    GetOrCreateCancellationTokenSource().Token, cancellationToken);
+                requestToken = requestCts.Token;
+                _activeRequestCts = requestCts;
+                // WHY the host deadline is not linked in here: requestToken is the "somebody asked to stop" side of
+                // the classification below and of the orchestrator's metrics. The service links it with its own
+                // idle deadline and the host deadline into the operation token, and reports a fired deadline at a
+                // live caller as a timeout.
                 if (!OwnsActiveTurn(turnGeneration, requestCts))
                 {
                     return null;
@@ -2895,11 +2937,10 @@ namespace CoreAI.Chat
 
                 if (useStreaming)
                 {
-                    return await SendStreamingAsync(request, turnGeneration, turnToken, outcome,
-                        requestToken, deadlineToken);
+                    return await SendStreamingAsync(request, turnGeneration, outcome, requestToken, deadlineToken);
                 }
 
-                return await SendNonStreamingAsync(request, turnGeneration, turnToken, outcome);
+                return await SendNonStreamingAsync(request, turnGeneration, requestToken, deadlineToken, outcome);
             }
             catch (OperationCanceledException error)
             {
@@ -2973,13 +3014,16 @@ namespace CoreAI.Chat
                     _lastToolNameInTurn = null;
                 }
 
-                if (ReferenceEquals(_activeRequestCts, requestCts))
+                if (requestCts != null)
                 {
-                    _activeRequestCts = null;
+                    if (ReferenceEquals(_activeRequestCts, requestCts))
+                    {
+                        _activeRequestCts = null;
+                    }
+
+                    requestCts.Dispose();
                 }
 
-                deadlineLinkedCts?.Dispose();
-                requestCts.Dispose();
                 if (!IsStaleTurn(turnGeneration, _currentTurnGeneration))
                 {
                     UpdateSendButtonVisualState();
@@ -3052,7 +3096,6 @@ namespace CoreAI.Chat
         private async Task<string?> SendStreamingAsync(
             AiTaskRequest request,
             int turnGeneration,
-            CancellationToken ct,
             CoreAiChatExternalSubmitResult outcome,
             CancellationToken callerToken,
             CancellationToken deadlineToken)
@@ -3165,7 +3208,8 @@ namespace CoreAI.Chat
 
             try
             {
-                await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
+                await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, callerToken,
+                                   deadlineToken))
                 {
                     // WHY: stream-gap diagnostic: helps tell "model is slow" from "UI lost a chunk".
                     TimeSpan gap = DateTime.UtcNow - lastChunkAt;
@@ -3182,7 +3226,7 @@ namespace CoreAI.Chat
 
                     // WHY: LLM/orchestrator stack uses ConfigureAwait(false); UITK must be touched on
                     // the main thread.
-                    await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(ct);
+                    await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(callerToken);
 
                     // WHY: a newer turn may have started while this one awaited (agent switch / stop +
                     // resend); stop touching the UI — the new turn owns the transcript and busy state.
@@ -3215,7 +3259,10 @@ namespace CoreAI.Chat
                             // WHY: a terminal Timeout/Cancelled chunk is the same event as the exception the
                             // turn catches below, delivered as data. It gets the same presentation: a timeout
                             // bubble for a timeout, nothing for a cancellation - not the generic stream error.
-                            string detail = string.IsNullOrEmpty(chunk.Error)
+                            // WHY the chunk's own text only when its code was not reclassified: the text of a
+                            // provider error that became the caller's stop describes the fault, not the stop.
+                            string detail = string.IsNullOrEmpty(chunk.Error) ||
+                                            interruption != ReportedStreamCode(chunk)
                                 ? DescribeInterruption(interruption)
                                 : chunk.Error;
                             SetExternalFailure(outcome, interruption, detail);
@@ -3280,7 +3327,7 @@ namespace CoreAI.Chat
                     }
                 }
 
-                await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(ct);
+                await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(callerToken);
                 if (IsStaleTurn(turnGeneration, _currentTurnGeneration))
                 {
                     SetExternalFailure(outcome, LlmErrorCode.Cancelled, "A newer turn superseded this invocation.");
@@ -3362,8 +3409,9 @@ namespace CoreAI.Chat
         private async Task<string?> SendNonStreamingAsync(
             AiTaskRequest request,
             int turnGeneration,
-            CancellationToken ct,
-            CoreAiChatExternalSubmitResult outcome = null)
+            CancellationToken callerToken,
+            CancellationToken deadlineToken,
+            CoreAiChatExternalSubmitResult outcome)
         {
             ShowTypingIndicator();
             _nonStreamAssistantOutputStarted = false;
@@ -3371,10 +3419,10 @@ namespace CoreAI.Chat
             try
             {
                 string response;
-                if (outcome == null) response = await _chatService.SendMessageAsync(request, ct);
+                if (outcome == null) response = await _chatService.SendMessageAsync(request, callerToken, deadlineToken);
                 else
                 {
-                    outcome.Completion = await _chatService.SendMessageResultAsync(request, ct) ??
+                    outcome.Completion = await _chatService.SendMessageResultAsync(request, callerToken, deadlineToken) ??
                         new LlmCompletionResult { Ok = false, ErrorCode = LlmErrorCode.EmptyResponse, Error = "No task completion was returned." };
                     if (!outcome.Completion.Ok) return null;
                     response = outcome.Completion.Content;
@@ -3548,22 +3596,34 @@ namespace CoreAI.Chat
         /// <summary>
         /// <see cref="LlmErrorCode.Timeout"/> or <see cref="LlmErrorCode.Cancelled"/> when a stream chunk ends
         /// the turn as an interruption rather than a provider failure; <see cref="LlmErrorCode.None"/> otherwise.
-        /// A legacy producer that only writes <c>Error = "cancelled"</c> counts as a cancellation.
+        /// Any failure reported after the caller cancelled is the caller's stop
+        /// (<see cref="LlmCancellation.ClassifyCode(LlmErrorCode, CancellationToken, CancellationToken)"/>).
         /// </summary>
         private static LlmErrorCode ClassifyStreamInterruption(
             LlmStreamChunk chunk,
             CancellationToken callerToken,
             CancellationToken deadlineToken)
         {
-            LlmErrorCode code = chunk.ErrorCode;
-            if (code == LlmErrorCode.None &&
-                string.Equals(chunk.Error, "cancelled", StringComparison.OrdinalIgnoreCase))
+            LlmErrorCode code = LlmCancellation.ClassifyCode(ReportedStreamCode(chunk), callerToken, deadlineToken);
+            return code == LlmErrorCode.Timeout || code == LlmErrorCode.Cancelled ? code : LlmErrorCode.None;
+        }
+
+        /// <summary>
+        /// The failure code <paramref name="chunk"/> reports: its own code; for a chunk that carries only error
+        /// text, <see cref="LlmErrorCode.Cancelled"/> from a legacy producer that writes <c>Error = "cancelled"</c>
+        /// and otherwise the <see cref="LlmErrorCode.ProviderError"/> the chunk is presented as;
+        /// <see cref="LlmErrorCode.None"/> for a chunk that did not fail.
+        /// </summary>
+        private static LlmErrorCode ReportedStreamCode(LlmStreamChunk chunk)
+        {
+            if (chunk.ErrorCode != LlmErrorCode.None || string.IsNullOrEmpty(chunk.Error))
             {
-                code = LlmErrorCode.Cancelled;
+                return chunk.ErrorCode;
             }
 
-            code = LlmCancellation.ClassifyCode(code, callerToken, deadlineToken);
-            return code == LlmErrorCode.Timeout || code == LlmErrorCode.Cancelled ? code : LlmErrorCode.None;
+            return string.Equals(chunk.Error, LlmCancellation.CancelledErrorText, StringComparison.OrdinalIgnoreCase)
+                ? LlmErrorCode.Cancelled
+                : LlmErrorCode.ProviderError;
         }
 
         /// <summary>
@@ -4041,7 +4101,9 @@ namespace CoreAI.Chat
 
         private void StopActiveGeneration()
         {
-            if (_isStopping || !IsRequestInProgress)
+            // WHY the destroyed check: OnDestroy already cancelled the request and released the root source; a stop
+            // that arrives afterwards (a host's watchdog, a late button handler) would arm a new root nobody disposes.
+            if (_destroyed || _isStopping || !IsRequestInProgress)
             {
                 return;
             }
@@ -4160,6 +4222,19 @@ namespace CoreAI.Chat
                     Logger.LogWarning(GameLogFeature.Core,
                         $"[CoreAiChatPanel] {context}: root dispose failed: {disposeEx.Message}");
                 }
+            }
+
+            // WHY no replacement outside an active lifecycle: the next turn creates the root lazily through
+            // GetOrCreateCancellationTokenSource, while a source armed on a disabled or destroyed panel has no owner
+            // left to dispose it.
+            if (!_lifecycleActive)
+            {
+                if (ReferenceEquals(_cts, root))
+                {
+                    _cts = null;
+                }
+
+                return;
             }
 
             if (ReferenceEquals(_cts, root) || _cts == null || IsCancellationRequested(_cts))
@@ -5063,7 +5138,8 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Clears chat.
+        /// Clears chat. Every clear path - the header clear button, <see cref="ClearChat()"/> and host calls -
+        /// goes through here and notifies <see cref="OnChatClearing"/> first.
         /// </summary>
         /// <param name="clearChatHistory">The clear chat history value.</param>
         /// <param name="clearLongTermMemory">The clear long term memory value.</param>
@@ -5079,6 +5155,7 @@ namespace CoreAI.Chat
             UpdateSendButtonVisualState();
             try
             {
+                NotifyChatClearing(clearChatHistory, clearLongTermMemory);
                 StopActiveGeneration();
 
                 if (MessageScroll != null)
@@ -5124,9 +5201,36 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Called once per <see cref="ClearChat(bool, bool)"/>, before the active generation is stopped and before
+        /// <see cref="MessageScroll"/> is emptied - on every clear path, including the header clear button. A host
+        /// that inserts its own rows into the feed (inline cards, widgets) closes their state here so nothing stays
+        /// "live" without a row in the tree. The base implementation does nothing. An exception thrown here is logged
+        /// and does not abort the clear.
+        /// </summary>
+        /// <param name="clearChatHistory">Whether the clear also wipes the role's chat history.</param>
+        /// <param name="clearLongTermMemory">Whether the clear also wipes the role's long-term memory.</param>
+        protected virtual void OnChatClearing(bool clearChatHistory, bool clearLongTermMemory)
+        {
+        }
+
+        private void NotifyChatClearing(bool clearChatHistory, bool clearLongTermMemory)
+        {
+            try
+            {
+                OnChatClearing(clearChatHistory, clearLongTermMemory);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(GameLogFeature.Core,
+                    $"[CoreAiChatPanel] OnChatClearing override failed; the chat is cleared anyway: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Stops the active generation request and immediately restores the chat controls.
         /// The unified stop path leaves already streamed assistant text in place and does not append
-        /// an extra cancellation message.
+        /// an extra cancellation message. A no-op once the panel is destroyed: <see cref="OnDestroy"/> already
+        /// cancelled the request.
         /// </summary>
         public void StopAgent()
         {

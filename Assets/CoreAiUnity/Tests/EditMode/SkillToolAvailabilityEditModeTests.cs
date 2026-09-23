@@ -438,5 +438,123 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotEmpty(error);
             Assert.AreEqual(0, calls);
         }
+
+        /// <summary>
+        /// A value of the wrong type ("yes" for a bool) used to pass the key-presence check and fail
+        /// INSIDE MEAI's binder, exactly like a missing key did before 7.44.2. Now the same structural
+        /// preflight as the direct path runs against the target's own binder, before the body.
+        /// </summary>
+        [Test]
+        public void TypeMismatchedArgument_IsRejectedBeforeBinding_WithExpectedParameters()
+        {
+            int calls = 0;
+            ILlmTool caller = CallSkillToolLlmTool.Create(new[]
+            {
+                new SkillSet("briefing", "", "", VerdictTool(() => calls++))
+            });
+
+            Assert.IsFalse(TryResolve(caller, "submit_task_verdict",
+                "{\"task_id\":\"t1\",\"accepted\":\"yes\",\"reason\":\"fine\"}",
+                out ResolvedLlmToolInvocation invocation, out string error));
+
+            Assert.IsNull(invocation);
+            Assert.AreEqual(0, calls);
+            StringAssert.Contains("Argument 'accepted' does not match the expected type for tool 'submit_task_verdict'", error);
+            StringAssert.Contains("Expected parameters: task_id (string, required), accepted (boolean, required), reason (string, required)", error);
+            StringAssert.Contains("NOT executed", error);
+            StringAssert.Contains("Retry call_skill_tool with tool_name=\"submit_task_verdict\"", error);
+        }
+
+        [Test]
+        public async Task TypeMismatchedArgument_ThroughProxyFunction_ReturnsActionableFailure()
+        {
+            int calls = 0;
+            ILlmTool caller = CallSkillToolLlmTool.Create(new[]
+            {
+                new SkillSet("briefing", "", "", VerdictTool(() => calls++))
+            });
+            AIFunction function = ((IAIFunctionLlmTool)caller).CreateAIFunction();
+
+            object result = await function.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object>
+            {
+                ["tool_name"] = "submit_task_verdict",
+                ["arguments_json"] = "{\"task_id\":\"t1\",\"accepted\":\"yes\",\"reason\":\"fine\"}"
+            }), CancellationToken.None);
+
+            JObject parsed = JObject.Parse(result.ToString());
+            Assert.IsFalse(parsed["success"].Value<bool>());
+            StringAssert.Contains("Argument 'accepted' does not match the expected type", parsed["error"].Value<string>());
+            StringAssert.Contains("NOT executed", parsed["error"].Value<string>());
+            Assert.AreEqual(0, calls);
+        }
+
+        /// <summary>The preflight must never be stricter than MEAI: a bare enum name binds through the string-value route.</summary>
+        [Test]
+        public async Task EnumNameArgument_StillBindsThroughProxy()
+        {
+            DayOfWeek? seen = null;
+            ILlmTool caller = CallSkillToolLlmTool.Create(new[]
+            {
+                new SkillSet("calendar", "", "", new DelegateLlmTool("set_day", "Set the day",
+                    new Func<DayOfWeek, string>(day =>
+                    {
+                        seen = day;
+                        return "{\"success\":true}";
+                    })))
+            });
+
+            Assert.IsTrue(TryResolve(caller, "set_day", "{\"day\":\"Friday\"}",
+                out ResolvedLlmToolInvocation invocation, out string error), error);
+            await invocation.InvokeAsync(CancellationToken.None);
+            Assert.AreEqual(DayOfWeek.Friday, seen);
+        }
+
+        /// <summary>
+        /// An object argument reaches the binder as compact JSON text (the normalizer's rule) whether the
+        /// model sent it as a nested object or as a JSON string; both bind as JSON content.
+        /// </summary>
+        [TestCase("{\"counts\":{\"apples\":3}}")]
+        [TestCase("{\"counts\":\"{\\\"apples\\\":3}\"}")]
+        public async Task JsonObjectArgument_StillBindsThroughProxy(string argumentsJson)
+        {
+            Dictionary<string, int> seen = null;
+            ILlmTool caller = CallSkillToolLlmTool.Create(new[]
+            {
+                new SkillSet("inventory", "", "", new DelegateLlmTool("set_counts", "Set counts",
+                    new Func<Dictionary<string, int>, string>(counts =>
+                    {
+                        seen = counts;
+                        return "{\"success\":true}";
+                    })))
+            });
+
+            Assert.IsTrue(TryResolve(caller, "set_counts", argumentsJson,
+                out ResolvedLlmToolInvocation invocation, out string error), error);
+            await invocation.InvokeAsync(CancellationToken.None);
+            Assert.IsNotNull(seen);
+            Assert.AreEqual(3, seen["apples"]);
+        }
+
+        /// <summary>
+        /// The descriptor carries its schema parsed once; the proxy checks against that, not against the
+        /// schema string re-parsed on every call, and both readings say the same thing.
+        /// </summary>
+        [Test]
+        public void Descriptor_CarriesParsedSchema_AndDescribesMissingArgumentsFromIt()
+        {
+            SkillToolDescriptor descriptor = SkillSetToolResolver.BuildDescriptors(
+                new SkillSet("briefing", "", "", VerdictTool(() => { })))[0];
+
+            Assert.IsNotNull(descriptor.Schema);
+            Assert.AreSame(descriptor.Schema, descriptor.Schema);
+            CollectionAssert.AreEqual(new[] { "task_id", "accepted", "reason" }, descriptor.Schema.Required);
+            CollectionAssert.AreEqual(new[] { "task_id", "accepted", "reason" }, descriptor.Schema.PropertyNames);
+            Assert.IsNotNull(descriptor.PreflightFunction, "a delegate tool binds through its own MEAI function");
+
+            JObject arguments = JObject.Parse("{\"task_id\":\"t1\",\"accepted\":true,\"comment\":\"ok\"}");
+            Assert.AreEqual(
+                SkillSetToolResolver.DescribeMissingRequiredArguments("submit_task_verdict", descriptor.ParametersSchema, arguments),
+                SkillSetToolResolver.DescribeMissingRequiredArguments(descriptor, arguments));
+        }
     }
 }

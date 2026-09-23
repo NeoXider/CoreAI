@@ -33,7 +33,7 @@ Those two versions are the **Unity consumer's ceiling**, not a preference, and t
 
 The [portable NUnit suite](Tests/README.md) runs existing engine-free tests against this DLL and collects line/branch coverage without Unity. Run `dotnet test tools/portable/Tests/CoreAI.Portable.Tests.csproj -c Release` from the checkout. Unity host and device tests remain separate.
 
-It executed **1,231 cases with 0 failures in 18 s** on 2026-09-09, and it is the **first** CI job (`portable-core`, `ubuntu-latest`, no Unity license). That is what makes "the core does not depend on Unity" checkable rather than aspirational: this project references no Unity assembly at all, so one `using UnityEngine;` in `Assets/CoreAI/Runtime/Core/**` breaks the build. Re-run the command above to confirm the number yourself; it is not a badge.
+It is the **first** CI job (`portable-core`, `ubuntu-latest`, no Unity license) and must finish with 0 failures. That is what makes "the core does not depend on Unity" checkable rather than aspirational: this project references no Unity assembly at all, so one `using UnityEngine;` in `Assets/CoreAI/Runtime/Core/**` breaks the build. Re-run the command above to see the current case count yourself; it is not a badge.
 
 The test project lists its sources file by file rather than by glob, so a new engine-free fixture must be added to `Tests/CoreAI.Portable.Tests.csproj` explicitly or it never runs in this leg.
 
@@ -65,7 +65,7 @@ The plain non-streaming desktop path uses MEAI `FunctionInvokingChatClient` and 
 ## What this DLL will not do for you
 
 - **Execute tools mid-stream.** `SmartToolCallingChatClient.GetStreamingResponseAsync` passes tool calls through unexecuted and logs that it did; the execute-as-you-stream loop lives in `MeaiLlmClient` in the Unity package. In a plain .NET host use the non-streaming `GetResponseAsync`, as the console sample does.
-- **Persist anything.** There is no file store here. Supply your own `IConversationSummaryStore` / memory store, or state dies with the process.
+- **Persist most things.** The only file-backed store here is `FileConversationSummaryStore` (rolling conversation summaries). Agent memory, chat history and skills need your own `IAgentMemoryStore` / `ISkillStore`, or that state dies with the process.
 - **Speak a non-OpenAI provider API.** `MeaiOpenAiChatClient` implements the OpenAI chat-completions shape over HTTP/SSE. Anything else needs your own `IChatClient` or a proxy in front.
 - **Run a UI, a Lua sandbox, or the MCP server.** Those are separate packages and stay out of this assembly on purpose.
 - **Bill, throttle, or authorize.** Budgets, rate limits and permission checks belong in your tools and your endpoint.

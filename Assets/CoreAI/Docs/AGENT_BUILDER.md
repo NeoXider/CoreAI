@@ -69,7 +69,7 @@ fail separately after a skill commits; inspect the existing authoring result's r
 ### Capabilities
 
 - ✅ **Unique tools** — any `ILlmTool` for a specific agent
-- ✅ **Skills** — named tool+instruction groups with per-request activation (**v2.0+**)
+- ✅ **Skills** — named tool+instruction groups with per-request activation
 - ✅ **Three response modes** — `ChatOnly`, `ToolsAndChat`, `ToolsOnly`
 - ✅ **Memory** — persistent agent memory (read/write/append/clear and granular edits)
 - ✅ **Wait tool** — optional `wait(seconds)` tool for polling/cooldowns inside a tool-calling turn
@@ -107,11 +107,11 @@ declaration, or a built-in fallback, `MissingSystemPrompt` is still reported. No
 
 ---
 
-## Skills (v2.1)
+## Skills
 
 `SkillSet` — a group of tools + instructions that the model loads **on demand** via two meta-tools:
 - `read_skill(skill_name)` — load instructions + tool schemas
-- `call_skill_tool(tool_name, arguments_json)` — execute a skill's tool
+- `call_skill_tool(tool_name, arguments_json)` — execute a skill's tool (the arguments are checked against that tool's parameters first)
 
 Skills add two meta-tools, regardless of the number of nested tools. Their schemas load on demand; the catalog of names and descriptions grows with the skill set. The role's regular tools may be available at the same time.
 
@@ -124,13 +124,17 @@ var crafting = new SkillSet("Crafting",
     "1. Call get_recipes to see available recipes.\n" +
     "2. Check inventory via check_inventory.\n" +
     "3. Craft via craft_item with recipe_id and quality.",
-    new DelegateLlmTool("get_recipes", "List recipes", (string type) => ...),
-    new DelegateLlmTool("craft_item", "Craft an item", (string id, float q) => ...));
+    new DelegateLlmTool("get_recipes", "List recipes", new Func<string, string>(type => ...)),
+    new DelegateLlmTool("craft_item", "Craft an item", new Func<string, float, string>((id, q) => ...)));
 
 // Without instructions — model relies on tool descriptions
 var combat = new SkillSet("Combat", "Fight enemies",
-    new DelegateLlmTool("attack", "Attack target", (string target) => ...));
+    new DelegateLlmTool("attack", "Attack target", new Func<string, string>(target => ...)));
 ```
+
+`DelegateLlmTool` takes a `System.Delegate`. Unity compiles C# 9, where a lambda has no type of its own,
+so always wrap it in an explicit delegate type (`new Func<...>(...)`, `new Action(...)`); a bare lambda
+fails with CS1660.
 
 Skill tools may be normal tools or actions. A `DelegateLlmTool` backed by `Action`, `Func<T>`, or an async delegate can
 live inside a `SkillSet`; the model still calls it through `call_skill_tool`. Void actions return
@@ -260,8 +264,8 @@ its text exactly as written.
 void Start()
 {
     SkillSet skill = craftingAsset.BuildSkillSet(
-        new DelegateLlmTool("get_recipes", "List recipes", (string type) => ...),
-        new DelegateLlmTool("craft_item", "Craft item", (string id) => ...));
+        new DelegateLlmTool("get_recipes", "List recipes", new Func<string, string>(type => ...)),
+        new DelegateLlmTool("craft_item", "Craft item", new Func<string, string>(id => ...)));
 
     new AgentBuilder("GameMaster")
         .WithSkill(skill)
@@ -303,8 +307,15 @@ await orch.RunTaskAsync(new AiTaskRequest {
     RoleId = "GameMaster",
     Hint = "Craft me an iron sword"
 });
-// Model: sees catalog → read_skill("Crafting") → call_skill_tool("get_recipes", "{}") → response
+// Model: sees catalog → read_skill("Crafting") → call_skill_tool("get_recipes", "{\"type\": \"sword\"}") → response
 ```
+
+`call_skill_tool` checks the arguments against the target tool before binding it. A call that omits a
+required argument (`call_skill_tool("get_recipes", "{}")` for the `type` parameter above) or passes a
+value of the wrong type (`"yes"` for a `bool`) is refused: the model gets an error that names the tool
+and the argument, lists the expected parameters, says the tool was **not** executed, and shows how to
+retry. "Missing" means the key is absent or `null`; an empty string is a present value and reaches
+the tool, so validate `""` inside the tool when it is not meaningful.
 
 ### Preloading a skill (force-inject, no model turn)
 
@@ -410,7 +421,9 @@ lock on WebGL fails explicitly without blocking the thread.
 1. `WithSkill()` stores the `SkillSet` — tools are **not** added to the model's tool list
 2. `ApplyToPolicy()` appends the static skill catalog to the stable system prompt prefix and registers `read_skill` + `call_skill_tool`
 3. Model sees the catalog (skill names + descriptions), calls `read_skill(name)` to load instructions + tool schemas
-4. Model calls `call_skill_tool(tool_name, arguments_json)` to execute tools through the proxy
+4. Model calls `call_skill_tool(tool_name, arguments_json)` to execute tools through the proxy; a
+   missing required argument or a type-mismatched one is refused before the tool is bound, and the
+   refusal tells the model the expected parameters
 5. The two meta-tools stay constant; the catalog and read documents occupy context as skills grow.
 6. Tool results are returned to the model as normal tool output; empty or void action results become
    `{"success":true}` instead of disappearing.
@@ -489,8 +502,10 @@ Model calls: read_skill("Crafting")
     { tool_name: "craft_item", parameters: [{name: "recipe_id", type: "string"}] }
   ↓
 Model calls: call_skill_tool("get_recipes", "{\"type\": \"sword\"}")
-  → Proxy finds get_recipes delegate, parses JSON, invokes it
+  → Proxy finds get_recipes delegate, parses JSON, checks required arguments and types, invokes it
   → Returns: [{recipe_id: "iron_sword_01", materials: [...]}]
+  (call_skill_tool("get_recipes", "{}") would be refused here: "type" is required,
+   the tool is not executed, and the error lists the expected parameters)
   ↓
 Model calls: call_skill_tool("craft_item", "{\"recipe_id\": \"iron_sword_01\"}")
   → Proxy routes to craft_item
@@ -523,7 +538,7 @@ merchant.ApplyToPolicy(policy);
 ### 2. Configure the backend (unified settings)
 
 ```
-Unity → Create → CoreAI → CoreAI Settings
+Assets → Create → CoreAI → CoreAI Settings
 ```
 
 In the Inspector, choose **LLM Backend**:
@@ -598,8 +613,13 @@ Debug.Log(result.ReasoningContent);
 > CoreAI never substitutes reasoning as an answer.
 
 > 🛡️ **Built-in spam protection (call cancellation):**
-> Both methods (`AskWithCallback` and `AskAsync`) automatically pass `CancellationScope = Agent.RoleId` to the orchestrator.
-> That means **if you call `merchant.AskWithCallback()` again while the first request is still generating, the old request is forcibly stopped (Cancelled)** and the new one runs. This saves CPU and tokens on double-clicks or message spam to the same NPC.
+> Both methods (`AskWithCallback` and `AskAsync`) pass the actor's session id as `CancellationScope`, and the
+> queued orchestrator scopes cancellation per (session, role).
+> That means **if you call `merchant.AskWithCallback()` again while the first request is still generating, the old request is stopped and reported as `Cancelled`** and the new one runs. This saves CPU and tokens on double-clicks or message spam to the same NPC.
+> A stopped request is never retried or sent to a fallback backend, and a fault it reports while stopping is
+> not presented as a provider error. A request whose *own* caller token was cancelled is `Cancelled` in every
+> layer whatever the transport reports; only a deadline that fires while the caller is still waiting is a
+> `Timeout`.
 
 ---
 
@@ -891,14 +911,18 @@ Passes any C# `Delegate` (`Action` or `Func`) into the agent pipeline. **Microso
 ```csharp
 var agent = new AgentBuilder("Helper")
     // Parameterless method
-    .WithAction("heal_player", "Heals the player fully", () => player.Heal())
+    .WithAction("heal_player", "Heals the player fully", new Action(() => player.Heal()))
 
     // Method with parameters (the agent infers amount(int) and item(string))
-    .WithAction("give_item", "Gives an item", (int amount, string item) => {
+    .WithAction("give_item", "Gives an item", new Action<int, string>((amount, item) => {
         inventory.Add(item, amount);
-    })
+    }))
     .Build();
 ```
+
+Unity compiles C# 9: when a parameter is `System.Delegate`, wrap the lambda in an explicit delegate type
+(`new Func<...>(...)`, `new Action(...)`). A method group works the same way:
+`new Func<int, string>(GrantGold)`.
 
 ### 2. WithEventTool (decoupled events)
 
@@ -937,7 +961,7 @@ void Start()
 >    `.WithSystemPrompt("You are a guard. If the player admits to a crime, you MUST call the 'alarm' tool immediately.")`
 
 > ❓ **What's the difference between WithAction and WithEventTool?**
-> - **`WithAction`** — wires a specific C# delegate. The agent invokes your method directly (e.g. `() => player.Heal()`). Good for direct actions with a clear outcome.
+> - **`WithAction`** — wires a specific C# delegate. The agent invokes your method directly (e.g. `new Action(() => player.Heal())`). Good for direct actions with a clear outcome.
 > - **`WithEventTool`** — only publishes on the `CoreAiEvents` bus via `CoreAiEvents.Publish()`. The agent does not know who handles it. Useful for decoupling: the agent fires `trigger_scare` while handlers live on audio, VFX spawners, etc.
 
 ---
@@ -949,33 +973,43 @@ void Start()
 **Step 1: Create a tool class**
 
 ```csharp
-// Must implement ILlmTool
-public class MyTool : ILlmTool
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using CoreAI.Ai;
+using Microsoft.Extensions.AI;
+
+// LlmToolBase supplies the ILlmTool defaults (ParametersSchema "{}", AllowDuplicates false, ...);
+// IAIFunctionLlmTool is the binding contract the pipeline looks for.
+public sealed class MyTool : LlmToolBase, IAIFunctionLlmTool
 {
     // 1. Unique name (used by the model to invoke)
-    public string Name => "my_tool_name";
+    public override string Name => "my_tool_name";
 
     // 2. Description (the model reads this to know when to call)
-    public string Description => "Description of what the tool does";
+    public override string Description => "Description of what the tool does";
 
-    // 3. JSON schema for parameters (if any)
-    public string ParametersSchema => "{}"; // No parameters
-
-    // 4. Create AIFunction — this runs when the tool is invoked
+    // 3. The function the model calls. Its schema comes from the delegate's parameters.
     public AIFunction CreateAIFunction()
     {
         return AIFunctionFactory.Create(
-            async (CancellationToken ct) =>
-            {
-                // Your code here
-                return new { result = "success" };
-            },
+            new Func<CancellationToken, Task<string>>(ExecuteAsync),
             Name,           // Function name
-            Description     // Description
-        );
+            Description);   // Description
+    }
+
+    private Task<string> ExecuteAsync(CancellationToken ct)
+    {
+        // Your code here
+        return Task.FromResult("{\"result\":\"success\"}");
     }
 }
 ```
+
+A class that implements only `ILlmTool` is **not** exposed to the model: `MeaiLlmClient` binds tools through
+`IAIFunctionLlmTool` (one function) or `IAIFunctionsLlmTool` (several functions) and skips any other tool with
+the warning *"does not implement a MEAI function binding interface"*. `ILlmTool` alone also declares
+`AllowDuplicates` without a default, which is why deriving from `LlmToolBase` is the simplest start.
 
 **Step 2: Add the tool to the agent**
 
@@ -1051,7 +1085,11 @@ If you see this line repeatedly, that's the signal to either (a) flip `WithAllow
 
 Per call you can override how the model picks tools via `AiTaskRequest.ForcedToolMode` (`LlmToolChoiceMode` enum): `Auto` (default — model decides), `RequireAny` (must emit some tool call), `RequireSpecific` (must call the tool named in `AiTaskRequest.RequiredToolName`), or `None` (answer without tools). These map onto Microsoft.Extensions.AI `ChatToolMode`.
 
-> ⚠️ **Known limitation (local servers):** local **llama.cpp** / **LM Studio** OpenAI-compatible servers reject a forced-**specific** `tool_choice` (CoreAI `LlmToolChoiceMode.RequireSpecific`) with **HTTP 400**. `"required"` (`RequireAny`), `"auto"` (`Auto`), and none are accepted. When targeting such local servers, prefer `RequireAny` or `Auto` over `RequireSpecific`. Cloud providers (OpenAI, OpenRouter, etc.) generally accept the specific form.
+> 💡 **Local servers:** CoreAI sends `RequireSpecific` as `tool_choice: "required"` over a tool list narrowed to
+> the named tool (the full list returns after the first tool call), so local **llama.cpp** / **LM Studio**
+> servers accept it — they would reject the OpenAI specific-function form with HTTP 400. If the named tool has
+> no bound function for the request, the call fails with `LlmErrorCode.InvalidRequest` before the provider is
+> contacted.
 
 #### Generation temperature
 
@@ -1132,14 +1170,15 @@ When the model decides your tool is needed, it returns:
 {"name": "my_tool_name", "arguments": {}}
 ```
 
-CoreAI recognizes this, runs `MyTool.CreateAIFunction()`, and returns the result to the model.
+CoreAI invokes the `AIFunction` it bound from `MyTool.CreateAIFunction()` when it built the request, and
+returns the result to the model.
 
 ---
 
 ### Basic tool (no parameters)
 
 ```csharp
-public class WeatherLlmTool : ILlmTool
+public sealed class WeatherLlmTool : LlmToolBase, IAIFunctionLlmTool
 {
     private readonly IWeatherProvider _weather;
 
@@ -1148,22 +1187,22 @@ public class WeatherLlmTool : ILlmTool
         _weather = weather;
     }
 
-    public string Name => "get_weather";
+    public override string Name => "get_weather";
 
-    public string Description => "Get current weather in the game world.";
-
-    public string ParametersSchema => "{}";
+    public override string Description => "Get current weather in the game world.";
 
     public AIFunction CreateAIFunction()
     {
         return AIFunctionFactory.Create(
-            async (CancellationToken ct) =>
-            {
-                var weather = await _weather.GetCurrentAsync(ct);
-                return new { weather.Temperature, weather.Condition, weather.IsRaining };
-            },
-            "get_weather",
-            "Get current weather in the game world.");
+            new Func<CancellationToken, Task<string>>(GetWeatherAsync),
+            Name,
+            Description);
+    }
+
+    private async Task<string> GetWeatherAsync(CancellationToken ct)
+    {
+        var weather = await _weather.GetCurrentAsync(ct);
+        return $"{weather.Condition}, {weather.Temperature} C, raining: {weather.IsRaining}";
     }
 }
 ```
@@ -1171,13 +1210,13 @@ public class WeatherLlmTool : ILlmTool
 ### Tool with parameters
 
 ```csharp
-public class CraftItemTool : ILlmTool
+public sealed class CraftItemTool : LlmToolBase, IAIFunctionLlmTool
 {
-    public string Name => "craft_item";
+    public override string Name => "craft_item";
 
-    public string Description => "Craft an item from ingredients.";
+    public override string Description => "Craft an item from ingredients.";
 
-    public string ParametersSchema =>
+    public override string ParametersSchema =>
         "{" +
         "  \"type\": \"object\"," +
         "  \"properties\": {" +
@@ -1190,16 +1229,23 @@ public class CraftItemTool : ILlmTool
     public AIFunction CreateAIFunction()
     {
         return AIFunctionFactory.Create(
-            async (string ingredient1, string ingredient2, CancellationToken ct) =>
-            {
-                var result = await CraftingSystem.CraftAsync(ingredient1, ingredient2, ct);
-                return new { result.ItemName, result.Quality, result.Success };
-            },
-            "craft_item",
-            "Craft an item from two ingredients.");
+            new Func<string, string, CancellationToken, Task<string>>(CraftAsync),
+            Name,
+            Description);
+    }
+
+    // Parameter names must match the schema property names above.
+    private async Task<string> CraftAsync(string ingredient1, string ingredient2, CancellationToken ct)
+    {
+        var result = await CraftingSystem.CraftAsync(ingredient1, ingredient2, ct);
+        return result.Success ? $"Crafted {result.ItemName} ({result.Quality})" : "Error: crafting failed";
     }
 }
 ```
+
+`ingredient1` and `ingredient2` are required, so a call that omits one of them (or sends `null`) is refused
+before `CraftAsync` runs. An empty string is a present value and reaches `CraftAsync` — reject it there if it
+is not a valid ingredient.
 
 ---
 
@@ -1301,7 +1347,7 @@ async Task AskMerchant(string playerMessage)
 | `WithPerRequestSystemPrompt()` | Declare that every call supplies `AiTaskRequest.SystemPrompt`; suppresses only `MissingSystemPrompt` validation | `.WithPerRequestSystemPrompt()` |
 | `WithTool(ILlmTool)` | Add a tool | `.WithTool(new InventoryLlmTool(...))` |
 | `WithTools(IEnumerable<ILlmTool>)` | Add multiple tools | `.WithTools(tools)` |
-| `WithAction(string, string, Delegate)` | ADD tool from C# delegate | `.WithAction("heal", "desc", () => Heal())` |
+| `WithAction(string, string, Delegate)` | ADD tool from C# delegate | `.WithAction("heal", "desc", new Action(() => Heal()))` |
 | `WithEventTool(string, string, bool)` | ADD tool that publishes an event | `.WithEventTool("alarm", "desc")` |
 | `WithMemory(MemoryToolAction)` | Enable memory | `.WithMemory()` or `.WithMemory(MemoryToolAction.Write)` |
 | `WithChatHistory()` | Enable chat history | `.WithChatHistory()` |
@@ -1344,7 +1390,7 @@ var custom   = new AgentBuilder(new RoleId("Blacksmith")) ... ; // custom role
 await CoreAi.AskAsync("Hi", roleId: RoleId.SmartChat);
 ```
 
-Built-in statics: `RoleId.Creator`, `RoleId.Builder`, `RoleId.Analyzer`, `RoleId.Programmer`, `RoleId.AiNpc`, `RoleId.CoreMechanic`, `RoleId.PlainChat`, `RoleId.SmartChat`, `RoleId.Merchant` (source: `Assets/CoreAI/Runtime/Core/Features/AgentPrompts/RoleId.cs:39-63`; this list previously omitted `RoleId.Builder`, which has existed alongside `Creator` since `BuiltInAgentRoleIds` added the `Builder` role). `roleId.IsBuiltIn` tells whether the id matches a built-in role.
+Built-in statics: `RoleId.Creator`, `RoleId.Builder`, `RoleId.Analyzer`, `RoleId.Programmer`, `RoleId.AiNpc`, `RoleId.CoreMechanic`, `RoleId.PlainChat`, `RoleId.SmartChat`, `RoleId.Merchant` (declared on `RoleId` and backed by `BuiltInAgentRoleIds`). `roleId.IsBuiltIn` tells whether the id matches a built-in role.
 
 ### CoreAI (static facade)
 

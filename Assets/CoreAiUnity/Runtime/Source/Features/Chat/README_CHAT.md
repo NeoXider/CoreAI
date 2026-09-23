@@ -128,7 +128,7 @@ Create two **`CoreAiChatConfig`** assets (or duplicate one) with **Role ID** = `
 The panel is **not bound** to a single role: **`CoreAiChatConfig`** sets **Role ID**, the same one you registered through **`AgentBuilder`**. The orchestrator and MEAI are the same for UI and programmatic calls. **`ToolsOnly`** is technically allowed for chat; the panel does not trim the agent mode. For UX, expect tools to dominate rather than conversation. Game code can add policy for its own mode in **`BuildAiTaskRequest`**.
 </details>
 
-**Tests:** In this repo, **`CoreAiChatPanelBuildRequestEditModeTests`** and **`CoreAiChatPanelBuildRequestPlayModeTests`** assert the default/minimal **`AiTaskRequest`** and **`BuildAiTaskRequest`** subclass injection (no LLM). **`CoreAiChatServiceIntegrationPlayModeTests`** exercises **`CoreAiChatService`** against a configured backend and multiple role modes (requires LLM Unity / ignores when unavailable). **`CoreAiChatServiceEditModeTests`** (no scene) cover **`TryGetPersistedChatHistory`** and the same **`FormatPersistedMessageForUi`** rules the panel uses when **`Load Persisted Chat On Startup`** is on. **`CoreAILifetimeScopeConversationStoreEditModeTests.RegisterAgentMemoryStore_Resolves_FileAgentMemoryStore_SharedSingleton`** asserts **`CoreAILifetimeScope.RegisterAgentMemoryStore`** binds **`FileAgentMemoryStore`** for **`IAgentMemoryStore`** and **`IConversationTranscriptStore`**. **`AiOrchestratorHistoryEditModeTests.RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore`** asserts that after **`RunTaskAsync`** with **`PersistChatHistory`** the **`FileAgentMemoryStore`** JSON is readable by a **second** store instance (same as “restart” without Play Mode). **`ChatHistoryPlayModeTests.ChatHistory_PersistentBetweenSessions_Works`** (LLM) checks that a new orchestrator + store still receives prior chat context when the model is asked to recall an earlier secret (requires LLM / ignores when unavailable).
+**Tests:** In this repo, **`CoreAiChatPanelBuildRequestEditModeTests`** and **`CoreAiChatPanelBuildRequestPlayModeTests`** assert the default/minimal **`AiTaskRequest`** and **`BuildAiTaskRequest`** subclass injection (no LLM). **`CoreAiChatServiceIntegrationPlayModeTests`** exercises **`CoreAiChatService`** against a configured backend and multiple role modes (requires LLM Unity / ignores when unavailable). **`CoreAiChatServiceEditModeTests`** (no scene) cover **`TryGetPersistedChatHistory`**, and **`CoreAiChatPanelEditModeTests`** the **`FormatPersistedMessageForUi`** rules the panel uses when **`Load Persisted Chat On Startup`** is on. **`CoreAILifetimeScopeConversationStoreEditModeTests.RegisterAgentMemoryStore_ResolvesScopedMemory_AndKeepsFileTranscriptStore`** asserts that **`CoreAILifetimeScope.RegisterAgentMemoryStore`** exposes scoped decorators over the private **`FileAgentMemoryStore`** backing for **`IAgentMemoryStore`** and **`IConversationTranscriptStore`**. **`AiOrchestratorHistoryFileStoreEditModeTests.RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore`** asserts that after **`RunTaskAsync`** with **`PersistChatHistory`** the **`FileAgentMemoryStore`** JSON is readable by a **second** store instance (same as “restart” without Play Mode). **`ChatHistoryPlayModeTests.ChatHistory_PersistentBetweenSessions_Works`** (LLM) checks that a new orchestrator + store still receives prior chat context when the model is asked to recall an earlier secret (requires LLM / ignores when unavailable).
 
 <a id="persisted-chat-session"></a>
 
@@ -138,7 +138,7 @@ By default **`CoreAiChatPanel`** on enable (`OnEnable`) loads saved chat history
 
 | Field in **Chat Config** | Purpose |
 |--------------------------|---------|
-| **Load Persisted Chat On Startup** | When enabled (default **yes**) — before the welcome message, history is read from **`IAgentMemoryStore`** (`FileAgentMemoryStore`: `persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`, field `chatHistoryJson`). |
+| **Load Persisted Chat On Startup** | When enabled (default **yes**) — before the welcome message, history is read from **`IAgentMemoryStore`** (`FileAgentMemoryStore`, layout v2: `persistentDataPath/CoreAI/AgentMemory/<stem>.history.jsonl`, one JSON line per record next to the `<stem>.json` memory document; `<stem>` is the role id, or `scope-v1-<sha256>` with a memory scope provider). |
 | **Max Persisted Messages For Ui** | How many **last** messages to show on load; **0** = all saved. |
 
 **Editor — wipe disk state:** **CoreAI → Delete All Persistent Saves...** removes **`persistentDataPath/CoreAI`** (exit Play Mode first). Helpful when debugging persisted chat or agent memory.
@@ -153,6 +153,8 @@ By default **`CoreAiChatPanel`** on enable (`OnEnable`) loads saved chat history
 
 **Extension:** override **`HydrateStartupMessagesFromStore`** or **`TryAppendPersistedChatHistoryFromStore`** if you need a custom message source.
 
+**Clearing:** every clear path (the header **`coreai-chat-clear`** button, `ClearChat()`, `ClearChat(bool, bool)`) first calls `protected virtual void OnChatClearing(bool clearChatHistory, bool clearLongTermMemory)`, before generation is stopped and the scroll is emptied. A host that inserts its own rows into the feed (inline cards, widgets) closes their state there, so nothing stays live without a row in the tree. An exception from the override is logged and the clear still happens.
+
 **Custom persistence:** chat hydration reads whatever `IAgentMemoryStore.GetChatHistory` returns (default: `FileAgentMemoryStore`). To use **PlayerPrefs** or **cloud** for the same contract (session + MemoryTool), see [`Docs/MEMORY_STORE_CUSTOM_BACKENDS.md`](../../../../Docs/MEMORY_STORE_CUSTOM_BACKENDS.md).
 
 ## Panel collapse (FAB) — since 0.21.7
@@ -163,7 +165,7 @@ On narrow screens (width ≤ 720 or height ≤ 560) the chat **starts collapsed*
 - **API from code:**
   - `bool IsCollapsed { get; }`
   - `void SetCollapsed(bool collapsed, bool persist = true)` — expand before a cutscene or collapse after; with `persist: false` the state is not written to `PlayerPrefs`.
-- **UXML:** elements `coreai-chat-collapse` (in `coreai-chat-header`) and `coreai-chat-fab` (root, before `coreai-chat-root`). After `#coreai-typing-indicator`, the template includes optional **`coreai-long-request-hint`** (`Label`, `picking-mode="Ignore"`) — a **“still working”** line shown **≥ ~3 s after the LLM turn starts** while no streaming bubble is active, aligned with RedoSchool-style in-flight feedback. **Stop** and **StartStreaming** clear it immediately. Text comes from **`CoreAiChatConfig.LongRequestHintFormat`** (default `⌛ Response is being generated... ~{elapsed} s`); placeholder **`{elapsed}`** = whole seconds since the hint line became eligible (starts at the configured minimum, then counts up). Empty format string disables the line. If you fork UXML and omit this name, `CoreAiChatPanel` skips the feature (`Q` returns `null`).
+- **UXML:** elements `coreai-chat-collapse` (in `coreai-chat-header`) and `coreai-chat-fab` (root, before `coreai-chat-root`). After `#coreai-typing-indicator`, the template includes optional **`coreai-long-request-hint`** (`Label`, `picking-mode="Ignore"`) — a **“still working”** line shown **≥ ~3 s after the LLM turn starts** while no streaming bubble is active, as in-flight feedback for long turns. **Stop** and **StartStreaming** clear it immediately. Text comes from **`CoreAiChatConfig.LongRequestHintFormat`** (default `Response is still being generated... ~{elapsed}s`); placeholder **`{elapsed}`** = whole seconds since the hint line became eligible (starts at the configured minimum, then counts up). Empty format string disables the line. If you fork UXML and omit this name, `CoreAiChatPanel` skips the feature (`Q` returns `null`).
 - **USS:** `.coreai-chat-header-btn`, `.coreai-collapsed` on the container, `.coreai-chat-fab` / `.coreai-chat-fab-icon`. **ScrollView:** default theme uses **no right padding** on `.coreai-chat-scroll` and zero horizontal **margin/padding** on `unity-scroll-view__content-and-vertical-scroll-container` and the vertical scroller so the **scrollbar track sits flush with the panel’s inner right edge** (no “floating” gap inside the bar).
 
 Custom layout: if you **copy** UXML into your project, add the same element names or override bindings in a subclass of `CoreAiChatPanel` (override `BindUI` and call `base.BindUI()` or duplicate the logic).
@@ -287,7 +289,7 @@ chatPanel.ClearRuntimeOptions(); // fall back to assigned CoreAiChatConfig or bu
 
 Set `AllowAgentSwitching = true` (on the `CoreAiChatConfig` asset or a `CoreAiChatOptions` snapshot) to
 show a role dropdown in the chat header. The user can switch the responding agent live
-(`Programmer`, `SmartChat`, `AINpc`, `Creator`, `Analyzer`, `CoreMechanicAI`, `PlainChat`, `Merchant` —
+(`Creator`, `Builder`, `Analyzer`, `Programmer`, `AINpc`, `CoreMechanicAI`, `PlainChat`, `SmartChat`, `Merchant` —
 `BuiltInAgentRoleIds.AllBuiltInRoles`); the choice affects new messages only, and each role keeps its own
 history/memory on the service side. Prefer a light, tool-free role like `SmartChat` for plain chat (no tool
 schemas in the prompt → faster first token) and `Programmer` when the user asks for code/mechanics.
@@ -323,9 +325,10 @@ Rule for tests: create `CoreAiChatOptions` for mutable behavior. Use `Scriptable
 Get a reference to the panel (`GetComponent<CoreAiChatPanel>()`, scene singleton, etc.) and call:
 
 ```csharp
-using CoreAI.Chat;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Chat;
 
 // Normal path: user bubble in chat + LLM request (same as after typing in the field)
 string? reply = await chatPanel.SubmitMessageFromExternalAsync(
@@ -349,8 +352,19 @@ reply = await chatPanel.SubmitMessageFromExternalAsync("…", fake);
 |---------------------------------------|---------|---------|
 | **`AppendUserMessageToChat`** | `true` | Add a **user** bubble with the request text before the turn. |
 | **`SimulatedAssistantReply`** | `null` | If set to a non-empty string — **LLM is not called**; an assistant bubble with this text is appended (after think strip and `FormatResponseText`). |
+| **`DeadlineCancellationToken`** | `default` | The host's own deadline, kept apart from the caller token. When it fires while the caller token is alive the turn ends as `Timeout` (`ResolveTimeoutMessage`) and the metrics record `DeadlineCancellation`; the panel passes it to `CoreAiChatService` separately. A deadline armed on the caller token itself (`CancelAfter` on the token you pass) is reported as a cancellation. An already-elapsed deadline admits nothing (no user bubble, no `OnUserMessageSent`, no service call). The token's source must outlive the turn. |
 
-**Return value:** assistant reply string (including simulated), or `null` if the panel is busy with another request, text after `OnMessageSending` is empty, or the operation was cancelled.
+```csharp
+// Host deadline: a timeout, not a cancellation
+using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+CancellationToken playerStopToken = CancellationToken.None; // or your own stop source
+var timed = new CoreAiChatExternalSubmitOptions { DeadlineCancellationToken = deadline.Token };
+reply = await chatPanel.SubmitMessageFromExternalAsync("Summarize the lesson", timed, playerStopToken);
+```
+
+**Return value:** assistant reply string (including simulated), or `null` if the panel is inactive or busy with another request, the text is empty after `OnMessageSending`, or the turn was interrupted (timeout **or** cancellation — the string API returns `null` for both).
+
+**Interrupted turns:** a timeout (library timeout, the service idle deadline, or a fired `DeadlineCancellationToken`) goes to `ResolveTimeoutMessage(false)`; any cancellation (your caller token, the panel's stop source, `CoreAi.StopAgent` from elsewhere) goes to `ResolveCancelledMessage()`, whose default `null` adds nothing to the chat. A UI Stop reaches neither hook. An already-elapsed deadline shows `ResolveTimeoutMessage(false)` once and returns `null`; an already-cancelled caller token does nothing at all. To tell timeout and cancellation apart in code, use **`SubmitMessageFromExternalResultAsync`** and read `Completion.ErrorCode` (`Timeout` / `Cancelled`); it rejects an already-fired token or deadline before admission with the same codes. Details: [ARCHITECTURE — Timeout & Retry Rule](../../../../Docs/ARCHITECTURE.md#timeout--retry-rule-v151).
 
 **Hooks:** `OnMessageSending` is still invoked; for a real reply — `OnResponseReceived` / **`OnAiResponseCompleted`**.
 
@@ -369,7 +383,7 @@ Since **0.25.14**:
 During active generation `CoreAiChatPanel` switches the send button to stop mode:
 
 - button label: `X` instead of `>`;
-- tooltip: `Stop generation (Esc)`;
+- tooltip: `CoreAiChatOptions.StopButtonTooltip` (the shipped default is a Russian-language "Stop generation (Esc)"; override it through **UI Text Overrides**);
 - style: red (`.coreai-chat-send-button-stop`).
 
 Stop the current reply in two ways:
@@ -434,15 +448,16 @@ chatPanel.ClearChat(clearChatHistory: true, clearLongTermMemory: true);
 chatPanel.ClearChat(clearChatHistory: false, clearLongTermMemory: true);
 ```
 
-## Prompt architecture (3 layers)
+## Prompt architecture (4 layers + tail)
 
 | Layer | Source | Example |
 |-------|--------|---------|
-| 1 | `CoreAISettings.universalSystemPromptPrefix` | "Keep answers short. Do not discuss forbidden topics." |
-| 2 | `.txt` file via `AgentPromptsManifest` | `TeacherSystemPrompt.txt` |
+| 1 | `ICoreAISettings.UniversalSystemPromptPrefix` (**General → Universal Prompt Prefix**) | "Keep answers short. Do not discuss forbidden topics." |
+| 2 | Role base prompt: `AgentPromptsManifest`, `Resources/AgentPrompts/System/<RoleId>.txt`, or the built-in fallback | `TeacherSystemPrompt.txt` |
 | 3 | `AgentBuilder.WithSystemPrompt()` | "You are teaching a student about: for loops" |
+| 4 | Full role tool contract (every tool registered for the role, canonical order) | `AgentBuilder.WithTool(...)`, skills, built-ins |
 
-Final prompt = `Layer 1` + `\n` + `Layer 2` + `\n\n` + `Layer 3`
+The four layers form the byte-stable, cacheable system prefix. Memory, pending memory updates, the conversation summary, per-request instructions and runtime context (`## World State`) are sent afterwards, in the ordered tail of `LlmCompletionRequest.ChatHistory`, never in that prefix. Exact layout: [DEVELOPER_GUIDE §3.5](../../../../Docs/DEVELOPER_GUIDE.md#35-prompt-layers-what-the-model-actually-sees).
 
 `WithSystemPrompt(...)` replaces the current builder-owned Layer 3 fragment by default. Use `AppendSystemPrompt(...)` or `WithSystemPrompt(..., SystemPromptWriteMode.Append)` only when several code-owned prompt fragments should be intentionally combined.
 
@@ -451,7 +466,7 @@ Final prompt = `Layer 1` + `\n` + `Layer 2` + `\n\n` + `Layer 3`
 By default **universalPrefix applies to all roles**. For a fully custom prompt without shared rules, use `.WithOverrideUniversalPrefix()`:
 
 ```csharp
-// Regular agent — prefix + base + additional (all 3 layers)
+// Regular agent — prefix + base + additional (+ tool contract)
 new AgentBuilder("Teacher")
     .WithSystemPrompt("You are a Python teacher.")
     .Build();
@@ -467,7 +482,7 @@ new AgentBuilder("JsonParser")
 
 | Mode | Mechanism | Real streaming? |
 |------|-----------|-----------------|
-| **LocalModel** | LLMUnity `LLMAgent.Chat(callback)` → deltas via ConcurrentQueue | ✅ Yes |
+| **LocalModel** | LLMUnity's built-in OpenAI-compatible server (`LlmUnityServerPort`) via `OpenAiChatLlmClient`, SSE (`stream: true`) | ✅ Yes (not available on WebGL) |
 | **ClientOwnedApi** | OpenAI-compatible SSE (`stream: true`) | ✅ Yes (Standalone / Editor); ⚠️ not on WebGL — see below |
 | **ClientLimited** | Local limits → OpenAI-compatible SSE | ✅ Yes (Standalone / Editor); ⚠️ not on WebGL — see below |
 | **ServerManagedApi** | Backend proxy using an OpenAI-compatible streaming endpoint | ✅ Yes when the backend streams SSE; ⚠️ WebGL caveat still applies |
@@ -478,7 +493,7 @@ For one global mode use `CoreAISettingsAsset`. For mixed-role chat setups use `L
 > ⚠️ **WebGL player.** `UnityWebRequest` does not deliver SSE incrementally. **`CoreAiChatService.IsStreamingEnabled`**
 > returns **`false`** in the WebGL player unless **`CoreAISettingsAsset.WebGlNativeStreaming`** is **enabled**
 > (native **fetch** + **ReadableStream** via `CoreAiSseFetch.jslib` → `FetchSseOpenAiTransport`). If that flag is off,
-> the chat uses **non-streaming** HTTP even when `CoreAiChatConfig.EnableStreaming` is on — logs show **`LLM ◀`**
+> the chat uses **non-streaming** HTTP even when `CoreAiChatConfig.EnableStreaming` is on — logs show **`LLM <`**
 > **without** **`(stream)`**, and the full reply lands at once. **Fix:** ensure **`WebGlNativeStreaming`** is **on** on your CoreAI settings asset (default **on** for new assets since v1.6.13; older assets may still have it off) and satisfy browser **CORS** / same-origin rules for your LLM host. See
 > [`STREAMING_WEBGL_TODO.md`](../../../../Docs/STREAMING_WEBGL_TODO.md) and [`WEBGL_BUILD_TROUBLESHOOTING.md`](../../../../Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
@@ -495,7 +510,7 @@ Tool JSON is not rendered in assistant bubbles: the player only sees the final r
 
 #### Optional in-chat tool diagnostics (`CoreAiChatConfig.ShowToolCallsInChat`)
 
-- **Default:** `ShowToolCallsInChat` is **off** (Inspector: **UI — Diagnostics** on the chat config asset).
+- **Default:** `ShowToolCallsInChat` is **off** (Inspector: **UI - Streaming** header on the chat config asset).
 - When **on**, `CoreAiChatPanel` subscribes to **`CoreAi.OnToolExecuted`** and appends a separate muted row for calls whose **`roleId`** matches the panel’s **`RoleId`** (same rule as other chat routing).
 - Rows are **not** written to `IAgentMemoryStore` / persisted chat history — session UI only.
 - Customize text via **`CoreAiChatPanel.FormatToolExecutedForChat`** in a subclass, or keep the default formatter **`CoreAiToolCallChatFormatter.BuildDisplayText`** (truncated JSON for args/result).
@@ -527,7 +542,7 @@ Priority order (highest to lowest):
 1. **UI flag** — `CoreAiChatConfig.EnableStreaming` (chat panel Inspector). If off → always non-streaming; other layers ignored.
 2. **Per-agent override** — `AgentBuilder.WithStreaming(true/false)` (registered in `AgentMemoryPolicy`).
 3. **Global** — `ICoreAISettings.EnableStreaming` — **`CoreAISettings` Inspector → Essentials → Global streaming** (default **on**; was easy to miss before because the custom inspector omitted the field).
-4. **WebGL player** (`UNITY_WEBGL && !UNITY_EDITOR`) — incremental SSE needs **`CoreAISettingsAsset.WebGlNativeStreaming`** (native fetch bridge, see `STREAMING_WEBGL_TODO.md`; Inspector: **Advanced Settings → WebGL player (browser build)**). **`CoreAiChatService.IsStreamingEnabled`** applies this **once**; it reads the flag from the DI-registered **`CoreAISettingsAsset`** when present, otherwise from **`CoreAISettingsAsset.Instance`**, so streaming is not accidentally disabled when the scope asset and the Resources default differ.
+4. **WebGL player** (`UNITY_WEBGL && !UNITY_EDITOR`) — incremental SSE needs **`CoreAISettingsAsset.WebGlNativeStreaming`** (native fetch bridge, see `STREAMING_WEBGL_TODO.md`; Inspector: **Advanced Settings → WebGL** tab, **Native SSE (fetch)**). **`CoreAiChatService.IsStreamingEnabled`** applies this **once**; it reads the flag from the DI-registered **`CoreAISettingsAsset`** when present, otherwise from **`CoreAISettingsAsset.Instance`**, so streaming is not accidentally disabled when the scope asset and the Resources default differ.
 
 ```csharp
 // Example: chat agent always streams regardless of global setting
@@ -654,6 +669,21 @@ await foreach (var chunk in chatService.SendMessageStreamingAsync("Tell me about
     myTextLabel.text += chunk.Text;
 }
 ```
+
+Every call runs under the service's idle deadline (**LLM Timeout (sec)**, re-armed by tool activity and stream chunks). A host deadline goes on its own token through the `AiTaskRequest` overloads — never merge it into the caller token, or a timeout is reported as a cancellation:
+
+```csharp
+// using System; using System.Threading; using CoreAI.Ai;
+AiTaskRequest request = new AiTaskRequest { RoleId = "Teacher", Hint = "Explain loops", SourceTag = "Chat" };
+CancellationToken stopToken = CancellationToken.None; // or your own stop source
+using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+string text = await chatService.SendMessageAsync(request, stopToken, deadline.Token);
+// Typed result: chatService.SendMessageResultAsync(request, stopToken, deadline.Token)
+// Streaming:    chatService.SendMessageStreamingAsync(request, stopToken, deadline.Token)
+```
+
+The service sets `request.CallerCancellationToken` to the caller token and `request.DeadlineCancellationToken` to the idle deadline joined with yours. A fired deadline while the caller token is alive ends the turn with `LlmOperationTimeoutException` (buffered and streaming) and is recorded as `DeadlineCancellation`; a caller stop stays a cancellation even if the deadline fired too. The two-argument overloads behave as before.
 
 ## uGUI / Canvas integration
 
@@ -784,7 +814,8 @@ chatPanel.ResetBusyStateWithoutCancellation();
 
 // Your own watchdog gave up on this turn (e.g. a shorter host-side timeout than the package's
 // HTTP timeout) — abandon it for real: bumps the turn generation, cancels the in-flight request,
-// and resets busy state. Returns false if nothing was actually in flight.
+// and resets busy state. Returns false if nothing was actually in flight (and after OnDestroy).
+// For a deadline you know up front, prefer CoreAiChatExternalSubmitOptions.DeadlineCancellationToken.
 bool wasAbandoned = chatPanel.AbandonCurrentTurn();
 ```
 
@@ -797,4 +828,4 @@ bool wasAbandoned = chatPanel.AbandonCurrentTurn();
 | `CurrentTurnGeneration` | `int` (get) | Monotonic ownership counter, incremented on turn start, Stop/abandon, and panel disable. Compare across awaits to detect that ownership moved to a newer turn/lifecycle. |
 | `ToolRoundStarted` | `event Action<int, string>` | Fires before each LLM iteration inside a turn (after a tool result). Args: 1-based iteration index, last executed tool name (or `null`). |
 | `ResetBusyStateWithoutCancellation()` | `void` | Clears all four busy flags **without** cancelling the active HTTP/streaming request and **without** moving the turn generation (in contrast to `StopActiveGeneration()` / `StopAgent()` / `AbandonCurrentTurn()`). The turn itself keeps running and still owns the transcript when it finishes. |
-| `AbandonCurrentTurn()` *(Unreleased)* | `bool` | For a host's own watchdog that gives up on the current turn independently of this panel's HTTP timeout. Bumps `CurrentTurnGeneration` (so the in-flight turn's own completion/error path recognises itself as stale and stops touching the transcript), cancels the active request the same way the Stop button does, and calls `ResetBusyStateWithoutCancellation()`. Returns `true` only if a turn was actually in flight — this is what stops a host's own "no answer" message from being followed by a second, redundant error bubble once the real request eventually fails. |
+| `AbandonCurrentTurn()` | `bool` | For a host's own watchdog that gives up on the current turn independently of this panel's HTTP timeout. Bumps `CurrentTurnGeneration` (so the in-flight turn's own completion/error path recognises itself as stale and stops touching the transcript), cancels the active request the same way the Stop button does, and calls `ResetBusyStateWithoutCancellation()`. Returns `true` only if a turn was actually in flight — this is what stops a host's own "no answer" message from being followed by a second, redundant error bubble once the real request eventually fails. After the panel's `OnDestroy` it is a no-op that returns `false` (as is `StopAgent()`). |

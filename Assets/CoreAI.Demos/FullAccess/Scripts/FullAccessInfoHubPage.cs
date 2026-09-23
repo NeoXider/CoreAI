@@ -64,12 +64,15 @@ namespace CoreAI.Demos
             ScrollView scroll = DemoHubWidgets.CreatePage("Full Access Demo", out VisualElement body);
 
             body.Add(DemoHubWidgets.MakeBody(
-                "Enable Full Lua on CoreAILifetimeScope so Programmer mods can reach this scene."));
+                "Turn on 'Enable Full Lua Access' on CoreAiModsLifetimeScope so Programmer mods can reach " +
+                "this scene. Only that scope grants the Full tier; the legacy Full flag on " +
+                "CoreAILifetimeScope grants nothing."));
             body.Add(DemoHubWidgets.MakeBody(
                 "The scene starts empty. Assign a TargetCube in the inspector (or let a mod spawn one) to " +
                 "reach it via unity_find / unity_set_member; the row below reads '-' until one exists."));
             body.Add(DemoHubWidgets.MakeBody(
-                "Private members need 'Enable Full Lua Private Access' (off by default)."));
+                "Private members also need 'Enable Full Lua Private Access' on CoreAiModsLifetimeScope " +
+                "(off by default)."));
 
             body.Add(DemoHubWidgets.MakeSection("Scene target"));
             body.Add(DemoHubWidgets.MakeRow("TargetCube position", "-", out _positionLabel));

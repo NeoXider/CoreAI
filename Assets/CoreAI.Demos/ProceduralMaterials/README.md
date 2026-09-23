@@ -2,7 +2,7 @@
 
 This demo compares all 45 runtime `Enum.Material` mappings plus the visible invalid-id fallback under one
 controlled URP setup. It uses the same process-wide `RbxTextureMaterialProvider` hybrid handles as a
-built player: six entries use their CC0 PBR sets and the others delegate to
+built player: 36 entries use their packaged CC0 PBR sets and the other nine delegate to
 `RbxProceduralMaterialProvider`. Every judging sample starts with the same neutral-white `Part.Color`;
 the rig does not brighten, recolour, or otherwise compensate the texture data. Neon therefore glows
 white here: its emission is `Part.Color` itself, as in Roblox, so a red part glows red and the default

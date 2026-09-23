@@ -5,21 +5,21 @@
 ### Type 1: MemoryTool (function call) — EXPLICIT MEMORY
 
 **How it works:**
-1. **Microsoft.Extensions.AI (MEAI)** integration via `FunctionInvokingChatClient`
-2. `MemoryTool.CreateAIFunction()` creates an `AIFunction` for MEAI
+1. **Microsoft.Extensions.AI (MEAI)** `AIFunction`s run inside CoreAI's tool loop (`SmartToolCallingChatClient` / the streaming loop in `MeaiLlmClient`) through `ToolExecutionPolicy`
+2. `MemoryTool.CreateAIFunction()` creates the `AIFunction` (exposed to a role through `MemoryLlmTool`)
 3. The model calls the function using a **single JSON format**: `{"name": "memory", "arguments": {"action": "write", "content": "..."}}`
-4. MEAI `FunctionInvokingChatClient` recognizes the call and runs `MemoryTool.ExecuteAsync()`
-5. On the next request memory is **injected into the system prompt**
+4. `ToolExecutionPolicy` validates the arguments and runs `MemoryTool.ExecuteAsync()`
+5. On the next request the orchestrator sends the memory as ordered **tail messages** of the chat history (`## Memory`), never inside the cacheable system prompt
 
-**MEAI pipeline:**
+**Pipeline:**
 ```
-LLM Request → FunctionInvokingChatClient → LLMAgent
+LLM request (ILlmClient → OpenAiChatLlmClient, HTTP API or LLMUnity's local server)
                     ↓
             [Model: {"name": "memory", "arguments": {...}}]
                     ↓
-            AIFunction (MemoryTool) executes
+            ToolExecutionPolicy → AIFunction (MemoryTool) executes
                     ↓
-            [Tool result returned]
+            [Tool result returned to the model]
                     ↓
             Final response → AiOrchestrator
 ```
@@ -64,22 +64,20 @@ policy.DisableMemoryTool("Merchant");
 // Enable for all
 policy.SetMemoryToolForAll(enabled: true);
 
-// Configure default action per role
+// Configure default action per role (every built-in role defaults to Append)
 policy.ConfigureRole("CoreMechanicAI", defaultAction: MemoryToolAction.Append);
 policy.ConfigureRole("Creator", defaultAction: MemoryToolAction.Write);
 ```
 
 ---
 
-### Type 2: ChatHistory (LLMUnity) — FULL CONTEXT
+### Type 2: ChatHistory — RECENT DIALOGUE
 
-**How it works:**
-1. `MeaiLlmUnityClient` is called with `useChatHistory: true`
-2. On `CompleteAsync()`:
-   - Loads the last 20 messages from `IAgentMemoryStore.GetChatHistory()`
-   - Inserts them into `LLMAgent.AddToHistory()`
-   - Calls `Chat(addToHistory: true)`
-   - Saves user + assistant messages back to the store
+**How it works (every backend):**
+1. The role has `WithChatHistory` enabled in `AgentMemoryPolicy` (default for every built-in role except Programmer).
+2. For each request `AiOrchestrator` reads the role's history once from `IAgentMemoryStore.GetChatHistory` (window cap `MaxChatHistoryMessages`, default 30), lets `IConversationContextManager` prune and fold older turns, and sends the result as chat messages in `LlmCompletionRequest.ChatHistory`.
+3. After the turn it appends the user message and the visible assistant reply to the store.
+4. The history reaches disk only with `PersistChatHistory` (`AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`).
 
 **When to use:**
 - ✅ PlainChat / SmartChat — conversation context with the player
@@ -88,7 +86,7 @@ policy.ConfigureRole("Creator", defaultAction: MemoryToolAction.Write);
 
 **Do not use when:**
 - ❌ You need control over **what** the model sees (prefer MemoryTool)
-- ❌ Saving tokens (ChatHistory sends the **entire** history)
+- ❌ Saving tokens (ChatHistory sends the recent raw turns; older ones are folded into a summary)
 - ❌ The model does not support a long context
 
 ---
@@ -101,8 +99,8 @@ policy.ConfigureRole("Creator", defaultAction: MemoryToolAction.Write);
 | **Control** | Model chooses **what** to remember | **Everything** is saved |
 | **Size** | Compact (model summarizes) | Full (all messages) |
 | **Tokens** | Saves (important only) | Spends (full history) |
-| **LLMUnity** | Always works | Only with `useChatHistory: true` |
-| **HTTP/OpenAI** | Works | ❌ No (needs chat object) |
+| **LLMUnity** | Works | Works |
+| **HTTP/OpenAI** | Works | Works |
 | **Persistence** | `Persistent`: `FileAgentMemoryStore`; `SessionOnly`: process memory | `Persistent`: `FileAgentMemoryStore`; `SessionOnly`: process memory |
 
 **v1.5.2:** deterministic compaction folds older turns into **`## Conversation Summary`**. **`RegisterCorePortable()`** defaults to **`InMemoryConversationSummaryStore`** (per-role summaries for the process). Unity **`CoreAILifetimeScope`** defaults to `AgentMemoryPersistenceMode.Persistent`: `FileConversationSummaryStore` on desktop and an in-memory summary on WebGL; memory/chat/transcript use `FileAgentMemoryStore` on both. Call `SetAgentMemoryPersistenceMode(AgentMemoryPersistenceMode.SessionOnly)` before build to keep all four data sets in memory and create no memory/summary files. Both `FileAgentMemoryStore` and `InMemoryAgentMemoryStore` implement **`IConversationTranscriptStore`**.
@@ -118,7 +116,7 @@ Per-role override: **`AgentBuilder.WithLlmContextCompaction(bool)`** or **`Agent
 
 Compaction calls route through `ILlmClient.CompleteAsync` with role id **`__CoreAI_ContextCompaction`** and configurable options (`LlmContextCompactionOptions`). If the auxiliary LLM call fails, the system falls back to the deterministic bullet summary.
 
-**Separation from the main system prompt:** The **full** orchestrator system string (built-in/custom role prompt, universal prefix, `## Memory`, `## Tool Contract`, etc.) is **not** fed into compaction. Only **persisted chat lines** (`IAgentMemoryStore.GetChatHistory` — typically `user` / `assistant` turns) plus the **prior rolling summary** are packed into that completion’s **`UserPayload`**; **`ChatHistory` on that request is `null`**. The compaction call uses **`LlmContextCompactionOptions.SystemPrompt`** (compact “you are a summarizer” instructions), which is unrelated to e.g. `Teacher`/`Creator` prose. After compaction, **`AiOrchestrator`** appends the new summary under **`## Conversation Summary`** into the **main** system prompt for the **primary** model turn — that block is downstream output; it is not sent back through the compaction LLM unless it later ages into history as normal assistant/user text.
+**Separation from the main system prompt:** The **full** orchestrator system string (built-in/custom role prompt, universal prefix, tool contract) and the memory tail are **not** fed into compaction. Only **persisted chat lines** (`IAgentMemoryStore.GetChatHistory` — typically `user` / `assistant` turns) plus the **prior rolling summary** are packed into that completion’s **`UserPayload`**; **`ChatHistory` on that request is `null`**. The compaction call uses **`LlmContextCompactionOptions.SystemPrompt`** (compact “you are a summarizer” instructions), which is unrelated to e.g. `Teacher`/`Creator` prose. After compaction, **`AiOrchestrator`** sends the new summary as a **`## Conversation Summary`** system-role message in the ordered tail of **`ChatHistory`** for the **primary** model turn (never in the cacheable system prefix) — that block is downstream output; it is not sent back through the compaction LLM unless it later ages into history as normal assistant/user text.
 
 **LLMUnity as a local OpenAI server (since v5.0.8):** the LLMUnity backend no longer calls `LLMAgent.Chat()` in-process. Instead the `LLM` component runs the GGUF model as its **built-in OpenAI-compatible server** (`llm.remote = true` + `CoreAISettingsAsset.LlmUnityServerPort`, default 13333, set **before** the native service initializes) and CoreAI drives it through the **native HTTP pipeline** (`OpenAiChatLlmClient` over `LlmUnityServerHttpSettings` → `POST http://localhost:{port}/v1/chat/completions`). This yields **native structured `tool_calls`** (server-side jinja + grammar) and SSE streaming, identical to LM Studio / any OpenAI backend — replacing the old prompt-injected, regex-parsed text tool calls. Context management is still **only** CoreAI's backend-agnostic compaction (above), which builds the whole prompt and sends it as ordinary OpenAI messages; the server never manages history. `agent.overflowStrategy` is still forced to `None` for tidiness, but it is moot now — the agent's in-process `Chat()` path is no longer used at all.
 
@@ -132,14 +130,14 @@ Compaction calls route through `ILlmClient.CompleteAsync` with role id **`__Core
 │                                                             │
 │  ┌───────────────────┐    ┌──────────────────────────────┐  │
 │  │ Type 1: MemoryTool│    │  Type 2: ChatHistory         │  │
-│  │                   │    │  (LLMUnity only)              │  │
-│  │ 1. Reads memory   │    │                               │  │
-│  │    from store     │    │ 1. Loads last 20 messages    │  │
-│  │ 2. Injects into   │    │    into LLMAgent               │  │
-│  │    system prompt  │    │ 2. Chat(addToHistory: true)    │  │
-│  │ 3. Model writes   │    │ 3. Saves user+assistant        │  │
-│  │    {"tool":"mem"} │    │    to store                    │  │
-│  │ 4. Persists       │    │                               │  │
+│  │                   │    │  (every backend)             │  │
+│  │ 1. Reads memory   │    │                              │  │
+│  │    from store     │    │ 1. Reads recent history once │  │
+│  │ 2. Sends it as    │    │ 2. Prunes / folds old turns  │  │
+│  │    tail messages  │    │ 3. Sends them as ChatHistory │  │
+│  │ 3. Model calls    │    │ 4. Appends user + assistant  │  │
+│  │    the memory tool│    │    to the store              │  │
+│  │ 4. Persists       │    │                              │  │
 │  └───────────────────┘    └──────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
          ↓                              ↓
@@ -178,13 +176,15 @@ These are **default policy choices**, not hard limits. The key distinction:
 
 | Role | MemoryTool | Default action | ChatHistory default | Persisted chat default | Why |
 |------|:----------:|:--------------:|:-------------------:|:----------------------:|-----|
-| **Creator** | ✅ | Write | ✅ | ❌ | Keeps short session continuity by default while durable design decisions still belong in compact MemoryTool facts. |
+| **Creator** | ✅ | Append | ✅ | ❌ | Keeps short session continuity by default while durable design decisions still belong in compact MemoryTool facts. |
+| **Builder** | ✅ | Append | ✅ | ❌ | Like Creator; builds run with unlimited tool-call roundtrips. |
 | **Analyzer** | ✅ | Append | ✅ | ❌ | Keeps recent discussion context, but summarized observations should still go through MemoryTool or structured telemetry. |
-| **Programmer** | ✅ | Append | ✅ | ❌ | Recent dialogue is retained by default; deterministic repair inputs remain the authoritative code context. |
+| **Programmer** | ✅ | Append | ❌ | ❌ | History is off by default (chat-source requests borrow short-term history for that run only); deterministic repair inputs remain the authoritative code context. |
 | **CoreMechanicAI** | ✅ | Append | ✅ | ❌ | Retains recent mechanic discussion while deterministic craft history/results stay in compact MemoryTool memory. |
 | **AINpc** | ✅ | Append | ✅ | ❌ | Sequential NPC lines now keep recent conversation by default; persistence remains opt-in for named/long-lived NPCs. |
 | **PlainChat** | ❌ | - | ✅ | ✅ | Simple drop-in chat; session restore after restart. |
 | **SmartChat** | ✅ | Append | ✅ | ✅ | Chat + MemoryTool for durable facts; session restore after restart. |
+| **Merchant** | ✅ | Append | ✅ | ❌ | Merchant NPC dialogue; persistence is opt-in. |
 
 **Implementation note:** `AgentMemoryPolicy.RoleMemoryConfig` and `AgentBuilder` now default `WithChatHistory` to **true** with `MaxChatHistoryMessages = 30`, but **`PersistChatHistory` remains false** unless you pass `true` (for example **`PlainChat`** / **`SmartChat`** entries in the policy constructor, or `ConfigureChatHistory` / `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`). This improves continuity without implying disk chat persistence. Use `AgentBuilder.WithoutChatHistory()` or `ConfigureChatHistory(roleId, enabled: false, ...)` for token-sensitive/tool-only roles.
 
@@ -257,26 +257,21 @@ policy.ConfigureRole("CoreMechanicAI",
 await orchestrator.RunTaskAsync(new AiTaskRequest
 {
     RoleId = "CoreMechanicAI",
-    Hint = "Craft a weapon from Iron + Fire Crystal. " +
-           "Save to memory: {\"tool\":\"memory\",\"action\":\"write\"," +
-           "\"content\":\"Craft#1: Iron Fireblade damage:45 fire:15\"}"
+    Hint = "Craft a weapon from Iron + Fire Crystal and remember the result with the memory tool."
 });
 
-// Memory saved: "Craft#1: Iron Fireblade damage:45 fire:15"
-// On the next request the model SEES this memory in the system prompt
+// The model calls: {"name":"memory","arguments":{"action":"append","content":"Craft#1: Iron Fireblade damage:45 fire:15"}}
+// On the next request the model SEES this memory in the request tail
 ```
 
 ### Example 2: PlainChat — dialogue context (ChatHistory)
 
 ```csharp
-// LLMUnity client setup
-var client = new MeaiLlmUnityClient(
-    llmAgent,
-    logger,
-    memoryStore: fileStore,
-    memoryPolicy: policy,
-    useChatHistory: true  // ← Type 2: full context
-);
+// Works on every backend. PlainChat already has history on (and persisted);
+// for a custom role, opt in explicitly:
+AgentConfig chat = new AgentBuilder("MyChat")
+    .WithChatHistory(4096, persistBetweenSessions: true)  // ← Type 2
+    .Build();
 
 // Dialogue 1
 await orchestrator.RunTaskAsync(new AiTaskRequest
@@ -292,7 +287,7 @@ await orchestrator.RunTaskAsync(new AiTaskRequest
     RoleId = "PlainChat",
     Hint = "What is my name?"
 });
-// Model answers: "Your name is Alex" (sees history from up to 20 messages)
+// Model answers: "Your name is Alex" (sees the recent history, up to 30 messages by default)
 ```
 
 ### Example 3: Disable memory for a role
@@ -313,14 +308,13 @@ policy.SetMemoryToolForAll(false);        // Disable for ALL (ChatHistory only)
 | `IAgentMemoryStore.cs` | Store interface (+ ChatHistory methods) |
 | `AgentMemoryState.cs` | State: LastSystemPrompt + Memory |
 | `MemoryTool.cs` | Microsoft.Extensions.AI function for the model |
-| `AgentMemoryDirectiveParser.cs` | Parses `{"tool":"memory"...}` from responses |
 | `NullAgentMemoryStore.cs` | Stub (saves nothing) — portable default when **`RegisterCorePortable`** is used without a host store; not the default for **`CoreAILifetimeScope`** (which registers **`FileAgentMemoryStore`**, WebGL player included since **v1.6.19**) |
 | `InMemoryAgentMemoryStore.cs` | Process-only memory, flat chat, structured transcript and atomic mutation backing selected by `AgentMemoryPersistenceMode.SessionOnly` |
-| `FileAgentMemoryStore.cs` | Unity: JSON files under persistentDataPath |
+| `FileAgentMemoryStore.cs` | Unity: `<stem>.json` (memory document) + `<stem>.history.jsonl` (conversation) under persistentDataPath |
 | `MEMORY_STORE_CUSTOM_BACKENDS.md` | PlayerPrefs / cloud / composite `IAgentMemoryStore` patterns |
-| `AiOrchestrator.cs` | Orchestrator: injects memory into system prompt |
-| `MeaiLlmUnityClient.cs` | LLMUnity with MEAI: MemoryTool (Type 1) and ChatHistory (Type 2) |
+| `AiOrchestrator.cs` | Orchestrator: reads the history once per request, sends memory and summary as tail messages, appends the turn |
+| `MemoryLlmTool.cs` | `ILlmTool` wrapper that exposes `MemoryTool` to the model |
 
 ### Clearing saves in the Editor
 
-**CoreAI → Delete All Persistent Saves...** (only when **not** in Play Mode) deletes the entire **`Application.persistentDataPath/CoreAI`** tree — **AgentMemory** (memory + persisted chat JSON), **ConversationSummaries**, **LuaScriptVersions**, **DataOverlayVersions**. Use for a clean persistence baseline while testing.
+**CoreAI → Delete All Persistent Saves...** (only when **not** in Play Mode) deletes the entire **`Application.persistentDataPath/CoreAI`** tree — **AgentMemory** (memory documents + persisted chat), **ConversationSummaries**, **LuaScriptVersions**, **DataOverlayVersions**. Use for a clean persistence baseline while testing.

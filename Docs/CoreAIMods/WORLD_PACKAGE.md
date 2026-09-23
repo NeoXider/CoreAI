@@ -68,8 +68,12 @@ transactional adapters before exposing it; the codec does not claim general roll
 ## Persistence status
 
 `FileRbxWorldPackageStore` is a storage primitive, not production save/load orchestration. Manual slots
-are create-once. Autosaves use timestamp/sequence/trigger names and rotate only after the new file's
-persistence callback reports success. The just-confirmed autosave is never a rotation candidate, so a
+are create-once. A manual slot name is 1-64 letters, digits, `-` or `_` after trimming surrounding
+whitespace, and not a reserved Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`,
+`LPT1`-`LPT9`, case-insensitive); an autosave name is exactly one `.world` file name with no
+directory part. The store throws `ArgumentException` for a name that breaks these rules. Autosaves
+use timestamp/sequence/trigger names and rotate only after the new file's persistence callback
+reports success. The just-confirmed autosave is never a rotation candidate, so a
 host clock that moved backwards cannot make a successful backup delete itself. Store mutations are
 serialized so two saves cannot interleave their durability phases. Manual bytes are never rotated.
 
@@ -174,10 +178,21 @@ ids such as `Case` and `case` cannot share data, deletion, or restart state on W
 a legacy sanitized file is atomically moved to the requesting exact id's hash; an old case-aliased file
 cannot be split retrospectively and is therefore claimed by only that first exact id.
 
-`save_world` writes a create-once manual package. `load_world` only returns
-`player_confirmation_required` plus a one-use request id; it cannot apply a package. Host/UI code
-subscribes to `ManualLoadConfirmationRequested` or reads `GetPendingManualLoads`, then calls
-`ConfirmManualLoadAsync`, which consumes that request and uses the same confirmed staged-swap path as
+The Programmer role gets four AI tools on this service: `save_world` writes a create-once manual
+package; `list_autosaves` returns the autosave ring (`name`, `trigger`, UTC `timestamp`, `size`);
+`load_world` (manual slot) and `load_autosave` (autosave file name) only return
+`player_confirmation_required` plus a one-use request id; they cannot apply a package.
+
+Every one of these tools that takes a name validates it first, with the store's rules above. An invalid
+name — blank or whitespace-only, too long, a character outside the allowed set, a reserved device name,
+or an autosave name that is not a single `.world` file name — is refused as an ordinary JSON tool
+result, never as an exception: `success: false` and an `error` that names the parameter (`slot` or
+`name`), states the rule, says the tool was not executed and asks for a retry with a valid value. The
+load tools also return `status: "invalid_argument"`, `player_confirmation_required: false` and an empty
+`request_id`. The world service is not called, so nothing is captured, written or queued.
+
+For a valid name, host/UI code subscribes to `ManualLoadConfirmationRequested` or reads
+`GetPendingManualLoads`, then calls `ConfirmManualLoadAsync`, which consumes that request and uses the same confirmed staged-swap path as
 direct trusted host loading. Requests expire after two minutes by default, a new request replaces the
 older request for the same slot, and the bounded eight-entry pool evicts its oldest request. Expired,
 unknown, rejected, and reused ids are fail-closed and never mutate the live session.

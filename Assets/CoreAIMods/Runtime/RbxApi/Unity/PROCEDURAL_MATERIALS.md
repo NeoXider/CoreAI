@@ -132,8 +132,8 @@ managed allocation.
 
 ## Source and licensing
 
-The enum names and values follow the offline Roblox mirror in `D:/Git/RobloxDocs`
-(`creator-docs/content/en-us/reference/engine/enums/Material.yaml`, 45 items). The six HLSL library sources under
+The enum names and values follow the Roblox creator documentation (an offline mirror of the
+`creator-docs` repository, `content/en-us/reference/engine/enums/Material.yaml`, 45 items). The six HLSL library sources under
 `Resources/CoreAIRbxMaterials/NoiseShader/` come from `keijiro/NoiseShader` commit
 `550100d4a74de1ba90eb1b8e90f25f9dbeec28d2`, itself an HLSL port of `stegu/webgl-noise`. Both are MIT;
 the complete upstream notice is preserved verbatim in `NoiseShader/LICENSE`, and `NoiseShader/UPSTREAM.md`

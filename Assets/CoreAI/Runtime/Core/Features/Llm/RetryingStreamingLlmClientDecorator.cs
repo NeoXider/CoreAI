@@ -19,8 +19,9 @@ namespace CoreAI.Infrastructure.Llm
     /// <para>
     /// Retried triggers (pre-commit only): a thrown exception, a terminal error chunk whose
     /// <see cref="LlmStreamChunk.ErrorCode"/> is transient, or a stream that ends without ever committing.
-    /// Caller cancellation is never retried. <see cref="CompleteAsync"/> just delegates — its retry already
-    /// lives in the outer logging decorator.
+    /// Caller cancellation is never retried, and a fault of any type observed after the caller cancelled
+    /// propagates as the cancellation with the fault attached (<see cref="LlmCancellation"/>).
+    /// <see cref="CompleteAsync"/> just delegates — its retry already lives in the outer logging decorator.
     /// </para>
     /// </summary>
     public sealed class RetryingStreamingLlmClientDecorator : ILlmClient, ILlmRequestHeaderScope
@@ -133,6 +134,14 @@ namespace CoreAI.Infrastructure.Llm
                             primaryFailure = ex;
                             throw;
                         }
+                        catch (Exception ex) when (LlmCancellation.IsCancellation(ex, cancellationToken))
+                        {
+                            // WHY: a fault reported after the caller cancelled is the cancellation, not a
+                            // pre-commit failure to describe and retry (LlmCancellation); the fault stays
+                            // attached for diagnostics and endpoint health.
+                            primaryFailure = LlmCancellation.WrapAsCancellation(ex, cancellationToken, "the stream");
+                            throw primaryFailure;
+                        }
                         catch (Exception ex)
                         {
                             primaryFailure = ex;
@@ -233,6 +242,16 @@ namespace CoreAI.Infrastructure.Llm
                             {
                                 hasNext = await enumerator.MoveNextAsync();
                                 current = hasNext ? enumerator.Current : null;
+                            }
+                            catch (Exception ex) when (
+                                ex is not OperationCanceledException &&
+                                LlmCancellation.IsCancellation(ex, cancellationToken))
+                            {
+                                // WHY: post-commit failures propagate, but a fault the caller's cancel caused
+                                // propagates AS the cancellation (LlmCancellation), with the fault attached.
+                                primaryFailure = LlmCancellation.WrapAsCancellation(
+                                    ex, cancellationToken, "the committed stream");
+                                throw primaryFailure;
                             }
                             catch (Exception ex)
                             {

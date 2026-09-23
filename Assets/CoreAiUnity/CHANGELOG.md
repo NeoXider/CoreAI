@@ -4,6 +4,100 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.45.0] - 2026-09-24
+
+### Added
+
+- **`CoreAiChatPanel.OnChatClearing(bool clearChatHistory, bool clearLongTermMemory)`** - a `protected virtual`
+  hook called once at the start of every `ClearChat` (the header clear button included), before generation is
+  stopped and the message scroll is emptied. `ClearChat` itself stays public and non-virtual, so the API is
+  unchanged. Hosts that insert their own rows into the feed (RedoSchool's inline quiz / drag-and-drop cards)
+  used to see the clear button wipe those rows while their state stayed live, because the button calls
+  `ClearChat()` directly and an explicit interface re-implementation in the host never ran. An exception from the
+  override is logged and does not abort the clear.
+- **`CoreAiChatService` takes a host deadline separately**: `SendMessageAsync`, `SendMessageResultAsync` and
+  `SendMessageStreamingAsync` gained a `(request, ct, deadlineToken)` overload. `AiTaskRequest.CallerCancellationToken`
+  is then the caller's token alone, `DeadlineCancellationToken` joins the service idle deadline with the host's, and the
+  operation token links all three. The two-argument overloads are unchanged.
+- **`CoreAiModsLifetimeScope.FullLuaAccessEnabled` / `FullLuaPrivateAccessEnabled`** — read-only accessors for the one
+  flag pair that actually grants the Full Lua tier, for hosts and scene helpers that must request the same tier.
+
+### Fixed
+
+- **A host deadline was counted as a user cancellation in the orchestration metrics.** `CoreAiChatPanel` linked
+  `CoreAiChatExternalSubmitOptions.DeadlineCancellationToken` into the token it handed the chat service as the caller's,
+  so every host timeout fired `AiTaskRequest.CallerCancellationToken` and `AiOrchestrator` recorded `Cancelled` while
+  the panel reported `Timeout`. The panel now passes the deadline separately, a fired deadline with a live caller ends
+  the turn as `LlmOperationTimeoutException` on both paths, and it is recorded as `DeadlineCancellation`. A caller Stop
+  still wins when both fired.
+- **`SubmitMessageFromExternalAsync` started a turn on an already-elapsed deadline.** The string API had no result to
+  reject into, so it appended the user bubble, raised `OnUserMessageSent`, sent the turn (recorded as unanswered) and
+  only then showed the timeout bubble. Both APIs now reject before any side effect: the typed result keeps its
+  `Timeout` / `Cancelled` rejection, the string API returns `null`, shows the timeout presentation once for an elapsed
+  deadline and nothing for an already-cancelled caller.
+- **Request-source ownership after a failed setup or a destroyed panel.** The request source is created inside the
+  turn's `try`, so a failure while linking a host deadline can no longer leave `_activeRequestCts` published and
+  undisposed; `StopAgent()` and `AbandonCurrentTurn()` are no-ops after `OnDestroy` (`AbandonCurrentTurn` returns
+  `false`), and a stop on a disabled panel no longer arms a root source nobody owns.
+- **`RoutingLlmClient` reports a cancelled turn as cancelled, and endpoint health is judged on the raw fault.** Any
+  fault or failure code seen after the caller cancelled is published as `Cancelled`; route health still reads what the
+  endpoint actually reported, so a permanent refusal (`AuthExpired`, `PaymentRequired`) still reaches
+  `ReportRouteFailure` — found through the `OperationCanceledException` a decorator may have wrapped it in — while a
+  transport, timeout or provider fault that merely coincided with a Stop no longer degrades the route.
+  `PaymentRequired` now counts as an endpoint-level failure. Result and chunk rewrites are copies, and the error text
+  follows the rewritten code.
+- **`CoreAiChatService` / `CoreAiChatPanel` classify a post-Stop chunk as the Stop**, not as the provider error it
+  carried, and no longer put that provider text into a cancelled outcome.
+- **The Full Lua tier had two switches and only one worked.** `CoreAiLuaWorldModule`'s **Enable Full Access** /
+  **Enable Full Private Access** never granted anything (`RegisterWorldCommands` ignores those parameters); the tier
+  comes from `CoreAiModsLifetimeScope`. The dead flags are hidden in the inspector (still serialized, so existing
+  scenes load unchanged) and the accessors are deprecated. The LiveMechanics mods-chat demo now takes the tier for
+  autoloaded and activated mods from the mods scope, so it can no longer request a tier the host does not grant.
+- **The Full Access demo Hub page** told users to enable Full Lua on `CoreAILifetimeScope`, whose flag grants nothing;
+  it now points at `CoreAiModsLifetimeScope`.
+- **`CoreAISettingsAsset.enableLuaOnWebGl`** (and the `ICoreAISettings` doc it inherits) claimed the Full `unity_*` tier
+  "stays disabled on WebGL". Nothing in the code blocks it — and the flag itself is not read by any runtime yet. Both
+  texts now say so.
+- **The demo assembly did not compile without `COREAI_LUA`** (since 7.32.0): `GameplayServicesDemoController` used the
+  Lua-only `CoreAiDemoScope` unguarded, so the `core` and `llm` module matrices could not build the demos. It is now
+  guarded like every other Lua demo and logs that it is inactive.
+
+### Deprecated
+
+- `CoreAiLuaWorldModule.FullAccessEnabled`, `CoreAiLuaWorldModule.FullPrivateAccessEnabled` and
+  `CoreAILifetimeScope.FullLuaAccessEnabled` (warning) — use `CoreAiModsLifetimeScope.FullLuaAccessEnabled` /
+  `FullLuaPrivateAccessEnabled`. The `enableFullLuaAccess` / `enableFullLuaPrivateAccess` parameters of
+  `WorldCommandsInstaller.RegisterWorldCommands` are documented as ignored; the signature is unchanged.
+
+### Docs
+
+- **A full sweep of the English documentation against the code** (two audits, ~110 files). The corrections that change
+  what a reader would do: every C# sample that passed a bare lambda to a `System.Delegate` parameter now wraps it
+  (Unity compiles C# 9, so the old form did not build); custom-tool samples implement `IAIFunctionLlmTool` on
+  `LlmToolBase` (a class implementing only `ILlmTool` does not compile and is never offered to the model); mod-runtime
+  management samples pass an `ActorContext` (the parameterless overloads are internal); the MCP server needs
+  **Start On Enable** or an explicit start and has bearer-token auth on by default; the dependency installer also adds
+  LLMUnity; `RequireSpecific` is sent as `tool_choice: "required"` over a narrowed tool list; the Full Lua tier lives on
+  `CoreAiModsLifetimeScope`; mod sources are auto-persisted and rehydrated by the Unity composition; `Player` character
+  loading, respawn and `DistanceFromCharacter` exist; `Humanoid.Running` reports measured speed; the WebGL player omits
+  the correlation headers a server-managed backend was told to expect; removed types (`MeaiLlmUnityClient`,
+  `IGameLuaRuntimeBindings`, `CoreAiBackendPanel`, the auto-executed `AiEnvelope` Lua path) are gone from the docs;
+  settings defaults, inspector labels, log strings, demo inventories and test names match the code. Dev-only material
+  moved to `dev-docs/`.
+
+### Tests
+
+- `CoreAiChatPanelEditModeTests`: the header clear path and `ClearChat(bool, bool)` call `OnChatClearing`
+  exactly once with the flags, before the scroll is emptied; a throwing override does not stop the clear.
+- New coverage for everything above, including: the capability clamp on the host-binding seam (persistent, one-off and
+  envelope paths); the wrapper-function tool policy (execution, casing repair, timeout override, ambiguity, allowlist
+  narrowing); post-cancel classification in the breaker, the logging and retry decorators, routing and the orchestrator
+  metrics; the host-deadline metric on a real `AiOrchestrator` + `InMemoryAiOrchestrationMetrics`; the string API on an
+  elapsed deadline; panel lifecycle (stop then destroy, stop then resend, a UI stop reaching neither hook); the world
+  tools' name refusals; a reflection ratchet that `WithError` copies every other property.
+- `AiOrchestratorHistoryEditModeTests` is engine-free and runs in the portable CI suite (the `FileAgentMemoryStore`
+  round-trip moved to `AiOrchestratorHistoryFileStoreEditModeTests`).
+
 ## [7.44.2] - 2026-09-17
 
 ### Tests

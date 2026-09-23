@@ -62,7 +62,10 @@ runtime, make them resolve the live world as above instead of attaching again.
 Two outcomes are decided on the wire rather than left hanging. A connection the authenticator admitted
 but the world could not turn into a player - `connectActor` threw or returned false - is dropped by the
 provider, with the world's exception in the log; nothing could ever admit that connection again, so it
-must not stay connected as an authenticated nobody. And `Player:Kick()` ends the kicked client's
+must not stay connected as an authenticated nobody. The drop happens on the provider's next `Update`
+(or when the provider is disabled), after Mirror has finished accepting the connection; until then
+every packet from that connection is dropped as unadmitted. Keep the provider enabled: a disabled
+provider runs no `Update`, so a drop owed after it was disabled waits until it is enabled again. And `Player:Kick()` ends the kicked client's
 connection through the bridge: the socket closes, the session host releases the session, and that
 client's next remote is dropped as unadmitted instead of re-creating the player. That is the Mirror
 bridge. On the in-process loopback (`NullNetworkBridge`, what an empty provider field gives you) a

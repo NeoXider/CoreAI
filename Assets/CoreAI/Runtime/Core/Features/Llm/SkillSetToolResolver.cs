@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
@@ -31,6 +32,8 @@ namespace CoreAI.Ai
             ParametersSchema = parametersSchema;
             JsonTool = jsonTool;
             Function = function;
+            Schema = SkillToolSchema.Parse(parametersSchema);
+            PreflightFunction = jsonTool == null || jsonTool is DelegateLlmTool ? function : null;
         }
 
         public SkillSet Skill { get; }
@@ -41,10 +44,146 @@ namespace CoreAI.Ai
         public IJsonInvocableLlmTool JsonTool { get; }
         public AIFunction Function { get; }
         public bool CanInvoke => JsonTool != null || Function != null;
+
+        /// <summary>
+        /// <see cref="ParametersSchema"/> read once, at descriptor build time; <c>null</c> when the schema
+        /// is blank or not JSON. Every call through the proxy used to re-parse the schema string.
+        /// </summary>
+        public SkillToolSchema Schema { get; }
+
+        /// <summary>
+        /// The MEAI function the invocation will bind its arguments through, or <c>null</c> when it will
+        /// not: the argument preflight is a proof only against the binder that actually runs. A pure
+        /// <see cref="Function"/> route binds through it by definition; a <see cref="DelegateLlmTool"/>
+        /// JSON route is documented as "the same MEAI binding used by direct tools"; any other
+        /// JSON-invocable tool parses its arguments itself, so nothing can be proven ahead of it.
+        /// </summary>
+        public AIFunction PreflightFunction { get; }
+    }
+
+    /// <summary>A tool's JSON parameter schema reduced to what the call-shape checks need.</summary>
+    internal sealed class SkillToolSchema
+    {
+        private readonly HashSet<string> _propertyNames;
+
+        private SkillToolSchema(List<string> required, bool declaresProperties, List<string> propertyNames,
+            List<string> expected)
+        {
+            Required = required;
+            DeclaresProperties = declaresProperties;
+            PropertyNames = propertyNames;
+            ExpectedParameters = expected;
+            _propertyNames = new HashSet<string>(propertyNames, StringComparer.Ordinal);
+        }
+
+        public IReadOnlyList<string> Required { get; }
+
+        /// <summary>True when the schema carries a <c>properties</c> object, even an empty one.</summary>
+        public bool DeclaresProperties { get; }
+
+        /// <summary>Declared property names in schema order; empty when the schema declares none.</summary>
+        public IReadOnlyList<string> PropertyNames { get; }
+
+        /// <summary>One <c>name (type, required|optional)</c> entry per declared property, in schema order.</summary>
+        public IReadOnlyList<string> ExpectedParameters { get; }
+
+        public bool DeclaresProperty(string name)
+        {
+            return name != null && _propertyNames.Contains(name);
+        }
+
+        /// <summary>Returns <c>null</c> for a blank or unreadable schema, so a check can stand down instead of blocking.</summary>
+        public static SkillToolSchema Parse(string parametersSchema)
+        {
+            if (string.IsNullOrWhiteSpace(parametersSchema))
+            {
+                return null;
+            }
+
+            JObject schema;
+            try
+            {
+                schema = JObject.Parse(parametersSchema);
+            }
+            catch (Newtonsoft.Json.JsonException)
+            {
+                return null;
+            }
+
+            List<string> required = LlmToolRequiredArguments.Read(schema);
+            List<string> names = new();
+            List<string> expected = new();
+            JObject properties = schema["properties"] as JObject;
+            if (properties != null)
+            {
+                foreach (JProperty property in properties.Properties())
+                {
+                    JToken typeToken = (property.Value as JObject)?["type"];
+                    string type = typeToken switch
+                    {
+                        JValue value => value.ToString(),
+                        JArray union => string.Join("|", union),
+                        _ => "any"
+                    };
+                    string requirement = required.Contains(property.Name) ? "required" : "optional";
+                    names.Add(property.Name);
+                    expected.Add($"{property.Name} ({type}, {requirement})");
+                }
+            }
+
+            return new SkillToolSchema(required, properties != null, names, expected);
+        }
+    }
+
+    /// <summary>
+    /// A multi-function wrapper as a request allowlist exposes it: the same tool - name, description, schema
+    /// and every per-tool setting are the wrapped tool's - offering only the allowed functions.
+    /// </summary>
+    internal sealed class AllowlistedFunctionsLlmTool : IAIFunctionsLlmTool
+    {
+        private readonly IAIFunctionsLlmTool _inner;
+        private readonly HashSet<string> _allowed;
+
+        public AllowlistedFunctionsLlmTool(IAIFunctionsLlmTool inner, IReadOnlyList<string> callableNames)
+        {
+            _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            CallableNames = callableNames ?? Array.Empty<string>();
+            _allowed = new HashSet<string>(CallableNames, StringComparer.Ordinal);
+        }
+
+        /// <summary>The allowed function names, in the wrapped tool's order.</summary>
+        public IReadOnlyList<string> CallableNames { get; }
+
+        public string Name => _inner.Name;
+        public string Description => _inner.Description;
+        public string ParametersSchema => _inner.ParametersSchema;
+        public bool AllowDuplicates => _inner.AllowDuplicates;
+        public int? ToolTimeoutMsOverride => _inner.ToolTimeoutMsOverride;
+        public bool EndsTurn => _inner.EndsTurn;
+        public bool IsMutating => _inner.IsMutating;
+
+        public IEnumerable<AIFunction> CreateAIFunctions()
+        {
+            IEnumerable<AIFunction> functions = _inner.CreateAIFunctions();
+            if (functions == null)
+            {
+                yield break;
+            }
+
+            foreach (AIFunction function in functions)
+            {
+                if (function != null && function.Name != null && _allowed.Contains(function.Name))
+                {
+                    yield return function;
+                }
+            }
+        }
     }
 
     internal static class SkillSetToolResolver
     {
+        private static readonly ConditionalWeakTable<ILlmTool, string[]> CallableNameCache = new();
+
         internal static IReadOnlyCollection<string> IntersectAllowlist(IReadOnlyCollection<string> current,
             IReadOnlyCollection<string> requested)
         {
@@ -240,54 +379,36 @@ namespace CoreAI.Ai
         /// the binder ignores them, and rejecting them would break calls that work today. A schema that
         /// cannot be read disables the check rather than blocking the call.
         /// </remarks>
+        public static string DescribeMissingRequiredArguments(SkillToolDescriptor descriptor, JObject arguments)
+        {
+            return DescribeMissingRequiredArguments(descriptor.Name, descriptor.Schema, arguments);
+        }
+
+        /// <summary>Same check from a raw schema string, parsed on the spot (tests and one-off callers).</summary>
         public static string DescribeMissingRequiredArguments(string toolName, string parametersSchema, JObject arguments)
         {
-            if (string.IsNullOrWhiteSpace(parametersSchema))
+            return DescribeMissingRequiredArguments(toolName, SkillToolSchema.Parse(parametersSchema), arguments);
+        }
+
+        private static string DescribeMissingRequiredArguments(string toolName, SkillToolSchema schema, JObject arguments)
+        {
+            if (schema == null)
             {
                 return null;
             }
 
-            JObject schema;
-            try
-            {
-                schema = JObject.Parse(parametersSchema);
-            }
-            catch (Newtonsoft.Json.JsonException)
-            {
-                return null;
-            }
-
-            List<string> requiredNames = LlmToolRequiredArguments.Read(schema);
-            List<string> missing = LlmToolRequiredArguments.FindMissing(requiredNames, arguments);
+            List<string> missing = LlmToolRequiredArguments.FindMissing(schema.Required, arguments);
             if (missing.Count == 0)
             {
                 return null;
             }
 
-            JObject properties = schema["properties"] as JObject;
-            List<string> expected = new();
-            if (properties != null)
-            {
-                foreach (JProperty property in properties.Properties())
-                {
-                    JToken typeToken = (property.Value as JObject)?["type"];
-                    string type = typeToken switch
-                    {
-                        JValue value => value.ToString(),
-                        JArray union => string.Join("|", union),
-                        _ => "any"
-                    };
-                    string requirement = requiredNames.Contains(property.Name) ? "required" : "optional";
-                    expected.Add($"{property.Name} ({type}, {requirement})");
-                }
-            }
-
             List<string> unknown = new();
-            if (arguments != null && properties != null)
+            if (arguments != null && schema.DeclaresProperties)
             {
                 foreach (JProperty property in arguments.Properties())
                 {
-                    if (properties[property.Name] == null)
+                    if (!schema.DeclaresProperty(property.Name))
                     {
                         unknown.Add(property.Name);
                     }
@@ -300,51 +421,129 @@ namespace CoreAI.Ai
                 message += $" Unknown argument(s) ignored: {string.Join(", ", unknown)}.";
             }
 
-            if (expected.Count > 0)
-            {
-                message += $" Expected parameters: {string.Join(", ", expected)}.";
-            }
-
-            return message +
-                   $" The tool was NOT executed. Retry call_skill_tool with tool_name=\"{toolName}\" and an " +
-                   "arguments_json object that uses exactly these parameter names.";
+            return message + ExpectedParametersSuffix(schema) + NotExecutedSuffix(toolName,
+                "an arguments_json object that uses exactly these parameter names");
         }
 
-        private static IEnumerable<string> GetCallableToolNames(ILlmTool tool)
+        /// <summary>
+        /// The refusal for an argument whose value cannot bind to the target's parameter type, from the
+        /// structural preflight's own finding (<paramref name="bindingError"/> already names the tool,
+        /// the argument and the binder's reason). Carries the same expected-parameter list and retry
+        /// instruction as the missing-argument refusal, so a single retry can fix the value.
+        /// </summary>
+        public static string DescribeArgumentTypeMismatch(SkillToolDescriptor descriptor, string bindingError)
         {
-            if (tool == null)
+            return bindingError + ExpectedParametersSuffix(descriptor.Schema) + NotExecutedSuffix(descriptor.Name,
+                "an arguments_json object whose values have exactly these types");
+        }
+
+        private static string ExpectedParametersSuffix(SkillToolSchema schema)
+        {
+            return schema == null || schema.ExpectedParameters.Count == 0
+                ? ""
+                : $" Expected parameters: {string.Join(", ", schema.ExpectedParameters)}.";
+        }
+
+        private static string NotExecutedSuffix(string toolName, string retryShape)
+        {
+            return $" The tool was NOT executed. Retry call_skill_tool with tool_name=\"{toolName}\" and {retryShape}.";
+        }
+
+        /// <summary>
+        /// The function names the provider is offered for <paramref name="tool"/>: every function of an
+        /// <see cref="IAIFunctionsLlmTool"/> wrapper (only the allowed ones for a wrapper narrowed by
+        /// <see cref="RestrictToAllowedFunctions"/>), the bound function's name for an
+        /// <see cref="IAIFunctionLlmTool"/>, otherwise <see cref="ILlmTool.Name"/>. A wrapper whose functions
+        /// cannot be built falls back to its own name.
+        /// </summary>
+        /// <remarks>
+        /// WHY a wrapper's names are cached per instance: building them runs <c>AIFunctionFactory.Create</c>
+        /// (reflection plus JSON schema generation) for every function, and the names are asked for on every
+        /// request - by the prompt formatter, by each <c>ToolExecutionPolicy</c>, by the request
+        /// allowlist - on top of the provider client's own expansion. A wrapper's function set is fixed for its
+        /// lifetime (the built-in camera and scene wrappers yield a constant list); a wrapper whose set changes
+        /// must be registered as a new instance. An enumeration that threw is not cached: the names built
+        /// before the failure are still reported, and the next request builds them again.
+        /// </remarks>
+        internal static IReadOnlyList<string> GetCallableToolNames(ILlmTool tool)
+        {
+            switch (tool)
             {
-                yield break;
+                case null:
+                    return Array.Empty<string>();
+                case AllowlistedFunctionsLlmTool narrowed:
+                    return narrowed.CallableNames;
+                case IAIFunctionsLlmTool functionTools:
+                    return GetWrapperFunctionNames(tool, functionTools);
+                case IAIFunctionLlmTool functionTool:
+                    AIFunction function = SafeCreateFunction(tool, functionTool);
+                    return new[] { !string.IsNullOrWhiteSpace(function?.Name) ? function.Name : tool.Name };
+                default:
+                    return new[] { tool.Name };
+            }
+        }
+
+        /// <summary>
+        /// <paramref name="tool"/>, a multi-function wrapper whose own name a request allowlist does NOT
+        /// contain, as that allowlist exposes it: <c>null</c> when none of its function names is allowed, the
+        /// wrapper itself when all of them are, otherwise an <see cref="AllowlistedFunctionsLlmTool"/> that offers
+        /// the provider, the execution policy and the prompt only the allowed functions.
+        /// </summary>
+        internal static ILlmTool RestrictToAllowedFunctions(IAIFunctionsLlmTool tool, ICollection<string> allowed)
+        {
+            if (tool == null || allowed == null || allowed.Count == 0)
+            {
+                return null;
             }
 
-            if (tool is IAIFunctionsLlmTool functionTools)
+            IReadOnlyList<string> callable = GetCallableToolNames(tool);
+            List<string> kept = new();
+            foreach (string name in callable)
             {
-                bool any = false;
-                foreach (AIFunction function in SafeCreateFunctions(tool, functionTools))
+                if (allowed.Contains(name))
                 {
-                    if (function != null && !string.IsNullOrWhiteSpace(function.Name))
-                    {
-                        any = true;
-                        yield return function.Name;
-                    }
+                    kept.Add(name);
                 }
-
-                if (!any)
-                {
-                    yield return tool.Name;
-                }
-
-                yield break;
             }
 
-            if (tool is IAIFunctionLlmTool functionTool)
+            if (kept.Count == 0)
             {
-                AIFunction function = SafeCreateFunction(tool, functionTool);
-                yield return !string.IsNullOrWhiteSpace(function?.Name) ? function.Name : tool.Name;
-                yield break;
+                return null;
             }
 
-            yield return tool.Name;
+            return kept.Count == callable.Count ? tool : new AllowlistedFunctionsLlmTool(tool, kept);
+        }
+
+        private static IReadOnlyList<string> GetWrapperFunctionNames(ILlmTool tool, IAIFunctionsLlmTool functionTools)
+        {
+            if (CallableNameCache.TryGetValue(tool, out string[] cached))
+            {
+                return cached;
+            }
+
+            List<string> names = new();
+            List<AIFunction> functions = SafeCreateFunctions(functionTools, out bool complete);
+            foreach (AIFunction function in functions)
+            {
+                if (function != null && !string.IsNullOrWhiteSpace(function.Name))
+                {
+                    names.Add(function.Name);
+                }
+            }
+
+            if (names.Count == 0)
+            {
+                names.Add(tool.Name);
+            }
+
+            string[] built = names.ToArray();
+            if (complete)
+            {
+                // WHY AddOrUpdate: two requests may build the same wrapper's names at once; both lists are equal.
+                CallableNameCache.AddOrUpdate(tool, built);
+            }
+
+            return built;
         }
 
         private static void AddDescriptors(SkillSet skill, ILlmTool tool, List<SkillToolDescriptor> descriptors)
@@ -357,7 +556,7 @@ namespace CoreAI.Ai
             if (tool is IAIFunctionsLlmTool functionTools)
             {
                 bool added = false;
-                foreach (AIFunction function in SafeCreateFunctions(tool, functionTools))
+                foreach (AIFunction function in SafeCreateFunctions(functionTools, out _))
                 {
                     if (function == null || string.IsNullOrWhiteSpace(function.Name))
                     {
@@ -445,27 +644,33 @@ namespace CoreAI.Ai
             }
         }
 
-        private static IEnumerable<AIFunction> SafeCreateFunctions(ILlmTool tool, IAIFunctionsLlmTool functionTools)
+        /// <param name="complete">False when building the functions threw; the ones built before that are returned.</param>
+        private static List<AIFunction> SafeCreateFunctions(IAIFunctionsLlmTool functionTools, out bool complete)
         {
-            IEnumerable<AIFunction> functions;
+            List<AIFunction> created = new();
+            complete = false;
             try
             {
-                functions = functionTools.CreateAIFunctions();
+                // WHY the enumeration is inside the try: CreateAIFunctions is usually an iterator, so its
+                // body - and a failure to build one function - runs while enumerating, not on the call.
+                // Outside the try that failure escaped to whoever asked for the names. The functions built
+                // before the failure are still reported.
+                IEnumerable<AIFunction> functions = functionTools.CreateAIFunctions();
+                if (functions != null)
+                {
+                    foreach (AIFunction function in functions)
+                    {
+                        created.Add(function);
+                    }
+                }
+
+                complete = true;
             }
             catch
             {
-                yield break;
             }
 
-            if (functions == null)
-            {
-                yield break;
-            }
-
-            foreach (AIFunction function in functions)
-            {
-                yield return function;
-            }
+            return created;
         }
 
         private static string SafeSchema(AIFunction function, string fallback)
@@ -497,100 +702,6 @@ namespace CoreAI.Ai
                 JsonValueKind.False => "false",
                 _ => element.GetRawText()
             };
-        }
-    }
-    /// <summary>
-    /// The one rule for "a required tool argument is missing", shared by the direct tool path
-    /// (<c>ToolExecutionPolicy</c>) and the skill proxy (<c>call_skill_tool</c>).
-    /// </summary>
-    /// <remarks>
-    /// Missing means: the key is absent, or its value is <c>null</c> / JSON <c>null</c> / undefined.
-    /// An empty or whitespace-only string is a PRESENT value - tools legitimately give "" a meaning
-    /// ("the current item"), and the two paths used to disagree on it. Required names come from the
-    /// schema's top-level <c>required</c> array; an unreadable schema yields no required names, so the
-    /// check never blocks a call it cannot reason about.
-    /// </remarks>
-    internal static class LlmToolRequiredArguments
-    {
-        public static List<string> Read(string parametersSchema)
-        {
-            if (string.IsNullOrWhiteSpace(parametersSchema))
-            {
-                return new List<string>();
-            }
-
-            try
-            {
-                return Read(JObject.Parse(parametersSchema));
-            }
-            catch (Newtonsoft.Json.JsonException)
-            {
-                return new List<string>();
-            }
-        }
-
-        public static List<string> Read(JObject schema)
-        {
-            List<string> result = new();
-            if (!(schema?["required"] is JArray required))
-            {
-                return result;
-            }
-
-            foreach (JToken token in required)
-            {
-                string name = token.Type == JTokenType.String ? token.Value<string>()?.Trim() : null;
-                if (!string.IsNullOrEmpty(name) && !result.Contains(name))
-                {
-                    result.Add(name);
-                }
-            }
-
-            return result;
-        }
-
-        public static bool IsMissing(object value)
-        {
-            switch (value)
-            {
-                case null:
-                    return true;
-                case JToken token:
-                    return token.Type == JTokenType.Null || token.Type == JTokenType.Undefined;
-                case JsonElement element:
-                    return element.ValueKind == JsonValueKind.Null || element.ValueKind == JsonValueKind.Undefined;
-                default:
-                    return false;
-            }
-        }
-
-        public static List<string> FindMissing(IReadOnlyList<string> required, JObject arguments)
-        {
-            List<string> missing = new();
-            foreach (string name in required)
-            {
-                if (arguments == null || !arguments.TryGetValue(name, StringComparison.Ordinal, out JToken value) ||
-                    IsMissing(value))
-                {
-                    missing.Add(name);
-                }
-            }
-
-            return missing;
-        }
-
-        public static List<string> FindMissing(IReadOnlyList<string> required, IDictionary<string, object> arguments)
-        {
-            List<string> missing = new();
-            foreach (string name in required)
-            {
-                if (arguments == null || !arguments.TryGetValue(name, out object value) || IsMissing(value))
-                {
-                    missing.Add(name);
-                }
-            }
-
-            return missing;
         }
     }
 }

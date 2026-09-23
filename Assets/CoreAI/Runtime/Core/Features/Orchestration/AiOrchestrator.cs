@@ -253,15 +253,15 @@ namespace CoreAI.Ai
                 };
             }
 
-            // WHY decided once, here, from the RAW store tail: the prompt filter below and the teardown append
-            // must agree. Deciding again on the pruned/folded prompt tail disagreed whenever pruning removed a
-            // message after the user turn ([user X, tool] with tool results pruned looks like an unanswered X).
-            bool resendOfUnansweredUserTurn = roleConfig.WithChatHistory && _memoryStore != null &&
-                                              IsResendOfUnansweredUserTurn(roleId, traceId, task);
+            // WHY decided once, inside BuildChatHistoryAsync, from the RAW store tail of the one history read
+            // every turn already makes: the prompt filter and the teardown append must agree, and a second
+            // GetChatHistory(roleId, 1) per request was a synchronous gate wait on the main thread for a file
+            // store. Deciding on the pruned/folded prompt tail disagreed whenever pruning removed a message
+            // after the user turn ([user X, tool] with tool results pruned looks like an unanswered X).
             (string updatedSystem, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool wasCompacted,
-                    ConversationContextSnapshot contextSnapshot) =
-                await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId,
-                    resendOfUnansweredUserTurn, cancellationToken);
+                    ConversationContextSnapshot contextSnapshot, bool resendOfUnansweredUserTurn) =
+                await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId, task,
+                    cancellationToken);
             system = updatedSystem;
             bool shouldConsolidateMemorySnapshot = wasCompacted || contextRetryPass > 0;
             if (shouldConsolidateMemorySnapshot &&
@@ -531,15 +531,21 @@ namespace CoreAI.Ai
             return AuditHash.ComputeParts(parts);
         }
 
+        /// <summary>
+        /// <paramref name="result"/> as a failed task outcome: a blank error text becomes
+        /// <paramref name="fallback"/>, a missing code becomes <see cref="LlmErrorCode.EmptyResponse"/> for an
+        /// empty success and <see cref="LlmErrorCode.ProviderError"/> otherwise. Always a new instance the caller
+        /// owns - WHY: <paramref name="result"/> is usually the instance the LLM client returned, which it may
+        /// reuse or cache.
+        /// </summary>
         private static LlmCompletionResult NormalizeTaskFailure(LlmCompletionResult result, string fallback)
         {
             result ??= new LlmCompletionResult();
-            bool emptySuccess = result.Ok;
-            result.Ok = false;
-            if (string.IsNullOrWhiteSpace(result.Error)) result.Error = fallback;
-            if (result.ErrorCode == LlmErrorCode.None)
-                result.ErrorCode = emptySuccess ? LlmErrorCode.EmptyResponse : LlmErrorCode.ProviderError;
-            return result;
+            string error = string.IsNullOrWhiteSpace(result.Error) ? fallback : result.Error;
+            LlmErrorCode code = result.ErrorCode != LlmErrorCode.None
+                ? result.ErrorCode
+                : result.Ok ? LlmErrorCode.EmptyResponse : LlmErrorCode.ProviderError;
+            return result.WithError(error, code);
         }
 
         /// <summary>
@@ -623,7 +629,6 @@ namespace CoreAI.Ai
                 int chunkCount = 0;
                 string terminalError = null;
                 LlmErrorCode terminalErrorCode = LlmErrorCode.None;
-                bool wasTimedOutByException = false;
                 int? terminalHttpStatus = null;
                 int? terminalRetryAfterSeconds = null;
                 IReadOnlyList<LlmToolCallTrace> executedToolCalls = Array.Empty<LlmToolCallTrace>();
@@ -654,7 +659,6 @@ namespace CoreAI.Ai
                 IAsyncEnumerator<LlmStreamChunk> enumerator = null;
                 string initError = null;
                 LlmErrorCode initErrorCode = LlmErrorCode.ProviderError;
-                bool initTimedOutByException = false;
                 int? initHttpStatus = null;
                 int? initRetryAfterSeconds = null;
                 string initProviderErrorBody = null;
@@ -663,23 +667,20 @@ namespace CoreAI.Ai
                     enumerator = _llm.CompleteStreamingAsync(req, cancellationToken)
                         .GetAsyncEnumerator(cancellationToken);
                 }
-                catch (OperationCanceledException ex)
-                {
-                    initError = ex.Message;
-                    initErrorCode = LlmCancellation.Classify(ex, cancellationToken);
-                    initTimedOutByException = initErrorCode == LlmErrorCode.Timeout;
-                }
-                catch (LlmClientException ex)
-                {
-                    initError = ex.Message;
-                    initErrorCode = ex.ErrorCode;
-                    initHttpStatus = ex.HttpStatus;
-                    initRetryAfterSeconds = ex.RetryAfterSeconds;
-                    initProviderErrorBody = ex.ProviderErrorBody;
-                }
                 catch (Exception ex)
                 {
-                    initError = ex.Message;
+                    // WHY one catch: LlmCancellation decides first - a caller that has cancelled owns every
+                    // fault, typed or not - and only a fault it leaves unclassified keeps its own code.
+                    initErrorCode = LlmCancellation.Classify(ex, cancellationToken);
+                    initError = initErrorCode == LlmErrorCode.Cancelled ? LlmCancellation.CancelledErrorText : ex.Message;
+                    if (initErrorCode == LlmErrorCode.None)
+                    {
+                        LlmClientException typed = ex as LlmClientException;
+                        initErrorCode = typed?.ErrorCode ?? LlmErrorCode.ProviderError;
+                        initHttpStatus = typed?.HttpStatus;
+                        initRetryAfterSeconds = typed?.RetryAfterSeconds;
+                        initProviderErrorBody = typed?.ProviderErrorBody;
+                    }
                 }
 
                 if (initError != null)
@@ -694,10 +695,8 @@ namespace CoreAI.Ai
                         bundle.ActorId,
                         bundle.RoleId,
                         bundle.TraceId,
-                        // WHY: the same outcome the pump loop below records for a timeout thrown mid-stream.
-                        initTimedOutByException
-                            ? AiLlmCompletionOutcome.DeadlineCancellation
-                            : ClassifyCompletionOutcome(task, initFailure),
+                        // WHY: the same outcome the pump loop below records for a timeout observed mid-stream.
+                        ClassifyCompletionOutcome(task, initFailure, cancellationToken),
                         0d);
                     bool canRetryInitOverflow = _compactionCoordinator.ShouldRetryAfterContextOverflow(
                         initFailure,
@@ -742,30 +741,32 @@ namespace CoreAI.Ai
                             hasNext = await enumerator.MoveNextAsync();
                             current = hasNext ? enumerator.Current : null;
                         }
-                        catch (OperationCanceledException ex)
-                        {
-                            // WHY: The OCE may carry a token other than the caller's (timeout decorator's
-                            // linked CTS). Falling through to the generic handler would report it as a
-                            // retryable provider fault instead of a cancellation. A library timeout keeps
-                            // its own code: tagging it Cancelled made the chat treat a dead backend as a
-                            // turn somebody stopped on purpose, and a real stop as a timeout further up.
-                            terminalErrorCode = LlmCancellation.Classify(ex, cancellationToken);
-                            wasTimedOutByException = terminalErrorCode == LlmErrorCode.Timeout;
-                            terminalError = wasTimedOutByException ? ex.Message : "cancelled";
-                            wasCancelled = true;
-                            hasNext = false;
-                        }
-                        catch (LlmClientException ex)
-                        {
-                            exceptionMessage = ex.Message;
-                            exceptionCode = ex.ErrorCode;
-                            exceptionHttpStatus = ex.HttpStatus;
-                            exceptionRetryAfterSeconds = ex.RetryAfterSeconds;
-                            hasNext = false;
-                        }
                         catch (Exception ex)
                         {
-                            exceptionMessage = ex.Message;
+                            // WHY LlmCancellation decides first: an OCE may carry a token other than the
+                            // caller's (timeout decorator's linked CTS), and a caller that has cancelled
+                            // owns every fault the tearing-down transport reports, typed or not. Falling
+                            // through to the generic classification reported those as retryable provider
+                            // faults. A library timeout keeps its own code: tagging it Cancelled made the
+                            // chat treat a dead backend as a turn somebody stopped on purpose.
+                            LlmErrorCode classified = LlmCancellation.Classify(ex, cancellationToken);
+                            if (classified != LlmErrorCode.None)
+                            {
+                                terminalErrorCode = classified;
+                                terminalError = classified == LlmErrorCode.Timeout
+                                    ? ex.Message
+                                    : LlmCancellation.CancelledErrorText;
+                                wasCancelled = true;
+                            }
+                            else
+                            {
+                                LlmClientException typed = ex as LlmClientException;
+                                exceptionMessage = ex.Message;
+                                exceptionCode = typed?.ErrorCode ?? LlmErrorCode.ProviderError;
+                                exceptionHttpStatus = typed?.HttpStatus;
+                                exceptionRetryAfterSeconds = typed?.RetryAfterSeconds;
+                            }
+
                             hasNext = false;
                         }
 
@@ -861,6 +862,14 @@ namespace CoreAI.Ai
 
                         if (current != null && (!string.IsNullOrEmpty(current.Error) || current.ErrorCode != LlmErrorCode.None))
                         {
+                            // WHY: an error chunk that arrives after the caller cancelled is the caller's stop
+                            // whatever its code (LlmCancellation.ClassifyCode); the consumer sees the same code as
+                            // the metric, and the copy keeps the inner client's instance untouched.
+                            if (LlmCancellation.IsReportedCallerStop(current.ErrorCode, cancellationToken))
+                            {
+                                current = current.WithError(LlmCancellation.CancelledErrorText, LlmErrorCode.Cancelled);
+                            }
+
                             terminalError = string.IsNullOrWhiteSpace(current.Error) ? "Streaming completion failed." : current.Error;
                             terminalErrorCode = current.ErrorCode;
                             terminalHttpStatus = current.HttpStatus;
@@ -966,13 +975,16 @@ namespace CoreAI.Ai
                     // synthesized from the executed calls right after this block.
                     bool producedContent = !string.IsNullOrWhiteSpace(accumulated.ToString()) ||
                                            (executedToolCalls != null && executedToolCalls.Count > 0);
+                    // WHY a terminal Timeout is the deadline however it arrived: the default pipeline's timeout
+                    // decorator yields a Timeout CHUNK on the streaming path and throws only on the other one;
+                    // counting the chunk as a provider failure made the same dead backend two different metrics.
                     AiLlmCompletionOutcome outcome = terminalErrorCode == LlmErrorCode.Cancelled
-                        ? ResolveCancellationOutcome(task, null)
-                        : terminalErrorCode == LlmErrorCode.Timeout && wasTimedOutByException
+                        ? ResolveCancellationOutcome(task, null, cancellationToken)
+                        : terminalErrorCode == LlmErrorCode.Timeout
                             ? AiLlmCompletionOutcome.DeadlineCancellation
-                        : string.IsNullOrEmpty(terminalError) && producedContent
-                            ? AiLlmCompletionOutcome.Succeeded
-                            : AiLlmCompletionOutcome.ProviderFailure;
+                            : string.IsNullOrEmpty(terminalError) && producedContent
+                                ? AiLlmCompletionOutcome.Succeeded
+                                : AiLlmCompletionOutcome.ProviderFailure;
                     _metrics.RecordLlmCompletion(
                         bundle.ActorId,
                         bundle.RoleId,
@@ -1130,20 +1142,36 @@ namespace CoreAI.Ai
             try
             {
                 LlmCompletionResult result = await CompleteForTaskAsync(request, cancellationToken);
-                outcome = ClassifyCompletionOutcome(task, result);
-                if (outcome == AiLlmCompletionOutcome.Cancelled ||
-                    outcome == AiLlmCompletionOutcome.Replaced ||
-                    outcome == AiLlmCompletionOutcome.DeadlineCancellation)
+                // WHY: a failed result returned after the caller cancelled is the caller's stop whatever its code,
+                // exactly like a thrown fault (LlmCancellation.ClassifyCode); the copy keeps the inner client's
+                // instance untouched.
+                if (result != null && !result.Ok &&
+                    LlmCancellation.IsReportedCallerStop(result.ErrorCode, cancellationToken))
                 {
-                    throw new OperationCanceledException(result?.Error ?? "cancelled", cancellationToken);
+                    result = result.WithError(LlmCancellation.CancelledErrorText, LlmErrorCode.Cancelled);
+                }
+
+                outcome = ClassifyCompletionOutcome(task, result, cancellationToken);
+                // WHY only a Cancelled result throws: a Timeout result records the deadline metric but stays a
+                // result - thrown as a plain OperationCanceledException it would reach the caller as a stop.
+                if (result != null && !result.Ok && result.ErrorCode == LlmErrorCode.Cancelled)
+                {
+                    throw new OperationCanceledException(result.Error ?? LlmCancellation.CancelledErrorText, cancellationToken);
                 }
 
                 return result;
             }
             catch (OperationCanceledException ex)
             {
-                outcome = ResolveCancellationOutcome(task, ex);
+                outcome = ResolveCancellationOutcome(task, ex, cancellationToken);
                 throw;
+            }
+            catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+            {
+                // WHY: the caller stopped; whatever the pipeline reported while stopping is the stop (see
+                // LlmCancellation). The fault stays attached for diagnostics.
+                outcome = ResolveCancellationOutcome(task, ex, cancellationToken);
+                throw LlmCancellation.WrapAsCancellation(ex, cancellationToken, "the completion");
             }
             finally
             {
@@ -1157,33 +1185,57 @@ namespace CoreAI.Ai
             }
         }
 
+        /// <summary>
+        /// The metric outcome of a completion <paramref name="result"/> whose code has already been classified
+        /// against <paramref name="operationToken"/>: a <see cref="LlmErrorCode.Timeout"/> is the deadline
+        /// (however it arrived - thrown or as a terminal chunk), a <see cref="LlmErrorCode.Cancelled"/> is
+        /// attributed between caller and deadline, anything else failed at the provider.
+        /// </summary>
         private static AiLlmCompletionOutcome ClassifyCompletionOutcome(
             AiTaskRequest task,
-            LlmCompletionResult result)
+            LlmCompletionResult result,
+            CancellationToken operationToken)
         {
             if (result != null && result.Ok)
             {
                 return AiLlmCompletionOutcome.Succeeded;
             }
 
-            return result?.ErrorCode == LlmErrorCode.Cancelled
-                ? ResolveCancellationOutcome(task, null)
-                : AiLlmCompletionOutcome.ProviderFailure;
+            switch (result?.ErrorCode)
+            {
+                case LlmErrorCode.Cancelled:
+                    return ResolveCancellationOutcome(task, null, operationToken);
+                case LlmErrorCode.Timeout:
+                    return AiLlmCompletionOutcome.DeadlineCancellation;
+                default:
+                    return AiLlmCompletionOutcome.ProviderFailure;
+            }
         }
 
+        /// <summary>
+        /// Attributes a stopped completion: a library timeout with the caller still listening is the deadline;
+        /// everything else is attributed between the caller's own token and the caller-owned deadline token.
+        /// <para>
+        /// WHY <paramref name="operationToken"/> is consulted too: a queue hands the orchestrator a linked token
+        /// and keeps the caller's own on the task, a direct call hands only its own token. Either way the caller
+        /// wins over a timer that raced the stop (<see cref="LlmCancellation"/>).
+        /// </para>
+        /// </summary>
         private static AiLlmCompletionOutcome ResolveCancellationOutcome(
             AiTaskRequest task,
-            OperationCanceledException exception)
+            Exception exception,
+            CancellationToken operationToken)
         {
-            if (exception is LlmOperationTimeoutException)
-            {
-                return AiLlmCompletionOutcome.DeadlineCancellation;
-            }
-
             CancellationToken callerCancellationToken =
                 task?.CallerCancellationToken ?? CancellationToken.None;
             CancellationToken deadlineCancellationToken =
                 task?.DeadlineCancellationToken ?? CancellationToken.None;
+            if (!callerCancellationToken.IsCancellationRequested &&
+                LlmCancellation.IsTimeout(exception, operationToken))
+            {
+                return AiLlmCompletionOutcome.DeadlineCancellation;
+            }
+
             return AiCancellationAttributionContext.Resolve(
                 callerCancellationToken,
                 deadlineCancellationToken);
@@ -1232,6 +1284,11 @@ namespace CoreAI.Ai
                     .GetAsyncEnumerator(cancellationToken);
             }
             catch (OperationCanceledException) { throw; }
+            catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+            {
+                // WHY: the caller stopped; a fault reported while stopping is the stop (LlmCancellation).
+                throw LlmCancellation.WrapAsCancellation(ex, cancellationToken, "the stream");
+            }
             catch (LlmClientException ex)
             {
                 LlmCompletionResult failed = BuildFailureResult(ex.Message, ex.ErrorCode, ex.HttpStatus, ex.RetryAfterSeconds);
@@ -1265,6 +1322,11 @@ namespace CoreAI.Ai
                         // OCE may carry a decorator's linked token rather than the caller's own.
                         throw;
                     }
+                    catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+                    {
+                        // WHY: the caller stopped; a fault reported while stopping is the stop (LlmCancellation).
+                        throw LlmCancellation.WrapAsCancellation(ex, cancellationToken, "the stream");
+                    }
                     catch (LlmClientException ex)
                     {
                         terminalError = ex.Message;
@@ -1294,8 +1356,13 @@ namespace CoreAI.Ai
                     if (!string.IsNullOrEmpty(current.Model)) model = current.Model;
                     if (!string.IsNullOrEmpty(current.Error) || current.ErrorCode != LlmErrorCode.None)
                     {
-                        terminalError = string.IsNullOrWhiteSpace(current.Error) ? "Streaming completion failed." : current.Error;
-                        terminalErrorCode = current.ErrorCode;
+                        // WHY: an error chunk after the caller cancelled is the caller's stop whatever its code
+                        // (LlmCancellation.ClassifyCode).
+                        bool callerStop = LlmCancellation.IsReportedCallerStop(current.ErrorCode, cancellationToken);
+                        terminalError = callerStop
+                            ? LlmCancellation.CancelledErrorText
+                            : string.IsNullOrWhiteSpace(current.Error) ? "Streaming completion failed." : current.Error;
+                        terminalErrorCode = callerStop ? LlmErrorCode.Cancelled : current.ErrorCode;
                         terminalHttpStatus = current.HttpStatus;
                         terminalRetryAfterSeconds = current.RetryAfterSeconds;
                     }
@@ -1400,7 +1467,7 @@ namespace CoreAI.Ai
 
             /// <summary>
             /// The request repeats the unanswered user message at the tail of the role history
-            /// (<see cref="IsResendOfUnansweredUserTurn"/>), decided once from the raw store tail.
+            /// (<see cref="IsResendOfUnansweredUserTurn(string, string, AiTaskRequest, ChatMessage[])"/>), decided once from the raw store tail.
             /// </summary>
             public bool ResendOfUnansweredUserTurn;
             public int EstimatedPromptTokens;
@@ -1434,20 +1501,26 @@ namespace CoreAI.Ai
             public int PreviousEstimatedPromptTokens { get; }
         }
 
+        /// <summary>
+        /// Reads the role history once and builds the prompt window from it. The same read decides whether
+        /// <paramref name="task"/> is a resend of the unanswered message at the store tail (the last item of
+        /// the read, whatever the cap - <see cref="IAgentMemoryStore.GetChatHistory"/> returns the NEWEST
+        /// messages); the decision is returned so the teardown append follows it without a second read.
+        /// </summary>
         private async Task<(string systemPrompt, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool
-                wasCompacted, ConversationContextSnapshot contextSnapshot)>
+                wasCompacted, ConversationContextSnapshot contextSnapshot, bool resendOfUnansweredUserTurn)>
             BuildChatHistoryAsync(
                 string roleId,
                 AgentMemoryPolicy.RoleMemoryConfig roleConfig,
                 string system,
                 ConversationContextBuildArgs buildArgs,
                 string traceId,
-                bool resendOfUnansweredUserTurn,
+                AiTaskRequest task,
                 CancellationToken cancellationToken)
         {
             if (!roleConfig.WithChatHistory || _memoryStore == null)
             {
-                return (system, null, false, null);
+                return (system, null, false, null, false);
             }
 
             int maxMessages = roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30;
@@ -1457,8 +1530,10 @@ namespace CoreAI.Ai
                 _settings.EnableConversationHistorySummarization ? 0 : maxMessages);
             if (history == null || history.Length == 0)
             {
-                return (system, null, false, null);
+                return (system, null, false, null, false);
             }
+
+            bool resendOfUnansweredUserTurn = IsResendOfUnansweredUserTurn(roleId, traceId, task, history);
 
             ConversationContextSnapshot snapshot;
             if (!_settings.EnableConversationHistorySummarization)
@@ -1497,7 +1572,7 @@ namespace CoreAI.Ai
 
             if (snapshot == null)
             {
-                return (system, null, false, null);
+                return (system, null, false, null, resendOfUnansweredUserTurn);
             }
 
             // This summary describes old messages: preserve it before any provider/tool side effect
@@ -1546,10 +1621,10 @@ namespace CoreAI.Ai
                     return (resultSystem, new List<Microsoft.Extensions.AI.ChatMessage>
                     {
                         new(Microsoft.Extensions.AI.ChatRole.User, summaryBlock)
-                    }, snapshot.WasCompacted, snapshot);
+                    }, snapshot.WasCompacted, snapshot, resendOfUnansweredUserTurn);
                 }
 
-                return (resultSystem, null, snapshot.WasCompacted, snapshot);
+                return (resultSystem, null, snapshot.WasCompacted, snapshot, resendOfUnansweredUserTurn);
             }
 
             List<Microsoft.Extensions.AI.ChatMessage> chatHistory =
@@ -1575,7 +1650,7 @@ namespace CoreAI.Ai
                     ToolResultPromptProjection.ForPrompt(msg.Role, msg.Content)));
             }
 
-            return (resultSystem, chatHistory, snapshot.WasCompacted, snapshot);
+            return (resultSystem, chatHistory, snapshot.WasCompacted, snapshot, resendOfUnansweredUserTurn);
         }
 
         private static string BuildWorldStateInstructions(string worldState)
@@ -1742,7 +1817,7 @@ namespace CoreAI.Ai
         /// <para>
         /// The one exception is a resend: when the history already ends with this exact user message (an
         /// earlier attempt was cancelled or failed before any answer), that record IS this turn and nothing is
-        /// appended — see <see cref="IsResendOfUnansweredUserTurn"/>.
+        /// appended — see <see cref="IsResendOfUnansweredUserTurn(string, string, AiTaskRequest, ChatMessage[])"/>.
         /// </para>
         /// </summary>
         private void EnsureUserTurnRecorded(
@@ -1821,32 +1896,22 @@ namespace CoreAI.Ai
         /// <para>
         /// A read failure never blocks the append: losing the learner's words is worse than a duplicate.
         /// </para>
+        /// <para>
+        /// This overload reads the store tail itself and serves only the teardown paths that never built a
+        /// request (authority denied, a queue that terminated admitted work); a built request carries the
+        /// decision from the history read of <see cref="BuildChatHistoryAsync"/>.
+        /// </para>
         /// </summary>
         private bool IsResendOfUnansweredUserTurn(string roleId, string traceId, AiTaskRequest task)
         {
-            if (task?.Attachments != null && task.Attachments.Count > 0)
+            if (!MayBeResend(task))
             {
-                // WHY: history keeps only a descriptor of an attachment (name, type, size), so two different
-                // screenshots can produce byte-identical text. A turn with attachments is never collapsed; the
-                // price is a possible duplicate when the very same files are re-sent.
                 return false;
             }
 
-            string userTurnText = BuildUserTurnHistoryText(task);
             try
             {
-                ChatMessage[] tail = _memoryStore.GetChatHistory(roleId, 1);
-                bool resend = tail != null && tail.Length > 0 &&
-                              IsUnansweredCopyOf(tail[tail.Length - 1], userTurnText);
-                if (resend)
-                {
-                    Log.Instance.Info(
-                        $"[AiOrchestrator] role='{roleId}' trace='{traceId ?? "unknown"}' " +
-                        "user turn is a resend of the unanswered message at the tail of history; not stored twice.",
-                        LogTag.Llm);
-                }
-
-                return resend;
+                return IsResendOfUnansweredUserTurn(roleId, traceId, task, _memoryStore.GetChatHistory(roleId, 1));
             }
             catch (Exception ex)
             {
@@ -1856,6 +1921,41 @@ namespace CoreAI.Ai
                     LogTag.Llm);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// The decision itself, from <paramref name="history"/> as the store returned it (newest last): true when
+        /// its last message is an unanswered copy of this turn's user message.
+        /// </summary>
+        private static bool IsResendOfUnansweredUserTurn(
+            string roleId,
+            string traceId,
+            AiTaskRequest task,
+            ChatMessage[] history)
+        {
+            if (!MayBeResend(task) || history == null || history.Length == 0)
+            {
+                return false;
+            }
+
+            bool resend = IsUnansweredCopyOf(history[history.Length - 1], BuildUserTurnHistoryText(task));
+            if (resend)
+            {
+                Log.Instance.Info(
+                    $"[AiOrchestrator] role='{roleId}' trace='{traceId ?? "unknown"}' " +
+                    "user turn is a resend of the unanswered message at the tail of history; not stored twice.",
+                    LogTag.Llm);
+            }
+
+            return resend;
+        }
+
+        private static bool MayBeResend(AiTaskRequest task)
+        {
+            // WHY: history keeps only a descriptor of an attachment (name, type, size), so two different
+            // screenshots can produce byte-identical text. A turn with attachments is never collapsed; the
+            // price is a possible duplicate when the very same files are re-sent.
+            return task?.Attachments == null || task.Attachments.Count == 0;
         }
 
         /// <summary>
@@ -1873,6 +1973,34 @@ namespace CoreAI.Ai
         private static string ResolveRoleId(AiTaskRequest task)
         {
             return string.IsNullOrWhiteSpace(task?.RoleId) ? BuiltInAgentRoleIds.Creator : task.RoleId.Trim();
+        }
+
+        /// <summary>
+        /// Every name a text-shaped call leaked into the visible answer can carry for this request's tools: each
+        /// tool's registered name and, for a multi-function wrapper, its function names.
+        /// <para>
+        /// WHY the function names: the model calls a wrapper by its functions (<c>camera_look</c>), the names the
+        /// execution policy resolves; a registry of registered names alone left such a leaked call on screen.
+        /// </para>
+        /// </summary>
+        private static string[] BuildLeakedCallNames(IReadOnlyList<ILlmTool> tools)
+        {
+            List<string> names = new();
+            foreach (ILlmTool tool in tools)
+            {
+                if (tool == null)
+                {
+                    continue;
+                }
+
+                names.Add(tool.Name);
+                if (tool is IAIFunctionsLlmTool)
+                {
+                    names.AddRange(SkillSetToolResolver.GetCallableToolNames(tool));
+                }
+            }
+
+            return names.ToArray();
         }
 
         /// <summary>
@@ -1894,8 +2022,7 @@ namespace CoreAI.Ai
             // showing JSON to a learner and the answer must remain intact.
             if (IsTextShapedToolChannel(bundle))
             {
-                string sanitised = LlmToolCallTextExtractor.StripForDisplay(content,
-                    bundle.Tools.Where(tool => tool != null).Select(tool => tool.Name).ToArray());
+                string sanitised = LlmToolCallTextExtractor.StripForDisplay(content, BuildLeakedCallNames(bundle.Tools));
                 if (!string.Equals(sanitised, content, StringComparison.Ordinal))
                 {
                     Log.Instance.Warn(
@@ -2178,6 +2305,19 @@ namespace CoreAI.Ai
                 {
                     filtered.Add(skillMetaTool.RestrictTo(allowed));
                     keptSkillEntryPoint = true;
+                    continue;
+                }
+
+                // WHY a multi-function wrapper is judged by its function names too: the provider is offered the
+                // wrapper's functions (camera_look), never its own name (camera), and the request's Tool
+                // Availability lists those function names - an allowlist written from them dropped the whole
+                // wrapper. The rule: the wrapper's own name allows all of its functions (it is the name the role
+                // registered it under, matched above); otherwise the allowed function names keep the wrapper
+                // narrowed to exactly those functions, so allowing one function never exposes its siblings.
+                if (tool is IAIFunctionsLlmTool functionTools &&
+                    SkillSetToolResolver.RestrictToAllowedFunctions(functionTools, allowed) is { } narrowed)
+                {
+                    filtered.Add(narrowed);
                 }
             }
 

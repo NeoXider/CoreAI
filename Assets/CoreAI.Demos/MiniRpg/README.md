@@ -11,8 +11,8 @@ Open `MiniRpgModsDemo.unity`.
   (`Horizontal`/`Vertical` axes and mouse look, `Jump`, **Left Shift** to run).
 - The UI Toolkit **CoreAI Hub** (`CoreAiHubWindow` + `CoreAiHubDemo` + `CoreAiModsHubBinder`) with the
   built-in Chat, Settings, Statistics and live Mods pages.
-- The IMGUI mod manager (**F9**) and Token Budget overlay (**F10**) from
-  `LiveMechanicsModsChatPersistenceController` / `CoreAiTokenBudgetOverlay`.
+- The mod manager (**F9**, a uGUI `CoreAiDemoPanel` from `LiveMechanicsModsChatPersistenceController`)
+  and the IMGUI Token Budget overlay (**F10**, `CoreAiTokenBudgetOverlay`).
 - A child `CoreAiModsLifetimeScope` with `storeId = mini-rpg-demo`, so this demo's persisted mods stay
   isolated from every other demo.
 

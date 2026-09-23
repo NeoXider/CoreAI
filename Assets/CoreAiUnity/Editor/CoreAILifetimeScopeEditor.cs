@@ -29,7 +29,9 @@ namespace CoreAI.Editor
             if (module == null)
             {
                 EditorGUILayout.HelpBox(
-                    "Optional. Add a child module to configure Lua capabilities, spawn prefabs, and scene access. Existing serialized settings are copied during migration.",
+                    "Optional. Add a child module to configure world-command spawn prefabs and scene access. " +
+                    "Existing serialized settings are copied during migration. The Lua capability tier " +
+                    "(Full access) is set on CoreAiModsLifetimeScope.",
                     MessageType.Info);
                 if (GUILayout.Button("Add Lua / World Commands Module"))
                 {

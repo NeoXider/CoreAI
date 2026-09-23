@@ -34,9 +34,10 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
   draws no frames. Anchored roots remain anchored. Hosts can supply an
   `IRbxCharacterMotor` factory; headless worlds retain character health and state
   without requiring Unity physics.
-- This character slice does not implement avatar rigs, animation, appearance loading, automatic
-  death/respawn scheduling, or a production multiplayer transport. `RespawnTime` remains a stored
-  setting until automatic respawn scheduling is implemented.
+- A character whose `Humanoid` dies is reloaded `Players.RespawnTime` seconds later while
+  `CharacterAutoLoads` is still true (scheduled by the Lua bindings layer, not by this assembly).
+- This character slice does not implement avatar rigs, animation, or appearance loading. The network
+  transport is the optional `com.neoxider.coreaimirror` package, not this assembly.
 - `Clone()` copies external part state through the backing binder and removes partially created
   copies if that binder fails. Lua clones receive the calling actor's ownership recursively.
 

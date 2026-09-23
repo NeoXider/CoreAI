@@ -19,7 +19,7 @@ Use `AiTaskRequest.AllowedToolNames` to narrow the role's registered tools for o
 - `ForcedToolMode = RequireAny`: the request expects at least one available tool.
 - `ForcedToolMode = RequireSpecific`: set `RequiredToolName` and include that tool in the allowlist.
 
-RedoSchool can use this to keep theory turns text-only and require concrete practice tools for check/quiz slots.
+A lesson host can use this to keep theory turns text-only and require concrete practice tools for check/quiz slots.
 
 ## Deterministic Tests
 

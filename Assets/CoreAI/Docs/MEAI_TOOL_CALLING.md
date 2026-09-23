@@ -1,8 +1,8 @@
 # 🛠️ MEAI Tool Calling — Architecture
 
-**Microsoft.Extensions.AI (MEAI)** is a unified pipeline for tool calling across all backends. The **OpenAI-compatible HTTP** `IChatClient` (`MeaiOpenAiChatClient`) lives in the portable **`com.nexoider.coreai`** assembly; Unity wires **`MeaiLlmClient`**, decorators, and **`MessagePipeToolCallEventPublisher`** in **`com.nexoider.coreaiunity`**. See [`README.md`](README.md) for the full portable-doc map.
+**Microsoft.Extensions.AI (MEAI)** is a unified pipeline for tool calling across all backends. The **OpenAI-compatible HTTP** `IChatClient` (`MeaiOpenAiChatClient`) lives in the portable **`com.neoxider.coreai`** assembly; Unity wires **`MeaiLlmClient`**, decorators, and **`MessagePipeToolCallEventPublisher`** in **`com.neoxider.coreaiunity`**. See [`README.md`](README.md) for the full portable-doc map.
 
-> 💡 **v2.0+:** Tools can be organized into **SkillSets** — named groups with per-skill prompt instructions. See [AGENT_BUILDER.md — Skills](AGENT_BUILDER.md#skills-v20). The MEAI pipeline handles skill tools identically — `DelegateLlmTool` and `AIFunctionFactory` work the same way regardless of whether the tool was registered directly or through a `SkillSet`.
+> 💡 Tools can be organized into **SkillSets** — named groups with per-skill prompt instructions. See [AGENT_BUILDER.md — Skills](AGENT_BUILDER.md#skills). The MEAI pipeline handles skill tools identically — `DelegateLlmTool` and `AIFunctionFactory` work the same way regardless of whether the tool was registered directly or through a `SkillSet`.
 
 ---
 
@@ -32,27 +32,29 @@ Raising the version is allowed only once the engine can load the newer assemblie
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      ILlmClient                              │
-├────────────────────────┬────────────────────────────────────┤
-│ MeaiLlmUnityClient     │    OpenAiChatLlmClient              │
-│   (local GGUF)         │    (HTTP API)                       │
-├────────────────────────┼────────────────────────────────────┤
-│ LlmUnityMeaiChatClient │    MeaiOpenAiChatClient             │
-│   (MEAI.IChatClient)   │    (MEAI.IChatClient)               │
-├────────────────────────┴────────────────────────────────────┤
+│   OpenAiChatLlmClient / LlmEndpointClientFactory activation  │
+├─────────────────────────────────────────────────────────────┤
 │                MeaiLlmClient                                 │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │     MEAI.FunctionInvokingChatClient                    │  │
+│  │  SmartToolCallingChatClient + ToolExecutionPolicy      │  │
+│  │  (MEAI FunctionInvokingChatClient on the               │  │
+│  │   non-streaming path)                                  │  │
 │  │  1. Model → tool_calls                                │  │
 │  │  2. Resolve AIFunction by name                        │  │
 │  │  3. Execute AIFunction.InvokeAsync()                  │  │
 │  │  4. Result → model → final answer                     │  │
 │  └───────────────────────────────────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────┤
+│   MeaiOpenAiChatClient (MEAI.IChatClient, HTTP + SSE)        │
+│   → any OpenAI-compatible API, or the local llama.cpp        │
+│     endpoint an LLMUnity model exposes                       │
+├─────────────────────────────────────────────────────────────┤
 │           AIFunction[] (MemoryTool, LuaTool, etc.)          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**The same MEAI pipeline for both backends.**
+**The same MEAI pipeline for both backends:** an LLMUnity model is reached through the same HTTP client
+as a remote API.
 
 ---
 
@@ -63,27 +65,39 @@ Raising the version is allowed only once the engine can load the newer assemblie
 ```csharp
 public interface ILlmTool
 {
-    string Name { get; }           // "memory", "execute_lua", "get_inventory"
-    string Description { get; }    // What the tool does
-    string ParametersSchema { get; } // JSON schema for parameters
+    string Name { get; }                 // "memory", "execute_lua", "get_inventory"
+    string Description { get; }          // What the tool does
+    string ParametersSchema { get; }     // JSON schema for parameters
+    bool AllowDuplicates { get; }        // no default: implement it (LlmToolBase returns false)
+    int? ToolTimeoutMsOverride => null;  // per-tool timeout; null = global setting
+    bool EndsTurn => false;              // a successful call ends the model's turn
+    bool IsMutating => false;            // serialize against other mutating calls
 }
 ```
 
-`ILlmTool` is metadata only for system prompts and routing.
+`ILlmTool` carries the metadata the prompt and the execution policy use. It does **not** make a tool
+callable: the pipeline binds a tool only through `IAIFunctionLlmTool.CreateAIFunction()` (one function) or
+`IAIFunctionsLlmTool.CreateAIFunctions()` (several functions) — see §3. `LlmToolBase` implements the
+metadata with defaults, so a custom tool usually derives from it and adds `IAIFunctionLlmTool`.
 
 ### 2. AIFunction — executor
 
 ```csharp
-public class MemoryTool
+public sealed class MyMemoryTool
 {
     public AIFunction CreateAIFunction() => AIFunctionFactory.Create(
-        async (string action, string? content, CancellationToken ct) => ExecuteAsync(action, content, ct),
+        new Func<string, string?, CancellationToken, Task<string>>(ExecuteAsync),
         "memory",
         "Store, append, or clear persistent memory.");
+
+    public Task<string> ExecuteAsync(string action, string? content = null, CancellationToken ct = default) =>
+        Task.FromResult("ok");
 }
 ```
 
-`AIFunction` wraps a .NET method for MEAI.
+`AIFunction` wraps a .NET method for MEAI. `AIFunctionFactory.Create` takes a `System.Delegate`; Unity
+compiles C# 9, so pass a typed delegate (`new Func<...>(...)` or a typed local), never a bare lambda.
+The shipped `MemoryTool` does the same with its full parameter list.
 
 The public .NET parameter names are part of the native tool contract. Keep them
 identical to the JSON schema property names exposed through `ILlmTool.ParametersSchema`
@@ -93,17 +107,26 @@ the tool implementation sees it.
 
 ### 3. Mapping ILlmTool → AIFunction
 
-In `MeaiLlmClient.BuildAIFunctions()`:
+`MeaiLlmClient.BuildAIFunctions()` walks the role's tools in canonical order and binds each one by
+interface, not by concrete class:
 
 ```csharp
 switch (tool)
 {
-    case MemoryLlmTool:  → new MemoryTool(store, roleId).CreateAIFunction()
-    case LuaLlmTool:     → luaTool.CreateAIFunction()
-    case InventoryLlmTool: → invTool.CreateAIFunction()
-    case GameConfigLlmTool: → gcTool.CreateAIFunction()
+    case MemoryLlmTool:        // → new MemoryTool(store, roleId).CreateAIFunction(), bound to the role's store
+    case DelegateLlmTool dt:   // → dt.CreateAIFunction()
+    case IAIFunctionLlmTool t: // → t.CreateAIFunction()           (LuaLlmTool, InventoryLlmTool, WorldLlmTool, ...)
+    case IAIFunctionsLlmTool m:// → m.CreateAIFunctions()          (camera, scene_tool, ...)
+    default:                   // skipped, with the warning "does not implement a MEAI function binding interface"
 }
 ```
+
+A tool that expands into several functions (`IAIFunctionsLlmTool`) is called by its **function** names —
+`camera_capture`, `screenshot`, `camera_look`, `camera_list` for `camera`; `find_objects`, `get_hierarchy`,
+`get_transform`, `set_transform` for `scene_tool`. The execution policy accepts those names, runs each call
+under the wrapper's `ToolTimeoutMsOverride` / `EndsTurn` / `IsMutating` / `AllowDuplicates`, applies casing
+repair to them, extracts and strips text-shaped calls to them, and lists them (not the wrapper name) under
+"Available tools" in the prompt and in refusals.
 
 ### 3.1 IL2CPP / WebGL — typed binding
 
@@ -175,21 +198,23 @@ models the same explicit behavioral guidance that production integrations expect
 
 ## 📦 Files
 
-### Core (CoreAI)
+### Core (`com.neoxider.coreai`)
 
 | File | Purpose |
 |------|-----------|
-| `ILlmTool.cs` | `ILlmTool` interface + `LlmToolBase` |
-| `MemoryTool.cs` | AIFunction for memory (write/append/clear) |
-| `LuaTool.cs` | AIFunction for Lua execution |
-| `InventoryTool.cs` | AIFunction for inventory |
-| `GameConfigTool.cs` | AIFunction for config |
-| `WorldTool.cs` | AIFunction for world control |
-| `MemoryLlmTool.cs` | `ILlmTool` → `MemoryTool` adapter |
-| `LuaLlmTool.cs` | `ILlmTool` → `LuaTool` adapter |
-| `InventoryLlmTool.cs` | `ILlmTool` → `InventoryTool` adapter |
-| `GameConfigLlmTool.cs` | `ILlmTool` → `GameConfigTool` adapter |
-| `WorldLlmTool.cs` | `ILlmTool` → `WorldTool` adapter |
+| `ILlmTool.cs` | `ILlmTool`, `IAIFunctionLlmTool`, `IAIFunctionsLlmTool`, `IJsonInvocableLlmTool`, `LlmToolBase` |
+| `DelegateLlmTool.cs` | A tool built from a C# delegate |
+| `MemoryTool.cs` / `MemoryLlmTool.cs` | AIFunction for memory, and its declarative tool bound to the role's store |
+| `InventoryTool.cs` / `InventoryLlmTool.cs` | AIFunction for `get_inventory`, and its tool |
+| `GameConfigTool.cs` / `GameConfigLlmTool.cs` | AIFunction for `game_config`, and its tool |
+| `MeaiOpenAiChatClient.cs` | OpenAI-compatible `IChatClient` (HTTP + SSE) |
+
+### Mods (`com.neoxider.coreaimods`)
+
+| File | Purpose |
+|------|-----------|
+| `LuaTool.cs` / `LuaLlmTool.cs` | AIFunction for `execute_lua`, and its tool |
+| `LuaModsLlmTool.cs` | `manage_mods` |
 
 ### Unity layer (CoreAiUnity)
 
@@ -199,6 +224,7 @@ models the same explicit behavioral guidance that production integrations expect
 | `LlmEndpointClientFactory.cs` | HTTP/LLMUnity activation after readiness and `Auto`/`Native`/`Text` channel selection |
 | `OpenAiChatLlmClient.cs` | Synchronous HTTP composition with a mandatory explicit channel |
 | `CoreAISettingsAsset.cs` | Unity host settings |
+| `WorldLlmTool.cs` | `world_command` (binds its own AIFunction over `ICoreAiWorldCommandExecutor`) |
 
 `MeaiOpenAiChatClient.cs` lives in **CoreAI.Core**, not in the Unity layer. It implements
 `Microsoft.Extensions.AI.IChatClient` on top of `IOpenAiHttpTransport`; the core can be used outside Unity.
@@ -253,9 +279,9 @@ but the outgoing HTTP contains no `tools`, `tool_choice`, `parallel_tool_calls`,
 
 ---
 
-## 🎯 Forced Tool Mode (v0.25.0+)
+## 🎯 Forced Tool Mode
 
-Sometimes the model “forgets” to call a tool even when it clearly should (e.g. the user asked for a list quiz and the LLM replies in text that it ran the test). From v0.25.0, `AiTaskRequest` and `LlmCompletionRequest` include `ForcedToolMode` (enum `LlmToolChoiceMode`) for **deterministic** tool-choice behavior per request — default is `Auto` (same as before).
+Sometimes the model “forgets” to call a tool even when it clearly should (e.g. the user asked for a list quiz and the LLM replies in text that it ran the test). `AiTaskRequest` and `LlmCompletionRequest` include `ForcedToolMode` (enum `LlmToolChoiceMode`) for **deterministic** tool-choice behavior per request — default is `Auto` (same as before).
 
 ### API
 
@@ -292,18 +318,18 @@ await orch.RunTaskAsync(new AiTaskRequest
 
 ### Mapping to Microsoft.Extensions.AI
 
-`MeaiLlmClient.ApplyForcedToolMode` maps values 1:1 to `ChatOptions.ToolMode`:
+`MeaiLlmClient.ApplyForcedToolMode` maps the values onto `ChatOptions`:
 
-| `LlmToolChoiceMode` | MEAI `ChatToolMode` | Provider semantics |
+| `LlmToolChoiceMode` | MEAI `ChatOptions` | Provider semantics |
 |---|---|---|
-| `Auto` | `null` | OpenAI: `tool_choice: "auto"` (default) |
+| `Auto` | `ToolMode` left unset | OpenAI: `tool_choice: "auto"` (default) |
 | `RequireAny` | `ChatToolMode.RequireAny` | OpenAI: `tool_choice: "required"` |
-| `RequireSpecific` | `ChatToolMode.RequireSpecific(name)` | OpenAI: `tool_choice: {type: "function", function: {name: ...}}` |
+| `RequireSpecific` | `ChatToolMode.RequireAny` with `ChatOptions.Tools` narrowed to the named function (the full set is restored after the first tool call) | OpenAI: `tool_choice: "required"` — accepted by llama.cpp / LM Studio too, which reject the specific-function form with HTTP 400 |
 | `None` | `ChatToolMode.None` | OpenAI: `tool_choice: "none"` |
 
-For `RequireSpecific`, the name is checked against registered `AIFunction[]` for the role — if the tool is missing, a warning is logged and forced mode is downgraded to `RequireAny` (the model must still call something — better to fail loudly than silently get a non-tool answer).
+If `RequireSpecific` has no `RequiredToolName`, or the named tool has no bound `AIFunction` for the request, the call fails with `LlmErrorCode.InvalidRequest` before the provider is contacted; `RequireAny` with no callable tool fails the same way.
 
-### Streaming + ForcedToolMode (v0.25.0)
+### Streaming + ForcedToolMode
 
 In `MeaiLlmClient.CompleteStreamingAsync`, forced mode applies **only on the first iteration** of the tool loop. After we feed the model the tool result, options are cloned with `ChatToolMode.Auto` via `CloneOptionsWithAutoToolMode` — otherwise the model would stay locked in an infinite tool-call loop (each round would be forced again).
 

@@ -795,6 +795,143 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("VISIBLE_RESPONSE", joined);
         }
 
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task Streaming_FaultAfterCallerCancel_EndsAsTheCancellation(bool typed)
+        {
+            // WHY: the decorator mapped a thrown fault to its own code even after the caller had cancelled, so
+            // a socket the stop disposed reached the chat as "provider error" (LlmCancellation owns the rule).
+            using CancellationTokenSource caller = new();
+            Exception fault = typed
+                ? new LlmClientException("socket disposed", LlmErrorCode.BackendUnavailable, 503)
+                : new InvalidOperationException("socket disposed");
+            SpyLogger spy = new();
+            LoggingLlmClientDecorator dec = new(new CancelThenThrowStreamingMock(fault, caller.Cancel), spy, 0f);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in dec.CompleteStreamingAsync(
+                               new LlmCompletionRequest { AgentRoleId = "Tester", TraceId = "c1", UserPayload = "hi" },
+                               caller.Token))
+            {
+                chunks.Add(chunk);
+            }
+
+            LlmStreamChunk terminal = chunks[chunks.Count - 1];
+            Assert.IsTrue(terminal.IsDone);
+            Assert.AreEqual(LlmErrorCode.Cancelled, terminal.ErrorCode);
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, terminal.Error, "The text agrees with the code.");
+            StringAssert.Contains("socket disposed", string.Join("\n", spy.Lines),
+                "The log still says what actually broke while stopping.");
+        }
+
+        [Test]
+        public async Task Streaming_FaultWithLiveCaller_KeepsItsOwnCode()
+        {
+            using CancellationTokenSource caller = new();
+            SpyLogger spy = new();
+            LoggingLlmClientDecorator dec = new(
+                new CancelThenThrowStreamingMock(
+                    new LlmClientException("HTTP 503", LlmErrorCode.BackendUnavailable, 503), () => { }),
+                spy, 0f);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in dec.CompleteStreamingAsync(
+                               new LlmCompletionRequest { AgentRoleId = "Tester", TraceId = "c2", UserPayload = "hi" },
+                               caller.Token))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, chunks[chunks.Count - 1].ErrorCode);
+            Assert.AreEqual("HTTP 503", chunks[chunks.Count - 1].Error);
+        }
+
+        [Test]
+        public async Task FailedCompletion_FaultDuringRetryAfterCallerCancel_ReturnsTheCancellation()
+        {
+            // WHY: the retry attempt's fault-to-result conversion classified by exception type alone; with the
+            // caller gone the structured failure said "provider error" about a request nobody was waiting for.
+            using CancellationTokenSource caller = new();
+            RateLimitThenCancelAndThrowMock inner = new(caller.Cancel);
+            LoggingLlmClientDecorator sut = new(
+                inner, new SpyLogger(), 0f, 3, true, true, new TokenIgnoringDelayMarshaler());
+
+            LlmCompletionResult result = await sut.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                UserPayload = "x"
+            }, caller.Token);
+
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.Cancelled, result.ErrorCode);
+            Assert.AreEqual(LlmCancellation.CancelledErrorText, result.Error);
+            Assert.AreEqual(2, inner.CompleteCallCount, "The 429 was retried once; the fault ended it.");
+        }
+
+        /// <summary>Streams one text chunk, then cancels the caller and throws the configured fault.</summary>
+        private sealed class CancelThenThrowStreamingMock : ILlmClient
+        {
+            private readonly Exception _fault;
+            private readonly Action _cancelCaller;
+
+            public CancelThenThrowStreamingMock(Exception fault, Action cancelCaller)
+            {
+                _fault = fault;
+                _cancelCaller = cancelCaller;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException("streaming only");
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                yield return new LlmStreamChunk { Text = "partial" };
+                await Task.Yield();
+                _cancelCaller();
+                throw _fault;
+            }
+        }
+
+        /// <summary>Answers 429 once, then cancels the caller and throws an untyped fault on the retry.</summary>
+        private sealed class RateLimitThenCancelAndThrowMock : ILlmClient
+        {
+            private readonly Action _cancelCaller;
+            public int CompleteCallCount;
+
+            public RateLimitThenCancelAndThrowMock(Action cancelCaller)
+            {
+                _cancelCaller = cancelCaller;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                CompleteCallCount++;
+                if (CompleteCallCount == 1)
+                {
+                    return Task.FromResult(new LlmCompletionResult
+                    {
+                        Ok = false,
+                        Error = "HTTP 429",
+                        ErrorCode = LlmErrorCode.RateLimited,
+                        HttpStatus = 429,
+                        RetryAfterSeconds = 1
+                    });
+                }
+
+                _cancelCaller();
+                throw new InvalidOperationException("socket disposed");
+            }
+        }
+
         [Test]
         public void PromptBudget_ToolsDefNonZeroWhenToolsPresent()
         {

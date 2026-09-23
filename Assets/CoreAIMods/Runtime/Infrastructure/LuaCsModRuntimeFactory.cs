@@ -160,7 +160,10 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public LuaCapabilities Capabilities = LuaCapabilities.All;
 
-        /// <summary>Fixed capability tier for the one-off <c>execute_lua</c> executor.</summary>
+        /// <summary>
+        /// Fixed capability tier for the one-off <c>execute_lua</c> executor. It is applied on top of
+        /// <see cref="Capabilities"/>, so the one-off surface gets <c>Capabilities &amp; OneOffCapabilities</c>.
+        /// </summary>
         public LuaCapabilities OneOffCapabilities = LuaCapabilities.All;
 
         /// <summary>Wall-clock budget per persistent handler/timer call.</summary>
@@ -207,6 +210,13 @@ namespace CoreAI.Ai.LuaCs
         /// <c>Action&lt;LuaCsApiRegistry, LuaCapabilities&gt;</c> seam without replacing the core surface. It runs
         /// AFTER the built-in bindings, so it may add to or override them. Register your names against a value
         /// resolved LAZILY (at call time) if the backing scene object is not ready at scope-build. Null = none.
+        /// <para>
+        /// The <see cref="LuaCapabilities"/> argument is the EFFECTIVE set the built-in surface used for the
+        /// same registry, never the raw request: for a persistent mod it is <see cref="Capabilities"/>
+        /// intersected with the mod's requested grant; for the one-off executor it is
+        /// <see cref="Capabilities"/> intersected with <see cref="OneOffCapabilities"/>. Gate privileged APIs
+        /// on it (e.g. <c>(caps &amp; LuaCapabilities.Full) != 0</c>) exactly as the built-in tiers do.
+        /// </para>
         /// </summary>
         public Action<LuaCsApiRegistry, LuaCapabilities> AdditionalGameplayBindings;
 
@@ -337,7 +347,11 @@ namespace CoreAI.Ai.LuaCs
 
                         // WHY: The compatibility field is typed against the concrete Lua-CSharp registry; this
                         // stack only ever creates registries via the Lua-CSharp engine, so the cast is exact.
-                        options.AdditionalGameplayBindings((LuaCsApiRegistry)registry, caps);
+                        // The extension gets the tiers the built-in surface just registered, not the mod's raw
+                        // request: a mod asking for Full under a ceiling without Full must not reach a host
+                        // API gated on the Full bit.
+                        options.AdditionalGameplayBindings(
+                            (LuaCsApiRegistry)registry, bindings.EffectiveCapabilities(caps));
                     };
 
             LuaCsModRuntime runtime = new(
@@ -387,7 +401,9 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Adapts the runtime's two-arg <see cref="LuaCsGameplayBindings"/> into the one-off executor's
         /// VM-agnostic <see cref="ILuaCsGameRuntimeBindings"/> at a fixed capability tier, forwarding the
-        /// transaction-reset seam so a leaked <c>coreai_world_begin</c> can be cleared between chunks.
+        /// transaction-reset seam so a leaked <c>coreai_world_begin</c> can be cleared between chunks. The
+        /// optional host extension sees the same effective tiers as the built-in surface (host ceiling
+        /// intersected with the one-off tier).
         /// </summary>
         private sealed class CapabilityScopedGameRuntimeBindings : ILuaCsGameRuntimeBindings,
             IActorScopedLuaCsGameRuntimeBindings, ILuaTransactionScope
@@ -409,7 +425,7 @@ namespace CoreAI.Ai.LuaCs
             public void RegisterGameplayApis(LuaCsApiRegistry registry)
             {
                 _bindings.Register(registry, _capabilities);
-                _additional?.Invoke(registry, _capabilities);
+                RegisterAdditional(registry);
             }
 
             public InstanceRegistry MutationRegistry => _bindings.RbxApi?.Registry;
@@ -418,7 +434,7 @@ namespace CoreAI.Ai.LuaCs
                 ActorContext actorContext)
             {
                 _bindings.Register(registry, _capabilities, null, actorContext);
-                _additional?.Invoke(registry, _capabilities);
+                RegisterAdditional(registry);
             }
 
             public void RegisterGameplayApis(LuaCsApiRegistry registry,
@@ -426,7 +442,15 @@ namespace CoreAI.Ai.LuaCs
             {
                 _bindings.Register(registry, _capabilities, null,
                     actorContext, mutationEnvelope);
-                _additional?.Invoke(registry, _capabilities);
+                RegisterAdditional(registry);
+            }
+
+            private void RegisterAdditional(LuaCsApiRegistry registry)
+            {
+                // WHY: _capabilities is only the one-off tier; the built-in surface above also applied the
+                // host ceiling, so the extension must receive that same intersection or a one-off tier
+                // wider than the ceiling would hand it tiers (Full) the host never granted.
+                _additional?.Invoke(registry, _bindings.EffectiveCapabilities(_capabilities));
             }
 
             public void ResetTransactions()

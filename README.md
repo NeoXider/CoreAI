@@ -57,8 +57,9 @@ product; your game logic stays yours.
    https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
    ```
 2. **Dependencies:** `Microsoft.Extensions.AI` through [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity),
-   then `CoreAI → Setup → Install Git Dependencies` (VContainer / MessagePipe / UniTask). Full
-   walkthrough, including the manual-DLL path: **[INSTALL.md](INSTALL.md)**.
+   then `CoreAI → Setup → Install Git Dependencies` (VContainer / MessagePipe / UniTask, plus LLMUnity
+   for local models — drop that entry if you only use an HTTP API). Full walkthrough, including the
+   manual-DLL path: **[INSTALL.md](INSTALL.md)**.
 3. **Scene:** `CoreAI → Setup → Create Chat Demo Scene`.
 4. **Backend:** `CoreAI → Settings` — a local GGUF via LLMUnity, or any OpenAI-compatible endpoint
    (LM Studio, Ollama, vLLM, a hosted provider, or your own proxy).
@@ -67,6 +68,8 @@ product; your game logic stays yours.
 Then, from any script:
 
 ```csharp
+using System;
+using System.Collections.Generic;
 using CoreAI;
 using CoreAI.Ai;
 
@@ -82,13 +85,17 @@ Dictionary<string, int> stock = new() { ["fire sword"] = 0, ["iron sword"] = 3 }
 AgentConfig blacksmith = new AgentBuilder("Blacksmith")
     .WithSystemPrompt("You are a blacksmith. Sell weapons and remember purchases.")
     .WithTool(new DelegateLlmTool("stock_of", "How many of an item are in stock.",
-        (string item) => stock.TryGetValue(item, out int count) ? count.ToString() : "0"))
+        new Func<string, string>(item => stock.TryGetValue(item, out int count) ? count.ToString() : "0")))
     .WithMemory()
     .WithMode(AgentMode.ToolsAndChat)
     .Build();          // registers the role with the live policy once the scope is built
 
 string answer = await CoreAi.AskAsync("Got any fire swords?", "Blacksmith");
 ```
+
+Unity compiles C# 9, where a lambda has no type of its own: wherever a parameter is `System.Delegate`
+(`DelegateLlmTool`, `AgentBuilder.WithAction`), wrap the lambda in an explicit delegate type —
+`new Func<string, string>(...)`, `new Action(...)`.
 
 More: [Unity package README](Assets/CoreAiUnity/README.md) · [QUICK_START](Assets/CoreAiUnity/Docs/QUICK_START.md) ·
 [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md)
@@ -112,13 +119,16 @@ the [core package README](Assets/CoreAI/README.md#quick-start).
 (`ToolsAndChat` / `ToolsOnly` / `ChatOnly`), temperature, output budget, roundtrip cap, streaming
 override, LLM profile.
 
-**Tools the model calls.** Implement `ILlmTool`, or wrap a delegate:
-`new DelegateLlmTool("get_weather", "Current weather.", (string city) => …)`. `ToolExecutionPolicy`
-adds per-tool timeouts, duplicate detection, retry-with-feedback, tool-name repair
-(`MEMORY` → `memory`), a result-size cap, and bounded parallelism. Built-ins: `memory`, `game_config`,
-`game_state`, `get_inventory`, `wait`, `read_skill`, `call_skill_tool`, `manage_skills` (core);
-`world_command`, `component_command`, `scene_tool`, `camera` (Unity); `execute_lua`, `manage_mods`
-(Mods).
+**Tools the model calls.** Implement `IAIFunctionLlmTool` (or `IAIFunctionsLlmTool` for a tool that
+exposes several functions), or wrap a delegate:
+`new DelegateLlmTool("get_weather", "Current weather.", new Func<string, string>(city => …))`.
+`ToolExecutionPolicy` adds per-tool timeouts, duplicate detection, required-argument and argument-type
+checks before the tool body runs, retry-with-feedback, tool-name repair (`MEMORY` → `memory`), a
+result-size cap, and bounded parallelism. Built-ins: `memory`, `game_config`, `game_state`,
+`get_inventory`, `wait`, `read_skill`, `call_skill_tool`, `manage_skills` (core); `world_command`,
+`component_command`, `scene_tool`, `camera` (Unity); `execute_lua`, `manage_mods` (Mods). A
+multi-function tool such as `camera` reaches the model as its functions (`camera_capture`,
+`screenshot`, `camera_look`, `camera_list`), and those are the names the model calls.
 
 **Skills.** A skill is a named group of tools plus instructions that may span several documents. The
 model sees a one-line catalog entry per skill and two meta-tools, then pulls the entry document with
@@ -140,8 +150,11 @@ once, with per-role assignment and automatic fallback.
 fragmented tool-call arguments, mid-stream transport failure after a tool has already run.
 
 **Production guardrails.** Request timeout, HTTP 429/5xx retry with `Retry-After`, pre-commit stream
-retry, circuit breaker, runaway-output cap, Lua generation rate limit, an append-only SHA-256-chained
-audit log, and a token-budget overlay.
+retry, an opt-in circuit-breaker decorator (the default Unity pipeline does not compose it; hosts add
+it), runaway-output cap, Lua generation rate limit, an append-only SHA-256-chained audit log, and a
+token-budget overlay. A request the caller cancelled is reported as `Cancelled` by every layer — never
+retried, never failed over, never counted as an outage by the circuit breaker — while a real timeout
+stays a `Timeout`.
 
 ---
 
@@ -235,7 +248,7 @@ serialized against each other and result order is preserved.
 `FromTextParts` keep every document addressable as a `SkillSection`; `read_skill` returns the entry
 document plus an index, and a second call fetches one section or `all`. A Unity `SkillSetAsset` accepts
 a primary `TextAsset` plus references.
-→ `SkillSectionDisclosureEditModeTests` (15 cases, including
+→ `SkillSectionDisclosureEditModeTests` (including
 `ReadSkill_StagedAnswer_IsSmallerThanTheWholeSkill`), `SkillSetEditModeTests`,
 `SkillSetAssetInstructionsEditModeTests`.
 
@@ -243,7 +256,7 @@ a primary `TextAsset` plus references.
 / session / topic + role (+ optional actor) collapse into one canonical key used by memory, chat,
 transcript and summary alike; keys are opaque full SHA-256, and a case-only difference in a user id
 produces a different key rather than a Windows filename collision.
-→ `ScopedAgentMemoryStoreDecoratorEditModeTests` (15 cases, including
+→ `ScopedAgentMemoryStoreDecoratorEditModeTests` (including
 `ScopedKeys_LowercaseGuid_IsNotPersistedInPlaintext`, `FilePersistence_CaseOnlyUsers_CreateDistinctOpaqueFiles`),
 `AgentMemoryActorScopeKeyEditModeTests`.
 
@@ -258,9 +271,9 @@ arguments.
 
 **The engine-free claim is a CI gate, not a statement.**
 `dotnet test tools/portable/Tests/CoreAI.Portable.Tests.csproj -c Release` runs the existing EditMode
-fixtures against the real `netstandard2.1` DLL with no Unity present — **1,317 cases, 0 failures,
-21 s** on 2026-09-09 — and it is the first job on every push. Re-run it yourself; it is a command, not
-a badge.
+fixtures against the real `netstandard2.1` DLL with no Unity present, and it is the first job on
+every push (`portable-core`). Re-run it yourself for the current case count; it is a command, not a
+badge.
 
 **Primitives that are dead in a browser cannot creep back in.** `Task.Run`, `Task.Delay`,
 `CancelAfter`, `RunContinuationsAsynchronously` and `ConfigureAwait(false)` are rejected in
@@ -309,8 +322,9 @@ be visible while `Ok` is false — a non-empty string is never treated as proof 
 ## Game-Creation Benchmark
 
 CoreAI ships a benchmark that scores how well an LLM builds and changes a game by driving real
-`execute_lua` and `world_command` tools — 0–100 across eight scenario groups (**suite v1.7**, benchmark
-v2 prompts, G1–G8), against any OpenAI-compatible endpoint.
+`execute_lua` and `world_command` tools — 0–100 across eight scenario groups (G1–G8), against any
+OpenAI-compatible endpoint. The current suite is **v1.8**; the table below is the historical **suite
+v1.7** frontier sweep (benchmark v2 prompts), and v1.8 scores are not mixed with it.
 
 <img src="Docs/Images/benchmark_v2_frontier.png" alt="CoreAI Game-Creation Benchmark v2 — top-tier frontier-model comparison ranked by suite score" width="900">
 
@@ -328,8 +342,9 @@ v2 prompts, G1–G8), against any OpenAI-compatible endpoint.
 One run each (2026-07-11) via the `cli-agents` bridge — indicative, not a ranked submission.
 
 > ⚠️ **Claude scores are understated.** Those three ran through a non-native, unstable API with a high
-> tool-failure rate (opus ~24%, sonnet ~23%, fable ~36% vs 1–13% for the Codex models): well-formed
-> tool calls that still failed to land. Read them as a lower bound.
+> tool-failure rate (opus ~24%, sonnet ~23%, fable ~36%, against 1.5–13.5% for four of the five Codex
+> models; `gpt-5.3-spark` logged ~36% on its re-run and still scored 92.9): well-formed tool calls that
+> still failed to land. Read the Claude rows as a lower bound.
 
 Free models through the opencode native API (`opencode serve`, real token streaming):
 `hy3-free` **86.9** / 72.4% (full G1–G8); `deepseek-v4-flash-free` 87.2 / 75.0% (partial — the free
@@ -374,8 +389,8 @@ Without Unity at all:
 dotnet test tools/portable/Tests/CoreAI.Portable.Tests.csproj -c Release
 ```
 
-**1,317 cases, 0 failures** on 2026-09-09. The full Unity EditMode suite is much larger (~4,200
-executed cases in the full profile) but **profile-dependent** — `COREAI_LLM`, `COREAI_LUA` and Hub
+It runs as the CI job `portable-core` on every push and must finish with 0 failures. The full Unity
+EditMode suite is much larger (~4,200 executed cases in the full profile) but **profile-dependent** — `COREAI_LLM`, `COREAI_LUA` and Hub
 change which assemblies compile at all. Compare the *number of executed cases* between runs, not just
 the colour: a suite that failed to compile also reports green.
 

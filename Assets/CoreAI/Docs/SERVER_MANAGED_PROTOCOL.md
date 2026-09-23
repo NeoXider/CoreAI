@@ -2,7 +2,7 @@
 
 **Version:** 1.1 (Draft)
 **Date:** 2026-08-01
-**Goal:** Define the contract between a CoreAI WebGL client and a custom backend proxy.
+**Goal:** Define the contract between a CoreAI client (WebGL player, desktop or Editor) and a custom backend proxy.
 
 ## 1. Endpoint
 
@@ -10,18 +10,25 @@
 
 ## 2. Request Headers
 
-| Header | Required | Description |
-|---|---|---|
-| `Authorization` | Yes | Bearer token or dynamic header from `ServerManagedAuthorization`. |
-| `Content-Type` | Yes | `application/json`. |
-| `X-Tenant-Id` | No | Tenant identifier (from `ILlmAuthContextProvider.TenantId`). |
-| `X-User-Id` | No | User identifier (from `ILlmAuthContextProvider.UserId`). |
-| `X-Session-Id` | No | Session identifier (from `ILlmAuthContextProvider.SessionId`). |
-| `X-Request-Id` | Yes | Unique request identifier (UUID, matches `traceId`). Used for logging. |
-| `Idempotency-Key` | Yes | Stable key for the logical request. Reused across HTTP retries. Populated from **`LlmCompletionRequest.IdempotencyKey`** (auto-assigned once per request instance if empty). |
-| `X-Coreai-Role` | No | Agent role ID (e.g., `SmartChat`, `Teacher`). |
-| `X-Coreai-Client` | No | Client version string (e.g. semver from `com.neoxider.coreaiunity` `package.json`). |
-| Host-specific attribution header | No | For example `X-RedoSchool-Lesson-Id`; supplied dynamically by the host and validated by the backend. |
+| Header | Sent by desktop / Editor | Sent by a WebGL player | Description |
+|---|---|---|---|
+| `Authorization` | Yes | Yes | Bearer token or dynamic header from `ServerManagedAuthorization`. |
+| `Content-Type` | Yes | Yes | `application/json`. |
+| `X-Tenant-Id` | When set | **No** | Tenant identifier (from `ILlmAuthContextProvider.TenantId`). |
+| `X-User-Id` | When set | **No** | User identifier (from `ILlmAuthContextProvider.UserId`). |
+| `X-Session-Id` | When set | **No** | Session identifier (from `ILlmAuthContextProvider.SessionId`). |
+| `X-Request-Id` | When the request has a trace id | **No** | Unique request identifier (matches `traceId`). Used for logging. |
+| `Idempotency-Key` | Yes (requests sent through `MeaiLlmClient`) | **No** | Stable key for the logical request. Reused across HTTP retries. Populated from **`LlmCompletionRequest.IdempotencyKey`** (auto-assigned once per request instance if empty). |
+| `X-Coreai-Role` | When known | **No** | Agent role ID (e.g., `SmartChat`, `Teacher`). |
+| Host-specific attribution header | No | Allowed | For example `X-MyGame-Lesson-Id`; supplied dynamically by the host and validated by the backend. |
+
+**WebGL players omit the correlation headers.** In a WebGL player (`UNITY_WEBGL && !UNITY_EDITOR`)
+`MeaiOpenAiChatClient` never sends `Idempotency-Key`, `X-Request-Id`, `X-Coreai-Role`, `X-Tenant-Id`,
+`X-User-Id` or `X-Session-Id` — not even when an `IRequestHeaderProvider` supplies them — because
+public gateways often leave them out of their CORS allow-list and the browser preflight would fail. A
+backend that serves WebGL clients must therefore not require these headers: carry identity in the
+`Authorization` token (or in a custom header of your own name from `IRequestHeaderProvider`), and do
+not rely on `Idempotency-Key` for deduplication of browser traffic.
 
 ### 2.1. Dynamic product headers
 
@@ -40,7 +47,7 @@ ServerManaged provider fills in missing names. A custom provider cannot override
 are ignored. Trace and idempotency still come from `LlmCompletionRequest`/`LlmRequestContext`.
 
 The backend must validate a host-specific value in the context of the authenticated user. For example,
-`X-RedoSchool-Lesson-Id` may be used for cost attribution only after verifying that the lesson exists
+`X-MyGame-Lesson-Id` may be used for cost attribution only after verifying that the lesson exists
 and is available to the current user; a header from a WebGL client must not be treated as a trusted billing source.
 For cross-origin WebGL, add the exact custom header name to `Access-Control-Allow-Headers`.
 
@@ -88,7 +95,8 @@ data: [DONE]\n\n
 
 | HTTP Status | `LlmErrorCode` (Client) | Description |
 |---|---|---|
-| 401 | `AuthExpired` | JWT invalid/expired. Client triggers `RefreshOnUnauthorizedDecorator`. |
+| 401 / 403 | `AuthExpired` | JWT invalid/expired. Client triggers `RefreshOnUnauthorizedDecorator`. |
+| 402 | `PaymentRequired` | Account out of credit. Never retried; degrades the endpoint's health. |
 | 409 | `QuotaExceeded` | `quota_exceeded` in body. User quota reached. |
 | 429 | `RateLimited` | Rate limit hit. Check `Retry-After` header. |
 | 500+ | `BackendUnavailable` | Server error. Client may retry if idempotency is guaranteed. |
@@ -100,7 +108,7 @@ Error Body Example:
 
 ## 5. Idempotency
 
-When the client sends `Idempotency-Key: <key>`:
+When the client sends `Idempotency-Key: <key>` (desktop and Editor clients; a WebGL player does not send it):
 1. If the backend has a stored response for this key (TTL 24h), return it immediately (even on retry).
 2. Otherwise, process the request and store the response mapped to the key.
 
@@ -117,10 +125,11 @@ If `ApiBaseUrl` starts with `/` (e.g., `/api/llm/v1`):
 
 To implement a basic compliant backend, ensure:
 - [ ] JWT Validation (JWKS or static secret).
-- [ ] Header parsing (`X-Tenant-Id`, `X-User-Id`, `Idempotency-Key`, allowed host-specific headers).
+- [ ] Header parsing (`X-Tenant-Id`, `X-User-Id`, `Idempotency-Key`, allowed host-specific headers) — all optional, since a WebGL player sends none of the correlation headers.
 - [ ] Idempotency store (Redis/InMemory with TTL).
 - [ ] SSE pass-through with `Transfer-Encoding: chunked`.
 - [ ] Error mapping (401, 409, 429).
 - [ ] CORS headers if cross-origin:
   `Access-Control-Allow-Origin: <origin>`
-  `Access-Control-Allow-Headers: Authorization, Content-Type, X-Request-Id, Idempotency-Key, X-Tenant-Id, X-Session-Id, <your-custom-header>`
+  `Access-Control-Allow-Headers: Authorization, Content-Type, <your-custom-header>` (CORS applies only to
+  browser clients, and a WebGL player sends none of the correlation headers).

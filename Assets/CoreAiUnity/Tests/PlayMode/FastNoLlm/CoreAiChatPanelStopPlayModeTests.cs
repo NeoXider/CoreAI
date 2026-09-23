@@ -171,6 +171,10 @@ namespace CoreAI.Tests.PlayMode
             CancellationTokenSource rootCts = new();
             CancellationTokenSource activeRequestCts = new();
 
+            // WHY the lifecycle flag: a stop re-arms the root source only on a LIVE panel - on a disabled or
+            // destroyed one the replacement would have no owner left to dispose it. This panel is built on an
+            // inactive object, so OnEnable never runs; the flag puts it in the state a scene panel is in.
+            SetPrivateField(panel, "_lifecycleActive", true);
             SetPrivateField(panel, "_cts", rootCts);
             SetPrivateField(panel, "_isSending", true);
             SetPrivateField(panel, "_isStreaming", true);

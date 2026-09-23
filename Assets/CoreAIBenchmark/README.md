@@ -1,6 +1,6 @@
 # CoreAI Game-Creation Benchmark
 
-Package graph: `com.neoxider.coreaibenchmark` 6.0.0 depends on `com.neoxider.coreai`,
+Package graph: `com.neoxider.coreaibenchmark` depends on `com.neoxider.coreai`,
 `com.neoxider.coreaiunity`, and `com.neoxider.coreaimods` at the same version. The Mods dependency is
 required because the scenarios instantiate and execute the real Lua tool/runtime.
 
@@ -104,7 +104,7 @@ The one-click menu reuses the last saved benchmark-window settings. Results are 
 For batchmode or automation, launch the explicit PlayMode suite through:
 
 ```powershell
-Unity.exe -batchmode -projectPath C:\Git\CoreAI `
+Unity.exe -batchmode -projectPath <path-to-CoreAI> `
   -executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli `
   -coreAiBenchmarkModel qwen3.5-4b-mtp `
   -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6,G7,G8 `
@@ -138,7 +138,7 @@ $models = @(
 foreach ($model in $models) {
   lms unload --all
   lms load $model
-  Unity.exe -batchmode -projectPath C:\Git\CoreAI `
+  Unity.exe -batchmode -projectPath <path-to-CoreAI> `
     -executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli `
     -coreAiBenchmarkModel $model `
     -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6,G7,G8 `
@@ -192,7 +192,7 @@ _Model card: suite score, dimension profile, and role fitness in one image._
 
 ![Coin collector scene](../../Docs/Images/example_scene.png)
 
-_Scene capture example (a coin-collector build): the report marks expected/missing/extra objects visually. Current reports capture scenes for G6 (hero) and G7._
+_Scene capture example (a coin-collector build): the report marks expected/missing/extra objects visually. Current reports capture a scene for G6 (the hero) only._
 
 ![Castle free-build hero](../../Docs/Images/example_castle.png)
 
@@ -207,11 +207,11 @@ _G6 scene example: a free-form castle build preserving the model-authored layout
 
 _Comparison chart: suite base scores across the newest JSON report for each selected model._
 
-The repository's published cloud-model and local-model tables are historical suite v1.6 / G1-G7
-baselines in the [README benchmark section](../../README.md#game-creation-benchmark). Current v1.8 / G1-G8
-runs start a separate leaderboard and must not be mixed with those scores (nor with the v1.7 frontier sweep
-below, whose G6 was the earlier `world_command` castle). Historical example (local models,
-2026-07-02 sweep):
+The [README benchmark section](../../README.md#game-creation-benchmark) shows the historical suite v1.7
+frontier sweep (the same run as the frontier section below). The local-model table here is a historical
+suite v1.6 / G1-G7 baseline. Current v1.8 / G1-G8 runs start a separate leaderboard and must not be mixed
+with those scores (nor with the v1.7 frontier sweep, whose G6 was the earlier `world_command` castle).
+Historical example (local models, 2026-07-02 sweep):
 
 | # | Model | Suite | Pass-rate | P/PA/F | Tools | Intent | Task | Determ | Reason | Instr | Eff | Tool-err | Tokens | Run |
 |---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
@@ -225,9 +225,9 @@ below, whose G6 was the earlier `world_command` castle). Historical example (loc
 | 8 | `qwen3.5-0.8b` | **57.8** | 41.7% | 10/4/10 | 94.4 | 80.1 | 91.4 | 100 | 55.6 | 38 | 2.4 | 1% | 43383 | `20260702_222625` |
 | 9 | `lfm2-8b-a1b` | **12.4** | 0% | 0/0/25 | 50.9 | 2.1 | 0 | 0 | 0 | 57.8 | 0 | 0% | 52430 | `20260702_051709` |
 
-## Frontier-model sweep (2026-07-11, suite v2 / G1–G8)
+## Frontier-model sweep (2026-07-11, suite v1.7 / benchmark v2 prompts / G1–G8)
 
-Frontier hosted models, run through the [`cli-agents`](https://github.com/) `openai-server` bridge — an
+Frontier hosted models, run through the `cli-agents` `openai-server` bridge — an
 OpenAI-compatible shim over the Claude Code / Codex CLIs. This is a **separate leaderboard** from the local
 LM Studio models above (different suite version *and* different backend class). Ranked by suite base score.
 
@@ -248,10 +248,13 @@ LM Studio models above (different suite version *and* different backend class). 
 failed scenario; perfect G3/G4/G5/G7), and `gpt-5.6-terra` has the most passes (25/29, 86.2%). `gpt-5.5`
 lands a strong third.
 
-**Why the Claude models sit lower here — a bridge artifact, not a capability verdict.** The gap tracks
-tool-call FAILURE rate almost exactly: through the `cli-agents` bridge the Codex models failed 1.5–13.5% of
-their tool calls (terra 1.5%, sol 2.8%), while the Claude models failed **22–32%** (opus 22%, sonnet 23.2%,
-fable 32.1%) — with `invalid world commands = 0` for everyone, so the calls were well-formed but the
+**Why the Claude models sit lower here — a bridge artifact, not a capability verdict.** The gap mostly
+tracks the tool-call FAILURE rate recorded in the reports behind the table
+([benchmark_v2_frontier.md](../../Docs/Images/benchmark_v2_frontier.md)): through the `cli-agents` bridge four
+of the five Codex models failed 1.5–13.5% of their tool calls (terra 1.5%, sol 2.8%, luna 9.2%, gpt-5.5
+13.5%), while the Claude models failed **23–36%** (sonnet 23.2%, opus 23.9%, fable 36.1%). The exception is
+`gpt-5.3-spark`, whose recovery-retry re-run logged 35.5% and still scored 92.9. `invalid world commands`
+was 0 for everyone, so the calls were well-formed but the
 *operations* failed (wrong object refs, bad sequencing). The bridge drives the **Claude Code CLI** (an
 agentic coding tool with its own system-prompt/scaffolding) as a raw OpenAI endpoint, which does not surface
 Claude's native tool-calling as cleanly as the Codex CLI does. For reference, the historical **direct-API**
@@ -276,7 +279,7 @@ clean A/B). A verified `gpt-5.3-spark` re-run after the fix scores the two varia
 confirming vision-feedback is neutral for a non-vision model rather than harmful.
 
 > **Methodology / caveats — read before citing.** Single run per model (reps=1), streaming off, native
-> tools on, temperature 0.1, Unity 6000.3.14f1, suite v2. Run over the CLI bridge (higher latency; each call
+> tools on, temperature 0.1, Unity 6000.3.14f1, suite v1.7 with the benchmark v2 prompts. Run over the CLI bridge (higher latency; each call
 > spawns a CLI subprocess), so absolute tokens/time are not comparable to a direct-API run. The Claude rows
 > are penalised by a high bridge tool-failure rate (see above), and the G6 image-feedback numbers do not
 > measure vision (no bridge model can see). Treat these as *indicative* single-shot results, not a controlled

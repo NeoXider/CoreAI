@@ -1,7 +1,5 @@
 # 📖 CoreAI usage examples
 
-**Document version:** 1.0 | **Date:** May 2026
-
 Practical CoreAI examples from simple to advanced scenarios.
 
 ---
@@ -11,7 +9,7 @@ Practical CoreAI examples from simple to advanced scenarios.
 - [Choosing tools: `WithAction` vs custom `ILlmTool`](#choosing-tools-withaction-vs-custom-illmtool)
 - [Example 1: Spawning an enemy via AI](#example-1-spawning-an-enemy-via-ai)
 - [Example 2: Weapon crafting (CoreMechanicAI + Programmer)](#example-2-weapon-crafting-coremechanicai--programmer)
-- [Example 3: Auto-repair Lua code](#example-3-auto-repair-lua-code)
+- [Example 3: The model repairs its own Lua](#example-3-the-model-repairs-its-own-lua)
 - [Example 4: NPC merchant with inventory](#example-4-npc-merchant-with-inventory)
 - [Example 5: Adaptive difficulty](#example-5-adaptive-difficulty)
 - [Example 6: Custom storyteller agent](#example-6-custom-storyteller-agent)
@@ -90,11 +88,11 @@ public class WaveManager : MonoBehaviour
 }}
 ```
 
-### Result in Unity
+### Result in Unity (with **Log Tool Calls** on)
 ```
-[World] Spawned "archer_w4_1" (Archer) at (-15, 0, 20)
-[World] Spawned "boss_w4" (EliteBoss) at (0, 0, 30)
-[Memory] Creator: appended "Wave 4: spawned 1 Archer + 1 EliteBoss..."
+[ToolCall] traceId=… role=Creator tool=world_command status=OK dur=…ms
+[ToolCall] traceId=… role=Creator tool=world_command status=OK dur=…ms
+[ToolCall] traceId=… role=Creator tool=memory status=OK dur=…ms
 ```
 
 Two new enemies appear on the scene.
@@ -108,7 +106,7 @@ CoreAiPrefabRegistryAsset:
   ├─ Key: "Archer"     → Prefab: ArcherPrefab
   └─ Key: "Healer"     → Prefab: HealerPrefab
 
-CoreAILifetimeScope → World Prefab Registry → your asset
+CoreAILifetimeScope → Add Lua / World Commands Module → CoreAiLuaWorldModule → prefab registry → your asset
 ```
 
 ---
@@ -116,7 +114,7 @@ CoreAILifetimeScope → World Prefab Registry → your asset
 ## Example 2: Weapon crafting (CoreMechanicAI + Programmer)
 
 ### Scenario
-The player crafts a weapon from two ingredients. CoreMechanicAI decides the outcome; Programmer creates the item via Lua.
+The player crafts a weapon from two ingredients. CoreMechanicAI decides the outcome; Programmer creates the item via Lua. `create_item` and `add_effect` are **your game's** Lua functions — register them through `ILuaCsGameRuntimeBindings` (see [DEVELOPER_GUIDE §6](DEVELOPER_GUIDE.md#6-lua-for-the-programmer-agent)); the built-in API only has `report`, `add` and `coreai_world_*`.
 
 ### Flow
 ```
@@ -186,89 +184,76 @@ Base damage: 45. Special effect: fire_damage +15."
 }}
 ```
 
-### Result
+### Result (with **Log Tool Calls** on)
 ```
-[CoreMechanicAI] Memory: "Craft#1: Iron + Fire Crystal → Flame Sword..."
-[Programmer] Lua: create_item("Flame Sword", 45) ✅
-[Programmer] Lua: add_effect("fire_damage", 15) ✅
-[Programmer] Lua: report → "Crafted: Flame Sword, damage=45, fire=15"
+[ToolCall] traceId=… role=CoreMechanicAI tool=memory status=OK dur=…ms
+[ToolCall] traceId=… role=Programmer tool=execute_lua status=OK dur=…ms
+[Lua report] Crafted: Flame Sword, damage=45, fire=15
 ```
 
 ---
 
-## Example 3: Auto-repair Lua code
+## Example 3: The model repairs its own Lua
 
 ### Scenario
-Programmer generates Lua that contains an error. The system automatically tries to fix the code up to 3 times.
+Programmer generates Lua that contains an error. The `execute_lua` tool returns the error as the tool result, so the model can fix the code and call the tool again — all inside one turn.
 
 ### Flow
 ```
-Attempt 1: LLM → Lua → ❌ Error
-Attempt 2: LLM (+ error context) → Lua → ❌ Error 
-Attempt 3: LLM (+ error history) → Lua → ✅ Success!
+Roundtrip 1: LLM → execute_lua → ❌ error returned to the model
+Roundtrip 2: LLM (reads the error) → execute_lua → ❌ error returned
+Roundtrip 3: LLM (reads the error) → execute_lua → ✅ Success!
 ```
 
 ### How it works (inside the system)
 
 ```
-═══════════ ATTEMPT 1 ═══════════
+═══════════ ROUNDTRIP 1 ═══════════
 
 LLM → execute_lua:
   local reward = calculate_reward(player_level)  -- ❌ nil function!
   report("Reward: " .. reward)
 
-Lua Error:
-  "attempt to call 'calculate_reward' (a nil value)"
+Tool result:
+  attempt to call a nil value (global 'calculate_reward')
 
-═══════════ ATTEMPT 2 (auto-repair) ═══════════
+═══════════ ROUNDTRIP 2 ═══════════
 
-System prompt includes:
-  "Previous error: attempt to call 'calculate_reward' (a nil value)"
-  "Available API: report(string), add(a,b), coreai_world_*"
-  "Fix the Lua code. Do NOT use functions not in the API."
-
-LLM → execute_lua:
+The model reads that result and writes new code:
   local reward = 50 * 3  -- use only allowed math
   report("Reward: " .. reward
 
-Lua Error:
-  "')' expected near '<eof>'"  -- missing closing paren
+Tool result:
+  syntax error (missing closing parenthesis)
 
-═══════════ ATTEMPT 3 (auto-repair) ═══════════
-
-System prompt includes:
-  "Previous errors: [attempt to call..., ')' expected near...]"
-  "Fix the syntax error."
+═══════════ ROUNDTRIP 3 ═══════════
 
 LLM → execute_lua:
   local reward = 50 * 3
   report("Reward: " .. reward)  -- ✅ Fixed!
 
-Result: "Reward: 150" ✅ Success!
+Tool result: success ✅
 ```
 
-### Unity console logs
+Keep the available Lua API in the Programmer prompt ("Available API: report(string), add(a,b), coreai_world_*") so the model does not invent functions.
+
+### Unity console logs (with **Log Tool Calls** / **Log Results** on)
 ```
-[traceId=xyz789] LLM ▶ role=Programmer (attempt 1/4)
-[traceId=xyz789] LLM ◀ 156 tokens, 0.8s
-[traceId=xyz789] Lua FAILED: "attempt to call 'calculate_reward' (a nil value)"
-[traceId=xyz789] Programmer repair: scheduling retry 1/3
-[traceId=xyz789] LLM ▶ role=Programmer (attempt 2/4, repair context)
-[traceId=xyz789] LLM ◀ 128 tokens, 0.7s
-[traceId=xyz789] Lua FAILED: "')' expected near '<eof>'"
-[traceId=xyz789] Programmer repair: scheduling retry 2/3
-[traceId=xyz789] LLM ▶ role=Programmer (attempt 3/4, repair context)
-[traceId=xyz789] LLM ◀ 134 tokens, 0.6s
-[traceId=xyz789] Lua execution succeeded: "Reward: 150"
+LLM > traceId=xyz789 role=Programmer backend=…
+[ToolCall] traceId=xyz789 role=Programmer tool=execute_lua status=FAIL dur=…ms result=…attempt to call a nil value…
+[ToolCall] traceId=xyz789 role=Programmer tool=execute_lua status=FAIL dur=…ms result=…
+[ToolCall] traceId=xyz789 role=Programmer tool=execute_lua status=OK dur=…ms
+[Lua report] Reward: 150
+LLM < traceId=xyz789 role=Programmer backend=… wallMs=… | …
 ```
 
 ### Configuration
 ```csharp
-// Max auto-repair attempts (default 3):
-CoreAISettings.MaxLuaRepairRetries = 3;
-
-// Max tool call attempts (default 3):
+// Consecutive all-failed tool batches before the loop stops with a summary turn (default 3):
 CoreAISettings.MaxToolCallRetries = 3;
+
+// Only for the opt-in envelope path (LuaCsAiEnvelopeProcessor): repair generations (default 3):
+CoreAISettings.MaxLuaRepairRetries = 3;
 ```
 
 ---
@@ -281,20 +266,33 @@ The player talks to an NPC merchant. The NPC queries inventory and answers with 
 ### Code
 
 ```csharp
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using CoreAI;
+using CoreAI.Ai;
+using UnityEngine;
+
+public sealed class MyInventoryProvider : InventoryTool.IInventoryProvider
+{
+    public Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(CancellationToken cancellationToken)
+    {
+        return Task.FromResult(new List<InventoryTool.InventoryItem>
+        {
+            new() { Name = "Iron Sword", Type = "weapon", Quantity = 3, Price = 50 },
+            new() { Name = "Steel Axe", Type = "weapon", Quantity = 1, Price = 100 },
+            new() { Name = "Health Potion", Type = "consumable", Quantity = 10, Price = 25 },
+            new() { Name = "Flame Blade", Type = "weapon", Quantity = 1, Price = 250 }
+        });
+    }
+}
+
 public class MerchantSetup : MonoBehaviour
 {
-    [Inject] private IObjectResolver _container;
-
     void Start()
     {
         // Create inventory (or resolve via DI)
-        var inventory = new SimpleInventoryProvider(new[]
-        {
-            new InventoryItem("Iron Sword", "weapon", 3, 50),
-            new InventoryItem("Steel Axe", "weapon", 1, 100),
-            new InventoryItem("Health Potion", "consumable", 10, 25),
-            new InventoryItem("Flame Blade", "weapon", 1, 250)
-        });
+        var inventory = new MyInventoryProvider();
 
         // Merchant agent
         var merchant = new AgentBuilder("Merchant")
@@ -469,6 +467,12 @@ Build a guard who remembers the player, can raise the alarm, and open the gates.
 ### Code
 
 ```csharp
+using System;
+using CoreAI;
+using CoreAI.Ai;
+using UnityEngine;
+using VContainer;
+
 public class GuardSetup : MonoBehaviour
 {
     [SerializeField] private GameObject _gate;
@@ -486,18 +490,18 @@ public class GuardSetup : MonoBehaviour
                 "If someone shows the king's seal, call 'open_gate'. " +
                 "Remember everyone you meet using memory tool.")
             
-            // Custom actions via WithAction
+            // Custom actions via WithAction (Unity compiles C# 9: wrap the lambda in a delegate type)
             .WithAction("raise_alarm", "Raise the city alarm for intruders",
-                () => {
+                new Action(() => {
                     _alarmAudio.Play();
                     Debug.Log("🚨 ALARM RAISED!");
-                })
-            
+                }))
+
             .WithAction("open_gate", "Open the city gate for authorized visitors",
-                () => {
+                new Action(() => {
                     _gate.GetComponent<Animator>().SetTrigger("Open");
                     Debug.Log("🚪 Gate opened!");
-                })
+                }))
             
             // Event via EventTool (decoupled via CoreAiEvents)
             .WithEventTool("report_crime", "Report a crime to the patrol system")
@@ -556,7 +560,7 @@ public class GuardSetup : MonoBehaviour
 |--------|------|-------|:---------:|
 | [Enemy spawn](#example-1-spawning-an-enemy-via-ai) | Creator | world_command, memory | ⭐ |
 | [Weapon craft](#example-2-weapon-crafting-coremechanicai--programmer) | CoreMechanicAI + Programmer | memory, execute_lua | ⭐⭐ |
-| [Auto-repair](#example-3-auto-repair-lua-code) | Programmer | execute_lua (self-heal) | ⭐⭐ |
+| [Lua self-repair](#example-3-the-model-repairs-its-own-lua) | Programmer | execute_lua (model retries on the error) | ⭐⭐ |
 | [Merchant](#example-4-npc-merchant-with-inventory) | Merchant (custom) | get_inventory, memory | ⭐ |
 | [Adaptive difficulty](#example-5-adaptive-difficulty) | Analyzer + Creator | memory, game_config, world_command | ⭐⭐⭐ |
 | [Storyteller](#example-6-custom-storyteller-agent) | Storyteller (custom) | (none — ChatOnly) | ⭐ |

@@ -21,16 +21,17 @@ All bindings run on the Unity main thread.
 
 `LuaCsGameplayBindings` registers a function group only if its level is granted: a script
 with `Read` physically has no world-editing functions in globals. By default (DI), `All` is granted
-(without `Full`), preserving historical behavior. Full is enabled explicitly with **Enable Full
-Access** on the optional `CoreAiLuaWorldModule` child of `CoreAILifetimeScope`, or per mod through
-`LoadMod`.
+(without `Full`). The host grant is set on `CoreAiModsLifetimeScope`: **Enable Full Lua Access**
+(`enableFullLuaAccess`) adds `Full` for `execute_lua`, `manage_mods` and rehydrated mods (see
+[Host Configuration](#host-configuration-unity)).
 
-Per-mod: `LuaCsModRuntime.LoadMod(id, code, caps)` scopes the mod to the intersection of its caps and
-the host grant; a restricted mod **cannot** expand the host tier.
+Per-mod: `ILuaModRuntime.LoadMod(caller, id, code, caps)` scopes the mod to the intersection of its
+caps and the host grant; a restricted mod **cannot** expand the host tier, and requesting `Full` on a
+host without the Full grant yields no `unity_*` functions.
 
 Persistent mod `report()` output is muted by default. Hosts can expose
-`LuaCsModRuntime.SetModReportLoggingEnabled(id, true)` for per-mod diagnostics when console output is
-needed.
+`ILuaModRuntime.SetModReportLoggingEnabled(caller, id, true)` for per-mod diagnostics when console
+output is needed.
 
 | Level | Opens |
 |---|---|
@@ -95,14 +96,16 @@ automatically, the game returns to the C# default, and the error is written to t
 
 ## Stage 3 - Persistent Mod Runtime
 
-`LuaCsModRuntime` (DI singleton; `LuaModRuntimeTickDriver` ticks it every frame):
+`ILuaModRuntime` (DI singleton backed by `LuaCsModRuntime`; `LuaModRuntimeTickDriver` ticks it every
+frame). Every call takes the calling `ActorContext` first — resolve it from `IActorIdentityProvider`
+(see [FIRST_MOD.md](FIRST_MOD.md) and `LuaModsDemoController`):
 
 ```csharp
-modRuntime.LoadMod("night_director", luaCode, LuaCapabilities.Read | LuaCapabilities.WorldEdit);
-modRuntime.EmitEvent("wave_started", "3");          // game -> mods
-modRuntime.ModEventEmitted += (mod, evt, payload) => ...; // mods -> game
-modRuntime.ReloadMod("night_director", newCode);
-modRuntime.UnloadMod("night_director");
+modRuntime.LoadMod(host, "night_director", luaCode, LuaCapabilities.Read | LuaCapabilities.WorldEdit);
+modRuntime.EmitEvent(host, "wave_started", "3");           // game -> mods (host actor only)
+modRuntime.AddModEventEmittedListener(host, OnModEvent);   // mods -> game (host actor only)
+modRuntime.ReloadMod(host, "night_director", newCode);
+modRuntime.UnloadMod(host, "night_director");
 ```
 
 ```lua
@@ -135,11 +138,12 @@ mod; event queue <= 256 (oldest evicted); 8 consecutive errors quarantine the mo
 (kept loaded with dispatch suspended; a reload clears the quarantine).
 Storage: `FileLuaModStore` (`persistentDataPath/CoreAI/LuaMods`, <= 256 keys, value <= 64 KB).
 
-Persistence boundary: `FileLuaModStore` persists per-mod `store_set` / `store_get` string values.
-It does not automatically persist or autoload the set of currently loaded mod source chunks; hosts
-that want mod autoload should persist selected mod sources separately and call `LoadMod` / `ReloadMod`
-during startup. One-shot `execute_lua` rule-slot edits can be persisted by the host with
-`ILuaScriptVersionStore`; the LiveMechanics demo does this for its own known slots.
+Persistence boundary: in the Unity composition (`CoreAiModsInstaller`) mod sources are
+auto-persisted to `FileLuaModSourceStore` and active mods are rehydrated on startup (see
+[Persistence & Sharing](#persistence--sharing)); `FileLuaModStore` separately persists the per-mod
+`store_set` / `store_get` string values. One-shot `execute_lua` rule-slot edits are not mods and are
+not persisted that way: a host can keep them with `ILuaScriptVersionStore`, as the LiveMechanics demo
+does for its own known slots.
 
 ## Stage 4 - Level Primitives and Transactions (opt-in hosts only)
 
@@ -189,8 +193,10 @@ There is no undo for already applied commands (see TODO).
 ## Stage 5 - Events
 
 The bus lives inside `LuaCsModRuntime`: `events_emit` is delivered to all other mods (on the next `Tick`)
-and to the C# event `ModEventEmitted`; the game sends events to mods through `EmitEvent`. Game-side
-subscription is directly on the DI singleton `LuaCsModRuntime` (a MessagePipe adapter can be written in one line if needed).
+and to the game's listeners; the game sends events to mods through `EmitEvent(caller, name, payload)`.
+Game-side subscription is `AddModEventEmittedListener(caller, listener)` /
+`RemoveModEventEmittedListener(caller, listener)` on the DI singleton `ILuaModRuntime`; both need an
+unrestricted host actor (a MessagePipe adapter can be written in one line if needed).
 
 ## Cross-mod Exports
 
@@ -268,9 +274,11 @@ end)
 
 ## Persistence & Sharing
 
-By default a loaded mod lives only in memory. A host can make mods durable and shareable by wiring an
-`ILuaModSourceStore` into `LuaCsModRuntime` (constructor parameter `sourceStore`; `autoPersistMods`
-defaults to `true`). The source store keeps a mod's **source plus its `LuaModManifest`** (`id`, `name`,
+The Unity composition (`CoreAiModsInstaller`) already wires a file-backed source store, seeds the
+bundled mods and rehydrates the active ones on startup. A bare `LuaCsModRuntime` constructed without
+`sourceStore` keeps loaded mods only in memory; a custom host makes them durable and shareable by
+wiring an `ILuaModSourceStore` into `LuaCsModRuntime` (constructor parameter `sourceStore`;
+`autoPersistMods` defaults to `true`). The source store keeps a mod's **source plus its `LuaModManifest`** (`id`, `name`,
 `description`, `version`, `author`, `capabilities`, `active`, `entry`). This is separate from
 `ILuaModStore` / `FileLuaModStore`, which persists per-mod `store_set`/`store_get` values, not the mod
 itself.
@@ -280,21 +288,23 @@ A file-backed implementation (`FileLuaModSourceStore`) lays each package out und
 runtime uses `NullLuaModSourceStore` (in-memory only, exactly the historical behavior).
 
 ```csharp
-// Auto-save on load/reload, mark dormant on unload, and auto-load active mods on startup.
-var modRuntime = new LuaCsModRuntime(gameplayBindings, store, log, sourceStore: fileSourceStore);
-int restored = modRuntime.RehydrateFromStore(LuaCapabilities.All);   // active mods reload
-modRuntime.ForgetMod("greeter");                                      // delete the stored package
+// Custom host: auto-save on load/reload, mark dormant on unload, auto-load active mods on startup.
+LuaCsModRuntime modRuntime = new(gameplayBindings, store, log, sourceStore: fileSourceStore);
+int restored = modRuntime.RehydrateFromStore(host, LuaCapabilities.All); // active mods reload
+modRuntime.ForgetMod(host, "greeter");                                   // delete the stored package
 ```
 
 - **Auto-persist.** Every successful `LoadMod` / `ReloadMod` saves the source + manifest; `UnloadMod`
   flips the stored manifest to `Active = false` (dormant, not deleted). All store calls are
   best-effort — a store failure is logged and never aborts the load.
-- **Rehydrate.** `RehydrateFromStore(hostGrant, allowFull = false)` re-loads every stored package whose
-  manifest is `Active`, masking each mod's requested capabilities to `hostGrant` and stripping `Full`
-  unless `allowFull` is set. Returns the count of mods reloaded.
-- **Export / import.** `ExportMod(id)` returns a self-contained bundle `{"manifest":{...},"source":"..."}`
-  (or `null` for an unknown id). `ImportMod(bundleJson, hostGrant, allowFull = false)` loads it on
-  another host with the same capability masking. `ForgetMod(id)` permanently removes the stored package.
+- **Rehydrate.** `RehydrateFromStore(caller, hostGrant, allowFull = false)` re-loads every stored
+  package whose manifest is `Active`, masking each mod's requested capabilities to `hostGrant` and
+  stripping `Full` unless `allowFull` is set. Returns the count of mods reloaded. The caller must be an
+  unrestricted host actor.
+- **Export / import.** `ExportMod(caller, id)` returns a self-contained bundle
+  `{"manifest":{...},"source":"..."}` (or `null` for an unknown id).
+  `ImportMod(caller, bundleJson, hostGrant, allowFull = false)` loads it on another host with the same
+  capability masking. `ForgetMod(caller, id)` permanently removes the stored package.
 - **Security.** Persisted, rehydrated, imported, and copied mods are **never** granted `Full` unless the
   host explicitly opts in. A shared mod can only ever request capabilities; the host grant decides.
 
@@ -311,13 +321,13 @@ seeded mod, `"3"` after three distinct edits), so the host never manages it by h
 store is wired the runtime uses `NullLuaScriptVersionStore` (no history — the prior behavior).
 
 ```csharp
-var modRuntime = new LuaCsModRuntime(gameplayBindings, store, log,
+LuaCsModRuntime modRuntime = new(gameplayBindings, store, log,
     sourceStore: fileSourceStore, versionStore: scriptVersions);
-IReadOnlyList<LuaScriptRevision> history = modRuntime.ListModVersions("greeter"); // 0 = original
-modRuntime.TryRevertMod("greeter", revisionIndex: 0, out string restored);        // roll back
+IReadOnlyList<LuaScriptRevision> history = modRuntime.ListModVersions(host, "greeter"); // 0 = original
+modRuntime.TryRevertMod(host, "greeter", 0, out string restored);                        // roll back
 ```
 
-`TryRevertMod(id, revisionIndex, out restored)` rolls a loaded mod back by **reloading** it from the
+`TryRevertMod(caller, id, revisionIndex, out restored)` rolls a loaded mod back by **reloading** it from the
 chosen revision's source (a non-destructive revert: the reload appends the restored source as the new
 current revision and re-persists). If the restored source fails to reload, the live mod is left
 untouched, exactly like `ReloadMod`.
@@ -328,7 +338,8 @@ Load/reload errors propagate synchronously to whoever triggered them, but a hook
 **later**, during `Tick`, only raises `ModHandlerErrored` (and counts toward the quarantine threshold —
 the mod stays loaded with dispatch suspended until a reload). The
 runtime now also buffers these Tick-time failures in a bounded ring (`MaxRetainedHandlerErrors`), readable
-via `GetRecentHandlerErrors(modId = null)` and clearable via `ClearRecentHandlerErrors(modId = null)`, so
+via `GetRecentHandlerErrors(caller, modId = null)` and clearable via
+`ClearRecentHandlerErrors(caller, modId = null)` (host actor only), so
 the agent can learn of them on a later turn through `manage_mods diagnostics` and repair the mod.
 
 The `manage_mods` tool exposes the same flow to the agent: `export`, `import`, `forget`, `versions`,
@@ -343,16 +354,20 @@ The `manage_mods` tool exposes the same flow to the agent: `export`, `import`, `
 | `manage_mods` | `list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`, `versions`, `revert`, `diagnostics` for `LuaCsModRuntime` |
 
 `manage_mods` does not let the model expand the capability tier; the host sets the tier when registering the tool.
-When Full access is enabled on the host (`enableFullLuaAccess` on the composition), mods loaded through the built-in Programmer `manage_mods` tool receive
-the same Full grant; otherwise they get `LuaCapabilities.All` without Full.
+When Full access is enabled on the host (**Enable Full Lua Access** on `CoreAiModsLifetimeScope`), mods loaded through the
+built-in Programmer `manage_mods` tool and `execute_lua` chunks receive the same Full grant; otherwise they get
+`LuaCapabilities.All` without Full.
+`execute_lua` refuses empty or whitespace-only `code` with `Lua code is required`; nothing runs and no autosave is taken.
 Read-only introspection: `LuaModsLlmTool(..., allowModManagement: false)`.
 
 ## Full Mode (`unity_*`)
 
-Opt-in through **Enable Full Access** on the optional `CoreAiLuaWorldModule` child of
-`CoreAILifetimeScope`, or `LoadMod(..., caps | Full)`.
-Policy is **allow-all by default**; hosts can inject `IFullLuaAccessBlacklistPolicy` to deny component types
-or specific members.
+Opt-in through **Enable Full Lua Access** (`enableFullLuaAccess`) on `CoreAiModsLifetimeScope`. With that
+grant, `execute_lua`, `manage_mods` and rehydrated mods run at `Full`, and a C# `LoadMod(..., caps | Full)`
+receives it; without the grant, requesting `Full` yields only error stubs. Non-public members additionally
+need **Enable Full Lua Private Access**.
+Policy is **allow-all by default**; hosts can assign an `IFullLuaAccessBlacklistPolicy` (the scope's
+**Blacklist Policy** field) to deny component types or specific members.
 
 ```lua
 -- One-shot diagnostic: inspect first, then decide what mod/edit to make.
@@ -402,31 +417,46 @@ LUA_NATIVE_APIS.md).
 
 ## Host Configuration (Unity)
 
-On the optional `CoreAiLuaWorldModule` child of `CoreAILifetimeScope` (legacy flat fields serialized
-on `CoreAILifetimeScope` migrate into the module):
+The Lua grant lives on `CoreAiModsLifetimeScope` (the child scope that installs the mod runtime):
 
 | Field | Effect |
 |---|---|
-| `worldPrefabRegistry` | Whitelist prefab-id for spawn |
-| `allowedScenes` | Whitelist scene names for `coreai_world_load_scene` (empty = any scene from Build Settings; only relevant on hosts that opt into the classic build bindings) |
-| `enableFullAccess` | Adds `Full` to the aggregator capability |
-| `enableFullPrivateAccess` | Lets Full-tier reflection access non-public members |
+| `enableFullLuaAccess` | Adds `Full` to the host grant used by `execute_lua`, `manage_mods` and rehydrated mods (read it back through `FullLuaAccessEnabled`) |
+| `enableFullLuaPrivateAccess` | Lets Full-tier reflection access non-public members (`FullLuaPrivateAccessEnabled`) |
+| `allowedLuaScenes` | Whitelist scene names for `coreai_world_load_scene` (empty = any scene from Build Settings; only relevant on hosts that opt into the classic build bindings) |
+| `blacklistPolicy` | Optional `IFullLuaAccessBlacklistPolicy` asset that denies Full-tier types/members |
+| `coroutineResumeBudget` | Per-resume instruction and wall-clock budget (see [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md)) |
+| `storeId` | Isolates this scope's persisted mods in their own store subfolder |
+
+The optional `CoreAiLuaWorldModule` child of `CoreAILifetimeScope` (legacy flat fields serialized on
+`CoreAILifetimeScope` migrate into it) configures the native `world_command` executor, not the Lua
+grant:
+
+| Field | Effect |
+|---|---|
+| `worldPrefabRegistry` | Prefab whitelist for `world_command` spawns; the Lua `coreai_world_list_prefabs` query reads the same registry |
+| `allowedScenes` | Scene whitelist the world-command executor enforces for every `load_scene` command, the native `world_command` tool included (empty = any scene from Build Settings) |
+| `enableFullAccess` / `enableFullPrivateAccess` | Legacy values, hidden in the Inspector and without effect: they never granted `Full`. They stay serialized so old scenes load unchanged; the `FullAccessEnabled` / `FullPrivateAccessEnabled` accessors and `CoreAILifetimeScope.FullLuaAccessEnabled` are `[Obsolete]` — read `CoreAiModsLifetimeScope.FullLuaAccessEnabled` / `FullLuaPrivateAccessEnabled` instead |
 
 ## Extending the Game API
 
 ### Custom Lua Functions
 
-The MoonSharp-era `GameLuaBindingsExtensibility.Register(bindings, requiredCapabilities)` hook was
-removed with the old VM. Today the gameplay bindings are assembled inside `LuaCsModRuntimeFactory`;
-registering a game's own binding group into that stack is a follow-up feature. The binding pattern
-itself — typed delegates on a `LuaCsApiRegistry` — is documented in
+The gameplay bindings are assembled inside `LuaCsModRuntimeFactory`. A host that builds its own stack
+registers extra bindings through `LuaCsModStackOptions.AdditionalGameplayBindings`
+(`Action<LuaCsApiRegistry, LuaCapabilities>`, invoked for each script's registry with the capability
+set that script was loaded with — gate on it yourself); the Unity
+`CoreAiModsLifetimeScope` does not expose that option yet. The binding pattern itself — typed
+delegates on a `LuaCsApiRegistry` — is documented in
 [LUA_NATIVE_APIS.md § Registering a Native API](LUA_NATIVE_APIS.md); examples:
 [LUA_BEST_PRACTICES.md § Custom Functions](LUA_BEST_PRACTICES.md).
 
 ### Custom World Commands (Without Editing CoreAI)
 
 `CoreAiWorldCommandExecutor.RegisterCustomHandler(ICoreAiCustomWorldCommandHandler)`: the action goes
-into the same pipeline as LLM/Lua world commands. Example in LUA_BEST_PRACTICES.md.
+into the same pipeline as LLM/Lua world commands. The method lives on the concrete executor, which the
+default composition registers only as `ICoreAiWorldCommandExecutor` (wrapped in
+`AuditedWorldCommandExecutor`); see LUA_BEST_PRACTICES.md for what that means for registration.
 
 ## Related Documents
 

@@ -1,8 +1,9 @@
 # Optional modules: Mods/Lua, Hub, and LLMUnity
 
-CoreAI ships as six lockstep UPM packages. `com.neoxider.coreai` is the portable core and
-`com.neoxider.coreaiunity` is the Unity host. Lua/modding, Hub UI, and the benchmark are separate
-packages so a consumer installs only the surfaces it uses.
+CoreAI ships as seven lockstep UPM packages: `coreai`, `coreaiunity`, optional `coreaimods`,
+`coreaihub`, `coreaibenchmark`, `coreaimcp`, and `coreaimirror`. `com.neoxider.coreai` is the portable
+core and `com.neoxider.coreaiunity` is the Unity host. Lua/modding, Hub UI, the in-game MCP server,
+Mirror networking and the benchmark are separate packages so a consumer installs only the surfaces it uses.
 
 | Module | Package/dependency | Auto-define when installed | Manual switch |
 |---|---|---|---|
@@ -11,6 +12,8 @@ packages so a consumer installs only the surfaces it uses.
 | LLM pipeline | NuGet `Microsoft.Extensions.AI` | — | `COREAI_LLM` (positive enable; absent by default) |
 | Local inference | `ai.undream.llm` | `COREAI_HAS_LLMUNITY` | also requires `COREAI_LLM` |
 | Benchmark | `com.neoxider.coreaibenchmark` | none | do not install in players |
+| In-game MCP server | `com.neoxider.coreaimcp` (depends on Unity + Mods) | none | remove the package |
+| Mirror networking | `com.neoxider.coreaimirror` (depends on Core + Mods) | assemblies build only with `MIRROR` (defined by the Mirror package) | remove the package or Mirror |
 
 `CoreAI.Core.asmdef` has no Lua reference. Lua VM/sandbox implementations and their
 Lua-CSharp dependencies live in `CoreAI.Mods`. `CoreAI.Source` owns the guarded LLMUnity

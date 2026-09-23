@@ -23,7 +23,7 @@ If the hook blocks your commit, unstage the listed files with `git restore --sta
 - **EditMode tests, four compile configurations** — `core` (no optional symbols), `llm`
   (`COREAI_LLM`), `lua` (`COREAI_LUA`), and `full` (both symbols). All four must stay green;
   define injection is verified for Standalone and WebGL rows.
-- **Module coverage gates** — the `lua` and `full` jobs fail if the `SecureLuaSandboxEditModeTests`
+- **Module coverage gates** — the `lua` and `full` jobs fail if the `LuaCsSecureSandboxEditModeTests`
   escape-test fixture did not actually execute, so Lua isolation coverage cannot silently drop out.
   The `llm` and `full` jobs similarly require the LLM installer fixture to execute.
 - **Standalone core tests** — a package-local `CoreAI.Core.Tests` EditMode assembly proves the
@@ -76,9 +76,10 @@ New public symbols follow `CoreAI…`; only the top-level facade keeps `CoreAi`.
 1. **Reformat** — Rider *Reformat & Cleanup Code* (applies `.editorconfig`, incl. attribute-per-line).
 2. **Tests** — run the EditMode gate green (CI runs `core` + `llm` + `lua` + `full`; run locally in batchmode for a fast pre-push check).
 3. **Changelog** — add an entry under `[Unreleased]` (or the release section) in the affected package `CHANGELOG.md`.
-4. **Version** — for a release run `python tools/bump_version.py <version>`: it sets **all six**
-   `package.json` files (and their internal `com.neoxider.*` pins) plus `McpServerInfo.Version` in
-   lockstep, then verifies the result. `python tools/bump_version.py --check` verifies without writing.
+4. **Version** — for a release run `python tools/bump_version.py <version>`: it sets **all seven**
+   `package.json` files (and their internal `com.neoxider.*` pins), `McpServerInfo.Version`, the
+   package-map version line in `Docs/ROADMAP.md` and the Developer Guide footer in lockstep, then
+   verifies the result. `python tools/bump_version.py --check` verifies without writing.
    Never hand-edit one manifest — the MCP server's advertised version is the piece that silently drifts.
 5. **Docs** — update every doc the change makes stale, in the same commit. Ask which README, guide or
    checklist described the old behaviour; a change is not done while a doc still describes what it replaced.

@@ -375,8 +375,11 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("fast", result.Content);
         }
 
+        /// <summary>
+        /// Same rule as the streaming path: the code and the text are rewritten together, the payload is kept.
+        /// </summary>
         [Test]
-        public async Task CompleteAsync_InnerCancelledResultFromDecoratorToken_RewritesOnlyErrorCode()
+        public async Task CompleteAsync_InnerCancelledResultFromDecoratorToken_RewritesCodeAndMessage()
         {
             CancelledResultClient inner = new();
             TimeoutLlmClientDecorator sut = new(inner, () => 0.03f);
@@ -384,7 +387,8 @@ namespace CoreAI.Tests.EditMode
             LlmCompletionResult result = await sut.CompleteAsync(Req());
 
             Assert.AreEqual(LlmErrorCode.Timeout, result.ErrorCode);
-            Assert.AreEqual("inner cancelled", result.Error);
+            Assert.AreEqual("LLM request timed out.", result.Error);
+            Assert.IsFalse(result.Ok);
             Assert.AreEqual("partial", result.Content);
             Assert.AreEqual("test-model", result.Model);
             Assert.AreEqual(1, result.ExecutedToolCalls.Count);
@@ -596,6 +600,22 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("LLM request timed out.", chunks[0].Error);
             Assert.AreEqual(LlmErrorCode.Cancelled, inner.CachedChunk.ErrorCode);
             Assert.AreEqual("inner cancelled", inner.CachedChunk.Error);
+        }
+
+        [Test]
+        public async Task CompleteAsync_Rewrite_DoesNotMutateInnerResult()
+        {
+            CachingCancelledClient inner = new();
+            TimeoutLlmClientDecorator sut = new(inner, () => 0.03f);
+
+            LlmCompletionResult result = await sut.CompleteAsync(Req());
+
+            Assert.AreNotSame(inner.CachedResult, result);
+            Assert.AreEqual(LlmErrorCode.Timeout, result.ErrorCode);
+            Assert.AreEqual("LLM request timed out.", result.Error);
+            Assert.AreEqual("partial", result.Content);
+            Assert.AreEqual(LlmErrorCode.Cancelled, inner.CachedResult.ErrorCode);
+            Assert.AreEqual("inner cancelled", inner.CachedResult.Error);
         }
 
         private static LlmCompletionRequest Req()
@@ -931,11 +951,28 @@ namespace CoreAI.Tests.EditMode
                 Model = "test-model"
             };
 
-            public Task<LlmCompletionResult> CompleteAsync(
+            public readonly LlmCompletionResult CachedResult = new()
+            {
+                Ok = false,
+                Content = "partial",
+                Error = "inner cancelled",
+                ErrorCode = LlmErrorCode.Cancelled,
+                Model = "test-model"
+            };
+
+            public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
                 CancellationToken cancellationToken = default)
             {
-                throw new NotSupportedException("Streaming-only stub.");
+                try
+                {
+                    await InlineCancellationAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                return CachedResult;
             }
 
             public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(

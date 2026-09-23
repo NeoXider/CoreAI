@@ -7,31 +7,36 @@ The fastest way to get your first AI agent running in Unity with local LLM.
 ## 1. Setup the Scene
 
 In Unity:
-1. Open the top menu: **CoreAI → Development → Open _mainCoreAI scene** (`Assets/CoreAiUnity/Scenes/_mainCoreAI.unity`).
-2. This scene contains everything you need: DI container, Logging, and LLM Manager.
+1. Open the top menu: **CoreAI → Setup → Create Chat Demo Scene**.
+2. The generated scene (`Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity`) contains everything you need: the
+   `CoreAILifetimeScope` DI container, logging, the chat panel, and — when your settings use LLMUnity — an
+   `LLM` + `LLMAgent` host. (`_mainCoreAI.unity` is an internal development harness, not a starting point.)
 
 ---
 
 ## 2. Configure the LLM
 
-Open **CoreAI → Settings** — it selects `Assets/Resources/CoreAISettings.asset` and creates it if it does not exist yet (the asset is never generated automatically on package import). You can also create one via **Create → CoreAI → Core AI Settings** and assign it on `CoreAILifetimeScope`.
+Open **CoreAI → Settings** — it selects `Assets/Resources/CoreAISettings.asset` and creates it if it does not exist yet (the asset is never generated automatically on package import). You can also create one via **Create → CoreAI → CoreAI Settings** and assign it on `CoreAILifetimeScope`.
 
 Choose one of two options:
 
 ### Option A: Local LLMUnity (Recommended for Testing or local in-game usage - with caution!)
 
-> 📦 **LLMUnity is installed automatically** along with the CoreAI package (via Unity Package Manager). Read more about the plugin here: [GitHub LLMUnity](https://github.com/undreamai/LLMUnity).
+> 📦 **LLMUnity (`ai.undream.llm`) is optional and not installed with CoreAI.** Add it via
+> **CoreAI → Setup → Modules → LLMUnity → Enable + Update to latest**; the LLM pipeline also needs the
+> `COREAI_LLM` define (**CoreAI → Setup → Modules → LLM Providers → Enable Providers**). Read more about the
+> plugin here: [GitHub LLMUnity](https://github.com/undreamai/LLMUnity).
 
-1. Set **Backend Type**: `LlmUnity` (or `Auto`).
-2. On the `LlmManager` GameObject in the scene, select a model via the LLM component (e.g., Qwen 4B). If you don't have any, you can download them via the LLMUnity interface.
+1. Set **LLM Backend**: `LlmUnity` (or `Auto`).
+2. Pick a model in **GGUF Model** on the settings asset, or on the scene's `LLM` object (e.g., Qwen 4B). If you don't have any, you can download them via the LLMUnity interface. **Auto-create LLM host** creates the `LLM` + `LLMAgent` at runtime when the scene has none.
 3. That's it! `CoreAILifetimeScope` will find the `LLMAgent` automatically on start.
 
 ### Option B: HTTP API (LM Studio / OpenAI / vLLM)
 
-1. Set **Backend Type**: `OpenAiHttp`.
-2. Fill in the **Api Base Url** (e.g., `http://localhost:1234/v1` for LM Studio).
-3. Set the **Model Name** (e.g., `Qwen`).
-4. If using OpenAI — fill in the **Api Key** (editor/local work only).
+1. Set **LLM Backend**: `OpenAiHttp`.
+2. Fill in the **Base URL** (e.g., `http://localhost:1234/v1` for LM Studio).
+3. Set the **Model** to the exact model id your server reports (required — there is no default).
+4. If using OpenAI — fill in the **API Key** (editor/local work only).
 
 > ⚠️ A non-empty **Api Key** / **Secondary Api Key** on a `CoreAISettings` asset that sits under a
 > `Resources/` folder **aborts every player build** — `Resources` assets ship inside the player and the
@@ -88,10 +93,10 @@ public class MyNpcScript : MonoBehaviour
 
 ## 4. Play and Verify
 
-1. Attach your script to any GameObject in the `_mainCoreAI` scene.
+1. Attach your script to any GameObject in the scene you created.
 2. Press **Play** in Unity.
-3. Check the Console — you should see `VContainer + MessagePipe... ready`.
-4. Press `Space` — and watch the `[Llm] ▶` and `[Llm] ◀` logs pop up with the AI's answer!
+3. Check the Console — you should see `VContainer + MessagePipe (GlobalMessagePipe) + filtered ILog are registered.`
+4. Press `Space` — and watch the `LLM >` and `LLM <` log lines pop up with the AI's answer!
 
 ---
 

@@ -664,6 +664,21 @@ namespace CoreAI.Mods.WorldPackages
             [System.ComponentModel.Description("Autosave file name.")] string name,
             CancellationToken cancellationToken = default)
         {
+            // WHY first: see SaveWorldLlmTool - a name the store would throw on is refused as a result.
+            if (!RbxWorldPackageNames.TryValidateAutoFileName(name, out string nameError))
+            {
+                return Newtonsoft.Json.JsonConvert.SerializeObject(new
+                {
+                    success = false,
+                    status = RbxWorldPackageNames.InvalidArgumentStatus,
+                    player_confirmation_required = false,
+                    request_id = "",
+                    slot = name ?? "",
+                    world_id = "",
+                    error = RbxWorldPackageNames.DescribeInvalidArgument("name", nameError)
+                });
+            }
+
             CoreAI.Authority.ActorContext actor = _identityProvider.GetActorContext(_roleId);
             RbxWorldLoadRequest request = await _service.RequestAutoLoadAsync(actor, name, cancellationToken);
             return Newtonsoft.Json.JsonConvert.SerializeObject(new

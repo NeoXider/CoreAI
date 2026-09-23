@@ -326,6 +326,11 @@ namespace CoreAI.Tests.EditMode
                 CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
                 CancellationTokenSource rootCts = new();
 
+                // WHY the lifecycle flag: a stop re-arms the root source only on a LIVE panel - on a disabled or
+                // destroyed one the replacement would have no owner left to dispose it (pinned by
+                // StopWhileDisabled_ArmsNoRootSource_TheNextTurnCreatesItLazily). A panel built by AddComponent in
+                // Edit Mode never reaches the OnEnable that sets the flag, so a scene panel's state is set here.
+                SetPrivateField(panel, "_lifecycleActive", true);
                 SetPrivateField(panel, "_cts", rootCts);
                 SetPrivateField(panel, "_isSending", true);
                 SetPrivateField<CancellationTokenSource>(panel, "_activeRequestCts", null);
@@ -664,6 +669,82 @@ namespace CoreAI.Tests.EditMode
                 Object.DestroyImmediate(go);
                 Object.DestroyImmediate(panelHost);
                 Object.DestroyImmediate(panelSettings);
+            }
+        }
+
+        /// <summary>
+        /// The header clear button calls <c>ClearChat()</c> directly, so a host that only guarded its own clear
+        /// entry point missed it and kept inline rows "live" without a row in the tree. Every clear path now
+        /// notifies <c>OnChatClearing</c> first, while the rows are still in the scroll.
+        /// </summary>
+        [Test]
+        public void ClearButton_NotifiesOnChatClearingOnceBeforeScrollIsEmptied()
+        {
+            GameObject go = new("CoreAiChatPanel_OnChatClearing_Button_Test");
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
+            try
+            {
+                ClearingHookPanel panel = go.AddComponent<ClearingHookPanel>();
+                panel.SetRuntimeOptions(new CoreAiChatOptions { WelcomeMessage = "" });
+                SetPrivateField(panel, "MessageScroll", CreateAttachedMessageScroll(out panelHost, out panelSettings));
+                panel.AddMessage("hello", true);
+
+                InvokePrivate(panel, "OnClearClicked", new object[] { null });
+
+                Assert.AreEqual(1, panel.Calls.Count, "the clear button must reach the hook exactly once");
+                Assert.AreEqual((true, false, 1), panel.Calls[0], "flags of ClearChat() and rows still present");
+                Assert.AreEqual(0, GetMessageScrollChildCount(panel), "cleared");
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                Object.DestroyImmediate(panelHost);
+                Object.DestroyImmediate(panelSettings);
+            }
+        }
+
+        [Test]
+        public void ClearChatWithFlags_PassesFlagsToOnChatClearing_AndThrowingHookDoesNotStopClear()
+        {
+            GameObject go = new("CoreAiChatPanel_OnChatClearing_Flags_Test");
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
+            try
+            {
+                ClearingHookPanel panel = go.AddComponent<ClearingHookPanel>();
+                panel.SetRuntimeOptions(new CoreAiChatOptions { WelcomeMessage = "" });
+                SetPrivateField(panel, "MessageScroll", CreateAttachedMessageScroll(out panelHost, out panelSettings));
+                panel.AddMessage("hello", true);
+                panel.Throw = true;
+
+                panel.ClearChat(false, true);
+
+                CollectionAssert.AreEqual(new[] { (false, true, 1) }, panel.Calls);
+                Assert.AreEqual(0, GetMessageScrollChildCount(panel), "a failing hook must not abort the clear");
+                Assert.IsFalse(panel.IsBusy, "the clearing flag must be released");
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                Object.DestroyImmediate(panelHost);
+                Object.DestroyImmediate(panelSettings);
+            }
+        }
+
+        private sealed class ClearingHookPanel : CoreAiChatPanel
+        {
+            public readonly List<(bool History, bool Memory, int RowsAtHook)> Calls = new();
+
+            public bool Throw { get; set; }
+
+            protected override void OnChatClearing(bool clearChatHistory, bool clearLongTermMemory)
+            {
+                Calls.Add((clearChatHistory, clearLongTermMemory, GetMessageScrollChildCount()));
+                if (Throw)
+                {
+                    throw new System.InvalidOperationException("hook failure");
+                }
             }
         }
 

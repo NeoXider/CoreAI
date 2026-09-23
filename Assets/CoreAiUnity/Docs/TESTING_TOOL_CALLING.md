@@ -13,7 +13,7 @@ Quick reference: which tests to run after touching `MeaiLlmClient`, `SmartToolCa
 | **Non-streaming** | text-shape JSON executes, gets stripped, traces populated | `ToolCallExtractionParityEditModeTests.NonStreaming_*` |
 | **Streaming** | text-shape JSON executes when bound; stripped when unbound; traces on `IsDone`; hybrid suffix reconciliation | `ToolCallExtractionParityEditModeTests.Streaming_*` + `MeaiLlmClientEditModeTests.CompleteStreamingAsync_*` |
 | **Per-call log** | `[ToolCall] traceId=… role=… tool=… status=OK dur=… args=… result=…` | `ToolCallExtractionParityEditModeTests.NonStreaming_PerCallLogLine_*` |
-| **Summary log** | `tools=[name(ok,12ms),…]` tail on `LLM ◀` line | `ToolCallExtractionParityEditModeTests.FormatExecutedTools_*` |
+| **Summary log** | `tools=[name(ok,12ms),…]` tail on `LLM <` line | `ToolCallExtractionParityEditModeTests.FormatExecutedTools_*` |
 | **Fast PlayMode (stub inner client)** | `MeaiLlmClient` tool pipeline in a player frame — **no** loaded model in this assembly | `ToolCallStreamingParityPlayModeTests` (**`CoreAI.Tests.PlayMode.FastNoLlm`**) |
 | **Real LLM (opt-in)** | live HTTP / LLMUnity tool execution | **LlmVerification:** `MerchantWithToolCallingPlayModeTests`, `AllToolCallsPlayModeTests`, `MultiToolChainPlayModeTests` (retry second hop if memory marker missing) |
 
@@ -76,7 +76,7 @@ Reproduces the original symptom: `MemoryLlmTool` is in `request.Tools`, but `Bui
 Pins the `[ToolCall]` log shape (`traceId=… role=… tool=… status=OK/FAIL dur=…ms args=… result=…`). This is the per-call diagnostic the user wanted — independent of the verbose `LogMeaiToolCallingSteps` switch.
 
 ### `FormatExecutedTools_RendersStableLine` (EditMode)
-Pins the summary tail appended to `LLM ◀`: `tools=[memory(ok,12ms),missing_tool(fail,0ms,missing),memory(fail,0ms,duplicate)]`.
+Pins the summary tail appended to `LLM <`: `tools=[memory(ok,12ms),missing_tool(fail,0ms,missing),memory(fail,0ms,duplicate)]`.
 
 ### Multi-call edge cases (1.3.1)
 
@@ -96,9 +96,9 @@ Pins the summary tail appended to `LLM ◀`: `tools=[memory(ok,12ms),missing_too
 3. Look for these three log lines in order:
 
    ```
-   LLM ▶ (stream) traceId=…
+   LLM > (stream) traceId=…
    [ToolCall] traceId=… role=… tool=memory status=OK dur=12ms args={"action":"append",…}
-   LLM ◀ (stream) traceId=… … | tools=[memory(ok,12ms)]
+   LLM < (stream) traceId=… … | tools=[memory(ok,12ms)]
      content (…): may still contain tool-shaped JSON in logs when the gateway batched text + JSON in one delta; the chat UI may briefly show it during live streaming before the tool pass strips it on the next iteration.
    ```
 

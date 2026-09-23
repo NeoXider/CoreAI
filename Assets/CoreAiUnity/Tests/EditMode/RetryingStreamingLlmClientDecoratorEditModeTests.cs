@@ -207,6 +207,80 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0, sut.RetryCount, "Cancellation is never a retry trigger.");
         }
 
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task FaultAfterCallerCancel_PropagatesAsTheCancellation_WithTheFaultAttached(bool committed)
+        {
+            // WHY: a retryable transport fault reported while the caller was cancelling used to be a pre-commit
+            // failure to retry (and then a bare OperationCanceledException) or, after commit, a raw provider
+            // exception. Either way the layers above disagreed about what happened; the rule is one cancellation.
+            using CancellationTokenSource caller = new();
+            LlmClientException fault = new("socket disposed", LlmErrorCode.BackendUnavailable, 503);
+            CancelThenThrowStreamingClient inner = new(fault, caller.Cancel, committed);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3, null);
+
+            List<LlmStreamChunk> chunks = new();
+            OperationCanceledException thrown = null;
+            try
+            {
+                await foreach (LlmStreamChunk chunk in sut.CompleteStreamingAsync(Req(), caller.Token))
+                {
+                    chunks.Add(chunk);
+                }
+            }
+            catch (OperationCanceledException ex)
+            {
+                thrown = ex;
+            }
+
+            Assert.IsNotNull(thrown, "A fault after the caller cancelled is the cancellation.");
+            Assert.AreSame(fault, thrown.InnerException, "The fault stays attached for diagnostics and endpoint health.");
+            Assert.AreEqual(committed ? "partial" : "", Concat(chunks));
+            Assert.AreEqual(0, sut.RetryCount, "Nobody is waiting for a retry.");
+            Assert.AreEqual(1, inner.StreamCallCount);
+        }
+
+        /// <summary>
+        /// Optionally commits one text chunk, then cancels the caller's token and throws the configured fault -
+        /// the shape of a transport torn down by the stop.
+        /// </summary>
+        private sealed class CancelThenThrowStreamingClient : ILlmClient
+        {
+            private readonly Exception _fault;
+            private readonly Action _cancelCaller;
+            private readonly bool _commitFirst;
+            public int StreamCallCount;
+
+            public CancelThenThrowStreamingClient(Exception fault, Action cancelCaller, bool commitFirst)
+            {
+                _fault = fault;
+                _cancelCaller = cancelCaller;
+                _commitFirst = commitFirst;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException("streaming only");
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                StreamCallCount++;
+                await Task.Yield();
+                if (_commitFirst)
+                {
+                    yield return Text("partial");
+                }
+
+                _cancelCaller();
+                throw _fault;
+            }
+        }
+
         [Test]
         public void PreCancelledRequest_DoesNotOpenProvider()
         {
