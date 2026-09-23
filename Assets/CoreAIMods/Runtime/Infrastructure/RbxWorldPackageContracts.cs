@@ -167,6 +167,12 @@ namespace CoreAI.Mods.WorldPackages
         /// engine-free; a live Unity host supplies an adapter around its RbxSpace session policy.
         /// </summary>
         public Func<float, Action> BeginMetersPerStudRestore { get; set; }
+
+        /// <summary>
+        /// Durable actor id whose single server-generated mutation applies the restored tree. Null or
+        /// blank uses the composition's local host id (<see cref="LocalActorIdentityProvider.DefaultActorId"/>).
+        /// </summary>
+        public string HostActorId { get; set; }
     }
 
     /// <summary>A freshly restored DataModel plus the exact mod sources that must restart once.</summary>
@@ -1121,6 +1127,7 @@ namespace CoreAI.Mods.WorldPackages
         private readonly ILuaModStore _modStore;
         private readonly ILuaScriptVersionStore _versionStore;
         private readonly Action<string> _diagnostics;
+        private readonly int? _worldAclFloor;
         private readonly Dictionary<string, PendingLoad> _pendingLoads =
             new(StringComparer.Ordinal);
         private Session _current;
@@ -1167,6 +1174,10 @@ namespace CoreAI.Mods.WorldPackages
                 initialSourceStore,
                 null,
                 null);
+            // WHY the composed ACL version is a floor: a package whose world.json omits the optional
+            // world_acl_version would otherwise restore as a legacy world, silently switch off every
+            // per-actor check, and persist that downgrade in every later save.
+            _worldAclFloor = _current.RbxApi.Registry.WorldAclVersion;
             Runtime = new ActiveLuaModRuntime(this);
             Executor = new ActiveLuaExecutor(this);
             Stack = new LuaCsModStack(() => Current.Stack);
@@ -1387,6 +1398,20 @@ namespace CoreAI.Mods.WorldPackages
             if (payload == null)
             {
                 return new RbxWorldLoadResult(false, "World package payload is required.", 0);
+            }
+
+            if (_worldAclFloor.HasValue && payload.Tree != null
+                && !payload.Tree.WorldAclVersion.HasValue)
+            {
+                return new RbxWorldLoadResult(
+                    false,
+                    "World package has no world ACL version (legacy compatibility mode), but this "
+                        + "session was composed with world ACL version "
+                        + _worldAclFloor.Value.ToString(CultureInfo.InvariantCulture)
+                        + "; loading it would switch off per-actor access control. The live world was "
+                        + "not changed; compose the session with worldAclVersion: null to open a "
+                        + "legacy world.",
+                    0);
             }
 
             string activeFullMod = FindActiveFullCapabilityMod(payload.Mods);

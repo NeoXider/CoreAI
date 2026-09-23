@@ -312,7 +312,9 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>
         /// Restores a captured subtree into <paramref name="registry"/> under the original ids
         /// and returns the restored root. Two passes: create all nodes, then link parents, so
-        /// snapshot ordering is not load-bearing.
+        /// snapshot ordering is not load-bearing. The writes run outside any mutation envelope and
+        /// leave nothing in the replay ledger; a production world load restores through
+        /// <see cref="Restore(InstanceTreeSnapshot, InstanceRegistry, string)"/> instead.
         /// </summary>
         public static RbxInstance Restore(InstanceTreeSnapshot snapshot, InstanceRegistry registry)
         {
@@ -322,24 +324,98 @@ namespace CoreAI.Mods.Rbx.Instances
             Dictionary<ulong, RbxInstance> restored = new();
             foreach (InstanceSnapshot node in snapshot.Instances)
             {
-                RbxInstance instance = registry.RestoreInstance(node.ClassName,
-                    new InstanceId(node.Id), node.OwnerModId, node.OriginTag,
-                    node.OwnerActorId, node.AccessScope);
-                instance.Name = node.Name;
-                instance.Archivable = node.Archivable;
-                foreach (AttributeSnapshot attribute in node.Attributes)
-                {
-                    instance.SetAttribute(attribute.Name, FromAttributeSnapshot(attribute));
-                }
-
-                foreach (string tag in node.Tags)
-                {
-                    instance.AddTag(tag);
-                }
-
+                RbxInstance instance = RegisterNode(registry, node);
+                ApplyNodeState(instance, node);
                 restored.Add(node.Id, instance);
             }
 
+            return LinkSpecializeAndStamp(snapshot, registry, restored);
+        }
+
+        /// <summary>
+        /// Restores a captured subtree exactly like <see cref="Restore(InstanceTreeSnapshot, InstanceRegistry)"/>,
+        /// but runs every registry write as ONE server-generated mutation of
+        /// <paramref name="hostActorId"/>, so a restored world retains one host operation in its replay
+        /// ledger like every other production mutation entry. Validation still runs first and the
+        /// captured revisions still win.
+        /// </summary>
+        /// <remarks>
+        /// WHY the writes are enveloped but never authorized: a restore relinks the HostProtected
+        /// services (Workspace, Players, Camera) under the DataModel, which the world ACL refuses as a
+        /// reparent even for an unrestricted actor. The snapshot was validated as a whole; the envelope
+        /// records who applied it, it does not re-ask whether they may.
+        /// </remarks>
+        public static RbxInstance Restore(InstanceTreeSnapshot snapshot, InstanceRegistry registry,
+            string hostActorId)
+        {
+            if (string.IsNullOrWhiteSpace(hostActorId))
+            {
+                throw RbxError.BadArgument(
+                    "a host restore requires a host actor id",
+                    "pass the trusted host identity that applies the restored world");
+            }
+
+            Validate(snapshot, registry);
+            if (registry.IsDetached)
+            {
+                throw RbxError.WorldDetached("restore instance tree");
+            }
+
+            registry.ConfigureWorldAclVersion(snapshot.WorldAclVersion);
+            // WHY every node is registered before the operation opens: a server-generated mutation is
+            // anchored on a live record, and a fresh registry has none until the tree is in it.
+            // Registration is bookkeeping, not a write; names, links, state and revisions below are.
+            Dictionary<ulong, RbxInstance> restored = new();
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                restored.Add(node.Id, RegisterNode(registry, node));
+            }
+
+            // WHY: RevisionAdvanced events raised by these writes are parked until the operation
+            // releases the mutation gate, so they carry intermediate revisions the final stamp then
+            // overwrites. A registry fresh from restore has no subscriber yet; one that subscribes
+            // before a restore must re-read revisions afterwards instead of trusting those events.
+            return registry.ApplyServerGeneratedMutation(hostActorId.Trim(), true, registry.WorldId,
+                "restore instance tree", () =>
+                {
+                    foreach (InstanceSnapshot node in snapshot.Instances)
+                    {
+                        ApplyNodeState(restored[node.Id], node);
+                    }
+
+                    return LinkSpecializeAndStamp(snapshot, registry, restored);
+                });
+        }
+
+        private static RbxInstance RegisterNode(InstanceRegistry registry, InstanceSnapshot node)
+        {
+            return registry.RestoreInstance(node.ClassName,
+                new InstanceId(node.Id), node.OwnerModId, node.OriginTag,
+                node.OwnerActorId, node.AccessScope);
+        }
+
+        private static void ApplyNodeState(RbxInstance instance, InstanceSnapshot node)
+        {
+            instance.Name = node.Name;
+            instance.Archivable = node.Archivable;
+            foreach (AttributeSnapshot attribute in node.Attributes)
+            {
+                instance.SetAttribute(attribute.Name, FromAttributeSnapshot(attribute));
+            }
+
+            foreach (string tag in node.Tags)
+            {
+                instance.AddTag(tag);
+            }
+        }
+
+        /// <summary>
+        /// Links parents, applies specialized state, then stamps the captured revisions LAST so no
+        /// restore write can leave a revision the snapshot did not carry; returns the restored root.
+        /// </summary>
+        private static RbxInstance LinkSpecializeAndStamp(InstanceTreeSnapshot snapshot,
+            InstanceRegistry registry, Dictionary<ulong, RbxInstance> restored)
+        {
             RbxInstance root = null;
             foreach (InstanceSnapshot node in snapshot.Instances)
             {
@@ -748,9 +824,9 @@ namespace CoreAI.Mods.Rbx.Instances
 
             if (node.ClickDetector != null)
             {
-                double value = double.Parse(
-                    node.ClickDetector.MaxActivationDistance, CultureInfo.InvariantCulture);
-                if (double.IsNaN(value) || double.IsInfinity(value) || value < 0d)
+                if (!double.TryParse(node.ClickDetector.MaxActivationDistance, NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out double value)
+                    || double.IsNaN(value) || double.IsInfinity(value) || value < 0d)
                 {
                     throw RbxError.BadArgument(
                         "snapshot ClickDetector has invalid MaxActivationDistance '"
@@ -779,9 +855,9 @@ namespace CoreAI.Mods.Rbx.Instances
                         "use a canonical Enum.Material item name");
                 }
 
-                float studs = float.Parse(
-                    node.MaterialVariant.StudsPerTile, CultureInfo.InvariantCulture);
-                if (float.IsNaN(studs) || float.IsInfinity(studs) || studs <= 0f)
+                if (!float.TryParse(node.MaterialVariant.StudsPerTile, NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out float studs)
+                    || float.IsNaN(studs) || float.IsInfinity(studs) || studs <= 0f)
                 {
                     throw RbxError.BadArgument(
                         "snapshot MaterialVariant " + node.Id + " has invalid StudsPerTile '"
@@ -1216,7 +1292,14 @@ namespace CoreAI.Mods.Rbx.Instances
             float[] result = new float[expected];
             for (int i = 0; i < expected; i++)
             {
-                result[i] = float.Parse(parts[i], CultureInfo.InvariantCulture);
+                if (!float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture,
+                        out result[i]))
+                {
+                    throw RbxError.BadArgument(
+                        "datatype attribute value '" + serialized + "' contains a malformed component",
+                        "serialize each component as an invariant-culture number");
+                }
+
                 if (float.IsNaN(result[i]) || float.IsInfinity(result[i]))
                 {
                     throw RbxError.BadArgument(

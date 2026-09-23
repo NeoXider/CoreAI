@@ -231,6 +231,94 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         }
 
         [Test]
+        public void Validate_MalformedClickDetectorDistance_IsBadArgumentNotAnEscapedParseException()
+        {
+            foreach (string malformed in new[] { "abc", null, "" })
+            {
+                InstanceTreeSnapshot snapshot = SingleNodeSnapshot("ClickDetector");
+                snapshot.Instances[0].ClickDetector = new ClickDetectorSnapshot
+                {
+                    MaxActivationDistance = malformed
+                };
+
+                RbxError error = Assert.Throws<RbxError>(
+                    () => InstanceTreeSerializer.Validate(snapshot, new InstanceRegistry()),
+                    "MaxActivationDistance '" + malformed + "' must fail as a named snapshot error");
+                Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
+                StringAssert.Contains("MaxActivationDistance", error.RawMessage);
+            }
+        }
+
+        [Test]
+        public void Validate_MalformedMaterialVariantStudsPerTile_IsBadArgumentNotAnEscapedParseException()
+        {
+            foreach (string malformed in new[] { "abc", null, "" })
+            {
+                InstanceTreeSnapshot snapshot = SingleNodeSnapshot("MaterialVariant");
+                snapshot.Instances[0].MaterialVariant = new MaterialVariantSnapshot
+                {
+                    BaseMaterial = "Plastic",
+                    BaseMaterialValue = 256,
+                    ColorMap = "",
+                    NormalMap = "",
+                    RoughnessMap = "",
+                    MetalnessMap = "",
+                    StudsPerTile = malformed
+                };
+
+                RbxError error = Assert.Throws<RbxError>(
+                    () => InstanceTreeSerializer.Validate(snapshot, new InstanceRegistry()),
+                    "StudsPerTile '" + malformed + "' must fail as a named snapshot error");
+                Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
+                StringAssert.Contains("StudsPerTile", error.RawMessage);
+            }
+        }
+
+        [Test]
+        public void Validate_MalformedDatatypeComponent_IsBadArgumentNotAnEscapedParseException()
+        {
+            foreach (string malformed in new[] { "1,abc,3", "1,,3" })
+            {
+                InstanceTreeSnapshot snapshot = SingleNodeSnapshot("Vector3Value");
+                snapshot.Instances[0].Value = new ValueSnapshot { StringValue = malformed };
+
+                RbxError error = Assert.Throws<RbxError>(
+                    () => InstanceTreeSerializer.Validate(snapshot, new InstanceRegistry()),
+                    "Vector3Value '" + malformed + "' must fail as a named snapshot error");
+                Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
+                StringAssert.Contains(malformed, error.RawMessage);
+            }
+        }
+
+        [Test]
+        public void Validate_WellFormedSpecializedState_StillPasses()
+        {
+            InstanceTreeSnapshot detector = SingleNodeSnapshot("ClickDetector");
+            detector.Instances[0].ClickDetector = new ClickDetectorSnapshot
+            {
+                MaxActivationDistance = "32.5"
+            };
+            InstanceTreeSnapshot vector = SingleNodeSnapshot("Vector3Value");
+            vector.Instances[0].Value = new ValueSnapshot { StringValue = "1,-2.5,3E-2" };
+
+            Assert.DoesNotThrow(() => InstanceTreeSerializer.Validate(detector, new InstanceRegistry()));
+            Assert.DoesNotThrow(() => InstanceTreeSerializer.Validate(vector, new InstanceRegistry()));
+        }
+
+        private static InstanceTreeSnapshot SingleNodeSnapshot(string className)
+        {
+            InstanceTreeSnapshot snapshot = new();
+            snapshot.Instances.Add(new InstanceSnapshot
+            {
+                Id = 1UL,
+                ClassName = className,
+                Name = className,
+                Archivable = true
+            });
+            return snapshot;
+        }
+
+        [Test]
         public void Restore_AdvancesTheAllocatorPastRestoredIds()
         {
             InstanceRegistry source = BuildSourceRegistry(out RbxDataModel game);

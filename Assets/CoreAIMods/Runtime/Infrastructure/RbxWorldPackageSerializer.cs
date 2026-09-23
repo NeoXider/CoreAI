@@ -5,6 +5,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Text;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
@@ -305,7 +306,11 @@ namespace CoreAI.Mods.WorldPackages
                     backingBinder,
                     worldAclVersion: null,
                     worldId: payload.Settings.WorldId);
-                game = (RbxDataModel)InstanceTreeSerializer.Restore(payload.Tree, registry);
+                string hostActorId = string.IsNullOrWhiteSpace(options?.HostActorId)
+                    ? LocalActorIdentityProvider.DefaultActorId
+                    : options.HostActorId.Trim();
+                game = (RbxDataModel)InstanceTreeSerializer.Restore(
+                    payload.Tree, registry, hostActorId);
 
                 foreach (KeyValuePair<InstanceId, PartProperties> entry in payload.Parts)
                 {

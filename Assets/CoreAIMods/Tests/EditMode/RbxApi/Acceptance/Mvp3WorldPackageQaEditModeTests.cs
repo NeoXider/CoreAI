@@ -183,6 +183,84 @@ p.Parent = workspace",
         }
 
         [Test]
+        public async Task HeadlessSessionController_AclComposed_RefusesLegacyPackageBeforeAnySideEffect()
+        {
+            using HeadlessSession session = new(WorldId, InstanceRegistry.CurrentWorldAclVersion);
+            InstanceRegistry outgoing = session.Controller.CurrentRbxApi.Registry;
+            RbxWorldPackagePayload captured = session.Controller.CaptureCurrent();
+            Assert.AreEqual(InstanceRegistry.CurrentWorldAclVersion, captured.Tree.WorldAclVersion);
+            RbxWorldPackagePayload legacy = WithTree(captured, new InstanceTreeSnapshot
+            {
+                WorldAclVersion = null,
+                Instances = captured.Tree.Instances
+            });
+
+            RbxWorldLoadResult refused = await session.Controller.LoadConfirmedAsync(legacy);
+
+            Assert.IsFalse(refused.Success, "a legacy package must not downgrade an ACL-composed session");
+            StringAssert.Contains(
+                "compose the session with worldAclVersion: null to open a legacy world",
+                refused.Error);
+            Assert.AreEqual(0, session.PackageStore.AutoTriggers.Count,
+                "the refusal must come before the pre-load safety autosave");
+            Assert.AreSame(outgoing, session.Controller.CurrentRbxApi.Registry);
+            Assert.IsFalse(outgoing.IsDetached);
+            Assert.IsTrue(outgoing.IsWorldAclEnabled);
+
+            RbxWorldLoadResult accepted = await session.Controller.LoadConfirmedAsync(
+                WithTree(captured, captured.Tree));
+
+            Assert.IsTrue(accepted.Success, accepted.Error);
+            CollectionAssert.AreEqual(new[] { "load_world-pre" }, session.PackageStore.AutoTriggers);
+            InstanceRegistry published = session.Controller.CurrentRbxApi.Registry;
+            Assert.AreNotSame(outgoing, published);
+            Assert.IsTrue(outgoing.IsDetached);
+            Assert.AreEqual(InstanceRegistry.CurrentWorldAclVersion, published.WorldAclVersion);
+            Assert.AreEqual(1, published.RetainedMutationOperationCount,
+                "the headless restore must run as exactly one server-generated host operation");
+        }
+
+        [Test]
+        public async Task HeadlessSessionController_LegacyComposed_AcceptsLegacyAndKeepsAPackagedAclVersion()
+        {
+            using HeadlessSession session = new(WorldId);
+            RbxWorldPackagePayload captured = session.Controller.CaptureCurrent();
+            Assert.IsNull(captured.Tree.WorldAclVersion, "precondition: a legacy session captures legacy");
+
+            RbxWorldLoadResult legacyLoad = await session.Controller.LoadConfirmedAsync(
+                WithTree(captured, captured.Tree));
+
+            Assert.IsTrue(legacyLoad.Success, legacyLoad.Error);
+            Assert.IsNull(session.Controller.CurrentRbxApi.Registry.WorldAclVersion);
+
+            RbxWorldLoadResult aclLoad = await session.Controller.LoadConfirmedAsync(
+                WithTree(captured, new InstanceTreeSnapshot
+                {
+                    WorldAclVersion = InstanceRegistry.CurrentWorldAclVersion,
+                    Instances = captured.Tree.Instances
+                }));
+
+            Assert.IsTrue(aclLoad.Success, aclLoad.Error);
+            Assert.AreEqual(InstanceRegistry.CurrentWorldAclVersion,
+                session.Controller.CurrentRbxApi.Registry.WorldAclVersion,
+                "a package keeps the ACL version it declares");
+            Assert.AreEqual(2, session.PackageStore.AutoTriggers.Count);
+        }
+
+        private static RbxWorldPackagePayload WithTree(
+            RbxWorldPackagePayload source,
+            InstanceTreeSnapshot tree)
+        {
+            return new RbxWorldPackagePayload(
+                source.CapturedAtUtc,
+                source.Settings,
+                tree,
+                source.Parts,
+                source.CameraCFrame,
+                source.Mods);
+        }
+
+        [Test]
         public async Task FileStore_AutosaveRotationUnderClockRegression_NeverDropsTheJustConfirmedBackup()
         {
             MemoryFileSystem fileSystem = new();
@@ -255,9 +333,9 @@ p.Parent = workspace",
         /// <summary>Engine-free Rbx world composed exactly like the installer's headless branch.</summary>
         private sealed class HeadlessWorld
         {
-            public HeadlessWorld(string worldId)
+            public HeadlessWorld(string worldId, int? worldAclVersion = null)
             {
-                Registry = new InstanceRegistry(worldId: worldId);
+                Registry = new InstanceRegistry(worldAclVersion: worldAclVersion, worldId: worldId);
                 Game = DataModelBootstrap.CreateGame(Registry);
                 SourceStore = new MemoryTransactionalSourceStore();
                 RbxApi = new LuaCsRbxApiBindings(Registry, Game);
@@ -311,9 +389,9 @@ p.Parent = workspace",
         {
             private readonly HeadlessWorld _world;
 
-            public HeadlessSession(string worldId)
+            public HeadlessSession(string worldId, int? worldAclVersion = null)
             {
-                _world = new HeadlessWorld(worldId);
+                _world = new HeadlessWorld(worldId, worldAclVersion);
                 LuaCsModStack initialStack = _world.CreateStack(null);
                 WireSessionTeardown(initialStack, _world.RbxApi);
                 Controller = new RbxWorldRuntimeSessionController(
@@ -322,7 +400,7 @@ p.Parent = workspace",
                         _world.RbxApi.Game,
                         partSink: _world.RbxApi.PartSink,
                         cameraRig: _world.RbxApi.CameraRig),
-                    new RecordingPackageStore(),
+                    PackageStore,
                     _world.SourceStore,
                     initialStack,
                     _world.RbxApi,
@@ -356,6 +434,8 @@ p.Parent = workspace",
             }
 
             public RbxWorldRuntimeSessionController Controller { get; }
+
+            public RecordingPackageStore PackageStore { get; } = new();
 
             public List<string> Diagnostics { get; } = new();
 

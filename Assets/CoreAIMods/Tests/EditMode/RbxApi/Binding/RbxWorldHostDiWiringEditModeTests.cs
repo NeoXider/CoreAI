@@ -533,6 +533,7 @@ end)");
                     actor,
                     "outgoing-listener",
                     @"hooks_on('probe', function()
+    store_set('old_probe', 'fired')
     local callback = Instance.new('Folder')
     callback.Name = 'OldCallback'
     callback.Parent = workspace
@@ -553,6 +554,10 @@ end)",
                 RbxInstance outgoingRemote = outgoingRegistry.WorldRoot.FindFirstChild(
                     "OutgoingRemote");
                 Assert.IsNotNull(outgoingRemote);
+                Assert.Greater(outgoingRbxApi.Scheduler.LiveThreadCount, 0,
+                    "precondition: the outgoing task.delay thread is live before the swap");
+                Assert.Greater(outgoingRbxApi.Connections.GetOwnedBy("outgoing-listener").Count, 0,
+                    "precondition: the outgoing Heartbeat and OnServerEvent connections are live before the swap");
 
                 RbxWorldLoadResult result = service.LoadConfirmedAsync(package)
                     .GetAwaiter().GetResult();
@@ -614,6 +619,18 @@ end)",
                     System.Text.Encoding.UTF8.GetBytes("[]")));
                 Assert.DoesNotThrow(() => outgoingRbxApi.Scheduler.Advance(1d));
                 Assert.IsNull(host.Registry.WorldRoot.FindFirstChild("OldCallback"));
+                // WHY the published world alone proves nothing: host.Registry is already the incoming
+                // registry, and a surviving outgoing hook would write into the OUTGOING one. The hook
+                // records its run in mod data before touching any world, and the outgoing session's
+                // scheduler and connection ledger must be empty.
+                Assert.AreEqual(0, CountLiveNamed(outgoingRegistry, "OldCallback"),
+                    "the outgoing probe hook must not run against the retired world");
+                Assert.AreEqual("", modData.Get("outgoing-listener", "old_probe"),
+                    "the outgoing probe hook must not run at all after the swap");
+                Assert.AreEqual(0, outgoingRbxApi.Scheduler.LiveThreadCount,
+                    "the retired scheduler must hold no live thread after the swap");
+                Assert.AreEqual(0, outgoingRbxApi.Connections.GetOwnedBy("outgoing-listener").Count,
+                    "the retired session must hold no live connection after the swap");
                 Assert.AreEqual("", modData.Get("outgoing-listener", "old_heartbeat"));
                 Assert.AreEqual("", modData.Get("outgoing-listener", "old_delay"));
                 Assert.AreEqual("", modData.Get("outgoing-listener", "old_remote"));
@@ -637,6 +654,164 @@ end)",
                 Object.DestroyImmediate(registry);
                 Object.DestroyImmediate(hostGo);
             }
+        }
+
+        [Test]
+        public void RungZeroHostRestore_AclPackageLoad_RestoresTreeAsOneHostEnvelopedOperation()
+        {
+            RunInComposedWorld(true, InstanceRegistry.CurrentWorldAclVersion, world =>
+            {
+                OwnedFolderLoad load = LoadOwnedAclPackage(world);
+
+                Assert.AreSame(world.Host.Registry, load.Published,
+                    "the scene host must publish the restored registry");
+                AssertRestoredAsOneHostOperation(load);
+            });
+        }
+
+        [Test]
+        public void RungZeroHostRestore_HeadlessAclPackageLoad_RestoresTreeAsOneHostEnvelopedOperation()
+        {
+            RunInComposedWorld(false, InstanceRegistry.CurrentWorldAclVersion, world =>
+            {
+                OwnedFolderLoad load = LoadOwnedAclPackage(world);
+
+                Assert.AreSame(
+                    world.Container.Resolve<LuaCsModStack>().GameplayBindings.RbxApi.Registry,
+                    load.Published,
+                    "the stable stack must route to the restored headless registry");
+                AssertRestoredAsOneHostOperation(load);
+            });
+        }
+
+        [Test]
+        public void RungZeroHostRestore_AclPackageLoad_LeaksNoHostScopeAndKeepsOwnership()
+        {
+            RunInComposedWorld(true, InstanceRegistry.CurrentWorldAclVersion, world =>
+            {
+                OwnedFolderLoad load = LoadOwnedAclPackage(world);
+                InstanceRegistry published = load.Published;
+                ILuaModRuntime runtime = world.Container.Resolve<ILuaModRuntime>();
+
+                RbxError leaked = Assert.Throws<RbxError>(() => published.DemandMutationEnvelope(
+                    LocalActorIdentityProvider.DefaultActorId, "write property"));
+                StringAssert.Contains("no server-generated mutation envelope is active", leaked.RawMessage,
+                    "the host restore scope must be closed once the restore returns");
+
+                System.Exception denied = Assert.Catch(() => runtime.LoadMod(
+                    Actor("restore-intruder-b"),
+                    "restore-intruder",
+                    "workspace:FindFirstChild('" + RestoredFolderName + "').Name = 'Stolen'",
+                    persistToStore: false));
+                StringAssert.Contains(
+                    "Owned by actor '" + RestoreOwnerActorId + "'", denied.ToString());
+                Assert.IsTrue(published.TryGet(load.FolderId, out RbxInstance folder));
+                Assert.AreEqual(RestoredFolderName, folder.Name);
+
+                Assert.DoesNotThrow(() => runtime.LoadMod(
+                    Actor(RestoreOwnerActorId),
+                    "restore-owner",
+                    "workspace:FindFirstChild('" + RestoredFolderName + "').Name = 'RenamedByOwner'",
+                    persistToStore: false));
+                Assert.AreEqual("RenamedByOwner", folder.Name,
+                    "the restored owner keeps write access, so the refusal above is the ACL and not a dead world");
+            });
+        }
+
+        [Test]
+        public void AclComposedSession_LegacyPackage_IsRefusedBeforeAnySideEffect()
+        {
+            RunInComposedWorld(true, InstanceRegistry.CurrentWorldAclVersion, world =>
+            {
+                RbxWorldRuntimeSessionController controller = world.Controller;
+                InstanceRegistry outgoing = world.Host.Registry;
+                RbxWorldPackagePayload captured = world.Service.CaptureCurrent();
+                Assert.AreEqual(InstanceRegistry.CurrentWorldAclVersion, captured.Tree.WorldAclVersion);
+                RbxWorldPackagePayload legacy = WithTreeAndNoMods(captured, new InstanceTreeSnapshot
+                {
+                    WorldAclVersion = null,
+                    Instances = captured.Tree.Instances
+                });
+
+                RbxWorldLoadResult refused = world.Service.LoadConfirmedAsync(legacy)
+                    .GetAwaiter().GetResult();
+
+                Assert.IsFalse(refused.Success,
+                    "a legacy package must not downgrade an ACL-composed session");
+                StringAssert.Contains("no world ACL version", refused.Error);
+                StringAssert.Contains(
+                    "compose the session with worldAclVersion: null to open a legacy world",
+                    refused.Error);
+                Assert.AreEqual(0, world.PackageStore.AutoTriggers.Count,
+                    "the refusal must come before the pre-load safety autosave");
+                Assert.AreSame(outgoing, world.Host.Registry);
+                Assert.AreSame(outgoing, controller.CurrentRbxApi.Registry);
+                Assert.IsFalse(outgoing.IsDetached);
+                Assert.IsTrue(outgoing.IsWorldAclEnabled);
+                Assert.IsNull(world.HostObject.transform.Find("CoreAI_RbxWorld_Staging"),
+                    "the refusal must come before anything is staged");
+
+                world.PackageStore.ManualPayload = legacy;
+                ActorContext trustedHost = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                RbxWorldLoadRequest request = world.Service.RequestManualLoadAsync(
+                        trustedHost, "legacy-slot")
+                    .GetAwaiter().GetResult();
+                RbxWorldLoadResult confirmed = world.Service.ConfirmManualLoadAsync(
+                        request.RequestId, true)
+                    .GetAwaiter().GetResult();
+
+                Assert.IsFalse(confirmed.Success,
+                    "a player-confirmed legacy package must be refused on the same load path");
+                StringAssert.Contains(
+                    "compose the session with worldAclVersion: null to open a legacy world",
+                    confirmed.Error);
+                Assert.AreEqual(0, world.PackageStore.AutoTriggers.Count);
+                Assert.AreSame(outgoing, world.Host.Registry);
+                Assert.IsFalse(outgoing.IsDetached);
+
+                RbxWorldLoadResult accepted = world.Service.LoadConfirmedAsync(
+                        WithTreeAndNoMods(captured, captured.Tree))
+                    .GetAwaiter().GetResult();
+
+                Assert.IsTrue(accepted.Success, accepted.Error);
+                CollectionAssert.AreEqual(new[] { "load_world-pre" }, world.PackageStore.AutoTriggers);
+                Assert.AreNotSame(outgoing, controller.CurrentRbxApi.Registry);
+                Assert.AreEqual(InstanceRegistry.CurrentWorldAclVersion,
+                    controller.CurrentRbxApi.Registry.WorldAclVersion);
+            });
+        }
+
+        [Test]
+        public void LegacyComposedSession_AcceptsLegacyPackageAndKeepsAPackagedAclVersion()
+        {
+            RunInComposedWorld(true, null, world =>
+            {
+                RbxWorldRuntimeSessionController controller = world.Controller;
+                RbxWorldPackagePayload captured = world.Service.CaptureCurrent();
+                Assert.IsNull(captured.Tree.WorldAclVersion, "precondition: a legacy session captures legacy");
+
+                RbxWorldLoadResult legacyLoad = world.Service.LoadConfirmedAsync(
+                        WithTreeAndNoMods(captured, captured.Tree))
+                    .GetAwaiter().GetResult();
+
+                Assert.IsTrue(legacyLoad.Success, legacyLoad.Error);
+                Assert.IsNull(controller.CurrentRbxApi.Registry.WorldAclVersion);
+
+                RbxWorldLoadResult aclLoad = world.Service.LoadConfirmedAsync(
+                        WithTreeAndNoMods(captured, new InstanceTreeSnapshot
+                        {
+                            WorldAclVersion = InstanceRegistry.CurrentWorldAclVersion,
+                            Instances = captured.Tree.Instances
+                        }))
+                    .GetAwaiter().GetResult();
+
+                Assert.IsTrue(aclLoad.Success, aclLoad.Error);
+                Assert.AreEqual(InstanceRegistry.CurrentWorldAclVersion,
+                    controller.CurrentRbxApi.Registry.WorldAclVersion,
+                    "a package keeps the ACL version it declares");
+                Assert.AreEqual(2, world.PackageStore.AutoTriggers.Count);
+            });
         }
 
         [Test]
@@ -1611,6 +1786,239 @@ camera_follow(p)"),
                 worldAclVersion: worldAclVersion,
                 modStoreId: modStoreId,
                 worldSessionSourceStore: worldSessionSourceStore);
+        }
+
+        private const string RestoreOwnerActorId = "restore-owner-a";
+        private const string RestoredFolderName = "RestoredOwnedByA";
+
+        /// <summary>
+        /// Builds the production composition (scene host or headless) over in-memory source and
+        /// package stores, runs <paramref name="body"/>, and tears everything down.
+        /// </summary>
+        private void RunInComposedWorld(
+            bool withSceneHost,
+            int? worldAclVersion,
+            System.Action<ComposedWorld> body)
+        {
+            CoreAiPrefabRegistryAsset prefabs = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            GameObject hostGo = null;
+            RbxWorldHost host = null;
+            if (withSceneHost)
+            {
+                hostGo = new GameObject("RbxWorldHost");
+                host = hostGo.AddComponent<RbxWorldHost>();
+                host.Initialize();
+            }
+
+            MemoryPackageStore packageStore = new();
+            ContainerBuilder builder = new();
+            RegisterMinimalModStack(
+                builder,
+                prefabs,
+                worldAclVersion: worldAclVersion,
+                modStoreId: "rz-restore-" + System.Guid.NewGuid().ToString("N"),
+                worldSessionSourceStore: new TransactionalMemorySourceStore());
+            // WHY registered after the installer: the later registration wins the single-service
+            // resolve, so the pre-load safety autosave stays in memory instead of the real
+            // persistentDataPath ring, and a refused load can be shown to have written none.
+            builder.RegisterInstance<IRbxWorldPackageStore>(packageStore);
+            if (host != null)
+            {
+                builder.RegisterInstance(host);
+            }
+
+            IObjectResolver container = builder.Build();
+            try
+            {
+                body(new ComposedWorld(container, host, hostGo, packageStore));
+            }
+            finally
+            {
+                container.Dispose();
+                Object.DestroyImmediate(prefabs);
+                if (hostGo != null)
+                {
+                    Object.DestroyImmediate(hostGo);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Seeds a world-owned Folder Owned by <see cref="RestoreOwnerActorId"/>, captures the
+        /// ACL-versioned world, and loads it back through the confirmed production path without mods.
+        /// </summary>
+        private static OwnedFolderLoad LoadOwnedAclPackage(ComposedWorld world)
+        {
+            RbxWorldRuntimeSessionController controller = world.Controller;
+            InstanceRegistry outgoing = controller.CurrentRbxApi.Registry;
+            RbxInstance seeded = outgoing.Create("Folder");
+            seeded.Name = RestoredFolderName;
+            seeded.Parent = outgoing.WorldRoot;
+            outgoing.SetAccessControl(seeded, RestoreOwnerActorId, InstanceAccessScope.Owned, false);
+            RbxWorldPackagePayload captured = world.Service.CaptureCurrent();
+            Assert.AreEqual(InstanceRegistry.CurrentWorldAclVersion, captured.Tree.WorldAclVersion,
+                "precondition: production composition must capture an ACL-versioned package");
+            ulong seededId = seeded.Id.Value;
+            InstanceSnapshot packagedNode = captured.Tree.Instances.Find(node => node.Id == seededId);
+            Assert.IsNotNull(packagedNode, "precondition: the world-owned folder must be captured");
+            Assert.AreEqual(RestoreOwnerActorId, packagedNode.OwnerActorId);
+
+            RbxWorldLoadResult result = world.Service.LoadConfirmedAsync(
+                    WithTreeAndNoMods(captured, captured.Tree))
+                .GetAwaiter().GetResult();
+
+            Assert.IsTrue(result.Success, result.Error);
+            InstanceRegistry published = controller.CurrentRbxApi.Registry;
+            Assert.AreNotSame(outgoing, published);
+            Assert.IsTrue(outgoing.IsDetached);
+            return new OwnedFolderLoad(published, seeded.Id, packagedNode.Revision);
+        }
+
+        private static void AssertRestoredAsOneHostOperation(OwnedFolderLoad load)
+        {
+            InstanceRegistry published = load.Published;
+            Assert.IsTrue(published.IsWorldAclEnabled, "the restored world must keep its ACL version");
+            Assert.IsTrue(published.TryGetRecord(load.FolderId, out InstanceRecord restored));
+            Assert.AreEqual(RestoreOwnerActorId, restored.OwnerActorId);
+            Assert.AreEqual(InstanceAccessScope.Owned, restored.AccessScope);
+            Assert.AreEqual(load.PackagedRevision, restored.Revision,
+                "the host restore envelope must not change captured revisions");
+            Assert.AreEqual(1, published.RetainedMutationOperationCount,
+                "restoring an ACL-versioned package must run as exactly one server-generated host operation");
+        }
+
+        private static RbxWorldPackagePayload WithTreeAndNoMods(
+            RbxWorldPackagePayload source,
+            InstanceTreeSnapshot tree)
+        {
+            return new RbxWorldPackagePayload(
+                source.CapturedAtUtc,
+                source.Settings,
+                tree,
+                source.Parts,
+                source.CameraCFrame,
+                System.Array.Empty<RbxWorldModSource>());
+        }
+
+        private static int CountLiveNamed(InstanceRegistry registry, string name)
+        {
+            int count = 0;
+            foreach (RbxInstance instance in registry.GetLiveInstances())
+            {
+                if (!instance.IsDestroyed
+                    && string.Equals(instance.Name, name, System.StringComparison.Ordinal))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private sealed class ComposedWorld
+        {
+            public ComposedWorld(
+                IObjectResolver container,
+                RbxWorldHost host,
+                GameObject hostObject,
+                MemoryPackageStore packageStore)
+            {
+                Container = container;
+                Host = host;
+                HostObject = hostObject;
+                PackageStore = packageStore;
+            }
+
+            public IObjectResolver Container { get; }
+
+            /// <summary>The scene host; null for the headless composition.</summary>
+            public RbxWorldHost Host { get; }
+
+            public GameObject HostObject { get; }
+
+            public MemoryPackageStore PackageStore { get; }
+
+            public RbxWorldRuntimeSessionController Controller =>
+                Container.Resolve<RbxWorldRuntimeSessionController>();
+
+            public IRbxWorldRuntimeService Service => Container.Resolve<IRbxWorldRuntimeService>();
+        }
+
+        private sealed class OwnedFolderLoad
+        {
+            public OwnedFolderLoad(InstanceRegistry published, InstanceId folderId, long packagedRevision)
+            {
+                Published = published;
+                FolderId = folderId;
+                PackagedRevision = packagedRevision;
+            }
+
+            public InstanceRegistry Published { get; }
+
+            public InstanceId FolderId { get; }
+
+            public long PackagedRevision { get; }
+        }
+
+        private sealed class MemoryPackageStore : IRbxWorldPackageStore
+        {
+            public List<string> AutoTriggers { get; } = new();
+
+            /// <summary>The payload every manual slot reads back; null means no slot exists.</summary>
+            public RbxWorldPackagePayload ManualPayload { get; set; }
+
+            public UniTask<RbxWorldPackageWriteResult> CreateManualAsync(
+                string slot,
+                RbxWorldPackagePayload payload,
+                CancellationToken cancellationToken = default)
+            {
+                return UniTask.FromResult(new RbxWorldPackageWriteResult(
+                    false, "", "Manual slots are outside this test seam."));
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> CreateAutoAsync(
+                string trigger,
+                RbxWorldPackagePayload payload,
+                CancellationToken cancellationToken = default)
+            {
+                AutoTriggers.Add(trigger);
+                return UniTask.FromResult(new RbxWorldPackageWriteResult(
+                    true, "memory://auto/" + AutoTriggers.Count, ""));
+            }
+
+            public UniTask<RbxWorldPackagePayload> LoadManualAsync(
+                string slot,
+                CancellationToken cancellationToken = default)
+            {
+                if (ManualPayload == null)
+                {
+                    throw new System.InvalidOperationException("No manual slot was prepared: " + slot);
+                }
+
+                return UniTask.FromResult(ManualPayload);
+            }
+
+            public UniTask<RbxWorldPackagePayload> LoadAutoAsync(
+                string fileName,
+                CancellationToken cancellationToken = default)
+            {
+                throw new System.NotSupportedException("Autosave reads are outside this test seam.");
+            }
+
+            public IReadOnlyList<string> ListManualSlots()
+            {
+                return System.Array.Empty<string>();
+            }
+
+            public IReadOnlyList<string> ListAutoFiles()
+            {
+                return System.Array.Empty<string>();
+            }
+
+            public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+            {
+                return System.Array.Empty<RbxAutoSaveInfo>();
+            }
         }
 
         private sealed class NoopSink : IAiGameCommandSink
