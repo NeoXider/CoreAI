@@ -411,6 +411,234 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Captures a bootstrapped world whose Workspace holds <paramref name="ownedByActor"/> folders
+        /// owned by <paramref name="ownerActorId"/> and <paramref name="hostOwned"/> unattributed host
+        /// folders, then restores it into a fresh registry the way a world load stages it: the whole
+        /// tree is registered before any runtime exists.
+        /// </summary>
+        private static LuaCsRbxApiBindings RestoreWorldBeforeTheRuntime(
+            string ownerActorId, int ownedByActor, int hostOwned = 0)
+        {
+            InstanceRegistry source = new();
+            RbxDataModel sourceGame = DataModelBootstrap.CreateGame(source);
+            for (int index = 0; index < ownedByActor; index++)
+            {
+                RbxInstance folder = source.Create("Folder", ownerActorId: ownerActorId);
+                folder.Name = "Owned" + index;
+                folder.Parent = source.WorldRoot;
+            }
+
+            for (int index = 0; index < hostOwned; index++)
+            {
+                RbxInstance folder = source.Create("Folder");
+                folder.Name = "Host" + index;
+                folder.Parent = source.WorldRoot;
+            }
+
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(sourceGame);
+            InstanceRegistry restored = new();
+            RbxDataModel game = (RbxDataModel)InstanceTreeSerializer.Restore(snapshot, restored);
+            DataModelBootstrap.AttachWorldRoot(restored, game);
+            return new LuaCsRbxApiBindings(restored, game);
+        }
+
+        /// <summary>Counts the live non-infrastructure records whose durable owner is <paramref name="ownerActorId"/>.</summary>
+        private static int CountLiveOwnedBy(InstanceRegistry registry, string ownerActorId)
+        {
+            int count = 0;
+            foreach (RbxInstance instance in registry.GetLiveInstances())
+            {
+                if (registry.TryGetRecord(instance.Id, out InstanceRecord record)
+                    && !record.IsRuntimeInfrastructure
+                    && string.Equals(record.OwnerActorId, ownerActorId, StringComparison.Ordinal))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private static ActorContext QuotaActor(string actorId)
+        {
+            return new LocalActorIdentityProvider(actorId)
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
+        [Test]
+        public void LuaCs_RegisteredInstanceQuota_ChargesInstancesRestoredBeforeTheRuntimeExisted()
+        {
+            const int quota = 2;
+            ActorContext actor = QuotaActor("restored-actor");
+            LuaCsRbxApiBindings rbxApi = RestoreWorldBeforeTheRuntime(actor.ActorId, quota);
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                RbxApi = rbxApi,
+                MaxRegisteredInstancesPerActor = quota
+            });
+
+            Exception exception = Assert.Catch(() => stack.Runtime.LoadMod(
+                    actor, "restored-a-1", "Instance.new('Folder')", persistToStore: false),
+                "the restored folders already fill this actor's quota, so a load must not grant a fresh one");
+            StringAssert.Contains(actor.ActorId, exception.Message);
+            StringAssert.Contains(
+                "registered instances quota reached (limit " + quota + ")", exception.Message);
+            Assert.AreEqual(quota, CountLiveOwnedBy(rbxApi.Registry, actor.ActorId),
+                "the refused creation must leave nothing behind and must not touch the restored folders");
+        }
+
+        [Test]
+        public void LuaCs_RegisteredInstanceQuota_RestoredInstancesOfOneActorLeaveAnotherActorsQuotaWhole()
+        {
+            const int quota = 2;
+            ActorContext restoredOwner = QuotaActor("restored-owner");
+            ActorContext otherActor = QuotaActor("other-actor");
+            LuaCsRbxApiBindings rbxApi = RestoreWorldBeforeTheRuntime(restoredOwner.ActorId, quota);
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                RbxApi = rbxApi,
+                MaxRegisteredInstancesPerActor = quota
+            });
+
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                    otherActor,
+                    "restored-b-1",
+                    "Instance.new('Folder')\nInstance.new('Folder')",
+                    persistToStore: false),
+                "another actor's restored records and the restored world skeleton must not be charged to this actor");
+            Assert.AreEqual(quota, CountLiveOwnedBy(rbxApi.Registry, otherActor.ActorId));
+        }
+
+        [Test]
+        public void LuaCs_RegisteredInstanceQuota_DestroyingARestoredInstanceFreesExactlyOneSlot()
+        {
+            const int quota = 2;
+            ActorContext actor = QuotaActor("restored-destroyer");
+            LuaCsRbxApiBindings rbxApi = RestoreWorldBeforeTheRuntime(actor.ActorId, quota);
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                RbxApi = rbxApi,
+                MaxRegisteredInstancesPerActor = quota
+            });
+
+            rbxApi.Registry.WorldRoot.FindFirstChild("Owned0").Destroy();
+
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                    actor, "restored-freed-1", "Instance.new('Folder')", persistToStore: false),
+                "destroying a restored record must release the slot it was charged");
+            Exception exception = Assert.Catch(() => stack.Runtime.LoadMod(
+                    actor, "restored-freed-2", "Instance.new('Folder')", persistToStore: false),
+                "one destroyed restored record frees exactly one slot, not the whole quota");
+            StringAssert.Contains(actor.ActorId, exception.Message);
+            StringAssert.Contains(
+                "registered instances quota reached (limit " + quota + ")", exception.Message);
+        }
+
+        [Test]
+        public void LuaCs_RegisteredInstanceQuota_ARestoredWorldOverTheLimitStaysWholeAndRefusesOnlyNewCreations()
+        {
+            const int quota = 2;
+            const int restoredCount = quota + 1;
+            ActorContext actor = QuotaActor("restored-over-limit");
+            LuaCsRbxApiBindings rbxApi = RestoreWorldBeforeTheRuntime(actor.ActorId, restoredCount);
+            List<RbxInstance> restoredFolders = new();
+            for (int index = 0; index < restoredCount; index++)
+            {
+                restoredFolders.Add(rbxApi.Registry.WorldRoot.FindFirstChild("Owned" + index));
+            }
+
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                RbxApi = rbxApi,
+                MaxRegisteredInstancesPerActor = quota
+            });
+
+            foreach (RbxInstance folder in restoredFolders)
+            {
+                Assert.IsFalse(folder.IsDestroyed,
+                    "charging a restored world must never destroy what it restored, even over the quota");
+                Assert.IsTrue(rbxApi.Registry.TryGet(folder.Id, out RbxInstance _));
+            }
+
+            Assert.AreEqual(restoredCount, CountLiveOwnedBy(rbxApi.Registry, actor.ActorId));
+            Assert.Catch(() => stack.Runtime.LoadMod(
+                    actor, "over-limit-1", "Instance.new('Folder')", persistToStore: false),
+                "an actor restored over its quota cannot create more");
+
+            restoredFolders[0].Destroy();
+            Assert.Catch(() => stack.Runtime.LoadMod(
+                    actor, "over-limit-2", "Instance.new('Folder')", persistToStore: false),
+                "one destroy takes the actor from quota + 1 to exactly the quota, which is still full");
+
+            restoredFolders[1].Destroy();
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                    actor, "over-limit-3", "Instance.new('Folder')", persistToStore: false),
+                "a second destroy leaves one free slot");
+        }
+
+        [Test]
+        public void LuaCs_EmergencyInstanceCeiling_ChargesInstancesRestoredBeforeTheRuntimeExisted()
+        {
+            ActorContext actor = QuotaActor("ceiling-actor");
+            LuaCsRbxApiBindings rbxApi = RestoreWorldBeforeTheRuntime(
+                actor.ActorId, 0, LuaCsModRuntime.EmergencyMaxRegisteredInstances);
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                RbxApi = rbxApi
+            });
+
+            Exception exception = Assert.Catch(() => stack.Runtime.LoadMod(
+                    actor, "ceiling-a-1", "Instance.new('Folder')", persistToStore: false),
+                "restored records must count toward the emergency ceiling");
+            StringAssert.Contains(
+                "emergency registered instances ceiling reached ("
+                + LuaCsModRuntime.EmergencyMaxRegisteredInstances + ")",
+                exception.Message);
+            Assert.AreEqual(0, CountLiveOwnedBy(rbxApi.Registry, actor.ActorId));
+        }
+
+        [Test]
+        public void LuaCs_RegisteredInstanceQuota_ChargesRestoredHostContentButNotTheWorldSkeleton()
+        {
+            const int quota = 2;
+            LuaCsRbxApiBindings rbxApi = RestoreWorldBeforeTheRuntime("unused-actor", 0, 1);
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                RbxApi = rbxApi,
+                MaxRegisteredInstancesPerActor = quota
+            });
+            Assert.IsNotNull(stack.Runtime);
+
+            Assert.DoesNotThrow(() => rbxApi.Registry.Create("Folder"),
+                "the restored DataModel, services and Camera are not charged; only the restored host folder is");
+            InvalidOperationException refused = Assert.Throws<InvalidOperationException>(
+                () => rbxApi.Registry.Create("Folder"),
+                "the restored host folder plus one new one fill the host/system quota");
+            StringAssert.Contains("host/system", refused.Message);
+            StringAssert.Contains(
+                "registered instances quota reached (limit " + quota + ")", refused.Message);
+        }
+
+        [Test]
+        public void LuaCs_RegisteredInstanceQuota_AFreshWorldsSkeletonIsNotCharged()
+        {
+            LuaCsRbxApiBindings rbxApi = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                RbxApi = rbxApi,
+                MaxRegisteredInstancesPerActor = 1
+            });
+            Assert.IsNotNull(stack.Runtime);
+
+            Assert.DoesNotThrow(() => rbxApi.Registry.Create("Folder"),
+                "a world that was not restored keeps its whole host/system quota");
+            InvalidOperationException refused = Assert.Throws<InvalidOperationException>(
+                () => rbxApi.Registry.Create("Folder"));
+            StringAssert.Contains("host/system", refused.Message);
+            StringAssert.Contains("registered instances quota reached (limit 1)", refused.Message);
+        }
+
         [Test]
         public void LuaCs_EventSubscriptionQuota_IsPerActorAtNAndNPlusOne()
         {

@@ -754,6 +754,107 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
         }
 
+        [Test]
+        public void RestoredHumanoid_InAHeadlessWorld_IsDrivenByTheSchedulerFromTheStart()
+        {
+            // WHY headless: a scene host attaches a motor factory whose sweep reaches a restored
+            // Humanoid anyway. A headless host attaches none, so only the bindings themselves can
+            // wire a Humanoid that was registered before they existed.
+            InstanceRegistry registry = RestoreWorldWithAHumanoid("Restored", out RbxDataModel game);
+            RbxHumanoid restored = (RbxHumanoid)registry.WorldRoot.FindFirstChild("Restored");
+            Assert.IsNotNull(restored);
+            using LuaCsRbxApiBindings bindings = new LuaCsRbxApiBindings(registry, game);
+            List<bool> finished = new();
+            Action<object[]> onFinished = args => finished.Add((bool)args[0]);
+
+            Assert.DoesNotThrow(() => restored.MoveToFinished.Connect(onFinished),
+                "a restored Humanoid's signals must be bound to the world's scheduler");
+            restored.MoveTo(new RbxVector3(1000f, 0f, 0f));
+            bindings.Scheduler.Advance(7.9d);
+            Assert.IsEmpty(finished, "the mirror's timeout is eight seconds, not seven");
+            bindings.Scheduler.Advance(0.2d);
+            CollectionAssert.AreEqual(new[] { false }, finished,
+                "the scheduler's Heartbeat must time out a restored Humanoid's walk");
+
+            restored.RequestJump();
+            Assert.AreEqual(RbxHumanoidState.Jumping, restored.GetState());
+            bindings.Scheduler.Advance(0.1d);
+            Assert.AreEqual(RbxHumanoidState.Landed, restored.GetState(),
+                "the scheduler's Heartbeat must run a restored Humanoid's state machine");
+            bindings.Scheduler.Advance(0.1d);
+            Assert.AreEqual(RbxHumanoidState.Running, restored.GetState());
+        }
+
+        [Test]
+        public void HumanoidCreatedAfterTheBindings_RunsLikeARestoredOne_AndTheMotorSweepAttachesEachOnce()
+        {
+            InstanceRegistry registry = RestoreWorldWithAHumanoid("Restored", out RbxDataModel game);
+            using LuaCsRbxApiBindings bindings = new LuaCsRbxApiBindings(registry, game);
+            RbxHumanoid restored = (RbxHumanoid)registry.WorldRoot.FindFirstChild("Restored");
+            RbxHumanoid created = (RbxHumanoid)registry.Create("Humanoid");
+            created.Parent = registry.WorldRoot;
+            Dictionary<RbxHumanoid, int> motorsBuilt = new();
+            Dictionary<RbxHumanoid, FakeCharacterMotor> motors = new();
+
+            bindings.AttachCharacterMotorFactory(humanoid =>
+            {
+                motorsBuilt.TryGetValue(humanoid, out int built);
+                motorsBuilt[humanoid] = built + 1;
+                FakeCharacterMotor motor = new();
+                motors[humanoid] = motor;
+                return motor;
+            });
+
+            foreach (RbxHumanoid humanoid in new[] { restored, created })
+            {
+                motorsBuilt.TryGetValue(humanoid, out int built);
+                Assert.AreEqual(1, built, humanoid.Name + ": the motor sweep builds one motor per Humanoid");
+                Assert.AreSame(motors[humanoid], humanoid.Motor);
+            }
+
+            Assert.AreEqual(20d, motors[restored].WalkSpeed, 1e-9d,
+                "the restored WalkSpeed reaches the motor attached after the restore");
+
+            List<bool> restoredFinished = new();
+            List<bool> createdFinished = new();
+            Action<object[]> onRestoredFinished = args => restoredFinished.Add((bool)args[0]);
+            Action<object[]> onCreatedFinished = args => createdFinished.Add((bool)args[0]);
+            restored.MoveToFinished.Connect(onRestoredFinished);
+            created.MoveToFinished.Connect(onCreatedFinished);
+            restored.MoveTo(new RbxVector3(1000f, 0f, 0f));
+            created.MoveTo(new RbxVector3(1000f, 0f, 0f));
+
+            bindings.Scheduler.Advance(7.9d);
+            Assert.IsEmpty(restoredFinished,
+                "a Humanoid advanced twice per Heartbeat would give up at four seconds");
+            Assert.IsEmpty(createdFinished);
+            bindings.Scheduler.Advance(0.2d);
+            CollectionAssert.AreEqual(new[] { false }, restoredFinished);
+            CollectionAssert.AreEqual(new[] { false }, createdFinished);
+        }
+
+        /// <summary>
+        /// Captures a world holding one Humanoid named <paramref name="humanoidName"/> with a
+        /// non-default WalkSpeed and restores it into a fresh registry the way a world load stages
+        /// it: every node is registered before any bindings exist.
+        /// </summary>
+        private static InstanceRegistry RestoreWorldWithAHumanoid(string humanoidName,
+            out RbxDataModel game)
+        {
+            InstanceRegistry source = new(worldId: "humanoid-restore-world");
+            RbxDataModel sourceGame = DataModelBootstrap.CreateGame(source);
+            RbxHumanoid original = (RbxHumanoid)source.Create("Humanoid");
+            original.Name = humanoidName;
+            original.WalkSpeed = 20d;
+            original.Parent = source.WorldRoot;
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(sourceGame);
+
+            InstanceRegistry restored = new(worldId: "humanoid-restore-world");
+            game = (RbxDataModel)InstanceTreeSerializer.Restore(snapshot, restored);
+            DataModelBootstrap.AttachWorldRoot(restored, game);
+            return restored;
+        }
+
         // ---- Harness -------------------------------------------------------------------------
 
         /// <summary>A character controller that records what the Humanoid asked of it.</summary>

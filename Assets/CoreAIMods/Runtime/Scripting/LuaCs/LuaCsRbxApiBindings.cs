@@ -368,6 +368,11 @@ namespace CoreAI.Ai.LuaCs
 
             _scheduler.PhaseReached += PumpSchedulerPhase;
 
+            // WHY: a restored world registers its Humanoids before these bindings exist, so the
+            // Registered wiring above never sees them. A headless host attaches no motor factory to
+            // sweep them later, which left every restored Humanoid with no scheduler at all.
+            WireExistingCharacterHumanoids();
+
             // WHY: Roblox default; a custom enum registry without CameraType simply reads nil.
             if (_enums.TryGet("CameraType", out RbxEnum cameraType)
                 && cameraType.TryGetItem("Custom", out RbxEnumItem custom))
@@ -435,9 +440,39 @@ namespace CoreAI.Ai.LuaCs
         {
             if (record.Instance is RbxHumanoid humanoid)
             {
-                AttachCharacterMotor(humanoid);
-                WireRespawnOnDeath(humanoid);
+                WireCharacterHumanoid(humanoid);
             }
+        }
+
+        /// <summary>Wires every Humanoid that was already registered when these bindings were built.</summary>
+        private void WireExistingCharacterHumanoids()
+        {
+            IReadOnlyList<RbxInstance> live = _registry.GetLiveInstances();
+            for (int index = 0; index < live.Count; index++)
+            {
+                if (live[index] is RbxHumanoid humanoid)
+                {
+                    WireCharacterHumanoid(humanoid);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gives a Humanoid its scheduler, motor and respawn-on-death wiring, once per Humanoid.
+        /// </summary>
+        private void WireCharacterHumanoid(RbxHumanoid humanoid)
+        {
+            // WHY keyed on the motor table: every wired Humanoid enters it and leaves it only when it
+            // unregisters or these bindings are disposed, so the registration path and the attach-time
+            // sweep can never both wire one Humanoid. A second pass would add a second Died
+            // connection and queue a second respawn timer for every death.
+            if (humanoid.IsDestroyed || _characterMotors.ContainsKey(humanoid))
+            {
+                return;
+            }
+
+            AttachCharacterMotor(humanoid);
+            WireRespawnOnDeath(humanoid);
         }
 
         /// <summary>

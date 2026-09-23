@@ -413,6 +413,7 @@ namespace CoreAI.Ai.LuaCs
                 _rbxApi.Scheduler.ThreadFaulted += OnSchedulerThreadFaulted;
                 _rbxApi.Registry.Registered += OnInstanceRegistered;
                 _rbxApi.Registry.Unregistered += OnInstanceUnregistered;
+                SeedRegisteredInstanceCounts(_rbxApi.Registry);
             }
 
             _logicSlots = logicSlots;
@@ -1016,6 +1017,66 @@ namespace CoreAI.Ai.LuaCs
             return "host/system";
         }
 
+        /// <summary>
+        /// Charges every record already live when this runtime attaches to <paramref name="registry"/>
+        /// to the bucket <see cref="OnInstanceRegistered"/> would have charged it to.
+        /// </summary>
+        /// <remarks>
+        /// WHY: a world load registers the whole restored tree while it stages, before the session's
+        /// runtime exists. Without this pass none of those records counted toward the per-actor quota
+        /// or the emergency ceiling, so every save/load cycle handed each actor a fresh quota.
+        /// WHY nothing is refused or destroyed here, unlike <see cref="OnInstanceRegistered"/>: these
+        /// records are the loaded world, not a creation request. An over-quota world stays whole, and
+        /// only the next creation of an actor at or over its quota is refused.
+        /// </remarks>
+        private void SeedRegisteredInstanceCounts(InstanceRegistry registry)
+        {
+            IReadOnlyList<RbxInstance> live = registry.GetLiveInstances();
+            for (int index = 0; index < live.Count; index++)
+            {
+                if (!registry.TryGetRecord(live[index].Id, out InstanceRecord record)
+                    || record.IsRuntimeInfrastructure
+                    || IsUnchargedWorldSkeleton(record))
+                {
+                    continue;
+                }
+
+                string actorId = ResolveInstanceQuotaActorId(record);
+                lock (_instanceQuotaGate)
+                {
+                    if (_quotaActorByInstanceId.ContainsKey(record.Id))
+                    {
+                        continue;
+                    }
+
+                    _registeredInstancesByActor.TryGetValue(actorId, out int actorCount);
+                    _quotaActorByInstanceId.Add(record.Id, actorId);
+                    _registeredInstancesByActor[actorId] = actorCount + 1;
+                    _registeredInstanceCount++;
+                }
+            }
+        }
+
+        /// <summary>
+        /// True for the unattributed skeleton of a world: the DataModel, its services and the
+        /// Workspace Camera, none of which a script can create.
+        /// </summary>
+        /// <remarks>
+        /// WHY left out of the seeding pass: DataModelBootstrap builds this skeleton before any runtime
+        /// can subscribe, so no live session has ever charged it. A restored package carries the same
+        /// skeleton, and charging it on attach would make a fresh world pay host/system quota it never
+        /// paid before and make a save/load round trip cost quota the saved session did not hold.
+        /// </remarks>
+        private static bool IsUnchargedWorldSkeleton(InstanceRecord record)
+        {
+            RbxInstance instance = record.Instance;
+            return string.IsNullOrWhiteSpace(record.OwnerActorId)
+                && !record.IsAuthoredContent
+                && (instance.IsService
+                    || instance is RbxDataModel
+                    || string.Equals(instance.ClassName, "Camera", StringComparison.Ordinal));
+        }
+
         private void OnInstanceRegistered(InstanceRecord record)
         {
             if (record.IsRuntimeInfrastructure)
@@ -1027,6 +1088,13 @@ namespace CoreAI.Ai.LuaCs
             string rejection = null;
             lock (_instanceQuotaGate)
             {
+                // WHY: a record the attach-time seeding already charged is never charged twice,
+                // whichever of the two paths saw it first.
+                if (_quotaActorByInstanceId.ContainsKey(record.Id))
+                {
+                    return;
+                }
+
                 _registeredInstancesByActor.TryGetValue(actorId, out int actorCount);
                 if (_registeredInstanceCount >= EmergencyMaxRegisteredInstances)
                 {
