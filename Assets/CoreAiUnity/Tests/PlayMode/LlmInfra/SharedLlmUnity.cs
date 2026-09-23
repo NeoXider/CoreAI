@@ -34,6 +34,7 @@ namespace CoreAI.Tests.PlayMode
         public static LLMAgent Agent => _agent;
         public static LLM Llm => _llm;
 
+#if COREAI_LLM
         /// <summary>
         ///  <see cref="ILlmClient"/>   <see cref="IAgentMemoryStore"/>.
         ///         LLMAgent.
@@ -53,6 +54,7 @@ namespace CoreAI.Tests.PlayMode
                 supportsNativeToolCalling: LlmToolChannelResolution.ResolveWithoutProbe(settings.LlmUnityToolChannel, LlmToolChannelResolution.BundledLlamaLibReason).Native,
                 memoryStore: store);
         }
+#endif
 
         /// <summary>
         ///   .    no-op (yield break).

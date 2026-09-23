@@ -495,8 +495,16 @@ namespace CoreAI.Diagnostics.G10
                 return new G10ScriptedLlmClient(configuration.StubLatencyMilliseconds.Value);
             }
 
+#if COREAI_LLM
             G10OpenAiHttpSettings httpSettings = new G10OpenAiHttpSettings(configuration);
             return MeaiLlmClient.CreateHttp(httpSettings, settings, logger, supportsNativeToolCalling: true);
+#else
+            // WHY: the HTTP client is stripped with the LLM module; substituting a stub would report
+            // stub answers as a real-provider measurement, so the real-provider run refuses instead.
+            throw new InvalidOperationException(
+                "G10 RealProvider mode needs the COREAI_LLM module, which this build strips; " +
+                "enable COREAI_LLM or run the ScriptedStub provider mode.");
+#endif
         }
 
         private sealed class G10OpenAiHttpSettings : IOpenAiHttpSettings

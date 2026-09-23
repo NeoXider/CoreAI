@@ -147,7 +147,9 @@ namespace CoreAI.Tests.EditMode
             {
                 AiToolContractPromptFormatter.BuildRequestToolAvailabilityMessage(
                     tools, new AiTaskRequest { RoleId = "Teacher" });
+#if COREAI_LLM
                 _ = new CoreAI.Infrastructure.Llm.ToolExecutionPolicy(null, new TestSettings(), tools, false, "Teacher");
+#endif
                 SkillSetToolResolver.RestrictToAllowedFunctions(wrapper, new[] { "camera_look" });
                 CollectionAssert.AreEqual(new[] { "camera_look", "camera_list" },
                     SkillSetToolResolver.GetCallableToolNames(wrapper));

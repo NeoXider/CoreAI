@@ -1,4 +1,4 @@
-#if UNITY_WEBGL && !UNITY_EDITOR
+#if UNITY_WEBGL && !UNITY_EDITOR && COREAI_LLM
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;

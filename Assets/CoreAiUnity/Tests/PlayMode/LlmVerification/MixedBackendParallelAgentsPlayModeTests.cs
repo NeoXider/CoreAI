@@ -1,4 +1,4 @@
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && COREAI_LLM
 using System.Collections;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;

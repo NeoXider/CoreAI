@@ -1,3 +1,4 @@
+#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -200,3 +201,4 @@ namespace CoreAI.Tests.EditMode
         }
     }
 }
+#endif
