@@ -56,8 +56,11 @@ MVP4 (RBXL import/export) starts only after MVP3 is closed, verified in Unity an
       binder (4b47d48d), Debris/InstanceBindings pass 1 (360c57b0). Mirror bridge fixes in progress.
 - [x] W3 landed: binder pass 2 (a571fbd6), Humanoid/Players (e2099108), runtime quarantine per faulting frame +
       WebGL instance ceiling (2e9ed931), InstanceBindings pass 2 (f1b8bbb5).
-- [ ] W3 in progress: ApiBindings pass 1 (AB-1), Mirror clock/readiness/reasons (MIRROR-3).
+- [x] W3 complete: Mirror clock anchor, readiness handshake, kick/supersede notices (d6096dc6); ApiBindings pass 1:
+      task handles, coroutine.create waits, per-sender remote handler budget, ThreadRetired cleanup (20fdd97a).
 - [ ] W4 in progress: FILLER (M8-10, M1-23 attr, M1-29/M8-23, M1-36), CORE-C (registry admission hook, Humanoid
-      clone state, RootPart write ends MoveTo, characters non-archivable, BoundProperties drift guard). After AB-1:
-      AB-2 (ApiBindings pass 2 + ClickDetector). Then W5 docs.
+      clone state, RootPart write ends MoveTo, characters non-archivable, BoundProperties drift guard), AB-2
+      (typeof/warn + stub tables, ClickDetector, GetServerTimeNow slew, os.time(table), coroutine resume args).
+- [ ] DOCS-1 in progress (docs/TODO/CHANGELOG for everything landed up to f1b8bbb5); DOCS-2 after W4.
+- [ ] Portable Lua-tier EditMode runner (tools/portable/LuaTests) in progress, so Lua binding tests really run on Linux.
 
