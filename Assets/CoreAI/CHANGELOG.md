@@ -42,6 +42,21 @@ multiplayer foundation (audit ids in parentheses; details in `TODO.md`).
   The fixes are listed under Fixed.
 - **`TweenInfo.new(1e-300, …, -1)` hung the host (M8-01).** A tween step is O(1): crossed legs are computed
   arithmetically, the remainder by `fmod`, with at most one write per target per frame.
+- **A remote client could exhaust the host's thread quota (MP-10).** `OnServerEvent` handlers and `OnServerInvoke`
+  callbacks started by a client's remotes were charged to the handler's owner — normally the host — so one client
+  firing faster than a yielding handler finished filled the host's whole live-thread quota. They are charged to the
+  sender now, at most 32 alive per sender: a `RemoteFunction` call over that is answered with `BUDGET_EXCEEDED`, an
+  `OnServerEvent` invocation is dropped, counted and logged once per sender, and the handler's mod is not faulted.
+- **`pcall` handed a script — and through `execute_lua` the model — C# stack traces and machine paths.** A failing
+  host function surfaced as `LuaRuntimeException(state, InvalidOperationException(...))`: `pcall` returned the
+  wrapper's `ToString()` (CLR type names, the managed stack trace, absolute source paths — about 1,600 characters per
+  refusal, so four refusals overflowed `execute_lua`'s 4,000-character result), while `xpcall` and a protected
+  `coroutine.resume` received `nil`. A host function now raises `LuaCsHostFunctionException`, whose error value is
+  exactly the host's one line (`name: message`; on the Rbx surface the `[mod:… script:… line:…] CODE: message |
+  fix: …` line) for all three; C# reads the original exception from `HostException`. The sandbox's own refusals
+  (`string.rep`, `table.concat`, `string.format` width, the `gsub`/`format` result caps) raise the same kind of error
+  at level 0, and a guard trip's error value (steps, time, memory, pattern steps) is its own one-line text instead of
+  a CLR type name (`0321448a`, `354e6248`).
 
 ### Fixed
 
@@ -179,6 +194,130 @@ multiplayer foundation (audit ids in parentheses; details in `TODO.md`).
   read `Part.Name expects a string, got number`. Boolean, EnumItem, UDim and Vector2 tween goals reach the service.
 - **`G10MeasurementComposition` in `RealProvider` mode without `COREAI_LLM`** now refuses with an error naming the
   missing module instead of silently substituting a stub provider.
+- **Tasks could not be handed back to the scheduler (M2-14).** `task.spawn`, `task.defer` and `task.delay` accept a
+  handle that the same mod's `task.*` call returned, and `task.spawn(t) == t`: a parked thread resumes now, a deferred
+  or delayed one moves (its old ticketed slot never fires), and the running thread may re-queue itself through
+  `task.defer`/`task.delay`; a dead thread, a thread inside a scheduler wait, another mod's or another scheduler's
+  thread, and a `coroutine.create` thread (R4.10) are `BAD_ARGUMENT`. A native `coroutine.yield` in a parked task
+  receives the arguments of `task.spawn(t, ...)`.
+- **Waits inside `coroutine.create` corrupted the outer thread (M2-06).** `task.wait`, `signal:Wait`,
+  `WaitForChild` and a `RemoteFunction` invoke from inside a nested coroutine raise `CONTEXT_VIOLATION` ("use
+  `task.spawn`") instead of suspending the task thread that resumed it.
+- **A native `coroutine.yield` leaked a thread slot for ever (M2-20).** In a task thread it parks the thread for
+  `task.spawn(t)`; in a signal handler, a `RemoteFunction` callback, a legacy `spawn`/`delay` function or the main
+  chunk nothing could resume it, so the thread is stopped with `CONTEXT_VIOLATION` and reported as its terminal
+  fault. A `THREAD_CAP` refusal names how many of the actor's threads are parked that way.
+- **A yield refused inside a `string.format`/`gsub` callback broke the thread's later waits (M2-19).** The unfinished
+  wait is rolled back, so the next `task.wait` schedules normally.
+- **Finished threads left bookkeeping behind (M2-07, M2-18).** Every thread exit raises the scheduler's
+  `ThreadRetired` once — a subscriber that throws is contained — which drops the thread's tracking entry, its pending
+  `signal:Wait` connection and an unanswered `RemoteFunction` request, so churn no longer grows the ledgers.
+- **`Stepped`'s `runTime` drifted after long sessions (M2-16)**: it accumulates in a double. **`WaitForChild`**
+  validates `(string, number?)` and NaN, and keeps waiting when the added child was destroyed before the drain
+  (M1-32).
+- **A mod's tweens outlived it (M8-22).** Unload, quarantine and a disconnect of its actor destroy the mod's tweens,
+  and disposing a world detaches its `TweenService`, so the old scheduler steps nothing. The headless part sink knows
+  the registry and releases a destroyed part's state after its destruction handlers have read the last values
+  (M1-28).
+- **`CollectionService.TagAdded`/`TagRemoved`/`GetAllTags` counted instances outside the DataModel (M8-10).** The
+  service keeps a count of holders inside the DataModel: a tag enters use with its first holder in the tree and leaves
+  with its last (removed, parented to `nil` or destroyed), so a pool of nil-parented coins moves nothing, and tags
+  applied before the bindings attached are counted. `GetService`/`FindService` no longer copy the child list
+  (M1-36, DataModel part). Error texts of `Random`, `WorldRoot:Raycast` and `RbxSpace` format numbers invariantly
+  (M1-29, M8-23).
+- **An instance-quota refusal was thrown from inside the `Registered` multicast.** A later subscriber missed
+  `Registered` but still received `Unregistered`. `InstanceRegistry` asks installed `IInstanceRegistrationAdmission`
+  checks before a record is added or announced; a refusal throws an `InvalidOperationException` with its text,
+  revokes earlier admissions and registers nothing, and the mod runtime's per-actor quota is such a check. Restoring
+  an instance under an id that is already registered is `BAD_ARGUMENT` instead of a raw dictionary exception.
+- **Characters did not behave like Roblox's (M8-18).** `Humanoid:Clone` keeps `MaxHealth`, `Health`, `WalkSpeed`,
+  `JumpPower`, `JumpHeight`, `UseJumpPower` and `DisplayName` (a dead humanoid's clone keeps 0 and dies on its first
+  Heartbeat inside the Workspace). A `CFrame`/`Position`/`Orientation`/`Rotation` write to the `HumanoidRootPart`, a
+  `PivotTo` that carries it, or a tween that changes its `CFrame` ends `MoveTo` with `MoveToFinished(false)`. The
+  character `Model` is created with `Archivable = false`, so `character:Clone()` is `nil`.
+- **`SetAttribute` accepted names Roblox refuses (M1-23).** A name a script creates must be ASCII letters, digits,
+  `.`, `-`, `/` or `_` (`AttributeContract.ValidateNewName`; a non-ASCII character is named with its code point);
+  names already stored by older worlds still load, replicate and stay writable and removable.
+- **Common Roblox globals were missing (M1-06, M1-34, M2-15).** `typeof` answers Roblox type names; `warn` writes to
+  the mod's log at `Warn` (the factory wires the log service, so `get_mod_logs` shows it) and, without a mod log, to
+  the host log at most 20 lines per 10 s per script; `BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`,
+  `Ray`, `Region3`, `Rect`, `PhysicalProperties`, `OverlapParams`, `DateTime` and `shared` are loud stubs that name a
+  workaround instead of "attempt to index a nil value". The `Instance` global exists on every tier with `Read`, and
+  `Instance.new` without `WorldEdit` raises the capability error.
+- **`os.time(table)` was missing (M2-22).** It reads the date table as UTC, as Luau does (`hour` defaults to 12,
+  out-of-range fields carry over, `isdst` is ignored, a missing `year`/`month`/`day` or a non-number is
+  `BAD_ARGUMENT`).
+- **`workspace:GetServerTimeNow()` froze or drifted (M2-25; MP-06, world half).** On a client it reads the local
+  clock, unclamped, until the bridge's first synchronization, re-bases once there, and from then on never decreases:
+  a backward correction is slewed at half speed instead of freezing the clock for the size of the step. Where this
+  process is the server clock (no bridge, `Solo`, `Host`, `DedicatedServer`) it is the local clock held at its last
+  reading; the slew there had let a solo world drift from an injected clock that stood still.
+- **`ClickDetector` ignored who clicked and where (M8-08, M8-11).** `MouseClick` passes the clicking player; a
+  detector under a `Model` or `Folder` answers for its parts and the deepest one wins (a detector under `Workspace`
+  claims nothing); `MaxActivationDistance` is measured from the player's `HumanoidRootPart` to the part's nearest
+  point, falling back to the camera distance without a character; the detector's signals are registered, so
+  `Destroy` disconnects them.
+- **Network receive warnings flooded the host log (MP-16).** Each sender's warning of one kind is logged once per
+  10 s and the rest are counted. `camera_set_cframe`/`camera_follow` fire the camera's `Changed` like the property
+  writes; a mod's `OriginTag` is interned instead of rebuilt per resume.
+- **A disconnected actor's mods kept running (M2-24).** The runtime unloads the mods loaded for an actor when it
+  disconnects (host-authority mods excepted; a quarantined mod too), after any mod code that is running has returned —
+  a hook, a timer, a logic-slot formula or a scheduler thread — or at the next `Tick`, so a mod that kicked its own
+  player can never go on running as the host. The stored package stays active and restarts on the next world load or
+  rehydrate. A failed first load leaves no actor record behind; a load or reload whose main chunk disconnects its own
+  actor fails with `InvalidOperationException` ("did not load: its actor … disconnected while its main chunk ran")
+  instead of a raw `LuaCanceledException`, and leaves nothing loaded.
+- **`Player:Kick(message)` lost its message.** The text reaches the transport (`RbxPlayers.KickPlayer(player, reason,
+  message)` → `INetworkBridge.DisconnectActor(actorId, message)`), cut to 1,024 UTF-8 bytes at a whole character;
+  `nil` leaves the transport's default, and a non-string — a number included — is `BAD_ARGUMENT` before anything is
+  kicked.
+- **A scheduler thread's host error got two prefixes and the wrong code.** A thread or handler that did not catch a
+  host error reported `BAD_ARGUMENT: nil` (`0321448a`), then `[mod:x …] BAD_ARGUMENT: [mod:x …] UNKNOWN_SERVICE …`,
+  which also told auto-repair it was a Lua bug. The fault keeps the host line's own code, fix and context under one
+  prefix (`RbxError.TryParse`, the exact inverse of the formatter); a budget kill stays `BUDGET_EXCEEDED` and only a
+  plain Lua error is wrapped as `BAD_ARGUMENT` (`354e6248`).
+- **An `UnreliableRemoteEvent` over 1,000 bytes worked in solo and failed online.** `NullNetworkBridge` refuses it with
+  `PAYLOAD_TOO_LARGE` before route, budget and delivery, exactly where the online transport does.
+- **Mirror package (`com.neoxider.coreaimirror`): a reconnect kicked the player (MP-03).** One connection per actor,
+  and the newest wins: an actor admitted on a new connection before kcp2k timed out the old one keeps its `Player`
+  (`PlayerRemoving` fires only when its last session ends) and the older connection is closed. Every disconnect path
+  is keyed by connection, never by actor alone, so the old connection's late disconnect cannot tear down the new
+  session.
+- **Mirror: a connection could ask for admission repeatedly, or never (MP-04, MP-05).** The first admission request
+  of a connection is decided and every later one is ignored and counted (repeats used to mint ghost players); a
+  connection that sends none within `CoreAiMirrorAuthenticator.AdmissionTimeoutSeconds` (default 10 s) is dropped —
+  Mirror has no authentication timeout of its own, so silent peers held their slots for ever.
+- **Mirror: one payload ceiling for every channel (MP-07).** Reliable remotes and `RemoteFunction` carry up to 64 KiB,
+  an `UnreliableRemoteEvent` up to Roblox's 1,000 bytes (less on a transport with a smaller datagram); a
+  `RemoteFunction` answer too large for the channel becomes a failure that names the size instead of vanishing.
+- **Mirror: remotes of actors local to the server went out on the wire (MP-08).** A server never sends a
+  client-to-server envelope to itself: remotes from and to actors registered in the server process are delivered in
+  process, so `InvokeServer` no longer waits 30 s, and `FireClient`/`InvokeClient`/`FireAllClients` reach local actors.
+- **Mirror: an unreliable remote that overtook the admission response disconnected the joining client (MP-09, client
+  half).** Client handlers no longer require Mirror authentication; such a packet is dropped and counted as
+  unadmitted.
+- **Mirror: robustness of the receive paths (MP-14/15/16/18/23).** An answer to a connection that is gone or reused
+  is dropped (`StaleResponsesDropped`); a client's pending requests fail at once on a disconnect or `Dispose`; a
+  malformed envelope is dropped and counted (`MalformedPacketsDropped`) without an exception inside Mirror's handler;
+  the disconnect hook is contained and restored.
+- **Mirror: kcp2k's negative connection ids were treated as "no connection" (MP-25).** About half of all clients get
+  one; their packets reached connection zero, and another client's answer could complete their request.
+- **Mirror: a client's server time was off by the server's uptime (MP-06, bridge half).**
+  `ServerClockOffsetSeconds` read Mirror's `NetworkTime.offset`, a difference of process uptimes: a client of a
+  server that had run for a day saw its time a day off. The server now sends its Unix time
+  (`CoreAiServerClockMessage`) when a connection acknowledges readiness and every 5 s; the client corrects it by half
+  the round trip, takes a jump over 1 s at once and blends smaller ones, and drops a NaN, infinite or non-positive
+  anchor as malformed. `IsServerClockSynchronized` says whether the offset is known yet.
+- **Mirror: server remotes sent before a joining client could route them were lost or disconnected it (MP-09, server
+  half).** Until the client's `CoreAiClientReadyMessage`, the server holds that connection's reliable remotes and
+  `InvokeClient` requests in order (up to 256 messages / 256 KiB) and drops and counts unreliable ones; a connection
+  that has not acknowledged within 10 s is dropped. The client repeats its acknowledgement every second until the
+  first clock anchor.
+- **Mirror: a kicked or superseded client could not tell why (MP-22).** The server sends
+  `CoreAiDisconnectNoticeMessage` (the kick's message, or the superseding session) first, unbinds the session at
+  once, and drops the transport on a later frame's `Pump`, because Mirror discards unflushed messages on a drop; the
+  deferred drop checks the connection object, so a reused id is never hit. A client whose own player is kicked
+  disconnects itself.
 
 ### Added
 
@@ -208,8 +347,40 @@ multiplayer foundation (audit ids in parentheses; details in `TODO.md`).
   `DefaultEmergencyMaxRegisteredInstances`, `WebGlEmergencyMaxRegisteredInstances` (4,032),
   `UnchargedWorldSkeletonAllowance` (64) and `MaxDistinctHostFaultsLogged` (64).
 - `RbxInstance.Changed`, `NotifyPropertyChanged`, `MaxNameLength`; `ReplicationApplier.BeginResync(worldSequence)`;
-  `ReplicationDirtySet.DeltasFor(ReplicationStream)`. (The Mirror package's changes are in the
-  `com.neoxider.coreaiunity` changelog.)
+  `ReplicationDirtySet.DeltasFor(ReplicationStream)`.
+- `INetworkBridge.IsServerClockSynchronized` and `INetworkBridge.DisconnectActor(actorId, message)` (default interface
+  members, so existing bridges compile unchanged; the world-session staging wrapper forwards both);
+  `NullNetworkBridge.MaxPayloadBytesFor(reliability)` and `UnreliablePayloadCeilingBytes`;
+  `RbxPlayers.KickPlayer(player, reason, message)` and `MaxKickMessageBytes` (1,024).
+- `IInstanceRegistrationAdmission`, `InstanceRegistry.AddRegistrationAdmission`/`RemoveRegistrationAdmission`/
+  `RegistrationAdmissionCount`; `AttributeContract.ValidateNewName`.
+- `LuaCsRbxApiBindings.ActorModsDisconnected`, `AttachModLog(ILuaLogService)` and `LocalPlayerActorId` (the local
+  player a click belongs to; unset, the pump uses the player the camera follows, or the only player).
+- `LuaCsHostFunctionException` (with `HostException`), `IScriptHostFailure`, `ScriptExecutionErrors.NextCause`;
+  `RbxError.TryParse`.
+- **`CoreAiMirrorNetworkBridgeProvider.AttachWorld(Func<LuaCsRbxApiBindings>)`** — attaches the world the function
+  returns at each admission and makes the session host that world's `Players.IdentitySource` (checked every frame and
+  before every admission, so a world loaded later is wired too; an identity source the host already set is kept).
+  The delegate overload remains for custom compositions. Paired with the world-side rule that a server world without
+  an identity source refuses a transport-admitted actor (Security, above), the manual
+  `Players.IdentitySource = provider.SessionHost` step is no longer needed.
+- Mirror counters: `MirrorNetworkBridge.MalformedPacketsDropped`, `UnroutablePacketsDropped`, `LocalDeliveries`,
+  `StaleResponsesDropped`, `OversizeResponsesFailed`, `SupersededConnections`, `CodecPayloadCeilingBytes`,
+  `UnreliablePayloadCeilingBytes`, `MaxRequestPayloadBytes`, `MaxPayloadBytesFor(reliability)`;
+  `CoreAiMirrorAuthenticator.IgnoredAdmissionRequests`, `AdmissionTimeouts`, `AdmissionTimeoutSeconds`;
+  `CoreAiMirrorSessionHost.SupersededSessions`.
+- Mirror (`com.neoxider.coreaimirror`): `MirrorNetworkBridge.Pump()` — the per-frame call the scene provider makes and
+  a custom composition must make too (`PumpTimeouts()` alone performs no owed drops, readiness deadlines, clock anchors
+  or acknowledgements) — `PerformOwedDropsNow()`, `DisconnectActor(actorId, message)`,
+  `BindConnection(connectionId, peer, awaitClientReady)`, `IsServerClockSynchronized`, `LastDisconnectNotice`,
+  `DisconnectNoticeReceived` and a `wallClock` constructor parameter (the `IRbxClockSource` server time is measured
+  against; a world with its own clock source builds its bridge with that same clock); the counters
+  `ReadyAcknowledgements`, `PacketsHeldUntilReady`, `NotReadyPacketsDropped`, `ReadinessTimeouts`,
+  `ClockAnchorsSent`, `ClockAnchorsReceived`, `DisconnectNoticesSent`, `SelfKicks`; the constants
+  `ReadinessTimeoutSeconds`, `MaxHeldMessagesPerJoiningConnection`, `MaxHeldBytesPerJoiningConnection`,
+  `ReadyAcknowledgementRetrySeconds`, `ClockAnchorIntervalSeconds`, `ClockStepThresholdSeconds`,
+  `DefaultKickMessage`, `SupersededNoticeMessage`, `MaxNoticeMessageBytes`; the messages `CoreAiClientReadyMessage`,
+  `CoreAiServerClockMessage`, `CoreAiDisconnectNoticeMessage` and `CoreAiDisconnectNoticeKind`.
 
 ### Changed
 
@@ -220,10 +391,24 @@ multiplayer foundation (audit ids in parentheses; details in `TODO.md`).
   schedule Debris, and no mod can do so to another actor's instances; the one-off `execute_lua` surface refuses
   signal connections; names are truncated at 100 characters; more than 256 attributes or tags, and trees deeper than
   2,048 levels, are refused; NaN and ±Infinity travel as bare numbers on the remote wire (MP-17; the decoder always
-  read them that way); the quarantine streak counts faulting frames.
+  read them that way); the quarantine streak counts faulting frames. Later in the same waves: `task.*` accepts a task
+  handle back; a native `coroutine.yield` outside a task, and a wait inside `coroutine.create`, is
+  `CONTEXT_VIOLATION`; an `UnreliableRemoteEvent` over 1,000 bytes is refused in solo too; `CollectionService`'s tag
+  globals ignore holders outside the DataModel; `MouseClick` passes the player; a character is not archivable; a new
+  non-ASCII attribute name is refused; a read-only script sees an `Instance` global whose `Instance.new` raises the
+  capability error; a disconnected actor's mods are unloaded; a load whose chunk kicks its own actor fails; a
+  client's `GetServerTimeNow` is the local clock until its first synchronization; and every error a script receives
+  is one line.
+- **Breaking wire change (Mirror).** The readiness, clock and notice messages are new, so server and client must
+  run the same CoreAI version, and a mismatch fails loudly: an older server has no handler for
+  `CoreAiClientReadyMessage` and Mirror disconnects a newer client right after admission; an older client never
+  acknowledges readiness and a newer server drops it at the 10 s deadline, with a log line naming the cause.
 - **The "Rbx API" skill** describes all of the above (signals, budgets, datatypes, Enum, instances, tweens, Debris,
   part writes, `CanCollide`, Humanoid, errors) and lists the 42 service registrations instead of "13". The error
-  section now documents the `[mod:<id> script:main.lua line:N]` prefix it used to deny.
+  section now documents the `[mod:<id> script:main.lua line:N]` prefix it used to deny. It also covers task handles
+  and native `coroutine.yield`, the clocks, `typeof`/`warn` and the loud global stubs, the 1,000-byte unreliable
+  ceiling, `ClickDetector`, the tag globals, `Humanoid:Clone`, the non-archivable character,
+  `Player:Kick(message)`, new attribute names, and that a player's mods leave with the player.
 
 ## [7.45.0] - 2026-09-24
 

@@ -15,11 +15,11 @@
 MVP3 is **code complete; its Unity verification gate is pending**. Five read-only audits of the 7.45.0 tree (MVP1
 instance core, 37 findings; MVP2 scheduler/signals/budgets/sandbox, 28; MVP8 gameplay services, 28; multiplayer
 foundation, 24, plus MP-25 found while fixing; newcomer ergonomics, triaged in the next section) were followed by
-fix waves W1–W3; each fix ships with a regression test that fails on the old code. IDs are the audits' (M1-xx, M2-xx, M8-xx, MP-xx); the reports
+fix waves W1–W6; each fix ships with a regression test that fails on the old code. IDs are the audits' (M1-xx, M2-xx, M8-xx, MP-xx); the reports
 themselves are not kept. Verified without Unity only: the Roslyn compile gate (C# 9, every asmdef, six configurations
-plus Mirror, no new error against 7.45.0) and the portable `dotnet test` suite (2085 passed / 0 failed / 3 skipped).
-This section records everything landed up to `f1b8bbb5`; the later commits (`d6096dc6` Mirror clock/readiness/
-notices, `20fdd97a` ApiBindings pass 1, `c6392287` W4 FILLER) and the rest of W4 are recorded by the next docs pass.
+plus Mirror, no new error against 7.45.0) and the two portable `dotnet test` suites on Linux — engine-free 2105 passed
+/ 0 failed / 3 skipped, Lua tier (`tools/portable/LuaTests`, CI job `portable-lua`) 1437 passed / 0 failed / 2 skipped,
+the engine-bound cases Inconclusive by design. This section records everything landed up to `b094d878`.
 
 - [ ] **Unity verification gate (owner/CI), then bump and tag:** full EditMode 0 failed and PlayMode `FastNoLlm`
       0 failed on this tree. Every EditMode fixture named below was written without a Unity run.
@@ -76,6 +76,51 @@ notices, `20fdd97a` ApiBindings pass 1, `c6392287` W4 FILLER) and the rest of W4
 - [x] **Bindings pass 2** — M1-03/05/07/21/31, M8-14, M2-10/24 binding half (`f1b8bbb5`).
 - [x] **Build and CI** — the `core` and `lua` legs (no `COREAI_LLM`) compile again (`32dbe28d`); engine-free Rbx API
       tests run on Linux in the portable suite (`4a4c80c2`).
+- [x] **Mirror sessions (W3)** — MP-06 bridge half (the client's server clock comes from the server's own Unix-time
+      anchors, not `NetworkTime.offset`), MP-09 server half (readiness handshake: reliable remotes held until the
+      client acknowledges, unreliable dropped and counted, 10 s deadline), MP-22 (kick and supersede notices before a
+      deferred drop; a client's own kick disconnects it), and `NullNetworkBridge` refusing an unreliable payload over
+      1,000 B in solo too (`d6096dc6`).
+- [x] **ApiBindings pass 1** — M2-06 (waits inside `coroutine.create`), M2-07/M2-18 (`ThreadRetired` releases a
+      retired thread's bookkeeping, wait connection and unanswered request), M2-14 (task handles rescheduled by
+      `task.spawn/defer/delay`), M2-16, M2-19 (rollback of an unfinished yield), M2-20 (native `coroutine.yield`
+      parks a task, stops anything else loudly; `THREAD_CAP` names parked threads), MP-10 (per-sender budget of 32
+      remote-started handler threads), M1-32, M8-22 Dispose half and unload/quarantine/disconnect destroying a mod's
+      tweens, M1-28 (headless part sink wired to the registry) (`20fdd97a`). `IRbxScriptThreadTerminalFault` is
+      implemented by `LuaCsRbxScriptThread`.
+- [x] **W4 FILLER** — M8-10 (`CollectionService` tag globals count holders inside the DataModel), M1-36 DataModel
+      part (`GetService` without a child-list copy), M1-29/M8-23 (culture-invariant error texts), M1-23 attribute
+      half: refuse a non-ASCII name on create, accept it on load (`c6392287`).
+- [x] **W4 CORE-C** — the `InstanceRegistry` pre-registration admission hook (a quota refusal is no longer thrown
+      inside the `Registered` multicast), `Humanoid:Clone` keeps its state, a scripted `RootPart` move ends `MoveTo`
+      (M8-18 second half), non-archivable characters, the `BoundProperties` drift guard, the Lua `SetAttribute` wiring
+      of M1-23 (`6be0c46f`).
+- [x] **W4 AB-2** — M1-06/M2-15 (`typeof`, `warn`, loud global stubs), M1-34 (`Instance` global on every tier), M2-22
+      (`os.time(table)`), M2-25 + MP-06 world half (`GetServerTimeNow` re-base and slew;
+      `INetworkBridge.IsServerClockSynchronized`), M8-08/M8-11 (`ClickDetector`), MP-16 (network warning throttle),
+      `camera_set_cframe`/`camera_follow` fire `Changed`, `OriginTag` interned per mod, a parked task's
+      `coroutine.yield` receives `task.spawn(t, ...)` arguments, and `ActorModsDisconnected` (`5fdfbf17`).
+- [x] **W5C** — M2-24 runtime half (a disconnect unloads the actor's mods after their running code returns;
+      host-authority mods stay; the stored package stays active), `warn` wired into the mod log, a tween of the
+      `HumanoidRootPart` ends `MoveTo` (`c233c9cf`); `Player:Kick(message)` reaches the client, `GetServerTimeNow`
+      on a server or in solo without drift, `ModActorLedger` as a field of the bindings that drops entries on
+      unload/quarantine/failed load (`0e51e982`).
+- [x] **Error values (ERRTEXT, W6-A)** — `pcall`/`xpcall`/`coroutine.resume` receive the host's one line, with no C#
+      stack trace or machine path (`0321448a`); sandbox caps, guard trips and pattern trips carry the same clean line,
+      `RbxError.TryParse`, `IScriptHostFailure`/`ScriptExecutionErrors.NextCause` (so `IsMemoryBudgetTrip` follows
+      `HostException` in both classifiers), and a scheduler thread's fault keeps the host's §5.2.7 code under one
+      prefix (`354e6248`).
+- [x] **W6-B runtime tails** — a failed first load leaves no actor record; a quarantined mod keeps its actor record
+      and is unloaded when its actor disconnects; a load whose chunk disconnects its own actor fails with a clear
+      `InvalidOperationException`; a logic-slot formula counts as running mod code; `Player:Kick(42)` stays
+      `BAD_ARGUMENT` (decision) (`7aa6f47c`).
+- [x] **Lua-tier tests on Linux** — the portable runner `tools/portable/LuaTests` (`1459086c`; two platform-dependent
+      tests fixed in `61bcfbef`), seven more fixtures linked after their engine-bound tests moved verbatim into
+      Unity-only classes (`80f2f30c`), CI job `portable-lua` with a floor of 1,400 passing cases (`b094d878`).
+- [x] **Docs (DOCS-1 `984c053f`, DOCS-2)** — everything above is in the roadmaps, `RBX_API.md`, the skill, the
+      Mirror, Hub and Instances READMEs, `LUA_SANDBOX_SECURITY.md`, `AGENT_ROLES_AND_TOOLS.md`,
+      `MVP2_MULTIPLAYER_PLAN.md`, the acceptance manifests and both changelogs (Mirror runtime entries in the core
+      one); MP-21 remainder: the roadmaps no longer describe a `ClientWritePolicy.Open` (owner decision 3).
 
 ### Open follow-ups from the fix waves
 
@@ -107,11 +152,17 @@ notices, `20fdd97a` ApiBindings pass 1, `c6392287` W4 FILLER) and the rest of W4
 - [ ] **Pattern budget:** the 5,000,000-step cap is per call; a step-charging API on the resume guard (so pattern
       work counts against the resume's own budget) is optional. The fence has a gap after a nested
       `coroutine.resume`.
-- [ ] **Stale prose outside this pass:** `Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md` (still describes "cleared
-      suspicion re-baselines" and lifetime caps on scheduler threads), `dev-docs/ALLOC_SIGNALS_FINDING_2026-09-05.md`,
-      the `IScriptCoroutine` summary ("per-resume and lifetime budgets"), the `HandlerMaxAllocatedBytes` docs on
-      `LuaCsModRuntime`/`LuaCsModStackOptions` (now every resume), the `RbxNumberValue` summary (capture now saves 0
-      plus a diagnostic), and the `WebGlUnsafeAsyncPrimitives` allowlist note for `LuaCsSecureEnvironment`.
+- [ ] **Stale prose, one left:** the `WebGlUnsafeAsyncPrimitives` allowlist note for `LuaCsSecureEnvironment`
+      ("coroutine resume and the string.format wrapper"). Done: `LUA_SANDBOX_SECURITY.md` and
+      `dev-docs/ALLOC_SIGNALS_FINDING_2026-09-05.md` (DOCS-2), the `IScriptCoroutine` summary and the
+      `HandlerMaxAllocatedBytes` docs (`c233c9cf`), the `RbxNumberValue` summary (`0e51e982`).
+- [ ] **`RegisterCallback(string, LuaFunction)` still leaks CLR exceptions:** a raw `LuaFunction` registered through
+      that escape hatch is not wrapped in `LuaCsHostFunctionException`, so its CLR exception text reaches `pcall`.
+      No production code calls it; wrap it or document it as a Lua-errors-only seam.
+- [ ] **Scheduler stragglers:** a host that only calls `Advance` (never `Tick`) never releases a disconnect that
+      was reached from a scheduler thread; `R4.10` raw-thread interop stays unsupported by design (a
+      `coroutine.create` thread cannot be scheduled); M8-22 remainder — a service that is itself destroyed does not
+      detach its host (only `Dispose` does).
 - [ ] **Runtime ceiling plumbing:** `LuaCsModStackOptions` has no pass-through for `emergencyMaxRegisteredInstances`;
       faults of a failed reload chunk are charged to the live instance's streak; a host that calls only `Advance`
       never closes a quarantine frame.
@@ -123,16 +174,15 @@ notices, `20fdd97a` ApiBindings pass 1, `c6392287` W4 FILLER) and the rest of W4
       instance, so another path could still exceed 256. `ReplicationApplier` should apply removals before additions
       so a replica at the cap cannot refuse a legitimate swap.
 - [ ] **`AncestryChanged` during `Destroy`:** the child argument's tombstone readability is not pinned by a test.
-- [ ] **Change notifications not yet raised:** `camera_set_cframe`/`camera_follow` (should notify like a
-      `CurrentCamera.CFrame` write), and the domain setters `ClickDetector.MaxActivationDistance`, part
-      `MaterialVariant`, `UserInputService.MouseBehavior`, `Players.CharacterAutoLoads`/`RespawnTime`. Part and
+- [ ] **Change notifications not yet raised** (`camera_set_cframe`/`camera_follow` notify since `5fdfbf17`): the
+      domain setters `ClickDetector.MaxActivationDistance`, part `MaterialVariant`, `UserInputService.MouseBehavior`,
+      `Players.CharacterAutoLoads`/`RespawnTime`. Part and
       camera properties do not reach a replica as patches, so their `Changed` never fires there (engine-free members
       do — `ReplicationApplierEditModeTests`); `dev-docs/REPLICATION_PHASE0.md` now says so.
 - [ ] **Assigning to an event** reports "not a valid member" instead of read-only.
-- [ ] **Bindings housekeeping:** `ModActorLedger` should become a field of `LuaCsRbxApiBindings` (it is a
-      `ConditionalWeakTable` only because of file ownership during the wave) and drop entries on unload;
-      `OriginTag.FromMod` allocates per resume; `RbxTweenService.DescribeGoal` prints CLR type names; the tween
-      property host does not consult the catalog for unknown members (`{Sit = true}` reads as unknown rather than a
+- [ ] **Bindings housekeeping** (`ModActorLedger` became a field that drops entries on unload in `0e51e982`;
+      `OriginTag` is interned per mod since `5fdfbf17`): `RbxTweenService.DescribeGoal` prints CLR type names; the
+      tween property host does not consult the catalog for unknown members (`{Sit = true}` reads as unknown rather than a
       stub); `Camera.FieldOfView` needs a camera-rig API before it can be bound.
 - [ ] **Input enum names:** mouse input objects in `RbxUserInputService` (`:195`, `:214`) look up `KeyCode.Unknown`,
       which now resolves only as the alias of the mirror's canonical `None` (value 0); look up `None`, and fix the
@@ -150,11 +200,28 @@ notices, `20fdd97a` ApiBindings pass 1, `c6392287` W4 FILLER) and the rest of W4
 
 **Players, Humanoid and multiplayer (MVP8/MVP11/MVP12)**
 
-- [ ] **Queued for W4 (CORE-C, in progress):** `Humanoid:Clone` loses its state; a `RootPart.CFrame` write should
-      end a `MoveTo`; character models are archivable (Roblox: not); an `InstanceRegistry` pre-registration
-      admission hook (a quota refusal is thrown inside the `Registered` multicast); a drift guard that the
-      `BoundProperties` table matches the read dispatch.
-- [ ] **M2-24 remainder:** unload or quarantine a disconnected actor's mods (queued for AB-2).
+- [ ] **Disconnect and load tails (after M2-24, `c233c9cf`/`7aa6f47c`):** decide the failed-load policy — sweep the
+      instances a failed first load's chunk created and clear its quota and registry attribution
+      (`_quotaActorByOwnerModId`); an active package is not restarted when its actor rejoins (today only
+      `RehydrateFromStore` or the next world load start it); `DisconnectActor` of the host's own actor kills the
+      host-authority mods' threads while the runtime leaves those mods loaded; a `ModTearingDown` listener that, after
+      an installer kill, disconnects the quarantined mod's own actor during the quarantine teardown restores the actor
+      record for a departed actor; `ModActorLedger.GetAttributedContext` creates an entry on demand without a load
+      record (no current path reaches it).
+- [ ] **Characters (after CORE-C):** a `RootPart` set by hand that is not named `HumanoidRootPart` does not end
+      `MoveTo` when moved; once MP-11 makes the client registry a replica, decide whether registration admission (the
+      instance quota) skips replica applies (`IsApplyingReplication`).
+- [ ] **Clicks and players:** no composition sets `LuaCsRbxApiBindings.LocalPlayerActorId` (a host or client
+      composition should name its local player; today the pump falls back to the player the camera follows, or the
+      only player); `IClickPickSource` reports no hit point, so the range is measured to the part's nearest box point
+      instead of where the ray hit.
+- [ ] **Tag and service bookkeeping (after M8-10):** `InstanceRegistry.SetSceneRoot` changes the in-tree set without
+      an event, so `CollectionService`'s holder counts go stale if the root is swapped under an attached service; a
+      service replaced after a snapshot restore stays subscribed (pre-existing). M1-36 remainder: the registry's
+      `ProcessPreSimulation` and `ModConnectionRegistry.PruneDead` still allocate.
+- [ ] **`typeof` of `TweenInfo`, `RaycastParams` and `RaycastResult`** reads the type name from the `__tostring`
+      name of their metatable, because their carrier types are private to the bindings that build them; expose the
+      carrier types and name them directly.
 - [ ] **Host UserIds:** a local actor's counter `UserId` can collide with a transport-admitted `UserId` on a Host.
       A `Player` destroyed directly from C# runs the leave teardown but does not `DisconnectActor` on the transport.
 - [ ] **After a world swap on a Host,** new connections still use the `AttachWorld` connect delegate — acceptable
@@ -163,10 +230,13 @@ notices, `20fdd97a` ApiBindings pass 1, `c6392287` W4 FILLER) and the rest of W4
       the decode side (MP-01) filters. MVP11/MVP12.
 - [ ] **MP-20 remainder:** strip `OwnerActorId`/`OwnerModId`/`OriginTag`/`AccessScope` from the snapshot at capture
       for a client, not only on the replica.
-- [ ] **MP-21 remainder:** the roadmap's MVP12 section still specifies a `ClientWritePolicy.Open` and "one test each
-      for `Strict` and `Open`", and `Docs/ROADMAP.md` §1 still promises `ClientWritePolicy: Open`, while owner decision
-      3 (`dev-docs/MVP25_BUILD_PLAN_2026-09-04.md`) says `Open` does not exist. Needs an owner-approved rewrite of that
-      rung text.
+- [ ] **Mirror follow-ups (after MIRROR-3, `d6096dc6`):** an authenticator refusal still reaches the client only as
+      a dropped connection (the MVP2.5 item "A refused client never learns it was refused") — the owed-drop pattern
+      the kick notice now uses is the fix shape; `Players.MaxPlayers` is not checked against the transport's
+      capacity; after a Mirror restart without disconnect reports the bridge may keep stale acknowledged-connection
+      state; the scene provider measures server time against the system clock and has no public way to take the
+      world's `IRbxClockSource` (a composition with its own clock must build the bridge itself with the `wallClock`
+      argument).
 - [ ] **Test harnesses:** `RungZeroEnvelopeEditModeTests`' `ForgingNetworkBridge` reports `Topology.Host`, so the
       fail-closed identity rule (MP-12) refuses its `ConnectActor` — give the harness an identity source.
 
@@ -178,9 +248,9 @@ notices, `20fdd97a` ApiBindings pass 1, `c6392287` W4 FILLER) and the rest of W4
       prose from its XML docs and its error string (`///   LLM + LLMAgent    PlayMode .`). Rewrite them in English
       and search the tree for other stripped fragments (runs of three or more spaces inside `///` comments and string
       literals).
-- [ ] **Docs outside this pass:** `Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md` (world-tool statuses),
-      `Assets/CoreAIHub/README.md` (World Loads startup section), `dev-docs/MVP2_MULTIPLAYER_PLAN.md` (legacy packages refused by an ACL-composed
-      session), `Assets/CoreAIMods/Runtime/RbxApi/Instances/README.md` (DEV-7 last-known part values).
+- [ ] **Link `Mvp3WorldPackageFollowUpEditModeTests` into the Lua-tier runner:** move its 18 `[UnityTest]` cases
+      (`UniTask.ToCoroutine`) and the 2 that call the internal `RbxWorldStartupSequence` verbatim into a Unity-only
+      class; the other 65 cases then run on Linux (`tools/portable/LuaTests/README.md`).
 
 ## 7.45.0 audit wave: 7.44.x re-audited, pipeline cancellation unified, docs swept (2026-09-24)
 
@@ -333,10 +403,10 @@ fixed in parallel (`c7b1f44e`) and not listed.
       `DelegateLlmTool(string, string, Delegate)` (`:54`) and `AgentBuilder.WithAction(…, Delegate)` (`:339`) force
       the wrapper README has to teach. Add `Func<…>` / `Action<…>` overloads whose `Task` variants apply
       `MeaiToolTaskBridge.Publish` (closes B5 for delegates). Additive. S.
-- [ ] **[C7] `Instance` is nil below `WorldEdit`.** `LuaCsRbxApiBindings.cs:2064-2067` registers it only for
-      WorldEdit, unlike `camera_*` (every tier, for an actionable error), so `Instance.new` in the FIRST_MOD sample
-      (`Read | LogicOverride`) fails with "attempt to index a nil value". Fix: a stub whose `new` raises the
-      capability message. S.
+- [x] **[C7] `Instance` is nil below `WorldEdit`** — fixed as M1-34 (`5fdfbf17`): the `Instance` global exists on
+      every tier with `Read`, and `Instance.new` without `WorldEdit` raises the capability error before it reads or
+      creates anything. Was: `LuaCsRbxApiBindings.cs:2064-2067` registered it only for WorldEdit, so `Instance.new`
+      in the FIRST_MOD sample (`Read | LogicOverride`) failed with "attempt to index a nil value".
 - [ ] **[C10] `AgentConfig.ClearMemory()` clears chat history only** (`AgentConfigExtensions.cs:196-201`), while
       "memory" means the long-term store everywhere else. Fix: `ClearChatHistory()`, `ClearLongTermMemory()`,
       `ClearContext(chat, longTerm)` mirroring `CoreAi.ClearContext`; mark `ClearMemory` obsolete. S.
@@ -621,7 +691,10 @@ Against the owner's bar, verified against the tree on 2026-09-10:
           `RbxError`, and these two methods run inside Mirror's handler wrapper where a throw
           disconnects the client, so the fix needs a drop-and-count design rather than a two-line
           insertion. The broadcast half of the same finding WAS fixed in 7.42.0 (a broadcast now goes
-          to the admitted set instead of every Mirror connection).
+          to the admitted set instead of every Mirror connection). Partly bounded since `20fdd97a` (MP-10): the
+          handler threads a sender's remotes start are capped at 32 per sender (a `RemoteFunction` over it is answered
+          `BUDGET_EXCEEDED`, an event is dropped and counted), and since `5fdfbf17` (MP-16) receive warnings are
+          logged once per sender and kind every 10 s — but decoding and dispatch themselves stay unmetered.
     - [ ] **A Mirror HOST has no client-side remotes (HIGH).** `MirrorNetworkBridge.AttachHandlers`
           installs the handlers of ONE side, and `CoreAiMirrorNetworkBridgeProvider`'s role guard
           refuses a client bridge while the server is active, so a host - server plus local client in
@@ -1237,10 +1310,12 @@ audit reports were absorbed into this file and deleted per the audit-report poli
       `Lua_InstanceNew_DeprecatedParentArgument_WorksAndLogsOnce` invokes twice inside one load, so a
       once-per-load implementation would also pass (needs a reload twin); `AssetRule_At1To1_*` proves
       the second scale per shape only. Rewrite each with an independent oracle or a negative twin.
-- [ ] **Four more vacuous tests from the same 2026-09-02 final QA pass, beyond the three above:**
-      `D3_MeterAuthoredHostObjectReadsAsStuds` (`1.8`/`0.28`,
-      `RbxSpaceGoldenFixtureEditModeTests.cs`) does bare arithmetic without wrapping a host object, so
-      it would pass even with no lazy-wrap layer; `CatalogOverrideWinsPerMaterial`
+- [ ] **Four more vacuous tests from the same 2026-09-02 final QA pass, beyond the three above** (three left):
+      `D3_MeterAuthoredHostObjectReadsAsStuds` (`1.8`/`0.28`) was flagged for doing bare arithmetic without
+      wrapping a host object — it now builds an `RbxWorldHost`, wraps a meter-authored scene object through the lazy
+      world-name lookup and reads its studs position, so that part is resolved; it lives in
+      `RbxApi/Binding/RbxWorldHostEditModeTests.cs`, class `RbxWorldHostLazyWorldWrapEditModeTests`, since
+      `80f2f30c` moved it out of `RbxSpaceGoldenFixtureEditModeTests.cs`. Still open: `CatalogOverrideWinsPerMaterial`
       (`RbxMaterialTextureCatalogEditModeTests.cs`) drives `RbxMaterialTextureCatalog` directly instead
       of the production `InstanceGameObjectBinder` path, so it would pass even if the binder still
       resolved the packaged texture; `CatalogShaders_NeverRaiseAnUnclampedBaseToAPower`
@@ -1248,9 +1323,9 @@ audit reports were absorbed into this file and deleted per the audit-report poli
       shader instantiation, so a runtime `pow(negative, …)` NaN would not flip it; and
       `ManyLuaParts_ReuseOneTexturedHandleWithoutNativeMaterialAllocation`
       (`RbxTextureMaterialsAcceptanceEditModeTests.cs`) asserts handle-name reuse only, so it would
-      pass even if every Part still re-created its own material under an equal name. All four test
-      methods confirmed still present, unchanged, 2026-09-09. Rewrite each with an independent oracle
-      or a negative twin.
+      pass even if every Part still re-created its own material under an equal name. These three were
+      confirmed still present, unchanged, 2026-09-09. Rewrite each with an independent oracle or a
+      negative twin.
 - [ ] **Final QA verdict (2026-09-02):** MVP2 G10 (chat throughput with a real provider, admission cap
       `MaxPending=64`) and the heap-slope budget stay open (the host-restore envelope closed in `c7b1f44e`); every other
       G1–G12 / P1–P5 / W3.1–W3.5 row is PASS on `g11.xml` + the browser record. See the reconciliation

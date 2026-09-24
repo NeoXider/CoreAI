@@ -304,6 +304,14 @@ The correct mechanism is an **ACL version on the world**. Legacy worlds (missing
 compatibility mode and keep today's destroy behaviour untouched; only worlds explicitly ACL-enabled
 use the strict table. Never silently weaken all `SharedWritable` objects to obtain compatibility.
 
+**As built (2026-09-24, `c7b1f44e`): compatibility mode belongs to the session, not to the package.**
+Only a session composed without a world ACL (`worldAclVersion: null`) opens a legacy package. A session
+composed with an ACL refuses a package without `world_acl_version` before any side effect — no safety
+autosave, no staging — and `load_world`/`load_autosave` refuse it before the player is asked, with
+status `invalid_package` and the session's reason. Accepting it had switched per-actor access control
+off for the whole session (no cross-actor mutation or destruction refusal) and written that downgrade
+into every later save.
+
 **Attribution rules** (from the same audit): new actor objects and clone subtrees are caller-`Owned`;
 host singletons are `HostProtected`; host-created ordinary content is `SharedWritable`. Reparenting is
 authorized against BOTH endpoints; recursive destruction is preflighted atomically; reads stay

@@ -201,8 +201,22 @@ resumes (`ClientIntentRetry_AfterMoreHeartbeatResumesThanTheWindowHolds_ReturnsT
 server-generated operations counted in each actor's server window, so existing expectations on it hold.
 The binding half of M2-24 is done: the resume actor context is cached per mod, and a mod whose actor
 was released gets `NOT_AUTHORITY` instead of falling back to the host identity
-(`ResumeActor_IsCachedPerMod_AndNeverFallsBackToTheHostForAReleasedActor`); unloading or quarantining an
-actor's mods on disconnect is still open.
+(`ResumeActor_IsCachedPerMod_AndNeverFallsBackToTheHostForAReleasedActor`). The runtime half landed after
+it (`c233c9cf`, `7aa6f47c`): a disconnect unloads the actor's mods through the production runtime and leaves
+other actors' mods running, host-authority mods excepted, the stored package staying active
+(`DisconnectActor_UnloadsThatActorsMods_ThroughTheProductionRuntime_AndLeavesTheOthersRunning`,
+`DisconnectActor_LeavesAModLoadedWithHostAuthority_Loaded`,
+`DisconnectActor_KeepsTheStoredPackageActive_SoTheModRehydratesWhenTheActorRejoins`); a disconnect reached
+from mod code is released only once that code has returned
+(`DisconnectActor_ReachedFromAModHook_ReleasesTheActorsModsOnlyOnceTheHookReturned`,
+`DisconnectActor_ReachedFromALogicSlotFormula_ReleasesTheModOnlyOnceTheFormulaReturned`,
+`DisconnectActor_ReachedFromAnExportCalledOnAnotherModsThread_ReleasesTheModOnlyAtTheNextTick`); a
+quarantined mod goes with its actor
+(`DisconnectActor_UnloadsItsQuarantinedMod_AndLeavesAnotherActorsQuarantinedModAlone`); a failed first load
+is never listed (`DisconnectActor_NeverListsAModWhoseFirstLoadFailed_ButStillListsOneAFailedReloadKept`);
+and a load whose chunk disconnects its own actor fails with a clear error and leaves nothing loaded
+(`LoadMod_WhoseChunkDisconnectsItsOwnActor_FailsWithAClearError_AndLeavesNothingLoaded`,
+`ReloadMod_WhoseChunkDisconnectsItsOwnActor_FailsWithTheSameError_AndTheKeptModGoesWithItsActor`).
 
 **Roadmap §5.2.9 criterion 14, quarantine clause.** Proven since the 2026-09-24 fix wave: for scheduler
 threads the quarantine streak counts faulting frames (many faults in one frame count once, a clean

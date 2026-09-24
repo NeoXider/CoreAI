@@ -84,8 +84,9 @@ must not stay connected as an authenticated nobody. The drop happens on the prov
 (or when the provider is disabled), after Mirror has finished accepting the connection; until then
 every packet from that connection is dropped as unadmitted. Keep the provider enabled: a disabled
 provider runs no `Update`, so a drop owed after it was disabled waits until it is enabled again. And `Player:Kick()` ends the kicked client's
-connection through the bridge: the socket closes, the session host releases the session, and that
-client's next remote is dropped as unadmitted instead of re-creating the player. That is the Mirror
+connection through the bridge: the client is sent the kick's message first, the session host releases
+the session at once, the socket closes on a later frame (see Sessions), and that client's next remote
+is dropped as unadmitted instead of re-creating the player. That is the Mirror
 bridge. On the in-process loopback (`NullNetworkBridge`, what an empty provider field gives you) a
 kick is the Player teardown only: there is no connection to end and the actor stays registered, so
 the actor's next use - a remote, a `Players.LocalPlayer` read, a new mod context - is a fresh join,
@@ -121,6 +122,56 @@ and the Player is re-created with `PlayerAdded` firing again.
   instead of waiting out their timeout. A client does not need Mirror authentication for its handlers, so a remote that overtakes
   the admission response is dropped as unadmitted rather than disconnecting the joining client.
   kcp2k's negative connection ids are real connections.
+- **A joining client acknowledges readiness before the server talks to it.** The server admits a
+  connection one round trip before the client has read its admission, so until the client's bridge
+  sends `CoreAiClientReadyMessage` the server holds that connection's reliable remotes and
+  `InvokeClient` requests in order — at most 256 messages and 256 KiB
+  (`MaxHeldMessagesPerJoiningConnection`, `MaxHeldBytesPerJoiningConnection`); past that they are
+  dropped and counted — and drops its unreliable remotes, counted (`PacketsHeldUntilReady`,
+  `NotReadyPacketsDropped`). A connection that has not acknowledged within
+  `ReadinessTimeoutSeconds` (10 s) is dropped with a log line naming the cause (`ReadinessTimeouts`).
+  The client repeats its acknowledgement every second (`ReadyAcknowledgementRetrySeconds`) until the
+  server's first clock anchor arrives, so a client admitted before the server's world attached is not
+  lost to the deadline. Accepted acknowledgements are counted (`ReadyAcknowledgements`).
+- **The server's clock reaches clients as anchors.** The server sends its Unix time
+  (`CoreAiServerClockMessage`) when a connection acknowledges readiness and every
+  `ClockAnchorIntervalSeconds` (5 s) after that (`ClockAnchorsSent`/`ClockAnchorsReceived`). The
+  client corrects each anchor by half the measured round trip and carries it forward on its own
+  process clock: the first anchor of a connection, or one more than `ClockStepThresholdSeconds` (1 s)
+  away, replaces the estimate; a nearer one is blended in; a NaN, infinite or non-positive anchor is
+  dropped and counted as malformed (`MalformedPacketsDropped`). `ServerClockOffsetSeconds` is then
+  "the server's Unix time now minus this machine's wall-clock Unix time now" — zero on a server, and
+  zero on a client until the first anchor, which `IsServerClockSynchronized` tells apart from "the
+  clocks agree"; at the first anchor it steps to the whole skew between the two machines. It no longer
+  reads Mirror's `NetworkTime.offset`, which compares the two processes' uptimes rather than their
+  clocks (a client of a server that had run for a day read the server's time a day off). The wall
+  clock is the bridge's `wallClock` constructor argument: the scene provider uses the system clock,
+  which is what a world composed without its own `IRbxClockSource` reads; a composition whose world
+  reads another clock builds its bridge with that same clock. The world side re-bases
+  `workspace:GetServerTimeNow()` at the first synchronization and slews backward corrections
+  afterwards (`Assets/CoreAI/Docs/RBX_API.md`, "Clocks").
+- **A kicked or superseded client is told why.** Before the server closes a connection for a kick or
+  for a newer session of the same player, it sends `CoreAiDisconnectNoticeMessage`
+  (`CoreAiDisconnectNoticeKind.Kicked` with the kick's message — `Player:Kick(message)` passes its text
+  through `INetworkBridge.DisconnectActor(actorId, message)`, `DefaultKickMessage` when it gave none;
+  `Superseded` with `SupersededNoticeMessage`), at most `MaxNoticeMessageBytes` (1,024) UTF-8 bytes
+  (`DisconnectNoticesSent`). The session is torn down and unbound at once, and the transport drops the
+  connection on a later frame's `Pump` — Mirror discards a connection's unflushed messages when it is
+  dropped, so a notice sent in the dropping frame would never leave; until then every packet from that
+  connection is dropped as unadmitted. The deferred drop checks the connection object, so a reused
+  connection id is never hit. On the client, `DisconnectNoticeReceived` fires and
+  `LastDisconnectNotice` keeps the reason after the disconnect (cleared by the next admission), so the
+  game can show it. A kick at join — a ban check in `PlayerAdded` — reaches the client after its
+  admission response on the same ordered channel.
+- **A client's own kick disconnects it.** `Players.LocalPlayer:Kick()` on a client makes the client
+  bridge disconnect from the server, as Roblox does (`SelfKicks`); a client has no authority over any
+  other actor's connection.
+- **The bridge runs on `Pump()`.** The scene provider calls `MirrorNetworkBridge.Pump()` every frame:
+  request timeouts, the drops a kick or a supersede owes, readiness deadlines and clock anchors on a
+  server, and the readiness acknowledgement on a client. A custom composition that builds the bridge
+  itself must call `Pump()` once per frame too — `PumpTimeouts()` alone performs no owed drops, no
+  deadlines, no anchors and no acknowledgements. `PerformOwedDropsNow()` closes every owed connection
+  at once, for a composition that stops pumping (the provider calls it when it is disabled).
 
 ## The one contract you must honour yourself
 
@@ -142,10 +193,17 @@ default, which will not match.
   dropped synchronously, which discards the unsent batch, so the client cannot tell "refused" from
   "server vanished". The refusal itself is sound: the connection is dropped and no actor is created.
 - **No inbound rate limit.** The rate limiter runs on the outbound path only, so an admitted peer can
-  flood the server's world dispatch.
-- **Adding a field to the admission response was a breaking wire change.** Server and client must run
-  the same CoreAI version; an older server's shorter message cannot be deserialized by a newer client
-  and the connection is dropped.
+  flood the server's world dispatch. What the world bounds is the handler work a sender's remotes
+  start: at most 32 `OnServerEvent` handlers and `OnServerInvoke` callbacks per sender may be alive
+  at once (a `RemoteFunction` over that is answered `BUDGET_EXCEEDED`, an event is dropped, counted
+  and logged once per sender), and repeated receive warnings are logged once per sender and kind
+  every 10 s; decoding and dispatch themselves are still unmetered.
+- **Server and client must run the same CoreAI version, and a mismatch fails loudly.** Adding a field
+  to the admission response already broke older peers; the readiness, clock and notice messages are
+  new too. An older server has no handler for `CoreAiClientReadyMessage`, so Mirror disconnects a newer
+  client right after admission with an error in the server log; an older client never acknowledges
+  readiness, so a newer server drops it at the readiness deadline with a log line naming the cause.
+  There is no compatibility fallback.
 - **Live Mirror sessions cannot be handed to a world loaded at runtime (MVP11).** Until MVP11 brings
   session handoff, `RbxWorldRuntimeSessionController` refuses a world load — at request, at
   confirmation and on a raw host load — with status `network_sessions_active` while the bridge lists

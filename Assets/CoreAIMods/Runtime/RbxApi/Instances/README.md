@@ -21,9 +21,11 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
 ## Recorded deviations / notes
 
 - `Players.CharacterAutoLoads` creates a minimal runtime character on join: a `Model` with a
-  `Humanoid` and `HumanoidRootPart`. `Player:LoadCharacterAsync()` replaces it and yields;
-  `LoadCharacter()` is a deprecated alias. Replacement checks ownership of the outgoing
-  character as well as the player. Disconnect removes the character and its signal subscriptions.
+  `Humanoid` and `HumanoidRootPart`, created with `Archivable = false` as in Roblox (so
+  `character:Clone()` is nil until a script sets `Archivable = true`). `Player:LoadCharacterAsync()`
+  replaces it and yields; `LoadCharacter()` is a deprecated alias. Replacement checks ownership of
+  the outgoing character as well as the player. Disconnect removes the character and its signal
+  subscriptions.
 - Character signals are deferred. `CharacterRemoving` permits the outgoing model's tombstone
   identity reads (for example `Name`); it does not preserve the destroyed descendant tree.
 - The Unity composition attaches motors after the root part exists and steps them at
@@ -39,13 +41,33 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
 - This character slice does not implement avatar rigs, animation, or appearance loading. The network
   transport is the optional `com.neoxider.coreaimirror` package, not this assembly.
 - `Clone()` copies external part state through the backing binder and removes partially created
-  copies if that binder fails. Lua clones receive the calling actor's ownership recursively.
+  copies if that binder fails. Lua clones receive the calling actor's ownership recursively. A
+  `Humanoid` clone keeps `MaxHealth`, `Health`, `WalkSpeed`, `JumpPower`, `JumpHeight`,
+  `UseJumpPower` and `DisplayName` (silently — no `Changed`); a clone at 0 health dies on its first
+  Heartbeat inside the Workspace.
+- A script, `PivotTo` or tween move of a `HumanoidRootPart` ends that Humanoid's `MoveTo` with
+  `MoveToFinished(false)` (the Humanoid is found among the part's siblings, never by a world walk).
 
 - Signals are live: `RunService.Heartbeat`, `UserInputService` input events and `ClickDetector`
   clicks all deliver through `RbxScriptSignal`.
 - DEV-7 at Domain level: tombstone reads (`Name`, `ClassName`, `Parent`, `IsDestroyed`) stay
   available on destroyed instances in C#; the stricter Lua-context rule is enforced by the
-  marshalling layer.
+  marshalling layer. Inside a destruction-queued handler (`Destroying`, `AncestryChanged`, and the
+  `Parent` change the destruction raises) a destroyed `BasePart` also reads its last-known property
+  values: both part sinks keep the most recent 2,048 destroyed parts, and older ones are forgotten.
+- Tags: `InstanceTagStore` answers for every registered instance, and its first-use/last-use flag
+  (`IsTagInUse`, `InstanceRegistry.TagAdded`/`TagRemoved`) is store-wide and informational.
+  `RbxCollectionService` keeps its own count of holders inside the DataModel and fires the Roblox
+  `TagAdded`/`TagRemoved` (and answers `GetAllTags`) from that count, so a tagged nil-parented
+  instance counts for nothing there.
+- Attribute names: `AttributeContract.ValidateNewName` (ASCII letters and digits plus `.`, `-`, `/`,
+  `_`) guards a name a script creates; `ValidateName` (letters and digits of any script) guards
+  restore, replication and reads, so a world saved with an older non-ASCII name still loads.
+- Registration admission: `IInstanceRegistrationAdmission` checks installed with
+  `InstanceRegistry.AddRegistrationAdmission` run, in order, before a new record is added or
+  `Registered` fires; the first refusal aborts the creation with an `InvalidOperationException`
+  carrying its text, earlier admissions are revoked, and nothing is registered, announced or
+  destroyed. The mod runtime's per-actor instance quota is one such check.
 - `RbxError` lives in this assembly for now; it moves to a shared RobloxApi contracts assembly
   when the Datatypes slice needs it.
 - Instances are created only through `InstanceRegistry` (no public `Register(instance)`)—

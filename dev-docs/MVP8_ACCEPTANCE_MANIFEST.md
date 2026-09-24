@@ -93,7 +93,40 @@ still have to be run in Unity. The corpus above is unchanged.
 - **Humanoid.** `TakeDamage`/`MoveTo`/`ChangeState` need `WorldEdit` and write authority
   (`HumanoidMethods_CrossActor_AreRefusedByTheWorldAcl`); `MoveTo` arrival is measured on the ground
   plane (`MoveTo_ArrivalIsMeasuredOnTheGroundPlane_ATargetBelowTheRootIsReached`); `Died` fires only
-  inside the Workspace (`HealthZero_OutsideTheWorkspace_DiesOnceOnTheFirstHeartbeatInside`).
+  inside the Workspace (`HealthZero_OutsideTheWorkspace_DiesOnceOnTheFirstHeartbeatInside`). Later in
+  the same waves: a script, `PivotTo` or tween move of the `HumanoidRootPart` ends `MoveTo` with `false`
+  (`MoveTo_EndsFalse_WhenAScriptMovesTheRootPart_ByCFramePositionOrPivotTo`,
+  `MoveTo_EndsFalse_WhenATweenMovesTheRootPart_ByCFramePositionOrOrientation`); `Humanoid:Clone` keeps
+  its state and a dead clone dies on its first Heartbeat inside
+  (`Clone_KeepsTheTemplatesHealthMovementParametersAndDisplayName`,
+  `Clone_OfADeadHumanoid_KeepsHealthZero_AndDiesOnItsFirstHeartbeatInTheWorkspace`); a character is not
+  archivable (`Character_IsNotArchivable_SoCloneIsNil_UntilAScriptSetsArchivableTrue`).
+- **ClickDetector (M8-08, M8-11).** `MouseClick` passes the player who clicked, a detector under a
+  `Model` or `Folder` answers and the deepest one wins, the range is measured from the character with a
+  camera fallback, and a detector parked under `Workspace` claims nothing
+  (`Lua_ClickDetector_MouseClick_PassesThePlayerWhoClicked_FromAModelLevelDetector`,
+  `Lua_ClickDetector_FolderLevelDetectorFires_AndTheDeepestDetectorWins`,
+  `Lua_ClickDetector_Distance_IsMeasuredFromTheCharacter_NotTheCamera`,
+  `Lua_ClickDetector_WithoutACharacter_FallsBackToTheCameraDistance`,
+  `Negative_Lua_ClickDetector_ParentedToWorkspace_DoesNotClaimEveryClick`); destroying a detector
+  disconnects its handlers (`ClickDetector_Destroy_DisconnectsItsMouseClickHandlers`).
+- **CollectionService (M8-10).** `TagAdded`/`TagRemoved`/`GetAllTags` count only holders inside the
+  DataModel: a nil-parented holder moves neither, the last holder leaving the tree fires `TagRemoved`
+  and a returning one `TagAdded` again, and tags applied before the bindings attach count too
+  (`TagGlobals_FollowTheLastHolderOutOfTheDataModelAndBackIn`,
+  `Negative_OutOfTreeHolders_MoveNeitherTagGlobalNorGetAllTags`,
+  `Negative_TagRemovedGlobal_WaitsForTheLastHolderInTheDataModel`,
+  `TagsAppliedBeforeTheBindingsAttach_CountOnlyTheirInTreeHolders`).
+- **Tween lifetime (M8-22).** A disposed world detaches its `TweenService`, and killing a mod's scheduled
+  work destroys the tweens it created
+  (`M8_22_Dispose_DetachesTweenService_SoTheOldSchedulerStepsNoTween`,
+  `KillAllScheduledOwnedBy_AlsoDestroysTheTweensTheModCreated`).
+- **Players.** `Player:Kick(message)` hands its text to the transport, cut to the 1,024-byte wire
+  ceiling, and a non-string is refused before anything is kicked
+  (`Kick_HandsTheScriptsMessageToTheTransport_AndNoMessageLeavesTheTransportsDefault`,
+  `Kick_ALongMessage_ReachesTheTransportCutToTheWireCeiling`,
+  `Negative_Kick_WithAMessageThatIsNotAString_IsRefusedBeforeAnythingIsKicked`,
+  `Negative_Kick_WithANumberMessage_IsRefusedLikeEveryOtherStringArgument`).
 - **Physics.** `CanCollide = false` lets bodies through but keeps `Touched` and raycast hits
   (`CanCollide_False_KeepsTheColliderEnabledAsATrigger`,
   `CanCollideFalsePart_IsHitByADefaultRay_AndSkippedWhenTheRayRespectsCanCollide`,

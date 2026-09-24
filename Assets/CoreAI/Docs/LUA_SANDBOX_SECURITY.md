@@ -109,8 +109,14 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
     crosses a 256MB budget after a few seconds of a loop that retains nothing, which cut
     pure-arithmetic runaways with `EXCEEDED_MEMORY_BUDGET` instead of their own wall-clock limit. The
     trip is therefore decided by one confirming `GC.GetTotalMemory(true)`: a real bomb's result string
-    is live and survives the collection, while transient runtime garbage does not. A cleared suspicion
-    re-baselines from the post-collection reading, so forced collections stay bounded.
+    is live and survives the collection, while transient runtime garbage does not. The trip reference
+    taken at the start of the execution never moves up (a lower post-collection reading may lower it);
+    a cleared suspicion instead re-arms the next one a quarter of the budget above the post-collection
+    reading, so forced collections stay bounded while live growth can overshoot the budget by at most
+    that quarter. (Re-baselining the reference itself, as earlier versions did, forgave every
+    confirmed step of growth: a doubling string passed a 256 MB budget on its way to 1 GB.) The budget
+    is per execution — one guarded call or one coroutine resume — never cumulative across a thread's
+    resumes, because the reading is process-wide.
   - **What this does not cover:** the budget bounds live growth, not GC churn — a script that allocates
     and discards memory in a tight loop is bounded by the wall-clock timeout instead. A single host
     callback that allocates a large amount of memory in one call (not driven by VM instructions) is not
@@ -137,15 +143,37 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
   moves the wall-clock half live and is gated to the unrestricted host actor (`NOT_AUTHORITY` for an
   ordinary mod); the instruction half has no Lua-facing setter. A trip is classified by a typed trip
   kind and reported as `BUDGET_EXCEEDED` with the bound and the author's line.
-- Coroutine abuse has a total-lifetime budget through `LuaCsCoroutineHandle`.
-  `LuaCsCoroutineHandle.DefaultTotalLifetimeSteps` is `1_000_000` across all resumes
-  for one handle, and the handle is forcibly killed when exceeded.
+- **Scheduler threads have no lifetime cap.** The per-resume budget is the only CPU limit on a mod's
+  main chunk, its `task.*` threads and its signal handlers, as in Roblox: a thread may run for the
+  whole session as long as every resume yields in time (`LuaCsCoroutineHandle.UnlimitedLifetimeSteps`).
+  A lifetime step cap (`DefaultTotalLifetimeSteps`, `1_000_000` across all resumes) remains only on a
+  `LuaCsCoroutineHandle` a host constructs directly, and exhausting it fails the resume loudly with
+  `EXCEEDED_LIFETIME_STEP_BUDGET` instead of killing the thread in silence.
+- **String patterns are budgeted per call.** `string.find`/`match`/`gmatch`/`gsub` run on a port of
+  Luau's matcher with a step counter — 5,000,000 steps per call, then `EXCEEDED_PATTERN_STEP_BUDGET`
+  — and `gsub`/`string.format` results are capped at 1,000,000 characters before the string is built,
+  so a single backtracking pattern can no longer run for seconds inside one resume.
 - `coroutine.wrap` is removed from the secured environment (its resumer would bypass the guard hook);
   `coroutine.resume` is replaced by a budget-guarded wrapper that arms the per-resume step, time and
   allocation limits on the coroutine's own state.
 - `execute_lua` (`LuaCsGameToolExecutor`) and `LuaCsAiEnvelopeProcessor` normalize and truncate results:
   the result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** (`LuaCsAiEnvelopeProcessor.MaxResultSummaryLength` / `MaxErrorMessageLength`) before they reach the model or the repair path.
-- `LuaCsApiRegistry` wraps host callbacks and converts host validation exceptions into `LuaRuntimeException`, so Lua callers see script errors instead of raw CLR exception types.
+- **An error value is one line, never a CLR dump.** `LuaCsApiRegistry` (and the Rbx bindings) turn a
+  failing host callback into a `LuaCsHostFunctionException` whose error value is exactly `name:
+  message` — on the Rbx surface the §5.2.7 `[mod:<id> script:<path> line:<n>] CODE: message | fix:
+  ...` line. `pcall`, `xpcall` and a protected `coroutine.resume` all receive that same string, with
+  no CLR type name, managed stack trace or absolute source path; before this fix `pcall` handed the
+  script the wrapper's `ToString()` (about 1,600 characters per refusal, so four refusals overflowed
+  the 4,000-character `execute_lua` result) while `xpcall` and `coroutine.resume` received `nil`. The
+  sandbox's own refusals (the `string.rep`, `table.concat` and `string.format` caps, a `gsub` result
+  cap) raise the same kind of error at level 0, so `pcall`, `xpcall` and `coroutine.resume` read the
+  same line for them too. A trip of the guard's step, time or memory budget carries its own one-line
+  error value of the same kind (its text, with no CLR type name), which is the line a host sees. C#
+  code reaches the original exception through `HostException`, which engine-neutral code reads via
+  `IScriptHostFailure` / `ScriptExecutionErrors.NextCause` (the memory-trip classifiers walk the chain
+  that way). A Lua error raised inside a registered delegate crosses unchanged. The one path left
+  unwrapped is a raw `LuaFunction` registered through `RegisterCallback(string, LuaFunction)`, which
+  no production code uses.
 - `coreai_world_load_scene` supports an optional scene whitelist check. (This is one of the classic
   build bindings: in the default production composition it is **disabled** — a stub raises an error
   pointing at the Rbx API — and the whitelist only matters on hosts that opt into the build bindings.)
@@ -257,7 +285,10 @@ Maintain EditMode tests for attempts to:
 - `table.concat` output capping (`MaxTableConcatLength`) and plain-concatenation allocation bombs
   (`s = s .. s` doubling) hitting the total per-execution allocation budget (`EXCEEDED_MEMORY_BUDGET`).
 - `pcall` loop recursion and unbounded call-stack behavior.
-- Coroutines that exceed total lifetime budgets.
+- A directly constructed coroutine handle that exceeds its total lifetime budget, and a scheduler
+  thread that loops forever while yielding (it must keep running).
+- `pcall`/`xpcall`/`coroutine.resume` of a failing host call and of a sandbox cap: the error value must
+  be the one line, with no CLR type name, stack trace or path; a guard trip's error text likewise.
 - World binding validations for NaN/Infinity and coordinate bounds (`|value| <= 100000`).
 - Rate-limit behavior for `execute_lua` and repair-generation lockout.
 

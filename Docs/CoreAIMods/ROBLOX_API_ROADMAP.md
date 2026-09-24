@@ -161,16 +161,15 @@ Derived rules:
   motor answering for whatever the provider declines — see
   [CHARACTER_MOTOR_BRIDGE.md](CHARACTER_MOTOR_BRIDGE.md). (4) Switching the scale config (0.28 ↔ 1:1)
   must require touching **zero assets** — only the `RobloxSpace` constant (tested: §5.1.8).
-- **Host integration profile**: embedding CoreAI mods into an **existing meter-scale Unity
-  game** is a first-class scenario. A per-project host profile (ScriptableObject: `RobloxSpace`
-  scale [default 0.28], capability defaults, which host services/objects are bound, the
-  per-world `ClientWritePolicy` — `RobloxParity` [default] / `Strict` / `Open`, resolved
-  through the single authority-resolver seam so future partial-authority rules are a resolver
-  swap, §MVP12 — plus the per-role human tool-surface config and the Players-may-fly flag from
-  the roles/locomotion decisions below) makes
-  integration "drop a config and it works". `RobloxSpace`'s configurable scale **is** the
-  meter-world adapter — no second conversion layer exists or is planned. Ships as a small
-  deliverable in MVP16 (§MVP16).
+- **Host integration profile**: embedding CoreAI mods into an **existing meter-scale Unity game** is a
+  first-class scenario. A per-project host profile (ScriptableObject: `RobloxSpace` scale [default
+  0.28], capability defaults, which host services/objects are bound, the per-world `ClientWritePolicy`
+  — `RobloxParity` [default] / `Strict`, resolved through the single authority-resolver seam so future
+  partial-authority rules are a resolver swap, §MVP12; co-building is a host grant, not an `Open` mode
+  (owner decision 3) — plus the per-role human tool-surface config and the Players-may-fly flag from
+  the roles/locomotion decisions below) makes integration "drop a config and it works".
+  `RobloxSpace`'s configurable scale **is** the meter-world adapter — no second conversion layer
+  exists or is planned. Ships as a small deliverable in MVP16 (§MVP16).
 - **Roles: Creator / Player (LOCKED — studio == game)**: every connected player has a per-world
   **role** — **Creator** (the host's default in their own world; grantable to others = the Team
   Create analog) or **Player** (joiner default). The role gates the **human-driven** AI tool
@@ -194,8 +193,9 @@ Derived rules:
   (templates default to `Enum.SignalBehavior.Deferred` [^10]) — details §5.1.4 (D4).
 - **Clocks (LOCKED)**: the scheduler (`task.wait`, `task.delay`) and the frame pipeline run on
   **scaled game time** (they respect `Time.timeScale` — pause/slow-mo pauses/slows mods), and the
-  real-time surface ships alongside with Roblox names: `os.time()`, `os.clock()`, `DateTime`,
-  `workspace:GetServerTimeNow()`, `time()`. Full clock-mapping table in §5.2.6 (D9).
+  real-time surface ships alongside with Roblox names: `os.time()`, `os.clock()`,
+  `workspace:GetServerTimeNow()`, `time()` (`DateTime` is a loud backlog stub, M2-15). Full
+  clock-mapping table in §5.2.6 (D9).
 - **Hot reload (LOCKED)**: reloading a mod restarts its scripts with clean state; mod-created
   Instances are destroyed by default (opt-out `preserveInstances` flag per mod); mod stores
   **always** survive. Full survival matrix in §6.3.
@@ -540,9 +540,10 @@ Ordering changes vs. the seed roadmap, with justification:
 ### MVP3 — World file (place package) + two-tier backups *(code complete 2026-09-24; Unity gate pending)*
 
 - **Status**: code complete (2026-09-24); the Unity verification gate is pending — EditMode 0 failed
-  and PlayMode `FastNoLlm` 0 failed must be run in Unity (the portable `dotnet test` suite: 2085
-  passed / 0 failed / 3 skipped). The rung closes, and MVP4 starts, only after that gate and the
-  release.
+  and PlayMode `FastNoLlm` 0 failed must be run in Unity (the portable `dotnet test` suites on Linux:
+  engine-free 2105 passed / 0 failed / 3 skipped; Lua tier 1437 passed / 0 failed / 2 skipped, with
+  the engine-bound cases Inconclusive by design). The rung closes, and MVP4 starts, only after that
+  gate and the release.
 - **Current state**: the deliverables below are built and covered by EditMode tests.
   The `.world` ZIP container, `FileRbxWorldPackageStore` (create-once manual slots + the two-phase
   durable autosave ring), `ConfirmedWorldMutationGate` in front of every `execute_lua` and every
@@ -776,7 +777,14 @@ Ordering changes vs. the seed roadmap, with justification:
   content is physical, cylinders are hit and touched, a nested part is independent of its parent, and
   an unanchored part reads its live pose. `Died` fires only inside the Workspace, `MoveTo` arrives
   within ~1 stud on the ground plane, `JumpPower` is clamped to [0, 1000], and `MaxHealth = math.huge`
-  follows DEV-16. Acceptance item P8.4 (Debris) and the per-item evidence live in
+  follows DEV-16. Later in the same waves: `MoveTo` ends with `false` when a script, a `PivotTo` or a
+  tween moves the `HumanoidRootPart` (M8-18); `Humanoid:Clone` keeps its health and movement values;
+  a character `Model` is `Archivable = false`; a mod's tweens are destroyed when it unloads, is
+  quarantined or its actor disconnects (M8-22); `CollectionService.TagAdded`/`TagRemoved`/`GetAllTags`
+  count only holders inside the DataModel (M8-10); `ClickDetector.MouseClick` passes the clicking
+  player, measures the range from that player's character and works for detectors under a `Model` or
+  `Folder`, the deepest winning (M8-11, M8-08); and `Player:Kick(message)` carries its text to the
+  client. Acceptance item P8.4 (Debris) and the per-item evidence live in
   `dev-docs/MVP8_ACCEPTANCE_MANIFEST.md`.
 - **Goal**: the minimum service set that makes classic tutorial gameplay scripts (kill bricks,
   pickups, doors, speed pads) run — with Roblox game feel at the default scale.
@@ -886,23 +894,32 @@ Ordering changes vs. the seed roadmap, with justification:
   `MirrorNetworkBridge : INetworkBridge` behind the `MIRROR` define, `CoreAiMirrorAuthenticator` and
   `CoreAiMirrorSessionHost`. Since 7.42.0 a scene switches it on through
   `CoreAiMirrorNetworkBridgeProvider` on `CoreAiModsLifetimeScope`, and `RemoteEvent` /
-  `RemoteFunction` traffic runs through Mirror's real handlers and batcher — proven over an
-  in-memory transport; no two-process run over a real socket has been made. Since 7.43.0
-  `Player:Kick()` closes the connection. The unreleased fix waves add: one connection per actor with
-  the newest winning on reconnect (the Player carries over; teardown is keyed by connection); one
-  admission attempt per connection and an admission deadline (`AdmissionTimeoutSeconds`, 10 s);
-  per-channel payload limits (reliable and `RemoteFunction` up to 64 KiB, unreliable up to Roblox's
-  1,000 B, an oversize answer returned as a failure); in-process delivery for actors local to the
-  server; client handlers that no longer require Mirror authentication; stale answers, malformed
-  envelopes and orphaned requests dropped and counted instead of thrown; kcp2k's negative connection
-  ids handled (MP-25); `AttachWorld(Func<LuaCsRbxApiBindings>)` wiring `Players.IdentitySource`
-  itself, and a world that refuses a transport-admitted actor with `NOT_AUTHORITY` when it has no
-  identity source. On the remote codec: client-authored `Instance` references resolve only if the
-  sender can see them (MP-01), a 64 KiB packet no longer costs hundreds of megabytes to decode
-  (MP-02), and NaN/±Infinity travel as bare numbers (MP-17). Host mode, world-state replication, the
-  join snapshot over the wire and handing live sessions to a world loaded at runtime are still open —
-  until MVP11 a world load is refused while network sessions are live (`network_sessions_active`).
-  See `Assets/CoreAIMirror/README.md` (Sessions, Known limits) and `TODO.md`.
+  `RemoteFunction` traffic runs through Mirror's real handlers and batcher — proven over an in-memory
+  transport; no two-process run over a real socket has been made. Since 7.43.0 `Player:Kick()` closes
+  the connection. The unreleased fix waves add: one connection per actor with the newest winning on
+  reconnect (the Player carries over; teardown is keyed by connection); one admission attempt per
+  connection and an admission deadline (`AdmissionTimeoutSeconds`, 10 s); per-channel payload limits
+  (reliable and `RemoteFunction` up to 64 KiB, unreliable up to Roblox's 1,000 B, an oversize answer
+  returned as a failure); in-process delivery for actors local to the server; client handlers that no
+  longer require Mirror authentication; stale answers, malformed envelopes and orphaned requests
+  dropped and counted instead of thrown; kcp2k's negative connection ids handled (MP-25);
+  `AttachWorld(Func<LuaCsRbxApiBindings>)` wiring `Players.IdentitySource` itself, and a world that
+  refuses a transport-admitted actor with `NOT_AUTHORITY` when it has no identity source. On the
+  remote codec: client-authored `Instance` references resolve only if the sender can see them (MP-01),
+  a 64 KiB packet no longer costs hundreds of megabytes to decode (MP-02), and NaN/±Infinity travel as
+  bare numbers (MP-17). Later in the same waves: a readiness handshake (the server holds a joining
+  client's reliable remotes until it acknowledges, drops and counts its unreliable ones, and drops a
+  client that has not acknowledged within 10 s, MP-09), a server clock carried by the server's own
+  Unix-time anchors instead of `NetworkTime.offset` (MP-06), kick and supersede notices that reach the
+  client before the drop — with `Player:Kick(message)`'s text — and a client's own kick disconnecting
+  it (MP-22), the in-process loopback refusing an `UnreliableRemoteEvent` over 1,000 B like the wire,
+  and a per-sender budget of 32 live handler threads for remote-started
+  `OnServerEvent`/`OnServerInvoke` work (MP-10); a disconnected actor's mods are unloaded once their
+  running code has returned (M2-24). Mixed CoreAI versions on server and client fail loudly. Host
+  mode, world-state replication, the join snapshot over the wire and handing live sessions to a world
+  loaded at runtime are still open — until MVP11 a world load is refused while network sessions are
+  live (`network_sessions_active`). See `Assets/CoreAIMirror/README.md` (Sessions, Known limits) and
+  `TODO.md`.
 - **Goal**: real multiplayer transport under the *unchanged* mod-facing API, in the **host mode**
   topology first (desktop listen server — fastest dev loop, mirrors Roblox Studio play-testing).
   Wire behavior per M-rules (`02_MULTIPLAYER_REPLICATION.md`, incl. serialization/limits
@@ -936,6 +953,9 @@ Ordering changes vs. the seed roadmap, with justification:
      `PlayerAdded`/`PlayerRemoving` from connect/disconnect.
   7. `workspace:GetServerTimeNow()` stays Unix-epoch seconds (D9 table): the server's epoch
      clock is synced to clients via the Mirror clock offset (`INetworkBridge.ServerTimeNow`).
+     As built, the bridge side is real: `INetworkBridge.ServerClockOffsetSeconds` plus
+     `IsServerClockSynchronized`, fed by the server's clock anchors (`CoreAiServerClockMessage`);
+     the world side re-bases at the first synchronization and slews afterwards (D9 table).
 - **Dependencies**: MVP5 (contexts declared), MVP8 (Players), NeoxiderTools `Neo.Network`.
 - **DoD**: host + client playtest: chat-via-RemoteEvent fixture, server-authoritative kill brick,
   RemoteFunction round trip with timeout test; all solo corpus fixtures still pass with `MIRROR`
@@ -971,9 +991,12 @@ Ordering changes vs. the seed roadmap, with justification:
   (M2.6/M1.5; local-only VFX/hides are a feature, not an error) — default because the Roblox
   corpus and the AI's trained priors assume it;
   **`Strict`** — such writes are rejected with `NOT_AUTHORITY` (+ the "use a RemoteEvent"
-  hint) — competitive games / anti-cheat;
-  **`Open`** — client writes are forwarded to the server and replicate to everyone —
-  creative/co-build worlds (the "friend's AI edits the host's world" scenario).
+  hint) — competitive games / anti-cheat.
+  There is **no `Open` policy** (owner decision 3, `dev-docs/MVP25_BUILD_PLAN_2026-09-04.md` §D):
+  creative/co-build worlds (the "friend's AI edits the host's world" scenario) use a **host grant**
+  (`WriteGrantLedger`) — under either policy, a client write covered by a grant for
+  `(instance, action)` is not applied locally but sent as a `MutationIntent` that the server
+  checks, applies and replicates; nothing a client sends selects authority.
   Under every policy, `NOT_AUTHORITY` also fires on explicit replication attempts (e.g. a
   client calling a server-only bridge op). **Implementation shape (reserved seam)**: the policy
   is not a raw enum check scattered through replication code but a single **authority
@@ -990,8 +1013,10 @@ Ordering changes vs. the seed roadmap, with justification:
 - **DoD**: server mod builds a tree, client sees identical ids/names/positions; client tamper
   test under the default `RobloxParity` policy: a client write to a server-owned instance stays
   local and is overwritten by the next server sync (M2.6), while an explicit replication attempt
-  raises `NOT_AUTHORITY` + logged; one test each for `Strict` (write rejected with
-  `NOT_AUTHORITY`) and `Open` (write forwards and replicates); late joiner converges; 100-instance churn soak stays under rate budget;
+  raises `NOT_AUTHORITY` + logged; a test for `Strict` (write rejected with `NOT_AUTHORITY`), one
+  for a host grant (the granted write travels as an intent, is applied by the server and
+  replicates) and one asserting the policy enum has exactly two values; late joiner converges;
+  100-instance churn soak stays under rate budget;
   conformance tests cite M-rule IDs per §6.6.
 - **Effort**: L.
 
@@ -1370,7 +1395,7 @@ records its C# marker; scheduled stubs normally use `// TODO: MVP<n> — ...`.
 |---|---|---|---|
 | shipped | `PVInstance:PivotTo/GetPivot`; `Model.PrimaryPart/WorldPivot` | landed in the MVP2 Model-pivot slice; no longer a stub | `ClassCatalog` |
 | shipped | `WorldRoot:Raycast`; `Workspace.Gravity` | landed in MVP8 slice 8.5: `Raycast(origin, direction, raycastParams?)` with the mirror's 15,000-stud cap, `Gravity` 196.2 studs/s² per-body | `ClassCatalog` |
-| shipped | `Workspace:GetServerTimeNow` | landed in MVP2: epoch seconds over `IRbxClockSource`, monotonic, plus the bridge's server offset on a client | Lua binding |
+| shipped | `Workspace:GetServerTimeNow` | landed in MVP2: epoch seconds over `IRbxClockSource` plus the bridge's server offset on a client; monotonic after a client's first synchronization, backward corrections slewed (D9 table) | Lua binding |
 | shipped | `BasePart.Material` | landed: all 45 `Enum.Material` items render, unmapped ids resolve to a magenta diagnostic material ([research](../../dev-docs/MATERIALS_RESEARCH.md)) | `ClassCatalog` |
 | shipped | `MaterialVariant` / `MaterialService` | landed in 7.10.0: `Instance.new("MaterialVariant")` parented to `MaterialService`; parts wear one via the string property `BasePart.MaterialVariant` (`""` for none); an unknown name renders the plain `Material`, not an error | `ClassCatalog` |
 | planned | `RunService:BindToRenderStep`/`UnbindFromRenderStep` | MVP2; the four topology queries (`IsServer`/`IsClient`/`IsStudio`/`IsRunning`) and the modern frame events (`PreAnimation`/`PreSimulation`/`PostSimulation`/`PreRender`) have shipped | `ClassCatalog` |
@@ -1443,16 +1468,16 @@ post-publish port after the world commits rather than while it is still staging
 #### 5.2.1 Task breakdown
 
 Tasks 1-3 and 6-10 plus 12 and 13 have landed, and 5 is wired for the frame signals (its topology
-query methods are still loud stubs). Task 4 (the clock surface) and task 11 (the Tier-A corpus gate)
-remain. File paths below are the original plan; the shipped code uses the `RbxApi` namespace and
-folder layout.
+query methods are still loud stubs). Task 4 (the clock surface) has landed except `DateTime`, which is
+a loud backlog stub (M2-15, 2026-09-24); task 11 (the Tier-A corpus gate) remains. File paths below
+are the original plan; the shipped code uses the `RbxApi` namespace and folder layout.
 
 | # | Task | Files |
 |---|------|-------|
 | 1 | `RbxScriptSignal` / `RbxScriptConnection` + deferred queue (R5.x) | `RobloxApi/Events/RbxScriptSignal.cs` |
 | 2 | `ModScheduler`: phases, thread pool over `IScriptCoroutine`, wait/delay heaps (R4.x), `ScheduleWaitUntil` completion primitive | `RobloxApi/Scheduling/ModScheduler.cs` |
 | 3 | `task` library + legacy aliases (`wait`, `spawn`, `delay`) | `RobloxApi/Scheduling/TaskLibrary.cs` |
-| 4 | Clock surface (D9): `time`, `os.time`, `os.clock`, `DateTime`, `GetServerTimeNow` | `RobloxApi/Scheduling/RbxClocks.cs`, `RobloxApi/Datatypes/RbxDateTime.cs` |
+| 4 | Clock surface (D9): `time`, `os.time`, `os.clock`, `DateTime`, `GetServerTimeNow` — landed on `IRbxClockSource` except `DateTime` (a loud backlog stub, M2-15; no `RbxDateTime` exists) | `RobloxApi/Scheduling/RbxClocks.cs`, `RobloxApi/Datatypes/RbxDateTime.cs` |
 | 5 | `RunService` service + tick-driver wiring | `RobloxApi/Services/RunServiceImpl.cs`; edit `Infrastructure/LuaModRuntimeTickDriver.cs` |
 | 6 | `ServiceCatalog`: `GetService`, registration, stub factory | `RobloxApi/Services/ServiceCatalog.cs` |
 | 7 | Shared JSON contract + `HttpService` JSON members | `RobloxApi/Marshalling/RobloxJson.cs`, `RobloxApi/Services/HttpServiceImpl.cs` |
@@ -1643,10 +1668,28 @@ Notes:
   once-per-mod log note** (deviation DEV-5). `math.huge` as a `task.wait`/`task.delay`/`WaitForChild`
   duration parks the thread until it is cancelled or its mod unloads; a NaN duration raises
   `duration must be a number, not NaN`; `task.cancel` on a finished thread is a no-op.
+  As built (M2-14, 2026-09-24): `task.spawn`/`task.defer`/`task.delay` take back a handle the same
+  mod's `task.*` call returned, and `task.spawn(t) == t`. A parked thread (suspended by a native
+  `coroutine.yield`) resumes; a deferred or delayed one is detached from its old slot, which never
+  fires; the running thread may re-queue itself through `task.defer`/`task.delay` only. A dead
+  thread, a thread suspended in a scheduler wait, another mod's or another scheduler's thread, and
+  the running thread passed to `task.spawn` are refused with `BAD_ARGUMENT`.
+- **Native `coroutine.yield` and nested coroutines (M2-06, M2-19, M2-20).** A native
+  `coroutine.yield` in a task thread parks it for `task.spawn(t, ...)`, and those arguments are what
+  `coroutine.yield` returns; in a signal handler, a `RemoteFunction` callback, a legacy
+  `spawn`/`delay` function or the main chunk nothing could resume it, so the thread is stopped with
+  `CONTEXT_VIOLATION` (reported through `IRbxScriptThreadTerminalFault`), and `THREAD_CAP` names
+  how many parked threads hold slots. `task.wait`, `signal:Wait`, `WaitForChild` and a
+  `RemoteFunction` invoke from inside a `coroutine.create` coroutine raise `CONTEXT_VIOLATION`
+  instead of suspending the outer task thread; a yield inside a `string.format`/`gsub` callback no
+  longer poisons the thread's later waits (the unfinished wait is rolled back). Every thread exit
+  raises the scheduler's `ThreadRetired` once, which releases its tracking entry, its pending
+  `signal:Wait` connection and an unanswered `RemoteFunction` request (M2-07, M2-18).
 - **R4.10 native coroutine-library interop is UNSUPPORTED.** A boxed CoreAI task handle may be
   rescheduled/cancelled, but a thread from `coroutine.create()` cannot be accepted or returned:
   `IScriptEngine` cannot wrap an existing native thread, and `IScriptCoroutine` exposes neither
-  the native VM value nor a stable native identity.
+  the native VM value nor a stable native identity. Passing one (or a `coroutine.running()` value)
+  to `task.spawn`/`defer`/`delay` is `BAD_ARGUMENT` naming this rule.
 - Legacy aliases: `wait(t)` → `task.wait(t)` but returning the legacy pair
   `(elapsed, time())` per R4.9; `spawn(fn)` → `task.defer` passing the legacy args
   `(elapsedTime, engineUptime)` per R4.9; `delay(t, fn)` → `task.delay` — each logs a
@@ -1655,7 +1698,12 @@ Notes:
 - Clock surface per D9 (§5.2.6): `time()`, `os.time()`, `os.clock()`, `tick()` (legacy, with
   deprecation note), `DateTime.now()`/`DateTime.fromUnixTimestamp()`/
   `DateTime.fromUnixTimestampMillis()` (+ `UnixTimestamp`/`UnixTimestampMillis` fields),
-  `workspace:GetServerTimeNow()`.
+  `workspace:GetServerTimeNow()`. As built: `DateTime` is a loud backlog stub (M2-15) whose error
+  points at `os.time()` and `GetServerTimeNow()`; `os.time(t)` reads the date table as UTC (Luau's
+  choice), `hour` defaulting to 12, out-of-range fields carrying over, a missing `year`/`month`/`day`
+  `BAD_ARGUMENT` (M2-22). `typeof` answers Roblox type names and `warn` writes to the mod's log at
+  `Warn` (M1-06); `BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Ray`,
+  `Region3`, `Rect`, `PhysicalProperties`, `OverlapParams` and `shared` are loud stubs too.
 - `RunService`: events per §5.2.3; `IsServer()`, `IsClient()`, `IsRunning()` — answered from
   `INetworkBridge.Topology` (solo: both true; dedicated server: server only; pure client: client
   only); `IsStudio()` → false in player, true in editor; `BindToRenderStep(name, priority, fn)` /
@@ -1744,10 +1792,10 @@ Game logic runs on scaled time; wall-clock APIs exist under their Roblox names. 
 | `task.wait` / `task.delay` / tween durations / `Debris` | scheduler time | `Time.time` accumulation via the phase pump | **yes** |
 | `RunService` event `dt` args | frame/physics deltas | `Time.deltaTime` / `Time.fixedDeltaTime` | **yes** |
 | `time()` | game-simulation time since world start | `Time.time` minus world-start offset | **yes** |
-| `workspace:GetServerTimeNow()` | server-synchronized clock, monotonic, **Unix epoch seconds** | `DateTimeOffset.UtcNow`-based epoch seconds, monotonic-smoothed (never steps back); MVP11: the same epoch base with the Mirror clock offset applied (`INetworkBridge.ServerTimeNow`) | no |
+| `workspace:GetServerTimeNow()` | server-synchronized clock, monotonic, **Unix epoch seconds** | `IRbxClockSource` Unix seconds plus `INetworkBridge.ServerClockOffsetSeconds`. Where this process is the server clock (no bridge, `Solo`, `Host`, `DedicatedServer`): the local clock, held at its last reading while that clock steps back. On a `Client`: the local clock, unsmoothed, until `INetworkBridge.IsServerClockSynchronized`; re-based once at the first synchronization; from then on never decreasing — an estimate ahead is taken at once, one behind is slewed onto at half speed (`ServerTimeSlewRate` 0.5; Roblox's 0.6% would take half an hour for a ten-second correction). The Mirror offset comes from the server's own clock anchors (sent at readiness and every 5 s, corrected by half the round trip), not from `NetworkTime.offset`, which compares process uptimes | no |
 | `os.time()` | Unix epoch seconds (UTC), integer | `DateTimeOffset.UtcNow.ToUnixTimeSeconds()` | no |
 | `os.clock()` | CPU time for benchmarking | `Stopwatch`-based process time | no |
-| `DateTime.now()` etc. | calendar datatype | `System.DateTimeOffset` wrapped as `RbxDateTime` | no |
+| `DateTime.now()` etc. | calendar datatype | planned: `System.DateTimeOffset` wrapped as `RbxDateTime`; as built a loud backlog stub (M2-15) pointing at `os.time()`/`GetServerTimeNow()` | no |
 | `tick()` (legacy) | epoch seconds with fraction | `DateTimeOffset.UtcNow` fractional epoch; deprecation note once per mod | no |
 
 Rules: pausing (`timeScale = 0`) freezes the first three rows and everything built on them;
@@ -1789,6 +1837,17 @@ owning mod and stay unprefixed. What is still deferred to MVP5 is the VM chunk n
 that raw VM tracebacks resolve to the owning mod too. Argument positions in `BAD_ARGUMENT` never count
 `self`, and a property-assignment error reads `Part.Name expects a string, got number | fix: assign a
 string to Part.Name`.
+
+The same line is the error value a script receives: `pcall`, `xpcall` and a protected
+`coroutine.resume` all get exactly the line a failing host call raised (as built since 2026-09-24:
+`LuaCsHostFunctionException`, error level 0), and a sandbox cap its own one-line text the same way —
+never a CLR type name, a managed stack trace or a source path, which used to cost about 1,600
+characters per refusal and overflowed `execute_lua`'s 4,000-character result. A budget trip's error
+value is a one-line text of the same kind. C# still reads the original exception (`HostException`,
+`IScriptHostFailure`, `ScriptExecutionErrors.NextCause`). When such a line ends a scheduler thread,
+the thread's fault keeps its code and context under one prefix (`RbxError.TryParse` is the exact
+inverse of the formatter); only a plain Lua error is wrapped as `BAD_ARGUMENT`, and a budget kill is
+`BUDGET_EXCEEDED`.
 
 #### 5.2.8 Risks and mitigations
 

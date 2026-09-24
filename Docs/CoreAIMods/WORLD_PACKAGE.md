@@ -322,9 +322,12 @@ through the Hub page.
 ## Acceptance status (MVP3)
 
 **Code complete (2026-09-24); the Unity verification gate is pending.** EditMode (0 failed) and
-PlayMode `FastNoLlm` (0 failed) must still be run in Unity; the portable `dotnet test` suite, which
-runs the engine-free tests on Linux, reports 2085 passed / 0 failed / 3 skipped. MVP3 is not closed
-until that gate is green and the release is tagged.
+PlayMode `FastNoLlm` (0 failed) must still be run in Unity. On Linux, the portable `dotnet test`
+suites report 2105 passed / 0 failed / 3 skipped for the engine-free tests and 1437 passed / 0 failed /
+2 skipped for the Lua tier (`tools/portable/LuaTests`, which runs `Mvp3WorldPackageEditModeTests` and
+`Mvp3WorldPackageQaEditModeTests` against a UnityEngine shim; a case that reaches the engine, a
+file-store load included, is Inconclusive by design). MVP3 is not closed until
+that gate is green and the release is tagged.
 
 Each item of the roadmap's MVP3 Definition of Done is proven by a named test that fails on a wrong
 implementation (EditMode fixtures: `Mvp3WorldPackageEditModeTests`, `Mvp3WorldPackageFollowUpEditModeTests`,

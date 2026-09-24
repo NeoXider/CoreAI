@@ -117,7 +117,7 @@ MVP11 adds **no new Lua members**. It changes where existing members answer from
 | `Player:Kick(message?)` | Server: disconnects the connection with `CreatorKick`; client: only self. |
 | `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction` | Same surface; packets move over Mirror reliable/unreliable channels; `OnServerEvent`'s first argument is the connection-bound `Player`, never a payload field. `UnreliableRemoteEvent` payloads over the transport MTU raise `PAYLOAD_TOO_LARGE` (Q4 answered at runtime from the transport). |
 | `RemoteFunction:InvokeServer/InvokeClient` | Correlated request/response with a wire correlation id; the existing 30 s timeout (`LuaCsRbxApiBindings.cs:33`) becomes the documented Lua error on both sides. |
-| `workspace:GetServerTimeNow()` | Server epoch seconds plus the measured Mirror clock offset on clients (`NetworkTime.offset`), monotonic-smoothed; tolerance frozen before the run. |
+| `workspace:GetServerTimeNow()` | Server epoch seconds plus the measured server clock offset on clients, monotonic-smoothed; tolerance frozen before the run. As built (2026-09-24, `d6096dc6`/`5fdfbf17`/`0e51e982`): the offset comes from the server's own Unix-time anchors (`CoreAiServerClockMessage`, sent at readiness and every 5 s, corrected by half the round trip), not from `NetworkTime.offset`, which compares process uptimes; a client re-bases at its first synchronization and slews backward corrections at half speed, a server or solo world holds its last reading. |
 | Script contexts | `server` / `client` / `shared` declared per mod (manifest field + header key); a client-only member used in server context raises `CONTEXT_VIOLATION` (code exists in `RbxError.cs`), replacing the grant-derived `IsNetworkServer`. |
 
 Explicitly **not** delivered: shared-state replication of any kind after the join moment (no deltas, no property sync, no late-join convergence — that is MVP12), `ReplicatedFirst`, `DataModel.Loaded`/`IsLoaded`, `TeleportService`, `MessagingService`, the `NetworkServer`/`NetworkClient`/`NetworkSettings` classes (present in the mirror, not usefully scriptable — they stay unknown members), dedicated server (MVP13), matchmaking/relay/NAT, WebGL hosting (WebGL is `Client` only and needs a WebSocket transport, §C.5).
@@ -232,7 +232,8 @@ public interface INetworkBridge
     event Action<RbxNetworkIntentMessage, RbxNetworkRequestResponder> IntentReceived;         // MVP12
     void SendDelta(RbxReplicationDelta delta, string recipientActorId /* null = all */);       // MVP12
     event Action<RbxReplicationDelta> DeltaReceived;                                           // MVP12
-    double ServerClockOffsetSeconds { get; }            // Null: 0; Mirror: NetworkTime.offset — consumed by IRbxServerClockOffset
+    double ServerClockOffsetSeconds { get; }            // Null: 0; Mirror: the server's clock anchors (as built; NetworkTime.offset compares uptimes, not clocks)
+    bool IsServerClockSynchronized { get; }             // as built: true on a server, on a client from the first anchor
 }
 ```
 
@@ -258,7 +259,7 @@ and only on `Admitted` calls `ServerAccept(conn)`; otherwise `ServerReject(conn)
 ### C.5 Transport notes that shape the plan
 
 - Desktop host/client: KCP (bundled). WebGL pure client (MVP13 validation) requires Mirror's `SimpleWebTransport`; KCP is not available in browsers. Not an MVP11 deliverable, but the bridge must not assume UDP (the MTU is read from `Transport.GetMaxPacketSize(channel)` at runtime, Q4).
-- `NetworkTime.offset` backs `ServerClockOffsetSeconds`; its variance is what freezes the N11.6 tolerance.
+- The server's clock anchors back `ServerClockOffsetSeconds` (as built; the plan named `NetworkTime.offset`, which is the difference of the two processes' uptimes, so a client of a server that had run for a day read the server's time a day off). The anchor estimate's spread across the round-trip variance (`NetworkTime.rttVariance`) is what freezes the N11.6 tolerance; the bridge side of N11.6 is real.
 - No `NetworkBehaviour`/`SyncVar` is ever exposed to mods (M1.7); the bridge uses `NetworkServer.RegisterHandler<T>`/`NetworkClient.RegisterHandler<T>` message handlers only. NeoxiderTools reflection sync and context relay are not used (decision 2).
 
 ---

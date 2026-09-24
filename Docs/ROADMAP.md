@@ -33,8 +33,9 @@ The headline scenario is **live co-creation**: everyone joins the running game a
 together — the in-game analog of Roblox Studio Team Create, except CoreAI needs no separate
 editor product because the game *is* the editor (the realtime principle). It falls out of
 pieces the tracks below already carry: the multiplayer join snapshot is the same serializer as
-the world file (Track C), `ClientWritePolicy: Open` will admit everyone as a builder (MVP12)
-while the partial-authority resolver later enables rules like build-but-not-delete (Track B),
+the world file (Track C), host grants let a co-builder's writes travel as intents the server checks
+and applies (MVP12; there is no `Open` write policy — owner decision 3) while the partial-authority
+resolver later enables rules like build-but-not-delete (Track B),
 each player talks to the AI through their own Hub chat (Track D), one-shot objects carry origin
 tags, every connected player carries a per-world role — Creator (grantable, the Team Create
 analog) or Player — gating the human-facing AI tool surface, while game-sanctioned AI creation
@@ -44,8 +45,9 @@ autosave-before-every-AI-mutation tier is the shared world's safety net, and a m
 shareable place package anyone can host next.
 
 CoreAI is a **framework, not a game**. Behavior that could be an opinion ships as configuration:
-the per-world `ClientWritePolicy` (RobloxParity default / Strict / Open, behind a single
-authority-resolver seam so partial `(instance, property)` authority is a later resolver swap),
+the per-world `ClientWritePolicy` (RobloxParity default / Strict, plus host grants for co-building,
+behind a single authority-resolver seam so partial `(instance, property)` authority is a later
+resolver swap),
 the `RbxSpace` scale constant (1 stud = 0.28 m default, 1:1 available), capability tiers,
 LLM endpoint routing profiles, and the host integration profile. Everything created at runtime —
 world state, mods, memories, (soon) UI — is versioned, persisted, revertible, and shareable.
@@ -131,8 +133,12 @@ over a real socket has been made yet); since 7.43.0 a kick (`INetworkBridge.Disc
 the connection. Unreleased, after 7.45.0: `AttachWorld(() => stack.GameplayBindings.RbxApi)` wires
 `Players.IdentitySource` to the session host itself, a reconnecting actor's newest connection wins,
 admission has a deadline, payload limits are per channel (reliable up to 64 KiB, unreliable up to
-1,000 B), actors local to the server are served in process, and a world load is refused while
-network sessions are live, because they cannot be handed to a new world before MVP11.
+1,000 B, in solo too), actors local to the server are served in process, a joining client
+acknowledges readiness before the server sends it anything, the server's clock reaches clients as
+its own Unix-time anchors, a kick or a superseded session tells the client why (with the kick's
+message) before the drop, a remote sender's handler threads are budgeted per sender, a disconnected
+actor's mods are unloaded, and a world load is refused while network sessions are live, because they
+cannot be handed to a new world before MVP11.
 `InstanceRegistry` binds instance ids to
 `netId`s, and the engine-free replication core under MVP12 — member-level change reporting, a dirty
 set, per-recipient Spawn/Patch/Remove planning and a replica-side applier — is built and tested
@@ -161,28 +167,28 @@ that serves as both the disk save format and the multiplayer join snapshot. Two-
 manual player-owned slots plus an autosave before every AI mutation. RBXL import/export makes
 existing Roblox places a content on-ramp.
 
-**Current state.** World state persistence (`WorldStateManager`), versioned mod source stores
-with revert, and the self-contained shareable mod bundle (`ExportMod`/import with capability
-masking) are shipped. **MVP3 is code complete (2026-09-24); its Unity verification gate is
-pending** — EditMode 0 failed and PlayMode `FastNoLlm` 0 failed still have to be run in Unity (the
-portable `dotnet test` suite reports 2085 passed / 0 failed / 3 skipped), so the rung is not closed
-yet. Built: the `.world` ZIP place package (deterministic
-`manifest.json` + `world.json` + indexed `Mods/`), `FileRbxWorldPackageStore` with create-once
-manual slots and a two-phase-durable autosave ring, `ConfirmedWorldMutationGate` in front of every
+**Current state.** World state persistence (`WorldStateManager`), versioned mod source stores with
+revert, and the self-contained shareable mod bundle (`ExportMod`/import with capability masking) are
+shipped. **MVP3 is code complete (2026-09-24); its Unity verification gate is pending** — EditMode 0
+failed and PlayMode `FastNoLlm` 0 failed still have to be run in Unity (on Linux the portable
+`dotnet test` suites report engine-free 2105 passed / 0 failed / 3 skipped and Lua tier 1437 passed /
+0 failed / 2 skipped), so the rung is not closed yet. Built: the `.world` ZIP place package (deterministic
+`manifest.json` + `world.json` + indexed `Mods/`), `FileRbxWorldPackageStore` with create-once manual
+slots and a two-phase-durable autosave ring, `ConfirmedWorldMutationGate` in front of every
 `execute_lua` and every mutating `manage_mods` action, `RbxWorldRuntimeSessionController` for
-transactional session replacement, the `save_world`/`load_world` tools with the
-confirm-before-restore flow, the `list_autosaves`/`load_autosave` tools over the autosave ring
-(`save_world`, `load_world` and `load_autosave` refuse an invalid slot or autosave name as a JSON error
-result), and the built-player **Hub → World Loads** page. Unreleased, after 7.45.0: every world
-tool returns a JSON failure instead of throwing (`capture_failed`, `not_found`, `invalid_package`, `read_failed`,
+transactional session replacement, the `save_world`/`load_world` tools with the confirm-before-restore
+flow, the `list_autosaves`/`load_autosave` tools over the autosave ring (`save_world`, `load_world`
+and `load_autosave` refuse an invalid slot or autosave name as a JSON error result), and the
+built-player **Hub → World Loads** page. Unreleased, after 7.45.0: every world tool returns a JSON
+failure instead of throwing (`capture_failed`, `not_found`, `invalid_package`, `read_failed`,
 `network_sessions_active`, `list_failed`); restore runs as one host-enveloped operation; a session
 composed with a world ACL refuses a legacy package; restored trees charge the instance quota; and the
 W3.5 tail is implemented — a player-confirmed world survives a process restart (durable startup
 selection under `Saves/Startup`, restored through the same staged swap, the default world on any
 failure, a Hub reset button). Each MVP3 DoD item (a)–(f) is proven by a named test, listed with the
 rung-zero envelope, ACL-floor and startup-selection tests in
-[`WORLD_PACKAGE.md`](CoreAIMods/WORLD_PACKAGE.md#acceptance-status-mvp3) and ROBLOX_API_ROADMAP
-§MVP3. The real WebGL page-reload gate stays open. RBXL is not built.
+[`WORLD_PACKAGE.md`](CoreAIMods/WORLD_PACKAGE.md#acceptance-status-mvp3) and ROBLOX_API_ROADMAP §MVP3.
+The real WebGL page-reload gate stays open. RBXL is not built.
 
 **Next milestones.** The MVP3 Unity verification gate, then its release; MVP4 (RBXL
 import/export) starts only after that; MVP9 (DataStoreService on the shared JSON contract).

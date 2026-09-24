@@ -31,6 +31,7 @@ description: one line.
 | `store_set(key, value)` / `store_get(key)` | per-mod persistent string key/value (survives frames + reloads). |
 | `mod_id()` | this mod's id. |
 | `report(msg)` / `print(msg)` | diagnostic line back to the host (muted by default; host enables per mod). |
+| `warn(...)` | (Rbx API) the arguments joined by spaces, into the mod's log at `Warn` level — `get_mod_logs` shows it. A one-off `execute_lua` chunk, or a composition without a mod log, writes to the host log instead, at most 20 lines per 10 s per script (the rest are counted into the next line). |
 
 ## Inter-mod API (cross-mod, plain-data only)
 | Function | Meaning |
@@ -50,7 +51,9 @@ The mod-core + inter-mod API above is always present. Tiers gate the **game** bi
 - **Read** — query only.
 - **Gameplay** — `time_*` (time scale) and read-only `input_*`.
 - **WorldEdit** — `Instance.new` and the rest of the Rbx API (see
-  [RBX_API.md](../../Assets/CoreAI/Docs/RBX_API.md)): creating, changing and destroying instances. The classic
+  [RBX_API.md](../../Assets/CoreAI/Docs/RBX_API.md)): creating, changing and destroying instances. The
+  `Instance` global itself exists on every tier, so a read-only script's `Instance.new` raises the capability
+  error instead of indexing a nil global. The classic
   `coreai_world_*` build calls (spawn/change/destroy/scene/animation/sound) are withheld stubs in the default
   composition; they raise an error that points at the Rbx API.
 - **LogicOverride** — `logic_*` formulas.
@@ -85,6 +88,25 @@ folder.Parent = workspace
 
 Do not depend on the relative invocation order of multiple connections to the same signal. That
 order is not part of the CoreAI or Roblox authoring contract.
+
+A task handle from `task.spawn`/`task.defer`/`task.delay` can be handed back to those functions:
+`task.spawn(t)` resumes a parked task and returns `t` itself, and `task.defer(t)`/`task.delay(s, t)`
+reschedule it. A native `coroutine.yield()` inside such a task parks it until `task.spawn(t, ...)`, and the
+extra arguments are what `coroutine.yield` returns. Threads from `coroutine.create` stay outside the
+scheduler: passing one to `task.*` is `BAD_ARGUMENT`, and `task.wait`, `signal:Wait`, `WaitForChild` or a
+`RemoteFunction` invoke inside one raise `CONTEXT_VIOLATION` — run such code with `task.spawn`.
+
+**A player who leaves takes their mods along.** When an actor disconnects, the mods loaded for that
+actor are unloaded (mods loaded with host authority stay), including one in quarantine; if mod code is
+running at that moment — a mod whose own script kicked its player — the unload waits until that code has
+returned. The stored package stays active, so the mod starts again on the next world load or rehydrate; it
+is not restarted automatically when the player rejoins. A mod whose main chunk disconnects its own actor
+while it loads does not load (`InvalidOperationException`, "did not load: its actor … disconnected while its
+main chunk ran").
+
+A `Humanoid:MoveTo` ends with `MoveToFinished(false)` when your script or a tween moves the character's
+`HumanoidRootPart` (its `CFrame`, `Position`, `Orientation` or `Rotation`, or a `PivotTo` that carries it),
+as in Roblox; teleport the character after the walk has finished if you need both.
 
 ## Roblox services and deferred placeholders
 

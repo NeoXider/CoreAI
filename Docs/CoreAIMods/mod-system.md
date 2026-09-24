@@ -174,11 +174,29 @@ configurable via `LuaCsModStackOptions.MaxErrorsBeforeQuarantine` — the mod is
   instance with a zero streak and no quarantine, and dispatch resumes. `unload`/`forget` remain the
   explicit removal paths.
 
+**Disconnect is the one runtime path that does unload.** When an actor disconnects,
+`LuaCsRbxApiBindings.ActorModsDisconnected` names the mods loaded for that actor and the runtime unloads
+them — host-authority mods excepted — while the stored package keeps its active flag, so the next world
+load or `RehydrateFromStore` starts them again (a rejoin alone does not). A quarantined mod keeps its actor
+record and is unloaded by its actor's disconnect like any other, instead of holding its instance quota for
+ever; a failed first load leaves no actor record behind. The unload never runs in the middle of mod code:
+a disconnect raised while a hook, a timer, a logic-slot formula or a scheduler thread runs — a script that
+kicked its own player — is released once that code has returned, or at the next `Tick`. A load or reload
+whose main chunk disconnects its own actor fails with `InvalidOperationException` ("did not load: its actor …
+disconnected while its main chunk ran") and is rolled back.
+
 Observability: quarantine entry raises `LuaCsModRuntime.ModQuarantined(modId, errorCount)`, and every
 teardown of a mod instance's side effects (unload, reload pre-swap, quarantine entry) raises
 `ModTearingDown(modId, reason)` — future subsystems (instance registries, signals) hook the same
 point. Logic-slot override failures are fail-open (reset to vanilla) but attributed: they are
 recorded into the mod's handler-error diagnostics with the owning mod id and slot name.
+
+The streak is also what the host's auto-repair reads (`AddModHandlerErroredListener` reports it with
+every failure). `LuaModAutoRepairPolicy` still attempts its first repair at a streak of
+`DefaultMinConsecutiveErrors` (3; unchanged by the 2026-09-24 fix waves), but for scheduler threads the
+streak now counts faulting frames (M2-08): any number of faults in one frame count once, and a frame whose
+threads ran cleanly resets it, so a burst inside one frame no longer triggers a repair on its own while an
+error repeated every frame does.
 
 ## 5b. Multiplayer write policy (decision core implemented; not on the network yet)
 
@@ -186,9 +204,10 @@ CoreAI is a framework, not one game: what clients may change in a shared world i
 configuration**, not a hardcoded rule. The engine-free decision core ships in
 `CoreAI.RbxApi.Instances` (`Replication/`): `ClientWritePolicy`, per-instance host grants in
 `WriteGrantLedger`, `ClientWriteAuthority.Resolve` and `IntentGateway`. The OnlineAuthority demo runs
-it in one process; nothing routes client writes over a transport yet. The design below is the plan it
-was built from — the shipped enum has only `RobloxParity` and `Strict`, and the "Open" behaviour is a
-host grant in `WriteGrantLedger` (a granted write is forwarded as an intent) rather than a third mode:
+it in one process; nothing routes client writes over a transport yet. The policy has exactly two modes;
+co-building is a host grant in `WriteGrantLedger` (a granted write is forwarded as an intent the server
+checks), not a third mode — there is no `Open` policy (owner decision 3,
+[`MVP25_BUILD_PLAN_2026-09-04.md`](../../dev-docs/MVP25_BUILD_PLAN_2026-09-04.md) §D):
 
 - **`RobloxParity` (default):** a client write to a server-owned replicated instance applies
   locally, never replicates, and the server state overwrites it on the next sync. This mirrors
@@ -196,8 +215,10 @@ host grant in `WriteGrantLedger` (a granted write is forwarded as an intent) rat
   LLM's priors assume it, so it is the default.
 - **`Strict`:** such writes are rejected with a `NOT_AUTHORITY` error (plus a "use a RemoteEvent"
   hint) — competitive games, anti-cheat.
-- **`Open`:** client writes are forwarded to the server and replicate to everyone — creative /
-  co-build worlds (the "friend's AI edits the host's world" scenario).
+- **Host grants (not a policy mode):** a client whose actor holds a grant covering `(instance, action)`
+  does not apply the write locally; it sends a `MutationIntent`, the server checks the grant and applies
+  it, and the authoritative change replicates to everyone — creative / co-build worlds (the "friend's AI
+  edits the host's world" scenario).
 
 Implementation seam (reserved now, implemented at MVP12): every mutation is routed through a single
 authority resolver `(instance, property/action) → ApplyLocalOnly | Replicate | Reject`. The MVP

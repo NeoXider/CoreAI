@@ -20,7 +20,7 @@ Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part propert
   execute_lua call see. An instance one mod creates is the same one another mod navigates.
 - Creating or mutating instances needs the WorldEdit capability (persistent mods have it by
   default). Read-only scripts still get `game`/`workspace`/datatypes and can READ input
-  (UserInputService) and the camera, but not `Instance` or any mutation.
+  (UserInputService) and the camera, but no mutation (`Instance.new` raises the capability error).
 - Every `RbxScriptSignal` uses DEFERRED dispatch. Firing queues handlers instead of running
   them at the fire site; they run at the next script-resumption point, and the queue flushes
   at every script-resumption point of the frame loop. `:Connect()`, `:Once()`, and `:Wait()`
@@ -36,6 +36,20 @@ Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part propert
   `WaitForChild(name, math.huge)` park until cancelled or the mod unloads; a NaN duration is
   BAD_ARGUMENT. `task.cancel` on a finished task does nothing. A `task.defer` from a handler runs
   in the same resumption point.
+- `task.spawn/defer/delay` also take a task handle they returned (`task.spawn(t) == t`): a parked
+  task resumes, a deferred/delayed one is rescheduled; a finished task, one inside a wait, another
+  mod's task, or a `coroutine.create` thread is BAD_ARGUMENT. `coroutine.yield()` inside a task
+  parks it until `task.spawn(t, ...)`, whose extra args are what yield returns; inside a handler
+  or the main chunk it is CONTEXT_VIOLATION. `task.wait`, `signal:Wait`, `WaitForChild` and `InvokeServer`
+  inside a `coroutine.create` coroutine raise CONTEXT_VIOLATION — use `task.spawn` instead.
+- `typeof(v)` returns Roblox type names ("Instance", "Vector3", "EnumItem", ...). `warn(...)`
+  writes to the mod log at Warn level (get_mod_logs shows it).
+- Clocks: `os.time()` (Unix seconds; `os.time({year=,month=,day=[,hour=,min=,sec=]})` reads the
+  table as UTC, hour defaults to 12), `os.clock()`, `time()` (scaled game time), and
+  `workspace:GetServerTimeNow()` (Unix seconds every player agrees on: a client reads the server's
+  clock once joined, and from then on it never goes backwards). `DateTime` is not implemented.
+- A player who leaves takes the mods loaded for them along: they are unloaded (after their running
+  code returns) and start again on the next world load.
 - Budgets are per resume: a thread may loop forever as long as it yields
   (`while true do task.wait() end` is fine); one resume that never yields, or that keeps too much
   memory alive, is cut with BUDGET_EXCEEDED. `string.find/match/gmatch/gsub` stop after 5,000,000
@@ -102,14 +116,17 @@ alias).
   Weld, Attachment, ...) raises NOT_IMPLEMENTED; any other name errors (a Camera is not creatable —
   reach the world camera through `workspace.CurrentCamera`).
   The parent argument is deprecated (logs once); set `.Parent` after configuring instead.
-- `RemoteEvent`/`UnreliableRemoteEvent` fire one-way. `RemoteFunction:InvokeServer/InvokeClient`
+- `RemoteEvent`/`UnreliableRemoteEvent` fire one-way; an `UnreliableRemoteEvent` payload over
+  1,000 bytes raises PAYLOAD_TOO_LARGE, in solo too. `RemoteFunction:InvokeServer/InvokeClient`
   yields for a reply and is bounded to 30 scheduler seconds: a missing or stalled receiver raises
   an error instead of yielding forever (a deliberate deviation from Roblox). Wrap a fallible
   invoke in `pcall`.
 - `ClickDetector` — parent one under a Part to make that 3D part clickable:
   `local cd = Instance.new("ClickDetector"); cd.Parent = part; cd.MouseClick:Connect(function() ... end)`.
-  MouseClick fires (no args) when the user clicks THAT part with the mouse and it is within
-  `cd.MaxActivationDistance` studs (default 32). Only the part under the cursor fires.
+  MouseClick fires `(playerWhoClicked)` when the user clicks THAT part with the mouse and the
+  player's character is within `cd.MaxActivationDistance` studs of it (default 32; measured from
+  the camera when there is no character). A detector under a Model or Folder covers all of its
+  parts; the deepest detector above the clicked part wins. Only the part under the cursor fires.
 - `game:GetService("Name")` — the standard runtime has live tree-backed `Workspace`, `Lighting`,
   `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `Players`,
   `HttpService`, `UserInputService`, `RunService`, `MaterialService`, `Debris`, `TweenService`, and
@@ -146,8 +163,10 @@ alias).
     tw:Play()
 - `CollectionService:AddTag(inst, tag)`, `:RemoveTag`, `:HasTag`, `:GetTags(inst)`,
   `:GetTagged(tag)`, `:GetAllTags()`, plus per-tag `:GetInstanceAddedSignal(tag)` /
-  `:GetInstanceRemovedSignal(tag)` and the placewide `.TagAdded` / `.TagRemoved` (fire once per
-  FIRST instance ever to carry a tag, not once per instance — use the per-tag signals for that).
+  `:GetInstanceRemovedSignal(tag)` and the placewide `.TagAdded` / `.TagRemoved` (fire when a tag
+  enters use inside the DataModel — its first holder in the tree — and when it leaves use — its last
+  holder in the tree loses it or leaves; a nil-parented holder counts for neither, and GetAllTags
+  lists only tags in use; once per tag, not once per instance — use the per-tag signals for that).
   Entering/leaving the tree fires Added/Removed exactly like Add/RemoveTag would. Duplicate
   `AddTag` is a no-op; `RemoveTag` of a tag never held is a no-op. `GetCollection`, `ItemAdded`,
   `ItemRemoved` are Deprecated in the mirror and are simply absent here (unknown-member, not a
@@ -288,7 +307,8 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
   Health, MaxHealth, WalkSpeed, JumpPower, JumpHeight, UseJumpPower and DisplayName fire Changed.
 - `:MoveTo(position)` walks toward `position` and fires `MoveToFinished(reached: bool)` — `true`
   on arrival (within ~1 stud on the ground plane; height is ignored), `false` after an
-  8-SCALED-second timeout (a paused world never times it out).
+  8-SCALED-second timeout (a paused world never times it out), and `false` when a script or a
+  tween moves the HumanoidRootPart (CFrame/Position/Orientation/Rotation, or PivotTo).
   `:MoveTo(position, part)` (follow a moving part) is refused with BAD_ARGUMENT, not silently
   downgraded. Setting `Jump = true` requests one jump (fires `Jumping(true)`) using
   `JumpPower`/`JumpHeight`/`UseJumpPower`; jumping and moving both do nothing while dead.
@@ -297,6 +317,8 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
   may only force `Enum.HumanoidStateType.Jumping` — any other state raises NOT_IMPLEMENTED. `Sit`
   is a loud stub (`h.Sit = true` raises NOT_IMPLEMENTED).
 - `MoveDirection` (read-only Vector3) mirrors the character controller's current motion.
+- `humanoid:Clone()` keeps Health, MaxHealth, WalkSpeed, JumpPower, JumpHeight, UseJumpPower and
+  DisplayName; a clone of a dead Humanoid (Health 0) dies on its first Heartbeat in `workspace`.
 
 ## 8. Players & Characters
 
@@ -324,6 +346,10 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
   a deprecated non-yielding alias (logs once per mod) with the same effect.
 - `player:DistanceFromCharacter(point)` -> studs from the character's root part to `point`, or `0`
   when the player has no character (never errors on a characterless player).
+- A character Model has `Archivable = false`, so `character:Clone()` returns nil — set
+  `character.Archivable = true` first to copy it.
+- `player:Kick([message])` removes the player; the message (a string, cut to 1,024 UTF-8 bytes) is
+  shown to that player's client. A non-string message is BAD_ARGUMENT.
     local Players = game:GetService("Players")
     Players.PlayerAdded:Connect(function(player)
       player.CharacterAdded:Connect(function(character)
@@ -404,7 +430,9 @@ under gravity and a dense stack shoves itself apart. Drive the whole game from o
 
 - `inst:SetAttribute(name, value)` / `inst:GetAttribute(name)` / `inst:GetAttributes()`.
   Value must be string, boolean, number, Vector3, Vector2, Color3, or UDim — anything else is
-  rejected with BAD_ARGUMENT. SetAttribute needs WorldEdit.
+  rejected with BAD_ARGUMENT. SetAttribute needs WorldEdit. A new attribute name uses only ASCII
+  letters, digits, `.`, `-`, `/` and `_` (at most 100 chars, no "RBX" prefix); anything else is
+  BAD_ARGUMENT.
 - `inst:AddTag(t)` / `RemoveTag(t)` / `HasTag(t)` / `GetTags()`. Add/Remove need WorldEdit.
 - At most 256 attributes and 256 tags per instance; one more is BAD_ARGUMENT (a world must stay
   savable).
@@ -414,9 +442,10 @@ under gravity and a dense stack shoves itself apart. Drive the whole game from o
 Every failure is a Lua error whose message is `CODE: message | fix: suggestion`; inside a mod
 it starts with `[mod:<id> script:main.lua line:N] ` (one-off execute_lua errors have no prefix).
 Argument numbers do not count `self` (in `part:SetAttribute(name, value)` the name is argument 1). Catch
-with `pcall`. Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE, INSTANCE_DESTROYED,
+with `pcall`; `pcall`, `xpcall` and `coroutine.resume` all receive exactly that one line (no stack
+trace). Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE, INSTANCE_DESTROYED,
 PARENT_LOCKED, NOT_IMPLEMENTED, WORLD_DETACHED, BUDGET_EXCEEDED, SIGNAL_CASCADE,
-CONTEXT_VIOLATION, NOT_AUTHORITY.
+CONTEXT_VIOLATION, NOT_AUTHORITY, THREAD_CAP, PAYLOAD_TOO_LARGE.
 
 `WORLD_DETACHED` is not a mistake in your script. The RbxWorldHost that owned the world was
 destroyed — a scene load, a domain reload during play, or leaving play mode — and it took every
@@ -427,6 +456,10 @@ the current world, so report it instead of retrying the spawn.
 
 - `Instance.fromExisting` (use `Clone`), `Model:MoveTo` (use `PivotTo`), `Camera.FieldOfView`,
   `Humanoid.Sit`, and the known Roblox classes CoreAI does not build (section 4).
+- The globals `BrickColor` (use `Color3.fromRGB`), `NumberSequence`, `ColorSequence`,
+  `NumberRange`, `Ray` (use `workspace:Raycast`), `Region3`, `Rect`, `PhysicalProperties`,
+  `OverlapParams`, `DateTime` (use `os.time()`) and `shared` (use mods_export/mods_get) exist
+  only as loud stubs: touching them raises NOT_IMPLEMENTED with a fix.
 - Part `Shape`, `Material`, `Orientation` and `Rotation` ALL work now — see section 5. So does
   `WaitForChild(name)` for an absent child: it yields through the scheduler bridge.
 - Luau syntax IS accepted and auto-downleveled to Lua 5.2 before compiling: `+=` (and

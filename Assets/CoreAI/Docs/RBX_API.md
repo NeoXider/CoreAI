@@ -13,16 +13,16 @@ script written here imports and exports without a rewrite. C# identifiers use th
 
 ## Capability
 
-`Instance` is registered only when the mod holds the **`WorldEdit`** capability. Every other global
-below is available at `Read`. `camera_set_cframe` / `camera_follow` are registered on every tier but
-throw the capability error when called without `WorldEdit`, so a mod never sees "attempt to call a
-nil value".
+Every global below is available at `Read`. Creating and mutating needs the **`WorldEdit`**
+capability: `Instance` exists on every tier, but `Instance.new` without `WorldEdit` raises the
+capability error before it reads or creates anything, and `camera_set_cframe` / `camera_follow` do
+the same, so a mod never sees "attempt to call a nil value".
 
 ## Globals
 
 | Global | What it is |
 |---|---|
-| `Instance` | `Instance.new(className)` — the object constructor (needs `WorldEdit`) |
+| `Instance` | `Instance.new(className)` — the object constructor (creating needs `WorldEdit`) |
 | `game` | The DataModel: `game:GetService(name)` |
 | `workspace` | The world root; also `workspace.CurrentCamera` |
 | `UserInputService` | Alias of `game:GetService("UserInputService")` |
@@ -33,12 +33,45 @@ nil value".
 | `Random` | Seedable RNG |
 | `Enum` | `Enum.CameraType.Scriptable`, `Enum.KeyCode.A`, … |
 | `TweenInfo`, `RaycastParams` | `.new(...)` for `TweenService:Create` and `workspace:Raycast` |
-| `task` | `task.wait`, `task.spawn`, `task.delay` |
+| `task` | `task.wait`, `task.spawn`, `task.defer`, `task.delay`, `task.cancel` (`spawn`/`defer`/`delay` also take a task handle back — see "Tasks and coroutines") |
 | `wait`, `spawn`, `delay` | Roblox's legacy scheduler globals |
 | `time`, `tick` | `time()` is scaled game time; `tick()` is deprecated (logs once per mod) |
-| `os` | Only `os.time()` and `os.clock()` — the stock `os` library stays removed by the sandbox |
+| `os` | Only `os.time([dateTable])` and `os.clock()` — the stock `os` library stays removed by the sandbox |
+| `typeof` | Roblox type names: `"Instance"`, `"Vector3"`, `"CFrame"`, `"EnumItem"`, `"RBXScriptSignal"`, … |
+| `warn` | Like `print`, into the mod's log at `Warn` level (`get_mod_logs`) |
 | `script` | The running mod's own script instance (mods only, not one-off `execute_lua`) |
-| `camera_set_cframe`, `camera_follow` | CoreAI convenience shorthands for camera control |
+| `camera_set_cframe`, `camera_follow` | CoreAI convenience shorthands for camera control (both fire the camera's `Changed`) |
+
+`BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Ray`, `Region3`, `Rect`,
+`PhysicalProperties`, `OverlapParams`, `DateTime` and `shared` exist as **loud stubs**: any use raises
+`NOT_IMPLEMENTED` with a workaround (`Color3.fromRGB` for `BrickColor`, `workspace:Raycast` for `Ray`,
+`os.time()` or `workspace:GetServerTimeNow()` for `DateTime`, `mods_export`/`mods_get` for `shared`)
+instead of "attempt to index a nil value".
+
+### Tasks and coroutines
+
+`task.spawn`, `task.defer` and `task.delay` accept a function or a task handle that one of them
+returned to the same mod, and `task.spawn(t) == t`. A parked task resumes, a deferred or delayed one
+is rescheduled (its old slot never fires), and the running task may re-queue itself only through
+`task.defer`/`task.delay`; a finished task, a task inside a scheduler wait, another mod's task and a
+`coroutine.create` thread are refused with `BAD_ARGUMENT` (native threads stay outside the scheduler,
+roadmap R4.10). A native `coroutine.yield()` inside a task parks it until `task.spawn(t, ...)`, and
+`coroutine.yield` returns those arguments; inside a signal handler, a `RemoteFunction` callback, a
+legacy `spawn`/`delay` function or the main chunk it stops that thread with `CONTEXT_VIOLATION`,
+because nothing could resume it. `task.wait`, `signal:Wait`, `WaitForChild` and a `RemoteFunction`
+invoke inside a `coroutine.create` coroutine raise `CONTEXT_VIOLATION` instead of suspending the
+wrong thread — run such code with `task.spawn`. `task.cancel` on a finished task does nothing.
+
+### Clocks
+
+`time()` is scaled game time. `os.time()` is Unix seconds; `os.time({year = ..., month = ..., day =
+...})` reads the table as UTC (`hour` defaults to 12, `min` and `sec` to 0, out-of-range fields carry
+over, `isdst` is ignored), so every machine computes the same timestamp. `os.clock()` is monotonic
+elapsed time. `workspace:GetServerTimeNow()` is Unix seconds that the server and every client agree
+on: where this process is the server clock (solo, host, dedicated server) it is the local clock, held
+at its last reading if that clock steps back; on a client it is the local clock until the join
+handshake, re-based once at the first synchronization, and from then on it never goes backwards — a
+backward correction is absorbed by running at half speed.
 
 ## Classes
 
@@ -75,6 +108,23 @@ and movement by the physics engine never fires them. `Workspace.Gravity`, the `H
 `Player.Character`/`DisplayName` notify the same way. `AncestryChanged(movedInstance, newParent)` fires
 on every descendant of a moved instance. `game:IsLoaded()` is `true` and `game.Loaded` never fires,
 because the world is loaded before any script runs.
+
+### `ClickDetector` and `CollectionService`
+
+`ClickDetector.MouseClick` fires with the player who clicked (`nil` only when the host can resolve no
+local player). A detector parented to a part, or to a `Model` or `Folder` holding the clicked part,
+answers the click, and of several the deepest one above the part wins. `MaxActivationDistance`
+(default 32 studs) is measured from the clicking player's `HumanoidRootPart` to the nearest point of
+the clicked part; without a character it falls back to the camera distance (OURS — Roblox has no
+characterless clicker). A host that runs several local players names the one at this screen with
+`LuaCsRbxApiBindings.LocalPlayerActorId`; otherwise the player whose character the camera follows,
+or the only connected player, is the clicker.
+
+`CollectionService.TagAdded`/`TagRemoved` fire when a tag enters use inside the DataModel (its first
+holder in the tree) and when it leaves use (its last holder in the tree loses the tag, leaves the tree
+or is destroyed); a tagged instance parented to `nil` — a pooled coin — counts for neither, and
+`GetAllTags` lists only tags in use. The per-tag `GetInstanceAddedSignal`/`GetInstanceRemovedSignal`
+fire per instance, as before.
 
 ### Part properties
 
@@ -144,13 +194,19 @@ the root part, or `0` without a character. A character whose `Humanoid` dies is 
 appearance loading are not modelled.
 
 A `Player` cannot be destroyed or re-parented from Lua (use `Player:Kick()`; parenting things *into* a
-Player is fine) and `player:Clone()` returns `nil`. A `Player` destroyed from host C# code runs the same
-leave teardown as a disconnect, once: the actor's slot is freed, `PlayerRemoving` fires once (with a
-`nil` reason) and the character is unloaded. On a `Host` or `DedicatedServer` topology, an actor the
-transport admitted before its `Player` existed is refused with `NOT_AUTHORITY` when the world has no
-`Players.IdentitySource`, instead of being handed a session-counter `UserId` that another account
-could receive later; local actors, solo and client worlds are unaffected. The Mirror provider sets the
-identity source for you (`Assets/CoreAIMirror/README.md`).
+Player is fine) and `player:Clone()` returns `nil`. `Player:Kick(message)` hands its message to the
+transport, which shows it to the kicked client (the Mirror bridge sends it before the drop; the
+in-process loopback has no client to show it to); the text is cut to 1,024 UTF-8 bytes at a whole
+character, `nil` leaves the transport's default text, and a non-string — a number included — is
+`BAD_ARGUMENT` before anything is kicked. A character `Model` is created with `Archivable = false`, as
+in Roblox, so `character:Clone()` returns `nil` until a script sets `Archivable = true`. A `Player`
+destroyed from host C# code runs the same leave teardown as a disconnect, once: the actor's slot is
+freed, `PlayerRemoving` fires once (with a `nil` reason) and the character is unloaded. On a `Host` or
+`DedicatedServer` topology, an actor the transport admitted before its `Player` existed is refused
+with `NOT_AUTHORITY` when the world has no `Players.IdentitySource`, instead of being handed a
+session-counter `UserId` that another account could receive later; local actors, solo and client
+worlds are unaffected. The Mirror provider sets the identity source for you
+(`Assets/CoreAIMirror/README.md`).
 
 `BasePart`'s network-ownership family (`SetNetworkOwner`, `GetNetworkOwner`,
 `SetNetworkOwnershipAuto`, `GetNetworkOwnershipAuto`, `CanSetNetworkOwnership`) is a loud stub too:
@@ -166,6 +222,13 @@ stays dead), `HealthChanged`, `MoveToFinished(reached)`, `Running`, `Jumping`, `
 `StateChanged(old, new)`. `MoveTo` arrives within about one stud on the ground plane (height is
 ignored) and reports `MoveToFinished(false)` after **eight seconds of scaled time**, so a paused world
 never times a walk out.
+
+`MoveTo` also ends with `MoveToFinished(false)` when a script moves the humanoid's `HumanoidRootPart`
+— a `CFrame`, `Position`, `Orientation` or `Rotation` write, or a `PivotTo` that carries it — or a
+tween changes that part's `CFrame`, as the mirror documents ("a script changes the CFrame"). A
+`Humanoid:Clone()` keeps `MaxHealth`, `Health`, `WalkSpeed`, `JumpPower`, `JumpHeight`,
+`UseJumpPower` and `DisplayName`; the clone of a dead humanoid keeps `Health = 0` and dies (firing its
+own `Died`) on its first Heartbeat inside the Workspace.
 
 `Died` fires only inside the Workspace: a humanoid at 0 health outside it dies on its first Heartbeat
 after entering. `JumpPower` is clamped to [0, 1000]. `MaxHealth = math.huge` is accepted and stored as
@@ -344,6 +407,15 @@ an instruction-step cap and a wall-clock cap. CoreAI's defaults are 10,000 steps
 yields (`while true do end`) is cut when either half runs out, and the failure is reported as a budget
 kill — `BUDGET_EXCEEDED`, with the bound and the author's line — not as a Lua error.
 
+An error is one line of text. `pcall`, `xpcall` and a protected `coroutine.resume` all get exactly the
+line the failure raised — for a Roblox API call the `[mod:<id> script:<path> line:<n>] CODE: message |
+fix: ...` line, for a sandbox cap (`string.rep`, `table.concat`, `string.format`, a `gsub` result) its
+own one-line text — never a CLR type name, a managed stack trace or a path on the machine; a budget
+trip's error is such a one-line text too. A fault that ends a scheduler thread is reported (to the
+mod's diagnostics and the auto-repair path) with the host error's own code under one prefix — an
+uncaught `UNKNOWN_SERVICE` stays `UNKNOWN_SERVICE`; a budget kill is `BUDGET_EXCEEDED`, and only a
+plain Lua error is reported as `BAD_ARGUMENT`.
+
 The budget belongs to the game, not to CoreAI. Both halves are the **Lua coroutine resume budget**
 field on `CoreAiModsLifetimeScope` (`LuaCsCoroutineBudgetSettings`); a value `<= 0` falls back to the
 default rather than reading as "no limit". Every coroutine site in the composition resolves the same
@@ -392,13 +464,31 @@ that the bridge has not admitted is refused with a structured error before any l
 `RemoteEvent` and `RemoteFunction` argument envelopes have a fixed **65,536-byte UTF-8** wire limit.
 CoreAI rejects larger inbound or outbound envelopes with `PAYLOAD_TOO_LARGE` and never truncates
 them; inbound size is checked before the UTF-8/JSON string is materialised. Split large application
-payloads across several events.
+payloads across several events. An `UnreliableRemoteEvent` carries at most Roblox's 1,000 bytes, and
+the in-process loopback refuses a larger one with `PAYLOAD_TOO_LARGE` exactly as the online transport
+does, so a script that works in solo does not break online.
+
+The handlers a remote sender's calls start on the server — `OnServerEvent` handlers and
+`OnServerInvoke` callbacks — are charged to that sender, never to the handler's owner: at most 32 of
+them may be alive (suspended) per sender. A `RemoteFunction` call over that answers the caller with
+`BUDGET_EXCEEDED`; an `OnServerEvent` invocation over it is dropped, counted and logged once per
+sender. A flooding client exhausts its own budget, not the host's thread quota.
 
 Disconnecting an actor is one production seam: it unregisters the actor from the bridge, fires
 `Players.PlayerRemoving` **exactly once** (with the documented `PlayerExitReason`), releases the actor's
 chat service, kills the actor's scheduler threads and drops its rate windows and client signals. A
 second disconnect is a no-op, and other actors are untouched; 200 connect/disconnect cycles leave no
 retained state.
+
+The mods loaded for that actor are **unloaded** too (mods loaded with host authority stay). If mod
+code is running at that moment — a mod whose script kicked its own player, from a hook, a timer, a
+logic-slot formula or a scheduler thread — the unload waits until that code has returned (or until
+the next `Tick`), so nothing it scheduled on the way out ever runs as the host. A mod in quarantine is
+unloaded the same way. The stored package keeps its active flag and its source, so the mod starts
+again when the world is rehydrated or reloaded; it is not restarted automatically when the actor
+rejoins. A load or reload whose main chunk disconnects its own actor fails with an
+`InvalidOperationException` ("mod '<id>' did not load: its actor '<actor>' disconnected while its
+main chunk ran, …") and leaves nothing loaded.
 
 ## Saving and loading a world
 

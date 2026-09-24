@@ -12,45 +12,8 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   sibling `WebGlCompositeOpenAiTransport` has, and five test files (`MeaiOpenAiChatClientWebGlDelay`,
   `ToolCallAuditInterceptor`, one `ToolExecutionPolicy` case, `SharedLlmUnity`, `MixedBackendParallelAgents`) used
   LLM types unguarded. All are now under `#if COREAI_LLM`; a Roslyn compile of every asmdef in the six module
-  configurations reports no new error.
-- **Mirror package (`com.neoxider.coreaimirror`): a reconnect kicked the player (MP-03).** One connection per actor,
-  and the newest wins: an actor admitted on a new connection before kcp2k timed out the old one keeps its `Player`
-  (`PlayerRemoving` fires only when its last session ends) and the older connection is closed. Every disconnect path
-  is keyed by connection, never by actor alone, so the old connection's late disconnect cannot tear down the new
-  session.
-- **Mirror: a connection could ask for admission repeatedly, or never (MP-04, MP-05).** The first admission request
-  of a connection is decided and every later one is ignored and counted (repeats used to mint ghost players); a
-  connection that sends none within `CoreAiMirrorAuthenticator.AdmissionTimeoutSeconds` (default 10 s) is dropped —
-  Mirror has no authentication timeout of its own, so silent peers held their slots for ever.
-- **Mirror: one payload ceiling for every channel (MP-07).** Reliable remotes and `RemoteFunction` carry up to 64 KiB,
-  an `UnreliableRemoteEvent` up to Roblox's 1,000 bytes (less on a transport with a smaller datagram); a
-  `RemoteFunction` answer too large for the channel becomes a failure that names the size instead of vanishing.
-- **Mirror: remotes of actors local to the server went out on the wire (MP-08).** A server never sends a
-  client-to-server envelope to itself: remotes from and to actors registered in the server process are delivered in
-  process, so `InvokeServer` no longer waits 30 s, and `FireClient`/`InvokeClient`/`FireAllClients` reach local actors.
-- **Mirror: an unreliable remote that overtook the admission response disconnected the joining client (MP-09, client
-  half).** Client handlers no longer require Mirror authentication; such a packet is dropped and counted as
-  unadmitted.
-- **Mirror: robustness of the receive paths (MP-14/15/16/18/23).** An answer to a connection that is gone or reused
-  is dropped (`StaleResponsesDropped`); a client's pending requests fail at once on a disconnect or `Dispose`; a
-  malformed envelope is dropped and counted (`MalformedPacketsDropped`) without an exception inside Mirror's handler;
-  the disconnect hook is contained and restored.
-- **Mirror: kcp2k's negative connection ids were treated as "no connection" (MP-25).** About half of all clients get
-  one; their packets reached connection zero, and another client's answer could complete their request.
-
-### Added
-
-- **`CoreAiMirrorNetworkBridgeProvider.AttachWorld(Func<LuaCsRbxApiBindings>)`** — attaches the world the function
-  returns at each admission and makes the session host that world's `Players.IdentitySource` (checked every frame and
-  before every admission, so a world loaded later is wired too; an identity source the host already set is kept).
-  The delegate overload remains for custom compositions. Paired with the world-side rule that a server world without
-  an identity source refuses a transport-admitted actor (`com.neoxider.coreai` changelog), the manual
-  `Players.IdentitySource = provider.SessionHost` step is no longer needed.
-- Mirror counters: `MirrorNetworkBridge.MalformedPacketsDropped`, `UnroutablePacketsDropped`, `LocalDeliveries`,
-  `StaleResponsesDropped`, `OversizeResponsesFailed`, `SupersededConnections`, `CodecPayloadCeilingBytes`,
-  `UnreliablePayloadCeilingBytes`, `MaxRequestPayloadBytes`, `MaxPayloadBytesFor(reliability)`;
-  `CoreAiMirrorAuthenticator.IgnoredAdmissionRequests`, `AdmissionTimeouts`, `AdmissionTimeoutSeconds`;
-  `CoreAiMirrorSessionHost.SupersededSessions`.
+  configurations reports no new error. The runtime changes of the fix waves, the Mirror package's included, are
+  in the `com.neoxider.coreai` changelog.
 
 ### Docs
 
@@ -61,20 +24,56 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   Mirror README no longer claims that remotes "cross a socket" (they run through Mirror's real handlers over an
   in-memory transport in tests; no two-process run exists yet), shows the new `AttachWorld` overload, and gained a
   Sessions section.
+- **The later fix waves are documented too.** The Mirror README describes the readiness handshake, the server
+  clock anchors, the kick and supersede notices, the per-frame `Pump()` a custom composition must call and the
+  version-mismatch behaviour; `RBX_API.md`, `mod-authoring.md`, `mod-system.md`, the roadmaps, the MVP2/MVP8
+  acceptance manifests, `LUA_SANDBOX_SECURITY.md`, `AGENT_ROLES_AND_TOOLS.md`, the Hub README and the Instances
+  README follow the code (task handles and native `coroutine.yield`, clocks, `typeof`/`warn` and the loud global
+  stubs, `ClickDetector`, `CollectionService` tag globals, `Humanoid:Clone`, the non-archivable character,
+  `Player:Kick(message)`, mods unloaded on disconnect, the one-line error value). The roadmaps no longer
+  describe a `ClientWritePolicy.Open`: it does not exist (owner decision 3); co-building is a host grant. The
+  Mirror package's runtime entries moved to the `com.neoxider.coreai` changelog, next to its 7.42/7.43
+  entries; this changelog keeps its tests and build legs.
 
 ### Tests
 
 - **Engine-free Roblox-API tests run on Linux.** `tools/portable` gained `CoreAI.RbxApi.Datatypes`,
   `CoreAI.RbxApi.Instances` and `CoreAI.LuauDownlevel` projects (netstandard2.1, C# 9, one per asmdef), and the
   portable suite links 33 test files (388 cases at the time) covering instances, ACL, scheduler, replication,
-  networking, the Luau downleveler and datatypes; later waves added more (2085 passed / 0 failed / 3 skipped when this
-  entry was written). `.gitignore` now keeps `tools/**/*.csproj`: the capitalised `!Tools/` exception did not
+  networking, the Luau downleveler and datatypes; later waves added more (2105 passed / 0 failed / 3 skipped at the
+  last docs pass). `.gitignore` now keeps `tools/**/*.csproj`: the capitalised `!Tools/` exception did not
   match on Linux.
+- **Lua-tier EditMode tests run on Linux too** (`tools/portable/LuaTests`, see its README). The Lua runtime, the
+  bindings, the mod runtime, the one-off executor, the world-package store and the MVP acceptance fixtures that need
+  no scene compile under their Unity assembly names (so `InternalsVisibleTo` holds unchanged) against a UnityEngine
+  shim that holds managed twins of Unity's own code (`Debug`, `Mathf`, the value types, `Time`, `Application`) and
+  refusing surfaces for everything that needs the engine: a test that reaches one is reported Inconclusive, never
+  passed. The Unity Test Framework log rule (an unexpected error log fails the test) and
+  `Is.Not.AllocatingGCMemory()` are reproduced. 75 fixture files of `Assets/CoreAIMods/Tests/EditMode` plus
+  `LuaModAutoRepairPolicyEditModeTests` are linked; 31 are excluded with a reason. Result at the last docs pass:
+  1437 passed / 0 failed / 2 skipped, the engine-bound cases Inconclusive by design. The first run found two real
+  runtime bugs (the `pcall` stack-trace leak and a solo `GetServerTimeNow` drift, both fixed) and two
+  platform-dependent tests (an ICU culture-sensitive tag search and a Lua `tostring` of a non-exact double, made
+  platform-independent).
+- **CI job `portable-lua`** runs that suite on every push and fails when fewer than 1,400 cases pass, because an
+  Inconclusive result does not fail `dotnet test` and a broken link list could otherwise go green having run
+  almost nothing.
+- **Engine-bound tests moved out of the linked fixtures, verbatim.** The production-container tests of
+  `RbxApiLuaBindingsEditModeTests` now live in `RbxApiLuaBindingsProductionContainerEditModeTests`
+  (`CoreAiModsLifetimeScopeNoNetworkBridgeEditModeTests.cs`); the binder-bound tests of it,
+  `Mvp1ConversionLintEditModeTests` and `R6_5_CloneEditModeTests` in `InstanceGameObjectBinderCrossLayerEditModeTests`;
+  the `RbxWorldHost` tests of `InstanceRegistryEditModeTests` and `RbxSpaceGoldenFixtureEditModeTests` in
+  `RbxWorldHostLazyWorldWrapEditModeTests`; the motor test of `Mvp2StanceConformanceEditModeTests` in
+  `UnityRbxCharacterMotorLifecycleEditModeTests`. Names, attributes and bodies are unchanged (267 test cases before
+  and after), so seven more fixtures run on Linux.
 - **Regression coverage for every fix above** — each written to fail on the old code — including the MVP3 DoD
   fixtures (`Mvp3WorldPackageEditModeTests`, `Mvp3WorldPackageFollowUpEditModeTests`,
-  `RbxWorldHostDiWiringEditModeTests`, `CoreAiModsHubBinderFullTierEditModeTests`), the Mirror suites (53 new tests, compiled against the Mirror v96.0.1
-  sources), and a PlayMode check that a character above a `CanCollide = false` part does not stand on it. None of
-  the new EditMode and PlayMode fixtures has run in Unity yet.
+  `RbxWorldHostDiWiringEditModeTests`, `CoreAiModsHubBinderFullTierEditModeTests`), the Mirror suites (53 new tests,
+  then 32 more for the readiness handshake, the clock anchors, the kick and supersede notices and the kick message;
+  compiled against the Mirror v96.0.1 sources), the disconnect, task-handle, coroutine, `ClickDetector`, clock and
+  error-line fixtures, and a PlayMode check that a character above a `CanCollide = false` part does not stand on it.
+  None of the new EditMode and PlayMode fixtures has run in Unity yet; the Lua-tier ones that the portable runner
+  links have run on Linux.
 
 ## [7.45.0] - 2026-09-24
 

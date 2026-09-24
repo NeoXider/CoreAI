@@ -27,7 +27,8 @@ Same pattern as the Lua Modding skill:
 - **Built-in fallback** — `BuiltInRbxApiSkillText` in
   `Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInRbxApiSkillText.cs`. Code-only hosts
   (no Resources) fall back to this constant. The two are byte-identical, pinned by an EditMode
-  test (`LuaModdingSkillEditModeTests`).
+  test (`LuaModdingSkillEditModeTests`; its phrase checks also run on Linux in the portable
+  Lua-tier suite, `tools/portable/LuaTests`, while the `Resources` comparison needs Unity).
 - **Registration** — `CoreAiModsInstaller.RegisterCoreAiMods` adds the skill to the built-in
   Programmer role (`AddSkillForRole`), loading the Resources override if present and the built-in
   constant otherwise. `read_skill` resolves the skill by its name, `"Rbx API"`.
@@ -82,11 +83,26 @@ Keep these in step with the runtime when the skill text is edited:
   a NaN duration is `BAD_ARGUMENT`, `task.cancel` of a finished task is a no-op; a thread may loop
   forever as long as it yields, memory is budgeted per resume, string patterns stop after 5,000,000
   steps per call and `gsub`/`format` results at 1,000,000 characters.
+- Section 1 also states the task-handle rules (`task.spawn/defer/delay` accept a handle the mod's own
+  `task.*` call returned and `task.spawn(t) == t`; a finished task, one inside a scheduler wait,
+  another mod's task or a `coroutine.create` thread is `BAD_ARGUMENT`), native `coroutine.yield`
+  (parks a task until `task.spawn(t, ...)`, whose arguments it returns; `CONTEXT_VIOLATION` in a
+  handler or the main chunk), `CONTEXT_VIOLATION` for `task.wait`/`signal:Wait`/`WaitForChild`/
+  `InvokeServer` inside `coroutine.create`, `typeof` with Roblox type names, `warn` into the mod log
+  at `Warn`, the clocks (`os.time(t)` reads the table as UTC with `hour` defaulting to 12;
+  `GetServerTimeNow` follows the server once a client has joined and never goes backwards from then
+  on; `DateTime` is not implemented), that a read-only script's `Instance.new` raises the capability
+  error, and that a player's mods are unloaded when that player leaves.
 - Section 2 lists `Vector2:Angle`, the CFrame `components`/`ToEulerAngles`/`ToOrientation`/
   `ToAxisAngle`/`AngleBetween` family and `CFrame.fromRotationBetweenVectors`, `Color3.toHSV`, the
   constructor coercion rule (numeric string → number, nil → 0, anything else `BAD_ARGUMENT`), 32-bit
   UDim offsets and the ±(2^53−1) `NextInteger` bounds. Section 3 lists `Enum.X:FromName` /
   `:FromValue` and `Enum.KeyCode.None = 0` with `Unknown` as its alias.
+- Section 4 also states that an `UnreliableRemoteEvent` payload over 1,000 bytes is
+  `PAYLOAD_TOO_LARGE` in solo as well as online, that `ClickDetector.MouseClick` passes the clicking
+  player, measures `MaxActivationDistance` from that player's character (from the camera when there
+  is none) and works for a detector under a `Model` or `Folder` (the deepest detector wins), and that
+  `CollectionService.TagAdded`/`TagRemoved`/`GetAllTags` count only holders inside the DataModel.
 - Section 4 also states the instance-core rules: `Instance.Changed` on every instance and
   `GetPropertyChangedSignal` refusing an unknown or wrong-case name (script, tween and `PivotTo`
   writes fire both; an equal assignment and physics movement fire nothing), `AncestryChanged` on every
@@ -99,9 +115,17 @@ Keep these in step with the runtime when the skill text is edited:
   `CanCollide = false` as in Roblox (bodies pass through, `Touched` and `Raycast` still see the part;
   only `workspace` content is physical). Section 7 states the Humanoid rules (`Died` only inside
   `workspace`, `JumpPower` in [0, 1000], `math.huge` health, write authority for
-  `TakeDamage`/`MoveTo`/`ChangeState`, a ~1-stud arrival radius on the ground plane). Section 12 caps
-  attributes and tags at 256 per instance. Section 13 documents the `[mod:<id> script:main.lua line:N]`
-  prefix on errors raised inside a mod and argument numbers that do not count `self`.
+  `TakeDamage`/`MoveTo`/`ChangeState`, a ~1-stud arrival radius on the ground plane, `MoveTo` ending
+  with `false` when a script or a tween moves the `HumanoidRootPart`, `Humanoid:Clone` keeping the
+  health and movement values). Section 8 adds the non-archivable character (`character:Clone()` is
+  nil until the script sets `Archivable = true`) and `Player:Kick(message)` (the text reaches the
+  kicked client, cut to 1,024 UTF-8 bytes; a non-string is `BAD_ARGUMENT`). Section 12 caps
+  attributes and tags at 256 per instance and limits a new attribute name to ASCII letters, digits,
+  `.`, `-`, `/` and `_`. Section 13 documents the `[mod:<id> script:main.lua line:N]` prefix on errors
+  raised inside a mod, argument numbers that do not count `self`, and that `pcall`, `xpcall` and
+  `coroutine.resume` all receive exactly that one line. Section 14 lists the loud global stubs
+  (`BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Ray`, `Region3`, `Rect`,
+  `PhysicalProperties`, `OverlapParams`, `DateTime`, `shared`), each with its workaround.
 - `BasePart` exposes `Shape`, `Material`, `MaterialVariant` (string; `""` for none), `Orientation`, and `Rotation` in addition to the MVP1
   set. All 45 `Enum.Material` items render; an unmapped id resolves to a magenta diagnostic
   material. `Part.Color` stays an independent tint over the material's own albedo. `MaterialService` is a tree-backed service.

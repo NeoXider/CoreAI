@@ -488,7 +488,10 @@ Sources:
   destroy (R6.2); make script-thread termination ride on it (R6.3).
 - Provide a Debris-style engine-side TTL destroyer decoupled from mod script lifetime (R6.4).
 - Attributes: implement the documented type whitelist + name validation verbatim (R6.7) — it is
-  cheap and makes save/replication formats stable.
+  cheap and makes save/replication formats stable. As built (M1-23, 2026-09-24): the mirror's
+  ASCII-only name rule applies where a script creates a name (`SetAttribute` of a name the instance
+  does not hold yet); attribute names from older worlds may be non-ASCII letters or digits and still
+  load, replicate, and stay writable and removable.
 - Change-signal design: per-property signals with no args + a coarse `Changed`; exclude
   simulation-driven transform changes from both (R6.11) so mods poll in the sim phase instead.
 - `WaitForChild` needs the 5-second "infinite yield" warning — it is Roblox's single most

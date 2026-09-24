@@ -144,7 +144,7 @@ The rest of the harness's 5.2 KB/actor is remote traffic, `Instance.new`/`Destro
 | `ReadableTombstone` | `null`, then set by `SpawnSignal` from the current drain | `null` | the destroyed-instance read scope must never outlive its fire |
 | `SignalWaitGeneration` | **kept, keeps counting** | kept | timeout entries match `(record, generation)`; a monotonic counter can never reproduce a value an earlier tenant used, so no stale entry can resume a later tenant |
 
-The wrapper (`LuaCsRbxScriptThread`) is not reused at all. The runner's per-handler state is `pendingCallable`/`pendingArguments` (cleared before the handler runs and again after it returns), `IterationCompleted` (reset on arm) and the lifetime step budget (reset on rent); its `OwnerState` is fixed at construction and re-checked on every rent, and the mod id of its pool is fixed by the first rent.
+The wrapper (`LuaCsRbxScriptThread`) is not reused at all. The runner's per-handler state is `pendingCallable`/`pendingArguments` (cleared before the handler runs and again after it returns), `IterationCompleted` (reset on arm) and the consumed-step count (reset on rent; since 2026-09-24, `a5c453f4`, a runner has no lifetime step cap at all — the per-resume budget is the only CPU limit on a scheduler thread); its `OwnerState` is fixed at construction and re-checked on every rent, and the mod id of its pool is fixed by the first rent.
 
 ### How the thread cap still bites
 
@@ -170,3 +170,15 @@ The allocation rate, which is deterministic, halved at both N and is now under t
 ### Tests
 
 EditMode, executed on the host through a reflection runner over Unity's `nunit.framework.dll` because the editor lock was held: `ModSchedulerRecordPoolEditModeTests` (6) and `RbxSignalHandlerThreadReuseEditModeTests` (4) are new; `ModSchedulerEditModeTests` (26), `RbxRunServiceLuaBindingsEditModeTests`, `RbxTaskSchedulerLuaBindingsEditModeTests` (34) and `RbxSignalConnectionTeardownEditModeTests` are unchanged. Signal-order and deferred-drain coverage that still passes unweakened: `SignalDrain_QuotaSaturatedFirstSubscriber_StillInvokesLaterSubscriber`, `R4_8_TaskDeferDoesNotRunBeforeCurrentDrainFinishes`, `R4_8_TaskDeferRunsAfterTheCurrentResumptionPoint`, `R4_8_TaskDeferDrainsAfterEveryScriptResumePoint`, `DEV3_DeferredFaultDoesNotOrphanDifferentModSibling`, `Lua_R5_5_SignalsDrainAtEveryLiveFrameResumptionPoint`, `Lua_R5_4_DeferredMutationDoesNotReenterAndNewSignalUsesNextGeneration`, `Lua_R5_6_DeferredReentrancyCapIs10AndReportsChain`, `R5_4_SignalDrainRunsAfterDelayedResumptionAndBeforeHeartbeat`, `Lua_SignalHandlerFault_ReportsOwningModAndRunsQueuedSiblings`. `Lua_SignalHandler_TaskWaitUsesOwningSchedulerThread` fails on the host before and after the change alike (CoreCLR prints `0.35 − 0.1` as `0.24999999999999997`, Unity's Mono as `0.25`); tests that build a `GameObject` need the editor.
+
+## Status 2026-09-24 (after the MVP2 audit fix waves)
+
+Three of the per-resume allocations named under "Measured" are gone: the server-generated resume
+envelope carries one reserved operation id instead of a new `Guid` string per resume (M2-10,
+`d2216d38`); the actor context of an actor-attributed mod is built once and cached per mod
+(`ModActorLedger`, an ordinary field of `LuaCsRbxApiBindings` since `0e51e982`); and the mod's
+`OriginTag` is interned per mod instead of built per resume (`5fdfbf17`). Every thread exit now raises
+`ModScheduler.ThreadRetired` once, which drops the thread's tracking entry, its pending `signal:Wait`
+connection and an unanswered `RemoteFunction` request (M2-07, M2-18, `20fdd97a`), so a long session no
+longer accumulates retired-thread bookkeeping. The heap-slope row has not been re-measured since; the
+heap-slope budget stays open in `TODO.md` ("Final QA verdict").
