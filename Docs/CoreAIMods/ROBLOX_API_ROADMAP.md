@@ -14,9 +14,10 @@ camera slice (§MVP1); the Lua log service core has **landed** in
 `Docs/CoreAIMods/RobloxReference/` (§2.1).
 Since then **MVP2 has largely landed** (scheduler, deferred signals, services framework, loopback
 remotes, the shared JSON contract, the Model pivot slice, and the complete 45-item `Enum.Material`
-catalog — see §MVP2 for the remaining items) and **MVP3 (the world/place package) is implemented**;
-its contract is specified in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md), and its Unity/browser
-acceptance runs are owned outside this document.
+catalog — see §MVP2 for the remaining items) and **MVP3 (the world/place package) is code complete
+(2026-09-24)** with its Unity verification gate pending; its contract and acceptance evidence are in
+[`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). Audits of MVP1, MVP2 and MVP8 (2026-09-24) were followed by
+fix waves recorded in the rung sections below and in `TODO.md`; they are unreleased.
 
 **Architecture (normative)**: every deliverable in this ladder is built to
 `Docs/ARCHITECTURE_RULES.md` — engine-free Domain assemblies (`noEngineReferences: true`),
@@ -284,14 +285,16 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-2 | `SignalBehavior.Immediate` exists | Deferred only; setter is a loud stub | D4; budget enforcement and reentrancy safety |
 | DEV-3 | no per-slice instruction budgets | budget kills + quarantine per mod (§2, quarantine policy) | sandbox safety in a live game |
 | DEV-4 | fixed stud scale | configurable `RobloxSpace` scale (default 0.28 m) | host-game integration |
-| DEV-5 | `task.synchronize/desynchronize` switch Parallel Luau contexts | no-op + once-per-mod log note | Parallel-annotated scripts are otherwise runnable; throwing would fail working code |
+| DEV-5 | `task.synchronize/desynchronize` switch Parallel Luau contexts; `RBXScriptSignal:ConnectParallel` runs the handler in parallel | no-op + once-per-mod log note; `ConnectParallel` is `Connect` (serial) with the same once-per-mod note | Parallel-annotated scripts are otherwise runnable; throwing would fail working code |
 | DEV-6 | global gravity | per-body gravity forces, host `Physics.gravity` untouched | mods coexist with the host game's physics |
-| DEV-7 | destroyed instances stay readable (`Parent` nil + locked, R5.8/R6.2) | member access on a destroyed instance raises `INSTANCE_DESTROYED` — **except** inside destruction-queued handlers (`Destroying`/`AncestryChanged`), which read a **tombstone** (`Name`, `ClassName`, `Parent == nil`; connections gone) | loud errors drive AI self-repair; the tombstone keeps R5.8's observable post-destruction state |
+| DEV-7 | destroyed instances stay readable (`Parent` nil + locked, R5.8/R6.2) | member access on a destroyed instance raises `INSTANCE_DESTROYED` — **except** inside destruction-queued handlers (`Destroying`/`AncestryChanged`), which read a **tombstone** (`Name`, `ClassName`, `Parent == nil`; connections gone). A `Parent` change notification raised by the destruction itself is tombstone-readable too, and `BasePart` properties read inside those handlers return the part's last-known values (both part sinks keep the most recent 2,048 destroyed parts; older ones are forgotten) | loud errors drive AI self-repair; the tombstone keeps R5.8's observable post-destruction state |
 | DEV-9 | legacy `wait`/`spawn`/`delay` have a ~29 ms floor + load-dependent throttling (R4.9) | preserve the **0.029 s minimum delay**, but omit load-dependent throttling | the real floor preserves timing compatibility; deterministic scheduling avoids machine-load-dependent behavior |
 | DEV-10 | `GetAsync`/`UpdateAsync` return a `DataStoreKeyInfo` second value (S1.4/S1.7 — S1.4 is `GetAsync`'s `(value, DataStoreKeyInfo)` tuple; S1.7 is `UpdateAsync`'s transform contract) | second return is `nil` in MVP9 — documented reduced fidelity | version/metadata model not emulated locally; loud stubs cover the explicit version APIs |
 | DEV-11 | `GetAsync` results are cached for 4 s (S1.5) | cache **not emulated** — every `GetAsync` reads the store | the local store is fast; emulating the cache would only add staleness surprises |
 | DEV-12 | command-bar/one-shot execution is Studio-only | `execute_lua` one-shots are a first-class **runtime** feature (full API env, same sandbox/budgets; §2 one-shot decision) | Realtime principle — the game is authored while it runs |
 | DEV-13 | a Lua string is a byte string; non-ASCII text built from UTF-8 byte sequences (e.g. `'\195\169'` for "é") is one Unicode codepoint by Luau's own character-counting (`utf8.len`), even though `#s` counts the 2 raw bytes | crossing the C#/Lua boundary maps each byte to one `System.Char` (UTF-16 code unit) — a non-ASCII codepoint spanning 2+ UTF-8 bytes becomes that many C# chars, not one; pinned by `RoundTrip_UnicodeStrings_SurviveEncodeDecodeUnescaped` (`RbxJsonContractEditModeTests`) | the VM boundary marshals bytes, not codepoints; a mod author, or C# code reading a Lua string (logs, `GetAttribute`, `JSONEncode` output), must not assume `String.Length`/indexing on a crossed string matches Luau's `utf8.len`/perceived character count for non-ASCII text |
+| DEV-15 | "The name of an instance cannot exceed 100 characters" — the mirror states the cap, not what an over-long assignment does | an over-long `Name` keeps its first 100 characters (never splitting a surrogate pair) | truncation instead of an error keeps a world saved before the cap existed restorable |
+| DEV-16 | `Humanoid.MaxHealth = math.huge` stores infinity (a common "invincible" idiom) | accepted, but stored as the largest finite double, so `Health == math.huge` is false (compare with `MaxHealth`); `TakeDamage(math.huge)` still kills; NaN is refused | a non-finite value cannot be saved in a world package; the idiom keeps working without making the world unsavable |
 | DEV-14 | members carrying `security: PluginSecurity` are unreachable from a running game — they exist for Studio and plugins, and the shipped experience never sees them (e.g. `ScriptContext:SetTimeout`, which limits how long a script may run without yielding) | the same members are reachable at RUNTIME, gated to the elevated actor tier (`ActorContext.Grants.IsUnrestricted`); an ordinary mod is refused exactly as it is for any other privileged member | CoreAI has no Studio: authoring and playing are ONE application, so "Studio-only" has no place to live. Mapping these to "unavailable" would delete a control the creator legitimately needs while the game runs; mapping them to "anyone" would let a mod raise its own execution budget. The elevated tier is the only honest reading, and it is the same tier that already gates the rest of the privileged surface. Sibling of DEV-12, which made the same call for one-shot execution |
 
 ---
@@ -411,7 +414,7 @@ the MVP1–MVP5 surface.
 | MVP0 | Engine abstraction seam *(landed 2026-07-22)* | — | M |
 | MVP1 | Instance/DataModel core + pure-spec datatypes + RobloxSpace + identity *(landed 6.3.0; §5.1.8 gate green)* | MVP0 | L |
 | MVP2 | Scheduler, signals, clocks, services/materials framework, loopback remotes | MVP1 | L |
-| MVP3 | World file (place package) + two-tier backups *(implemented; acceptance runs owned outside this doc)* | MVP1, MVP2 | M |
+| MVP3 | World file (place package) + two-tier backups *(code complete 2026-09-24; Unity verification gate pending)* | MVP1, MVP2 | M |
 | MVP4 | RBXL import/export (round trip both directions; scripts arrive as disabled mods) | MVP1, MVP2, MVP3 | M |
 | MVP5 | Mod system UX (hierarchy, contexts, hot reload, AI tools) | MVP2 + preprocessor *(landed — mini-rewriter, Q1)* | M |
 | MVP6 | AI Lua skill = the documentation (+ generated API manifest) | MVP2; co-evolves with MVP5 | M |
@@ -534,17 +537,26 @@ Ordering changes vs. the seed roadmap, with justification:
   runs unmodified (§6.4).
 - **Effort**: L.
 
-### MVP3 — World file (place package) + two-tier backups *(implemented)*
+### MVP3 — World file (place package) + two-tier backups *(code complete 2026-09-24; Unity gate pending)*
 
-- **Current state (implemented)**: the deliverables below are built and covered by EditMode tests.
+- **Status**: code complete (2026-09-24); the Unity verification gate is pending — EditMode 0 failed
+  and PlayMode `FastNoLlm` 0 failed must be run in Unity (the portable `dotnet test` suite: 2085
+  passed / 0 failed / 3 skipped). The rung closes, and MVP4 starts, only after that gate and the
+  release.
+- **Current state**: the deliverables below are built and covered by EditMode tests.
   The `.world` ZIP container, `FileRbxWorldPackageStore` (create-once manual slots + the two-phase
   durable autosave ring), `ConfirmedWorldMutationGate` in front of every `execute_lua` and every
   mutating `manage_mods` action, `RbxWorldRuntimeSessionController` transactional session
   replacement, the `save_world`/`load_world` tools with the confirm-before-restore flow, and the
   built-player **Hub → World Loads** page all exist. The shipped contract, its validation limits,
-  and the WebGL execution budget are specified in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). Unity and
-  browser acceptance runs for this rung are owned outside this document; the remaining open tail is
-  persisting world selection/autoload across a process restart.
+  and the WebGL execution budget are specified in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). The W3.5
+  tail is implemented: a player-confirmed load is recorded as a durable startup selection
+  (`Saves/Startup`, create-once entries, the same durability rule as every save) and restored at boot
+  through the same staged swap, with the default world on any failure and a Hub reset button. Also
+  closed: restore as one host-enveloped operation (rung-zero residue), the ACL floor (an ACL-composed
+  session refuses a legacy package), restored trees charging the instance quota, JSON failures from
+  every world tool, and a refusal of world loads while network sessions are live (the MVP11 entry
+  guard). The real WebGL page-reload gate is still open.
 
 - **Goal**: the world is a savable, shareable artifact — the single serializer that disk save,
   backups, and (later) the multiplayer join snapshot all share (§2, world file / backups).
@@ -570,6 +582,33 @@ Ordering changes vs. the seed roadmap, with justification:
 - **DoD**: save → load round-trips the world-owned tree with stable ids (golden comparison);
   mods restart clean on load; a manual slot is provably untouchable by AI tools (negative
   test); the autosave ring rotates and records triggers; WebGL IDBFS flush after save.
+  (Since Unity 6.3 the flush is the engine's automatic `persistentDataPath` persistence, reported by
+  `CoreAiWebGlPersistence.SyncAsync`.)
+- **DoD evidence** (each item proven by a named test that fails on a wrong implementation):
+  (a) golden round trip — `WritePackage_AuthoredWorld_MatchesLiteralGoldenJson`,
+  `ReadPackage_HandWrittenLiteralPackage_RestoresLiteralIdsParentsRevisionsAndPartState`;
+  (b) clean restart — `ConfirmedPackageLoad_SwapsEveryFacadeAndRestartsOnlyActiveModsOnce` (active mods
+  start once; the outgoing scheduler has `LiveThreadCount == 0`);
+  (c) manual slots untouchable, restore only after player confirmation —
+  `SaveWorldTool_SecondSaveToSameSlot_IsRefusedAsResultAndKeepsFirstBytes`,
+  `WorldPersistenceSurface_ExposesNoDeleteOverwriteRemoveOrReplacePath`,
+  `ProgrammerRole_WorldTools_AreExactlySaveLoadListAndLoadAutosave`, and the positive confirm in
+  `StartupSelection_ConfirmedManualLoad_RestartRestoresSameTreeAndExactSources`;
+  (d) ring and triggers — `FileStore_DefaultAutosaveCapacity_IsTenAndRotatesOnlyTheOldest`,
+  `ListAutoSaves_HyphenatedTriggers_RoundTripExactly`, `ListAutoSavesTool_ReturnsExactNameTriggerTimestampAndSize`,
+  `ConfirmedBackup_GatedExecuteLua_WritesExactlyOneExecuteLuaAutosaveToFileStore`;
+  (e) persistence after save — `FileStores_WithoutInjectedHook_DefaultToCoreAiWebGlPersistenceSyncAsync`
+  (the real-browser reload stays an open gate);
+  (f) invalid names as JSON results (7.45.0) — `SaveWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`,
+  `LoadWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`,
+  `LoadAutoSave_InvalidName_IsRefusedAsResult_WithoutCallingService`.
+  Rung-zero envelope: `RungZeroHostRestore_AclPackageLoad_RestoresTreeAsOneHostEnvelopedOperation` (and
+  its headless twin); ACL floor: `AclComposedSession_LegacyPackage_IsRefusedBeforeAnySideEffect`,
+  `WorldLoadRequest_AclComposedSession_RefusesLegacyPackageBeforeAskingThePlayer`; startup selection:
+  `StartupSelection_ConfirmedAutosaveLoad_SurvivesTheAutosaveRotatingAway`,
+  `StartupRestore_CorruptOversizedOrMissingEntry_KeepsDefaultWorld_NeverThrows`,
+  `StartupSequence_RestoresFirst_AndRehydratesTheDefaultWorldUnlessRestored`. The full list is in
+  [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md#acceptance-status-mvp3).
 - **Effort**: M.
 
 ### MVP4 — RBXL import/export
@@ -725,6 +764,20 @@ Ordering changes vs. the seed roadmap, with justification:
 
 ### MVP8 — Gameplay services I
 
+- **Current state (audit fix waves, 2026-09-24, unreleased)**: TweenService advances in O(1) per
+  step (a `TweenInfo.new(1e-300, …, -1)` hung the host), refuses non-finite goals at `Create`, contains
+  a faulting tween (cancelled with `Completed(Cancelled)`), plays `Reverses` as two legs per repeat,
+  never fires `Touched` for a tweened move, and charges each tween to the creating actor's quota with at
+  most 256 finished tweens kept per actor; a mod's tweens die with it. `Humanoid:TakeDamage`/`MoveTo`/
+  `ChangeState`, `Debris:AddItem` and the Tween calls need `WorldEdit` and write authority, so one
+  actor's mod can no longer kill or steer another actor's character; Debris refuses services, `game`,
+  the camera and a `Player`, and re-adding an item keeps its eviction order. `CanCollide = false`
+  behaves as in Roblox (bodies pass, `Touched` and `Raycast` still see the part), only Workspace
+  content is physical, cylinders are hit and touched, a nested part is independent of its parent, and
+  an unanchored part reads its live pose. `Died` fires only inside the Workspace, `MoveTo` arrives
+  within ~1 stud on the ground plane, `JumpPower` is clamped to [0, 1000], and `MaxHealth = math.huge`
+  follows DEV-16. Acceptance item P8.4 (Debris) and the per-item evidence live in
+  `dev-docs/MVP8_ACCEPTANCE_MANIFEST.md`.
 - **Goal**: the minimum service set that makes classic tutorial gameplay scripts (kill bricks,
   pickups, doors, speed pads) run — with Roblox game feel at the default scale.
 - **Deliverables**:
@@ -829,13 +882,27 @@ Ordering changes vs. the seed roadmap, with justification:
 
 ### MVP11 — Mirror bridge core (host mode)
 
-- **Current state (7.44.x)**: `com.neoxider.coreaimirror` ships `MirrorNetworkBridge :
-  INetworkBridge` behind the `MIRROR` define, `CoreAiMirrorAuthenticator` and
+- **Current state (7.45.0 plus the unreleased fix waves)**: `com.neoxider.coreaimirror` ships
+  `MirrorNetworkBridge : INetworkBridge` behind the `MIRROR` define, `CoreAiMirrorAuthenticator` and
   `CoreAiMirrorSessionHost`. Since 7.42.0 a scene switches it on through
   `CoreAiMirrorNetworkBridgeProvider` on `CoreAiModsLifetimeScope`, and `RemoteEvent` /
-  `RemoteFunction` traffic crosses the socket; since 7.43.0 `Player:Kick()` closes the connection.
-  Host mode, world-state replication and the join snapshot over the wire are still open — see
-  `Assets/CoreAIMirror/README.md` (Known limits) and `TODO.md`, "MVP2.5 rungs".
+  `RemoteFunction` traffic runs through Mirror's real handlers and batcher — proven over an
+  in-memory transport; no two-process run over a real socket has been made. Since 7.43.0
+  `Player:Kick()` closes the connection. The unreleased fix waves add: one connection per actor with
+  the newest winning on reconnect (the Player carries over; teardown is keyed by connection); one
+  admission attempt per connection and an admission deadline (`AdmissionTimeoutSeconds`, 10 s);
+  per-channel payload limits (reliable and `RemoteFunction` up to 64 KiB, unreliable up to Roblox's
+  1,000 B, an oversize answer returned as a failure); in-process delivery for actors local to the
+  server; client handlers that no longer require Mirror authentication; stale answers, malformed
+  envelopes and orphaned requests dropped and counted instead of thrown; kcp2k's negative connection
+  ids handled (MP-25); `AttachWorld(Func<LuaCsRbxApiBindings>)` wiring `Players.IdentitySource`
+  itself, and a world that refuses a transport-admitted actor with `NOT_AUTHORITY` when it has no
+  identity source. On the remote codec: client-authored `Instance` references resolve only if the
+  sender can see them (MP-01), a 64 KiB packet no longer costs hundreds of megabytes to decode
+  (MP-02), and NaN/±Infinity travel as bare numbers (MP-17). Host mode, world-state replication, the
+  join snapshot over the wire and handing live sessions to a world loaded at runtime are still open —
+  until MVP11 a world load is refused while network sessions are live (`network_sessions_active`).
+  See `Assets/CoreAIMirror/README.md` (Sessions, Known limits) and `TODO.md`.
 - **Goal**: real multiplayer transport under the *unchanged* mod-facing API, in the **host mode**
   topology first (desktop listen server — fastest dev loop, mirrors Roblox Studio play-testing).
   Wire behavior per M-rules (`02_MULTIPLAYER_REPLICATION.md`, incl. serialization/limits
@@ -850,8 +917,10 @@ Ordering changes vs. the seed roadmap, with justification:
      `NetworkActionRelay`), `FireAllClients` → Rpc. `UnreliableRemoteEvent` on Mirror's
      unreliable channel; payload size checked against transport MTU with a loud
      `PAYLOAD_TOO_LARGE` error (Roblox: documented drop threshold 1000 B; practical budget
-     ~900 B — community-measured, UNCERTAIN [^6-note]; we enforce the transport's real limit
-     and *report* the Roblox figures in the hint).
+     ~900 B — community-measured, UNCERTAIN [^6-note]). As built, the limit is per channel:
+     an unreliable payload is capped at Roblox's 1,000 B, or at the transport's datagram when that
+     is smaller; a reliable remote or `RemoteFunction` payload at the codec's 64 KiB, or at the
+     transport's reliable message size when that is smaller.
   3. `RemoteFunction` request/response over paired `NetworkMessage`s (pattern:
      `NetworkContextActionRelay`), with timeout → Lua error, matching "InvokeClient is
      hazardous" guidance [^7] in the docs string.
@@ -882,7 +951,12 @@ Ordering changes vs. the seed roadmap, with justification:
   from the mirror's class tags), and `ReplicationApplier` applies a plan to a replica registry with
   duplicate/gap/violation handling. Nothing in production constructs these types and no bytes cross
   a socket; a replicated `Player` and cross-batch references are named open limits — `TODO.md`,
-  "MVP2.5 rungs".
+  "MVP2.5 rungs". Since the 2026-09-24 audit (unreleased): a resync converges onto a replica that
+  already holds a world (`ReplicationApplier.BeginResync(worldSequence)` reconciles in place and keeps
+  client handlers connected), `PlanWorld` sends an empty batch to a recipient that held something and
+  may now see nothing, a removal goes only to streams that knew the id (`DeltasFor(stream)`), and a
+  replica no longer restores the server's owner/ACL metadata (MP-13, MP-20; stripping it at capture is
+  open). `dev-docs/REPLICATION_PHASE0.md` has the detail.
 - **Goal**: instance trees and properties replicate; the identity promise (§3.3) is cashed in.
   Semantics per M-rules (authority, ownership, replication order).
 - **Deliverables**: server-side `Instance.new` under `workspace`/`ReplicatedStorage` replicates
@@ -1104,6 +1178,7 @@ public abstract class RbxInstance
 {
     public InstanceId Id { get; }
     public string ClassName { get; }
+    public const int MaxNameLength = 100;                   // longer names are truncated (DEV-15)
     public string Name { get; set; }
     public bool Archivable { get; set; }                    // honored by Clone()
     public RbxInstance Parent { get; set; }                 // full re-parent pipeline; throws PARENT_LOCKED after Destroy
@@ -1137,10 +1212,13 @@ public abstract class RbxInstance
     public RbxScriptSignal DescendantAdded { get; }
     public RbxScriptSignal DescendantRemoving { get; }
     public RbxScriptSignal Destroying { get; }
-    public RbxScriptSignal AncestryChanged { get; }         // (child, parent)
+    public RbxScriptSignal AncestryChanged { get; }         // (movedInstance, newParent), on every descendant
+    public RbxScriptSignal Changed { get; }                 // (propertyName); a ValueBase passes its new Value
     public RbxScriptSignal AttributeChanged { get; }        // (attributeName)
     public RbxScriptSignal GetAttributeChangedSignal(string attribute);
     public RbxScriptSignal GetPropertyChangedSignal(string property);
+    // fires Changed and the per-property signal, only on a real change
+    protected internal void NotifyPropertyChanged(string property);
 }
 ```
 
@@ -1151,15 +1229,15 @@ Globals installed: `game`, `workspace` (== `game.Workspace`), `Instance`, `Vecto
 
 | Class | Lua members shipped by the current release | Planned loud stubs (has rung) | Backlog loud errors (no rung) | Unsupported loud errors (deliberate) |
 |---|---|---|---|---|
-| `Instance` (static) | `Instance.new(className)`; deprecated second `parent` arg accepted with a once-per-mod log | — | `Instance.fromExisting` | — |
-| `Instance` (members) | §5.1.2 navigation/lifecycle/attributes/tags; `WaitForChild` including the absent-child yield, 5 s infinite-yield warning and timeout overload; general Instance-tree signals | — | — | — |
+| `Instance` (static) | `Instance.new(className)`; deprecated second `parent` arg accepted with a once-per-mod log; about ninety known Roblox classes that are not built (`WedgePart`, `SpawnLocation`, `Weld`, `Attachment`, …) raise `NOT_IMPLEMENTED` instead of "Unable to create" | — | `Instance.fromExisting` | — |
+| `Instance` (members) | §5.1.2 navigation/lifecycle/attributes/tags; `WaitForChild` including the absent-child yield, 5 s infinite-yield warning and timeout overload; general Instance-tree signals; `Changed` on every instance; `GetPropertyChangedSignal` refusing a name that is not a property of the class | — | `FindFirstDescendant`, `QueryDescendants`, `GetActor`, the styling and sandboxing members | — |
 | `Folder` | pure container | — | — | — |
 | `PVInstance` descendants | ancestry/API shape plus `PivotTo`, `GetPivot` | — | — | — |
-| `Model` | container plus `PrimaryPart`, `WorldPivot`, `GetPivot`, `PivotTo` | — | — | — |
+| `Model` | container plus `PrimaryPart`, `WorldPivot`, `GetPivot`, `PivotTo` | — | `MoveTo` (use `PivotTo`), `TranslateBy`, `GetBoundingBox`, `GetExtentsSize`, `ScaleTo`/`GetScale`, the persistent-player and legacy primary-part members | — |
 | `BasePart`/`Part` | `Position`, `Size`, `CFrame`, `Orientation`, `Rotation`, `Color`, `Transparency`, `Anchored`, `CanCollide`, `Shape`, `Material` (all 45 `Enum.Material` items render; unmapped ids fall back to a magenta diagnostic material), `MaterialVariant` (string; `""` for none; an unknown name renders the plain `Material`, not an error) | — | `Velocity`, `AssemblyLinearVelocity`, `AssemblyAngularVelocity`, `Massless`, `CanQuery`, `CanTouch`, `CollisionGroup`, `CustomPhysicalProperties`, six legacy surface properties | — |
 | `Workspace` | child navigation; `CurrentCamera`; `SignalBehavior` reads `Enum.SignalBehavior.Deferred` (D4); inherited `PivotTo`/`GetPivot` | `Raycast`/`Gravity` → MVP8; `GetServerTimeNow` → MVP2 | — | `Terrain`; setting `SignalBehavior` (Deferred-only, D4) |
-| `Camera` | `CFrame`, `CameraType`, `CameraSubject` | — | — | — |
-| `DataModel` (`game`) | class-scoped `GetService`/`FindService`; `GetService` resolves tree-backed services and registered placeholders; placeholder member access raises `NOT_IMPLEMENTED` with its rung; `FindService` returns nil for a registered placeholder not yet resolved; unknown names raise `UNKNOWN_SERVICE` | class-scoped `BindToClose` → MVP5 | — | — |
+| `Camera` | `CFrame`, `CameraType`, `CameraSubject`; a `PVInstance`, so `GetPivot`/`PivotTo` | — | `FieldOfView` (needs a rig API) and the other projection/viewport members | — |
+| `DataModel` (`game`) | class-scoped `GetService`/`FindService`; `GetService` resolves tree-backed services, registered placeholders and 28 further known Roblox services as loud placeholders; placeholder member access raises `NOT_IMPLEMENTED` with its rung or workaround; `FindService` returns nil for a registered placeholder not yet resolved; unknown names (and `""`) raise `UNKNOWN_SERVICE`; `IsLoaded()` is true and `Loaded` never fires | class-scoped `BindToClose` → MVP5 | `PlaceId`, `GameId`, `JobId` and the other place-metadata members | — |
 | containers | `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer` tree nodes | — | — | — |
 | `Lighting` | structural service/tree node | — | `ClockTime`, `Ambient`, `GeographicLatitude` | — |
 | `UserInputService` | `InputBegan`, `InputEnded`, `InputChanged`; `MouseBehavior`; `IsKeyDown`, `GetKeysPressed`, `GetMouseLocation`; signal `Wait` | — | — | — |
@@ -1231,7 +1309,11 @@ appears in any datatype signature.
   no rendering, no world-query visibility — mirroring Roblox, where unparented instances are not
   simulated. The binder materializes the GameObject when the instance first enters the
   `workspace` subtree and *deactivates* (not destroys) it when detached, so re-parenting is
-  cheap. `ReplicatedStorage`-only subtrees never materialize (storage semantics).
+  cheap. As built, the whole parented DataModel materializes, but only the Workspace subtree is
+  active: `Lighting`, `Players`, the storage services and parts directly under `game` materialize
+  inactive (no physics, no rendering), and the flag is recomputed on every re-parent. A part's
+  children live in a `"<Part> (children)"` container with no scale or rotation, so a nested part does
+  not inherit its parent's scale or join its compound collider.
 - **D6 — `Destroy()` vs Unity `Object.Destroy` timing.** `instance:Destroy()` follows R6.2
   (atomicity and ordering), concretely: (1) `Destroying` is **enqueued** on the deferred queue —
   handlers do *not* run at the fire site, (2) Parent set to nil and **locked** — any later
@@ -1251,7 +1333,12 @@ appears in any datatype signature.
   waiting, and the timeout overload returning `nil` after `timeOut` seconds [^3].
 - **D8 — `Clone()`** deep-copies the subtree, skipping `Archivable == false` nodes (returns nil
   if the root itself is non-archivable, Roblox parity); the clone's `Parent` is nil; attributes
-  and tags copy; new `InstanceId`s are allocated (identity is never cloned).
+  and tags copy; new `InstanceId`s are allocated (identity is never cloned). References inside the
+  cloned subtree are remapped: `Model.PrimaryPart` and `ObjectValue.Value` point at the copies (a
+  reference outside the subtree is kept), and `WorldPivot` is kept. `game:Clone()`, a service's
+  `Clone()` and `player:Clone()` return nil. Traversals (`FindFirstChild` recursive,
+  `GetDescendants`, `Clone`, `Destroy`) are iterative, and the live tree is capped at the snapshot
+  depth (2,048 levels) — a deeper `Parent` assignment is `BAD_ARGUMENT`.
 - **D10 — `BasePart.Rotation` uses XYZ Euler order (INFERRED).** The offline Roblox creator docs
   describe only degrees around three axes; the `Rotation` API-dump entry supplies
   `Vector3`/`NotReplicated` but no order.
@@ -1293,6 +1380,9 @@ records its C# marker; scheduled stubs normally use `// TODO: MVP<n> — ...`.
 | shipped | absent-child `WaitForChild` | landed: scheduler yield, 5 s infinite-yield warning, timeout overload | Lua binding |
 | planned | `game:BindToClose` | MVP5 | DataModel binding |
 | backlog | `Instance.fromExisting` | not scheduled; use `Clone()` | Lua binding |
+| backlog / unsupported | `Instance.new` of about ninety known Roblox classes (parts, meshes, constraints, body movers, `Tool`, `Sound`, …) | each class names its status and a workaround instead of "Unable to create" | `ClassCatalog` |
+| backlog / unsupported | 28 known Roblox services (`StarterGui` → MVP14; `Teams`, `PhysicsService`, `ReplicatedFirst`, … backlog; platform services such as `BadgeService`, `TeleportService`, `TextChatService` unsupported) | a loud placeholder instead of `UNKNOWN_SERVICE` | `ServiceCatalog` |
+| backlog | extended member tables of `Instance`, `Model`, `WorldRoot`, `Camera`, `DataModel`, `BasePart` (`Model:MoveTo`, spatial queries, collision groups, `Camera.FieldOfView`, place metadata, mass/impulse members, CSG) | known member; no rung assigned | `ClassCatalog` |
 
 The concurrent end state moves `Workspace.SignalBehavior` out of the catalog's planned row: reads
 return Deferred, while writes are deliberately unsupported per D4.
@@ -1323,7 +1413,8 @@ post-publish port after the world commits rather than while it is still staging
    detach → deactivated.
 3. Navigation: `FindFirstChild` (+recursive), `FindFirstChildOfClass/WhichIsA`, ancestor trio,
    `GetChildren` order = insertion order, `GetDescendants` preorder.
-4. `IsA("BasePart")`, `IsA("Instance")` true for `Part`; false cases.
+4. `IsA("BasePart")`, `IsA("Instance")` true for `Part`; false cases. (The hierarchy is rooted at
+   `Object`; `Part` is a `FormFactorPart`, and `Camera` is a `PVInstance`.)
 5. `Clone` deep-copies, respects `Archivable = false`, allocates fresh ids (D8).
 6. `Destroy` sequence per D6/R6.2 incl. `PARENT_LOCKED` and `INSTANCE_DESTROYED` on later access.
 7. Attributes: set/get/enumerate; wrong types rejected with `BAD_ARGUMENT` naming the type.
@@ -1335,10 +1426,12 @@ post-publish port after the world commits rather than while it is still staging
 11. Asset-scale rule: `Part` with `Size = Vector3.new(4, 1, 2)` produces
     `localScale = (4, 1, 2) × MetersPerStud` — asserted under **both** scale configs with zero
     asset differences (only the `RobloxSpace` constant changes); wedge/corner-wedge meshes obey
-    the same formula.
+    the same formula. Holds for a part nested in a part too: the child container carries no scale.
 12. Identity: `TryGetByWorldName` resolves a CoreAI world object lazily wrapped (position equals
     the `RobloxSpace` inverse of its Unity position — a 1.8 m-tall host object reads ~6.4 studs
-    at default scale); same record via `TryGet(id)`.
+    at default scale); same record via `TryGet(id)`. **PARTIAL** for writes: an adopted host
+    object follows pose writes only — the binder never changes the scale, shape, material or
+    Rigidbody of a GameObject the host owns (M1-16).
 13. Every stub in §5.1.6 raises `NOT_IMPLEMENTED` with mod id, line, and phase name.
 14. `Instance.new("Part", parent)` works and logs the deprecation note exactly once per mod.
 15. `InstanceId` authority partition (§3.3): server-assigned and locally-assigned ids are
@@ -1398,6 +1491,11 @@ public sealed class RbxScriptConnection
 // Scheduling/ModScheduler.cs
 public enum SchedulerPhase { PreSimulation, PostSimulation, Heartbeat, PreRender }
 
+public interface IRbxScriptThreadTerminalFault   // a thread that can name the fault that ended it
+{
+    RbxError TerminalFault { get; }
+}
+
 public sealed class ModScheduler
 {
     // task library backing — signatures mirror Roblox task.* [^1]; all timing on SCALED game time (D9)
@@ -1416,7 +1514,17 @@ public sealed class ModScheduler
     // host pump — called by LuaModRuntimeTickDriver (frame mapping §5.2.3, order per R4.2)
     public void RunPhase(SchedulerPhase phase, double deltaSeconds);
 
-    public event Action<string /*modId*/, string /*error*/> ThreadFaulted;
+    public event Action<string /*modId*/, RbxError> ThreadFaulted;   // handler faults of owned connections,
+                                                                      // SIGNAL_CASCADE (firing mod), BUDGET_EXCEEDED,
+                                                                      // dead-thread resumes
+    public event Action<string /*source*/, Exception> HostFaulted;   // faults no mod owns (host callbacks, ownerless
+                                                                      // handlers, throwing subscribers)
+    public event Action<string /*modId*/, bool /*completed*/> ThreadResumeSucceeded;
+    public const int DefaultMaxSignalInvocationsPerOwner = 16384;   // per resumption point
+    public const int DefaultMaxQueuedSignalInvocations = 65536;
+    public void ConfigureSignalBudget(int maxInvocationsPerOwner, int maxQueuedInvocations);
+    public void ScheduleHostCallback(double seconds, Action callback); // a throwing callback goes to HostFaulted;
+                                                                        // the rest of the slot still runs
 }
 
 // Services/ServiceCatalog.cs
@@ -1499,6 +1607,17 @@ Notes:
   signals queue for the *same* drain up to the re-entrancy cap of **10 generations per R5.6**,
   then `SIGNAL_CASCADE` — loud, with the offending chain in the message; the
   Disconnect-vs-Destroy pending-handler asymmetry is exactly R5.7.
+- **Fault containment (as built).** `ModScheduler.Advance` contains every fault: a throwing handler,
+  a cascade, a resume of a dead thread, a throwing host callback or `Wait`-timeout factory drops only
+  the guilty chain. A cascade is a fault of the mod that fired; a fault is attributed to its mod
+  through `ThreadFaulted`, and one no mod owns goes to `HostFaulted`. The other phases and mods run
+  on in the same frame, and an unobserved fault is rethrown only after the whole frame.
+  `PhaseReached`/`ThreadFaulted` subscribers are contained one by one. A width budget caps the fan-out:
+  16,384 handler invocations per owner and 65,536 queued per resumption point, beyond which the rest
+  are dropped with `BUDGET_EXCEEDED`. A `task.defer` issued by a handler runs in the same resumption
+  point (at most 10 drain rounds). The tick driver contains `Advance` and `Tick` separately. A
+  runtime composed with a logger logs each distinct ownerless fault once (at most 64, then one summary
+  line); without a logger the scheduler still rethrows.
 - **Budgets (DEV-3)**: each resumed thread / drained handler runs under `IExecutionBudget`
   (`LuaCsExecutionGuard` semantics: instruction + wall-clock caps per slice, defaults from
   `LuaCsCoroutineHandle`: 10k steps / 500 ms, tuned down per phase; since 7.39.0 both halves are
@@ -1506,8 +1625,10 @@ Notes:
   by every coroutine site and re-read on every resume, with `ScriptContext:SetTimeout(seconds)`
   moving the wall-clock half live for the host actor per DEV-14 and the instruction half staying
   composition-only because Roblox has no scriptable equivalent). Breach kills that
-  thread only, logs `BUDGET_EXCEEDED` with the mod/site, and increments the mod's consecutive-
-  error count (existing `ModHandlerErrored` flow → **quarantine** policy, §2). Budget
+  thread only, logs `BUDGET_EXCEEDED` with the mod/site, and counts toward the mod's quarantine
+  streak (existing `ModHandlerErrored` flow → **quarantine** policy, §2). For scheduler threads the
+  streak counts faulting frames: any number of faults in one frame counts once, a frame whose threads
+  ran cleanly resets it, idle frames change nothing, and quarantine is decided at the end of `Tick`. Budget
   wall-clocks are always **unscaled** real time — `timeScale = 0` must not grant infinite
   budgets. The budget interfaces carry **per-frame/per-mod slice accounting**
   (skip/downgrade + `BUDGET_EXCEEDED` warning) from MVP2 even though slice *enforcement* lands
@@ -1519,7 +1640,9 @@ Notes:
   (semantics per R4.8); `task.delay(duration, fn | taskHandle, ...) → taskHandle`;
   `task.wait(duration = 0) → elapsed`; `task.cancel(taskHandle)`. `task.synchronize`/
   `task.desynchronize`: **no-op +
-  once-per-mod log note** (deviation DEV-5).
+  once-per-mod log note** (deviation DEV-5). `math.huge` as a `task.wait`/`task.delay`/`WaitForChild`
+  duration parks the thread until it is cancelled or its mod unloads; a NaN duration raises
+  `duration must be a number, not NaN`; `task.cancel` on a finished thread is a no-op.
 - **R4.10 native coroutine-library interop is UNSUPPORTED.** A boxed CoreAI task handle may be
   rescheduled/cancelled, but a thread from `coroutine.create()` cannot be accepted or returned:
   `IScriptEngine` cannot wrap an existing native thread, and `IScriptCoroutine` exposes neither
@@ -1543,6 +1666,12 @@ Notes:
   `GetAttributeChangedSignal`, …). Every signal uses the same deferred path: firing only queues
   handlers, which run at the next script-resumption point. Signal handlers are scheduler-owned
   and may call `task.wait()`. Handler order across multiple connections is not guaranteed (R5.11).
+  As built: `GetPropertyChangedSignal` and `Changed` fire for engine-free members and for script,
+  tween and `PivotTo` writes to parts and the camera; `ConnectParallel` is `Connect` (DEV-5); each
+  handler receives its own copy of a table argument (the R5.10 bindable sanitization: no metatable,
+  cycle-safe, depth 64, instances rebound); and the ownerless one-off `execute_lua` surface refuses
+  `Connect`/`Once`/`ConnectParallel`/`Wait` with `CONTEXT_VIOLATION`, because a connection with no
+  owning mod could never be torn down.
 - **Shared JSON contract**: `RobloxJson` — one table↔JSON mapping (empty-table→`{}` vs `[]`
   rule, `null` handling, number formatting, string escapes — per the M-doc serialization
   appendix and S-rules) with `HttpService:JSONEncode(value) → string` and
@@ -1552,15 +1681,17 @@ Notes:
   stays loud-stubbed as not-planned (no open internet egress — Non-goals).
 - `game:GetService(name)`: tree-backed services in the standard runtime are `Workspace`,
   `Lighting`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`,
-  `UserInputService`, `MaterialService`, and `RunService`. Registered placeholder names also resolve, but return a
-  placeholder whose first member access raises `NOT_IMPLEMENTED` with its catalog rung:
-  `HttpService` (MVP2); `Players`, `TweenService`, `CollectionService`, and `Debris` (MVP8);
-  `DataStoreService` (MVP9); `ContextActionService` (MVP10); `SoundService` (MVP15);
-  `AIService` (`a future MVP (reserved)`); and `PathfindingService`/`MarketplaceService`
-  (`no planned MVP (not planned)`). `ServiceCatalog` also retains fallback registrations for
-  `RunService` (MVP2) and `UserInputService` (MVP10), which the normal game tree replaces with
-  the live implementations. Unknown names still raise `UNKNOWN_SERVICE` at resolution with the
-  Roblox-shaped message `X is not a valid Service name`.
+  `UserInputService`, `MaterialService`, and `RunService`, plus the catalog's tree-backed
+  `HttpService`, `Players`, `Debris`, `TweenService`, `CollectionService` and `ScriptContext`.
+  Registered placeholder names also resolve, but return a placeholder whose first member access
+  raises `NOT_IMPLEMENTED` with its catalog rung or status: `DataStoreService` (MVP9);
+  `ContextActionService` (MVP10); `SoundService` (MVP15); `StarterGui` (MVP14); `AIService`
+  (`a future MVP (reserved)`); `PathfindingService`/`MarketplaceService` (unsupported); and, since
+  the 2026-09-24 fix wave, 27 further known Roblox services as backlog or unsupported placeholders
+  (42 registrations in all). `ServiceCatalog` also retains fallback registrations for `RunService`
+  and `UserInputService`, which the normal game tree replaces with the live implementations; a bare
+  fallback's error names the missing attachment. Unknown names (and `""`) still raise
+  `UNKNOWN_SERVICE` at resolution with the Roblox-shaped message `X is not a valid Service name`.
 - Remotes (loopback via `NullNetworkBridge`): `Instance.new("RemoteEvent")` under
   `ReplicatedStorage`; `:FireServer(...)`, `:FireClient(player, ...)`, `:FireAllClients(...)`,
   `OnServerEvent(player, ...)`, `OnClientEvent(...)` [^5]; `UnreliableRemoteEvent` same
@@ -1593,7 +1724,11 @@ Notes:
   signal with zero live connections is free (no queue entry).
 - Thread lifetime: all threads spawned by a mod are tracked by owner; mod unload cancels them
   (`IScriptCoroutine.Kill` — semantics already implemented in `LuaCsCoroutineHandle`: killed
-  threads report Dead, never resume again, lifetime step cap enforced).
+  threads report Dead and never resume again). Scheduler threads have **no lifetime step cap**: the
+  per-resume budget is the only CPU limit, as in Roblox, so `while true do task.wait() end` runs for
+  the whole session; memory is budgeted per resume (`EXCEEDED_MEMORY_BUDGET`). A lifetime cap remains
+  only on handles built directly (`LuaCsCoroutineHandle.UnlimitedLifetimeSteps` marks its absence),
+  and exhausting it fails loudly with `EXCEEDED_LIFETIME_STEP_BUDGET`.
 - Reserved but inert in MVP2: every remote payload passes through the `INetworkBridge` byte
   path even in loopback (encode → decode via the §5.2.4 envelope: `RobloxJson` + tagged
   datatype/`InstanceId` entries), so marshalling bugs surface in solo play, not first in MVP11.
@@ -1646,11 +1781,14 @@ format is **stable and machine-parsable from day one**, LOCKED):
 Rules: no stack-trace-only errors (the top frame is resolved to mod/script/line even through the
 scheduler); identical repeated errors are coalesced in the ring buffer with a counter (AI context
 budget is finite; `LuaLogFormatter.ToPromptText` renders the coalesced view); `debug.traceback`
-remains available for depth. The `[mod:<id> script:… line:…]` prefix is **not attached yet**:
-`RbxError` carries the ready seam (`WithContext(modId, script, line)` and the format above), but
-wiring it is **deferred to MVP5**, where script chunk names become `mod:<id>` in the VM itself so
-even raw VM tracebacks resolve to the owning mod. Until then errors surface with the
-`CODE: message | fix: …` body and no mod prefix.
+remains available for depth. The `[mod:<id> script:… line:…]` prefix **is attached** to errors
+raised inside a persistent mod — instance and service errors, and (since the 2026-09-24 fix wave)
+datatype errors too — through `RbxError.WithContext(modId, script, line)`, with `script:main.lua`
+and the author's post-downlevel line from the live traceback. One-off `execute_lua` errors have no
+owning mod and stay unprefixed. What is still deferred to MVP5 is the VM chunk name `mod:<id>`, so
+that raw VM tracebacks resolve to the owning mod too. Argument positions in `BAD_ARGUMENT` never count
+`self`, and a property-assignment error reads `Part.Name expects a string, got number | fix: assign a
+string to Part.Name`.
 
 #### 5.2.8 Risks and mitigations
 
@@ -1675,7 +1813,9 @@ even raw VM tracebacks resolve to the owning mod. Until then errors surface with
    unconditionally.
 2. `task.spawn` runs to first yield synchronously; `task.defer` does not run before the current
    drain completes (R4.8); relative ordering test from the Roblox docs example.
-3. `task.cancel` on a waiting thread: never resumes; canceling a dead thread errors like Lua.
+3. `task.cancel` on a waiting thread: never resumes; cancelling a thread that already finished is a
+   no-op — Roblox's `task.cancel` closes the thread, and closing a dead thread is not an error (only
+   the currently running thread, or a thread another scheduler owns, raises).
 4. `task.delay(0, fn)` fires on the next Heartbeat.
 5. Frame order matches R4.2 — including **delayed threads resume BEFORE Heartbeat**
    (`R4_2_DelayedThreadsResumeBeforeHeartbeat`); `Heartbeat`/`PostSimulation`/`PreSimulation`/
@@ -1689,7 +1829,8 @@ even raw VM tracebacks resolve to the owning mod. Until then errors surface with
    was created — **a recorded deviation**: stock Lua's `os.clock` is process CPU time, but the
    offline mirror defines Luau's as monotonic elapsed wall time, and CoreAI follows the mirror.
 7. Deferred dispatch per R5.4–R5.7: `ChildAdded` handler runs deferred, mutations inside the
-   handler do not re-enter; re-entrancy cap of 10 generations raises `SIGNAL_CASCADE` (R5.6).
+   handler do not re-enter; re-entrancy cap of 10 generations raises `SIGNAL_CASCADE` (R5.6),
+   attributed to the firing mod while the rest of the frame runs.
 8. `Once` fires exactly once; `Wait` resumes with fire args; Disconnect-vs-Destroy
    pending-handler asymmetry exactly per R5.7.
 9. Destroy → all connections dead, Parent nil + locked before disconnect/child teardown
@@ -1710,7 +1851,8 @@ even raw VM tracebacks resolve to the owning mod. Until then errors surface with
     divergences — the remote codec wraps every table in a `$rbx` envelope and carries an argument
     LIST at the root, it *rejects* mixed numeric/string keys and sparse arrays where the HTTP
     encoder silently follows Roblox and drops or null-pads them, and whole numbers format as `12`
-    over HTTP versus `12.0` on the wire (`NaN`/`Infinity` likewise bare versus quoted). String
+    over HTTP versus `12.0` on the wire (`NaN`/`±Infinity` used to differ as well — bare over HTTP,
+    quoted on the wire — until MP-17 made the wire encoder emit bare tokens too). String
     escaping agrees exactly. Forcing them together would change observable behaviour on both
     paths, so what is asserted instead is the divergence itself, fixture by fixture, in
     `RbxJsonContractEditModeTests` — a test that goes red the day either side drifts.
@@ -1721,8 +1863,10 @@ even raw VM tracebacks resolve to the owning mod. Until then errors surface with
     two-mod cross-talk works.
 14. Budget: `while true do end` in a Heartbeat handler is killed within its slice, other mods'
     handlers still run that same frame, `BUDGET_EXCEEDED` logged with mod/line, and K consecutive
-    kills **quarantine** only that mod (it stays loaded/addressable; reload clears — §2);
-    budgets enforce at `timeScale = 0`.
+    faulting frames **quarantine** only that mod (it stays loaded/addressable; reload clears — §2);
+    budgets enforce at `timeScale = 0`. Library calls no longer escape the slice: string patterns
+    are capped at 5,000,000 matcher steps per call (`EXCEEDED_PATTERN_STEP_BUDGET`), `gsub` and
+    `string.format` results at 1,000,000 characters, and memory is enforced per resume.
 15. Stances for U1–U7 recorded (§2.1); testable stances have conformance tests.
 16. Corpus: ≥30% of Tier-A fixtures pass end-to-end (preprocess → load → run → assert).
 
@@ -1893,7 +2037,7 @@ Tests that pin a recorded DEV decision use the `DEV<n>_` prefix in the same way 
 | Q1 | Loretta vs mini-rewriter after the IL2CPP/WebGL smoke test | — | **Resolved**: mini-rewriter chosen and implemented on disk (`Assets/CoreAIMods/Runtime/LuauDownlevel/`: `LuauLexer.cs`, `LuauRewriteParser.cs`, `LuauDownleveler.cs`); Loretta reconsidered only if construct coverage proves insufficient |
 | Q2 | Golden-fixture source values for datatype tests — hand-derived from docs vs captured from a live Roblox session | MVP1 | hand-derive core cases from documented examples; capture a verification set from a live session if licensing-clean |
 | Q3 | Do `instanceId`s persist into world save files (stable across sessions)? | MVP3 | **Resolved** by the world-file decision (§2): registry records serialize with stable ids from day one — no remap table |
-| Q4 | Mirror unreliable-channel MTU per transport (KCP vs others) for `PAYLOAD_TOO_LARGE` | MVP11 | query transport at runtime; hint cites Roblox's 1000 B drop threshold (~900 B practical, UNCERTAIN) |
+| Q4 | Mirror unreliable-channel MTU per transport (KCP vs others) for `PAYLOAD_TOO_LARGE` | MVP11 | **Resolved**: per channel, read from Mirror's `NetworkMessages.MaxContentSize` at runtime — unreliable capped at Roblox's 1,000 B or the transport's datagram when smaller (kcp2k: 1194 B), reliable and `RemoteFunction` at the codec's 64 KiB or the transport's reliable message size |
 | Q5 | `shared` context double-execution: run on both sides (Roblox ModuleScript = per-VM copy) — confirm no shared-state illusions in docs/samples | — | **Resolved**: per-context isolated copies per R3.4 + the §3.2 matrix; "document loudly in the skill" moved to the MVP6 common-mistakes backlog |
 | Q6 | WebGL DataStore quota (IDBFS size) — cap per mod? | MVP9 | 1 MB/mod soft cap with `warn`, hard cap 5 MB |
 | Q7 | Do we need `CollectionService:GetTagged` + `GetInstanceAddedSignal` earlier than MVP8 (tags already work in MVP1)? | no | **Resolved**: committed as an MVP8 deliverable (S5.2/S5.3); pull into MVP2 only if a Tier-A fixture needs it |

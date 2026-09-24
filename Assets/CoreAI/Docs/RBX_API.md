@@ -47,14 +47,34 @@ nil value".
 the value objects **`IntValue`**, **`NumberValue`**, **`StringValue`**, **`BoolValue`**,
 **`ObjectValue`**, **`Vector3Value`**, **`CFrameValue`** and **`Color3Value`** (each with one
 type-checked `Value`). `Camera` is not creatable — the world's one camera is
-`workspace.CurrentCamera`.
-The class ancestry (`BasePart`, `PVInstance`, `WorldRoot`, …) is data-driven through `ClassCatalog`,
+`workspace.CurrentCamera`. About ninety real Roblox classes CoreAI does not build yet (`WedgePart`,
+`SpawnLocation`, `Weld`, `Attachment`, …) raise `NOT_IMPLEMENTED` from `Instance.new`, so a script
+learns "not yet" rather than "no such class"; an unknown name still raises `BAD_ARGUMENT`.
+The class ancestry (`Object` → `Instance` → `PVInstance` → `BasePart` → `FormFactorPart` → `Part`;
+`Camera` is a `PVInstance`, so `GetPivot`/`PivotTo` work on it) is data-driven through `ClassCatalog`,
 so `IsA` works the way it does in Roblox.
 
 Services reachable via `game:GetService`: `RunService`, `UserInputService`, `Players`,
 `CollectionService`, `TweenService`, `SoundService`, `Lighting`, `Debris`, `HttpService`,
 `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `ContextActionService`,
 `PathfindingService`, `MarketplaceService`, `DataStoreService`, `MaterialService`, `ScriptContext`, and CoreAI's own `AIService`.
+Twenty-eight more real Roblox services (`StarterGui`, `Teams`, `PhysicsService`, `ReplicatedFirst`,
+`TeleportService`, `BadgeService`, …) resolve to loud placeholders whose first member access raises
+`NOT_IMPLEMENTED` with a workaround, instead of the false `X is not a valid Service name`;
+`GetService("")` is `UNKNOWN_SERVICE`.
+
+### Change notifications
+
+`Instance.Changed(propertyName)` fires on every instance; a value object passes its new `Value`
+instead, as in Roblox. `GetPropertyChangedSignal(name)` fires with no arguments and refuses a name
+that is not a property of that class — a typo, an event, a method or the wrong case — with
+`X is not a valid property name.` (a catalogued, not-yet-implemented property is accepted). Writes
+from a script, a tween or `PivotTo` fire both, only on a real change, and derived members fire too: a
+`CFrame` write also reports `Position`, `Orientation` and `Rotation`. An equal assignment fires nothing,
+and movement by the physics engine never fires them. `Workspace.Gravity`, the `Humanoid` numbers and
+`Player.Character`/`DisplayName` notify the same way. `AncestryChanged(movedInstance, newParent)` fires
+on every descendant of a moved instance. `game:IsLoaded()` is `true` and `game.Loaded` never fires,
+because the world is loaded before any script runs.
 
 ### Part properties
 
@@ -65,6 +85,21 @@ soon as its `Parent` is set into the world.
 
 `Position` keeps the part's rotation; `CFrame` sets position and rotation together; `Orientation`
 (YXZ degrees) and `Rotation` (XYZ degrees) set the rotation and keep the position.
+
+Writes are checked the way Roblox checks them: boolean properties accept only `true`/`false`, number
+properties also accept a numeric string, `Size` is clamped to [0.001, 2048] studs per axis, a NaN or
+infinite `Position`/`Size`/`CFrame` is `BAD_ARGUMENT`, and a written `CFrame` is orthonormalized. A
+wrong type reads `Part.Name expects a string, got number | fix: assign a string to Part.Name`, and
+assigning a read-only property says it is read only. `BasePart:PivotTo` moves the part's descendants
+with it. An unanchored part moved by physics reads its live body pose. Assigning
+`workspace.CurrentCamera` raises `NOT_IMPLEMENTED`; drive the one camera through its `CFrame`.
+
+A part parented under another part lives in a `"<Part> (children)"` container GameObject with no scale
+or rotation of its own, so a nested part keeps its own size and does not join the parent's compound
+collider. Only the Workspace subtree is active: `Lighting`, `Players`, the storage services and parts
+directly under `game` materialize inactive, and the flag is recomputed on every re-parent. While a
+`Destroying` or `AncestryChanged` handler runs, a destroyed part still reads its last property values
+(the most recent 2,048 destroyed parts are kept; older ones are forgotten).
 
 ### `RunService`: the frame loop
 
@@ -93,7 +128,8 @@ instead until named render-step binding lands.
 
 `Players.LocalPlayer` (nil in a server context), `PlayerAdded(player)`,
 `PlayerRemoving(player, exitReason)`, `GetPlayers()`, `GetPlayerByUserId(userId)` and
-`GetPlayerFromCharacter(character)`, plus `CharacterAutoLoads` (default true), `RespawnTime`
+`GetPlayerFromCharacter(character)` (the lookups see only live Players under `Players`), plus
+`CharacterAutoLoads` (default true), `RespawnTime`
 (default 5.0 seconds; a negative or non-finite value is refused at the assignment) and a read-only
 `MaxPlayers` — assigning `MaxPlayers` from a mod is refused rather than silently ignored, because
 the host owns the capacity.
@@ -107,6 +143,15 @@ the root part, or `0` without a character. A character whose `Humanoid` dies is 
 `RespawnTime` seconds later while `CharacterAutoLoads` is still true. Avatar rigs, animation and
 appearance loading are not modelled.
 
+A `Player` cannot be destroyed or re-parented from Lua (use `Player:Kick()`; parenting things *into* a
+Player is fine) and `player:Clone()` returns `nil`. A `Player` destroyed from host C# code runs the same
+leave teardown as a disconnect, once: the actor's slot is freed, `PlayerRemoving` fires once (with a
+`nil` reason) and the character is unloaded. On a `Host` or `DedicatedServer` topology, an actor the
+transport admitted before its `Player` existed is refused with `NOT_AUTHORITY` when the world has no
+`Players.IdentitySource`, instead of being handed a session-counter `UserId` that another account
+could receive later; local actors, solo and client worlds are unaffected. The Mirror provider sets the
+identity source for you (`Assets/CoreAIMirror/README.md`).
+
 `BasePart`'s network-ownership family (`SetNetworkOwner`, `GetNetworkOwner`,
 `SetNetworkOwnershipAuto`, `GetNetworkOwnershipAuto`, `CanSetNetworkOwnership`) is a loud stub too:
 the server simulates every part, and ownership is deferred to the replication rung.
@@ -118,8 +163,17 @@ the server simulates every part, and ownership is deferred to the replication ru
 (true), read-only `MoveDirection` and `RootPart`, plus `TakeDamage(amount)` (negative heals),
 `MoveTo(location)`, `GetState()` and `Humanoid.Jump = true`. Signals: `Died` (once — a dead humanoid
 stays dead), `HealthChanged`, `MoveToFinished(reached)`, `Running`, `Jumping`, `FreeFalling`,
-`StateChanged(old, new)`. `MoveTo` reports `MoveToFinished(false)` after **eight seconds of scaled
-time**, so a paused world never times a walk out.
+`StateChanged(old, new)`. `MoveTo` arrives within about one stud on the ground plane (height is
+ignored) and reports `MoveToFinished(false)` after **eight seconds of scaled time**, so a paused world
+never times a walk out.
+
+`Died` fires only inside the Workspace: a humanoid at 0 health outside it dies on its first Heartbeat
+after entering. `JumpPower` is clamped to [0, 1000]. `MaxHealth = math.huge` is accepted and stored as
+the largest finite number (so the world stays savable) — `Health == math.huge` is then false, compare
+with `MaxHealth` — `TakeDamage(math.huge)` kills, and NaN is refused. Property writes fire `Changed` and
+`GetPropertyChangedSignal`. `TakeDamage`, `MoveTo` and `ChangeState` need `WorldEdit`, write authority
+over that humanoid and a mutation envelope, exactly like `Health =`: one actor's mod can no longer kill
+or steer another actor's character, so player-versus-player damage has to go through server-side code.
 
 Movement is done by a motor behind `IRbxCharacterMotor`: CoreAI ships `UnityRbxCharacterMotor`, and
 a host that prefers its own controller implements the interface without changing anything a script
@@ -151,7 +205,14 @@ otherwise, because a group that filtered parts differently would return a confid
 
 `BasePart.Touched(otherPart)` and `BasePart.TouchEnded(otherPart)` fire on **both** parts, and only
 from physical movement: at least one part must be unanchored, and a part moved by assigning
-`Position` or `CFrame` fires nothing that step — the same rule Roblox documents.
+`Position` or `CFrame` (or by a tween) fires nothing that step — the same rule Roblox documents.
+
+`CanCollide = false` works as in Roblox: other bodies pass through the part, but it still fires
+`Touched`/`TouchEnded`, and `workspace:Raycast` still hits it unless `RespectCanCollide` is set — so a
+coin pickup or a trap zone is a `CanCollide = false` part with a `Touched` handler. Cylinders are hit
+by raycasts and fire `Touched` too. Only parts under the Workspace are physical. `RaycastParams`
+also carries `ExcludeInstances` and `IncludeInstances` (exclusion wins; `IncludeInstances = nil`
+means everything, `{}` means nothing), and `AddToFilter` accepts one instance or an array.
 
 ### `BasePart.Material` and `Part.Color`
 
@@ -369,10 +430,23 @@ that names the parameter, states the rule and says the tool was not executed —
 set `status: "invalid_argument"` — so the model can correct the name and retry. `FileRbxWorldPackageStore`
 still throws `ArgumentException` with the same rule text for C# callers that bypass the tools.
 
+No failure crosses the tool boundary as an exception (only cancellation does). `save_world` reports a
+capture failure as `capture_failed` and writes nothing. `load_world` and `load_autosave` report
+`not_found` (a missing slot, or an autosave that rotated away), `invalid_package` (corrupt, truncated,
+over the read limit, or a legacy package refused by a session composed with a world ACL),
+`read_failed`, and `network_sessions_active` (a load is refused while remote players are connected
+through a network bridge, because live sessions cannot be handed to another world yet); no request is
+created. `list_autosaves` reports a store failure as `list_failed`. No tool can reach the startup
+selection below.
+
 The load flow is deliberately fail-closed: host or UI code subscribes to
 `ManualLoadConfirmationRequested` (or reads `GetPendingManualLoads`) and calls
 `ConfirmManualLoadAsync(requestId, true|false)`. The built-player **Hub → World Loads** page renders
-those pending requests and is the surface where the player accepts or rejects one. Requests expire
+those pending requests and is the surface where the player accepts or rejects one. A world the player
+confirms there also **reopens on the next start**: it is recorded as the durable startup selection
+(`Saves/Startup`), restored at boot through the same staged swap, and the default world opens instead
+on any failure. The page shows `Opens on start: <world>` and a **Start with the default world next
+time** button. Requests expire
 after two minutes by default, a newer request for the same slot replaces the older one, and expired,
 unknown, rejected, or reused ids never touch the live session.
 

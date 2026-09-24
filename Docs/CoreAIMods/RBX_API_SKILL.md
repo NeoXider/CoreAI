@@ -52,7 +52,8 @@ rung. See the exact current service table and author-facing examples in
 `ScriptContext` resolves as a tree-backed service. Its one member, `SetTimeout(seconds)`, moves the
 wall-clock half of the per-resume execution budget live and is host-gated: an ordinary mod is refused
 with `NOT_AUTHORITY` (the mirror marks the member `PluginSecurity`; CoreAI maps that tier to the host
-actor — roadmap deviation DEV-14). The skill text does not describe it yet.
+actor — roadmap deviation DEV-14). The skill text lists `ScriptContext` among the real services but
+does not describe `SetTimeout`.
 
 For the full picture of what has landed and what is planned, see
 [`ROBLOX_API_ROADMAP.md`](ROBLOX_API_ROADMAP.md).
@@ -65,8 +66,42 @@ Keep these in step with the runtime when the skill text is edited:
   `MaterialVariant`, `RemoteEvent`, `UnreliableRemoteEvent`, and `RemoteFunction`. `Camera` is not
   creatable — a mod reaches the world camera through `workspace.CurrentCamera`. `Humanoid` (section 7)
   and the eight value objects `IntValue`, `NumberValue`, `StringValue`, `BoolValue`, `ObjectValue`,
-  `Vector3Value`, `CFrameValue`, `Color3Value` (section 9) are creatable too. `ClassCatalog` also marks
-  `Backpack` creatable, which the skill text does not mention.
+  `Vector3Value`, `CFrameValue`, `Color3Value` (section 9) are creatable too, and so is `Backpack` (a
+  plain container). A real Roblox class that is not built yet (`WedgePart`, `SpawnLocation`, `Weld`,
+  `Attachment`, …) raises `NOT_IMPLEMENTED` instead of "Unable to create".
+- Section 4 describes the service catalog as 42 registrations: the tree-backed `HttpService`,
+  `Players`, `Debris`, `TweenService`, `CollectionService` and `ScriptContext`, the `RunService` /
+  `UserInputService` fallbacks the standard runtime replaces, and loud placeholders with a rung
+  (`DataStoreService`, `ContextActionService`, `SoundService`, `StarterGui`, `AIService`) or a
+  backlog/unsupported status (`Teams`, `PhysicsService`, `PathfindingService`, `MarketplaceService`, …).
+- Section 1 carries the scheduler and signal rules: `ConnectParallel` is `Connect` (DEV-5, a note
+  once per mod); a one-off `execute_lua` chunk gets `CONTEXT_VIOLATION` from
+  `Connect`/`Once`/`ConnectParallel`/`Wait`; every handler receives its own copy of a table argument;
+  a self-re-firing handler is cut after 10 generations (`SIGNAL_CASCADE`) and more than 16,384 handler
+  calls of one mod in one resumption point are dropped (`BUDGET_EXCEEDED`); `math.huge` waits park,
+  a NaN duration is `BAD_ARGUMENT`, `task.cancel` of a finished task is a no-op; a thread may loop
+  forever as long as it yields, memory is budgeted per resume, string patterns stop after 5,000,000
+  steps per call and `gsub`/`format` results at 1,000,000 characters.
+- Section 2 lists `Vector2:Angle`, the CFrame `components`/`ToEulerAngles`/`ToOrientation`/
+  `ToAxisAngle`/`AngleBetween` family and `CFrame.fromRotationBetweenVectors`, `Color3.toHSV`, the
+  constructor coercion rule (numeric string → number, nil → 0, anything else `BAD_ARGUMENT`), 32-bit
+  UDim offsets and the ±(2^53−1) `NextInteger` bounds. Section 3 lists `Enum.X:FromName` /
+  `:FromValue` and `Enum.KeyCode.None = 0` with `Unknown` as its alias.
+- Section 4 also states the instance-core rules: `Instance.Changed` on every instance and
+  `GetPropertyChangedSignal` refusing an unknown or wrong-case name (script, tween and `PivotTo`
+  writes fire both; an equal assignment and physics movement fire nothing), `AncestryChanged` on every
+  descendant, `game:IsLoaded()`, the 100-character `Name`, the 2,048-level depth limit, `Clone`
+  remapping `PrimaryPart`/`ObjectValue.Value` onto the copies, `game:Clone()`/`player:Clone()` → nil,
+  the Debris refusals (services, `game`, the camera, a `Player`) and the TweenService rules
+  (WorldEdit, tweenable types, per-actor retention of 256 finished tweens with the WRONG/RIGHT pair).
+- Sections 5 and 6 state the Part write rules (strict booleans, `Size` clamped to [0.001, 2048],
+  non-finite spatial values refused, the `Part.Name expects a string, got number` error shape) and
+  `CanCollide = false` as in Roblox (bodies pass through, `Touched` and `Raycast` still see the part;
+  only `workspace` content is physical). Section 7 states the Humanoid rules (`Died` only inside
+  `workspace`, `JumpPower` in [0, 1000], `math.huge` health, write authority for
+  `TakeDamage`/`MoveTo`/`ChangeState`, a ~1-stud arrival radius on the ground plane). Section 12 caps
+  attributes and tags at 256 per instance. Section 13 documents the `[mod:<id> script:main.lua line:N]`
+  prefix on errors raised inside a mod and argument numbers that do not count `self`.
 - `BasePart` exposes `Shape`, `Material`, `MaterialVariant` (string; `""` for none), `Orientation`, and `Rotation` in addition to the MVP1
   set. All 45 `Enum.Material` items render; an unmapped id resolves to a magenta diagnostic
   material. `Part.Color` stays an independent tint over the material's own albedo. `MaterialService` is a tree-backed service.

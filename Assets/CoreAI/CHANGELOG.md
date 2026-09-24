@@ -2,6 +2,229 @@
 
 ## [Unreleased]
 
+MVP3 (the world/place package) is code complete; its Unity verification gate (EditMode 0 failed, PlayMode
+`FastNoLlm` 0 failed) is still to be run. The entries below also cover the fix waves that followed the
+2026-09-24 audits of the MVP1 instance core, the MVP2 scheduler and sandbox, the MVP8 gameplay services and the
+multiplayer foundation (audit ids in parentheses; details in `TODO.md`).
+
+### Security
+
+- **Loading a legacy world package switched off per-actor access control.** A session composed with a world ACL
+  accepted a package without `world_acl_version`, ran it in compatibility mode — no cross-actor mutation or
+  destruction refusal — and wrote that downgrade into every later save. Such a package is now refused before any
+  side effect (no safety autosave, no staging), and `load_world`/`load_autosave` refuse it before the player is
+  asked, with status `invalid_package` and the session's reason. A composition that must open legacy worlds is
+  composed with `worldAclVersion: null`.
+- **A remote could hand the server objects the sender cannot see (MP-01).** `OnServerEvent`, `OnServerInvoke` and
+  `InvokeClient` answers decode client-authored `Instance` references through `DecodeClientArguments`, which
+  resolves one only if the admitted sender can see it under the replication visibility rule
+  (`GuardedReplicationFilter`): `ServerStorage`, `ServerScriptService`, another player's `Backpack`/`PlayerGui`,
+  unknown and destroyed ids arrive as `nil`. The codec also receives the bindings' log now; it used to be built
+  before that field was assigned, so all its diagnostics were lost.
+- **A 64 KB remote packet cost 268 MB and ~100 ms to decode (MP-02).** The value path is kept as a segment stack
+  and turned into text only for an error; the worst packet is now 2.4 MB / ~9 ms, and datatype components count
+  against the entry limit. Error texts are unchanged.
+- **Another actor's mod could kill or steer your character (M8-05, M8-06).** `Humanoid:TakeDamage`/`MoveTo`/
+  `ChangeState` now need `WorldEdit`, write authority over that Humanoid and a mutation envelope, exactly like
+  `Health =`. `Debris:AddItem` and `TweenService:Create`/`Play`/`Pause`/`Cancel` need `WorldEdit`; Debris checks
+  the whole subtree at the call and again when the item fires, and refuses services, the DataModel,
+  `workspace.CurrentCamera` and a `Player` (with a pointer to `Player:Kick()`) in every world. Tweens are authorized
+  against the calling actor, also when a paused tween resumes. `Player` cannot be destroyed or re-parented from
+  Lua.
+- **A server world without an identity source minted session-counter UserIds for remote players (MP-12).** On a
+  `Host` or `DedicatedServer` topology, an actor the transport registered before its `Player` existed is refused
+  with `NOT_AUTHORITY` when `Players.IdentitySource` is null, and nothing is created; the counter restarts with
+  every world, so another account could later receive the same UserId. Local actors, solo and client worlds are
+  unaffected.
+- **Library calls and allocations escaped the per-resume budget (M2-04, M2-05).** One backtracking `string.find`
+  ran 3.3 s under a 500 ms budget, `gsub`/`string.format` built 40-million-character strings, and the memory
+  reference re-baselined after every confirmation, so a doubling string passed a 256 MB budget on its way to 1 GB.
+  The fixes are listed under Fixed.
+- **`TweenInfo.new(1e-300, …, -1)` hung the host (M8-01).** A tween step is O(1): crossed legs are computed
+  arithmetically, the remainder by `fmod`, with at most one write per target per frame.
+
+### Fixed
+
+- **One line of Lua could block every save, every autosave and every gated `execute_lua`.** A NaN written to a
+  world `NumberValue` (and five other states: an `ObjectValue` pointing at a destroyed, unparented or mod-owned
+  instance, a `PrimaryPart` outside its Model, a negative `ClickDetector.MaxActivationDistance`, a non-positive
+  `StudsPerTile`, a part naming a missing `MaterialVariant`) failed every `Capture`/`ExportSnapshot`, and with it
+  `ConfirmedWorldMutationGate`. Like the dangling `PrimaryPart` before them, these are now replaced in the snapshot
+  only — the live world keeps what the script wrote — and recorded as `diagnostics` entries (`non-finite-value`,
+  `out-of-range`, `missing`, `mod-ephemeral`, `not-descendant`) with a new optional `member` field. Reading such a
+  package is still refused (untrusted input). Disk and join snapshot share one projection.
+- **World-package restore ran outside any host operation (rung-zero residue).** `InstanceTreeSerializer.Restore`
+  now validates first, registers every node, applies every write as one server-generated host operation and
+  stamps the captured revisions last; `RestoreFresh` uses the local host (`"local"`) unless
+  `RbxWorldPackageRestoreOptions.HostActorId` names another. Malformed numbers in specialised state are a
+  `BAD_ARGUMENT`, not an escaped `FormatException`.
+- **A loaded world did not charge the instance quota.** The restored tree registers before the new session's
+  `Registered` subscribers exist, so every save/load cycle gave an actor a fresh 2,048. `LuaCsModRuntime` now
+  charges existing records when it attaches (the world skeleton stays uncharged), and `LuaCsRbxApiBindings` attaches
+  the scheduler, motor and respawn to Humanoids that already exist — a restored Humanoid in a headless world never
+  finished a `MoveTo`.
+- **World tools threw instead of answering.** `save_world` returns `capture_failed` for a capture failure (including
+  a disposed session); `load_world` and `load_autosave` return `not_found` (a missing slot, an autosave rotated
+  away), `invalid_package` (corrupt, truncated, over the read limit, or refused by the session), `read_failed` and
+  `network_sessions_active`, without creating a request; `list_autosaves` returns `list_failed`. Cancellation still
+  propagates.
+- **World loads while remote players are connected are refused.** Live network sessions cannot be handed to a new
+  world before MVP11, so a load is refused at request, confirmation and raw host load, with
+  `network_sessions_active`, while the bridge lists registered actors on a non-`Solo` topology.
+- **One mod's fault broke the frame for every mod (M2-02, M2-11/12/13/17/26, M8-02).** `ModScheduler.Advance`
+  contains every fault — a throwing handler, a signal cascade, a resume of a dead thread, a throwing host callback
+  or `Wait`-timeout factory — drops only the guilty chain and reports it through `ThreadFaulted` (a cascade is the
+  firing mod's fault) or the new `HostFaulted`; the rest of the frame runs and an unobserved fault is rethrown only
+  after it. `PhaseReached`/`ThreadFaulted` subscribers are contained one by one without per-frame allocation. A
+  `task.defer` issued by a handler runs in the same resumption point (up to 10 drain rounds). A signal fan-out is
+  capped at 16,384 invocations per owner and 65,536 queued per resumption point (`BUDGET_EXCEEDED`; it used to reach
+  1.4 million invocations in one frame). `task.cancel` on a finished thread is a no-op, as in Roblox; `math.huge`
+  as a wait parks the thread; cancel/kill no longer walk every queue and `Disconnect` is O(1).
+- **A scheduler thread died silently after a million instructions (M2-01).** Scheduler threads (main chunk,
+  `task.*`, signal runners) have no lifetime step cap: the per-resume budget is the only CPU limit, as in Roblox,
+  so `while true do task.wait() end` no longer stops after ~16 s. A handle built directly keeps its cap and fails
+  loudly with `EXCEEDED_LIFETIME_STEP_BUDGET`.
+- **The memory budget did not hold (M2-05).** A mod's `HandlerMaxAllocatedBytes` (256 MB by default) is checked on
+  every resume of each of its threads, the trip reference only moves down, and a cleared suspicion re-arms a quarter
+  of the budget higher; a trip is `EXCEEDED_MEMORY_BUDGET` with the hint "keep less memory alive between two yields".
+- **String patterns bypassed the budget (M2-04, M2-19).** `find`/`match`/`gmatch`/`gsub` run on a port of Luau's
+  `MatchState` with a step counter — 5,000,000 steps per call, beyond which `BUDGET_EXCEEDED`
+  (`EXCEEDED_PATTERN_STEP_BUDGET`) — and `gsub`/`string.format` results are capped at 1,000,000 characters before
+  the string is built. Thirteen matcher divergences from Lua were fixed (`%f` at the end, `find('abc','$')`, `gmatch`
+  with `^`, numeric `gsub` replacements, `__index` replacements, an exhausted `gmatch` iterator, …), checked against
+  194 reference cases and 5,500 random ones. A yield inside a `__tostring` of `string.format`, a `gsub` replacement
+  function or `__index` raises "attempt to yield across a C-call boundary"; `%q` of a table or function is an error.
+- **A one-off `execute_lua` subscription broke the runtime (M2-03).** `Connect`/`Once`/`ConnectParallel`/`Wait` from
+  a chunk with no owning mod raise `CONTEXT_VIOLATION`; the untracked connection used to throw on every later fire
+  until the world was reloaded.
+- **Signal table arguments were shared or lost (M2-09).** Each handler receives its own copy (no metatable,
+  cycle-safe, depth 64, instances rebound); tables from remote events used to arrive as `nil`.
+- **Datatypes (M1-04/07/19/24/26/37).** New in Lua: `CFrame:ToEulerAngles([order])`, `ToEulerAnglesXYZ`/`YXZ`,
+  `ToOrientation`, `ToAxisAngle`, `AngleBetween`, `components`, `CFrame.fromRotationBetweenVectors`, `Vector2:Angle`,
+  `Color3.toHSV`, `Enum:FromName`/`FromValue`, and `ConnectParallel` as `Connect` (DEV-5). Constructors no longer
+  swallow garbage: a numeric string is a number, `nil` is 0, anything else is `BAD_ARGUMENT`; UDim offsets and
+  `NextInteger` bounds are range-checked instead of a platform-dependent cast. Argument numbers no longer count
+  `self`. Datatype errors carry the `[mod:… script:… line:…]` prefix. `Enum.KeyCode.None` is 0 with `Unknown`
+  as its alias, and KeyCode has the full 283 items.
+- **TweenService (M8-02/03/07/08/14/20/21).** Non-finite goals are refused at `Create`; a faulting tween is cancelled
+  with `Completed(Cancelled)` and logged once; `IntValue` writes round and saturate. `Reverses` plays a forward and a
+  backward leg per repeat. A tween is owned by the creating actor and charged to its quota, with at most 256 finished
+  tweens kept per actor (replaying an older one raises `INSTANCE_DESTROYED`); `CancelAndReleaseOwnedBy` releases a
+  mod's tweens. A destroyed tween stops writing and never fires `Completed`. Humanoid numbers and `Camera.CFrame`
+  are tweenable, a known but untweenable member raises the loud stub, and a tweened move is noted as a teleport, so
+  it fires no `Touched`.
+- **Instance events and `Clone` (M1-01/02/03/13/22/23).** `AncestryChanged` reaches every descendant with
+  `(movedInstance, newParent)`. `Clone` remaps `Model.PrimaryPart` and `ObjectValue.Value` onto the copies and keeps
+  `WorldPivot`. `Instance.Changed` and `NotifyPropertyChanged` exist (`Name`, `Archivable`, `Parent`, `PrimaryPart`,
+  `WorldPivot`, `Value`); a `Parent` handler during `Destroy` can read its own parent. Traversals are iterative, and
+  the live tree is capped at the snapshot depth (2,048) — a ~2,000-deep tree used to crash the process with an
+  uncatchable `StackOverflowException`. More than 256 attributes or tags on one instance is `BAD_ARGUMENT`, so a
+  script cannot build an unsavable world. `game:Clone()` and a service's clone return nil; `Name` is capped at 100
+  characters (DEV-15); `IsDescendantOf(nil)` is `BAD_ARGUMENT`.
+- **Known Roblox API answers with a loud stub (M1-05/21/25/27/36, M8-24).** About ninety known classes
+  (`WedgePart`, `SpawnLocation`, `Weld`, `Attachment`, …) raise `NOT_IMPLEMENTED` from `Instance.new` instead of
+  "Unable to create", 28 known services resolve to placeholders instead of `UNKNOWN_SERVICE`, and the known-member
+  tables of `Model`, `Camera`, `BasePart`, `DataModel`, `Instance` and `WorldRoot` grew. The class hierarchy is
+  rooted at `Object` and `Part` is a `FormFactorPart`. `GetService('')` is `UNKNOWN_SERVICE`; each stub status has
+  its own wording, and the `RunService`/`UserInputService` fallbacks name the missing attachment. A later `NetId`/
+  `WorldName` binding wins, and destroying the old holder no longer removes the new holder's key.
+- **A client's retried intent was refused as stale after 64 scheduler resumes (M2-10).** Server-generated operations
+  have their own bounded per-actor window, their results are not kept, and a resume uses one reserved id instead of
+  a new GUID; a client envelope carrying that id is refused. The resume actor context is cached per mod, and a mod
+  whose actor was released gets `NOT_AUTHORITY` instead of falling back to the host (M2-24, binding half).
+- **Replica resync failed on a non-empty world (MP-13, MP-20).** `ReplicationApplier.BeginResync(worldSequence)`
+  applies the re-sent world onto the replica in place — known ids reconciled, stale attributes/tags/references
+  removed, server instances the world no longer names removed, the replica's own instances kept — so client
+  handlers keep their objects. `PlanWorld` sends an empty batch to a recipient that held something; a removal goes
+  only to streams that knew the id (`DeltasFor(ReplicationStream)`); a replica no longer restores the server's
+  owner/ACL metadata.
+- **`CanCollide = false` switched collisions off entirely (M8-04, M1-08/14/15/16/30).** It now makes the collider a
+  trigger: bodies pass through, `Touched`/`TouchEnded` fire and `workspace:Raycast` hits it (`RespectCanCollide`
+  skips it) — coin pickups and trap zones on such parts work. Only Workspace content is active (Lighting, storage
+  and parts directly under `game` materialize inactive); cylinders are hit and touched; collider-to-instance lookup
+  is O(1); the binder changes only the pose of an adopted host object; a host GameObject destroyed from outside no
+  longer breaks writes. The character's ground probe ignores triggers.
+- **Parts in parts, live poses and destroyed parts (M1-09/10/11/20/28).** A part's children live in a
+  `"<Part> (children)"` container without scale or rotation, so a nested part no longer inherits its parent's
+  scale and motion or joins its compound collider. An unanchored part moved by physics reads its real pose, and a
+  `Size`/`Shape`/`Color` write no longer snaps it back. Destruction handlers read the last property values (the most
+  recent 2,048 destroyed parts are kept). The binder clamps `Size` to [0.001, 2048] and refuses non-finite poses.
+- **Bindings pass 1 (M8-09/12/16/17, M1-12/17/19/20/22/33).** Re-adding a Debris item updates it in place and keeps
+  its eviction order, with bounded queues and scheduler callbacks. `RaycastParams:AddToFilter` accepts one instance;
+  `ExcludeInstances`/`IncludeInstances` exist. The mod's Lua proxy cache drops destroyed instances while held
+  proxies keep their identity. `BasePart:PivotTo` moves descendants; boolean properties take only booleans; `Size` is
+  clamped and non-finite spatial writes are `BAD_ARGUMENT`; a written `CFrame` is orthonormalized; `game:Destroy()`
+  and `game:Clone()` are guarded; assigning a read-only property says "read only".
+- **Players and Humanoid (M8-12/18/19/27, M1-03).** A `Player` destroyed from C# runs the same leave teardown as
+  `RemoveActor`, once; the lookups see only live Players under `Players`. `MoveTo` arrives within ~1 stud on the
+  ground plane. `Died` fires only inside the Workspace (a 0-health Humanoid dies on its first Heartbeat there).
+  `JumpPower` is clamped to [0, 1000]; `MaxHealth = math.huge` is accepted and stored as the largest finite double
+  (DEV-16), `TakeDamage(math.huge)` kills, NaN is still refused. Humanoid and Player properties fire `Changed` and
+  `GetPropertyChangedSignal` on a real change. `player:Clone()` returns nil.
+- **A signal cascade never quarantined a mod, and rare errors did (M2-08).** For scheduler threads the quarantine
+  streak counts faulting frames: any number of faults in one frame counts once, a clean frame resets it, idle frames
+  change nothing, and quarantine is decided at the end of `Tick`. Successful resumes of a reload candidate do not
+  forgive the live instance. With a logger, each distinct ownerless scheduler fault is logged once (64 kept, then one
+  overflow line); without one the scheduler still rethrows.
+- **A WebGL script could grow a world its autosave could no longer write.** A WebGL player refuses registrations
+  past 4,032 charged instances (the 4,096-instance save budget minus a 64-instance skeleton allowance); a host may
+  only lower the ceiling.
+- **Change notifications and argument positions (M1-03/05/07/21/31, M8-14).** `Instance.Changed` fires on every
+  instance (a value object passes its `Value`); script, tween and `PivotTo` writes to parts and the camera fire
+  `Changed` and `GetPropertyChangedSignal` only on a real change, derived members included, and so does
+  `Workspace.Gravity`. `GetPropertyChangedSignal` refuses an unknown name (a typo, an event, a method, the wrong case)
+  with `X is not a valid property name.`; catalogued properties are accepted. `game:IsLoaded()` is true and
+  `game.Loaded` never fires; `Model:MoveTo` stays a loud stub. The method table is keyed by name and declaring class
+  (the nearest declaration wins). `Camera` is a `PVInstance` with `GetPivot`/`PivotTo`. Property-assignment errors
+  read `Part.Name expects a string, got number`. Boolean, EnumItem, UDim and Vector2 tween goals reach the service.
+- **`G10MeasurementComposition` in `RealProvider` mode without `COREAI_LLM`** now refuses with an error naming the
+  missing module instead of silently substituting a stub provider.
+
+### Added
+
+- **The world a player confirms reopens on the next start (W3.5).** `ConfirmManualLoadAsync(requestId, true)`
+  records the confirmed package as the durable startup selection: `FileRbxWorldPackageStore` now also implements
+  `IRbxWorldStartupStore` with a startup area `Saves/Startup/[Stores/<storeId>/]` of create-once `<N>.world`,
+  `<N>.default` and informational `<N>.json` entries (the highest `N` wins), written through the same durability
+  check (`CoreAiWebGlPersistence.SyncAsync` by default; `false` is a failure and keeps the previous selection) and
+  serialized with the autosave ring. `RbxWorldRuntimeSessionController` implements `IRbxWorldStartupSelection`
+  (`RestoreStartupSelectionAsync`, `ClearStartupSelectionAsync`, `ReadStartupSelectionAsync`), deliberately not part
+  of `IRbxWorldRuntimeService`, so no AI tool reaches it. `RbxWorldLoadResult` gained `StartupSelectionPersisted` /
+  `StartupSelectionError`. At boot the composition restores the selection through the same staged swap (no
+  `load_world-pre` autosave) and falls back to the default world, with a diagnostic, on any failure. The Hub
+  **World Loads** page shows "Opens on start: …" and a **Start with the default world next time** button, and its
+  Confirm tooltip and outcome line say whether the world will reopen. `save_world` and a raw `LoadConfirmedAsync`
+  never change the selection.
+- `CoreAiModsInstaller.RegisterCoreAiMods(worldPackageStore: …)` — inject the world package store (tests no longer
+  write into the real `persistentDataPath`); `RbxWorldPackageRestoreOptions.HostActorId`;
+  `InstanceTreeSerializer.Restore(snapshot, registry, hostActorId)`; `RbxWorldPackageDiagnostic.Member` (the old
+  constructor is kept); `RbxWorldLoadRefusedException` with `invalid_package` / `network_sessions_active` statuses.
+- `ModScheduler.HostFaulted`, `ThreadResumeSucceeded`, `ConfigureSignalBudget(perOwner, queued)`,
+  `DefaultMaxSignalInvocationsPerOwner` (16,384), `DefaultMaxQueuedSignalInvocations` (65,536), the
+  `IRbxScriptThreadTerminalFault` capability, and `RbxScriptConnection.OwnerModId`.
+- `LuaCsCoroutineHandle.UnlimitedLifetimeSteps`, `DefaultMaxAllocatedBytesPerResume`, `HasLifetimeCap`,
+  `MaxAllocatedBytes` and a `maxAllocatedBytes` constructor/`Create` parameter; `LuaCsGuardTripKind.LifetimeSteps`.
+- `LuaCsModRuntime`: the `emergencyMaxRegisteredInstances` constructor parameter, `EmergencyRegisteredInstanceCeiling`,
+  `DefaultEmergencyMaxRegisteredInstances`, `WebGlEmergencyMaxRegisteredInstances` (4,032),
+  `UnchargedWorldSkeletonAllowance` (64) and `MaxDistinctHostFaultsLogged` (64).
+- `RbxInstance.Changed`, `NotifyPropertyChanged`, `MaxNameLength`; `ReplicationApplier.BeginResync(worldSequence)`;
+  `ReplicationDirtySet.DeltasFor(ReplicationStream)`. (The Mirror package's changes are in the
+  `com.neoxider.coreaiunity` changelog.)
+
+### Changed
+
+- **Behaviour changes a mod may notice:** `task.cancel` on a finished thread no longer raises; a known Roblox class
+  or service raises `NOT_IMPLEMENTED` instead of `BAD_ARGUMENT`/`UNKNOWN_SERVICE`; `GetPropertyChangedSignal`
+  refuses a name that is not a property of the class; `CanCollide = false` parts fire `Touched` and are hit by
+  raycasts; parts outside the Workspace are inactive; a mod without `WorldEdit` can no longer `TakeDamage`, tween or
+  schedule Debris, and no mod can do so to another actor's instances; the one-off `execute_lua` surface refuses
+  signal connections; names are truncated at 100 characters; more than 256 attributes or tags, and trees deeper than
+  2,048 levels, are refused; NaN and ±Infinity travel as bare numbers on the remote wire (MP-17; the decoder always
+  read them that way); the quarantine streak counts faulting frames.
+- **The "Rbx API" skill** describes all of the above (signals, budgets, datatypes, Enum, instances, tweens, Debris,
+  part writes, `CanCollide`, Humanoid, errors) and lists the 42 service registrations instead of "13". The error
+  section now documents the `[mod:<id> script:main.lua line:N]` prefix it used to deny.
+
 ## [7.45.0] - 2026-09-24
 
 ### Security

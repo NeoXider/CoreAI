@@ -183,7 +183,36 @@ a claimed configuration needs additional headroom and a new measurement.
 **G2 scope.** G2's cross-actor refusal security claim applies only to worlds with an explicit ACL
 version. Legacy worlds whose ACL version is missing or `null` remain in compatibility mode: they do
 **not** receive cross-actor mutation/destruction refusal and are **not covered by the G2 security
-claim**. The strict ACL-versioned-world positive/negative test remains mandatory.
+claim**. The strict ACL-versioned-world positive/negative test remains mandatory. A legacy package can
+no longer switch an ACL-versioned session into compatibility mode: a session composed with a world ACL
+version refuses a package without `world_acl_version` before any side effect
+(`AclComposedSession_LegacyPackage_IsRefusedBeforeAnySideEffect`,
+`WorldLoadRequest_AclComposedSession_RefusesLegacyPackageBeforeAskingThePlayer`); a composition that
+must open legacy worlds is composed with `worldAclVersion: null`.
+
+**G8 after the 2026-09-24 audit (M2-10, M2-24).** Server-generated resume envelopes no longer share the
+per-actor idempotency window with client intents: they count in a separate, bounded per-actor server
+window, their results are not kept (nobody can replay a server-generated id), each resume uses one
+reserved operation id instead of a new GUID, and a client envelope carrying that id is refused. A
+client's retried intent therefore still returns its cached result after any number of Heartbeat
+resumes (`ClientIntentRetry_AfterMoreHeartbeatResumesThanTheWindowHolds_ReturnsTheCachedResult`,
+`ApplyServerGeneratedMutation_ManyResumesOfTheSameActor_KeepItsClientIntentReplayable`).
+`InstanceRegistry.RetainedMutationOperationCount` counts every retained caller-generated result plus the
+server-generated operations counted in each actor's server window, so existing expectations on it hold.
+The binding half of M2-24 is done: the resume actor context is cached per mod, and a mod whose actor
+was released gets `NOT_AUTHORITY` instead of falling back to the host identity
+(`ResumeActor_IsCachedPerMod_AndNeverFallsBackToTheHostForAReleasedActor`); unloading or quarantining an
+actor's mods on disconnect is still open.
+
+**Roadmap §5.2.9 criterion 14, quarantine clause.** Proven since the 2026-09-24 fix wave: for scheduler
+threads the quarantine streak counts faulting frames (many faults in one frame count once, a clean
+frame resets, idle frames change nothing, quarantine is decided at the end of `Tick`, reload clears it)
+— `LuaCs_M2_02_CascadingModIsQuarantinedAfterKFaultingFrames_WhileAnotherModKeepsRunning`,
+`LuaCs_M2_08_SchedulerHandlerErroringKFiresInARow_IsQuarantinedAtTheNextTick_AndReloadClearsIt`,
+`LuaCs_M2_08_ManySchedulerFaultsInOneFrame_CountAsOneFaultingFrame`, and the negative twin
+`LuaCs_M2_08_SchedulerHandlerErroringOnAlternateFires_IsNeverQuarantined`. Library calls no longer
+escape the slice either (string patterns: 5,000,000 steps per call; `gsub`/`format`: 1,000,000
+characters; memory per resume).
 
 **G12 frozen fixture ids:**
 

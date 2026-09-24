@@ -50,8 +50,22 @@ Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part propert
   at every script-resumption point of the frame loop. `:Connect()`, `:Once()`, and `:Wait()`
   work, and a connected handler may call `task.wait()`. Invocation order for multiple
   connections to one signal is NOT guaranteed; never depend on connection order.
+  `:ConnectParallel()` is `:Connect()` (runs serially, logs once per mod). A one-off execute_lua
+  chunk has no owning mod: Connect/Once/ConnectParallel/Wait there raise CONTEXT_VIOLATION — put
+  listeners in a mod. Each handler gets its own copy of a table argument (no metatable).
+  A handler that keeps re-firing its own signal is cut after 10 generations (SIGNAL_CASCADE);
+  more than 16,384 handler calls of one mod in one resumption point are dropped (BUDGET_EXCEEDED).
 - `task.wait/spawn/defer/delay/cancel` work. `task.synchronize/desynchronize` are no-ops that
-  log once per mod.
+  log once per mod. `task.wait(math.huge)`, `task.delay(math.huge, f)` and
+  `WaitForChild(name, math.huge)` park until cancelled or the mod unloads; a NaN duration is
+  BAD_ARGUMENT. `task.cancel` on a finished task does nothing. A `task.defer` from a handler runs
+  in the same resumption point.
+- Budgets are per resume: a thread may loop forever as long as it yields
+  (`while true do task.wait() end` is fine); one resume that never yields, or that keeps too much
+  memory alive, is cut with BUDGET_EXCEEDED. `string.find/match/gmatch/gsub` stop after 5,000,000
+  matcher steps per call; `gsub`/`string.format` results are capped at 1,000,000 chars. Yielding
+  inside a `__tostring`/`__index` or a gsub replacement function raises ""attempt to yield across
+  a C-call boundary"".
 
 ## 2. Datatypes (immutable value types; assigning a field errors)
 
@@ -62,25 +76,31 @@ Globals: `Vector3`, `Vector2`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Random`, `E
   Fields X,Y,Z,Magnitude,Unit. Methods Dot,Cross,Lerp,Angle,FuzzyEq,Abs,Ceil,Floor,Sign,
   Max,Min. Operators + - * / and unary -. `tostring` -> ""x, y, z"".
 - Vector2: `Vector2.new(x,y)`, `.zero/.one/.xAxis/.yAxis`; fields X,Y,Magnitude,Unit; same
-  methods except no Angle.
+  methods (Angle included).
 - CFrame: `CFrame.new()` (identity), `.new(x,y,z)`, `.new(pos)`, `.new(x,y,z, qx,qy,qz,qw)`,
   12-component `.new(...)`. Also `.identity`, `.lookAt(pos,target[,up])`,
   `.lookAlong(pos,dir[,up])`, `.Angles(rx,ry,rz)` (radians),
   `.fromEulerAngles(rx,ry,rz[,Enum.RotationOrder])` (default XYZ), `.fromEulerAnglesXYZ`,
   `.fromEulerAnglesYXZ`, `.fromOrientation(rx,ry,rz)`, `.fromAxisAngle(axis,angle)`,
-  `.fromMatrix(pos,vX,vY[,vZ])`.
+  `.fromMatrix(pos,vX,vY[,vZ])`, `.fromRotationBetweenVectors(a,b)`.
   Fields Position, X,Y,Z, Rotation, RightVector, UpVector, LookVector, XVector,YVector,ZVector.
   Methods Inverse, ToWorldSpace, ToObjectSpace, PointToWorldSpace, PointToObjectSpace,
-  VectorToWorldSpace, VectorToObjectSpace, Lerp, Orthonormalize, FuzzyEq, GetComponents.
+  VectorToWorldSpace, VectorToObjectSpace, Lerp, Orthonormalize, FuzzyEq, GetComponents,
+  components, ToEulerAngles([Enum.RotationOrder]), ToEulerAnglesXYZ, ToEulerAnglesYXZ,
+  ToOrientation, ToAxisAngle, AngleBetween.
   Operators: `cf * cf`, `cf * v3`, `cf + v3`, `cf - v3`.
 - Color3: `Color3.new(r,g,b)` (0..1), `Color3.fromRGB(0..255)`, `Color3.fromHSV(h,s,v)`,
-  `Color3.fromHex(""#RRGGBB"")`. Fields R,G,B. Methods Lerp, ToHSV, ToHex. `tostring`->""r, g, b"".
+  `Color3.fromHex(""#RRGGBB"")`, `Color3.toHSV(c)`. Fields R,G,B. Methods Lerp, ToHSV, ToHex.
+  `tostring`->""r, g, b"".
 - UDim: `UDim.new(scale,offset)`; fields Scale,Offset; + - unary-.
 - UDim2: `UDim2.new(sx,ox,sy,oy)` or `UDim2.new(udimX,udimY)`, `.fromScale`, `.fromOffset`;
   fields X,Y,Width,Height; method Lerp.
 - Random: `Random.new()` or `Random.new(seed)` (deterministic xoshiro).
   `:NextNumber()` -> [0,1); `:NextNumber(min,max)`; `:NextInteger(min,max)`;
   `:NextUnitVector()`; `:Clone()`; `:Shuffle(arrayTable)` (in place, seeded Fisher-Yates).
+  NextInteger bounds must be finite whole numbers within +/-9007199254740991.
+- Constructor arguments: a numeric string (""5"") counts as a number, nil as 0, anything else is
+  BAD_ARGUMENT. UDim/UDim2 offsets are 32-bit integers (fractions truncate).
 
 ## 3. Enum
 
@@ -91,17 +111,20 @@ Globals: `Vector3`, `Vector2`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Random`, `E
 Registered enum types: Material, PartType, CameraType, NormalId, Axis, RotationOrder, KeyCode,
 UserInputType, UserInputState, MouseBehavior, RaycastFilterType, HumanoidStateType, EasingStyle,
 EasingDirection, PlaybackState. Any other `Enum.X` raises NOT_IMPLEMENTED. Item
-fields: Name, Value, EnumType. `Enum.GetEnums()`; `Enum.Material:GetEnumItems()`. Items compare
+fields: Name, Value, EnumType. `Enum.GetEnums()`; `Enum.Material:GetEnumItems()`;
+`Enum.KeyCode:FromName(""Space"")` / `:FromValue(32)` return the item or nil. Items compare
 by identity (`==`). Names AND numeric values are the real Roblox ones (e.g. KeyCode gamepad
-buttons live at 1000+).
+buttons live at 1000+; all 283 KeyCode items; `Enum.KeyCode.None` is 0 and `Unknown` is its
+alias).
 
 ## 4. Instances
 
 - `Instance.new(""Class""[, parent])` — creatable classes are ""Part"", ""Folder"", ""Model"",
   ""ClickDetector"", ""RemoteEvent"", ""UnreliableRemoteEvent"", ""RemoteFunction"",
   ""MaterialVariant"", ""Humanoid"" (section 7), ""Backpack"" (a plain container), and the value
-  objects of section 9. Any other name
-  errors (a Camera is not creatable — reach the world camera through `workspace.CurrentCamera`).
+  objects of section 9. A real Roblox class CoreAI does not build yet (WedgePart, SpawnLocation,
+  Weld, Attachment, ...) raises NOT_IMPLEMENTED; any other name errors (a Camera is not creatable —
+  reach the world camera through `workspace.CurrentCamera`).
   The parent argument is deprecated (logs once); set `.Parent` after configuring instead.
 - `RemoteEvent`/`UnreliableRemoteEvent` fire one-way. `RemoteFunction:InvokeServer/InvokeClient`
   yields for a reply and is bounded to 30 scheduler seconds: a missing or stalled receiver raises
@@ -115,13 +138,14 @@ buttons live at 1000+).
   `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `Players`,
   `HttpService`, `UserInputService`, `RunService`, `MaterialService`, `Debris`, `TweenService`, and
   `CollectionService` services.
-- The catalog's 13 registrations are: `HttpService`, `Players`, `Debris`, `TweenService`, and
-  `CollectionService` (tree-backed — real implementations, the same tier as `HttpService`, NOT
-  placeholders), `RunService` (MVP2; fallback), `UserInputService` (MVP10; fallback),
-  `DataStoreService` (MVP9), `ContextActionService` (MVP10), `SoundService` (MVP15), `AIService`
-  (`a future MVP (reserved)`), `PathfindingService` (`no planned MVP (not planned)`), and
-  `MarketplaceService` (`no planned MVP (not planned)`). The standard runtime replaces the
-  two fallbacks with its live implementations.
+- The service catalog has 42 registrations. Real ones: `HttpService`, `Players`, `Debris`,
+  `TweenService`, `CollectionService` and `ScriptContext` (tree-backed — NOT placeholders), plus
+  `RunService` and `UserInputService`, whose catalog fallbacks the standard runtime replaces with
+  its live implementations (a bare fallback's error names the missing attachment). Placeholders:
+  `DataStoreService` (MVP9), `ContextActionService` (MVP10), `SoundService` (MVP15), `StarterGui`
+  (MVP14), `AIService` (`a future MVP (reserved)`), and backlog or unsupported Roblox services such
+  as `Teams`, `PhysicsService`, `ReplicatedFirst`, `PathfindingService`, `MarketplaceService`,
+  `TeleportService` and `BadgeService` (each error says which and gives a workaround).
 - `TweenService:Create(instance, TweenInfo.new(time[, easingStyle, easingDirection, repeatCount,
   reverses, delayTime]), {Property = goal, ...})` returns a Tween. `:Play()`, `:Pause()`,
   `:Cancel()`; `.PlaybackState` (Enum.PlaybackState); `.Completed` fires once with the ending
@@ -132,6 +156,14 @@ buttons live at 1000+).
   `TweenInfo.new()` defaults: time 1, `Enum.EasingStyle.Quad`, `Enum.EasingDirection.Out`,
   repeatCount 0, reverses false, delayTime 0. `SmoothDamp` is a loud stub (NOT_IMPLEMENTED) —
   interpolate manually with `GetValue` over `Heartbeat` instead.
+  Create/Play/Pause/Cancel need WorldEdit and write access to the target. Tweenable: number,
+  Vector3, CFrame, Color3, UDim2 (parts, `CurrentCamera.CFrame`, Humanoid numbers, value objects);
+  boolean/EnumItem/UDim/Vector2 members raise NOT_IMPLEMENTED; a NaN/inf goal is BAD_ARGUMENT at
+  Create. With `reverses` every repeat is a forward and a backward leg; time 0 completes at once.
+  A tweened move never fires Touched. A tween that faults is cancelled (Completed(Cancelled)).
+  WRONG: keep one tween and `:Play()` it again much later — an actor keeps only its 256 most
+  recent finished tweens, and an older one raises INSTANCE_DESTROYED. RIGHT: call
+  `TweenService:Create` each time you animate.
     local tw = game:GetService(""TweenService""):Create(part,
         TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Transparency = 1})
     tw.Completed:Connect(function(state) print(state) end)  -- Enum.PlaybackState.Completed
@@ -154,15 +186,26 @@ buttons live at 1000+).
   ""X is not a valid Service name"". Also `game:FindService(name)`. `workspace` is
   `game:GetService(""Workspace"")`.
 - Properties: Name, ClassName (read-only), Parent, Archivable. Setting Name/Parent/Archivable
-  needs WorldEdit.
+  needs WorldEdit. Name keeps its first 100 characters. A Parent deeper than 2,048 levels is
+  BAD_ARGUMENT. A Player cannot be destroyed or re-parented (use `player:Kick()`).
+- `inst.Changed(propertyName)` fires on every instance (a value object passes the new Value);
+  `inst:GetPropertyChangedSignal(""Name"")` fires with no args and refuses an unknown or
+  wrong-case name. Writes by a script, a tween or PivotTo fire them (derived members too: a CFrame
+  write fires Position/Orientation/Rotation); an equal assignment fires nothing and physics
+  movement never does. `AncestryChanged(movedInstance, newParent)` fires on every descendant.
+  `game:IsLoaded()` is true; `game.Loaded` never fires.
 - Navigation: `FindFirstChild(name[,recursive])`, `FindFirstChildOfClass(cls)`,
   `FindFirstChildWhichIsA(cls[,recursive])`, `FindFirstAncestor(name)`,
   `FindFirstAncestorOfClass(cls)`, `FindFirstAncestorWhichIsA(cls)`, `GetChildren()`,
-  `GetDescendants()`, `GetFullName()`, `IsA(cls)`, `IsDescendantOf(x)`, `IsAncestorOf(x)`.
+  `GetDescendants()`, `GetFullName()`, `IsA(cls)`, `IsDescendantOf(x)` (nil is BAD_ARGUMENT),
+  `IsAncestorOf(x)`.
   `inst.ChildName` is sugar for an existing child; a missing member errors (use FindFirstChild).
 - Lifecycle: `Clone()`, `Destroy()`, `ClearAllChildren()` (all need WorldEdit). Clone is a deep
   copy: name, attributes, tags and (for parts) Size/CFrame/Color/Anchored/Shape carry across;
-  non-Archivable subtrees are skipped and the copy gets fresh ids. After Destroy, any member
+  non-Archivable subtrees are skipped and the copy gets fresh ids; `PrimaryPart` and
+  `ObjectValue.Value` pointing inside the copy point at the copies, and WorldPivot is kept.
+  `game:Clone()`, a service's Clone and `player:Clone()` return nil; `game:Destroy()` errors.
+  After Destroy, any member
   access errors with INSTANCE_DESTROYED; re-parenting a destroyed instance raises PARENT_LOCKED
   — drop the reference and make a new one.
 - `Debris:AddItem(inst[, seconds])` (default 10 s) schedules guaranteed destruction without
@@ -170,13 +213,18 @@ buttons live at 1000+).
   projectiles/effects. WRONG: `task.delay(10, function() part:Destroy() end)` (dies with the
   script); RIGHT: `game:GetService(""Debris""):AddItem(part, 10)`. Past 1,000 queued items the
   oldest is destroyed instantly, so treat the lifetime as a maximum, not an exact delay.
+  Needs WorldEdit and write access to the whole subtree; services, `game`, the CurrentCamera and a
+  Player are refused (a Player leaves through `player:Kick()`). Re-adding an item replaces its
+  lifetime but keeps its place in the eviction order.
 
 ### Model pivots
 
 `model.PrimaryPart` is a BasePart or nil; `model.WorldPivot` is a writable CFrame.
 `model:GetPivot()` uses the PrimaryPart CFrame when set, otherwise WorldPivot (initially the
 contents' bounding-box center). `model:PivotTo(cf)` rigidly moves every descendant PVInstance.
-Pivot/property writes need WorldEdit. BaseParts also support `GetPivot()` and `PivotTo(cf)`.
+Pivot/property writes need WorldEdit. BaseParts also support `GetPivot()` and `PivotTo(cf)`
+(which moves the part's descendants too), and so does `workspace.CurrentCamera` (a PVInstance).
+`model:MoveTo(pos)` is a loud stub — use `model:PivotTo(CFrame.new(pos))`.
 
 ## 5. Part properties (a Part / any BasePart)
 
@@ -187,6 +235,11 @@ Read+write (writes need WorldEdit): `Position`, `Size`, `CFrame` (Vector3/Vector
 degrees; Orientation is YXZ, Rotation is XYZ).
 Setting `Position` keeps the part's rotation; setting `CFrame` sets position AND rotation;
 setting `Orientation` or `Rotation` sets the rotation and keeps the position.
+Booleans accept only true/false; number properties also accept numeric strings. `Size` is
+clamped to [0.001, 2048] per axis; a NaN or infinite Position/Size/CFrame is BAD_ARGUMENT; a
+written CFrame is orthonormalized. An unanchored part reads its live physics pose. A wrong type
+reads `Part.Name expects a string, got number | fix: assign a string to Part.Name`; a read-only
+property says it is read only. Assigning `workspace.CurrentCamera` raises NOT_IMPLEMENTED.
 `Shape` accepts `Enum.PartType.Ball`, `.Block`, `.Cylinder`, `.Wedge`, `.CornerWedge` — every
 one of them materializes its real mesh.
 `Material` accepts any of the 45 `Enum.Material` items and all 45 render. Thirty-six of them
@@ -221,7 +274,9 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
   raises BAD_ARGUMENT), `BruteForceAllSlow` (bool, accepted but a no-op). Method
   `:AddToFilter(list)` appends to `FilterDescendantsInstances`. `Exclude` skips the listed
   instances and their descendants; `Include` makes ONLY the listed subtree eligible; an empty list
-  means everything is eligible.
+  means everything is eligible. `:AddToFilter` takes one instance or an array. `ExcludeInstances`
+  / `IncludeInstances` are arrays too (exclusion wins; `IncludeInstances = nil` means everything,
+  `{}` means nothing). `RespectCanCollide = true` skips CanCollide=false parts.
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = {player.Character}
@@ -234,6 +289,10 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
   versa); several engine contact points for one collision collapse to a single fire. Setting a
   part's `CFrame` (a teleport) so it ends up overlapping another part does NOT fire Touched for
   that physics step — the suppression lasts exactly one step, then contacts fire normally again.
+- `CanCollide = false` works as in Roblox: bodies pass through the part, but it still fires
+  Touched/TouchEnded and `workspace:Raycast` still hits it — a coin or trap zone is a
+  CanCollide=false part with a Touched handler. Cylinders are hit and touched too. Only parts under
+  `workspace` are physical; parts in ReplicatedStorage, ServerStorage or Lighting do nothing.
 
 ## 7. Humanoid
 
@@ -245,8 +304,15 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
   once; a dead Humanoid does not resurrect from further Health writes and stays `IsDead == true`.
   There is NO passive health regeneration in the class itself (the mirror puts that in a Script
   inserted into the character; nothing heals a CoreAI Humanoid on its own).
+  `Died` fires only inside `workspace` (a Humanoid at 0 outside it dies on its first Heartbeat
+  inside). `MaxHealth = math.huge` is allowed, but then `Health == math.huge` is false — compare
+  with `MaxHealth`; `TakeDamage(math.huge)` kills; NaN is BAD_ARGUMENT. `JumpPower` is clamped to
+  [0, 1000]. TakeDamage/MoveTo/ChangeState need WorldEdit and write access to that Humanoid, so a
+  mod cannot damage another actor's character (route PvP damage through server code). Writes to
+  Health, MaxHealth, WalkSpeed, JumpPower, JumpHeight, UseJumpPower and DisplayName fire Changed.
 - `:MoveTo(position)` walks toward `position` and fires `MoveToFinished(reached: bool)` — `true`
-  on arrival, `false` after an 8-SCALED-second timeout (a paused world never times it out).
+  on arrival (within ~1 stud on the ground plane; height is ignored), `false` after an
+  8-SCALED-second timeout (a paused world never times it out).
   `:MoveTo(position, part)` (follow a moving part) is refused with BAD_ARGUMENT, not silently
   downgraded. Setting `Jump = true` requests one jump (fires `Jumping(true)`) using
   `JumpPower`/`JumpHeight`/`UseJumpPower`; jumping and moving both do nothing while dead.
@@ -259,7 +325,8 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
 ## 8. Players & Characters
 
 - `game:GetService(""Players"")` — `:GetPlayers()` -> array of connected Players; `:GetPlayerByUserId(id)`
-  and `:GetPlayerFromCharacter(model)` -> Player or nil (never error on a miss). `.PlayerAdded(player)`
+  and `:GetPlayerFromCharacter(model)` -> Player or nil (never error on a miss; only live Players
+  under Players count). `.PlayerAdded(player)`
   and `.PlayerRemoving(player, reason)` fire on connect/disconnect. `Players.LocalPlayer` is nil on the
   server (there is no client/server split to script against here — it stays nil).
 - `Players.CharacterAutoLoads` (bool, default true) — when true, a joining actor gets a character
@@ -270,7 +337,7 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
   a character's `Humanoid.Died` fires before a fresh one autoloads, when `CharacterAutoLoads` is
   still true when the timer elapses.
 - `player.Character` — the Model driven for this player, or nil until loaded. Assigning it directly
-  does NOT fire the signals below; only `LoadCharacterAsync` does.
+  does NOT fire the signals below (only `LoadCharacterAsync` does), though it fires `Changed`.
 - `player.CharacterAdded(character)` / `player.CharacterRemoving(character)` fire on load/replace.
   Replacing an existing character fires `CharacterRemoving` for the outgoing one BEFORE
   `CharacterAdded` for its replacement.
@@ -363,12 +430,17 @@ under gravity and a dense stack shoves itself apart. Drive the whole game from o
   Value must be string, boolean, number, Vector3, Vector2, Color3, or UDim — anything else is
   rejected with BAD_ARGUMENT. SetAttribute needs WorldEdit.
 - `inst:AddTag(t)` / `RemoveTag(t)` / `HasTag(t)` / `GetTags()`. Add/Remove need WorldEdit.
+- At most 256 attributes and 256 tags per instance; one more is BAD_ARGUMENT (a world must stay
+  savable).
 
 ## 13. Errors
 
-Every failure is a Lua error whose message is `CODE: message | fix: suggestion` (no
-`[mod:...]` prefix). Catch with `pcall`. Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE,
-INSTANCE_DESTROYED, PARENT_LOCKED, NOT_IMPLEMENTED, WORLD_DETACHED.
+Every failure is a Lua error whose message is `CODE: message | fix: suggestion`; inside a mod
+it starts with `[mod:<id> script:main.lua line:N] ` (one-off execute_lua errors have no prefix).
+Argument numbers do not count `self` (in `part:SetAttribute(name, value)` the name is argument 1). Catch
+with `pcall`. Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE, INSTANCE_DESTROYED,
+PARENT_LOCKED, NOT_IMPLEMENTED, WORLD_DETACHED, BUDGET_EXCEEDED, SIGNAL_CASCADE,
+CONTEXT_VIOLATION, NOT_AUTHORITY.
 
 `WORLD_DETACHED` is not a mistake in your script. The RbxWorldHost that owned the world was
 destroyed — a scene load, a domain reload during play, or leaving play mode — and it took every
@@ -377,7 +449,8 @@ the current world, so report it instead of retrying the spawn.
 
 ## 14. Not implemented (raise NOT_IMPLEMENTED — do not use)
 
-- `Instance.fromExisting` (use `Clone`).
+- `Instance.fromExisting` (use `Clone`), `Model:MoveTo` (use `PivotTo`), `Camera.FieldOfView`,
+  `Humanoid.Sit`, and the known Roblox classes CoreAI does not build (section 4).
 - Part `Shape`, `Material`, `Orientation` and `Rotation` ALL work now — see section 5. So does
   `WaitForChild(name)` for an absent child: it yields through the scheduler bridge.
 - Luau syntax IS accepted and auto-downleveled to Lua 5.2 before compiling: `+=` (and

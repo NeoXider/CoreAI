@@ -5,7 +5,7 @@
 > [`TODO.md`](../TODO.md); shipped work in the package changelogs
 > (e.g. [`Assets/CoreAI/CHANGELOG.md`](../Assets/CoreAI/CHANGELOG.md)).
 
-Last updated: 2026-09-17. All seven package manifests carry the same release version (see §2); release
+Last updated: 2026-09-24. All seven package manifests carry the same release version (see §2); release
 history lives in the package changelogs and open work in `TODO.md`.
 
 ---
@@ -101,8 +101,14 @@ overridable from a project-local 2K–4K catalog through the Editor menus, the r
 **Next milestones.** Finish the remaining MVP2 items (clocks, the shared JSON contract, and the
 Tier-A corpus gate), then the ladder through MVP17 (RBXL, mod UX,
 skill-as-docs, gameplay services, DataStore, input, Mirror, replication, dedicated server, GUI,
-audio/FX, in-game console, performance/WebGL). MVP3 (the world/place package) has landed — see
-Track C.
+audio/FX, in-game console, performance/WebGL). MVP3 (the world/place package) is code complete
+and awaits its Unity verification gate — see Track C. Audits of the MVP1 instance core, the MVP2
+scheduler/signals/budgets and the MVP8 gameplay services (2026-09-24) were followed by fix waves
+that are unreleased (after 7.45.0): one mod's fault no longer breaks the frame for the others,
+scheduler threads have no lifetime step cap (the per-resume budget is the only CPU limit, as in
+Roblox) while memory is enforced per resume, string patterns are budgeted, `CanCollide = false`
+behaves as in Roblox, `Instance.Changed` fires on every instance, and TweenService can no longer hang
+the host.
 
 **Detail:** [`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md`](CoreAIMods/ROBLOX_API_ROADMAP.md)
 (the definitive MVP0–MVP17 ladder and all locked decisions) ·
@@ -119,9 +125,15 @@ Mirror (via NeoxiderTools `Neo.Network`); topology order is Null loopback (solo)
 topology-agnostic; `NullNetworkBridge` is the solo loopback. Since 7.42.0 a scene can switch Mirror
 on: the optional `com.neoxider.coreaimirror` package (`MIRROR` define) provides
 `CoreAiMirrorNetworkBridgeProvider`, which `CoreAiModsLifetimeScope` registers as the
-`INetworkBridge`, so `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction` traffic crosses a real
-socket; since 7.43.0 a kick (`INetworkBridge.DisconnectActor`) closes the connection. The game still
-calls `AttachWorld` and sets `Players.IdentitySource` itself. `InstanceRegistry` binds instance ids to
+`INetworkBridge`, so `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction` traffic runs through
+Mirror's real message handlers and batcher (tested over an in-memory transport — no two-process run
+over a real socket has been made yet); since 7.43.0 a kick (`INetworkBridge.DisconnectActor`) closes
+the connection. Unreleased, after 7.45.0: `AttachWorld(() => stack.GameplayBindings.RbxApi)` wires
+`Players.IdentitySource` to the session host itself, a reconnecting actor's newest connection wins,
+admission has a deadline, payload limits are per channel (reliable up to 64 KiB, unreliable up to
+1,000 B), actors local to the server are served in process, and a world load is refused while
+network sessions are live, because they cannot be handed to a new world before MVP11.
+`InstanceRegistry` binds instance ids to
 `netId`s, and the engine-free replication core under MVP12 — member-level change reporting, a dirty
 set, per-recipient Spawn/Patch/Remove planning and a replica-side applier — is built and tested
 registry-to-registry, but world-state replication does not cross the wire yet, and host mode is
@@ -151,18 +163,29 @@ existing Roblox places a content on-ramp.
 
 **Current state.** World state persistence (`WorldStateManager`), versioned mod source stores
 with revert, and the self-contained shareable mod bundle (`ExportMod`/import with capability
-masking) are shipped. **MVP3 has landed:** the `.world` ZIP place package (deterministic
+masking) are shipped. **MVP3 is code complete (2026-09-24); its Unity verification gate is
+pending** — EditMode 0 failed and PlayMode `FastNoLlm` 0 failed still have to be run in Unity (the
+portable `dotnet test` suite reports 2085 passed / 0 failed / 3 skipped), so the rung is not closed
+yet. Built: the `.world` ZIP place package (deterministic
 `manifest.json` + `world.json` + indexed `Mods/`), `FileRbxWorldPackageStore` with create-once
 manual slots and a two-phase-durable autosave ring, `ConfirmedWorldMutationGate` in front of every
 `execute_lua` and every mutating `manage_mods` action, `RbxWorldRuntimeSessionController` for
 transactional session replacement, the `save_world`/`load_world` tools with the
 confirm-before-restore flow, the `list_autosaves`/`load_autosave` tools over the autosave ring
 (`save_world`, `load_world` and `load_autosave` refuse an invalid slot or autosave name as a JSON error
-result), and the built-player **Hub → World Loads** page. Unity and browser acceptance runs for that
-rung are owned outside this document. RBXL is not built.
+result), and the built-player **Hub → World Loads** page. Unreleased, after 7.45.0: every world
+tool returns a JSON failure instead of throwing (`capture_failed`, `not_found`, `invalid_package`, `read_failed`,
+`network_sessions_active`, `list_failed`); restore runs as one host-enveloped operation; a session
+composed with a world ACL refuses a legacy package; restored trees charge the instance quota; and the
+W3.5 tail is implemented — a player-confirmed world survives a process restart (durable startup
+selection under `Saves/Startup`, restored through the same staged swap, the default world on any
+failure, a Hub reset button). Each MVP3 DoD item (a)–(f) is proven by a named test, listed with the
+rung-zero envelope, ACL-floor and startup-selection tests in
+[`WORLD_PACKAGE.md`](CoreAIMods/WORLD_PACKAGE.md#acceptance-status-mvp3) and ROBLOX_API_ROADMAP
+§MVP3. The real WebGL page-reload gate stays open. RBXL is not built.
 
-**Next milestones.** MVP4 (RBXL import/export), MVP9 (DataStoreService on the shared JSON
-contract); persisting world selection/autoload across a process restart (the W3.5 tail).
+**Next milestones.** The MVP3 Unity verification gate, then its release; MVP4 (RBXL
+import/export) starts only after that; MVP9 (DataStoreService on the shared JSON contract).
 
 **Detail:** [`Docs/CoreAIMods/WORLD_PACKAGE.md`](CoreAIMods/WORLD_PACKAGE.md) (the shipped format,
 limits, durability, and session-replacement contract) · ROBLOX_API_ROADMAP §MVP3/§MVP4/§MVP9 ·
@@ -276,8 +299,9 @@ ROBLOX_API_ROADMAP §MVP17/§6.5.
 - **Current release.** The version in §2 is the latest release. Every release is described in the
   package changelogs ([core](../Assets/CoreAI/CHANGELOG.md),
   [Unity host](../Assets/CoreAiUnity/CHANGELOG.md)); the milestones below are kept as history.
-- **7.42.0–7.43.0 (2026-09-16).** Mirror multiplayer can be switched on from a scene; remotes cross
-  the socket; a kick closes the connection.
+- **7.42.0–7.43.0 (2026-09-16).** Mirror multiplayer can be switched on from a scene; remotes run
+  through Mirror (proven over an in-memory transport, not yet across a real socket); a kick closes the
+  connection.
 - **7.1.1 (2026-08-31).** Patch release for `com.neoxider.coreai` /
   `com.neoxider.coreaiunity`: `call_skill_tool` now falls through to the role's own top-level tools
   instead of answering a miss with a plain "not found" result, and a rejected tool call is logged.

@@ -155,6 +155,19 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   (`while true do end`) is cut on ALL platforms incl. WebGL — a buggy mod cannot hang a frame — and the
   failure reaches you as a budget kill, `BUDGET_EXCEEDED`, naming the bound and your line, not as a Lua
   error to "fix".
+- **A thread may run forever as long as it yields.** The per-resume budget is the only CPU limit on a
+  scheduler thread (the main chunk, `task.*`, signal handlers), exactly as in Roblox: `while true do
+  task.wait() end` runs for the whole session. (A lifetime step cap survives only on coroutine handles
+  a host builds directly, and exhausting it fails loudly with `EXCEEDED_LIFETIME_STEP_BUDGET`.)
+- **Memory is budgeted per resume too.** Live heap growth inside one resume of any of the mod's threads
+  is capped by the mod's allocation budget (`HandlerMaxAllocatedBytes`, 256 MB by default); a resume
+  that exceeds it is cut with `BUDGET_EXCEEDED` / `EXCEEDED_MEMORY_BUDGET` and the fix hint "keep less
+  memory alive between two yields" — build big data across several yields, or keep less of it.
+- **String patterns are budgeted per call.** `string.find`/`match`/`gmatch`/`gsub` stop after 5,000,000
+  matcher steps with `BUDGET_EXCEEDED` (`EXCEEDED_PATTERN_STEP_BUDGET`), and a `gsub` or `string.format`
+  result may not exceed 1,000,000 characters. Pattern semantics are Luau's. Yielding inside a
+  `string.format` `__tostring`, a `gsub` replacement function or an `__index` metamethod raises
+  `attempt to yield across a C-call boundary`.
 - **The budget is the game's, not CoreAI's.** The host sets both halves on `CoreAiModsLifetimeScope`
   (**Lua coroutine resume budget**; `<= 0` falls back to the defaults) and every resume re-reads them, so a
   game may tighten the budget for untrusted mods or loosen it for a heavy simulation while mods are already
@@ -163,7 +176,10 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   `NOT_AUTHORITY`, the way Roblox limits the member to plugins. The instruction half has no Lua-facing
   setter, because Roblox has none.
 - Caps: timer min interval `0.05 s`, exports/mod, dispatch per tick (no events dropped; serviced on later
-  ticks), quarantine after consecutive failures (mod stays loaded; reload resumes it).
+  ticks), quarantine after consecutive failures (the mod stays loaded; reload resumes it). A failed
+  hook/timer call counts once and a successful one resets the streak; for scheduler threads a frame with
+  any number of faults counts once and a frame whose threads ran cleanly resets it, so an error repeated
+  every frame (a signal cascade) is quarantined while a rare one is not.
 
 ## Lua version note
 Lua-CSharp targets **Lua 5.2** semantics with **double-only numbers** — there is no integer/float

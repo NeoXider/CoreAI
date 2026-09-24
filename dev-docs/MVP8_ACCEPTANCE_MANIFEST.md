@@ -65,3 +65,38 @@ stub-hiding one — which is why the guard counts stub raises specifically rathe
 `Negative_CorruptedTierBFixtures_Fail` runs deliberately broken copies of three fixtures and
 requires the expected diagnostic text (`Vaporize`, `IntValue`, `CanCollide`). A corpus that passes
 its twins is not measuring anything.
+
+## Gameplay-service audit (2026-09-24)
+
+The 2026-09-24 audit of the MVP8 services found defects under several gates of
+`dev-docs/MVP25_BUILD_PLAN_2026-09-04.md`; the fixes are unreleased and verified by EditMode tests that
+still have to be run in Unity. The corpus above is unchanged.
+
+- **Gate P8.4 (`Debris:AddItem`).** Capability: a mod without `WorldEdit` is refused
+  (`AddItem_ReadOnlyMod_IsRefusedForMissingWorldEdit`). Subtree: the caller must be allowed to destroy
+  the whole subtree, checked at the call and again when the item fires
+  (`AddItem_CrossOwnerDescendant_RefusedAtCallTime_SubtreeUntouched`,
+  `AddItem_DescendantReownedAfterScheduling_FireDroppedWithOneLogLine`, positive twin
+  `AddItem_OwnSubtree_DestroysEveryDescendant`). Singletons: services, the DataModel and
+  `workspace.CurrentCamera` are refused in every world, ACL-versioned or not, and a `Player` is refused
+  with a pointer to `Player:Kick()` (`AddItem_NonAclWorld_ProtectedSingletonsAreRefused`,
+  `AddItem_Player_IsRefusedWithAKickHint`). Memory: re-adding an item replaces its lifetime in place and
+  keeps its eviction order, and the queues and scheduler callbacks stay bounded under churn
+  (`AddItem_ReAddedItem_KeepsItsOriginalInsertionOrderForEviction`,
+  `AddItem_ChurnAndReAdds_KeepInternalQueuesAndSchedulerCallbacksBounded`).
+- **TweenService.** Stepping is O(1) per tween and frame, non-finite goals are refused at `Create`, a
+  faulting tween is cancelled alone, each tween is owned by and charged to the creating actor with at
+  most 256 finished tweens kept per actor, and Create/Play/Pause/Cancel are authorized against the
+  calling actor (`Step_TinyDurationForeverRepeat_WritesOncePerFrame_AndCarriesTheRemainder`,
+  `CreatePlayComplete_TenThousandCycles_KeepsAtMost256IdleTweensPerActor`,
+  `Replay_OfAReleasedTween_RaisesInstanceDestroyed`, `Play_WithACaller_AuthorizesTheCallerNotTheCreator`).
+- **Humanoid.** `TakeDamage`/`MoveTo`/`ChangeState` need `WorldEdit` and write authority
+  (`HumanoidMethods_CrossActor_AreRefusedByTheWorldAcl`); `MoveTo` arrival is measured on the ground
+  plane (`MoveTo_ArrivalIsMeasuredOnTheGroundPlane_ATargetBelowTheRootIsReached`); `Died` fires only
+  inside the Workspace (`HealthZero_OutsideTheWorkspace_DiesOnceOnTheFirstHeartbeatInside`).
+- **Physics.** `CanCollide = false` lets bodies through but keeps `Touched` and raycast hits
+  (`CanCollide_False_KeepsTheColliderEnabledAsATrigger`,
+  `CanCollideFalsePart_IsHitByADefaultRay_AndSkippedWhenTheRayRespectsCanCollide`,
+  `CanCollideFalsePart_TriggerOverlap_IsReportedAsAContactThenItsEnd`), only Workspace content is
+  physical (`D5_OnlyWorkspaceIsActive_AmongTheDataModelsChildren`), and cylinders are hit and touched
+  (`PartShapeMaterializationEditModeTests`, `Mvp8PhysicsPlayModeTests`).

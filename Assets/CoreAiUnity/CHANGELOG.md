@@ -4,6 +4,78 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `core` and `lua` module legs (no `COREAI_LLM`) did not compile, nor did WebGL `core`.** Twenty-three
+  unguarded references to LLM-only types in seven files: `LlmPipelineInstaller` used
+  `MeaiOpenAiChatClient.DefaultAsyncMarshaler` outside `COREAI_LLM`, `FetchSseOpenAiTransport` lacked the guard its
+  sibling `WebGlCompositeOpenAiTransport` has, and five test files (`MeaiOpenAiChatClientWebGlDelay`,
+  `ToolCallAuditInterceptor`, one `ToolExecutionPolicy` case, `SharedLlmUnity`, `MixedBackendParallelAgents`) used
+  LLM types unguarded. All are now under `#if COREAI_LLM`; a Roslyn compile of every asmdef in the six module
+  configurations reports no new error.
+- **Mirror package (`com.neoxider.coreaimirror`): a reconnect kicked the player (MP-03).** One connection per actor,
+  and the newest wins: an actor admitted on a new connection before kcp2k timed out the old one keeps its `Player`
+  (`PlayerRemoving` fires only when its last session ends) and the older connection is closed. Every disconnect path
+  is keyed by connection, never by actor alone, so the old connection's late disconnect cannot tear down the new
+  session.
+- **Mirror: a connection could ask for admission repeatedly, or never (MP-04, MP-05).** The first admission request
+  of a connection is decided and every later one is ignored and counted (repeats used to mint ghost players); a
+  connection that sends none within `CoreAiMirrorAuthenticator.AdmissionTimeoutSeconds` (default 10 s) is dropped —
+  Mirror has no authentication timeout of its own, so silent peers held their slots for ever.
+- **Mirror: one payload ceiling for every channel (MP-07).** Reliable remotes and `RemoteFunction` carry up to 64 KiB,
+  an `UnreliableRemoteEvent` up to Roblox's 1,000 bytes (less on a transport with a smaller datagram); a
+  `RemoteFunction` answer too large for the channel becomes a failure that names the size instead of vanishing.
+- **Mirror: remotes of actors local to the server went out on the wire (MP-08).** A server never sends a
+  client-to-server envelope to itself: remotes from and to actors registered in the server process are delivered in
+  process, so `InvokeServer` no longer waits 30 s, and `FireClient`/`InvokeClient`/`FireAllClients` reach local actors.
+- **Mirror: an unreliable remote that overtook the admission response disconnected the joining client (MP-09, client
+  half).** Client handlers no longer require Mirror authentication; such a packet is dropped and counted as
+  unadmitted.
+- **Mirror: robustness of the receive paths (MP-14/15/16/18/23).** An answer to a connection that is gone or reused
+  is dropped (`StaleResponsesDropped`); a client's pending requests fail at once on a disconnect or `Dispose`; a
+  malformed envelope is dropped and counted (`MalformedPacketsDropped`) without an exception inside Mirror's handler;
+  the disconnect hook is contained and restored.
+- **Mirror: kcp2k's negative connection ids were treated as "no connection" (MP-25).** About half of all clients get
+  one; their packets reached connection zero, and another client's answer could complete their request.
+
+### Added
+
+- **`CoreAiMirrorNetworkBridgeProvider.AttachWorld(Func<LuaCsRbxApiBindings>)`** — attaches the world the function
+  returns at each admission and makes the session host that world's `Players.IdentitySource` (checked every frame and
+  before every admission, so a world loaded later is wired too; an identity source the host already set is kept).
+  The delegate overload remains for custom compositions. Paired with the world-side rule that a server world without
+  an identity source refuses a transport-admitted actor (`com.neoxider.coreai` changelog), the manual
+  `Players.IdentitySource = provider.SessionHost` step is no longer needed.
+- Mirror counters: `MirrorNetworkBridge.MalformedPacketsDropped`, `UnroutablePacketsDropped`, `LocalDeliveries`,
+  `StaleResponsesDropped`, `OversizeResponsesFailed`, `SupersededConnections`, `CodecPayloadCeilingBytes`,
+  `UnreliablePayloadCeilingBytes`, `MaxRequestPayloadBytes`, `MaxPayloadBytesFor(reliability)`;
+  `CoreAiMirrorAuthenticator.IgnoredAdmissionRequests`, `AdmissionTimeouts`, `AdmissionTimeoutSeconds`;
+  `CoreAiMirrorSessionHost.SupersededSessions`.
+
+### Docs
+
+- **MVP3 status and the fix waves are documented.** `WORLD_PACKAGE.md` gained the capture-projection table, the
+  host-enveloped restore, the ACL floor, the startup selection, the tool failure statuses and an MVP3 acceptance
+  section naming the proving test of every DoD item; the roadmaps, `RBX_API.md`, `mod-authoring.md`,
+  `CHARACTER_MOTOR_BRIDGE.md`, the MVP2/MVP8 acceptance manifests and `REPLICATION_PHASE0.md` follow the code. The
+  Mirror README no longer claims that remotes "cross a socket" (they run through Mirror's real handlers over an
+  in-memory transport in tests; no two-process run exists yet), shows the new `AttachWorld` overload, and gained a
+  Sessions section.
+
+### Tests
+
+- **Engine-free Roblox-API tests run on Linux.** `tools/portable` gained `CoreAI.RbxApi.Datatypes`,
+  `CoreAI.RbxApi.Instances` and `CoreAI.LuauDownlevel` projects (netstandard2.1, C# 9, one per asmdef), and the
+  portable suite links 33 test files (388 cases at the time) covering instances, ACL, scheduler, replication,
+  networking, the Luau downleveler and datatypes; later waves added more (2085 passed / 0 failed / 3 skipped when this
+  entry was written). `.gitignore` now keeps `tools/**/*.csproj`: the capitalised `!Tools/` exception did not
+  match on Linux.
+- **Regression coverage for every fix above** — each written to fail on the old code — including the MVP3 DoD
+  fixtures (`Mvp3WorldPackageEditModeTests`, `Mvp3WorldPackageFollowUpEditModeTests`,
+  `RbxWorldHostDiWiringEditModeTests`, `CoreAiModsHubBinderFullTierEditModeTests`), the Mirror suites (53 new tests, compiled against the Mirror v96.0.1
+  sources), and a PlayMode check that a character above a `CanCollide = false` part does not stand on it. None of
+  the new EditMode and PlayMode fixtures has run in Unity yet.
+
 ## [7.45.0] - 2026-09-24
 
 ### Added
