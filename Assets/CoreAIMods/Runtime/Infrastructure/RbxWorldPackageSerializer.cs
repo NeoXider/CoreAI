@@ -42,6 +42,18 @@ namespace CoreAI.Mods.WorldPackages
         /// </summary>
         private const string NonFiniteValueReason = "non-finite-value";
 
+        /// <summary>Diagnostic reason for a finite live value outside the range the format accepts.</summary>
+        private const string OutOfRangeReason = "out-of-range";
+
+        /// <summary>Diagnostic reason for a reference to a mod-owned or otherwise excluded target.</summary>
+        private const string ModEphemeralReason = "mod-ephemeral";
+
+        /// <summary>Diagnostic reason for a reference to a destroyed, unparented or unknown target.</summary>
+        private const string MissingReason = "missing";
+
+        /// <summary>Diagnostic reason for a PrimaryPart that is retained but not inside its Model.</summary>
+        private const string NotDescendantReason = "not-descendant";
+
         /// <summary>Captures the supported world-owned DataModel projection plus settings and mods.</summary>
         public static RbxWorldPackagePayload Capture(RbxWorldPackageCaptureContext context)
         {
@@ -59,7 +71,10 @@ namespace CoreAI.Mods.WorldPackages
 
             InstanceTreeSnapshot capturedTree = InstanceTreeSerializer.Capture(context.Game);
             List<RbxWorldPackageDiagnostic> diagnostics = new();
-            InstanceTreeSnapshot tree = ProjectWorldOwnedTree(capturedTree, context.Registry, diagnostics);
+            HashSet<string> excludedVariantNames = new(StringComparer.Ordinal);
+            InstanceTreeSnapshot tree = ProjectWorldOwnedTree(
+                capturedTree, context.Registry, diagnostics, excludedVariantNames);
+            HashSet<string> retainedVariantNames = CollectMaterialVariantNames(tree);
             Dictionary<InstanceId, PartProperties> parts = new();
             foreach (InstanceSnapshot node in tree.Instances)
             {
@@ -90,7 +105,9 @@ namespace CoreAI.Mods.WorldPackages
                         + " but its durable Part state is missing from IPartPropertySink.");
                 }
 
-                parts.Add(id, ProjectFinitePartState(id, properties, diagnostics));
+                PartProperties finite = ProjectFinitePartState(id, properties, diagnostics);
+                parts.Add(id, ProjectMaterialVariantReference(
+                    id, finite, retainedVariantNames, excludedVariantNames, diagnostics));
             }
 
             RbxWorldSettings settings = context.Settings;
@@ -119,17 +136,25 @@ namespace CoreAI.Mods.WorldPackages
             return payload;
         }
 
+        /// <summary>
+        /// Projects the live tree to its world-owned, format-valid snapshot: excludes mod-ephemeral
+        /// and runtime-infrastructure subtrees, then drops or replaces, in the snapshot only, every
+        /// dangling reference and out-of-format value a script can leave behind, recording one
+        /// diagnostic each. The names of excluded MaterialVariants are added to
+        /// <paramref name="excludedVariantNames"/> for the Part reference projection.
+        /// </summary>
         private static InstanceTreeSnapshot ProjectWorldOwnedTree(
             InstanceTreeSnapshot capturedTree,
             InstanceRegistry registry,
-            List<RbxWorldPackageDiagnostic> diagnostics)
+            List<RbxWorldPackageDiagnostic> diagnostics,
+            HashSet<string> excludedVariantNames)
         {
             InstanceTreeSnapshot projectedTree = new()
             {
                 WorldAclVersion = capturedTree.WorldAclVersion
             };
             HashSet<ulong> excludedIds = new();
-            HashSet<ulong> retainedIds = new();
+            Dictionary<ulong, ulong> retainedParents = new();
             foreach (InstanceSnapshot node in capturedTree.Instances)
             {
                 bool excludedByParent = node.ParentId != 0UL && excludedIds.Contains(node.ParentId);
@@ -139,10 +164,15 @@ namespace CoreAI.Mods.WorldPackages
                 if (node.OwnerModId != null || runtimeInfrastructure || excludedByParent)
                 {
                     excludedIds.Add(node.Id);
+                    if (string.Equals(node.ClassName, "MaterialVariant", StringComparison.Ordinal))
+                    {
+                        excludedVariantNames?.Add(node.Name);
+                    }
+
                     continue;
                 }
 
-                if (node.ParentId != 0UL && !retainedIds.Contains(node.ParentId))
+                if (node.ParentId != 0UL && !retainedParents.ContainsKey(node.ParentId))
                 {
                     throw new RbxWorldPackageException(
                         "World-owned projection found instance id " + node.Id
@@ -150,31 +180,150 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 projectedTree.Instances.Add(node);
-                retainedIds.Add(node.Id);
+                retainedParents.Add(node.Id, node.ParentId);
             }
 
             foreach (InstanceSnapshot node in projectedTree.Instances)
             {
-                if (node.Model == null
-                    || node.Model.PrimaryPartId == 0UL
-                    || retainedIds.Contains(node.Model.PrimaryPartId))
+                if (node.Model == null || node.Model.PrimaryPartId == 0UL)
                 {
                     continue;
                 }
 
-                string classification = excludedIds.Contains(node.Model.PrimaryPartId)
-                    ? "mod-ephemeral"
-                    : "missing";
+                ulong primaryPartId = node.Model.PrimaryPartId;
+                string classification;
+                if (!retainedParents.ContainsKey(primaryPartId))
+                {
+                    classification = excludedIds.Contains(primaryPartId)
+                        ? ModEphemeralReason
+                        : MissingReason;
+                }
+                else if (!IsRetainedDescendant(primaryPartId, node.Id, retainedParents))
+                {
+                    // WHY: SetPrimaryPart accepts any BasePart, and only the next pre-simulation
+                    // step resets one outside the Model, so a capture in between sees it.
+                    classification = NotDescendantReason;
+                }
+                else
+                {
+                    continue;
+                }
+
                 diagnostics?.Add(new RbxWorldPackageDiagnostic(
                     node.Id,
-                    node.Model.PrimaryPartId,
+                    primaryPartId,
                     classification));
                 node.Model.PrimaryPartId = 0UL;
             }
 
+            foreach (InstanceSnapshot node in projectedTree.Instances)
+            {
+                if (node.Value == null
+                    || node.Value.ObjectTargetId == 0UL
+                    || !string.Equals(node.ClassName, "ObjectValue", StringComparison.Ordinal)
+                    || retainedParents.ContainsKey(node.Value.ObjectTargetId))
+                {
+                    continue;
+                }
+
+                // WHY: nothing clears an ObjectValue when its target is destroyed or never parented,
+                // and a world-owned ObjectValue may point at a mod-owned instance the projection drops.
+                string classification = IsModEphemeralTarget(
+                    node.Value.ObjectTargetId, excludedIds, registry)
+                    ? ModEphemeralReason
+                    : MissingReason;
+                diagnostics?.Add(new RbxWorldPackageDiagnostic(node.Id, 0UL, classification, "Value"));
+                node.Value.ObjectTargetId = 0UL;
+            }
+
             InstanceTreeSerializer.ReplaceNonFiniteValues(projectedTree, (instanceId, member) =>
                 diagnostics?.Add(NonFiniteValueDiagnostic(instanceId, member)));
+            InstanceTreeSerializer.ReplaceOutOfRangeValues(projectedTree, (instanceId, member) =>
+                diagnostics?.Add(new RbxWorldPackageDiagnostic(
+                    instanceId, 0UL, OutOfRangeReason, member)));
             return projectedTree;
+        }
+
+        /// <summary>True when <paramref name="descendantId"/> sits below <paramref name="ancestorId"/> in the retained tree.</summary>
+        private static bool IsRetainedDescendant(
+            ulong descendantId,
+            ulong ancestorId,
+            IReadOnlyDictionary<ulong, ulong> retainedParents)
+        {
+            ulong current = retainedParents[descendantId];
+            while (current != 0UL)
+            {
+                if (current == ancestorId)
+                {
+                    return true;
+                }
+
+                if (!retainedParents.TryGetValue(current, out current))
+                {
+                    return false;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// True when a reference target that the projection did not retain still exists but is
+        /// mod-owned, runtime infrastructure, or inside an excluded subtree.
+        /// </summary>
+        private static bool IsModEphemeralTarget(
+            ulong targetId,
+            HashSet<ulong> excludedIds,
+            InstanceRegistry registry)
+        {
+            return excludedIds.Contains(targetId)
+                   || (registry.TryGetRecord(new InstanceId(targetId), out InstanceRecord record)
+                       && (record.OwnerModId != null || record.IsRuntimeInfrastructure));
+        }
+
+        private static HashSet<string> CollectMaterialVariantNames(InstanceTreeSnapshot tree)
+        {
+            HashSet<string> names = new(StringComparer.Ordinal);
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                if (string.Equals(node.ClassName, "MaterialVariant", StringComparison.Ordinal))
+                {
+                    names.Add(node.Name);
+                }
+            }
+
+            return names;
+        }
+
+        /// <summary>
+        /// Clears, in the captured Part state only, a MaterialVariant name that no retained
+        /// MaterialVariant carries, and records one diagnostic.
+        /// </summary>
+        /// <remarks>
+        /// WHY: <c>part.MaterialVariant</c> accepts any string, and renaming or destroying a
+        /// variant, or creating it from a mod, leaves Parts naming it. An unknown name renders the
+        /// plain Material, which is what the cleared snapshot restores.
+        /// </remarks>
+        private static PartProperties ProjectMaterialVariantReference(
+            InstanceId id,
+            PartProperties properties,
+            HashSet<string> retainedVariantNames,
+            HashSet<string> excludedVariantNames,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            string variantName = properties.MaterialVariant;
+            if (string.IsNullOrEmpty(variantName) || retainedVariantNames.Contains(variantName))
+            {
+                return properties;
+            }
+
+            string classification = excludedVariantNames.Contains(variantName)
+                ? ModEphemeralReason
+                : MissingReason;
+            diagnostics.Add(new RbxWorldPackageDiagnostic(
+                id.Value, 0UL, classification, "MaterialVariant"));
+            properties.MaterialVariant = null;
+            return properties;
         }
 
         /// <summary>

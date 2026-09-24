@@ -682,6 +682,200 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void Capture_DanglingReferencesAndOutOfRangeValues_ProjectOneDiagnosticEachAndKeepLiveState()
+        {
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            InMemoryPartPropertySink partSink = new();
+            RbxInstance workspace = registry.WorldRoot;
+            RbxInstance materialService = game.FindFirstChildOfClass("MaterialService");
+            RbxInstance target = CreateNamed(registry, "Folder", "Target", workspace);
+            RbxInstance destroyedTarget = CreateNamed(registry, "Folder", "DestroyedTarget", workspace);
+            RbxInstance unparentedTarget = registry.Create("Folder");
+            RbxInstance modTarget = registry.Create("Folder", "ref-mod", OriginTag.FromMod("ref-mod"));
+            modTarget.Parent = workspace;
+            RbxObjectValue refKept = (RbxObjectValue)CreateNamed(registry, "ObjectValue", "RefKept", workspace);
+            refKept.Value = target;
+            RbxObjectValue refDestroyed =
+                (RbxObjectValue)CreateNamed(registry, "ObjectValue", "RefDestroyed", workspace);
+            refDestroyed.Value = destroyedTarget;
+            destroyedTarget.Destroy();
+            RbxObjectValue refUnparented =
+                (RbxObjectValue)CreateNamed(registry, "ObjectValue", "RefUnparented", workspace);
+            refUnparented.Value = unparentedTarget;
+            RbxObjectValue refModOwned =
+                (RbxObjectValue)CreateNamed(registry, "ObjectValue", "RefModOwned", workspace);
+            refModOwned.Value = modTarget;
+            RbxInstance button = CreateNamedPart(registry, partSink, "Button", workspace, null);
+            RbxClickDetector clicker = (RbxClickDetector)CreateNamed(registry, "ClickDetector", "Clicker", button);
+            clicker.MaxActivationDistance = -5d;
+            RbxClickDetector zeroClicker =
+                (RbxClickDetector)CreateNamed(registry, "ClickDetector", "ZeroClicker", button);
+            zeroClicker.MaxActivationDistance = 0d;
+            RbxMaterialVariant mossy =
+                (RbxMaterialVariant)CreateNamed(registry, "MaterialVariant", "Mossy", materialService);
+            mossy.StudsPerTile = 0f;
+            RbxInstance modMoss = registry.Create(
+                "MaterialVariant", "moss-mod", OriginTag.FromMod("moss-mod"));
+            modMoss.Name = "ModMoss";
+            modMoss.Parent = materialService;
+            RbxModel rig = (RbxModel)CreateNamed(registry, "Model", "Rig", workspace);
+            CreateNamedPart(registry, partSink, "Head", rig, null);
+            RbxInstance loose = CreateNamedPart(registry, partSink, "Loose", workspace, null);
+            rig.SetPrimaryPart(loose);
+            RbxModel keptModel = (RbxModel)CreateNamed(registry, "Model", "KeptModel", workspace);
+            RbxInstance keptPrimary = CreateNamedPart(registry, partSink, "KeptPrimary", keptModel, null);
+            keptModel.SetPrimaryPart(keptPrimary);
+            RbxInstance brick = CreateNamedPart(registry, partSink, "Brick", workspace, "Nope");
+            RbxInstance tile = CreateNamedPart(registry, partSink, "Tile", workspace, "Mossy");
+            RbxInstance modTile = CreateNamedPart(registry, partSink, "ModTile", workspace, "ModMoss");
+            RbxWorldPackageCaptureContext context = new(
+                registry,
+                game,
+                partSink,
+                NewSettings(),
+                capturedAtUtc: CapturedAtUtc);
+
+            RbxWorldPackagePayload payload = RbxWorldPackageSerializer.Capture(context);
+            byte[] package = RbxWorldPackageSerializer.WritePackage(payload);
+
+            string[] expected =
+            {
+                Diagnostic(refDestroyed, null, "missing", "Value"),
+                Diagnostic(refUnparented, null, "missing", "Value"),
+                Diagnostic(refModOwned, null, "mod-ephemeral", "Value"),
+                Diagnostic(clicker, null, "out-of-range", "MaxActivationDistance"),
+                Diagnostic(mossy, null, "out-of-range", "StudsPerTile"),
+                Diagnostic(rig, loose, "not-descendant", null),
+                Diagnostic(brick, null, "missing", "MaterialVariant"),
+                Diagnostic(modTile, null, "mod-ephemeral", "MaterialVariant")
+            };
+            AssertDiagnostics(payload, expected);
+            CollectionAssert.AreEqual(
+                package,
+                RbxWorldPackageSerializer.WritePackage(RbxWorldPackageSerializer.ExportSnapshot(context)),
+                "The disk capture and the join snapshot must share one projection.");
+            JArray manifestDiagnostics = (JArray)ParseJsonLiteral(
+                ReadEntryText(package, RbxWorldPackageSerializer.ManifestEntryName))["diagnostics"];
+            foreach (JToken entry in manifestDiagnostics)
+            {
+                bool primaryPartEntry = (string)entry["reason"] == "not-descendant";
+                CollectionAssert.AreEqual(
+                    primaryPartEntry
+                        ? new[] { "model_id", "dropped_primary_part_id", "reason" }
+                        : new[] { "model_id", "dropped_primary_part_id", "reason", "member" },
+                    PropertyNames(entry));
+            }
+
+            RbxWorldPackagePayload decoded = RbxWorldPackageSerializer.ReadPackage(package);
+            AssertDiagnostics(decoded, expected);
+            RbxWorldPackageRestoreResult restored = RbxWorldPackageSerializer.RestoreFresh(decoded);
+            _games.Add(restored.Game);
+            Assert.AreEqual(target.Id, RestoredObjectValue(restored, refKept).Value.Id);
+            Assert.IsNull(RestoredObjectValue(restored, refDestroyed).Value);
+            Assert.IsNull(RestoredObjectValue(restored, refUnparented).Value);
+            Assert.IsNull(RestoredObjectValue(restored, refModOwned).Value);
+            Assert.IsTrue(restored.Registry.TryGet(clicker.Id, out RbxInstance restoredClicker));
+            Assert.AreEqual(32d, ((RbxClickDetector)restoredClicker).MaxActivationDistance);
+            Assert.IsTrue(restored.Registry.TryGet(zeroClicker.Id, out RbxInstance restoredZero));
+            Assert.AreEqual(0d, ((RbxClickDetector)restoredZero).MaxActivationDistance);
+            Assert.IsTrue(restored.Registry.TryGet(mossy.Id, out RbxInstance restoredMossy));
+            Assert.AreEqual(1f, ((RbxMaterialVariant)restoredMossy).StudsPerTile);
+            Assert.IsTrue(restored.Registry.TryGet(rig.Id, out RbxInstance restoredRig));
+            Assert.IsNull(((RbxModel)restoredRig).PrimaryPart);
+            Assert.IsTrue(restored.Registry.TryGet(keptModel.Id, out RbxInstance restoredKept));
+            Assert.AreEqual(keptPrimary.Id, ((RbxModel)restoredKept).PrimaryPart.Id);
+            Assert.IsTrue(restored.PartSink.TryGetPartProperties(brick.Id, out PartProperties restoredBrick));
+            Assert.IsNull(restoredBrick.MaterialVariant);
+            Assert.IsTrue(restored.PartSink.TryGetPartProperties(modTile.Id, out PartProperties restoredModTile));
+            Assert.IsNull(restoredModTile.MaterialVariant);
+            Assert.IsTrue(restored.PartSink.TryGetPartProperties(tile.Id, out PartProperties restoredTile));
+            Assert.AreEqual("Mossy", restoredTile.MaterialVariant);
+
+            Assert.AreSame(destroyedTarget, refDestroyed.Value, "Only the payload is adjusted.");
+            Assert.AreSame(unparentedTarget, refUnparented.Value);
+            Assert.AreSame(modTarget, refModOwned.Value);
+            Assert.AreEqual(-5d, clicker.MaxActivationDistance);
+            Assert.AreEqual(0f, mossy.StudsPerTile);
+            Assert.AreSame(loose, rig.PrimaryPart);
+            Assert.IsTrue(partSink.TryGetPartProperties(brick.Id, out PartProperties liveBrick));
+            Assert.AreEqual("Nope", liveBrick.MaterialVariant);
+        }
+
+        [TestCase("object-target", "names missing target")]
+        [TestCase("click-distance", "MaxActivationDistance")]
+        [TestCase("studs-per-tile", "StudsPerTile")]
+        [TestCase("primary-part", "non-descendant PrimaryPart")]
+        [TestCase("material-variant", "undefined MaterialVariant")]
+        public void ReadPackage_HandCraftedDanglingOrOutOfRangeState_IsRejectedBeforeRestore(
+            string mutation,
+            string expectedMessage)
+        {
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            InMemoryPartPropertySink partSink = new();
+            RbxInstance workspace = registry.WorldRoot;
+            RbxInstance target = CreateNamed(registry, "Folder", "Target", workspace);
+            RbxObjectValue reference = (RbxObjectValue)CreateNamed(registry, "ObjectValue", "Ref", workspace);
+            reference.Value = target;
+            RbxInstance button = CreateNamedPart(registry, partSink, "Button", workspace, null);
+            RbxClickDetector clicker = (RbxClickDetector)CreateNamed(registry, "ClickDetector", "Clicker", button);
+            clicker.MaxActivationDistance = 12.5d;
+            RbxMaterialVariant mossy = (RbxMaterialVariant)CreateNamed(
+                registry, "MaterialVariant", "Mossy", game.FindFirstChildOfClass("MaterialService"));
+            mossy.StudsPerTile = 2.5f;
+            RbxModel rig = (RbxModel)CreateNamed(registry, "Model", "Rig", workspace);
+            RbxInstance head = CreateNamedPart(registry, partSink, "Head", rig, null);
+            rig.SetPrimaryPart(head);
+            RbxInstance loose = CreateNamedPart(registry, partSink, "Loose", workspace, null);
+            CreateNamedPart(registry, partSink, "Tile", workspace, "Mossy");
+            byte[] package = RbxWorldPackageSerializer.WritePackage(RbxWorldPackageSerializer.Capture(
+                new RbxWorldPackageCaptureContext(
+                    registry,
+                    game,
+                    partSink,
+                    NewSettings(),
+                    capturedAtUtc: CapturedAtUtc)));
+            Assert.DoesNotThrow(() => RbxWorldPackageSerializer.ReadPackage(package));
+            Assert.AreEqual(0, RbxWorldPackageSerializer.ReadPackage(package).Diagnostics.Count);
+            string finiteText;
+            string hostileText;
+            switch (mutation)
+            {
+                case "object-target":
+                    finiteText = "\"object_target_id\": \"" + target.Id.Value.ToString(CultureInfo.InvariantCulture) + "\"";
+                    hostileText = "\"object_target_id\": \"999999999\"";
+                    break;
+                case "click-distance":
+                    finiteText = "\"max_activation_distance\": 12.5";
+                    hostileText = "\"max_activation_distance\": -12.5";
+                    break;
+                case "studs-per-tile":
+                    finiteText = "\"studs_per_tile\": 2.5";
+                    hostileText = "\"studs_per_tile\": 0.0";
+                    break;
+                case "primary-part":
+                    finiteText = "\"primary_part_id\": \"" + head.Id.Value.ToString(CultureInfo.InvariantCulture) + "\"";
+                    hostileText = "\"primary_part_id\": \"" + loose.Id.Value.ToString(CultureInfo.InvariantCulture) + "\"";
+                    break;
+                default:
+                    finiteText = "\"material_variant\": \"Mossy\"";
+                    hostileText = "\"material_variant\": \"Nope\"";
+                    break;
+            }
+
+            byte[] hostile = ReplaceEntryText(
+                package, RbxWorldPackageSerializer.WorldEntryName, finiteText, hostileText);
+
+            RbxWorldPackageException exception = Assert.Throws<RbxWorldPackageException>(() =>
+                RbxWorldPackageSerializer.ReadPackage(hostile));
+
+            StringAssert.Contains(expectedMessage, exception.Message);
+        }
+
+        [Test]
         public void ReadPackage_InjectedModOwnedNode_IsRejectedBeforeRestore()
         {
             RbxWorldPackagePayload payload = CreateMinimalPayload(CapturedAtUtc);
@@ -2224,6 +2418,85 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(0, store.ListManualSlots().Count);
         }
 
+        [TestCase(
+            "local reference = workspace:FindFirstChild('Ref') local target = workspace:FindFirstChild('Target') "
+            + "reference.Value = target target:Destroy()",
+            "Ref", null, "missing", "Value")]
+        [TestCase(
+            "local folder = Instance.new('Folder') folder.Parent = workspace "
+            + "workspace:FindFirstChild('Ref').Value = folder",
+            "Ref", null, "mod-ephemeral", "Value")]
+        [TestCase(
+            "workspace:FindFirstChild('Button'):FindFirstChild('Clicker').MaxActivationDistance = -5",
+            "Clicker", null, "out-of-range", "MaxActivationDistance")]
+        [TestCase(
+            "game:GetService('MaterialService'):FindFirstChild('Mossy').StudsPerTile = 0",
+            "Mossy", null, "out-of-range", "StudsPerTile")]
+        [TestCase(
+            "workspace:FindFirstChild('Rig').PrimaryPart = workspace:FindFirstChild('Loose')",
+            "Rig", "Loose", "not-descendant", null)]
+        [TestCase(
+            "workspace:FindFirstChild('Brick').MaterialVariant = 'Nope'",
+            "Brick", null, "missing", "MaterialVariant")]
+        public async Task ConfirmedBackup_GatedExecuteLuaAfterModLeftFormatInvalidState_StillAutosavesAndRuns(
+            string modSource,
+            string instanceName,
+            string droppedName,
+            string reason,
+            string member)
+        {
+            RuntimeWorld world = new(WorldId);
+            _games.Add(world.Game);
+            InstanceRegistry registry = world.Registry;
+            RbxInstance workspace = registry.WorldRoot;
+            RbxInstance target = CreateNamed(registry, "Folder", "Target", workspace);
+            RbxObjectValue reference = (RbxObjectValue)CreateNamed(registry, "ObjectValue", "Ref", workspace);
+            reference.Value = target;
+            RbxInstance button = CreateNamedPart(registry, world.PartSink, "Button", workspace, null);
+            CreateNamed(registry, "ClickDetector", "Clicker", button);
+            CreateNamed(registry, "MaterialVariant", "Mossy", world.Game.FindFirstChildOfClass("MaterialService"));
+            RbxModel rig = (RbxModel)CreateNamed(registry, "Model", "Rig", workspace);
+            RbxInstance head = CreateNamedPart(registry, world.PartSink, "Head", rig, null);
+            rig.SetPrimaryPart(head);
+            CreateNamedPart(registry, world.PartSink, "Loose", workspace, null);
+            CreateNamedPart(registry, world.PartSink, "Brick", workspace, null);
+            RbxInstance instance = world.Game.FindFirstChild(instanceName, true);
+            Assert.IsNotNull(instance);
+            string expected = Diagnostic(
+                instance,
+                droppedName == null ? null : world.Game.FindFirstChild(droppedName, true),
+                reason,
+                member);
+            world.Stack.Runtime.LoadMod("format-breaker", modSource, LuaCapabilities.All);
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore store = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => CapturedAtUtc);
+            ConfirmedWorldMutationGate gate = new(
+                cancellationToken => UniTask.FromResult(Capture(world, CapturedAtUtc)),
+                store);
+            RecordingLuaCsBindings bindings = new();
+            LuaCsGameToolExecutor executor = new(
+                new LuaCsSecureEnvironment(),
+                bindings,
+                new NullLuaExecutionObserver(),
+                null,
+                gate);
+
+            LuaTool.LuaResult result = await executor.ExecuteAsync("mutate_world()", CancellationToken.None);
+
+            Assert.IsTrue(result.Success,
+                "One format-invalid write by a mod must not refuse execute_lua: " + result.Error);
+            Assert.AreEqual("new-tree", bindings.TreeState);
+            IReadOnlyList<RbxAutoSaveInfo> autosaves = store.ListAutoSaves();
+            Assert.AreEqual(1, autosaves.Count);
+            Assert.AreEqual(LuaCsGameToolExecutor.ExecuteLuaBackupTrigger, autosaves[0].Trigger);
+            RbxWorldPackagePayload saved = RbxWorldPackageSerializer.ReadPackage(
+                File.ReadAllBytes(Path.Combine(root, "Auto", autosaves[0].FileName)));
+            AssertDiagnostics(saved, expected);
+        }
+
         private RuntimeWorld BuildAuthoredWorld()
         {
             RuntimeWorld world = new(WorldId);
@@ -2712,6 +2985,65 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         /// Asserts the payload carries exactly these non-finite diagnostics ("instanceId:member"), each
         /// with no dropped PrimaryPart and the <c>non-finite-value</c> reason, and nothing else.
         /// </summary>
+        /// <summary>Formats one expected diagnostic as "modelId:droppedId:reason:member".</summary>
+        private static string Diagnostic(RbxInstance instance, RbxInstance dropped, string reason, string member)
+        {
+            return instance.Id.Value.ToString(CultureInfo.InvariantCulture)
+                   + ":" + (dropped == null ? 0UL : dropped.Id.Value).ToString(CultureInfo.InvariantCulture)
+                   + ":" + reason
+                   + ":" + (member ?? "");
+        }
+
+        /// <summary>Asserts the payload carries exactly these diagnostics, in any order.</summary>
+        private static void AssertDiagnostics(RbxWorldPackagePayload payload, params string[] expected)
+        {
+            List<string> actual = new();
+            foreach (RbxWorldPackageDiagnostic diagnostic in payload.Diagnostics)
+            {
+                actual.Add(diagnostic.ModelId.ToString(CultureInfo.InvariantCulture)
+                           + ":" + diagnostic.DroppedPrimaryPartId.ToString(CultureInfo.InvariantCulture)
+                           + ":" + diagnostic.Reason
+                           + ":" + (diagnostic.Member ?? ""));
+            }
+
+            CollectionAssert.AreEquivalent(expected, actual);
+        }
+
+        private static RbxInstance CreateNamed(
+            InstanceRegistry registry,
+            string className,
+            string name,
+            RbxInstance parent)
+        {
+            RbxInstance instance = registry.Create(className);
+            instance.Name = name;
+            instance.Parent = parent;
+            return instance;
+        }
+
+        /// <summary>Creates a world-owned Part with the default bundle, optionally naming a MaterialVariant.</summary>
+        private static RbxInstance CreateNamedPart(
+            InstanceRegistry registry,
+            IPartPropertySink partSink,
+            string name,
+            RbxInstance parent,
+            string materialVariant)
+        {
+            RbxInstance part = CreateNamed(registry, "Part", name, parent);
+            PartProperties properties = PartProperties.CreateDefault();
+            properties.MaterialVariant = materialVariant;
+            partSink.SetPartProperties(part.Id, in properties);
+            return part;
+        }
+
+        private static RbxObjectValue RestoredObjectValue(
+            RbxWorldPackageRestoreResult restored,
+            RbxInstance original)
+        {
+            Assert.IsTrue(restored.Registry.TryGet(original.Id, out RbxInstance instance));
+            return (RbxObjectValue)instance;
+        }
+
         private static void AssertOnlyNonFiniteDiagnostics(
             RbxWorldPackagePayload payload,
             params string[] expectedMembers)

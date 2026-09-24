@@ -480,6 +480,91 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             StringAssert.Contains("non-finite", error.RawMessage);
         }
 
+        [Test]
+        public void ReplaceOutOfRangeValues_NegativeDistanceAndNonPositiveStuds_SnapshotHoldsDefaultsWhileLiveKeepsThem()
+        {
+            InstanceRegistry source = new();
+            RbxDataModel game = DataModelBootstrap.CreateGame(source);
+            RbxInstance holder = CreateChild(source, "Folder", source.WorldRoot);
+            RbxClickDetector negative = (RbxClickDetector)CreateChild(source, "ClickDetector", holder);
+            negative.MaxActivationDistance = -5d;
+            RbxClickDetector zeroDistance = (RbxClickDetector)CreateChild(source, "ClickDetector", holder);
+            zeroDistance.MaxActivationDistance = 0d;
+            RbxMaterialVariant zeroStuds = (RbxMaterialVariant)CreateChild(source, "MaterialVariant", holder);
+            zeroStuds.StudsPerTile = 0f;
+            RbxMaterialVariant negativeStuds =
+                (RbxMaterialVariant)CreateChild(source, "MaterialVariant", holder);
+            negativeStuds.StudsPerTile = -2.5f;
+            RbxMaterialVariant smallStuds = (RbxMaterialVariant)CreateChild(source, "MaterialVariant", holder);
+            smallStuds.StudsPerTile = 0.25f;
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(game);
+            Assert.Throws<RbxError>(
+                () => InstanceTreeSerializer.Validate(snapshot, new InstanceRegistry()),
+                "precondition: the world format rejects a raw negative distance or non-positive tile size");
+
+            List<string> replaced = new();
+            InstanceTreeSerializer.ReplaceOutOfRangeValues(
+                snapshot, (instanceId, member) => replaced.Add(instanceId + ":" + member));
+
+            CollectionAssert.AreEquivalent(
+                new[]
+                {
+                    negative.Id.Value + ":MaxActivationDistance",
+                    zeroStuds.Id.Value + ":StudsPerTile",
+                    negativeStuds.Id.Value + ":StudsPerTile"
+                },
+                replaced,
+                "every out-of-range member is reported once; a zero distance and a small tile size are valid");
+            Assert.AreEqual(CaptureFresh("ClickDetector").ClickDetector.MaxActivationDistance,
+                FindSnapshotNode(snapshot, negative.Id).ClickDetector.MaxActivationDistance);
+            Assert.AreEqual("0", FindSnapshotNode(snapshot, zeroDistance.Id).ClickDetector.MaxActivationDistance);
+            Assert.AreEqual(CaptureFresh("MaterialVariant").MaterialVariant.StudsPerTile,
+                FindSnapshotNode(snapshot, zeroStuds.Id).MaterialVariant.StudsPerTile);
+            Assert.AreEqual(CaptureFresh("MaterialVariant").MaterialVariant.StudsPerTile,
+                FindSnapshotNode(snapshot, negativeStuds.Id).MaterialVariant.StudsPerTile);
+            Assert.AreEqual("0.25", FindSnapshotNode(snapshot, smallStuds.Id).MaterialVariant.StudsPerTile);
+            Assert.DoesNotThrow(() => InstanceTreeSerializer.Validate(snapshot, new InstanceRegistry()));
+            Assert.AreEqual(-5d, negative.MaxActivationDistance, "the live detector keeps what the script wrote");
+            Assert.AreEqual(0f, zeroStuds.StudsPerTile);
+            Assert.AreEqual(-2.5f, negativeStuds.StudsPerTile);
+
+            InstanceRegistry target = new();
+            InstanceTreeSerializer.Restore(snapshot, target);
+            Assert.IsTrue(target.TryGet(negative.Id, out RbxInstance restoredDetector));
+            Assert.AreEqual(32d, ((RbxClickDetector)restoredDetector).MaxActivationDistance);
+            Assert.IsTrue(target.TryGet(negativeStuds.Id, out RbxInstance restoredVariant));
+            Assert.AreEqual(1f, ((RbxMaterialVariant)restoredVariant).StudsPerTile);
+        }
+
+        [Test]
+        public void Validate_OutOfRangeValueOutsideTheCaptureProjection_IsStillRejected()
+        {
+            InstanceTreeSnapshot detector = SingleNodeSnapshot("ClickDetector");
+            detector.Instances[0].ClickDetector = new ClickDetectorSnapshot
+            {
+                MaxActivationDistance = "-1"
+            };
+            InstanceTreeSnapshot variant = SingleNodeSnapshot("MaterialVariant");
+            variant.Instances[0].MaterialVariant = new MaterialVariantSnapshot
+            {
+                BaseMaterial = "Plastic",
+                BaseMaterialValue = 256,
+                ColorMap = "",
+                NormalMap = "",
+                RoughnessMap = "",
+                MetalnessMap = "",
+                StudsPerTile = "0"
+            };
+
+            RbxError detectorError = Assert.Throws<RbxError>(
+                () => InstanceTreeSerializer.Validate(detector, new InstanceRegistry()),
+                "only capture projects the default; a snapshot from elsewhere is still refused");
+            StringAssert.Contains("MaxActivationDistance", detectorError.RawMessage);
+            RbxError variantError = Assert.Throws<RbxError>(
+                () => InstanceTreeSerializer.Validate(variant, new InstanceRegistry()));
+            StringAssert.Contains("StudsPerTile", variantError.RawMessage);
+        }
+
         private static RbxInstance CreateChild(InstanceRegistry registry, string className, RbxInstance parent)
         {
             RbxInstance child = registry.Create(className);

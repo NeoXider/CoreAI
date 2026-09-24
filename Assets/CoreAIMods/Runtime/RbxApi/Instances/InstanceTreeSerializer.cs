@@ -416,6 +416,60 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
+        /// <summary>
+        /// Replaces, in <paramref name="snapshot"/> only, every finite number that a script can set
+        /// but <see cref="Validate"/> refuses, with that member's default. Each replacement is
+        /// reported to <paramref name="replaced"/> as (instance id, member name), in snapshot order.
+        /// </summary>
+        /// <remarks>
+        /// Covered: <c>ClickDetector.MaxActivationDistance</c> below 0 becomes 32, and
+        /// <c>MaterialVariant.StudsPerTile</c> of 0 or below becomes 1. Both are plain Lua
+        /// assignments with no range check, and the mirror documents no range or clamp for either.
+        /// WHY the snapshot and never the live instance: the same reason as
+        /// <see cref="ReplaceNonFiniteValues"/>. Run that method first; NaN never compares as out
+        /// of range, so it is left to the non-finite rule.
+        /// </remarks>
+        public static void ReplaceOutOfRangeValues(InstanceTreeSnapshot snapshot,
+            Action<ulong, string> replaced)
+        {
+            if (snapshot == null)
+            {
+                throw new ArgumentNullException(nameof(snapshot));
+            }
+
+            if (replaced == null)
+            {
+                throw new ArgumentNullException(nameof(replaced));
+            }
+
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                if (node == null)
+                {
+                    continue;
+                }
+
+                if (node.ClickDetector != null
+                    && double.TryParse(node.ClickDetector.MaxActivationDistance, NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out double distance)
+                    && distance < 0d)
+                {
+                    node.ClickDetector.MaxActivationDistance =
+                        DefaultMaxActivationDistance.ToString("R", CultureInfo.InvariantCulture);
+                    replaced(node.Id, "MaxActivationDistance");
+                }
+
+                if (node.MaterialVariant != null
+                    && float.TryParse(node.MaterialVariant.StudsPerTile, NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out float studs)
+                    && studs <= 0f)
+                {
+                    node.MaterialVariant.StudsPerTile = F(DefaultStudsPerTile);
+                    replaced(node.Id, "StudsPerTile");
+                }
+            }
+        }
+
         /// <summary>The captured default for a non-finite value payload, or null when it is finite.</summary>
         private static string DefaultForNonFiniteValue(InstanceSnapshot node)
         {
