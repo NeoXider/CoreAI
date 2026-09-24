@@ -25,25 +25,15 @@ namespace CoreAI.Ai
 
             sb.Append("revision_count: ").Append(snapshot.History.Count).Append('\n');
             sb.Append("original_payload_baseline:\n```json\n");
-            sb.Append(Clamp(snapshot.OriginalPayload)).Append("\n```\n");
+            sb.Append(Clamp(snapshot.OriginalPayload, overlayKey, "original_payload_baseline")).Append("\n```\n");
             sb.Append("current_payload:\n```json\n");
-            sb.Append(Clamp(snapshot.CurrentPayload)).Append("\n```\n");
+            sb.Append(Clamp(snapshot.CurrentPayload, overlayKey, "current_payload")).Append("\n```\n");
             return sb.ToString();
         }
 
-        private static string Clamp(string s)
+        private static string Clamp(string s, string key, string field)
         {
-            if (string.IsNullOrEmpty(s))
-            {
-                return "";
-            }
-
-            if (s.Length <= MaxChars)
-            {
-                return s;
-            }
-
-            return s.Substring(0, MaxChars) + "\n...";
+            return VersionPromptClip.Clamp(s, MaxChars, nameof(DataOverlayVersionPromptFormatter), key, field);
         }
     }
 }

@@ -1188,14 +1188,20 @@ namespace CoreAI.Infrastructure.Llm
                         }
                         else
                         {
-                            string truncated = remaining > 0
-                                ? tc.Text.Substring(0, remaining) + "\n...[response truncated at " + maxChars +
-                                  " chars]"
-                                : "...[response truncated]";
+                            int kept = remaining;
+                            if (kept > 0 && char.IsHighSurrogate(tc.Text[kept - 1]))
+                            {
+                                kept--;
+                            }
+
+                            int dropped = tc.Text.Length - kept;
+                            string marker = "…[response truncated at " + maxChars + " chars: +" + dropped + " chars]";
+                            string truncated = kept > 0 ? tc.Text.Substring(0, kept) + "\n" + marker : marker;
                             m.Contents[i] = new MEAI.TextContent(truncated);
                             remaining = 0;
                             _logger.Info(
-                                $"[SmartToolCall] Response truncated at {maxChars} chars", LogTag.Llm);
+                                $"[SmartToolCall] Response text truncated at {maxChars} chars: a {tc.Text.Length}-char " +
+                                $"part -> {kept} kept, {dropped} dropped.", LogTag.Llm);
                         }
                     }
                 }

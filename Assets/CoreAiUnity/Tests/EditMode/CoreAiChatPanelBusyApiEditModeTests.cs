@@ -695,6 +695,263 @@ namespace CoreAI.Tests.EditMode
             return GetField<ScrollView>(panel, "MessageScroll");
         }
 
+        [Test]
+        public void ApplyUserInputLengthLimit_CutsToLimit_AndReportsTypedLength()
+        {
+            string cut = CoreAiChatPanel.ApplyUserInputLengthLimit(new string('a', 25), 10, out int typed);
+
+            Assert.AreEqual(new string('a', 10), cut);
+            Assert.AreEqual(25, typed);
+        }
+
+        [Test]
+        public void ApplyUserInputLengthLimit_WithinLimitOrLimitOff_ReportsNothing()
+        {
+            Assert.AreEqual("short", CoreAiChatPanel.ApplyUserInputLengthLimit("short", 10, out int within));
+            Assert.AreEqual(0, within);
+
+            string longText = new('b', 5000);
+            Assert.AreEqual(longText, CoreAiChatPanel.ApplyUserInputLengthLimit(longText, 0, out int off));
+            Assert.AreEqual(0, off, "MaxMessageLength = 0 disables the limit");
+        }
+
+        [Test]
+        public void ApplyUserInputLengthLimit_NeverSplitsASurrogatePair()
+        {
+            string text = "abc" + char.ConvertFromUtf32(0x1F600) + "def";
+
+            string cut = CoreAiChatPanel.ApplyUserInputLengthLimit(text, 4, out int typed);
+
+            Assert.AreEqual("abc", cut, "the limit falls inside the emoji, so the whole pair is dropped");
+            Assert.AreEqual(text.Length, typed);
+        }
+
+        /// <summary>
+        /// Regression: a user message longer than MaxMessageLength was cut with no trace anywhere. The cut is
+        /// now a warning with the numbers, and the host hears about it through OnMessageTruncated.
+        /// </summary>
+        [Test]
+        public async Task TrySendInput_OverLimit_LogsWarningWithNumbers_AndRaisesOnMessageTruncated()
+        {
+            using PanelCtx ctx = NewPanel();
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
+            ctx.Panel.SetRuntimeOptions(new CoreAiChatOptions { MaxMessageLength = 10, EnableStreaming = false });
+            try
+            {
+                ScrollView scroll = CreateAttachedMessageScroll(out panelHost, out panelSettings);
+                SetField(ctx.Panel, "MessageScroll", scroll);
+                TextField input = new();
+                scroll.parent.Add(input);
+                SetField(ctx.Panel, "InputField", input);
+                input.value = new string('q', 25);
+
+                HintCapturingOrchestrator orchestrator = new();
+                ctx.Panel.ChatService = new CoreAiChatService(
+                    orchestrator,
+                    settings: new StubSettings { EnableStreaming = false });
+
+                List<(int Original, int Limit)> truncations = new();
+                ctx.Panel.OnMessageTruncated += (original, limit) => truncations.Add((original, limit));
+                string sent = null;
+                ctx.Panel.OnUserMessageSent += text => sent = text;
+
+                LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex(
+                    @"\[CoreAiChatPanel\] User message cut to MaxMessageLength: 25 chars typed -> 10 sent, 15 dropped"));
+
+                typeof(CoreAiChatPanel)
+                    .GetMethod("TrySendInput", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(ctx.Panel, new object[] { false });
+
+                CollectionAssert.AreEqual(new[] { (25, 10) }, truncations);
+                Assert.AreEqual(new string('q', 10), sent);
+
+                await WaitUntilIdleAsync(ctx.Panel);
+                Assert.IsNotNull(orchestrator.LastHint, "the cut message must still be sent");
+                StringAssert.Contains(new string('q', 10), orchestrator.LastHint);
+                StringAssert.DoesNotContain(new string('q', 11), orchestrator.LastHint,
+                    "the model receives the cut text, not the typed text");
+            }
+            finally
+            {
+                ctx.Panel.ClearRuntimeOptions();
+                if (panelHost != null)
+                {
+                    Object.DestroyImmediate(panelHost);
+                }
+
+                if (panelSettings != null)
+                {
+                    Object.DestroyImmediate(panelSettings);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Regression: host-submitted text (briefings, task statements) was cut to the TYPING limit, so the end
+        /// of a service instruction never reached the model and nothing said so. External submits are not cut.
+        /// </summary>
+        [Test]
+        public async Task SubmitMessageFromExternalAsync_IgnoresMaxMessageLength_AndRaisesNoTruncation()
+        {
+            using PanelCtx ctx = NewPanel();
+            ctx.Panel.SetRuntimeOptions(new CoreAiChatOptions { MaxMessageLength = 10, EnableStreaming = false });
+            try
+            {
+                HintCapturingOrchestrator orchestrator = new();
+                ctx.Panel.ChatService = new CoreAiChatService(
+                    orchestrator,
+                    settings: new StubSettings { EnableStreaming = false });
+                int truncations = 0;
+                ctx.Panel.OnMessageTruncated += (_, _) => truncations++;
+                string briefing = "BRIEFING-START " + new string('x', 500) + " BRIEFING-END";
+
+                await ctx.Panel.SubmitMessageFromExternalAsync(
+                    briefing,
+                    new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+
+                StringAssert.Contains(briefing, orchestrator.LastHint,
+                    "the whole host text must reach the orchestrator, the typing limit does not apply");
+                Assert.AreEqual(0, truncations);
+            }
+            finally
+            {
+                ctx.Panel.ClearRuntimeOptions();
+            }
+        }
+
+        [Test]
+        public void AddMessage_AssistantOverRenderCap_LogsDrawnAndNotDrawnCounts()
+        {
+            using PanelCtx ctx = NewPanel();
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
+            try
+            {
+                ScrollView scroll = CreateAttachedMessageScroll(out panelHost, out panelSettings);
+                SetField(ctx.Panel, "MessageScroll", scroll);
+                int total = CoreAiChatPanel.MaxAssistantRenderChars + 1234;
+                LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex(
+                    $@"\[CoreAiChatPanel\] Assistant message drawn clipped: {total} chars total -> " +
+                    $@"{CoreAiChatPanel.MaxAssistantRenderChars} drawn, 1234 not drawn"));
+
+                ctx.Panel.AddMessage(new string('r', total), false);
+            }
+            finally
+            {
+                if (panelHost != null)
+                {
+                    Object.DestroyImmediate(panelHost);
+                }
+
+                if (panelSettings != null)
+                {
+                    Object.DestroyImmediate(panelSettings);
+                }
+            }
+        }
+
+        [Test]
+        public void ApplyUserInputLengthLimit_LimitOneWithEmojiFirst_KeepsThePair_NeverEmpty()
+        {
+            string emoji = char.ConvertFromUtf32(0x1F600);
+
+            string cut = CoreAiChatPanel.ApplyUserInputLengthLimit(emoji + "abc", 1, out int typed);
+
+            Assert.AreEqual(emoji, cut, "the user's text must not vanish because the limit fell inside a pair");
+            Assert.AreEqual(5, typed);
+            Assert.AreEqual(emoji, CoreAiChatPanel.ApplyUserInputLengthLimit(emoji, 1, out int alone));
+            Assert.AreEqual(0, alone, "a lone emoji at limit 1 is sent whole and is not reported as cut");
+        }
+
+        /// <summary>
+        /// Host text is no longer bounded by MaxMessageLength, so a long user bubble must be render-capped like a
+        /// long reply (WebGL vertex-buffer backstop), with the numbers in the log.
+        /// </summary>
+        [Test]
+        public void AddMessage_UserOverRenderCap_IsClippedForDrawing_AndLogged()
+        {
+            using PanelCtx ctx = NewPanel();
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
+            try
+            {
+                ScrollView scroll = CreateAttachedMessageScroll(out panelHost, out panelSettings);
+                SetField(ctx.Panel, "MessageScroll", scroll);
+                int total = CoreAiChatPanel.MaxAssistantRenderChars + 500;
+                LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex(
+                    $@"\[CoreAiChatPanel\] User message drawn clipped: {total} chars total -> " +
+                    $@"{CoreAiChatPanel.MaxAssistantRenderChars} drawn, 500 not drawn"));
+
+                ctx.Panel.AddMessage(new string('u', total), true);
+
+                int longest = 0;
+                scroll.Query<Label>().ForEach(l => longest = System.Math.Max(longest, l.text?.Length ?? 0));
+                Assert.Less(longest, total, "the drawn user bubble must be capped");
+            }
+            finally
+            {
+                if (panelHost != null)
+                {
+                    Object.DestroyImmediate(panelHost);
+                }
+
+                if (panelSettings != null)
+                {
+                    Object.DestroyImmediate(panelSettings);
+                }
+            }
+        }
+
+        [Test]
+        public void ClampAssistantForRender_NeverSplitsASurrogatePair()
+        {
+            string text = new string('a', CoreAiChatPanel.MaxAssistantRenderChars - 1) +
+                          char.ConvertFromUtf32(0x1F600) + new string('b', 10);
+
+            string clamped = CoreAiChatPanel.ClampAssistantForRender(text, out int drawn);
+
+            Assert.AreEqual(CoreAiChatPanel.MaxAssistantRenderChars - 1, drawn);
+            Assert.IsFalse(char.IsHighSurrogate(clamped[drawn - 1]));
+        }
+
+        private static async Task WaitUntilIdleAsync(CoreAiChatPanel panel)
+        {
+            for (int i = 0; i < 2000 && panel.IsBusy; i++)
+            {
+                await Task.Yield();
+            }
+
+            Assert.IsFalse(panel.IsBusy, "the turn must finish before the panel is destroyed");
+        }
+
+        /// <summary>Records the text the panel handed to the orchestrator and answers at once.</summary>
+        private sealed class HintCapturingOrchestrator : IAiOrchestrationService
+        {
+            public string LastHint { get; private set; }
+
+            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                LastHint = request?.Hint;
+                return Task.FromResult("ok");
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                LastHint = request?.Hint;
+                await Task.Yield();
+                yield return new LlmStreamChunk { Text = "ok" };
+                yield return new LlmStreamChunk { IsDone = true };
+            }
+
+            public void CancelTasks(string scopeId)
+            {
+            }
+        }
+
         private readonly struct PanelCtx : System.IDisposable
         {
             public readonly GameObject Go;

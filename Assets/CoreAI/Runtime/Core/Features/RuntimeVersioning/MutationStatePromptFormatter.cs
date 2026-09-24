@@ -27,9 +27,9 @@ namespace CoreAI.Ai
                 else
                 {
                     sb.Append("lua_revision_count: ").Append(luaSnapshot.History.Count).Append('\n');
-                    sb.Append("lua_original_baseline:\n```lua\n").Append(Clamp(luaSnapshot.OriginalLua))
+                    sb.Append("lua_original_baseline:\n```lua\n").Append(Clamp(luaSnapshot.OriginalLua, luaKey, "lua_original_baseline"))
                         .Append("\n```\n");
-                    sb.Append("lua_current:\n```lua\n").Append(Clamp(luaSnapshot.CurrentLua)).Append("\n```\n");
+                    sb.Append("lua_current:\n```lua\n").Append(Clamp(luaSnapshot.CurrentLua, luaKey, "lua_current")).Append("\n```\n");
                 }
             }
 
@@ -49,23 +49,44 @@ namespace CoreAI.Ai
                     }
 
                     sb.Append("data_revision_count: ").Append(snap.History.Count).Append('\n');
-                    sb.Append("data_original_baseline:\n```json\n").Append(Clamp(snap.OriginalPayload))
+                    sb.Append("data_original_baseline:\n```json\n").Append(Clamp(snap.OriginalPayload, key, "data_original_baseline"))
                         .Append("\n```\n");
-                    sb.Append("data_current:\n```json\n").Append(Clamp(snap.CurrentPayload)).Append("\n```\n");
+                    sb.Append("data_current:\n```json\n").Append(Clamp(snap.CurrentPayload, key, "data_current")).Append("\n```\n");
                 }
             }
 
             return sb.ToString();
         }
 
-        private static string Clamp(string s)
+        private static string Clamp(string s, string key, string field)
+        {
+            return VersionPromptClip.Clamp(s, MaxChars, nameof(MutationStatePromptFormatter), key, field);
+        }
+    }
+
+    /// <summary>
+    /// The shared clip for stored Lua / data snapshots in versioning prompts: the kept prefix, then
+    /// <c>…[+N chars]</c> on its own line inside the code fence. The snapshot is re-sent every turn unchanged, so
+    /// the cut is logged once per formatter, key, field and length.
+    /// </summary>
+    internal static class VersionPromptClip
+    {
+        internal static string Clamp(string s, int maxChars, string formatter, string key, string field)
         {
             if (string.IsNullOrEmpty(s))
             {
                 return "";
             }
 
-            return s.Length <= MaxChars ? s : s.Substring(0, MaxChars) + "\n...";
+            string clipped = TruncationMarker.ClipBlock(s, maxChars, out int dropped);
+            if (dropped > 0)
+            {
+                TruncationMarker.LogOnce(null, $"{formatter}|{key}|{field}|{s.Length}",
+                    $"[{formatter}] '{key}' {field} clipped for the prompt: {s.Length} chars total -> " +
+                    $"{s.Length - dropped} shown, {dropped} dropped (limit {maxChars}). Logged once per distinct snapshot.");
+            }
+
+            return clipped;
         }
     }
 }

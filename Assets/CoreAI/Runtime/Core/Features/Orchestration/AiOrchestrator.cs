@@ -1526,11 +1526,23 @@ namespace CoreAI.Ai
             int maxMessages = roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30;
             // Compaction must receive the retained prefix as well as the prompt window. The store
             // already bounds its history; applying the role cap here would silently skip that prefix.
-            ChatMessage[] history = _memoryStore.GetChatHistory(roleId,
-                _settings.EnableConversationHistorySummarization ? 0 : maxMessages);
+            // WHY maxMessages + 1 with summarization off: the store applies the cap itself, so a read of exactly
+            // maxMessages cannot tell "that is all there is" from "older messages were cut off". One extra
+            // message answers it; only maxMessages are sent.
+            bool summarizationOn = _settings.EnableConversationHistorySummarization;
+            ChatMessage[] history = _memoryStore.GetChatHistory(roleId, summarizationOn ? 0 : maxMessages + 1);
             if (history == null || history.Length == 0)
             {
                 return (system, null, false, null, false);
+            }
+
+            bool olderMessagesNotRead = false;
+            if (!summarizationOn && history.Length > maxMessages)
+            {
+                olderMessagesNotRead = true;
+                ChatMessage[] capped = new ChatMessage[maxMessages];
+                Array.Copy(history, history.Length - maxMessages, capped, 0, maxMessages);
+                history = capped;
             }
 
             bool resendOfUnansweredUserTurn = IsResendOfUnansweredUserTurn(roleId, traceId, task, history);
@@ -1543,9 +1555,11 @@ namespace CoreAI.Ai
                 // working and the tail grows with session length (progressive per-request latency,
                 // eventual context overflow).
                 ChatMessage[] retained = history;
+                int prunedCount = 0;
                 if (buildArgs != null && buildArgs.EnableContextPruning)
                 {
                     retained = ConversationHistoryPruner.Prune(retained, buildArgs.MaxRetainedToolResultMessages);
+                    prunedCount = Math.Max(0, history.Length - (retained?.Length ?? 0));
                 }
 
                 if (buildArgs != null && buildArgs.HistoryTokenBudget > 0 &&
@@ -1559,7 +1573,8 @@ namespace CoreAI.Ai
                 snapshot = new ConversationContextSnapshot
                 {
                     RecentMessages = retained,
-                    WasCompacted = false
+                    WasCompacted = false,
+                    PrunedMessageCount = prunedCount
                 };
             }
             else
@@ -1601,6 +1616,9 @@ namespace CoreAI.Ai
             bool hasSummary = summaryBlock.Length > 0;
 
             ChatMessage[] recent = snapshot.RecentMessages ?? Array.Empty<ChatMessage>();
+            LogHistoryWindow(roleId, traceId, history.Length, recent.Length, snapshot.PrunedMessageCount,
+                snapshot.DeferredFoldMessageCount, budgetedSummary, summarizationOn,
+                olderMessagesNotRead ? maxMessages : 0);
             // WHY: the tail message is the unanswered record an earlier, cancelled attempt of THIS message left
             // behind (see IsResendOfUnansweredUserTurn). The live payload already carries it; sending the copy as
             // history too made the model read the same request twice in a row. Only the prompt drops it - the
@@ -1651,6 +1669,82 @@ namespace CoreAI.Ai
             }
 
             return (resultSystem, chatHistory, snapshot.WasCompacted, snapshot, resendOfUnansweredUserTurn);
+        }
+
+        /// <summary>
+        /// One line per turn whenever stored messages do not reach the model verbatim, with the reason for each:
+        /// pruned (superseded tool results, exact duplicates - routine, Info), folded into the rolling summary
+        /// (Info), or left out by the window / budget with nothing retelling them (Warn). With summarization off
+        /// the store's own <c>MaxChatHistoryMessages</c> cap is reported too (Warn), since those messages never
+        /// reach the orchestrator at all.
+        /// </summary>
+        private void LogHistoryWindow(
+            string roleId,
+            string traceId,
+            int storedCount,
+            int windowCount,
+            int prunedCount,
+            int deferredCount,
+            string carriedSummary,
+            bool summarizationEnabled,
+            int messageCapHit)
+        {
+            int pruned = Math.Max(0, prunedCount);
+            int deferred = Math.Max(0, Math.Min(deferredCount, storedCount - windowCount - pruned));
+            int leftOut = Math.Max(0, storedCount - windowCount - pruned - deferred);
+            if (leftOut <= 0 && pruned <= 0 && deferred <= 0 && messageCapHit <= 0)
+            {
+                return;
+            }
+
+            bool hasSummary = !string.IsNullOrWhiteSpace(carriedSummary);
+            StringBuilder line = new();
+            line.Append("[AiOrchestrator] role='").Append(roleId).Append("' trace='").Append(traceId ?? "unknown")
+                .Append("' history window: ").Append(storedCount).Append(" stored message(s) -> ")
+                .Append(windowCount).Append(" sent verbatim");
+            if (pruned > 0)
+            {
+                line.Append(", ").Append(pruned).Append(" pruned (superseded tool results / exact duplicates)");
+            }
+
+            // WHY once per role and cap: with summarization off the cap is a configured window that is hit on every
+            // turn of a long session; the first hit is news (Warning), every later one is bookkeeping (Info).
+            bool loss = messageCapHit > 0 && TruncationMarker.IsFirstTime($"history-cap|{roleId}|{messageCapHit}");
+            if (leftOut > 0 && hasSummary)
+            {
+                line.Append(", ").Append(leftOut).Append(" folded into the rolling summary (~")
+                    .Append(_tokenEstimator.EstimateText(carriedSummary)).Append(" tokens sent)");
+            }
+            else if (leftOut > 0)
+            {
+                loss = true;
+                line.Append(", ").Append(leftOut).Append(" left out by the window with no rolling summary")
+                    .Append(summarizationEnabled ? "" : " (history summarization is off)")
+                    .Append(": the model does not see them");
+            }
+
+            if (deferred > 0)
+            {
+                // WHY not "folded": the compactor did not receive these (payload cap); the context manager has
+                // already warned, so this line only accounts for them.
+                line.Append(", ").Append(deferred)
+                    .Append(" deferred to the next compaction (not in this prompt, not yet in the summary)");
+            }
+
+            if (messageCapHit > 0)
+            {
+                line.Append("; ≥1 older message(s) not sent (MaxChatHistoryMessages=").Append(messageCapHit).Append(')');
+            }
+
+            line.Append('.');
+            if (loss)
+            {
+                Log.Instance.Warn(line.ToString(), LogTag.Llm);
+            }
+            else
+            {
+                Log.Instance.Info(line.ToString(), LogTag.Llm);
+            }
         }
 
         private static string BuildWorldStateInstructions(string worldState)
@@ -2061,7 +2155,19 @@ namespace CoreAI.Ai
                     bundle.RoleConfig.PersistChatHistory);
                 string toolResultsBlock = BuildToolResultsMemoryBlock(
                     result?.ExecutedToolCalls,
-                    bundle.RoleConfig.ToolResultMemory);
+                    bundle.RoleConfig.ToolResultMemory,
+                    out ToolResultsClipStats toolResultsClip);
+                if (toolResultsClip.ClippedEntries > 0)
+                {
+                    Log.Instance.Info(
+                        $"[AiOrchestrator] role='{bundle.RoleId}' trace='{bundle.TraceId}' tool results stored in " +
+                        $"history ({bundle.RoleConfig.ToolResultMemory}): {toolResultsClip.ClippedEntries} entr(y/ies) " +
+                        $"clipped, {toolResultsClip.OriginalChars} chars total -> " +
+                        $"{toolResultsClip.OriginalChars - toolResultsClip.DroppedChars} kept, " +
+                        $"{toolResultsClip.DroppedChars} dropped (limits: {ToolResultDetailMaxChars} per Full detail, " +
+                        $"{ToolTraceMessageMaxChars} per compact line).",
+                        LogTag.Llm);
+                }
                 if (!string.IsNullOrWhiteSpace(toolResultsBlock))
                 {
                     _memoryStore.AppendChatMessage(bundle.RoleId, "tool", toolResultsBlock,
@@ -2376,6 +2482,12 @@ namespace CoreAI.Ai
 
         private static string SingleLine(string value, int maxChars)
         {
+            return SingleLine(value, maxChars, out _);
+        }
+
+        private static string SingleLine(string value, int maxChars, out int droppedChars)
+        {
+            droppedChars = 0;
             if (string.IsNullOrEmpty(value))
             {
                 return "";
@@ -2387,12 +2499,7 @@ namespace CoreAI.Ai
                 normalized = normalized.Replace("  ", " ");
             }
 
-            if (maxChars > 0 && normalized.Length > maxChars)
-            {
-                return normalized.Substring(0, maxChars) + "...";
-            }
-
-            return normalized;
+            return TruncationMarker.ClipPrefix(normalized, maxChars, out droppedChars);
         }
 
         private int EstimateChatHistoryTokens(IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> chatHistory)
@@ -2436,10 +2543,38 @@ namespace CoreAI.Ai
             return sum;
         }
 
-        private static string BuildToolResultsMemoryBlock(
+        /// <summary>Longest tool detail a <see cref="ToolResultMemoryPolicy.Full"/> history entry keeps.</summary>
+        internal const int ToolResultDetailMaxChars = 2000;
+
+        /// <summary>Longest tool message a compact history line or a tool-only reply keeps.</summary>
+        internal const int ToolTraceMessageMaxChars = 240;
+
+        /// <summary>What <see cref="BuildToolResultsMemoryBlock"/> cut; logged once per stored block.</summary>
+        internal struct ToolResultsClipStats
+        {
+            /// <summary>Entries whose detail or message was clipped.</summary>
+            public int ClippedEntries;
+
+            /// <summary>Length of those details/messages before clipping.</summary>
+            public int OriginalChars;
+
+            /// <summary>Characters removed from them; the stored text names the count at each cut.</summary>
+            public int DroppedChars;
+        }
+
+        internal static string BuildToolResultsMemoryBlock(
             IReadOnlyList<LlmToolCallTrace> executedToolCalls,
             ToolResultMemoryPolicy policy)
         {
+            return BuildToolResultsMemoryBlock(executedToolCalls, policy, out _);
+        }
+
+        internal static string BuildToolResultsMemoryBlock(
+            IReadOnlyList<LlmToolCallTrace> executedToolCalls,
+            ToolResultMemoryPolicy policy,
+            out ToolResultsClipStats clip)
+        {
+            clip = default;
             if (policy == ToolResultMemoryPolicy.None ||
                 executedToolCalls == null ||
                 executedToolCalls.Count == 0)
@@ -2475,13 +2610,29 @@ namespace CoreAI.Ai
                     case ToolResultMemoryPolicy.Full:
                         sb.Append("- ").Append(name).Append(": ").AppendLine(status);
                         sb.AppendLine("  Detail:");
-                        sb.AppendLine(IndentToolResultDetail(TruncateHeadTail(normalizedDetail, 2000), "  "));
+                        string detail = TruncateHeadTail(normalizedDetail, ToolResultDetailMaxChars, out int detailDropped);
+                        if (detailDropped > 0)
+                        {
+                            clip.ClippedEntries++;
+                            clip.OriginalChars += normalizedDetail.Length;
+                            clip.DroppedChars += detailDropped;
+                        }
+
+                        sb.AppendLine(IndentToolResultDetail(detail, "  "));
                         break;
                     case ToolResultMemoryPolicy.ErrorsOnly:
                     case ToolResultMemoryPolicy.CompactSummary:
                     default:
-                        string shortDetail = ExtractToolTraceMessage(trace.Detail);
-                        shortDetail = SingleLine(shortDetail, 240);
+                        string fullMessage = ExtractFullToolTraceMessage(trace.Detail);
+                        string shortDetail = SingleLine(fullMessage, ToolTraceMessageMaxChars, out int lineDropped);
+                        if (lineDropped > 0)
+                        {
+                            clip.ClippedEntries++;
+                            clip.OriginalChars += shortDetail.Length - TruncationMarker.Format(lineDropped).Length +
+                                                  lineDropped;
+                            clip.DroppedChars += lineDropped;
+                        }
+
                         sb.Append("- ").Append(name).Append(": ").Append(status);
                         if (!string.IsNullOrWhiteSpace(shortDetail))
                         {
@@ -2527,20 +2678,41 @@ namespace CoreAI.Ai
             return sb.ToString();
         }
 
-        private static string TruncateHeadTail(string value, int maxChars)
+        /// <summary>
+        /// Keeps the head and the tail of <paramref name="value"/> within <paramref name="maxChars"/> (marker
+        /// included) and names the cut: <c>...[truncated N chars]...</c>.
+        /// </summary>
+        internal static string TruncateHeadTail(string value, int maxChars, out int droppedChars)
         {
+            droppedChars = 0;
             if (string.IsNullOrEmpty(value) || maxChars <= 0 || value.Length <= maxChars)
             {
                 return value ?? "";
             }
 
-            const string marker = "\n...[truncated]...\n";
-            int available = Math.Max(0, maxChars - marker.Length);
+            // WHY value.Length: the real marker names a smaller count, so it is never longer than this one.
+            int available = Math.Max(0, maxChars - HeadTailMarker(value.Length).Length);
             int head = available / 2;
             int tail = available - head;
-            return value.Substring(0, head).TrimEnd() +
-                   marker +
-                   value.Substring(value.Length - tail).TrimStart();
+            if (head > 0 && char.IsHighSurrogate(value[head - 1]))
+            {
+                head--;
+            }
+
+            if (tail > 0 && char.IsLowSurrogate(value[value.Length - tail]))
+            {
+                tail--;
+            }
+
+            string headText = value.Substring(0, head).TrimEnd();
+            string tailText = value.Substring(value.Length - tail).TrimStart();
+            droppedChars = value.Length - headText.Length - tailText.Length;
+            return headText + HeadTailMarker(droppedChars) + tailText;
+        }
+
+        private static string HeadTailMarker(int droppedChars)
+        {
+            return "\n...[truncated " + droppedChars + " chars]...\n";
         }
 
         // WHY: 0 is meaningful: "explicitly unlimited" wins over the level below and reaches the LLM
@@ -2639,7 +2811,15 @@ namespace CoreAI.Ai
                     continue;
                 }
 
-                string detail = ExtractToolTraceMessage(trace.Detail);
+                string detail = ExtractToolTraceMessage(trace.Detail, out int detailChars, out int dropped);
+                if (dropped > 0)
+                {
+                    Log.Instance.Info(
+                        $"[AiOrchestrator] tool-only reply: failure detail of '{name}' clipped, " +
+                        $"{detailChars} chars total -> {detailChars - dropped} kept, {dropped} dropped.",
+                        LogTag.Llm);
+                }
+
                 failed.Add(string.IsNullOrWhiteSpace(detail)
                     ? name
                     : $"{name}: {detail}");
@@ -2660,8 +2840,37 @@ namespace CoreAI.Ai
                 : "Tool calls completed: " + string.Join(", ", succeeded) + ".";
         }
 
+        /// <summary>
+        /// The tool's own message: a JSON <c>message</c>/<c>error</c> is returned whole; plain text is clipped to
+        /// <see cref="ToolTraceMessageMaxChars"/> with a <c>…[+N chars]</c> marker.
+        /// </summary>
         internal static string ExtractToolTraceMessage(string detail)
         {
+            return ExtractToolTraceMessage(detail, out _, out _);
+        }
+
+        /// <summary>
+        /// Same as <see cref="ExtractToolTraceMessage(string)"/>, reporting the message length and what the clip
+        /// removed. A JSON <c>message</c>/<c>error</c> is returned whole, exactly as before 7.46.0; only plain text
+        /// is clipped to <see cref="ToolTraceMessageMaxChars"/>, now with a <c>…[+N chars]</c> marker.
+        /// </summary>
+        internal static string ExtractToolTraceMessage(string detail, out int originalChars, out int droppedChars)
+        {
+            string full = ExtractFullToolTraceMessage(detail, out bool fromJson);
+            originalChars = full.Length;
+            droppedChars = 0;
+            return fromJson ? full : TruncationMarker.ClipPrefix(full, ToolTraceMessageMaxChars, out droppedChars);
+        }
+
+        /// <summary>The tool's own message (JSON <c>message</c>/<c>error</c>, or the trimmed plain text), unclipped.</summary>
+        internal static string ExtractFullToolTraceMessage(string detail)
+        {
+            return ExtractFullToolTraceMessage(detail, out _);
+        }
+
+        private static string ExtractFullToolTraceMessage(string detail, out bool fromJson)
+        {
+            fromJson = false;
             if (string.IsNullOrWhiteSpace(detail))
             {
                 return "";
@@ -2683,6 +2892,7 @@ namespace CoreAI.Ai
                         string message = token.Type == JTokenType.String ? token.Value<string>() : token.ToString();
                         if (!string.IsNullOrWhiteSpace(message))
                         {
+                            fromJson = true;
                             return message.Trim();
                         }
                     }
@@ -2693,8 +2903,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            const int maxChars = 240;
-            return trimmed.Length <= maxChars ? trimmed : trimmed.Substring(0, maxChars) + "...";
+            return trimmed;
         }
 
         private static LlmCompletionResult BuildFailureResult(
@@ -2851,6 +3060,8 @@ namespace CoreAI.Ai
         {
             string carried = snapshot.Summary;
             int reserve = buildArgs?.SummaryTokenBudget ?? 0;
+            int managerDropped = snapshot.SummaryTokensDropped;
+            int requestDropped = 0;
             if (reserve > 0 && !string.IsNullOrWhiteSpace(snapshot.Summary))
             {
                 int estimate = _tokenEstimator.EstimateText(snapshot.Summary);
@@ -2860,7 +3071,8 @@ namespace CoreAI.Ai
                     // cost one more token; fitting one token short keeps the bound exact.
                     string bounded = ConversationRolledSummaryLimiter.Apply(
                         snapshot.Summary, _tokenEstimator, Math.Max(1, reserve - 1));
-                    snapshot.SummaryTokensDropped += Math.Max(1, estimate - _tokenEstimator.EstimateText(bounded));
+                    requestDropped = Math.Max(1, estimate - _tokenEstimator.EstimateText(bounded));
+                    snapshot.SummaryTokensDropped += requestDropped;
                     carried = bounded;
                 }
             }
@@ -2868,7 +3080,9 @@ namespace CoreAI.Ai
             if (snapshot.SummaryTokensDropped > 0)
             {
                 Log.Instance.Warn(
-                    $"[AiOrchestrator] Rolling summary for role '{roleId}' trimmed by ~{snapshot.SummaryTokensDropped} tokens to fit its {reserve}-token request reserve.",
+                    $"[AiOrchestrator] Rolling summary for role '{roleId}' trimmed by ~{snapshot.SummaryTokensDropped} tokens: " +
+                    $"~{managerDropped} by the context manager's MaxRolledSummaryTokens cap, " +
+                    $"~{requestDropped} to fit the {reserve}-token request reserve; ~{_tokenEstimator.EstimateText(carried ?? "")} tokens sent.",
                     LogTag.Llm);
             }
 
@@ -2925,10 +3139,16 @@ namespace CoreAI.Ai
                    string.Equals(task.SourceTag?.Trim(), "Chat", StringComparison.OrdinalIgnoreCase);
         }
 
+        private const int UserFacingFailureMaxChars = 400;
+
+        /// <summary>Longest failure text echoed into the log next to the clipped display text.</summary>
+        private const int FailureLogMaxChars = 8000;
+
         /// <summary>
         /// For UI chat flows (<see cref="AiTaskRequest.SourceTag"/> = <c>Chat</c>), return a printable error
         /// instead of leaving the orchestrator silent (<c>null</c>), which surfaced as empty UI bubbles.
         /// </summary>
+
         private static string UserFacingChatFailureOrNull(AiTaskRequest task, string detail)
         {
             if (!IsChatUiSourceTask(task))
@@ -2943,12 +3163,17 @@ namespace CoreAI.Ai
                 msg = msg.Replace("  ", " ");
             }
 
-            if (msg.Length > 400)
+            string shown = TruncationMarker.ClipPrefix(msg, UserFacingFailureMaxChars, out int dropped);
+            if (dropped > 0)
             {
-                return msg.Substring(0, 400) + "...";
+                Log.Instance.Info(
+                    $"[AiOrchestrator] chat failure text clipped for display: {msg.Length} chars total -> " +
+                    $"{msg.Length - dropped} shown, {dropped} dropped. Text: " +
+                    TruncationMarker.ClipPrefix(msg, FailureLogMaxChars, out _),
+                    LogTag.Llm);
             }
 
-            return msg;
+            return shown;
         }
     }
 }

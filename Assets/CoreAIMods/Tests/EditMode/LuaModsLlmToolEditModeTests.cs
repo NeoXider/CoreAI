@@ -111,6 +111,21 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task GetSource_OverTheReturnLimit_EndsWithACountedMarker()
+        {
+            LuaCsModRuntime runtime = new();
+            LuaModsLlmTool tool = CreateTool(runtime);
+            string code = "local x = 1\n" + new string('-', LuaModsLlmTool.MaxSourceLengthReturned + 500);
+            Assert.IsTrue((await ExecuteAsync(tool, "load", "big_mod", code)).Value<bool>("success"));
+
+            string data = (await ExecuteAsync(tool, "get_source", "big_mod")).Value<string>("data");
+
+            int dropped = code.Length - LuaModsLlmTool.MaxSourceLengthReturned;
+            StringAssert.EndsWith("\n--[[ …[+" + dropped + " chars] ]]", data);
+            StringAssert.StartsWith(code.Substring(0, 100), data);
+        }
+
+        [Test]
         public async Task List_QuarantinedMod_SurfacesQuarantineFlagAndHint()
         {
             LuaCsModRuntime runtime = new(maxErrorsBeforeQuarantine: 1);

@@ -27,6 +27,18 @@ namespace CoreAI.Ai
         /// </summary>
         public int SummaryTokensDropped { get; set; }
 
+        /// <summary>
+        /// Messages of the recent tail that context pruning removed (superseded tool results, exact duplicates).
+        /// Kept apart from messages the window or budget left out, so a routine prune is not reported as a loss.
+        /// </summary>
+        public int PrunedMessageCount { get; set; }
+
+        /// <summary>
+        /// Messages older than the recent tail that the compactor did not receive this turn (they did not fit its
+        /// payload): neither sent verbatim nor retold by the summary yet; the next compaction folds them.
+        /// </summary>
+        public int DeferredFoldMessageCount { get; set; }
+
         internal System.Action CommitSummary { get; set; }
         internal Func<CancellationToken, Task> CommitSummaryAsync { get; set; }
 

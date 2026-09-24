@@ -969,6 +969,7 @@ namespace CoreAI
             CoreAIGameEntryPoint.ResetStaticState();
             CoreAiEvents.ClearAll();
             CoreAiRoutingUi.Controller = null;
+            TruncationMarker.ResetLogOnce();
         }
     }
 }

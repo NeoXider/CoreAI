@@ -905,6 +905,19 @@ contexts) is next and not started. This section records everything landed up to 
       run before the drain; if none does, a synchronous dispatch would pass (from the 2026-09-06 closure audit, not
       re-checked since). *Owner:* test hygiene. *Plan:* add the pre-drain assertion to the loopback remote test.
 
+## 7.46.0 visible truncation (2026-09-24)
+
+The cuts an audit of every package found on the way to the model or a store are marked with their count and logged
+with numbers (both CHANGELOGs, 7.46.0), including the audit round's fixes (pruning is not a loss, the
+`MaxChatHistoryMessages` cap is reported, the compaction payload no longer marks unsent messages folded).
+
+- [ ] **`MirrorBroadcastEditModeTests.Mirror_PingsTheStrangerBelowAdmission_AndTheWitnessTellsThatFromTheBroadcast`**
+      fails when its class runs alone (no `NetworkPingMessage` reaches the stranger: expected 12, got empty); in the
+      2026-09-24 full EditMode run after the 7.46.0 audit fixes it passed, so it depends on order or timing. 7.46.0 does
+      not touch Mirror; check whether Mirror's ping interval depends on editor uptime / `NetworkTime` in a fresh
+      editor, and make the test drive the ping explicitly. Note: the test runs at all only because of a local `MIRROR`
+      scripting define in the uncommitted `ProjectSettings/ProjectSettings.asset`; CI without that define skips it.
+
 ## 7.45.0 audit wave: 7.44.x re-audited, pipeline cancellation unified, docs swept (2026-09-24)
 
 Five audits (7.44.2 `call_skill_tool`; 7.44.0/7.44.1 cancellation; 7.44.0/7.44.1 chat panel; English docs,

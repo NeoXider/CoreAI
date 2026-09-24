@@ -712,7 +712,8 @@ namespace CoreAI.Ai.LuaCs
 
         private LuaTool.LuaResult ReportSuccess(string code, object[] results)
         {
-            string summary = Truncate(Summarize(results), LuaCsAiEnvelopeProcessor.MaxResultSummaryLength);
+            string summary = Truncate(Summarize(results), LuaCsAiEnvelopeProcessor.MaxResultSummaryLength,
+                "result summary");
             _observer.OnLuaSuccess(summary);
             LuaExecutedSuccessfully?.Invoke(code ?? "");
             return new LuaTool.LuaResult { Success = true, Output = summary };
@@ -722,7 +723,7 @@ namespace CoreAI.Ai.LuaCs
         {
             string flat = Truncate(
                 (message ?? "").Replace("\r", " ").Replace("\n", " ").Trim(),
-                LuaCsAiEnvelopeProcessor.MaxErrorMessageLength);
+                LuaCsAiEnvelopeProcessor.MaxErrorMessageLength, "error");
             _observer.OnLuaFailure(flat);
             return new LuaTool.LuaResult { Success = false, Error = flat };
         }
@@ -778,14 +779,23 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private static string Truncate(string value, int maxLength)
+        /// <summary>
+        /// Clips Lua output or error text to <paramref name="maxLength"/> with a <c>…[+N chars]</c> marker (it
+        /// travels into tool results, payloads and repair prompts) and logs the cut with its numbers.
+        /// </summary>
+        private static string Truncate(string value, int maxLength, string what)
         {
             if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
             {
                 return value ?? "";
             }
 
-            return value.Substring(0, maxLength) + " ...(truncated)";
+            string clipped = TruncationMarker.ClipPrefix(value, maxLength, out int dropped);
+            CoreAI.Logging.Log.Instance.Info(
+                $"[LuaCsGameToolExecutor] Lua {what} clipped: {value.Length} chars total -> {value.Length - dropped} kept, " +
+                $"{dropped} dropped (limit {maxLength}).",
+                CoreAI.Logging.LogTag.Llm);
+            return clipped;
         }
     }
 }

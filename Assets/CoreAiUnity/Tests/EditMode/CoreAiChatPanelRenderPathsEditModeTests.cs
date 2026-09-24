@@ -29,7 +29,7 @@ namespace CoreAI.Tests.EditMode
         {
             using PanelCtx ctx = NewPanelWithAttachedScroll();
 
-            InvokePrivate(ctx.Panel, "AppendMessageBubble", HugeAssistantAnswer(), false);
+            InvokePrivate(ctx.Panel, "AppendMessageBubble", HugeAssistantAnswer(), false, false);
 
             Assert.LessOrEqual(
                 SingleAiLabelText(ctx.Scroll).Length,

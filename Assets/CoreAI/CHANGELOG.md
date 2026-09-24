@@ -879,6 +879,66 @@ and runtime, C3-xx sandbox for round 3; details in `TODO.md`).
   a `__tostring`, a sort comparator, a `__pairs`/`__ipairs` metamethod, `__index` or a gsub function; `RbxApi.txt`
   and `BuiltInRbxApiSkillText.cs` stay byte-identical.
 
+## [7.46.0] - 2026-09-24
+
+### Fixed
+
+- **No more silent cuts on the way to the model or a store.** The places found in an audit of every package that shorten
+  text before it reaches an LLM or a durable store now leave a marker that names the count and log the cut with its
+  numbers (what, total, limit, dropped). The shared shape is `…[+N chars]` (`TruncationMarker`), the same idea as the
+  tool-result marker `ToolExecutionPolicy` already used. Log previews (text cut only for a log line) and on-screen
+  previews stay as they were. Pinned by the tests listed in `com.neoxider.coreaiunity`.
+  - **Rolling-summary bullets.** A folded message longer than 280 chars ended in a bare `...`, indistinguishable from the
+    speaker's own ellipsis, and nothing was logged. New bullets end in `…[+N chars]`, and each fold writes ONE Info line
+    with the aggregate numbers (`Folded X message(s) … Y bullet(s) clipped to 280 chars: T chars total -> K kept, D
+    dropped.`) - in the deterministic manager and in the LLM-assisted bullet fallback. The legacy probes still format
+    the old way, so summaries persisted before this release keep their fold point.
+  - **LLM-assisted compaction.** Lines over `MaxPerMessageChars` carry `…[+N chars]`. A compacted summary over
+    `MaxSummaryChars` is clipped with the marker counted against the limit and logged as a Warning. The explicit
+    `MaxRolledSummaryTokens` cap now reports `SummaryTokensDropped` on the snapshot as the deterministic manager already
+    did, so the orchestrator logs it, and it fits the kept suffix one token short of the cap like the deterministic
+    manager: fitted to the cap itself, the ellipsis left the stored summary one token over, and it was cut and reported
+    again on every later turn.
+  - **Compaction payload over `MaxPayloadChars` no longer loses messages.** The payload used to be cut at the end: the
+    later dialogue lines and the closing instruction never reached the compactor, while the fold marker declared all of
+    them retold, so a bounded store could evict them for good. Whole lines are now added while they fit, the instruction
+    always closes the payload, the fold marker stops at the last line the compactor received, and the rest is folded by
+    the next compaction. A Warning names how many messages were deferred (they are not in that turn's prompt). A first
+    line longer than the whole payload budget is sent clipped to fit, with its count and a Warning, so compaction still
+    advances by one message.
+  - **Prompt history window.** `AiOrchestrator` logs one line per turn when stored messages do not reach the model
+    verbatim, with the reason: pruned (superseded tool results, exact duplicates - Info), folded into the rolling summary
+    (Info), or left out by the window / budget with nothing retelling them (Warning). With summarization off the store
+    applies `MaxChatHistoryMessages` itself; the orchestrator now reads one extra message, sends the cap, and warns
+    `≥1 older message(s) not sent (MaxChatHistoryMessages=N)` - a Warning the first time per role and cap, Info after
+    that. Messages the compactor deferred are reported as deferred, not as folded.
+    `ConversationContextSnapshot.PrunedMessageCount` and `DeferredFoldMessageCount` are new.
+  - **Summary request budget.** The existing warning named only the request reserve even when the context manager's
+    own cap did the cutting; it now splits the drop between the two and states the tokens sent.
+  - **Tool results stored in history.** A `Full` detail over 2000 chars is cut head + tail with
+    `...[truncated N chars]...` (was count-less); compact lines use `…[+N chars]` (240 chars). One Info line per stored
+    block with the totals. `AiOrchestrator.ExtractToolTraceMessage` keeps its pre-7.46.0 contract - a JSON
+    `message`/`error` whole, plain text clipped to 240 - with the marker on the plain-text clip, and the tool-only reply
+    logs a clip.
+  - **Chat failure text** shown to the user is clipped at 400 chars with the marker; the log line carries the text up
+    to 8000 chars (marked beyond that).
+  - **Prompt building blocks.** Lua repair error / failed code (`AiPromptComposer`, 500 / 1200) carry the marker and
+    log each cut. Stored Lua / data snapshots in `LuaScriptVersionPromptFormatter` (6000),
+    `DataOverlayVersionPromptFormatter` (8000) and `MutationStatePromptFormatter` (5000) end in `…[+N chars]` on its
+    own line inside the fence (was `\n...`). Tool descriptions in the tool contract (`AiToolContractPromptFormatter`,
+    500) and parameter schemas in retry hints (`ToolExecutionPolicy.CompactSchema`, 1200) carry the marker too. The
+    marker depends only on the clipped text, so the cacheable prefix stays byte-identical from turn to turn; these
+    repeating cuts are logged once per distinct input (`TruncationMarker.LogOnce`, keyed by tool / snapshot and length;
+    reset at `SubsystemRegistration` so a session with Domain Reload disabled logs again).
+  - **Tool-loop replies.** The "tool calls in a row failed" reply (`ToolExecutionPolicy`, 200 chars of the last failure)
+    and the response-length cap in `SmartToolCallingChatClient` (`MaxResponseChars`) name the dropped count and log it.
+  - **Lua mods (`com.neoxider.coreaimods`).** `manage_mods get_source` (16 000 chars) ends in `--[[ …[+N chars] ]]` and
+    logs the cut; revision previews in `versions` use the marker; Lua result summaries and error text in
+    `LuaCsGameToolExecutor` / `LuaCsAiEnvelopeProcessor` use the marker (was ` ...(truncated)`) and log each cut.
+  - Every clip keeps surrogate pairs whole, including the existing `MaxToolResultChars` tool-result cut and the kept
+    suffix of `ConversationRolledSummaryLimiter`.
+- `ICoreAiChatOptions.MaxMessageLength` is documented: it bounds typed input only (see `com.neoxider.coreaiunity`).
+
 ## [7.45.0] - 2026-09-24
 
 ### Security

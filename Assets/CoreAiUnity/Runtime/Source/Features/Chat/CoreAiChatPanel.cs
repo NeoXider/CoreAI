@@ -321,6 +321,15 @@ namespace CoreAI.Chat
         /// <summary>On user message sent event.</summary>
         public event Action<string> OnUserMessageSent;
 
+        /// <summary>
+        /// Raised when text the user typed was longer than <see cref="ICoreAiChatOptions.MaxMessageLength"/> and
+        /// was cut before sending. Arguments: the typed length (after trimming) and the limit. Raised after the
+        /// warning is logged and before <see cref="OnMessageSending"/>, so a host can tell the user their message
+        /// was shortened. Host-submitted text (<see cref="SubmitMessageFromExternalAsync"/>,
+        /// <see cref="SubmitMessageFromExternalResultAsync"/>) is never cut and never raises this.
+        /// </summary>
+        public event Action<int, int> OnMessageTruncated;
+
         /// <summary>On ai response completed event.</summary>
         public event Action<string> OnAiResponseCompleted;
 
@@ -1980,7 +1989,7 @@ namespace CoreAI.Chat
 
                 // WHY: render-only — persisted messages must NOT feed the per-role cache, or every
                 // re-hydrate on a role switch re-appends the whole store into the cache (N -> 2N -> 3N).
-                AppendMessageBubble(text.TrimEnd(), isUser);
+                AppendMessageBubble(text.TrimEnd(), isUser, true);
             }
         }
 
@@ -2546,12 +2555,14 @@ namespace CoreAI.Chat
                 return;
             }
 
-            string text = InputField.text.Trim();
-
-            int maxMessageLength = Options.MaxMessageLength;
-            if (maxMessageLength > 0 && text.Length > maxMessageLength)
+            string text = ApplyUserInputLengthLimit(InputField.text.Trim(), Options.MaxMessageLength,
+                out int typedLength);
+            if (typedLength > 0)
             {
-                text = text.Substring(0, maxMessageLength);
+                Logger.LogWarning(GameLogFeature.Core,
+                    $"[CoreAiChatPanel] User message cut to MaxMessageLength: {typedLength} chars typed -> " +
+                    $"{text.Length} sent, {typedLength - text.Length} dropped. Set MaxMessageLength to 0 to disable the limit.");
+                RaiseMessageTruncated(typedLength, Options.MaxMessageLength);
             }
 
             InputField.value = string.Empty;
@@ -2617,6 +2628,51 @@ namespace CoreAI.Chat
             return outcome;
         }
 
+        /// <summary>
+        /// The typed-input limit: returns <paramref name="text"/> cut to <paramref name="maxLength"/> characters
+        /// (a surrogate pair is never split). <paramref name="originalLength"/> is the length before the cut, or 0
+        /// when nothing was cut (limit off or text within it). The result is never empty: when the limit falls
+        /// inside a leading surrogate pair (a limit of 1 and an emoji first), the whole pair is kept, one character
+        /// over the limit, rather than sending nothing and clearing what the user typed.
+        /// </summary>
+        internal static string ApplyUserInputLengthLimit(string text, int maxLength, out int originalLength)
+        {
+            originalLength = 0;
+            if (string.IsNullOrEmpty(text) || maxLength <= 0 || text.Length <= maxLength)
+            {
+                return text;
+            }
+
+            int cut = char.IsHighSurrogate(text[maxLength - 1]) ? maxLength - 1 : maxLength;
+            if (cut == 0)
+            {
+                cut = 2;
+            }
+
+            originalLength = text.Length;
+            if (cut >= text.Length)
+            {
+                originalLength = 0;
+                return text;
+            }
+
+            return text.Substring(0, cut);
+        }
+
+        private void RaiseMessageTruncated(int originalLength, int maxLength)
+        {
+            try
+            {
+                OnMessageTruncated?.Invoke(originalLength, maxLength);
+            }
+            catch (Exception error)
+            {
+                // WHY: a host's hint must not cost the user their message; the send goes on.
+                Logger.LogError(GameLogFeature.Core,
+                    $"[CoreAiChatPanel] OnMessageTruncated handler threw: {error.Message}");
+            }
+        }
+
         private async Task<string?> SubmitExternalCoreAsync(string messageText,
             CoreAiChatExternalSubmitOptions options, CancellationToken cancellationToken,
             CoreAiChatExternalSubmitResult outcome)
@@ -2655,12 +2711,10 @@ namespace CoreAI.Chat
                 return null;
             }
 
+            // WHY no MaxMessageLength here: that limit bounds what a person types. Host-submitted text (a
+            // briefing, a task statement, a hint request) is composed by code that owns its size; cutting it
+            // with the typing limit silently removed the end of service instructions the model never saw.
             string text = messageText.Trim();
-            int maxMessageLength = Options.MaxMessageLength;
-            if (maxMessageLength > 0 && text.Length > maxMessageLength)
-            {
-                text = text.Substring(0, maxMessageLength);
-            }
 
             text = OnMessageSending(text);
             if (string.IsNullOrEmpty(text))
@@ -3693,12 +3747,26 @@ namespace CoreAI.Chat
         /// </summary>
         internal static string ClampAssistantForRender(string text)
         {
+            return ClampAssistantForRender(text, out _);
+        }
+
+        /// <summary>
+        /// Same as <see cref="ClampAssistantForRender(string)"/>, reporting how many characters of the message are
+        /// drawn (the kept prefix, without the closing fence and ellipsis the clamp adds).
+        /// </summary>
+        internal static string ClampAssistantForRender(string text, out int drawnChars)
+        {
+            drawnChars = text?.Length ?? 0;
             if (string.IsNullOrEmpty(text) || text.Length <= MaxAssistantRenderChars)
             {
                 return text;
             }
 
-            string clipped = text.Substring(0, MaxAssistantRenderChars);
+            int cut = char.IsHighSurrogate(text[MaxAssistantRenderChars - 1])
+                ? MaxAssistantRenderChars - 1
+                : MaxAssistantRenderChars;
+            string clipped = text.Substring(0, cut);
+            drawnChars = cut;
 
             // WHY: a truncation inside a ``` block leaves the fence open and breaks markdown layout; close it.
             int fences = 0;
@@ -3901,14 +3969,30 @@ namespace CoreAI.Chat
         /// rehydrated directly — so restoring either could still overflow the vertex buffer and crash WebGL.
         /// Render-only: the per-role cache and chat history keep the untruncated text.
         /// </remarks>
-        private void AppendMessageBubble(string text, bool isUser)
+        private void AppendMessageBubble(string text, bool isUser, bool isRestore = false)
         {
             HideTypingIndicator();
 
-            // WHY: user input is bounded by the input field; only assistant text can be arbitrarily large.
-            if (!isUser)
+            // WHY both sides: host-submitted user text is no longer bounded by MaxMessageLength (nor is typed
+            // text when the limit is 0), so a long briefing appended as a user bubble can overflow the WebGL
+            // vertex buffer exactly like a long reply.
+            if (text != null && text.Length > MaxAssistantRenderChars)
             {
-                text = ClampAssistantForRender(text);
+                int total = text.Length;
+                text = ClampAssistantForRender(text, out int drawn);
+                string line =
+                    $"[CoreAiChatPanel] {(isUser ? "User" : "Assistant")} message drawn clipped: {total} chars " +
+                    $"total -> {drawn} drawn, {total - drawn} not drawn (render cap; the full text stays in history).";
+                // WHY Info on restore: history hydration and role-cache restore redraw messages that were already
+                // reported when they first arrived; a warning per redraw would repeat the same news every time.
+                if (isRestore)
+                {
+                    Logger.LogInfo(GameLogFeature.Core, line);
+                }
+                else
+                {
+                    Logger.LogWarning(GameLogFeature.Core, line);
+                }
             }
 
             VisualElement bubble = CreateMessageBubble(text, isUser);
@@ -3965,7 +4049,7 @@ namespace CoreAI.Chat
 
             foreach ((string text, bool isUser) in messages)
             {
-                AppendMessageBubble(text, isUser);
+                AppendMessageBubble(text, isUser, true);
             }
 
             return true;
@@ -4623,6 +4707,13 @@ namespace CoreAI.Chat
 
             _streamingLabel.text =
                 AppendStreamingChunkForRender(_streamingLabel.text, chunk, out bool cappedAtLimit);
+            if (cappedAtLimit)
+            {
+                Logger.LogWarning(GameLogFeature.Core,
+                    $"[CoreAiChatPanel] Streamed assistant reply reached the render cap of {MaxAssistantRenderChars} " +
+                    "chars; the rest of this reply is not drawn (the full text stays in history).");
+            }
+
             _streamingRenderCapReached = cappedAtLimit;
             if (ScrollAnchor == ChatScrollAnchor.Bottom
                 || (ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom && _readerFollowsBottom))

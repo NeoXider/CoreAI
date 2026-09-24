@@ -135,7 +135,9 @@ namespace CoreAI.Chat
         [SerializeField]
         private bool _sendOnShiftEnter = false;
 
-        [Tooltip("Maximum message length. Zero disables the limit.")]
+        [Tooltip("Maximum length of a message the user types. Longer input is cut, logged as a warning and " +
+                 "reported through CoreAiChatPanel.OnMessageTruncated. Host-submitted messages " +
+                 "(SubmitMessageFromExternal*) are never cut. Zero disables the limit.")]
         [SerializeField]
         private int _maxMessageLength = 2000;
 

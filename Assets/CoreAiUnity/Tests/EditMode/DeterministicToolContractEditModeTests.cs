@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
+using CoreAI.Logging;
 using CoreAI.Messaging;
 using CoreAI.Session;
 using NUnit.Framework;
@@ -240,6 +241,159 @@ namespace CoreAI.Tests.EditMode
                 "Generated compact GUIDs must not appear in the frozen system prefix.");
             Assert.IsFalse(Regex.IsMatch(value ?? "", @"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}"),
                 "Timestamp-shaped values must not appear in the frozen system prefix.");
+        }
+
+        /// <summary>
+        /// Regression: a tool description over 500 chars ended in a bare "..." in the tool contract and nothing was
+        /// logged. The clip now names its count; because the marker depends only on the description, the cacheable
+        /// prefix stays byte-identical from one turn to the next, and the cut is logged once, not every turn.
+        /// </summary>
+        [Test]
+        public void AppendToolContract_LongDescription_ClippedWithCount_ByteIdenticalAcrossCalls_LoggedOnce()
+        {
+            TruncationMarker.ResetLogOnce();
+            using ContractLogCapture log = new();
+            string description = "Describes the tool. " + new string('d', 700);
+            ILlmTool[] tools = { new DescribedTool("verbose_tool", description) };
+
+            string first = AiToolContractPromptFormatter.AppendToolContract(
+                "sys", tools, new AiTaskRequest { RoleId = "Teacher" }, new TestSettings());
+            string second = AiToolContractPromptFormatter.AppendToolContract(
+                "sys", tools, new AiTaskRequest { RoleId = "Teacher" }, new TestSettings());
+
+            Assert.AreEqual(System.Text.Encoding.UTF8.GetBytes(first), System.Text.Encoding.UTF8.GetBytes(second),
+                "the clipped contract must be byte-identical across turns, or the prompt cache breaks");
+            int dropped = description.Length - AiToolContractPromptFormatter.ToolDescriptionMaxChars;
+            StringAssert.Contains(
+                description.Substring(0, AiToolContractPromptFormatter.ToolDescriptionMaxChars) + "…[+" + dropped + " chars]",
+                first);
+            string[] lines = log.Lines.Where(l => l.Contains("Tool 'verbose_tool' description clipped")).ToArray();
+            Assert.AreEqual(1, lines.Length, "one log line per description, not one per turn");
+            StringAssert.Contains($"{description.Length} chars total -> 500 shown, {dropped} dropped", lines[0]);
+        }
+
+        [Test]
+        public void ClipToolDescription_ShortDescription_Unchanged_AndNotLogged()
+        {
+            TruncationMarker.ResetLogOnce();
+            using ContractLogCapture log = new();
+
+            Assert.AreEqual("short and sweet", AiToolContractPromptFormatter.ClipToolDescription("t", "short\nand  sweet"));
+            Assert.IsEmpty(log.Lines);
+        }
+
+        [Test]
+        public void CompactSchema_LongSchema_ClippedWithCount_Deterministic_LoggedOncePerSchema()
+        {
+            TruncationMarker.ResetLogOnce();
+            using ContractLogCapture log = new();
+            string schema = "{\"type\":\"object\",\"description\":\"" + new string('s', 1500) + "\"}";
+
+            string first = CoreAI.Infrastructure.Llm.ToolExecutionPolicy.CompactSchema(
+                schema, CoreAI.Infrastructure.Llm.ToolExecutionPolicy.SchemaHintMaxChars, "big_schema_tool", Log.Instance);
+            string second = CoreAI.Infrastructure.Llm.ToolExecutionPolicy.CompactSchema(
+                schema, CoreAI.Infrastructure.Llm.ToolExecutionPolicy.SchemaHintMaxChars, "big_schema_tool", Log.Instance);
+
+            Assert.AreEqual(first, second);
+            int dropped = schema.Length - CoreAI.Infrastructure.Llm.ToolExecutionPolicy.SchemaHintMaxChars;
+            StringAssert.EndsWith("…[+" + dropped + " chars]", first);
+            Assert.AreEqual(1, log.Lines.Count(l => l.Contains("Tool 'big_schema_tool' schema clipped")));
+        }
+
+        [Test]
+        public void VersioningFormatters_LongSnapshots_ClipInsideTheFence_WithCount_LoggedOncePerSnapshot()
+        {
+            TruncationMarker.ResetLogOnce();
+            using ContractLogCapture log = new();
+            string lua = "-- start\n" + new string('l', 7000);
+            string data = "{\"k\":\"" + new string('j', 9000) + "\"}";
+            LuaScriptVersionRecord luaRecord = new("script_a", lua, lua, null);
+            DataOverlayVersionRecord dataRecord = new("overlay_a", data, data, null);
+
+            string luaPrompt = LuaScriptVersionPromptFormatter.Format("script_a", luaRecord);
+            string luaPromptAgain = LuaScriptVersionPromptFormatter.Format("script_a", luaRecord);
+            string dataPrompt = DataOverlayVersionPromptFormatter.Format("overlay_a", dataRecord);
+            string mutationPrompt = MutationStatePromptFormatter.Format(
+                "script_a", luaRecord, new[] { "overlay_a" }, new[] { dataRecord });
+
+            Assert.AreEqual(luaPrompt, luaPromptAgain);
+            StringAssert.Contains(lua.Substring(0, 6000) + "\n…[+" + (lua.Length - 6000) + " chars]\n```", luaPrompt);
+            StringAssert.Contains(data.Substring(0, 8000) + "\n…[+" + (data.Length - 8000) + " chars]\n```", dataPrompt);
+            StringAssert.Contains(lua.Substring(0, 5000) + "\n…[+" + (lua.Length - 5000) + " chars]\n```", mutationPrompt);
+            StringAssert.Contains(data.Substring(0, 5000) + "\n…[+" + (data.Length - 5000) + " chars]\n```", mutationPrompt);
+            Assert.AreEqual(2, log.Lines.Count(l => l.Contains("[LuaScriptVersionPromptFormatter] 'script_a'")),
+                "original and current each log once, and the second Format call adds nothing");
+            StringAssert.Contains($"{lua.Length} chars total -> 6000 shown, {lua.Length - 6000} dropped",
+                log.Lines.First(l => l.Contains("[LuaScriptVersionPromptFormatter]")));
+            Assert.AreEqual(2, log.Lines.Count(l => l.Contains("[DataOverlayVersionPromptFormatter] 'overlay_a'")));
+            Assert.AreEqual(4, log.Lines.Count(l => l.Contains("[MutationStatePromptFormatter]")));
+        }
+
+        [Test]
+        public void FailedToolRetryDetail_LongPlainText_ClippedWithCount_AndLogged()
+        {
+            using ContractLogCapture log = new();
+
+            string detail = CoreAI.Infrastructure.Llm.MeaiLlmClient.ClipFailedToolDetail(
+                "flaky_tool", new string('f', 300));
+
+            Assert.AreEqual(new string('f', 240) + "…[+60 chars]", detail);
+            StringAssert.Contains("Failed tool 'flaky_tool' detail clipped in the retry instruction: 300 chars total -> 240 kept, 60 dropped.",
+                log.Lines.Single(l => l.Contains("flaky_tool")));
+        }
+
+        /// <summary>
+        /// A JSON <c>error</c> went to the model whole before 7.46.0; the release about cuts must not add one.
+        /// </summary>
+        [Test]
+        public void FailedToolRetryDetail_LongJsonError_GoesWhole_AndIsNotLogged()
+        {
+            using ContractLogCapture log = new();
+            string error = new string('j', 600);
+
+            string detail = CoreAI.Infrastructure.Llm.MeaiLlmClient.ClipFailedToolDetail(
+                "json_tool", "{\"error\":\"" + error + "\"}");
+
+            Assert.AreEqual(error, detail);
+            Assert.IsFalse(log.Lines.Any(l => l.Contains("json_tool")));
+            Assert.AreEqual(error, AiOrchestrator.ExtractToolTraceMessage("{\"message\":\"" + error + "\"}"));
+        }
+
+        private sealed class DescribedTool : ILlmTool
+        {
+            public DescribedTool(string name, string description)
+            {
+                Name = name;
+                Description = description;
+            }
+
+            public string Name { get; }
+            public string Description { get; }
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+        }
+
+        /// <summary>Captures CoreAI log lines for one test and restores the previous log.</summary>
+        private sealed class ContractLogCapture : ILog, IDisposable
+        {
+            private readonly ILog _previous = Log.Instance;
+
+            public ContractLogCapture()
+            {
+                Log.Instance = this;
+            }
+
+            public List<string> Lines { get; } = new();
+
+            public void Debug(string message, string tag = null) => Lines.Add(message);
+            public void Info(string message, string tag = null) => Lines.Add(message);
+            public void Warn(string message, string tag = null) => Lines.Add(message);
+            public void Error(string message, string tag = null) => Lines.Add(message);
+
+            public void Dispose()
+            {
+                Log.Instance = _previous;
+            }
         }
 
         private sealed class StubTool : ILlmTool
