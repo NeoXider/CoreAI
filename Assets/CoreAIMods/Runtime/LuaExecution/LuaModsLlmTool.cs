@@ -404,13 +404,8 @@ namespace CoreAI.Ai
                 return Fail("reload: mod_id and code are required.");
             }
 
-            ModReloadReport report;
-            using (ModReloadScope scope = ModReloadScope.Begin(
-                       modId, keepObjects ? ModReloadMode.KeepObjects : ModReloadMode.CleanStartupObjects))
-            {
-                _runtime.ReloadMod(actor, modId, code);
-                report = scope.Report;
-            }
+            ModReloadReport report = _runtime.ReloadMod(
+                actor, modId, code, keepObjects ? ModReloadMode.KeepObjects : ModReloadMode.CleanStartupObjects);
 
             return report == null
                 ? Ok($"Mod '{modId.Trim()}' reloaded.")

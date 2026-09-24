@@ -4039,12 +4039,13 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// What sits inside a startup object without being one of that run's startup objects (a player's
-        /// build placed in the mod's folder, a part a handler made later) is moved to the startup object's
-        /// parent before the destroy, never destroyed.
+        /// What sits inside a startup object and belongs to someone else (a player's build placed in the
+        /// mod's folder) is moved to the startup object's parent before the destroy, never destroyed;
+        /// what the same mod still owns there (a part its handler made later) goes with the folder
+        /// (HUB-RELOAD follow-up H1, which flipped the handler part's side of this test).
         /// </summary>
         [Test]
-        public void Reload_CleanMode_MovesWhatIsNotAStartupObjectOutOfTheFolderItDestroys()
+        public void Reload_CleanMode_MovesAPlayersBuildOutOfTheFolderItDestroys_AndDestroysTheModsOwn()
         {
             LuaCsRbxApiBindings bindings = new();
             LuaCsModStack stack = BuildReloadStack(bindings);
@@ -4078,8 +4079,10 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(playerBuild.IsDestroyed, "a player's build is never destroyed");
             Assert.AreSame(bindings.Registry.WorldRoot, playerBuild.Parent,
                 "it moves to the destroyed folder's parent");
-            Assert.IsFalse(handlerPart.IsDestroyed, "an object a handler made later is not a startup object");
-            Assert.AreSame(bindings.Registry.WorldRoot, handlerPart.Parent);
+            Assert.IsTrue(handlerPart.IsDestroyed,
+                "what the mod's own handler put into its folder goes with the folder");
+            Assert.IsEmpty(WorkspaceChildrenNamed(bindings, "MadeByAHandler"),
+                "no part of the previous run is left lying in Workspace");
             Assert.AreEqual(1, WorkspaceChildrenNamed(bindings, "Base").Count);
         }
 
@@ -4157,11 +4160,12 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// The mode-less <see cref="ILuaModRuntime.ReloadMod"/>, the call every facade forwards, takes its
-        /// mode from an open <see cref="ModReloadScope"/> and hands the report back through it.
+        /// HUB-RELOAD follow-up H2: the mode reaches the runtime through the explicit
+        /// <see cref="ILuaModRuntime"/> member, and the report comes back as its answer; the mode-less
+        /// member cleans, the default.
         /// </summary>
         [Test]
-        public void Reload_ThroughTheModeLessInterface_TakesTheModeAndReturnsTheReportThroughAScope()
+        public void Reload_ThroughTheInterface_HonoursTheMode_AndTheModeLessReloadCleans()
         {
             LuaCsRbxApiBindings bindings = new();
             LuaCsModStack stack = BuildReloadStack(bindings);
@@ -4170,25 +4174,226 @@ namespace CoreAI.Tests.EditMode
             ILuaModRuntime facade = stack.Runtime;
             facade.LoadMod(host, "castle", CastleLikeSource, LuaCapabilities.All, false);
 
-            ModReloadReport keptReport;
-            using (ModReloadScope scope = ModReloadScope.Begin("castle", ModReloadMode.KeepObjects))
-            {
-                facade.ReloadMod(host, "castle", CastleLikeSource + "\n-- keep");
-                keptReport = scope.Report;
-            }
+            ModReloadReport keptReport = facade.ReloadMod(
+                host, "castle", CastleLikeSource + "\n-- keep", ModReloadMode.KeepObjects);
 
             Assert.IsNotNull(keptReport);
             Assert.AreEqual(ModReloadMode.KeepObjects, keptReport.Mode);
+            Assert.AreEqual(CastleLikeStartupObjects, keptReport.KeptObjects);
             Assert.AreEqual(2, WorkspaceChildrenNamed(bindings, "CastleShowcase").Count);
 
-            using (ModReloadScope other = ModReloadScope.Begin("another-mod", ModReloadMode.KeepObjects))
-            {
-                facade.ReloadMod(host, "castle", CastleLikeSource + "\n-- clean");
-                Assert.IsNull(other.Report, "a scope for another mod neither applies nor receives the report");
-            }
+            facade.ReloadMod(host, "castle", CastleLikeSource + "\n-- clean");
 
             Assert.AreEqual(1, WorkspaceChildrenNamed(bindings, "CastleShowcase").Count,
-                "without a scope for the mod the reload cleans, the default");
+                "the mode-less reload cleans, the default");
+        }
+
+        /// <summary>
+        /// H2: the installer's actor-attribution facade forwards the mode; left to the interface's
+        /// default it would run a mode-less (clean) reload and answer no report. The facade is private to
+        /// the installer, which needs VContainer, so the test reaches it by name and is inconclusive where
+        /// the composition assembly is not compiled (the portable Lua runner).
+        /// </summary>
+        [Test]
+        public void Reload_ThroughTheInstallersAttributionFacade_HonoursTheMode()
+        {
+            Type facadeType = typeof(LuaCsModRuntime).Assembly.GetType(
+                "CoreAI.Composition.CoreAiModsInstaller+ActorAttributedLuaModRuntime");
+            if (facadeType == null)
+            {
+                Assert.Inconclusive("The composition root is not compiled into this assembly.");
+            }
+
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            ILuaModRuntime facade = (ILuaModRuntime)Activator.CreateInstance(
+                facadeType,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new object[] { stack.Runtime, bindings.Registry },
+                null);
+            ActorContext host = CoreAI.Composition.CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            facade.LoadMod(host, "castle", CastleLikeSource, LuaCapabilities.All, false);
+
+            ModReloadReport report = facade.ReloadMod(
+                host, "castle", CastleLikeSource + "\n-- keep", ModReloadMode.KeepObjects);
+
+            Assert.IsNotNull(report, "the facade must forward the member, not fall back to the default");
+            Assert.AreEqual(ModReloadMode.KeepObjects, report.Mode);
+            Assert.AreEqual(2, WorkspaceChildrenNamed(bindings, "CastleShowcase").Count);
+        }
+
+        /// <summary>
+        /// A sample_clicker-like mod: its main chunk builds a folder, and its Heartbeat handler drops
+        /// coins into that folder while it plays.
+        /// </summary>
+        private const string ClickerLikeSource = @"
+            local root = Instance.new('Folder')
+            root.Name = 'BlockClicker'
+            root.Parent = workspace
+            local board = Instance.new('Part')
+            board.Name = 'Clicker'
+            board.Parent = root
+            local frames = 0
+            game:GetService('RunService').Heartbeat:Connect(function()
+                frames = frames + 1
+                if frames <= 3 then
+                    local coin = Instance.new('Part')
+                    coin.Name = 'Coin'
+                    coin.Parent = root
+                end
+            end)";
+
+        private static int CountLiveNamed(LuaCsRbxApiBindings bindings, string name)
+        {
+            int count = 0;
+            foreach (RbxInstance instance in bindings.Registry.WorldRoot.GetDescendants())
+            {
+                if (!instance.IsDestroyed && instance.Name == name)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// HUB-RELOAD follow-up H1: the coins a clicker's Heartbeat handler drops into its own startup
+        /// folder are not startup objects, so every clean Save &amp; run rescued them to Workspace, and
+        /// the previous runs' coins piled up there. What the same mod still owns inside a startup object
+        /// now goes with it: three saves leave only the live run's coins, all inside its folder.
+        /// </summary>
+        [Test]
+        public void Reload_CleanMode_ThreeSavesOfAClickerLikeMod_LeaveNoCoinsOfEarlierRuns()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            stack.Runtime.LoadMod("clicker", ClickerLikeSource);
+            for (int frame = 0; frame < 4; frame++)
+            {
+                PumpSchedulerFrame(stack, bindings);
+            }
+
+            Assert.AreEqual(3, CountLiveNamed(bindings, "Coin"), "precondition: the handler dropped its coins");
+
+            ModReloadReport last = null;
+            for (int save = 1; save <= 3; save++)
+            {
+                last = stack.Runtime.ReloadMod(
+                    "clicker", ClickerLikeSource + "\n-- edit " + InvariantText(save), ModReloadMode.CleanStartupObjects);
+                for (int frame = 0; frame < 4; frame++)
+                {
+                    PumpSchedulerFrame(stack, bindings);
+                }
+            }
+
+            Assert.AreEqual(1, WorkspaceChildrenNamed(bindings, "BlockClicker").Count);
+            Assert.IsEmpty(WorkspaceChildrenNamed(bindings, "Coin"), "no coin of an earlier run was rescued to Workspace");
+            Assert.AreEqual(3, CountLiveNamed(bindings, "Coin"), "only the live run's own coins are left");
+            Assert.AreEqual(3, WorkspaceChildrenNamed(bindings, "BlockClicker")[0].GetChildren().Count - 1,
+                "and they sit in the live run's folder next to its board");
+            Assert.AreEqual(0, last.RescuedObjects, "nothing of the mod's own was moved out");
+            Assert.AreEqual(5, last.CleanedObjects, "the folder, its board and the three coins of the replaced run");
+        }
+
+        /// <summary>
+        /// H1 negative twin: an object another owner put into the mod's folder is still rescued, with
+        /// everything inside it, including a coin of the mod's own that sits inside that object.
+        /// </summary>
+        [Test]
+        public void Reload_CleanMode_StillRescuesAPlayersObject_WithWhatIsInsideIt()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            stack.Runtime.LoadMod("clicker", ClickerLikeSource);
+            for (int frame = 0; frame < 4; frame++)
+            {
+                PumpSchedulerFrame(stack, bindings);
+            }
+
+            RbxInstance folder = WorkspaceChildrenNamed(bindings, "BlockClicker")[0];
+            RbxInstance playerChest = bindings.Registry.Create("Model");
+            playerChest.Name = "PlayerChest";
+            playerChest.Parent = folder;
+            RbxInstance coinInChest = folder.FindFirstChild("Coin");
+            coinInChest.Parent = playerChest;
+
+            ModReloadReport report = stack.Runtime.ReloadMod(
+                "clicker", "local quiet = true", ModReloadMode.CleanStartupObjects);
+
+            Assert.IsTrue(folder.IsDestroyed);
+            Assert.IsFalse(playerChest.IsDestroyed, "a player's object is never destroyed");
+            Assert.AreSame(bindings.Registry.WorldRoot, playerChest.Parent, "it moves to the folder's parent");
+            Assert.IsFalse(coinInChest.IsDestroyed, "what sits inside a rescued object moves with it");
+            Assert.AreSame(playerChest, coinInChest.Parent);
+            Assert.AreEqual(1, report.RescuedObjects);
+            Assert.AreEqual(4, report.CleanedObjects, "the folder, its board and the two coins left in it");
+        }
+
+        /// <summary>
+        /// C2-09: plain Lua nested deeper than the VM allows is refused before it compiles, and the
+        /// refusal said "Luau syntax error" although the chunk has no Luau in it. It now says "syntax error".
+        /// </summary>
+        [Test]
+        public void Load_PlainLuaNestedPastTheLimit_IsASyntaxError_NotALuauOne()
+        {
+            LuaCsModStack stack = BuildReloadStack(new LuaCsRbxApiBindings());
+            // WHY one compound assignment first: plain Lua alone passes the gate untouched and reaches the
+            // VM; a chunk the gate parses, with its deep part in plain Lua, is the one that was mislabelled.
+            string nested = "local y = 0\ny += 1\nlocal x = " + new string('(', 205) + "1" + new string(')', 205);
+
+            Exception refused = Assert.Catch(() => stack.Runtime.LoadMod("deep", nested));
+
+            StringAssert.StartsWith("syntax error: ", refused.Message);
+            StringAssert.DoesNotContain("Luau", refused.Message);
+            StringAssert.Contains("nested more than 200 levels", refused.Message);
+        }
+
+        /// <summary>
+        /// HUB-RELOAD follow-up H5: the installer no longer wires its own copy of the teardown, so the
+        /// factory's default teardown is the only one. It runs after every ModTearingDown subscriber (a
+        /// host subscriber still sees the mod's instances) and destroys each owned instance exactly once.
+        /// </summary>
+        [Test]
+        public void Factory_Unload_TearsDownOnce_AfterEveryHostSubscriber()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            stack.Runtime.LoadMod("castle", CastleLikeSource);
+            List<InstanceId> ownedIds = new();
+            foreach (RbxInstance owned in bindings.Registry.GetTeardownOwnedBy("castle"))
+            {
+                ownedIds.Add(owned.Id);
+            }
+
+            int ownedBeforeUnload = ownedIds.Count;
+            int seenBySubscriber = -1;
+            stack.Runtime.ModTearingDown += (modId, reason) =>
+            {
+                if (modId == "castle" && reason == LuaModTeardownReason.Unload)
+                {
+                    seenBySubscriber = bindings.Registry.GetTeardownOwnedBy("castle").Count;
+                }
+            };
+            Dictionary<InstanceId, int> unregistered = new();
+            bindings.Registry.Unregistered += record =>
+            {
+                unregistered.TryGetValue(record.Id, out int count);
+                unregistered[record.Id] = count + 1;
+            };
+
+            Assert.IsTrue(stack.Runtime.UnloadMod("castle"));
+
+            Assert.AreEqual(ownedBeforeUnload, seenBySubscriber,
+                "the default teardown runs after the host's subscriber, which still sees every instance");
+            Assert.IsEmpty(bindings.Registry.GetTeardownOwnedBy("castle"));
+            foreach (InstanceId id in ownedIds)
+            {
+                Assert.IsTrue(unregistered.TryGetValue(id, out int count), "every owned instance is torn down");
+                Assert.AreEqual(1, count, "each instance is torn down once");
+            }
         }
 
         /// <summary>

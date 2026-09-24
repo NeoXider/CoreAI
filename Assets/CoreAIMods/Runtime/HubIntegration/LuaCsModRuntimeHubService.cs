@@ -125,6 +125,12 @@ namespace CoreAI.Ai.Hub
             _runtime.ReloadMod(_actorContext, id, code);
         }
 
+        /// <inheritdoc />
+        protected override ModReloadReport RuntimeReload(string id, string code, ModReloadMode mode)
+        {
+            return _runtime.ReloadMod(_actorContext, id, code, mode);
+        }
+
         protected override bool RuntimeUnload(string id)
         {
             return _runtime.UnloadMod(_actorContext, id);

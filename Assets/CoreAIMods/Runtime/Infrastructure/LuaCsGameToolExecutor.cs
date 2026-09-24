@@ -30,8 +30,54 @@ namespace CoreAI.Mods.WorldPackages
             CancellationToken cancellationToken);
     }
 
+    /// <summary>
+    /// The optional second face of an <see cref="IConfirmedWorldMutationGate"/>: what a world session
+    /// controller (<see cref="RbxWorldRuntimeSessionController"/>) needs from the shared gate to keep the
+    /// world that opens on the next start in step with the live one. <see cref="ConfirmedWorldMutationGate"/>
+    /// implements it; a host gate that wraps one forwards these members to it.
+    /// </summary>
+    /// <remarks>
+    /// A gate without it still serializes and backs up every mutation, but the controller then falls
+    /// back as follows, and says so once through its diagnostics when it is composed with a startup
+    /// store: (1) the startup world follows mod source changes only, recorded from the frame pump, so a
+    /// gated change to the world tree (an execute_lua build) is not recorded for the next start; (2) the
+    /// boot-time startup restore runs without the gate, so a mutation arriving during boot can change the
+    /// default world the restore then replaces; (3) the pump cannot tell that a gated mutation is running
+    /// and may record the world in the middle of one (the next change records the finished state).
+    /// </remarks>
+    public interface IStartupAwareWorldMutationGate : IConfirmedWorldMutationGate
+    {
+        /// <summary>True while a mutation, a confirmed world load or a boot-time restore holds the gate.</summary>
+        bool IsHeld { get; }
+
+        /// <summary>
+        /// Called with the trigger of each mutation <see cref="IConfirmedWorldMutationGate.ExecuteAsync{TResult}"/>
+        /// runs, after its backup is confirmed and right before the mutation itself; the world session
+        /// controller sets it to watch what the mutation changes. Must not throw; a throw is contained.
+        /// </summary>
+        Action<string> MutationStarting { get; set; }
+
+        /// <summary>
+        /// Runs after every mutation that returned, while the gate is still held, with the mutation's
+        /// trigger. The world session controller sets it to keep the durable startup selection in step
+        /// with the live world; it answers a note for the caller (why the change was not recorded) or an
+        /// empty string, and the gate adds a note to the mutation's result. It must not throw; a throw
+        /// is contained so it never replaces the mutation result.
+        /// </summary>
+        Func<string, CancellationToken, UniTask<string>> AfterMutationAsync { get; set; }
+
+        /// <summary>
+        /// Runs <paramref name="operationAsync"/> alone under the gate, with no backup and no
+        /// after-mutation follow-up: the boot-time startup restore, whose outgoing world is the
+        /// reproducible default world. No thread and no blocking wait (WebGL).
+        /// </summary>
+        Task<TResult> ExecuteWithoutBackupAsync<TResult>(
+            Func<CancellationToken, Task<TResult>> operationAsync,
+            CancellationToken cancellationToken);
+    }
+
     /// <summary>Requires a durable world-package autosave before allowing a runtime mutation.</summary>
-    public sealed class ConfirmedWorldMutationGate : IConfirmedWorldMutationGate
+    public sealed class ConfirmedWorldMutationGate : IStartupAwareWorldMutationGate
     {
         /// <summary>The manage_mods result field that carries the after-mutation note.</summary>
         internal const string StartupNoteField = "startup_warning";
@@ -51,17 +97,14 @@ namespace CoreAI.Mods.WorldPackages
             _packageStore = packageStore ?? throw new ArgumentNullException(nameof(packageStore));
         }
 
-        /// <summary>
-        /// Runs after every mutation that returned, while the gate is still held, with the mutation's
-        /// trigger. The world session sets it to keep the durable startup selection in step with the
-        /// live world; it answers a note for the caller (why the change was not recorded) or an empty
-        /// string, and the gate adds a note to the mutation's result. It must not throw; a throw is
-        /// contained so it never replaces the mutation result.
-        /// </summary>
-        internal Func<string, CancellationToken, UniTask<string>> AfterMutationAsync { get; set; }
+        /// <inheritdoc />
+        public Action<string> MutationStarting { get; set; }
 
-        /// <summary>True while a mutation, a confirmed world load or a boot-time restore holds the gate.</summary>
-        internal bool IsHeld => Volatile.Read(ref _held) != 0;
+        /// <inheritdoc />
+        public Func<string, CancellationToken, UniTask<string>> AfterMutationAsync { get; set; }
+
+        /// <inheritdoc />
+        public bool IsHeld => Volatile.Read(ref _held) != 0;
 
         /// <inheritdoc />
         public async Task<TResult> ExecuteAsync<TResult>(
@@ -122,6 +165,7 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
+                NotifyMutationStarting(trigger);
                 TResult result = await mutationAsync(cancellationToken);
                 string note = await NotifyAfterMutationAsync(trigger);
                 return note.Length == 0 ? result : WithNote(result, note);
@@ -133,12 +177,8 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
-        /// <summary>
-        /// Runs <paramref name="operationAsync"/> alone under the gate, with no backup and no
-        /// after-mutation follow-up: the boot-time startup restore, whose outgoing world is the
-        /// reproducible default world. No thread and no blocking wait (WebGL).
-        /// </summary>
-        internal async Task<TResult> ExecuteWithoutBackupAsync<TResult>(
+        /// <inheritdoc />
+        public async Task<TResult> ExecuteWithoutBackupAsync<TResult>(
             Func<CancellationToken, Task<TResult>> operationAsync,
             CancellationToken cancellationToken)
         {
@@ -172,6 +212,25 @@ namespace CoreAI.Mods.WorldPackages
         private static bool BringsTheWorldUnderTheLimit(string trigger)
         {
             return string.Equals(trigger, LuaModsLlmTool.ForgetBackupTrigger, StringComparison.Ordinal);
+        }
+
+        private void NotifyMutationStarting(string trigger)
+        {
+            Action<string> starting = MutationStarting;
+            if (starting == null)
+            {
+                return;
+            }
+
+            // WHY contained: the backup is confirmed and the mutation is about to run; an observer's
+            // failure must not refuse it.
+            try
+            {
+                starting(trigger);
+            }
+            catch (Exception)
+            {
+            }
         }
 
         private async UniTask<string> NotifyAfterMutationAsync(string trigger)

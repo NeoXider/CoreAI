@@ -87,17 +87,15 @@ namespace CoreAI.Ai.Hub
 
         /// <summary>
         /// Reloads a loaded mod's code in <paramref name="mode"/> and returns what the reload did with the
-        /// previous run's startup objects (null when the runtime reports nothing). The default carries the
-        /// mode to the runtime in a <see cref="ModReloadScope"/> around <see cref="RuntimeReload(string, string)"/>,
-        /// so it reaches the runtime through any facade in between.
+        /// previous run's startup objects (null when the runtime reports nothing). The default is for an
+        /// adapter over a runtime without reload modes: it runs <see cref="RuntimeReload(string, string)"/>
+        /// and answers null; an adapter over an <see cref="ILuaModRuntime"/> overrides it with
+        /// <see cref="ILuaModRuntime.ReloadMod(CoreAI.Authority.ActorContext, string, string, ModReloadMode)"/>.
         /// </summary>
         protected virtual ModReloadReport RuntimeReload(string id, string code, ModReloadMode mode)
         {
-            using (ModReloadScope scope = ModReloadScope.Begin(id, mode))
-            {
-                RuntimeReload(id, code);
-                return scope.Report;
-            }
+            RuntimeReload(id, code);
+            return null;
         }
 
         /// <summary>

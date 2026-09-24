@@ -203,6 +203,11 @@ namespace CoreAI.Infrastructure.Lua
             }
         }
 
+        /// <summary>
+        /// Every readable stored manifest, sorted by id; a manifest that cannot be read is logged and left
+        /// out. When the store cannot be listed at all the answer is empty and marked unreadable, so a
+        /// load stamped meanwhile records no load order rather than the first one.
+        /// </summary>
         public IReadOnlyList<LuaModManifest> List()
         {
             EnterRoot("list mods");
@@ -236,7 +241,10 @@ namespace CoreAI.Infrastructure.Lua
             catch (Exception ex)
             {
                 _log?.Error("[FileLuaModSourceStore] List failed: " + ex);
-                return Empty;
+                // WHY not the shared empty list: a caller stamping a load order must not read a store it
+                // could not list as a store that holds nothing (C2-08); every other caller still sees none.
+                return new UnreadableLuaModSourceListing(
+                    "The mod source store at '" + _dir + "' could not be listed: " + ex.Message);
             }
             finally
             {

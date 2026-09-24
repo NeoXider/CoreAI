@@ -272,7 +272,7 @@ namespace CoreAI.Mods.WorldPackages
         /// The refusal of a new mod source past the world-package mod limit, worded the same wherever
         /// it is raised: by the session before a mod runs and by the source store that refuses to keep it.
         /// </summary>
-        internal static string DescribeModSourceLimit(string modId, int storedSources)
+        public static string DescribeModSourceLimit(string modId, int storedSources)
         {
             return "Mod '" + modId + "' cannot be added: this world already stores "
                    + storedSources.ToString(CultureInfo.InvariantCulture) + " mod sources, the most one world "
@@ -584,7 +584,15 @@ namespace CoreAI.Mods.WorldPackages
 
     /// <summary>
     /// A mod source store that refuses, in <see cref="ILuaModSourceStore.Save"/>, a new mod id past the
-    /// world-package mod limit, and answers the same question before anything runs.
+    /// world-package mod limit, and answers the same question before anything runs. A world session asks
+    /// it before a mod that adds a source is loaded or imported, and refuses the mod with the store's own
+    /// refusal instead of running it. A host store implements it with the rule its Save applies: the
+    /// built-in stores keep an id they already hold, and a new one only while they hold fewer than
+    /// <see cref="RbxWorldPackageSerializer.MaximumMods"/> ids, and refuse with
+    /// <see cref="RbxWorldPackageFormatLimitException.DescribeModSourceLimit"/> (Save throws
+    /// <see cref="RbxWorldPackageFormatLimitException"/> with that text). A store without it is judged by
+    /// its <see cref="ILuaModSourceStore.List"/> count, and a mod its Save then refuses is undone after
+    /// its load.
     /// </summary>
     /// <remarks>
     /// WHY one rule for both sides: the session counted the manifests the store could list while the
@@ -592,11 +600,12 @@ namespace CoreAI.Mods.WorldPackages
     /// admit a mod whose source the store then refused to keep. The mod ran, and was missing from every
     /// save and from the next start.
     /// </remarks>
-    internal interface ILuaModSourceAdmission
+    public interface ILuaModSourceAdmission
     {
         /// <summary>
         /// True when <see cref="ILuaModSourceStore.Save"/> would keep the source of
-        /// <paramref name="modId"/> now; otherwise <paramref name="refusal"/> is the refusal that save raises.
+        /// <paramref name="modId"/> now; otherwise <paramref name="refusal"/> is the refusal that save
+        /// raises. May throw when the store cannot answer (the session then refuses the load).
         /// </summary>
         bool CanAdmit(string modId, out string refusal);
     }
@@ -1404,6 +1413,10 @@ namespace CoreAI.Mods.WorldPackages
         private const string NonTransactionalSourceStoreRefusal =
             "The configured mod source store cannot atomically replace a world source set.";
         private const string SourceChangeTrigger = "mod source change";
+        private const string WorldChangeTrigger = "world change";
+
+        /// <summary>The default of <see cref="StartupRefreshInterval"/>.</summary>
+        public static readonly TimeSpan DefaultStartupRefreshInterval = TimeSpan.FromSeconds(5d);
 
         private readonly object _gate = new();
         private readonly IRbxWorldSessionHost _host;
@@ -1431,6 +1444,15 @@ namespace CoreAI.Mods.WorldPackages
         private StartupSource _liveStartupSource;
         private bool _startupRefreshPending;
         private bool _startupRefreshRunning;
+        private bool _worldRefreshDeferred;
+        private DateTime? _lastWorldRefreshUtc;
+        private TimeSpan _startupRefreshInterval = DefaultStartupRefreshInterval;
+        private long _sourceChanges;
+        private long _sourceChangesAtMutationStart;
+        private InstanceRegistry _watchedRegistry;
+        private bool _mutationWatchActive;
+        private int _worldChangedDuringMutation;
+        private string _startupSelectionNote = "";
         private Task _startupRefreshAfterSourceChanges = Task.CompletedTask;
         private byte[] _lastRefusedStartupContent;
         private string _lastReportedStartupRefusal = "";
@@ -1489,9 +1511,22 @@ namespace CoreAI.Mods.WorldPackages
             // takes it is serialized with them, and the gate reports each finished mutation back here
             // to keep the startup selection current. A stack composed without a gate has neither.
             _worldMutationGate = initialStack.ToolExecutor.WorldMutationGate;
-            if (_worldMutationGate is ConfirmedWorldMutationGate confirmedGate)
+            if (_worldMutationGate is IStartupAwareWorldMutationGate startupAwareGate)
             {
-                confirmedGate.AfterMutationAsync = RefreshStartupSelectionAfterMutationAsync;
+                startupAwareGate.MutationStarting = OnGatedMutationStarting;
+                startupAwareGate.AfterMutationAsync = RefreshStartupSelectionAfterMutationAsync;
+            }
+            else if (_worldMutationGate != null && _startupStore != null)
+            {
+                // WHY said at once: the fallback loses gated world changes at restart, and a host that
+                // composed its own gate otherwise finds out only after one.
+                ReportDiagnostic(
+                    "The shared world mutation gate (" + _worldMutationGate.GetType().Name + ") does not "
+                    + "implement IStartupAwareWorldMutationGate, so the world that opens on the next start "
+                    + "follows mod source changes only: gated changes to the world tree are not recorded "
+                    + "for the next start, the startup restore runs without the gate, and a source change "
+                    + "may be recorded in the middle of a gated mutation. Implement it, or forward it to "
+                    + "the ConfirmedWorldMutationGate the host gate wraps.");
             }
 
             Runtime = new ActiveLuaModRuntime(this);
@@ -1521,6 +1556,60 @@ namespace CoreAI.Mods.WorldPackages
         public LuaCsModRuntime CurrentConcreteRuntime => Current.Stack.Runtime;
 
         public LuaCsRbxApiBindings CurrentRbxApi => Current.RbxApi;
+
+        /// <summary>
+        /// The least wall-clock time between two records of the startup world that only gated changes to
+        /// the world tree call for (an execute_lua build); 5 s by default, zero records each at once. A
+        /// change inside the interval is recorded by the frame pump once the interval has passed, together
+        /// with every change made meanwhile. A change to the mod sources is always recorded at once.
+        /// </summary>
+        /// <remarks>
+        /// WHY an interval: each record is a whole package written, synced and pruned while the gate is
+        /// held (on WebGL up to 4 MB handed to the browser), and an AI that builds in many small calls
+        /// asked for one per call. WHY the first change after a quiet interval is recorded at once: a
+        /// single change reopens after a restart as soon as its call returns. A change made within the
+        /// interval before the process ends is not recorded.
+        /// </remarks>
+        public TimeSpan StartupRefreshInterval
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _startupRefreshInterval;
+                }
+            }
+            set
+            {
+                if (value < TimeSpan.Zero)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value), "The interval cannot be negative.");
+                }
+
+                lock (_gate)
+                {
+                    _startupRefreshInterval = value;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Why the latest change to the live startup world was not recorded for the next start (the
+        /// startup restore would refuse the world, or the record was not durably written), whichever path
+        /// made the change, gated tool or Hub; empty once a later record succeeded or when nothing failed.
+        /// A gated tool also carries the note in its result; this is where a Hub or a host reads it for
+        /// a change it made outside the gate.
+        /// </summary>
+        public string StartupSelectionNote
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _startupSelectionNote;
+                }
+            }
+        }
 
         /// <summary>
         /// The refresh of the startup selection that <see cref="PumpFrame"/> last started after mod
@@ -1741,7 +1830,7 @@ namespace CoreAI.Mods.WorldPackages
                     RbxWorldStartupRestoreOutcome.NotSelected, 0, "", 0, "");
             }
 
-            if (!(_worldMutationGate is ConfirmedWorldMutationGate confirmedGate))
+            if (!(_worldMutationGate is IStartupAwareWorldMutationGate startupAwareGate))
             {
                 return await RestoreStartupSelectionCoreAsync(cancellationToken);
             }
@@ -1753,7 +1842,7 @@ namespace CoreAI.Mods.WorldPackages
             // restored world, which is by then the startup world its refresh records.
             try
             {
-                return await confirmedGate.ExecuteWithoutBackupAsync(
+                return await startupAwareGate.ExecuteWithoutBackupAsync(
                     token => RestoreStartupSelectionCoreAsync(token).AsTask(),
                     cancellationToken);
             }
@@ -2123,7 +2212,9 @@ namespace CoreAI.Mods.WorldPackages
                     }
 
                     _current = incoming;
-                    _startupRefreshPending = false;
+                    // WHY the pending mark is kept (C2-02): a Hub or host write to the new world's
+                    // sources marks it from here on, also while this load still records its selection,
+                    // and the refresh after the record picks it up instead of losing it.
                     SetLiveStartupSourceLocked(restoredStartup);
                     published = true;
                 }
@@ -2258,12 +2349,14 @@ namespace CoreAI.Mods.WorldPackages
                 ReportPumpFailure(ref _lastTickFailure, "mod runtime Tick", ex);
             }
 
+            EndAbandonedMutationWatch();
             StartPendingStartupRefresh();
         }
 
         public void Dispose()
         {
             Session outgoing;
+            InstanceRegistry watched;
             lock (_gate)
             {
                 if (_disposed)
@@ -2274,8 +2367,12 @@ namespace CoreAI.Mods.WorldPackages
                 _disposed = true;
                 _pendingLoads.Clear();
                 outgoing = _current;
+                watched = _watchedRegistry;
+                _watchedRegistry = null;
+                _mutationWatchActive = false;
             }
 
+            Unwatch(watched);
             ShutdownOutgoing(outgoing);
         }
 
@@ -2509,8 +2606,11 @@ namespace CoreAI.Mods.WorldPackages
 
         /// <summary>
         /// After a gated mutation of a live world that is also the startup selection, records the
-        /// world as it is now as the new startup selection. Never throws; a failure is reported and
-        /// the previous selection stays. Answers the note the mutation's tool result carries: why the
+        /// world as it is now as the new startup selection when the mutation changed what an entry
+        /// holds: at once for a change to the mod sources, and for a change to the world tree alone at
+        /// most once per <see cref="StartupRefreshInterval"/> (a later one is left to the frame pump).
+        /// A call that changed neither writes nothing. Never throws; a failure is reported and the
+        /// previous selection stays. Answers the note the mutation's tool result carries: why the
         /// change could not be recorded, or empty.
         /// </summary>
         /// <remarks>
@@ -2527,18 +2627,219 @@ namespace CoreAI.Mods.WorldPackages
         {
             // WHY the load's own trigger is skipped: a confirmed load records its selection itself,
             // and the gate reports the load only after the new world is published.
-            return string.Equals(trigger, PreLoadAutosaveTrigger, StringComparison.Ordinal)
-                ? UniTask.FromResult("")
-                : RefreshStartupSelectionAsync(trigger);
+            if (string.Equals(trigger, PreLoadAutosaveTrigger, StringComparison.Ordinal))
+            {
+                return UniTask.FromResult("");
+            }
+
+            MutationChange change = EndWatchingMutation();
+            if (change == MutationChange.None)
+            {
+                return UniTask.FromResult("");
+            }
+
+            if (change == MutationChange.World && DeferWorldRefreshIfTooSoon())
+            {
+                return UniTask.FromResult("");
+            }
+
+            return RefreshStartupSelectionAsync(trigger, change == MutationChange.World);
+        }
+
+        /// <summary>What a gated mutation changed of what a startup entry holds.</summary>
+        private enum MutationChange
+        {
+            /// <summary>Neither the mod sources nor the world-owned tree.</summary>
+            None,
+
+            /// <summary>The world-owned tree (instances, parents, properties, attributes, tags) only.</summary>
+            World,
+
+            /// <summary>The mod sources, or unknown because the gate did not report the mutation's start.</summary>
+            Sources
+        }
+
+        /// <summary>
+        /// Starts watching what the gated mutation about to run changes: every write to the published
+        /// session's mod sources is counted anyway, and the published registry's instance events tell
+        /// whether it changed a world-owned instance.
+        /// </summary>
+        /// <remarks>
+        /// WHY only while a gated mutation runs (C2-03): a startup entry holds the mod sources and the
+        /// world-owned tree, and the refresh after a call compared a digest of a whole capture, which
+        /// also holds the camera and every part's pose, so in a live world, where both move all the
+        /// time, every gated call, a read-only one included, wrote a whole entry. Physics and the
+        /// player's camera raise no registry events, and the events of the mods' own instances, which no
+        /// entry holds, are ignored.
+        /// WHY subscribed only for the call: a registry with a revision subscriber queues every
+        /// property write of every script for it, which the rest of the frame need not pay for.
+        /// </remarks>
+        private void OnGatedMutationStarting(string trigger)
+        {
+            InstanceRegistry registry = null;
+            InstanceRegistry previous;
+            lock (_gate)
+            {
+                previous = _watchedRegistry;
+                _watchedRegistry = null;
+                _mutationWatchActive = false;
+                // WHY nothing is watched for a load or without a startup world: a confirmed load records
+                // its selection itself, and without a startup world the refresh records nothing.
+                if (!_disposed
+                    && _startupStore != null
+                    && _liveStartupSource != null
+                    && !string.Equals(trigger, PreLoadAutosaveTrigger, StringComparison.Ordinal))
+                {
+                    registry = _current.RbxApi.Registry;
+                    _watchedRegistry = registry;
+                    _mutationWatchActive = true;
+                    _sourceChangesAtMutationStart = _sourceChanges;
+                    Volatile.Write(ref _worldChangedDuringMutation, 0);
+                }
+            }
+
+            Unwatch(previous);
+            if (registry == null)
+            {
+                return;
+            }
+
+            registry.Registered += OnWatchedInstanceRegisteredOrRemoved;
+            registry.Unregistered += OnWatchedInstanceRegisteredOrRemoved;
+            registry.RevisionAdvanced += OnWatchedRevisionAdvanced;
+        }
+
+        /// <summary>Stops the watch <see cref="OnGatedMutationStarting"/> began and says what the mutation changed.</summary>
+        private MutationChange EndWatchingMutation()
+        {
+            InstanceRegistry registry;
+            bool watched;
+            bool sourcesChanged;
+            lock (_gate)
+            {
+                registry = _watchedRegistry;
+                watched = _mutationWatchActive;
+                sourcesChanged = _sourceChanges != _sourceChangesAtMutationStart;
+                _watchedRegistry = null;
+                _mutationWatchActive = false;
+            }
+
+            Unwatch(registry);
+            if (!watched || sourcesChanged)
+            {
+                return MutationChange.Sources;
+            }
+
+            return Volatile.Read(ref _worldChangedDuringMutation) != 0
+                ? MutationChange.World
+                : MutationChange.None;
+        }
+
+        /// <summary>
+        /// Ends the watch of a gated mutation that threw (the gate reports no end then) once the gate is
+        /// free, and leaves a world change it saw to the pump; its source writes are pending already.
+        /// </summary>
+        private void EndAbandonedMutationWatch()
+        {
+            if (!(_worldMutationGate is IStartupAwareWorldMutationGate gate))
+            {
+                return;
+            }
+
+            InstanceRegistry registry;
+            lock (_gate)
+            {
+                // WHY the held check under the lock: a mutation that begins after it can only start its
+                // own watch once this lock is released, and one that began before it holds the gate.
+                if (!_mutationWatchActive || gate.IsHeld)
+                {
+                    return;
+                }
+
+                registry = _watchedRegistry;
+                _watchedRegistry = null;
+                _mutationWatchActive = false;
+                if (Volatile.Read(ref _worldChangedDuringMutation) != 0)
+                {
+                    _worldRefreshDeferred = true;
+                }
+            }
+
+            Unwatch(registry);
+        }
+
+        private void Unwatch(InstanceRegistry registry)
+        {
+            if (registry == null)
+            {
+                return;
+            }
+
+            registry.Registered -= OnWatchedInstanceRegisteredOrRemoved;
+            registry.Unregistered -= OnWatchedInstanceRegisteredOrRemoved;
+            registry.RevisionAdvanced -= OnWatchedRevisionAdvanced;
+        }
+
+        private void OnWatchedInstanceRegisteredOrRemoved(InstanceRecord record)
+        {
+            if (record == null || IsWorldOwned(record))
+            {
+                Volatile.Write(ref _worldChangedDuringMutation, 1);
+            }
+        }
+
+        private void OnWatchedRevisionAdvanced(InstanceId id, long revision, string member)
+        {
+            InstanceRegistry registry = Volatile.Read(ref _watchedRegistry);
+            if (registry == null
+                || !registry.TryGetRecord(id, out InstanceRecord record)
+                || IsWorldOwned(record))
+            {
+                Volatile.Write(ref _worldChangedDuringMutation, 1);
+            }
+        }
+
+        /// <summary>True for an instance a startup entry holds: neither a mod's own nor runtime infrastructure.</summary>
+        private static bool IsWorldOwned(InstanceRecord record)
+        {
+            return string.IsNullOrEmpty(record.OwnerModId) && !record.IsRuntimeInfrastructure;
+        }
+
+        /// <summary>
+        /// Leaves a world-only change to the frame pump when the last world-only record was less than
+        /// <see cref="StartupRefreshInterval"/> ago; true when it did.
+        /// </summary>
+        private bool DeferWorldRefreshIfTooSoon()
+        {
+            lock (_gate)
+            {
+                if (IsWorldRefreshDueLocked())
+                {
+                    return false;
+                }
+
+                _worldRefreshDeferred = true;
+                return true;
+            }
+        }
+
+        private bool IsWorldRefreshDueLocked()
+        {
+            return !_lastWorldRefreshUtc.HasValue
+                   || _utcNow() - _lastWorldRefreshUtc.Value >= _startupRefreshInterval;
         }
 
         /// <summary>
         /// Records the live startup world as it is now, unless the newest entry already holds exactly
         /// that world or the startup restore would refuse it. Serialized on the startup gate; never
-        /// throws. Answers the note for a caller's tool result: why the change was not recorded
-        /// because the restore refuses the world (once per refused state), or empty.
+        /// throws. Answers the note for a caller's tool result: why the change was not recorded, because
+        /// the restore refuses the world (once per refused state) or the record was not durably written,
+        /// or empty; <see cref="StartupSelectionNote"/> keeps it for a change made outside the gate.
         /// </summary>
-        private async UniTask<string> RefreshStartupSelectionAsync(string trigger)
+        /// <param name="worldOnly">
+        /// True when only the world tree changed; writing its entry starts a new <see cref="StartupRefreshInterval"/>.
+        /// </param>
+        private async UniTask<string> RefreshStartupSelectionAsync(string trigger, bool worldOnly)
         {
             if (_startupStore == null || ReadLiveStartupSource() == null)
             {
@@ -2560,11 +2861,13 @@ namespace CoreAI.Mods.WorldPackages
                     RbxWorldPackagePayload captured = CaptureCurrent();
                     byte[] content = ComputeStartupContent(captured);
 
-                    // WHY compared first: most gated calls change nothing (a read-only execute_lua),
-                    // and each recorded entry is a whole package written, synced and pruned while the
-                    // gate is held; on WebGL up to 4 MB handed to the browser per call.
+                    // WHY still compared: a call that changed the sources or the world-owned tree may
+                    // have left them as the newest entry holds them (a folder created and destroyed
+                    // again), and each recorded entry is a whole package written, synced and pruned
+                    // while the gate is held.
                     if (source.Holds(content))
                     {
+                        SetStartupSelectionNote("");
                         return "";
                     }
 
@@ -2577,6 +2880,11 @@ namespace CoreAI.Mods.WorldPackages
                         return ReportStartupRefusal(content, refusal);
                     }
 
+                    if (worldOnly)
+                    {
+                        StartWorldRefreshInterval();
+                    }
+
                     RbxWorldPackageWriteResult written = await _startupStore.SelectStartupAsync(
                         captured,
                         source.Kind,
@@ -2585,6 +2893,7 @@ namespace CoreAI.Mods.WorldPackages
                     if (written != null && written.Success)
                     {
                         ReplaceLiveStartupSource(source, new StartupSource(source.Kind, source.Name, content));
+                        SetStartupSelectionNote("");
                         return "";
                     }
 
@@ -2600,11 +2909,25 @@ namespace CoreAI.Mods.WorldPackages
                 ReportDiagnostic(
                     "The live world changed ('" + trigger + "'), but the change was not recorded for the "
                     + "next start: " + reason + " The next start opens the world as it was before it.");
-                return "";
+                // WHY a note as well (C2-06): the caller whose change will not reopen is the one reader
+                // who can act on it, as with a refusal.
+                string note = "Startup world not updated: " + reason.TrimEnd('.')
+                              + ". This change will not reopen after a restart; the next start opens the "
+                              + "world as it was before it.";
+                SetStartupSelectionNote(note);
+                return note;
             }
             finally
             {
                 _startupSelectionGate.Release();
+            }
+        }
+
+        private void SetStartupSelectionNote(string note)
+        {
+            lock (_gate)
+            {
+                _startupSelectionNote = note ?? "";
             }
         }
 
@@ -2629,13 +2952,16 @@ namespace CoreAI.Mods.WorldPackages
                 ReportDiagnostic(note);
             }
 
+            SetStartupSelectionNote(note);
             return note;
         }
 
         /// <summary>
         /// Starts one refresh of the startup selection when mod sources of the live startup world
-        /// changed outside the shared gate, none is running, and no gated mutation or world load
-        /// holds the gate (a gated mutation refreshes the selection itself before it lets go).
+        /// changed outside the shared gate, or a gated world change was left for later
+        /// (<see cref="StartupRefreshInterval"/>) and is now due, none is running, and no gated mutation
+        /// or world load holds the gate (a gated mutation refreshes the selection itself before it lets
+        /// go).
         /// </summary>
         /// <remarks>
         /// WHY from the frame pump and not from the change itself: one Hub action writes the sources
@@ -2646,31 +2972,34 @@ namespace CoreAI.Mods.WorldPackages
         /// </remarks>
         private void StartPendingStartupRefresh()
         {
+            bool worldOnly;
             lock (_gate)
             {
-                if (!_startupRefreshPending
-                    || _startupRefreshRunning
+                if (_startupRefreshRunning
                     || _disposed
-                    || (_worldMutationGate is ConfirmedWorldMutationGate gate && gate.IsHeld))
+                    || _liveStartupSource == null
+                    || (!_startupRefreshPending && !(_worldRefreshDeferred && IsWorldRefreshDueLocked()))
+                    || (_worldMutationGate is IStartupAwareWorldMutationGate gate && gate.IsHeld))
                 {
                     return;
                 }
 
+                worldOnly = !_startupRefreshPending;
                 _startupRefreshRunning = true;
             }
 
-            Task refresh = RefreshAfterSourceChangesAsync().AsTask();
+            Task refresh = RefreshAfterSourceChangesAsync(worldOnly).AsTask();
             lock (_gate)
             {
                 _startupRefreshAfterSourceChanges = refresh;
             }
         }
 
-        private async UniTask RefreshAfterSourceChangesAsync()
+        private async UniTask RefreshAfterSourceChangesAsync(bool worldOnly)
         {
             try
             {
-                await RefreshStartupSelectionAsync(SourceChangeTrigger);
+                await RefreshStartupSelectionAsync(worldOnly ? WorldChangeTrigger : SourceChangeTrigger, worldOnly);
             }
             catch (Exception ex)
             {
@@ -2686,18 +3015,23 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         /// <summary>
-        /// Called by a session's source store after every write: marks the live startup world for a
-        /// refresh on the next frame when the write reached the published session's sources.
+        /// Called by a session's source store after every write: marks the startup world for a refresh
+        /// on the next frame when the write reached the published session's sources, and counts it for
+        /// the gated mutation that may be running.
         /// </summary>
+        /// <remarks>
+        /// WHY whether or not the world is the startup world yet (C2-02): a confirmed load publishes its
+        /// world before it records it, and a Hub or host change made in between marked nothing and was
+        /// gone at restart. The pump starts a refresh only once there is a startup world to record.
+        /// </remarks>
         private void OnSessionSourcesChanged(ILuaModSourceStore sessionSources)
         {
             lock (_gate)
             {
-                if (!_disposed
-                    && _liveStartupSource != null
-                    && ReferenceEquals(_current.SourceStore, sessionSources))
+                if (!_disposed && ReferenceEquals(_current.SourceStore, sessionSources))
                 {
                     _startupRefreshPending = true;
+                    _sourceChanges++;
                 }
             }
         }
@@ -2712,14 +3046,24 @@ namespace CoreAI.Mods.WorldPackages
 
         /// <summary>
         /// The live startup source for a refresh that is about to capture the world, clearing the
-        /// pending source-change mark that capture now covers.
+        /// pending source-change mark and the deferred world change that capture now covers.
         /// </summary>
         private StartupSource TakeLiveStartupSourceForRefresh()
         {
             lock (_gate)
             {
                 _startupRefreshPending = false;
+                _worldRefreshDeferred = false;
                 return _disposed ? null : _liveStartupSource;
+            }
+        }
+
+        /// <summary>Starts a new <see cref="StartupRefreshInterval"/>: an entry for a world-only change is being written now.</summary>
+        private void StartWorldRefreshInterval()
+        {
+            lock (_gate)
+            {
+                _lastWorldRefreshUtc = _utcNow();
             }
         }
 
@@ -2736,10 +3080,7 @@ namespace CoreAI.Mods.WorldPackages
             _liveStartupSource = source;
             _lastRefusedStartupContent = null;
             _lastReportedStartupRefusal = "";
-            if (source == null)
-            {
-                _startupRefreshPending = false;
-            }
+            _startupSelectionNote = "";
         }
 
         /// <summary>
@@ -3897,20 +4238,17 @@ namespace CoreAI.Mods.WorldPackages
                 bool addsSource = persistToStore && DemandSourceCapacity(modId);
                 AttributionSnapshot snapshot = Capture(modId);
                 PrepareNewOwner(caller, modId);
-                LuaCsModRuntime runtime = Inner;
+                Session session = _owner.Current;
+                LuaCsModRuntime runtime = session.Stack.Runtime;
                 try
                 {
-                    runtime.LoadMod(caller, id, luaCode, capabilities, persistToStore);
+                    runtime.LoadMod(caller, id, luaCode, capabilities, persistToStore,
+                        SourceKeptCheck(runtime, session.SourceStore, addsSource));
                 }
                 catch
                 {
                     Restore(modId, snapshot);
                     throw;
-                }
-
-                if (addsSource)
-                {
-                    DemandSourceKept(caller, runtime, modId, snapshot);
                 }
             }
 
@@ -3924,6 +4262,17 @@ namespace CoreAI.Mods.WorldPackages
                 string modId = Normalize(id);
                 PrepareExistingOwner(caller, modId);
                 Inner.ReloadMod(caller, id, luaCode);
+            }
+
+            public ModReloadReport ReloadMod(
+                ActorContext caller,
+                string id,
+                string luaCode,
+                ModReloadMode mode)
+            {
+                string modId = Normalize(id);
+                PrepareExistingOwner(caller, modId);
+                return Inner.ReloadMod(caller, id, luaCode, mode);
             }
 
             public bool UnloadMod(ActorContext caller, string id)
@@ -3946,11 +4295,13 @@ namespace CoreAI.Mods.WorldPackages
                 bool addsSource = DemandSourceCapacity(modId);
                 AttributionSnapshot snapshot = Capture(modId);
                 PrepareNewOwner(caller, modId);
-                LuaCsModRuntime runtime = Inner;
+                Session session = _owner.Current;
+                LuaCsModRuntime runtime = session.Stack.Runtime;
                 bool imported;
                 try
                 {
-                    imported = runtime.ImportMod(caller, bundleJson, hostGrant, allowFull);
+                    imported = runtime.ImportMod(caller, bundleJson, hostGrant, allowFull,
+                        SourceKeptCheck(runtime, session.SourceStore, addsSource));
                     if (!imported)
                     {
                         Restore(modId, snapshot);
@@ -3960,11 +4311,6 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     Restore(modId, snapshot);
                     throw;
-                }
-
-                if (imported && addsSource)
-                {
-                    DemandSourceKept(caller, runtime, modId, snapshot);
                 }
 
                 return imported;
@@ -4267,25 +4613,37 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             /// <summary>
-            /// After a load or import that added a new source, undoes the mod when its store did not
-            /// keep that source, and throws why.
+            /// The check a load or import that adds a new source hands the runtime
+            /// (<see cref="LuaCsModRuntime.LoadMod(ActorContext, string, string, LuaCapabilities, bool, Action{string})"/>);
+            /// null when nothing needs checking: the load adds no source, or the runtime persists none.
+            /// </summary>
+            private static Action<string> SourceKeptCheck(
+                LuaCsModRuntime runtime,
+                ILuaModSourceStore sources,
+                bool addsSource)
+            {
+                if (!addsSource || !runtime.PersistsModSources)
+                {
+                    return null;
+                }
+
+                return modId => DemandSourceKept(sources, modId);
+            }
+
+            /// <summary>
+            /// Throws why, when <paramref name="sources"/> did not keep the source of a mod whose load
+            /// just persisted it. Runs inside the load's commit, so the throw undoes the load through the
+            /// runtime's failed-build rollback.
             /// </summary>
             /// <remarks>
             /// WHY: the runtime persists best-effort and only logs a refused save, so the mod ran and
             /// was missing from every save and from the next start, and the caller heard nothing.
+            /// WHY inside the commit (C2-04): undone afterwards by an ordinary unload, a load that
+            /// displaced another live mod's logic-slot formula left that formula removed, kept its own
+            /// revision, and raised a load and an unload for a mod that never loaded.
             /// </remarks>
-            private void DemandSourceKept(
-                ActorContext caller,
-                LuaCsModRuntime runtime,
-                string modId,
-                AttributionSnapshot snapshot)
+            private static void DemandSourceKept(ILuaModSourceStore sources, string modId)
             {
-                if (!runtime.PersistsModSources)
-                {
-                    return;
-                }
-
-                ILuaModSourceStore sources = _owner.Current.SourceStore;
                 string limitRefusal = "";
                 string failure;
                 try
@@ -4302,15 +4660,6 @@ namespace CoreAI.Mods.WorldPackages
                 catch (Exception ex)
                 {
                     failure = "the mod source store could not confirm it kept the source (" + ex.Message + ")";
-                }
-
-                try
-                {
-                    runtime.UnloadMod(caller, modId);
-                }
-                finally
-                {
-                    Restore(modId, snapshot);
                 }
 
                 if (limitRefusal.Length > 0)

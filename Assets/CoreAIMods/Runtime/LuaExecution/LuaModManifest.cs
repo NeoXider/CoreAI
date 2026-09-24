@@ -84,9 +84,11 @@ namespace CoreAI.Ai
         /// the order they were loaded and a mod may use what an earlier one made at init. Stamped with
         /// <see cref="NextLoadOrder"/> when a mod is first loaded (or loaded again after an unload), kept
         /// by every rewrite of an existing mod, never changed by a rehydrate. <c>0</c> (or any value
-        /// below 1) means no recorded order: a package written before the field existed, or a bundled
-        /// mod seeded on install. Such mods start first, by ordinal id, because an active one had
-        /// already started at startup before any mod with a recorded order was first loaded.
+        /// below 1) means no recorded order: a package written before the field existed, a bundled mod
+        /// seeded on install, or a mod first loaded while its store could not be listed. Such mods start
+        /// first, by ordinal id, because an active one had already started at startup before any mod with
+        /// a recorded order was first loaded. A value above <see cref="MaximumLoadOrder"/> is no recorded
+        /// order either (<see cref="IsRecordedLoadOrder"/>), and a world package that carries one is refused.
         /// </summary>
         // WHY omitted when 0 and no format_version bump: an unordered manifest stays byte-identical to
         // the one written before this field existed, so a store or world package without load order
@@ -108,31 +110,93 @@ namespace CoreAI.Ai
         public bool SuspendedAfterBudgetTrips;
 
         /// <summary>
-        /// The <see cref="LoadOrder"/> for a mod that is being loaded for the first time into
-        /// <paramref name="store"/>: one past the highest value stored there, dormant packages included,
-        /// so the value keeps growing across restarts and never reuses a dormant mod's place. The one
-        /// rule every writer of a first-time manifest uses (the runtime, and a Hub save the runtime did
-        /// not already persist). A failing <see cref="ILuaModSourceStore.List"/> propagates; callers
-        /// treat it as no recorded order.
+        /// The largest <see cref="LoadOrder"/> a store records: 2^53. The order counts first loads, so no
+        /// store reaches it (one first load per microsecond would take 285 years), and every JSON reader
+        /// keeps a value up to it exact.
         /// </summary>
+        public const long MaximumLoadOrder = 9007199254740992L;
+
+        /// <summary>
+        /// True when <paramref name="loadOrder"/> is a recorded order: 1 up to <see cref="MaximumLoadOrder"/>.
+        /// Anything else reads as no recorded order.
+        /// </summary>
+        public static bool IsRecordedLoadOrder(long loadOrder)
+        {
+            return loadOrder > 0 && loadOrder <= MaximumLoadOrder;
+        }
+
+        /// <summary>
+        /// The <see cref="LoadOrder"/> for a mod that is being loaded for the first time into
+        /// <paramref name="store"/>: one past the highest recorded value stored there, dormant packages
+        /// included, so the value keeps growing across restarts and never reuses a dormant mod's place.
+        /// The one rule every writer of a first-time manifest uses (the runtime, and a Hub save the
+        /// runtime did not already persist). A <see cref="ILuaModSourceStore.List"/> that fails, by
+        /// throwing or by answering a listing its store marked unreadable, throws; callers treat it as
+        /// no recorded order and store the mod without one.
+        /// </summary>
+        /// <remarks>
+        /// WHY a stored value above <see cref="MaximumLoadOrder"/> is skipped rather than followed: only a
+        /// hand-edited store holds one (a world package that carries one is refused on read), and following
+        /// it saturated every later first load at long.MaxValue, where they all tied and fell back to id
+        /// order for the rest of the world's life. Skipped, it reads as unordered like
+        /// <see cref="IsRecordedLoadOrder"/> says, and later first loads keep their order.
+        /// </remarks>
         // WHY public, not internal: the Hub service that writes manifests lives in its own assembly
         // (CoreAI.Mods.Hub), and any host tool that writes a manifest into the store needs the same rule.
         public static long NextLoadOrder(ILuaModSourceStore store)
         {
             IReadOnlyList<LuaModManifest> stored = store?.List();
+            if (stored is UnreadableLuaModSourceListing unreadable)
+            {
+                throw new System.IO.IOException(unreadable.Reason);
+            }
+
             long highest = 0;
             if (stored != null)
             {
                 foreach (LuaModManifest manifest in stored)
                 {
-                    if (manifest != null && manifest.LoadOrder > highest)
+                    if (manifest != null && IsRecordedLoadOrder(manifest.LoadOrder) && manifest.LoadOrder > highest)
                     {
                         highest = manifest.LoadOrder;
                     }
                 }
             }
 
-            return highest < long.MaxValue ? highest + 1 : long.MaxValue;
+            return highest < MaximumLoadOrder ? highest + 1 : MaximumLoadOrder;
+        }
+    }
+
+    /// <summary>
+    /// The empty answer a source store gives <see cref="ILuaModSourceStore.List"/> when it could not read
+    /// its packages at all: every caller that only shows or restores mods sees an empty list, as before,
+    /// while <see cref="LuaModManifest.NextLoadOrder"/> can tell "unreadable" from "empty" (and wrappers
+    /// that forward <see cref="ILuaModSourceStore.List"/> pass it on unchanged).
+    /// </summary>
+    internal sealed class UnreadableLuaModSourceListing : IReadOnlyList<LuaModManifest>
+    {
+        public UnreadableLuaModSourceListing(string reason)
+        {
+            Reason = string.IsNullOrWhiteSpace(reason)
+                ? "The mod source store could not list its mods."
+                : reason;
+        }
+
+        /// <summary>Why the store could not list its mods.</summary>
+        public string Reason { get; }
+
+        public int Count => 0;
+
+        public LuaModManifest this[int index] => throw new System.ArgumentOutOfRangeException(nameof(index));
+
+        public IEnumerator<LuaModManifest> GetEnumerator()
+        {
+            yield break;
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
+        {
+            return GetEnumerator();
         }
     }
 }

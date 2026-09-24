@@ -50,7 +50,9 @@ namespace CoreAI.Ai.LuaCs
         private static string BuildErrorMessage(DownlevelResult result)
         {
             StringBuilder sb = new();
-            sb.Append("Luau syntax error: ");
+            // WHY no "Luau" in the prefix: plain Lua reaches this gate too, and a chunk nested deeper than
+            // the VM allows was reported as a Luau error although it has no Luau in it (C2-09).
+            sb.Append("syntax error: ");
             bool first = true;
             foreach (DownlevelDiagnostic d in result.Diagnostics)
             {

@@ -837,6 +837,227 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        // ==================== C2-01: a second build of an id already being built ====================
+
+        /// <summary>The code of the build that must keep running: a Heartbeat handler and a scheduler thread.</summary>
+        private const string SurvivingBuildCode =
+            "game:GetService('RunService').Heartbeat:Connect(function() store_set('beat', 'yes') end)\n"
+            + "task.delay(0, function() store_set('thread', 'ran') end)";
+
+        /// <summary>The code of the build that must be refused: it would record that it ran.</summary>
+        private const string RefusedBuildCode = "store_set('refused_ran', 'yes')";
+
+        private static LuaCsModStack SameIdStack(
+            LuaCsRbxApiBindings rbxApi,
+            CoreAI.Tests.EditMode.RbxApi.Acceptance.Mvp1AcceptanceMemoryStore modData,
+            Func<LuaCsModStack> self,
+            Func<LuaCsModStack, string> nestedBuild)
+        {
+            return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new CoreAI.Tests.EditMode.RbxApi.Acceptance.Mvp1AcceptanceNullLogger(),
+                ModStore = modData,
+                Capabilities = CapacityCapabilities,
+                OneOffCapabilities = CapacityCapabilities,
+                RbxApi = rbxApi,
+                AdditionalGameplayBindings = (registry, capabilities) =>
+                    registry.Register("build_same_id", new Func<string>(() => nestedBuild(self())))
+            });
+        }
+
+        private static void PumpFrames(LuaCsModStack stack, LuaCsRbxApiBindings rbxApi, int frames)
+        {
+            for (int frame = 0; frame < frames; frame++)
+            {
+                rbxApi.Scheduler.Advance(1d / 60d);
+                stack.Runtime.Tick(1d / 60d);
+            }
+        }
+
+        /// <summary>
+        /// C2-01: a first load of an id another first load was still building ran its own chunk, was
+        /// refused "loaded concurrently" at its commit, and the rollback of that refused build, keyed by
+        /// mod id on the Roblox side, tore down the Heartbeat handler, the threads and the script backing
+        /// of the build that won, which stayed reported as loaded and did nothing. The second build is now
+        /// refused before its chunk runs, so no rollback can reach the first.
+        /// </summary>
+        [Test]
+        public void LuaCs_FirstLoadOfAnIdAnotherLoadIsBuilding_IsRefusedBeforeItsChunkRuns_TheFirstKeepsRunning()
+        {
+            ActorContext actor = new LocalActorIdentityProvider("same-id-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            LuaCsRbxApiBindings rbxApi = new();
+            CoreAI.Tests.EditMode.RbxApi.Acceptance.Mvp1AcceptanceMemoryStore modData = new();
+            LuaCsModStack stack = null;
+            stack = SameIdStack(rbxApi, modData, () => stack, self =>
+            {
+                try
+                {
+                    self.Runtime.LoadMod(actor, "dup", RefusedBuildCode, CapacityCapabilities, false);
+                    return "loaded";
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return ex.Message;
+                }
+            });
+
+            stack.Runtime.LoadMod(
+                actor,
+                "dup",
+                "store_set('nested', build_same_id())\n" + SurvivingBuildCode,
+                CapacityCapabilities,
+                false);
+            PumpFrames(stack, rbxApi, 3);
+
+            Assert.AreEqual("Mod 'dup' was loaded concurrently.", modData.Get("dup", "nested"));
+            Assert.AreEqual("", modData.Get("dup", "refused_ran"), "the refused build's chunk never ran");
+            Assert.IsTrue(stack.Runtime.IsLoaded("dup"));
+            Assert.AreEqual(1, rbxApi.Connections.GetOwnedBy("dup").Count,
+                "the loaded build keeps its Heartbeat connection");
+            Assert.AreEqual("yes", modData.Get("dup", "beat"), "the loaded build's handler runs");
+            Assert.AreEqual("ran", modData.Get("dup", "thread"), "the loaded build's thread ran");
+            Assert.DoesNotThrow(() => stack.Runtime.ReloadMod("dup", "local again = true"),
+                "the refusal leaves no build of the id marked in flight");
+        }
+
+        /// <summary>
+        /// C2-01 twin for reloads: a reload of an id another reload was still building ran, won, and the
+        /// outer reload was then refused "reloaded concurrently" and its rollback tore down the winner.
+        /// The inner reload is now refused before the previous run's objects leave the world or its
+        /// chunk runs, and the outer reload completes.
+        /// </summary>
+        [Test]
+        public void LuaCs_ReloadOfAnIdAnotherReloadIsBuilding_IsRefusedBeforeAnythingRuns_TheFirstCompletes()
+        {
+            ActorContext actor = new LocalActorIdentityProvider("same-id-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            LuaCsRbxApiBindings rbxApi = new();
+            CoreAI.Tests.EditMode.RbxApi.Acceptance.Mvp1AcceptanceMemoryStore modData = new();
+            LuaCsModStack stack = null;
+            stack = SameIdStack(rbxApi, modData, () => stack, self =>
+            {
+                try
+                {
+                    self.Runtime.ReloadMod("dup", RefusedBuildCode);
+                    return "reloaded";
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return ex.Message;
+                }
+            });
+            stack.Runtime.LoadMod(actor, "dup", "local first = true", CapacityCapabilities, false);
+            string outerCode = "store_set('nested', build_same_id())\n" + SurvivingBuildCode;
+
+            stack.Runtime.ReloadMod("dup", outerCode);
+            PumpFrames(stack, rbxApi, 3);
+
+            Assert.AreEqual("Mod 'dup' was reloaded concurrently.", modData.Get("dup", "nested"));
+            Assert.AreEqual("", modData.Get("dup", "refused_ran"), "the refused reload's chunk never ran");
+            Assert.IsTrue(stack.Runtime.TryGetModSource("dup", out string live));
+            Assert.AreEqual(outerCode, live, "the reload that was building first is the live one");
+            Assert.AreEqual(1, rbxApi.Connections.GetOwnedBy("dup").Count);
+            Assert.AreEqual("yes", modData.Get("dup", "beat"));
+            Assert.AreEqual("ran", modData.Get("dup", "thread"));
+        }
+
+        // ==================== C2-08: load orders a store cannot follow ====================
+
+        /// <summary>
+        /// C2-08: a store holding an order no store records (long.MaxValue, from a hand-edited store)
+        /// saturated every later first load at long.MaxValue, where they all tied and restored by id. The
+        /// value now reads as no recorded order: later first loads keep counting past the real ones and
+        /// restore in the order they were loaded, after it.
+        /// </summary>
+        [Test]
+        public void LuaCs_AStoredLoadOrderPastTheMaximum_ReadsAsUnordered_AndLaterFirstLoadsKeepTheirOrder()
+        {
+            FakeSourceStore store = new();
+            SaveStoredMod(store, "a-planted", long.MaxValue);
+            SaveStoredMod(store, "m-older", 4);
+            LuaCsModRuntime session = NewRuntime(store);
+
+            session.LoadMod("z-first", "local x = 1", LuaCapabilities.Read);
+            session.LoadMod("b-second", "local x = 2", LuaCapabilities.Read);
+
+            Assert.AreEqual(5L, StoredLoadOrder(store, "z-first"));
+            Assert.AreEqual(6L, StoredLoadOrder(store, "b-second"),
+                "each later first load gets its own order instead of tying at the maximum");
+            LuaCsModRuntime restarted = NewRuntime(store);
+            Assert.AreEqual(4, restarted.RehydrateFromStore(LuaCapabilities.All));
+            CollectionAssert.AreEqual(
+                new[] { "a-planted", "m-older", "z-first", "b-second" },
+                LoadedIds(restarted));
+        }
+
+        [Test]
+        public void LuaCs_RestoreOrder_AnOrderPastTheMaximum_SortsWithTheUnorderedMods()
+        {
+            LuaModManifest planted = new() { Id = "b", LoadOrder = long.MaxValue };
+            LuaModManifest atMaximum = new() { Id = "c", LoadOrder = LuaModManifest.MaximumLoadOrder };
+            LuaModManifest legacy = new() { Id = "a", LoadOrder = 0 };
+            LuaModManifest ordered = new() { Id = "d", LoadOrder = 3 };
+            List<LuaModManifest> manifests = new() { planted, atMaximum, ordered, legacy };
+
+            manifests.Sort(LuaCsModRuntime.CompareRestoreOrder);
+
+            CollectionAssert.AreEqual(new[] { legacy, planted, ordered, atMaximum }, manifests);
+        }
+
+        /// <summary>
+        /// C2-08: the file store answers an empty list when it cannot list its folders, and a first load
+        /// stamped meanwhile got order 1, an order the store never recorded, which restores the new mod
+        /// ahead of every older ordered mod. A listing the store marks unreadable now stamps no order,
+        /// and says so.
+        /// </summary>
+        [Test]
+        public void LuaCs_FirstLoadWhileTheStoreCannotBeListed_StampsNoLoadOrder_AndLogsIt()
+        {
+            UnlistableSourceStore store = new();
+            FakeLog log = new();
+            LuaCsModRuntime runtime = new(log: log, sourceStore: store);
+
+            runtime.LoadMod("new-mod", "local x = 1", LuaCapabilities.Read);
+
+            Assert.IsTrue(store.Inner.Contains("new-mod"), "the load still succeeds and persists");
+            Assert.AreEqual(0L, store.Inner.ManifestOf("new-mod").LoadOrder,
+                "no order is recorded rather than the first one");
+            Assert.IsTrue(log.Errors.Exists(line => line.Contains("could not list its mods")),
+                string.Join(" | ", log.Errors));
+        }
+
+        /// <summary>A store whose listing fails the way the file store's does: an empty answer marked unreadable.</summary>
+        private sealed class UnlistableSourceStore : ILuaModSourceStore
+        {
+            public FakeSourceStore Inner { get; } = new();
+
+            public void Save(string id, string source, LuaModManifest manifest)
+            {
+                Inner.Save(id, source, manifest);
+            }
+
+            public bool TryLoad(string id, out string source, out LuaModManifest manifest)
+            {
+                return Inner.TryLoad(id, out source, out manifest);
+            }
+
+            public IReadOnlyList<LuaModManifest> List()
+            {
+                return new UnreadableLuaModSourceListing("The test store's folder is gone.");
+            }
+
+            public void SetActive(string id, bool active)
+            {
+                Inner.SetActive(id, active);
+            }
+
+            public void Delete(string id)
+            {
+                Inner.Delete(id);
+            }
+        }
+
         private const string SpinningTimerSource = "hooks_every(0.01, function() while true do end end)";
 
         /// <summary>

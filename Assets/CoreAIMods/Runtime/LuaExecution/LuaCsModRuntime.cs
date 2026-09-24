@@ -25,8 +25,10 @@ namespace CoreAI.Ai
         /// The default everywhere. The previous run's startup objects leave the world (Parent = nil)
         /// before the new main chunk runs, so it builds into a clean world, and are destroyed once it
         /// has run. A reload that fails puts them back exactly where they were. An object inside one of
-        /// them that is not itself a startup object (a player's build in the mod's folder) is moved to
-        /// that startup object's parent before the destroy, never destroyed.
+        /// them that the same mod still owns as the same actor (a coin its Heartbeat handler dropped into
+        /// its folder) goes with it; one owned by anyone else (a player's build in the mod's folder,
+        /// another mod's object) is moved to that startup object's parent before the destroy, never
+        /// destroyed.
         /// </summary>
         CleanStartupObjects = 0,
 
@@ -57,15 +59,18 @@ namespace CoreAI.Ai
         /// <summary>The mode the reload ran in.</summary>
         public ModReloadMode Mode { get; }
 
-        /// <summary>Startup objects of earlier runs this reload destroyed (0 in <see cref="ModReloadMode.KeepObjects"/>).</summary>
+        /// <summary>
+        /// Startup objects of earlier runs this reload destroyed, with the objects the mod still owned
+        /// inside them (0 in <see cref="ModReloadMode.KeepObjects"/>).
+        /// </summary>
         public int CleanedObjects { get; }
 
         /// <summary>Startup objects of earlier runs this reload left in the world (<see cref="ModReloadMode.KeepObjects"/>).</summary>
         public int KeptObjects { get; }
 
         /// <summary>
-        /// Objects that sat inside a destroyed startup object without being startup objects themselves,
-        /// moved out to its parent before the destroy.
+        /// Objects owned by someone other than the mod (a player, another mod, the host) that sat inside a
+        /// destroyed startup object, moved out to its parent before the destroy.
         /// </summary>
         public int RescuedObjects { get; }
 
@@ -85,109 +90,12 @@ namespace CoreAI.Ai
             return RescuedObjects == 0
                 ? cleaned
                 : cleaned + " and moved " + CountObjects(RescuedObjects)
-                          + " that were not its startup objects out of them first";
+                          + " that are not the mod's own out of them first";
         }
 
         private static string CountObjects(int count)
         {
             return count == 1 ? "1 object" : count + " objects";
-        }
-    }
-
-    /// <summary>
-    /// A reload request for one mod, ambient on the calling thread: a reload of <see cref="ModId"/> that
-    /// reaches the Lua-CSharp runtime through the mode-less <see cref="ILuaModRuntime.ReloadMod"/> while
-    /// the scope is open runs in <see cref="Mode"/> and leaves its <see cref="Report"/> here.
-    /// </summary>
-    /// <remarks>
-    /// WHY ambient: the runtime a Hub page or the manage_mods tool holds is usually a facade over the
-    /// active world session (and actor attribution) implementing the VM-agnostic
-    /// <see cref="ILuaModRuntime"/>, whose ReloadMod carries no mode and returns nothing. The scope takes
-    /// the request through any such facade to the runtime and the report back, without every facade
-    /// having to forward a new member. WHY per thread: a reload runs synchronously on its caller's thread,
-    /// and a reload another thread starts meanwhile must not pick this request up.
-    /// </remarks>
-    public sealed class ModReloadScope : IDisposable
-    {
-        [ThreadStatic]
-        private static ModReloadScope _innermost;
-
-        private readonly ModReloadScope _enclosing;
-        private bool _disposed;
-
-        private ModReloadScope(string modId, ModReloadMode mode, ModReloadScope enclosing)
-        {
-            ModId = modId;
-            Mode = mode;
-            _enclosing = enclosing;
-        }
-
-        /// <summary>The mod whose reload this scope configures.</summary>
-        public string ModId { get; }
-
-        /// <summary>The mode a reload of <see cref="ModId"/> inside the scope runs in.</summary>
-        public ModReloadMode Mode { get; }
-
-        /// <summary>What the last successful reload of <see cref="ModId"/> inside the scope did; null until one finished.</summary>
-        public ModReloadReport Report { get; private set; }
-
-        /// <summary>Opens a scope on the calling thread; dispose it (innermost first) when the reload call returns.</summary>
-        public static ModReloadScope Begin(string modId, ModReloadMode mode)
-        {
-            ModReloadScope scope = new((modId ?? "").Trim(), mode, _innermost);
-            _innermost = scope;
-            return scope;
-        }
-
-        /// <summary>The mode an open scope requests for <paramref name="modId"/>, or the default when none does.</summary>
-        internal static ModReloadMode ResolveMode(string modId)
-        {
-            ModReloadScope scope = Find(modId);
-            return scope?.Mode ?? ModReloadMode.CleanStartupObjects;
-        }
-
-        /// <summary>Hands the report of a finished reload to the innermost open scope of its mod.</summary>
-        internal static void Publish(ModReloadReport report)
-        {
-            ModReloadScope scope = report == null ? null : Find(report.ModId);
-            if (scope != null)
-            {
-                scope.Report = report;
-            }
-        }
-
-        private static ModReloadScope Find(string modId)
-        {
-            for (ModReloadScope scope = _innermost; scope != null; scope = scope._enclosing)
-            {
-                if (!scope._disposed && string.Equals(scope.ModId, modId, StringComparison.Ordinal))
-                {
-                    return scope;
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>Closes the scope; the enclosing one, if any, applies again.</summary>
-        public void Dispose()
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-            if (ReferenceEquals(_innermost, this))
-            {
-                ModReloadScope next = _enclosing;
-                while (next != null && next._disposed)
-                {
-                    next = next._enclosing;
-                }
-
-                _innermost = next;
-            }
         }
     }
 }
@@ -997,6 +905,27 @@ namespace CoreAI.Ai.LuaCs
                 caller.Grants.IsUnrestricted);
         }
 
+        /// <summary>
+        /// <see cref="LoadMod(ActorContext, string, string, LuaCapabilities, bool)"/> for a caller that
+        /// requires the source store to keep the new mod's source (the world session facade):
+        /// <paramref name="demandSourceKept"/> runs inside the load's commit, right after the source was
+        /// persisted, and throws when the store did not keep it, so the load is undone by the failed-build
+        /// rollback. Pass it only for an id the store does not hold yet.
+        /// </summary>
+        internal void LoadMod(
+            ActorContext caller,
+            string id,
+            string luaCode,
+            LuaCapabilities capabilities,
+            bool persistToStore,
+            Action<string> demandSourceKept)
+        {
+            DemandModAccess(caller, "load", id);
+            LoadModInternal(
+                id, luaCode, caller.ActorId, capabilities, persistToStore,
+                caller.Grants.IsUnrestricted, demandSourceKept);
+        }
+
         /// <inheritdoc />
         public string GetModOwnerActorId(ActorContext caller, string id)
         {
@@ -1005,20 +934,15 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <inheritdoc />
-        /// <remarks>
-        /// Runs in <see cref="ModReloadMode.CleanStartupObjects"/> unless a <see cref="ModReloadScope"/>
-        /// open on this thread requests another mode for the mod; the report goes to that scope.
-        /// </remarks>
+        /// <remarks>Runs in <see cref="ModReloadMode.CleanStartupObjects"/>, the default.</remarks>
         public void ReloadMod(ActorContext caller, string id, string luaCode)
         {
             DemandModAccess(caller, "reload", id);
-            ReloadMod(id, luaCode, ModReloadScope.ResolveMode(Normalize(id)));
+            ReloadMod(id, luaCode, ModReloadMode.CleanStartupObjects);
         }
 
-        /// <summary>
-        /// Replaces a loaded mod's code in the given <paramref name="mode"/> (see <see cref="ReloadMod(string, string, ModReloadMode)"/>)
-        /// and reports what happened to the startup objects of the run it replaced.
-        /// </summary>
+        /// <inheritdoc />
+        /// <remarks>See <see cref="ReloadMod(string, string, ModReloadMode)"/>; never returns null.</remarks>
         public ModReloadReport ReloadMod(ActorContext caller, string id, string luaCode, ModReloadMode mode)
         {
             DemandModAccess(caller, "reload", id);
@@ -1057,6 +981,31 @@ namespace CoreAI.Ai.LuaCs
             return ImportModInternal(
                 bundleJson, caller.ActorId, hostGrant, allowFull,
                 caller.Grants.IsUnrestricted);
+        }
+
+        /// <summary>
+        /// <see cref="ImportMod(ActorContext, string, LuaCapabilities, bool)"/> with the check of
+        /// <see cref="LoadMod(ActorContext, string, string, LuaCapabilities, bool, Action{string})"/> for a
+        /// mod the import loads for the first time; the check's refusal is thrown, not answered as false.
+        /// </summary>
+        internal bool ImportMod(
+            ActorContext caller,
+            string bundleJson,
+            LuaCapabilities hostGrant,
+            bool allowFull,
+            Action<string> demandSourceKept)
+        {
+            RequireTrusted(caller);
+            string modId = TryReadBundleModId(bundleJson);
+            if (modId == null)
+            {
+                return false;
+            }
+
+            DemandModAccess(caller, "import", modId);
+            return ImportModInternal(
+                bundleJson, caller.ActorId, hostGrant, allowFull,
+                caller.Grants.IsUnrestricted, demandSourceKept);
         }
 
         /// <inheritdoc />
@@ -1802,13 +1751,21 @@ namespace CoreAI.Ai.LuaCs
                 : ownerActorId.Trim();
         }
 
+        /// <param name="demandSourceKept">
+        /// Null, or the check of a caller that requires the source store to keep this new mod's source
+        /// (the world session facade): the source is then persisted inside the build's commit and the
+        /// check, run right after, throws when the store did not keep it, so the failed-build rollback
+        /// undoes the load (see <see cref="CommitFirstLoadKeepingSource"/>). Only for an id the store
+        /// does not hold yet.
+        /// </param>
         private void LoadModInternal(
             string id,
             string luaCode,
             string ownerActorId,
             LuaCapabilities capabilities,
             bool persistToStore,
-            bool ownerHasHostAuthority)
+            bool ownerHasHostAuthority,
+            Action<string> demandSourceKept = null)
         {
             ThrowIfShutdown();
             string modId = Normalize(id);
@@ -1829,12 +1786,30 @@ namespace CoreAI.Ai.LuaCs
                     throw new InvalidOperationException($"Mod '{modId}' is already loaded. Use ReloadMod.");
                 }
 
+                // WHY refused before any chunk runs (C2-01): a second build of an id in flight used to
+                // run to its commit and be refused there, and the rollback of that refused build, keyed
+                // by mod id on the Roblox side, tore down the threads, connections and tweens of the
+                // build that won.
+                DemandNoBuildInProgressLocked(modId, $"Mod '{modId}' was loaded concurrently.");
                 EnsureModCapacity(modId, ownerActorId);
+                EnterModBuildLocked(modId);
             }
 
-            BuildMod(
-                modId, luaCode, capabilities, ownerActorId, ownerHasHostAuthority,
-                built => InstallFirstLoad(modId, ownerActorId, built), false);
+            bool persistedInCommit = persistToStore && demandSourceKept != null && _autoPersistMods;
+            try
+            {
+                BuildMod(
+                    modId, luaCode, capabilities, ownerActorId, ownerHasHostAuthority,
+                    persistedInCommit
+                        ? built => CommitFirstLoadKeepingSource(
+                            modId, luaCode, capabilities, ownerActorId, built, demandSourceKept)
+                        : built => InstallFirstLoad(modId, ownerActorId, built),
+                    false);
+            }
+            finally
+            {
+                ExitModBuild(modId);
+            }
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
 
@@ -1845,10 +1820,90 @@ namespace CoreAI.Ai.LuaCs
             RecordRevision(modId, luaCode);
             if (persistToStore)
             {
-                PersistMod(modId, luaCode, capabilities, ownerActorId, true);
+                if (!persistedInCommit)
+                {
+                    PersistMod(modId, luaCode, capabilities, ownerActorId, true);
+                }
+                else if (VersionFollowsRevisions(modId, luaCode))
+                {
+                    // WHY again: the commit persisted before the revision was recorded (a refused load must
+                    // leave no revision behind), so a manifest whose version is the revision count is one
+                    // behind; the rewrite keeps the load order the commit stamped.
+                    PersistMod(modId, luaCode, capabilities, ownerActorId, false);
+                }
             }
 
             RaiseModSourceLoaded(modId, luaCode, capabilities);
+        }
+
+        /// <summary>
+        /// The commit of a first load whose caller requires the new source kept: it checks again that the
+        /// id and a mod slot are still free, persists the source and manifest, runs
+        /// <paramref name="demandSourceKept"/>, which throws when the store did not keep them, and only
+        /// then adds the mod. Any refusal throws inside the build, so the rollback undoes the load like
+        /// any failed first load (its threads, connections, logic-slot formulas and quota attribution),
+        /// and no revision is recorded for it.
+        /// </summary>
+        /// <remarks>
+        /// WHY here and not after the load (C2-04): the world facade used to undo such a load with an
+        /// ordinary unload, which kept a formula of another live mod the chunk had displaced removed,
+        /// kept the undone mod's revision, and raised a load and an unload for a mod that never loaded.
+        /// </remarks>
+        private void CommitFirstLoadKeepingSource(
+            string modId,
+            string luaCode,
+            LuaCapabilities capabilities,
+            string ownerActorId,
+            Mod built,
+            Action<string> demandSourceKept)
+        {
+            lock (_gate)
+            {
+                if (_mods.ContainsKey(modId))
+                {
+                    throw new InvalidOperationException($"Mod '{modId}' was loaded concurrently.");
+                }
+
+                EnsureModCapacity(modId, ownerActorId);
+            }
+
+            PersistMod(modId, luaCode, capabilities, ownerActorId, true);
+            try
+            {
+                demandSourceKept(modId);
+                InstallFirstLoad(modId, ownerActorId, built);
+            }
+            catch
+            {
+                // WHY deleted: the caller passes the check only for an id its store did not hold, so
+                // whatever the store holds for it now is this refused load's own write.
+                ForgetPersistedSource(modId);
+                throw;
+            }
+        }
+
+        /// <summary>Best-effort removal of the source a refused load persisted.</summary>
+        private void ForgetPersistedSource(string modId)
+        {
+            if (!_autoPersistMods)
+            {
+                return;
+            }
+
+            try
+            {
+                _sourceStore.Delete(modId);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Removing the source of the refused load of '{modId}' failed: {ex}");
+            }
+        }
+
+        /// <summary>True when the manifest version of <paramref name="source"/> is the revision count (its header names none).</summary>
+        private static bool VersionFollowsRevisions(string modId, string source)
+        {
+            return string.IsNullOrWhiteSpace(LuaModHeader.Parse(source ?? "", modId).Version);
         }
 
         /// <summary>
@@ -1906,6 +1961,12 @@ namespace CoreAI.Ai.LuaCs
         /// True for the candidate of a reload, whose failure also destroys the objects its chunk built;
         /// a failed first load keeps them.
         /// </param>
+        /// <remarks>
+        /// The caller has already entered the build of <paramref name="modId"/>
+        /// (<see cref="EnterModBuildLocked"/>, refused while another build of the id is in flight) and
+        /// ends it (<see cref="ExitModBuild"/>) once this returns or throws, so every candidate this
+        /// builds is the only one of its id and its rollback, keyed by mod id, can only undo its own work.
+        /// </remarks>
         private Mod BuildMod(
             string modId,
             string luaCode,
@@ -1927,7 +1988,6 @@ namespace CoreAI.Ai.LuaCs
             LuaCsRbxApiBindings.ModLoadCandidate rbxLoadCandidate = null;
             StartupCapture startupCapture = null;
             LuaCsLogicSlots.OverrideSnapshot slotsBeforeBuild = CaptureLogicSlots(modId);
-            EnterModBuild(modId);
 
             try
             {
@@ -2037,10 +2097,6 @@ namespace CoreAI.Ai.LuaCs
 
                 throw failure;
             }
-            finally
-            {
-                ExitModBuild(modId);
-            }
         }
 
         /// <summary>
@@ -2076,17 +2132,29 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        /// <summary>Marks <paramref name="modId"/> as having a candidate chunk under construction.</summary>
-        private void EnterModBuild(string modId)
+        /// <summary>
+        /// Refuses a build of <paramref name="modId"/> while another one is in flight, with
+        /// <paramref name="refusal"/>; call under the gate before anything of the new build runs.
+        /// </summary>
+        private void DemandNoBuildInProgressLocked(string modId, string refusal)
         {
-            lock (_gate)
+            if (_buildDepthByModId.Count != 0 && _buildDepthByModId.ContainsKey(modId))
             {
-                _buildDepthByModId.TryGetValue(modId, out int depth);
-                _buildDepthByModId[modId] = depth + 1;
+                throw new InvalidOperationException(refusal);
             }
         }
 
-        /// <summary>Ends one <see cref="EnterModBuild"/> of <paramref name="modId"/>.</summary>
+        /// <summary>
+        /// Marks <paramref name="modId"/> as having a candidate chunk under construction; call under the
+        /// gate, after <see cref="DemandNoBuildInProgressLocked"/>, and end it with <see cref="ExitModBuild"/>.
+        /// </summary>
+        private void EnterModBuildLocked(string modId)
+        {
+            _buildDepthByModId.TryGetValue(modId, out int depth);
+            _buildDepthByModId[modId] = depth + 1;
+        }
+
+        /// <summary>Ends one <see cref="EnterModBuildLocked"/> of <paramref name="modId"/>.</summary>
         private void ExitModBuild(string modId)
         {
             lock (_gate)
@@ -2340,51 +2408,70 @@ namespace CoreAI.Ai.LuaCs
                     throw new InvalidOperationException($"Mod '{modId}' is not loaded.");
                 }
 
+                // WHY refused here, before the previous run's objects leave the world or a chunk runs
+                // (C2-01): see LoadModInternal. WHY the build stays entered until the swap below: a
+                // second reload admitted between this build's end and its swap would build against
+                // the same outgoing run and be refused at its own commit, and that refusal's rollback
+                // would tear down this reload's live replacement.
+                DemandNoBuildInProgressLocked(modId, $"Mod '{modId}' was reloaded concurrently.");
+                EnterModBuildLocked(modId);
                 caps = existing.Caps;
                 ownerActorId = existing.OwnerActorId;
                 ownerHasHostAuthority = existing.OwnerHasHostAuthority;
             }
 
-            // WHY detached before the chunk runs and destroyed only after it succeeded: the new chunk
-            // must build into a world without the previous run's objects (a script that looks for its
-            // folder first would otherwise find the old one), yet a reload that fails must leave the
-            // world exactly as it was, which a destroy could not undo.
-            StartupDetachment detachment = mode == ModReloadMode.CleanStartupObjects
-                ? DetachStartupObjects(existing)
-                : null;
             Mod replacement;
+            StartupDetachment detachment = null;
             try
             {
-                replacement = BuildMod(
-                    modId, luaCode, caps, ownerActorId, ownerHasHostAuthority,
-                    built => DemandStillLoaded(modId, existing), true);
-            }
-            catch
-            {
-                ReattachStartupObjects(detachment);
-                throw;
-            }
-
-            // WHY: Teardown BEFORE the swap so the old instance's effects (its logic-slot overrides)
-            // are gone by the time the replacement is live — the old formula must never be invoked
-            // after the new load. The replacement's state is excluded: its load chunk already ran in
-            // BuildMod and may have re-defined slots, and those fresh defines must survive.
-            TeardownModEffects(modId, LuaModTeardownReason.Reload, replacement.State);
-
-            bool replaced;
-            lock (_gate)
-            {
-                replaced = _mods.TryGetValue(modId, out Mod live) && ReferenceEquals(live, existing);
-                if (replaced)
+                try
                 {
-                    SwapInReplacementLocked(existing, replacement);
+                    // WHY detached before the chunk runs and destroyed only after it succeeded: the new
+                    // chunk must build into a world without the previous run's objects (a script that
+                    // looks for its folder first would otherwise find the old one), yet a reload that
+                    // fails must leave the world exactly as it was, which a destroy could not undo.
+                    detachment = mode == ModReloadMode.CleanStartupObjects
+                        ? DetachStartupObjects(existing)
+                        : null;
+                    replacement = BuildMod(
+                        modId, luaCode, caps, ownerActorId, ownerHasHostAuthority,
+                        built => DemandStillLoaded(modId, existing), true);
+                }
+                catch
+                {
+                    ReattachStartupObjects(detachment);
+                    throw;
+                }
+
+                // WHY: Teardown BEFORE the swap so the old instance's effects (its logic-slot overrides)
+                // are gone by the time the replacement is live — the old formula must never be invoked
+                // after the new load. The replacement's state is excluded: its load chunk already ran in
+                // BuildMod and may have re-defined slots, and those fresh defines must survive.
+                TeardownModEffects(modId, LuaModTeardownReason.Reload, replacement.State);
+
+                bool replaced;
+                lock (_gate)
+                {
+                    replaced = _mods.TryGetValue(modId, out Mod live) && ReferenceEquals(live, existing);
+                    if (replaced)
+                    {
+                        SwapInReplacementLocked(existing, replacement);
+                    }
+                }
+
+                if (!replaced)
+                {
+                    // WHY: only an unload during the teardown gets here (no other build of the id can
+                    // run meanwhile); it released everything of the id, so the attribution this build
+                    // kept alive goes too.
+                    ReattachStartupObjects(detachment);
+                    DropUnusedQuotaAttribution(modId, 1);
+                    throw new InvalidOperationException($"Mod '{modId}' was reloaded concurrently.");
                 }
             }
-
-            if (!replaced)
+            finally
             {
-                ReattachStartupObjects(detachment);
-                throw new InvalidOperationException($"Mod '{modId}' was reloaded concurrently.");
+                ExitModBuild(modId);
             }
 
             // WHY after the teardown: the replaced run's threads are stopped and its connections are
@@ -2414,7 +2501,6 @@ namespace CoreAI.Ai.LuaCs
             RecordRevision(modId, luaCode);
             PersistMod(modId, luaCode, caps, ownerActorId, false);
             RaiseModSourceLoaded(modId, luaCode, caps);
-            ModReloadScope.Publish(report);
             return report;
         }
 
@@ -2623,10 +2709,11 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Destroys the startup objects a successful clean reload took out of the world. What sits
-        /// inside one of them without being a startup object itself is moved out first to the nearest
-        /// ancestor that is not being destroyed (for the top-most ones, their original parent, or the
-        /// nearest ancestor of it that still exists) and is never destroyed.
+        /// Destroys the startup objects a successful clean reload took out of the world, with what the
+        /// mod still owns inside them (<see cref="WithOwnDescendants"/>). Anything else inside them (a
+        /// player's build, another mod's object) is moved out first to the nearest ancestor that is not
+        /// being destroyed (for the top-most ones, their original parent, or the nearest ancestor of it
+        /// that still exists) and is never destroyed.
         /// </summary>
         private StartupCleanup DestroyDetachedStartupObjects(StartupDetachment detachment)
         {
@@ -2645,7 +2732,9 @@ namespace CoreAI.Ai.LuaCs
 
             try
             {
-                return DestroyStartupObjects(detachment.ModId, detachment.Members, detachment.Objects,
+                HashSet<InstanceId> doomed = WithOwnDescendants(
+                    detachment.ModId, detachment.Members, detachment.Objects, roots);
+                return DestroyStartupObjects(detachment.ModId, doomed, detachment.Objects,
                     roots, chains,
                     "destroy the previous run's startup objects of mod '" + detachment.ModId + "'");
             }
@@ -2656,6 +2745,72 @@ namespace CoreAI.Ai.LuaCs
                 _log?.Error($"[LuaCsModRuntime] Destroying the previous run's startup objects of mod '{detachment.ModId}' failed: {ex}");
                 return new StartupCleanup(0, 0, LiveStartupObjects(detachment.ModId, detachment.Objects));
             }
+        }
+
+        /// <summary>
+        /// <paramref name="members"/> plus every object inside them that the mod still owns as the same
+        /// actor as the startup object it sits in, reached through such objects only. What the mod's
+        /// handlers or timers put into its startup objects (coins a Heartbeat handler drops into the
+        /// mod's folder) goes with them; an object anyone else owns stops the walk, so it is rescued with
+        /// everything inside it.
+        /// </summary>
+        /// <remarks>
+        /// WHY (HUB-RELOAD follow-up H1): the startup objects are only what the main chunk built, so a
+        /// clean reload of a mod whose Heartbeat fills its own folder rescued every such object to the
+        /// folder's parent, and each Save &amp; run left the previous run's coins lying in Workspace.
+        /// </remarks>
+        private HashSet<InstanceId> WithOwnDescendants(string modId, HashSet<InstanceId> members,
+            List<StartupObject> objects, List<RbxInstance> roots)
+        {
+            HashSet<InstanceId> doomed = new(members);
+            Dictionary<InstanceId, string> actorByMember = new(objects.Count);
+            for (int index = 0; index < objects.Count; index++)
+            {
+                actorByMember[objects[index].Id] = objects[index].OwnerActorId ?? "";
+            }
+
+            InstanceRegistry registry = _rbxApi.Registry;
+            Stack<KeyValuePair<RbxInstance, string>> pending = new();
+            for (int index = 0; index < roots.Count; index++)
+            {
+                RbxInstance root = roots[index];
+                if (root != null && !root.IsDestroyed
+                                 && actorByMember.TryGetValue(root.Id, out string rootActor))
+                {
+                    pending.Push(new KeyValuePair<RbxInstance, string>(root, rootActor));
+                }
+            }
+
+            while (pending.Count > 0)
+            {
+                KeyValuePair<RbxInstance, string> entry = pending.Pop();
+                IReadOnlyList<RbxInstance> children = entry.Key.GetChildren();
+                for (int index = 0; index < children.Count; index++)
+                {
+                    RbxInstance child = children[index];
+                    if (child.IsDestroyed)
+                    {
+                        continue;
+                    }
+
+                    if (actorByMember.TryGetValue(child.Id, out string memberActor))
+                    {
+                        pending.Push(new KeyValuePair<RbxInstance, string>(child, memberActor));
+                        continue;
+                    }
+
+                    if (registry.TryGetRecord(child.Id, out InstanceRecord record)
+                        && !record.IsRuntimeInfrastructure
+                        && string.Equals(record.OwnerModId, modId, StringComparison.Ordinal)
+                        && string.Equals(record.OwnerActorId ?? "", entry.Value, StringComparison.Ordinal))
+                    {
+                        doomed.Add(child.Id);
+                        pending.Push(new KeyValuePair<RbxInstance, string>(child, entry.Value));
+                    }
+                }
+            }
+
+            return doomed;
         }
 
         /// <summary>
@@ -4811,12 +4966,14 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// The order both restore paths start stored mods in: mods without a recorded
-        /// <see cref="LuaModManifest.LoadOrder"/> (0 or below: written before the field existed, or
-        /// seeded on install) first, by ordinal id, which is the order every restore used before the load
-        /// order was persisted; then mods with one, ascending. An active unordered mod had already started
-        /// at startup before any ordered mod was first loaded, so an ordered mod may depend on it, never
-        /// the other way round. Equal load orders fall back to the ordinal id so the order is total, and a
-        /// nil manifest sorts first so the exact restore refuses it before any mod starts.
+        /// <see cref="LuaModManifest.LoadOrder"/> (0 or below: written before the field existed, seeded on
+        /// install, or loaded while the store could not be listed; or above
+        /// <see cref="LuaModManifest.MaximumLoadOrder"/>, which no store records) first, by ordinal id,
+        /// which is the order every restore used before the load order was persisted; then mods with one,
+        /// ascending. An active unordered mod had already started at startup before any ordered mod was
+        /// first loaded, so an ordered mod may depend on it, never the other way round. Equal load orders
+        /// fall back to the ordinal id so the order is total, and a nil manifest sorts first so the exact
+        /// restore refuses it before any mod starts.
         /// </summary>
         internal static int CompareRestoreOrder(LuaModManifest left, LuaModManifest right)
         {
@@ -4835,8 +4992,8 @@ namespace CoreAI.Ai.LuaCs
                 return 1;
             }
 
-            bool leftOrdered = left.LoadOrder > 0;
-            bool rightOrdered = right.LoadOrder > 0;
+            bool leftOrdered = LuaModManifest.IsRecordedLoadOrder(left.LoadOrder);
+            bool rightOrdered = LuaModManifest.IsRecordedLoadOrder(right.LoadOrder);
             if (leftOrdered != rightOrdered)
             {
                 return leftOrdered ? 1 : -1;
@@ -5065,8 +5222,12 @@ namespace CoreAI.Ai.LuaCs
                 bundleJson, ownerActorId.Trim(), hostGrant, allowFull, false);
         }
 
+        /// <param name="demandSourceKept">
+        /// Null, or the check of a caller that requires the store to keep a newly imported mod's source
+        /// (see <see cref="LoadModInternal"/>); its refusal is thrown to the caller, not reported as false.
+        /// </param>
         private bool ImportModInternal(string bundleJson, string ownerActorId, LuaCapabilities hostGrant,
-            bool allowFull, bool ownerHasHostAuthority)
+            bool allowFull, bool ownerHasHostAuthority, Action<string> demandSourceKept = null)
         {
             if (string.IsNullOrWhiteSpace(bundleJson))
             {
@@ -5099,6 +5260,21 @@ namespace CoreAI.Ai.LuaCs
 
             string capsText = bundle.Manifest != null ? bundle.Manifest.Capabilities : "";
             LuaCapabilities effectiveCaps = ApplyHostGrant(ParseCaps(capsText), hostGrant, allowFull);
+            Exception sourceRefusal = null;
+            Action<string> keptCheck = demandSourceKept == null
+                ? null
+                : new Action<string>(keptId =>
+                {
+                    try
+                    {
+                        demandSourceKept(keptId);
+                    }
+                    catch (Exception ex)
+                    {
+                        sourceRefusal = ex;
+                        throw;
+                    }
+                });
 
             try
             {
@@ -5109,6 +5285,14 @@ namespace CoreAI.Ai.LuaCs
                     // escalate a live mod's privileges from an untrusted bundle header. To change a loaded
                     // mod's tier the host must unload/forget it first, then re-import under the desired grant.
                     ReloadMod(modId, bundle.Source);
+                }
+                else if (keptCheck != null && _autoPersistMods)
+                {
+                    // WHY persisted by the load itself here: the check that the store kept the source
+                    // runs inside the load's commit, and the load persists exactly effectiveCaps.
+                    LoadModInternal(
+                        modId, bundle.Source, ownerActorId, effectiveCaps, true,
+                        ownerHasHostAuthority, keptCheck);
                 }
                 else
                 {
@@ -5127,6 +5311,13 @@ namespace CoreAI.Ai.LuaCs
             }
             catch (Exception ex)
             {
+                // WHY rethrown: the caller asked to hear why a source was not kept (a limit refusal
+                // names the mod to forget), which a bare false would hide.
+                if (sourceRefusal != null && ReferenceEquals(ex, sourceRefusal))
+                {
+                    throw;
+                }
+
                 _log?.Error($"[LuaCsModRuntime] ImportMod of '{modId}' failed: {ex}");
                 return false;
             }
@@ -5188,8 +5379,14 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// <see cref="LuaModManifest.NextLoadOrder"/> over this runtime's source store (read from the
         /// store, dormant packages included, not from the loaded mods or the per-session counter). A store
-        /// that cannot list yields 0 (no recorded order).
+        /// that cannot list (it throws, or answers the unreadable-listing marker) yields 0: the mod is
+        /// stored without a recorded order and restores with the unordered mods, before every ordered
+        /// one, until a later first load (after an unload) stamps it again.
         /// </summary>
+        /// <remarks>
+        /// WHY 0 and not the 1 an empty listing gives: 1 is an order the store never recorded, and
+        /// passed off as one it put the new mod ahead of every older ordered mod without a word.
+        /// </remarks>
         private long NextStoredLoadOrder()
         {
             try
@@ -5198,7 +5395,8 @@ namespace CoreAI.Ai.LuaCs
             }
             catch (Exception ex)
             {
-                _log?.Error($"[LuaCsModRuntime] Source store List() failed while stamping a load order: {ex}");
+                _log?.Error("[LuaCsModRuntime] The source store could not list its mods while stamping a load "
+                            + $"order, so the mod is stored without one: {ex}");
                 return 0;
             }
         }

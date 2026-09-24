@@ -1408,11 +1408,8 @@ namespace CoreAI.Tests.EditMode
 
             // WHY keep mode: the replacement reuses the remote the loaded run built; a default (clean)
             // reload destroys it, and the client below would find no remote at all.
-            using (ModReloadScope.Begin(serverModId, ModReloadMode.KeepObjects))
-            {
-                harness.Runtime.ReloadMod(serverActor, serverModId, @"
-                local remote = workspace:FindFirstChild('ReloadRemote')");
-            }
+            harness.Runtime.ReloadMod(serverActor, serverModId, @"
+                local remote = workspace:FindFirstChild('ReloadRemote')", ModReloadMode.KeepObjects);
 
             Assert.AreEqual(0,
                 harness.Bindings.CountRemoteFunctionCallbacksOwnedBy(serverModId));

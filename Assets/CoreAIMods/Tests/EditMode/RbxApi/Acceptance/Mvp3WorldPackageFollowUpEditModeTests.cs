@@ -2491,6 +2491,9 @@ end)";
                         "the unconfirmed entry was removed and the previous one kept");
                     Assert.AreEqual(1, first.Diagnostics.Count, string.Join(" | ", first.Diagnostics));
                     StringAssert.Contains("was not recorded for the next start", first.Diagnostics[0]);
+                    StringAssert.Contains("Startup world not updated", marker.Output,
+                        "C2-06: the call whose change will not reopen says so in its own result");
+                    StringAssert.Contains("will not reopen after a restart", first.Controller.StartupSelectionNote);
                 }
 
                 using StartupProcess second = new(disk, "default-world");
@@ -2819,6 +2822,9 @@ end)";
                         "the change was recorded once");
                     AssertSameFiles(afterChange, FileContents(disk.StartupDirectory));
 
+                    // WHY the clock moves: world-only changes are recorded at most once per interval
+                    // (C2-03), and this change is meant to be recorded at once.
+                    first.Clock = first.Clock.Add(RbxWorldRuntimeSessionController.DefaultStartupRefreshInterval);
                     LuaTool.LuaResult changedAgain = await first.Controller.Executor.ExecuteAsync(
                         "local marker = Instance.new('Folder') marker.Name = 'SecondChange' marker.Parent = workspace",
                         CancellationToken.None);
@@ -2838,6 +2844,343 @@ end)";
                 InstanceRegistry live = second.Controller.CurrentRbxApi.Registry;
                 Assert.AreEqual(1, CountNamed(live, "FirstChange"));
                 Assert.AreEqual(1, CountNamed(live, "SecondChange"));
+            });
+        }
+
+        /// <summary>
+        /// C2-03 (R2 B2-09 in a live world): the refresh compared a digest of the whole capture, which also
+        /// holds every part's pose and the camera, so in a world where physics moves parts and the player
+        /// moves the camera every gated call, a read-only one included, wrote a whole startup entry. The
+        /// refresh now follows only what the call changed: the mod sources or the world-owned tree.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_ReadOnlyCallsWhilePartsAndTheCameraMove_WriteNoEntry()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                using StartupProcess first = new(disk, "world-a", withMutationGate: true);
+                first.AuthorKeptPart();
+                await ConfirmStartupLoadAsync(first, "chosen");
+                LuaCsRbxApiBindings live = first.Controller.CurrentRbxApi;
+                RbxInstance kept = live.Registry.WorldRoot.FindFirstChild(KeptPartName);
+
+                for (int call = 1; call <= 3; call++)
+                {
+                    Assert.IsTrue(live.PartSink.TryGetPartProperties(kept.Id, out PartProperties pose));
+                    pose.CFrame = RbxCFrame.FromPosition(2f, 3f - 0.1f * call, -4f);
+                    live.PartSink.SetPartProperties(kept.Id, in pose);
+                    RbxCFrame camera = RbxCFrame.FromPosition(0f, 6f + call, 22f);
+                    live.CameraRig.SetCFrame(in camera);
+
+                    LuaTool.LuaResult readOnly = await first.Controller.Executor.ExecuteAsync(
+                        "return #workspace:GetChildren()",
+                        CancellationToken.None);
+
+                    Assert.IsTrue(readOnly.Success, readOnly.Error);
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000001.json", "0000000001.world" },
+                        FileNames(disk.StartupDirectory),
+                        "a read-only call writes no entry while the part and the camera move");
+                }
+
+                LuaTool.LuaResult built = await first.Controller.Executor.ExecuteAsync(
+                    "local built = Instance.new('Folder') built.Name = 'Built' built.Parent = workspace",
+                    CancellationToken.None);
+
+                Assert.IsTrue(built.Success, built.Error);
+                CollectionAssert.AreEqual(
+                    new[] { "0000000002.json", "0000000002.world" },
+                    FileNames(disk.StartupDirectory),
+                    "a change to the world tree writes exactly one entry");
+                CollectionAssert.IsEmpty(first.Diagnostics);
+            });
+        }
+
+        /// <summary>
+        /// C2-03: world-only changes are recorded at most once per <see cref="RbxWorldRuntimeSessionController.StartupRefreshInterval"/>;
+        /// one made inside the interval is recorded by the frame pump once the interval has passed, with
+        /// everything made meanwhile, and nothing is lost at the next start.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_WorldChangesInsideTheInterval_AreRecordedOnceItHasPassed()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                using (StartupProcess first = new(disk, "world-a", withMutationGate: true))
+                {
+                    first.AuthorKeptPart();
+                    await ConfirmStartupLoadAsync(first, "chosen");
+                    ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                        .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                    Assert.AreEqual(TimeSpan.FromSeconds(5d), first.Controller.StartupRefreshInterval, "the default");
+
+                    LuaTool.LuaResult firstBuild = await first.Controller.Executor.ExecuteAsync(
+                        "local f = Instance.new('Folder') f.Name = 'FirstBuild' f.Parent = workspace",
+                        CancellationToken.None);
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000002.json", "0000000002.world" },
+                        FileNames(disk.StartupDirectory),
+                        "the first change after a quiet interval is recorded at once");
+
+                    first.Clock = first.Clock.AddSeconds(1d);
+                    LuaTool.LuaResult secondBuild = await first.Controller.Executor.ExecuteAsync(
+                        "local f = Instance.new('Folder') f.Name = 'SecondBuild' f.Parent = workspace",
+                        CancellationToken.None);
+                    first.Controller.PumpFrame(host, 1f / 60f);
+                    await first.Controller.StartupRefreshForTests;
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000002.json", "0000000002.world" },
+                        FileNames(disk.StartupDirectory),
+                        "a change inside the interval waits");
+
+                    first.Clock = first.Clock.AddSeconds(5d);
+                    first.Controller.PumpFrame(host, 1f / 60f);
+                    await first.Controller.StartupRefreshForTests;
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000003.json", "0000000003.world" },
+                        FileNames(disk.StartupDirectory),
+                        "the frame after the interval records it once");
+                    first.Controller.PumpFrame(host, 1f / 60f);
+                    await first.Controller.StartupRefreshForTests;
+
+                    Assert.IsTrue(firstBuild.Success, firstBuild.Error);
+                    Assert.IsTrue(secondBuild.Success, secondBuild.Error);
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000003.json", "0000000003.world" },
+                        FileNames(disk.StartupDirectory),
+                        "and not again");
+                    CollectionAssert.IsEmpty(first.Diagnostics);
+                }
+
+                using StartupProcess second = new(disk, "default-world");
+                RbxWorldStartupRestoreResult restored = await second.Controller.RestoreStartupSelectionAsync();
+
+                Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+                InstanceRegistry live = second.Controller.CurrentRbxApi.Registry;
+                Assert.AreEqual(1, CountNamed(live, "FirstBuild"));
+                Assert.AreEqual(1, CountNamed(live, "SecondBuild"));
+            });
+        }
+
+        /// <summary>C2-03 twin: an interval of zero records every world change at once, as before.</summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_ZeroInterval_RecordsEveryWorldChangeAtOnce()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                using StartupProcess first = new(disk, "world-a", withMutationGate: true);
+                first.AuthorKeptPart();
+                await ConfirmStartupLoadAsync(first, "chosen");
+                first.Controller.StartupRefreshInterval = TimeSpan.Zero;
+
+                await first.Controller.Executor.ExecuteAsync(
+                    "local f = Instance.new('Folder') f.Name = 'FirstBuild' f.Parent = workspace",
+                    CancellationToken.None);
+                await first.Controller.Executor.ExecuteAsync(
+                    "local f = Instance.new('Folder') f.Name = 'SecondBuild' f.Parent = workspace",
+                    CancellationToken.None);
+
+                CollectionAssert.AreEqual(
+                    new[] { "0000000003.json", "0000000003.world" },
+                    FileNames(disk.StartupDirectory));
+            });
+        }
+
+        /// <summary>
+        /// HUB-RELOAD follow-up H2: the Hub's Save &amp; run over the world session facade reaches the live
+        /// runtime with the mode the player picked and brings the report back, through the explicit
+        /// <see cref="ILuaModRuntime"/> member every facade forwards.
+        /// </summary>
+        [Test]
+        public void HubSaveAndRun_OverTheWorldSessionFacade_HonoursTheModeAndReports()
+        {
+            StartupDisk disk = NewStartupDisk();
+            using StartupProcess process = new(disk, "world-a");
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            CoreAI.Ai.Hub.LuaCsModRuntimeHubService hub = new(
+                process.Controller.Runtime,
+                host,
+                process.Controller.SourceStore,
+                StartupCapabilities);
+            const string castle = "local root = Instance.new('Folder') root.Name = 'HubCastle' root.Parent = workspace";
+
+            hub.SaveOrReload("castle", castle);
+            CoreAI.Ai.Hub.HubModSaveResult kept = hub.SaveOrReload(
+                "castle", castle + "\n-- keep", ModReloadMode.KeepObjects);
+            int castlesAfterKeep = CountNamed(process.Controller.CurrentRbxApi.Registry, "HubCastle");
+            hub.SaveOrReload("castle", castle + "\n-- clean");
+
+            Assert.IsNotNull(kept.Reload, "the report comes back through the facade");
+            Assert.AreEqual(ModReloadMode.KeepObjects, kept.Reload.Mode);
+            Assert.AreEqual(1, kept.Reload.KeptObjects);
+            Assert.AreEqual(2, castlesAfterKeep);
+            Assert.AreEqual(1, CountNamed(process.Controller.CurrentRbxApi.Registry, "HubCastle"),
+                "Save & run without a mode cleans both kept runs, the default");
+        }
+
+        /// <summary>A package file system that calls <see cref="BeforeWrite"/> before each file it writes.</summary>
+        private sealed class HookedPackageFileSystem : IRbxWorldPackageFileSystem
+        {
+            private readonly IRbxWorldPackageFileSystem _inner = new SystemRbxWorldPackageFileSystem();
+
+            public Action<string> BeforeWrite { get; set; }
+
+            public bool DirectoryExists(string path)
+            {
+                return _inner.DirectoryExists(path);
+            }
+
+            public void CreateDirectory(string path)
+            {
+                _inner.CreateDirectory(path);
+            }
+
+            public bool FileExists(string path)
+            {
+                return _inner.FileExists(path);
+            }
+
+            public long GetFileLength(string path)
+            {
+                return _inner.GetFileLength(path);
+            }
+
+            public UniTask WriteAllBytesCreateNewAsync(string path, byte[] bytes, CancellationToken cancellationToken)
+            {
+                BeforeWrite?.Invoke(path);
+                return _inner.WriteAllBytesCreateNewAsync(path, bytes, cancellationToken);
+            }
+
+            public UniTask<byte[]> ReadAllBytesAsync(string path, CancellationToken cancellationToken)
+            {
+                return _inner.ReadAllBytesAsync(path, cancellationToken);
+            }
+
+            public void MoveCreateNew(string sourcePath, string destinationPath)
+            {
+                _inner.MoveCreateNew(sourcePath, destinationPath);
+            }
+
+            public void DeleteFile(string path)
+            {
+                _inner.DeleteFile(path);
+            }
+
+            public IReadOnlyList<string> GetFiles(string directory, string extension)
+            {
+                return _inner.GetFiles(directory, extension);
+            }
+        }
+
+        /// <summary>
+        /// C2-02 (a B2-02 residual): a Hub or host mod change made after a confirmed load published its
+        /// world but before the load finished recording it as the startup world marked nothing, because
+        /// the live startup world was not set yet, and the player's change was gone after a restart. A
+        /// write to the published world's sources now always marks it, and the frame after the record
+        /// records the change.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_HubChangeWhileTheConfirmedLoadRecordsIt_ReopensAfterRestart()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                HookedPackageFileSystem fileSystem = new();
+                bool edited = false;
+                using (StartupProcess first = new(disk, "world-a", packageFileSystem: fileSystem, withMutationGate: true))
+                {
+                    first.AuthorKeptPart();
+                    RbxWorldPackageWriteResult saved = await first.Controller.SaveManualAsync(first.Player, "chosen");
+                    Assert.IsTrue(saved.Success, saved.Error);
+                    RbxWorldLoadRequest request = await first.Controller.RequestManualLoadAsync(first.Player, "chosen");
+                    LuaCsRbxApiBindings before = first.Controller.CurrentRbxApi;
+                    ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                        .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                    fileSystem.BeforeWrite = path =>
+                    {
+                        if (edited
+                            || ReferenceEquals(first.Controller.CurrentRbxApi, before)
+                            || !path.Contains(Path.Combine("Startup", "Stores")))
+                        {
+                            return;
+                        }
+
+                        edited = true;
+                        first.Controller.Runtime.LoadMod(
+                            host,
+                            "hubmod",
+                            "local f = Instance.new('Folder') f.Name = 'HubModStart' f.Parent = workspace",
+                            StartupCapabilities);
+                    };
+
+                    RbxWorldLoadResult confirmed = await first.Controller.ConfirmManualLoadAsync(request.RequestId, true);
+                    Assert.IsTrue(confirmed.Success, confirmed.Error);
+                    Assert.IsTrue(edited, "precondition: the Hub change landed while the load recorded its world");
+                    first.Controller.PumpFrame(host, 1f / 60f);
+                    await first.Controller.StartupRefreshForTests;
+
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000002.json", "0000000002.world" },
+                        FileNames(disk.StartupDirectory),
+                        "the frame after the load records the Hub change");
+                    CollectionAssert.IsEmpty(first.Diagnostics);
+                }
+
+                using StartupProcess second = new(disk, "default-world");
+                RbxWorldStartupRestoreResult restored = await second.Controller.RestoreStartupSelectionAsync();
+
+                Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+                Assert.AreEqual(1, CountNamed(second.Controller.CurrentRbxApi.Registry, "HubModStart"),
+                    "the player's change reopened");
+                CollectionAssert.Contains(ModIds(second.Controller.SourceStore.List()), "hubmod");
+            });
+        }
+
+        /// <summary>
+        /// C2-06: a Hub change the startup restore would refuse (an active Full-capability mod) was
+        /// refused on the frame pump, and the note that said so was dropped; it is now kept where the
+        /// Hub or the host reads it.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_HubChangeTheRestoreWouldRefuse_LeavesANote()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                using StartupProcess first = new(disk, "world-a", withMutationGate: true);
+                first.AuthorKeptPart();
+                await ConfirmStartupLoadAsync(first, "chosen");
+                ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                Assert.AreEqual("", first.Controller.StartupSelectionNote, "precondition");
+
+                first.Controller.Runtime.LoadMod(
+                    host, "hubfull", "local x = 1", StartupCapabilities | LuaCapabilities.Full);
+                first.Controller.PumpFrame(host, 1f / 60f);
+                await first.Controller.StartupRefreshForTests;
+
+                CollectionAssert.AreEqual(
+                    new[] { "0000000001.json", "0000000001.world" },
+                    FileNames(disk.StartupDirectory),
+                    "the confirmed entry stays the startup world");
+                StringAssert.Contains("Startup world not updated", first.Controller.StartupSelectionNote);
+                StringAssert.Contains("'hubfull'", first.Controller.StartupSelectionNote);
+
+                first.Controller.Runtime.UnloadMod(host, "hubfull");
+                first.Controller.PumpFrame(host, 1f / 60f);
+                await first.Controller.StartupRefreshForTests;
+
+                Assert.AreEqual("", first.Controller.StartupSelectionNote,
+                    "a later change that is recorded clears the note");
             });
         }
 

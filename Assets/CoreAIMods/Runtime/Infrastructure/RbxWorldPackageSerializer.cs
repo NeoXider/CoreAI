@@ -622,6 +622,13 @@ namespace CoreAI.Mods.WorldPackages
 
             IReadOnlyList<LuaModManifest> listed = sourceStore.List()
                 ?? throw new RbxWorldPackageException("The mod source store returned a nil manifest list.");
+            if (listed is UnreadableLuaModSourceListing unreadable)
+            {
+                // WHY: an empty answer here would capture the world without any of its mods, and a
+                // startup refresh would record that as the world that opens on the next start.
+                throw new RbxWorldPackageException(unreadable.Reason + " Capture aborted.");
+            }
+
             if (listed.Count > MaximumMods)
             {
                 throw new RbxWorldPackageFormatLimitException(
@@ -661,7 +668,15 @@ namespace CoreAI.Mods.WorldPackages
                         + loadedManifest.Id + "'; capture aborted.");
                 }
 
-                mods.Add(new RbxWorldModSource(CloneManifest(loadedManifest), source));
+                LuaModManifest captured = CloneManifest(loadedManifest);
+                if (captured.LoadOrder > LuaModManifest.MaximumLoadOrder)
+                {
+                    // WHY: only a hand-edited store holds such an order, every reader takes it for no
+                    // order, and a package that carried it would be refused on read.
+                    captured.LoadOrder = 0;
+                }
+
+                mods.Add(new RbxWorldModSource(captured, source));
             }
 
             return mods;
@@ -1294,6 +1309,18 @@ namespace CoreAI.Mods.WorldPackages
                         + mod.Manifest.Id + "' after '" + previousModId + "'.");
                 }
 
+                // WHY refused rather than followed (C2-08): no store records an order past 2^53 (it
+                // counts first loads), so only a hand-made package carries one, and once restored it
+                // made every later first load in that world tie at the saturated maximum.
+                if (mod.Manifest.LoadOrder > LuaModManifest.MaximumLoadOrder)
+                {
+                    throw new RbxWorldPackageException(
+                        "World package mod '" + mod.Manifest.Id + "' has load order "
+                        + mod.Manifest.LoadOrder.ToString(CultureInfo.InvariantCulture)
+                        + ", above the largest a mod store records ("
+                        + LuaModManifest.MaximumLoadOrder.ToString(CultureInfo.InvariantCulture) + ").");
+                }
+
                 previousModId = mod.Manifest.Id;
             }
         }
@@ -1785,7 +1812,8 @@ namespace CoreAI.Mods.WorldPackages
                 Active = source.Active,
                 UpdateAvailable = source.UpdateAvailable,
                 Entry = source.Entry ?? "main.lua",
-                LoadOrder = source.LoadOrder
+                LoadOrder = source.LoadOrder,
+                SuspendedAfterBudgetTrips = source.SuspendedAfterBudgetTrips
             };
         }
 

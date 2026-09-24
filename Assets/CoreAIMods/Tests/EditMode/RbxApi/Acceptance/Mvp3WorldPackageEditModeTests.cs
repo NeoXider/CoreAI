@@ -2958,6 +2958,428 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         /// <summary>
+        /// C2-04: a load whose source the store did not keep was undone by an ordinary unload after it
+        /// had loaded, so a formula of another live mod its chunk had displaced stayed removed (the slot
+        /// fell back to vanilla), and the undone mod kept its recorded revision. The check now runs
+        /// inside the load's commit and the failed-build rollback undoes it.
+        /// </summary>
+        [Test]
+        public async Task ModSourceLoad_StoreThatDoesNotKeepTheSource_PutsBackTheFormulaItDisplaced_AndRecordsNoRevision()
+        {
+            MemorySourceStore sources = new() { DroppedSaveId = "unkept" };
+            MemoryLuaScriptVersionStore versions = new();
+            using GatedHeadlessSession session = new(new ScriptedWorldPackageStore(), sources, versionStore: versions);
+            session.Controller.LogicSlots.DeclareSlot("dmg");
+            LocalActorIdentityProvider identity = new("drop-host");
+            ActorContext actor = identity.GetActorContext(BuiltInAgentRoleIds.Programmer);
+            LuaModsLlmTool tool = new(
+                session.Controller.Runtime,
+                new TestCoreAiSettings(),
+                NullLog.Instance,
+                SessionCapabilities,
+                true,
+                identity,
+                BuiltInAgentRoleIds.Programmer,
+                session.Gate);
+
+            JObject owner = JObject.Parse(await tool.ExecuteAsync(
+                "load", "owner", "logic_define('dmg', function() return 3 end)"));
+            JObject unkept = JObject.Parse(await tool.ExecuteAsync(
+                "load", "unkept", "logic_define('dmg', function() return 999 end)"));
+
+            Assert.IsTrue(owner.Value<bool>("success"), owner.ToString());
+            Assert.IsFalse(unkept.Value<bool>("success"), unkept.ToString());
+            StringAssert.Contains("did not keep its source", unkept.Value<string>("message"));
+            Assert.IsFalse(session.Controller.Runtime.IsLoaded(actor, "unkept"));
+            Assert.IsTrue(session.Controller.Runtime.IsLoaded(actor, "owner"));
+            Assert.IsTrue(session.Controller.LogicSlots.TryInvokeNumber("dmg", out double damage),
+                "the live owner's formula is back, not vanilla");
+            Assert.AreEqual(3d, damage);
+            CollectionAssert.IsEmpty(session.Controller.Runtime.ListModVersions(actor, "unkept"),
+                "a load that never happened records no revision");
+            Assert.AreEqual(1, session.Controller.Runtime.ListModVersions(actor, "owner").Count);
+        }
+
+        /// <summary>
+        /// C2-04 twin: a source the store keeps loads as before, once, with its revision, and the manifest
+        /// rewritten after the revision was recorded names that revision.
+        /// </summary>
+        [Test]
+        public void ModSourceLoad_StoreThatKeepsTheSource_LoadsWithOneRevision_AndItsVersion()
+        {
+            MemorySourceStore sources = new();
+            MemoryLuaScriptVersionStore versions = new();
+            using GatedHeadlessSession session = new(new ScriptedWorldPackageStore(), sources, versionStore: versions);
+            ActorContext actor = new LocalActorIdentityProvider("keep-host").GetActorContext(BuiltInAgentRoleIds.Programmer);
+            // WHY a header with an empty version: only then is the manifest version the revision count.
+            const string code = "--[[@coreai\nversion:\n]]\nlocal value = 1";
+
+            session.Controller.Runtime.LoadMod(actor, "kept", code, SessionCapabilities);
+
+            Assert.IsTrue(session.Controller.Runtime.IsLoaded(actor, "kept"));
+            Assert.AreEqual(1, session.Controller.Runtime.ListModVersions(actor, "kept").Count);
+            Assert.IsTrue(sources.TryLoad("kept", out string source, out LuaModManifest manifest));
+            Assert.AreEqual(code, source);
+            Assert.AreEqual("1", manifest.Version, "the manifest names the recorded revision");
+        }
+
+        /// <summary>
+        /// C2-07: the shared admission rule is a public seam, so a host's own source store can refuse a
+        /// new mod before it runs, with its own refusal, as the built-in file store does.
+        /// </summary>
+        [Test]
+        public void HostSourceStoreWithAdmission_RefusesANewModBeforeItRuns()
+        {
+            Assert.IsTrue(typeof(ILuaModSourceAdmission).IsPublic, "a host store must be able to implement it");
+            FixedSourceStore sources = new() { RefusedId = "blocked" };
+            using GatedHeadlessSession session = new(new ScriptedWorldPackageStore(), sources);
+            ActorContext actor = new LocalActorIdentityProvider("admission-host").GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            RbxWorldPackageFormatLimitException refused = Assert.Throws<RbxWorldPackageFormatLimitException>(() =>
+                session.Controller.Runtime.LoadMod(
+                    actor,
+                    "blocked",
+                    "local ran = Instance.new('Folder') ran.Name = 'BlockedRan' ran.Parent = workspace",
+                    SessionCapabilities));
+
+            Assert.AreEqual(FixedSourceStore.Refusal, refused.Message);
+            Assert.IsNull(session.Controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("BlockedRan"),
+                "the refused mod never ran");
+        }
+
+        /// <summary>
+        /// C2-05: a host that composes its own gate around the built-in one kept the gate but lost the
+        /// startup world: the controller reached the refresh, the boot-time restore under the gate and
+        /// the pump's "gate held" check only through the concrete gate type. A host gate that forwards
+        /// <see cref="IStartupAwareWorldMutationGate"/> keeps all three.
+        /// </summary>
+        [Test]
+        public async Task HostGateForwardingTheStartupFace_RecordsGatedChanges_AndSerializesTheBootRestore()
+        {
+            RbxWorldPackagePayload selected = CreatePayloadWithFolder("RestoredWorldMarker");
+            ScriptedStartupWorldPackageStore packages = new(selected) { HoldNextStartupRead = true };
+            ForwardingHostGate hostGate = null;
+            using GatedHeadlessSession session = new(
+                packages,
+                new RecordingTransactionalSourceStore(),
+                gateDecorator: inner => hostGate = new ForwardingHostGate(inner));
+            LocalActorIdentityProvider identity = new("host-gate-actor");
+            LuaModsLlmTool tool = new(
+                session.Controller.Runtime,
+                new TestCoreAiSettings(),
+                NullLog.Instance,
+                SessionCapabilities,
+                true,
+                identity,
+                BuiltInAgentRoleIds.Programmer,
+                session.SharedGate);
+
+            UniTask<RbxWorldStartupRestoreResult> restoring = session.Controller.RestoreStartupSelectionAsync();
+            Task<string> loading = tool.ExecuteAsync("load", "bootmod", "local value = 1");
+            CollectionAssert.IsEmpty(packages.AutoTriggers,
+                "the mod change waits for the boot restore behind the host's gate");
+            packages.ReleaseHeldStartupRead();
+            RbxWorldStartupRestoreResult restored = await restoring;
+            JObject loaded = JObject.Parse(await loading);
+            LuaTool.LuaResult built = await session.Controller.Executor.ExecuteAsync(
+                "local work = Instance.new('Folder') work.Name = 'HostGateWork' work.Parent = workspace return true",
+                CancellationToken.None);
+
+            Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+            Assert.IsTrue(loaded.Value<bool>("success"), loaded.ToString());
+            Assert.IsTrue(built.Success, built.Error);
+            Assert.AreEqual(2, hostGate.Mutations, "both changes went through the host's gate");
+            Assert.AreEqual(2, packages.SelectedPayloads.Count, "the mod change and the world change are recorded");
+            CollectionAssert.AreEqual(new[] { "bootmod" }, ModIdsOf(packages.SelectedPayloads[0]));
+            Assert.IsNotNull(FindNodeOrNull(packages.SelectedPayloads[1], "HostGateWork"));
+            CollectionAssert.IsEmpty(session.Diagnostics);
+        }
+
+        /// <summary>
+        /// C2-05 fallback: a host gate without the startup face is reported once when the controller is
+        /// composed, the boot restore still restores, and a mod source change made outside the gate is
+        /// still recorded from the frame pump.
+        /// </summary>
+        [Test]
+        public async Task HostGateWithoutTheStartupFace_IsReportedOnce_AndSourceChangesAreStillRecordedFromThePump()
+        {
+            RbxWorldPackagePayload selected = CreatePayloadWithFolder("RestoredWorldMarker");
+            ScriptedStartupWorldPackageStore packages = new(selected);
+            using GatedHeadlessSession session = new(
+                packages,
+                new RecordingTransactionalSourceStore(),
+                gateDecorator: inner => new PlainHostGate(inner));
+            Assert.AreEqual(1, session.Diagnostics.Count, string.Join(" | ", session.Diagnostics));
+            StringAssert.Contains("IStartupAwareWorldMutationGate", session.Diagnostics[0]);
+            ActorContext host = CoreAI.Composition.CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            RbxWorldStartupRestoreResult restored = await session.Controller.RestoreStartupSelectionAsync();
+            session.Controller.Runtime.LoadMod(host, "hubmod", "local value = 1", SessionCapabilities);
+            int recordedBeforeTheFrame = packages.SelectedPayloads.Count;
+            session.Controller.PumpFrame(host, 1f / 60f);
+            await session.Controller.StartupRefreshForTests;
+
+            Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+            Assert.AreEqual(0, recordedBeforeTheFrame, "nothing is recorded in the middle of a change");
+            Assert.AreEqual(1, packages.SelectedPayloads.Count);
+            CollectionAssert.AreEqual(new[] { "hubmod" }, ModIdsOf(packages.SelectedPayloads[0]));
+            Assert.AreEqual(1, session.Diagnostics.Count,
+                "the fallback is reported once, not per change: " + string.Join(" | ", session.Diagnostics));
+        }
+
+        /// <summary>
+        /// C2-03: the refresh after a gated mutation follows what the mutation changed, and the gate
+        /// reports no end for a mutation that throws. A world change such a mutation made before it
+        /// threw is recorded by the next frame instead of being left out until the next change.
+        /// </summary>
+        [Test]
+        public async Task GatedMutationThatThrows_TheWorldChangeItMadeIsRecordedByTheNextFrame()
+        {
+            RbxWorldPackagePayload selected = CreatePayloadWithFolder("RestoredWorldMarker");
+            ScriptedStartupWorldPackageStore packages = new(selected);
+            using GatedHeadlessSession session = new(packages, new RecordingTransactionalSourceStore());
+            ActorContext host = CoreAI.Composition.CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            RbxWorldStartupRestoreResult restored = await session.Controller.RestoreStartupSelectionAsync();
+            InstanceRegistry live = session.Controller.CurrentRbxApi.Registry;
+            InvalidOperationException thrown = null;
+
+            try
+            {
+                await session.Gate.ExecuteAsync(
+                    "host_change",
+                    new Func<CancellationToken, Task<bool>>(token =>
+                    {
+                        RbxInstance work = live.Create("Folder");
+                        work.Name = "ThrownWork";
+                        work.Parent = live.WorldRoot;
+                        throw new InvalidOperationException("the host mutation failed after its change");
+                    }),
+                    CancellationToken.None);
+            }
+            catch (InvalidOperationException ex)
+            {
+                thrown = ex;
+            }
+
+            int recordedAfterTheThrow = packages.SelectedPayloads.Count;
+            session.Controller.PumpFrame(host, 1f / 60f);
+            await session.Controller.StartupRefreshForTests;
+
+            Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+            Assert.IsNotNull(thrown, "precondition: the mutation threw");
+            Assert.AreEqual(0, recordedAfterTheThrow);
+            Assert.AreEqual(1, packages.SelectedPayloads.Count, "the next frame records the change");
+            Assert.IsNotNull(FindNodeOrNull(packages.SelectedPayloads[0], "ThrownWork"));
+        }
+
+        /// <summary>HUB-RELOAD follow-up H2: the world session facade forwards the reload mode to the live runtime.</summary>
+        [Test]
+        public void Reload_ThroughTheWorldSessionFacade_HonoursTheMode()
+        {
+            using GatedHeadlessSession session = new(new ScriptedWorldPackageStore(), new RecordingTransactionalSourceStore());
+            ActorContext actor = new LocalActorIdentityProvider("reload-host").GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ILuaModRuntime facade = session.Controller.Runtime;
+            const string castle = "local root = Instance.new('Folder') root.Name = 'Castle' root.Parent = workspace";
+            facade.LoadMod(actor, "castle", castle, SessionCapabilities, false);
+
+            ModReloadReport kept = facade.ReloadMod(actor, "castle", castle + "\n-- keep", ModReloadMode.KeepObjects);
+            int castlesAfterKeep = CountChildrenNamed(session.Controller.CurrentRbxApi.Registry.WorldRoot, "Castle");
+            ModReloadReport cleaned = facade.ReloadMod(
+                actor, "castle", castle + "\n-- clean", ModReloadMode.CleanStartupObjects);
+
+            Assert.IsNotNull(kept, "the facade must forward the member, not fall back to the interface default");
+            Assert.AreEqual(ModReloadMode.KeepObjects, kept.Mode);
+            Assert.AreEqual(1, kept.KeptObjects);
+            Assert.AreEqual(2, castlesAfterKeep);
+            Assert.AreEqual(ModReloadMode.CleanStartupObjects, cleaned.Mode);
+            Assert.AreEqual(2, cleaned.CleanedObjects, "both kept runs' castles");
+            Assert.AreEqual(1, CountChildrenNamed(session.Controller.CurrentRbxApi.Registry.WorldRoot, "Castle"));
+        }
+
+        private static int CountChildrenNamed(RbxInstance parent, string name)
+        {
+            int count = 0;
+            foreach (RbxInstance child in parent.GetChildren())
+            {
+                if (child.Name == name)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>HUB-RELOAD follow-up H4: a world package keeps a mod's budget-trip suspension.</summary>
+        [Test]
+        public void Package_RoundTripAndCapture_KeepSuspendedAfterBudgetTrips()
+        {
+            RbxWorldPackagePayload payload = WithMods(
+                CreateMinimalPayload(CapturedAtUtc),
+                new RbxWorldModSource(
+                    new LuaModManifest { Id = "spinner", Name = "spinner", Active = false, SuspendedAfterBudgetTrips = true },
+                    "local x = 1"),
+                new RbxWorldModSource(new LuaModManifest { Id = "steady", Name = "steady", Active = true }, "local y = 1"));
+
+            RbxWorldPackagePayload read = RbxWorldPackageSerializer.ReadPackage(RbxWorldPackageSerializer.WritePackage(payload));
+
+            Assert.IsTrue(read.Mods[0].Manifest.SuspendedAfterBudgetTrips, "the suspension survives the package");
+            Assert.IsFalse(read.Mods[0].Manifest.Active);
+            Assert.IsFalse(read.Mods[1].Manifest.SuspendedAfterBudgetTrips);
+
+            FixedSourceStore sources = new();
+            sources.Save("spinner", "local x = 1", payload.Mods[0].Manifest);
+            RbxWorldPackagePayload captured = CaptureFrom(sources);
+            Assert.IsTrue(captured.Mods[0].Manifest.SuspendedAfterBudgetTrips, "and a capture of the store");
+        }
+
+        /// <summary>
+        /// C2-08: an order past 2^53 can only come from a hand-made package, and once restored it made
+        /// every later first load in that world tie at the saturated maximum. A package carrying one is
+        /// refused on read; a capture of a hand-edited store writes such an order as no order.
+        /// </summary>
+        [Test]
+        public void Package_ModLoadOrderPastTheMaximum_IsRefusedOnRead_AndCapturedAsUnordered()
+        {
+            RbxWorldPackagePayload atMaximum = WithMods(
+                CreateMinimalPayload(CapturedAtUtc),
+                new RbxWorldModSource(
+                    new LuaModManifest { Id = "edge", Name = "edge", LoadOrder = LuaModManifest.MaximumLoadOrder },
+                    "local x = 1"));
+            Assert.AreEqual(LuaModManifest.MaximumLoadOrder,
+                RbxWorldPackageSerializer.ReadPackage(RbxWorldPackageSerializer.WritePackage(atMaximum))
+                    .Mods[0].Manifest.LoadOrder,
+                "the largest recorded order round-trips");
+            byte[] planted = ReplaceEntryText(
+                RbxWorldPackageSerializer.WritePackage(atMaximum),
+                "Mods/0000/manifest.json",
+                "\"LoadOrder\": " + LuaModManifest.MaximumLoadOrder.ToString(CultureInfo.InvariantCulture),
+                "\"LoadOrder\": " + long.MaxValue.ToString(CultureInfo.InvariantCulture));
+
+            RbxWorldPackageException refused = Assert.Throws<RbxWorldPackageException>(
+                () => RbxWorldPackageSerializer.ReadPackage(planted));
+            StringAssert.Contains("'edge' has load order " + long.MaxValue.ToString(CultureInfo.InvariantCulture),
+                refused.Message);
+
+            FixedSourceStore sources = new();
+            sources.Save("edge", "local x = 1",
+                new LuaModManifest { Id = "edge", Name = "edge", Active = true, LoadOrder = long.MaxValue });
+            RbxWorldPackagePayload captured = CaptureFrom(sources);
+            Assert.AreEqual(0L, captured.Mods[0].Manifest.LoadOrder);
+            Assert.DoesNotThrow(() => RbxWorldPackageSerializer.ReadPackage(RbxWorldPackageSerializer.WritePackage(captured)),
+                "a world captured from such a store still saves and loads");
+        }
+
+        /// <summary>
+        /// A store that could not list its mods answered an empty list, so a capture saved the world
+        /// without any of them, and a startup refresh recorded that as the world of the next start.
+        /// </summary>
+        [Test]
+        public void Capture_FromAStoreThatCannotBeListed_IsRefused_NotSavedWithoutItsMods()
+        {
+            FixedSourceStore sources = new();
+            sources.Save("kept", "local x = 1", new LuaModManifest { Id = "kept", Name = "kept", Active = true });
+            sources.Listing = new UnreadableLuaModSourceListing("The test store's folder is gone.");
+
+            RbxWorldPackageException refused = Assert.Throws<RbxWorldPackageException>(() => CaptureFrom(sources));
+
+            StringAssert.Contains("The test store's folder is gone.", refused.Message);
+        }
+
+        private RbxWorldPackagePayload CaptureFrom(ILuaModSourceStore sources)
+        {
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            return RbxWorldPackageSerializer.Capture(new RbxWorldPackageCaptureContext(
+                registry,
+                game,
+                new InMemoryPartPropertySink(),
+                NewSettings(),
+                modSourceStore: sources,
+                capturedAtUtc: CapturedAtUtc));
+        }
+
+        /// <summary>
+        /// An in-memory source store that answers exactly what the test gave it, can answer a listing the
+        /// test sets instead, and refuses one id through the shared admission rule.
+        /// </summary>
+        private sealed class FixedSourceStore : ILuaModSourceStore, ILuaModSourceAdmission
+        {
+            public const string Refusal = "This host store keeps no mod called 'blocked'.";
+
+            private readonly Dictionary<string, KeyValuePair<string, LuaModManifest>> _mods = new(StringComparer.Ordinal);
+
+            /// <summary>When set, <see cref="List"/> answers it instead of the stored manifests.</summary>
+            public IReadOnlyList<LuaModManifest> Listing { get; set; }
+
+            /// <summary>An id the store refuses to keep, in Save and in the admission check.</summary>
+            public string RefusedId { get; set; }
+
+            public void Save(string id, string source, LuaModManifest manifest)
+            {
+                if (string.Equals(id, RefusedId, StringComparison.Ordinal))
+                {
+                    throw new RbxWorldPackageFormatLimitException(Refusal);
+                }
+
+                _mods[id] = new KeyValuePair<string, LuaModManifest>(source, manifest);
+            }
+
+            public bool TryLoad(string id, out string source, out LuaModManifest manifest)
+            {
+                if (_mods.TryGetValue(id ?? "", out KeyValuePair<string, LuaModManifest> entry))
+                {
+                    source = entry.Key;
+                    manifest = entry.Value;
+                    return true;
+                }
+
+                source = "";
+                manifest = null;
+                return false;
+            }
+
+            public IReadOnlyList<LuaModManifest> List()
+            {
+                if (Listing != null)
+                {
+                    return Listing;
+                }
+
+                List<LuaModManifest> manifests = new(_mods.Count);
+                foreach (KeyValuePair<string, LuaModManifest> entry in _mods.Values)
+                {
+                    manifests.Add(entry.Value);
+                }
+
+                return manifests;
+            }
+
+            public void SetActive(string id, bool active)
+            {
+                if (_mods.TryGetValue(id ?? "", out KeyValuePair<string, LuaModManifest> entry))
+                {
+                    entry.Value.Active = active;
+                }
+            }
+
+            public void Delete(string id)
+            {
+                _mods.Remove(id ?? "");
+            }
+
+            public bool CanAdmit(string modId, out string refusal)
+            {
+                bool refused = string.Equals(modId, RefusedId, StringComparison.Ordinal);
+                refusal = refused ? Refusal : "";
+                return !refused;
+            }
+        }
+
+        /// <summary>
         /// A1-08: a package the confirmed load would refuse (an active Full-capability mod, or a session
         /// whose source store cannot replace a source set) used to be queued, so the player was asked to
         /// confirm a load that could only fail. It is refused at request time as invalid_package.
@@ -4803,10 +5225,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         /// </summary>
         private sealed class GatedHeadlessSession : IDisposable
         {
+            /// <param name="versionStore">The revision history every session stack records into; none by default.</param>
+            /// <param name="gateDecorator">
+            /// Wraps the shared gate the stacks see, the way a host composes its own gate around the
+            /// built-in one; <see cref="Gate"/> stays the built-in gate.
+            /// </param>
             public GatedHeadlessSession(
                 IRbxWorldPackageStore packageStore,
                 ILuaModSourceStore sourceStore,
-                INetworkBridge networkBridge = null)
+                INetworkBridge networkBridge = null,
+                ILuaScriptVersionStore versionStore = null,
+                Func<ConfirmedWorldMutationGate, IConfirmedWorldMutationGate> gateDecorator = null)
             {
                 InstanceRegistry registry = new(worldId: WorldId);
                 RbxDataModel game = DataModelBootstrap.CreateGame(registry);
@@ -4825,11 +5254,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 Gate = new ConfirmedWorldMutationGate(
                     cancellationToken => UniTask.FromResult(Controller.CaptureCurrent()),
                     packageStore);
+                SharedGate = gateDecorator == null ? Gate : gateDecorator(Gate);
                 Controller = new RbxWorldRuntimeSessionController(
                     host,
                     packageStore,
                     sourceStore,
-                    CreateStack(rbxApi, sourceStore, new Mvp1AcceptanceMemoryStore(), null),
+                    CreateStack(rbxApi, sourceStore, new Mvp1AcceptanceMemoryStore(), versionStore),
                     rbxApi,
                     (candidate, stagedNetwork) => new LuaCsRbxApiBindings(
                         candidate.Registry,
@@ -4843,11 +5273,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     SessionCapabilities,
                     false,
                     new Mvp1AcceptanceMemoryStore(),
-                    null,
+                    versionStore,
                     message => Diagnostics.Add(message));
             }
 
             public ConfirmedWorldMutationGate Gate { get; }
+
+            /// <summary>The gate every session stack runs its mutations through: <see cref="Gate"/>, or the host's wrapper of it.</summary>
+            public IConfirmedWorldMutationGate SharedGate { get; }
 
             public RbxWorldRuntimeSessionController Controller { get; }
 
@@ -4873,9 +5306,75 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     Capabilities = SessionCapabilities,
                     OneOffCapabilities = SessionCapabilities,
                     RbxApi = rbxApi,
-                    WorldMutationGate = Gate,
+                    WorldMutationGate = SharedGate,
                     RegisterWorldEditBuildBindings = false
                 });
+            }
+        }
+
+        /// <summary>
+        /// A host's own gate around the built-in one that forwards the startup-aware members, as the
+        /// <see cref="IStartupAwareWorldMutationGate"/> contract asks of a wrapper; it counts the mutations
+        /// it passed on.
+        /// </summary>
+        private sealed class ForwardingHostGate : IStartupAwareWorldMutationGate
+        {
+            private readonly ConfirmedWorldMutationGate _inner;
+
+            public ForwardingHostGate(ConfirmedWorldMutationGate inner)
+            {
+                _inner = inner;
+            }
+
+            public int Mutations { get; private set; }
+
+            public bool IsHeld => _inner.IsHeld;
+
+            public Action<string> MutationStarting
+            {
+                get => _inner.MutationStarting;
+                set => _inner.MutationStarting = value;
+            }
+
+            public Func<string, CancellationToken, UniTask<string>> AfterMutationAsync
+            {
+                get => _inner.AfterMutationAsync;
+                set => _inner.AfterMutationAsync = value;
+            }
+
+            public Task<TResult> ExecuteAsync<TResult>(
+                string trigger,
+                Func<CancellationToken, Task<TResult>> mutationAsync,
+                CancellationToken cancellationToken)
+            {
+                Mutations++;
+                return _inner.ExecuteAsync(trigger, mutationAsync, cancellationToken);
+            }
+
+            public Task<TResult> ExecuteWithoutBackupAsync<TResult>(
+                Func<CancellationToken, Task<TResult>> operationAsync,
+                CancellationToken cancellationToken)
+            {
+                return _inner.ExecuteWithoutBackupAsync(operationAsync, cancellationToken);
+            }
+        }
+
+        /// <summary>A host's own gate around the built-in one that knows only <see cref="IConfirmedWorldMutationGate"/>.</summary>
+        private sealed class PlainHostGate : IConfirmedWorldMutationGate
+        {
+            private readonly IConfirmedWorldMutationGate _inner;
+
+            public PlainHostGate(IConfirmedWorldMutationGate inner)
+            {
+                _inner = inner;
+            }
+
+            public Task<TResult> ExecuteAsync<TResult>(
+                string trigger,
+                Func<CancellationToken, Task<TResult>> mutationAsync,
+                CancellationToken cancellationToken)
+            {
+                return _inner.ExecuteAsync(trigger, mutationAsync, cancellationToken);
             }
         }
 

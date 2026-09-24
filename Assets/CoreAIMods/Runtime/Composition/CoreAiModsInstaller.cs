@@ -305,61 +305,10 @@ namespace CoreAI.Composition
                     RegisterWorldEditBuildBindings = false
                 });
 
-                // WHY (audit H1): an unloaded mod must not leak the Rbx instances or scheduled threads it
-                // created, nor keep its signal connections firing after teardown. This single
-                // ModTearingDown handler stops threads and connections before the instance sweep, so no
-                // surviving execution can observe a just-destroyed instance during the sweep.
-                //
-                // Connections: mod-owned Connect/Once handles are Disconnected on EVERY reason — Unload,
-                // Reload, AND Quarantine — because unlike instances the re-run chunk re-Connects fresh
-                // handlers on reload, so the stale ones must always be dropped. Disconnect is idempotent.
-                //
-                // Instances: swept only on UNLOAD — NOT on Reload (same owner id — the replacement keeps
-                // them) nor Quarantine (objects must survive the auto-repair reload). GetOwnedBy returns a
-                // snapshot, so destroying while it prunes the registry is safe; RbxInstance.Destroy() is
-                // idempotent.
-                {
-                    Mods.Rbx.Instances.ModConnectionRegistry ownedConnections = rbxApi?.Connections;
-                    Mods.Rbx.Instances.InstanceRegistry ownedRegistry = rbxApi?.Registry;
-                    Logging.ILog teardownLog = c.ResolveOrDefault<Logging.ILog>();
-                    luaCsStack.Runtime.ModTearingDown += (modId, reason) =>
-                    {
-                        // WHY: on RELOAD the replacement chunk has ALREADY re-Connected (BuildMod runs
-                        // before this teardown), so only the outgoing chunk's connections are dropped here,
-                        // not the new generation's; Unload/Quarantine have no new chunk, so everything goes.
-                        if (reason == LuaModTeardownReason.Reload)
-                        {
-                            rbxApi?.KillOutgoingScheduledGenerations(modId);
-                        }
-                        else
-                        {
-                            rbxApi?.KillAllScheduledOwnedBy(modId);
-                        }
-
-                        ownedConnections?.DisconnectOwnedBy(
-                            modId, reason == LuaModTeardownReason.Reload);
-
-                        if (ownedRegistry == null || reason != LuaModTeardownReason.Unload)
-                        {
-                            return;
-                        }
-
-                        foreach (Mods.Rbx.Instances.RbxInstance owned in
-                                 ownedRegistry.GetTeardownOwnedBy(modId))
-                        {
-                            try
-                            {
-                                owned?.Destroy();
-                            }
-                            catch (System.Exception ex)
-                            {
-                                teardownLog?.Warn(
-                                    $"[CoreAiMods] Destroying an instance owned by unloaded mod '{modId}' failed: {ex.Message}");
-                            }
-                        }
-                    };
-                }
-
+                // WHY no ModTearingDown teardown here: LuaCsModRuntimeFactory.Create wires the release of
+                // a mod run's threads, connections and (on unload) instances into every stack it builds
+                // with an Rbx API, this one and every session stack alike, and runs it after all
+                // ModTearingDown subscribers.
                 return new InitialLuaWorldSession(
                     luaCsStack,
                     rbxApi,
@@ -918,45 +867,14 @@ namespace CoreAI.Composition
             return stack;
         }
 
+        /// <summary>
+        /// The session controller's per-stack teardown hook. Empty: every session stack comes from
+        /// <see cref="LuaCsModRuntimeFactory.Create"/> with its Rbx API, which already wires the teardown.
+        /// </summary>
         private static void WireSessionTeardown(
             LuaCsModStack stack,
             LuaCsRbxApiBindings rbxApi)
         {
-            ModConnectionRegistry ownedConnections = rbxApi.Connections;
-            InstanceRegistry ownedRegistry = rbxApi.Registry;
-            stack.Runtime.ModTearingDown += (modId, reason) =>
-            {
-                if (reason == LuaModTeardownReason.Reload)
-                {
-                    rbxApi.KillOutgoingScheduledGenerations(modId);
-                }
-                else
-                {
-                    rbxApi.KillAllScheduledOwnedBy(modId);
-                }
-
-                ownedConnections.DisconnectOwnedBy(
-                    modId,
-                    reason == LuaModTeardownReason.Reload);
-                if (reason != LuaModTeardownReason.Unload)
-                {
-                    return;
-                }
-
-                foreach (RbxInstance owned in ownedRegistry.GetTeardownOwnedBy(modId))
-                {
-                    try
-                    {
-                        owned?.Destroy();
-                    }
-                    catch (System.Exception ex)
-                    {
-                        Logging.Log.Instance.Warn(
-                            "[CoreAiMods] Destroying a teardown-owned instance failed: "
-                                + ex.Message);
-                    }
-                }
-            };
         }
 
         private static void BindPersistedActorAttribution(
@@ -1082,6 +1000,14 @@ namespace CoreAI.Composition
                 string modId = NormalizeModId(id);
                 PrepareExistingOwner(caller, modId);
                 _inner.ReloadMod(caller, id, luaCode);
+            }
+
+            public ModReloadReport ReloadMod(ActorContext caller, string id, string luaCode,
+                ModReloadMode mode)
+            {
+                string modId = NormalizeModId(id);
+                PrepareExistingOwner(caller, modId);
+                return _inner.ReloadMod(caller, id, luaCode, mode);
             }
 
             public bool UnloadMod(ActorContext caller, string id)

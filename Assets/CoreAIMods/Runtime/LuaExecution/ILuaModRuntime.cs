@@ -26,8 +26,28 @@ namespace CoreAI.Ai
         /// <summary>Returns the durable owner id, empty for host/system, or null when the mod is unknown.</summary>
         string GetModOwnerActorId(ActorContext caller, string id);
 
-        /// <summary>Replaces a loaded mod's code, keeping its granted capabilities.</summary>
+        /// <summary>
+        /// Replaces a loaded mod's code, keeping its granted capabilities, in the runtime's default
+        /// <see cref="ModReloadMode"/> (<see cref="ModReloadMode.CleanStartupObjects"/> for the
+        /// Lua-CSharp runtime).
+        /// </summary>
         void ReloadMod(ActorContext caller, string id, string luaCode);
+
+        /// <summary>
+        /// Replaces a loaded mod's code in <paramref name="mode"/> and answers what the reload did with
+        /// the startup objects of the run it replaced; null when the runtime cannot tell.
+        /// </summary>
+        /// <remarks>
+        /// A wrapper around another <see cref="ILuaModRuntime"/> (a world-session facade, an attribution
+        /// facade) must forward this member, or the mode is lost on the way. The default is for a runtime
+        /// that tracks no startup objects: it runs its only reload,
+        /// <see cref="ReloadMod(ActorContext, string, string)"/>, and answers null.
+        /// </remarks>
+        ModReloadReport ReloadMod(ActorContext caller, string id, string luaCode, ModReloadMode mode)
+        {
+            ReloadMod(caller, id, luaCode);
+            return null;
+        }
 
         /// <summary>Unloads a mod (persisted state, if any, goes dormant). False if it was not loaded.</summary>
         bool UnloadMod(ActorContext caller, string id);
