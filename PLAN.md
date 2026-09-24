@@ -61,7 +61,12 @@ MVP4 (RBXL import/export) starts only after MVP3 is closed, verified in Unity an
 - [x] W4 landed: FILLER (c6392287), CORE-C registry admission + Humanoid clone + RootPart ends MoveTo (6be0c46f),
       AB-2 typeof/warn/stubs, ClickDetector, GetServerTimeNow slew, os.time(table) (5fdfbf17).
 - [x] DOCS-1 landed (984c053f): docs/TODO/CHANGELOG for everything up to f1b8bbb5; MVP3 "code complete, Unity gate pending".
-- [ ] W5C in progress: runtime wiring (M2-24 unload on disconnect, warn -> mod log, tween RootPart ends MoveTo, stale
-      comments) and Lua kick message + ModActorLedger move + tag doc comments. Then DOCS-2, then 3 audit rounds.
-- [ ] Portable Lua-tier EditMode runner (tools/portable/LuaTests) in progress, so Lua binding tests really run on Linux.
+- [x] W5C landed: disconnect unloads the actor's mods after its code returns, warn -> mod log, tweened root ends MoveTo
+      (c233c9cf); Lua kick message to the client, server/solo clock without drift, ModActorLedger in the bindings (0e51e982).
+- [x] pcall/xpcall/coroutine.resume get only the error line, no C# stack trace or machine paths (0321448a).
+- [ ] W6 in progress: remaining error-text leaks (sandbox caps, guard trips, scheduler double prefix), runtime tails
+      (failed-load attribution leak, quarantined mods on disconnect, LoadMod self-kick, logic-slot depth), unlocking
+      RbxApiLuaBindings tests on Linux. Then DOCS-2, then 3 audit rounds.
+- [x] Portable Lua-tier EditMode runner (tools/portable/LuaTests, 1459086c): Lua-tier EditMode fixtures run on Linux
+      and in CI (job portable-lua); at 0e51e982: 1237 passed / 0 failed.
 
