@@ -494,14 +494,18 @@ namespace CoreAI.Tests.EditMode
         /// <paramref name="rows"/>, and <c>echo(...)</c> returns its arguments (an xpcall handler). Returns the
         /// Lua error that ended the run, or null when the chunk returned.
         /// </summary>
+        /// <param name="liveResumeBudget">
+        /// The state's raw-coroutine budget settings (see <see cref="LuaCsSecureEnvironment.Create"/>); null keeps
+        /// CoreAI's defaults.
+        /// </param>
         internal static LuaRuntimeException RunRecordingChunk(string chunk, LuaCsExecutionGuard guard,
-            List<string> rows)
+            List<string> rows, LuaCsCoroutineBudgetSettings liveResumeBudget = null)
         {
             LuaCsSecureEnvironment env = new();
             // WHY a fresh state per run: its record() writes into this call's rows and nowhere else. Reusing a
             // state after a trip has its own test, UncaughtTrip_LeavesTheStateGuarded_* in
             // LuaCsGuardFrameAndAllocationEditModeTests.
-            LuaState state = CreateRecordingState(env, rows);
+            LuaState state = CreateRecordingState(env, rows, liveResumeBudget);
             try
             {
                 env.RunChunk(state, chunk, guard);
@@ -517,7 +521,14 @@ namespace CoreAI.Tests.EditMode
         /// A sandboxed state carrying the <c>record(...)</c> and <c>echo(...)</c> host functions described on
         /// <see cref="RunRecordingChunk"/>.
         /// </summary>
-        internal static LuaState CreateRecordingState(LuaCsSecureEnvironment env, List<string> rows)
+        /// <param name="env">The environment that builds the state.</param>
+        /// <param name="rows">Where <c>record(...)</c> writes.</param>
+        /// <param name="liveResumeBudget">
+        /// The state's raw-coroutine budget settings (see <see cref="LuaCsSecureEnvironment.Create"/>); null keeps
+        /// CoreAI's defaults.
+        /// </param>
+        internal static LuaState CreateRecordingState(LuaCsSecureEnvironment env, List<string> rows,
+            LuaCsCoroutineBudgetSettings liveResumeBudget = null)
         {
             LuaCsApiRegistry registry = new();
             registry.RegisterCallback("record", (ctx, ct) =>
@@ -534,7 +545,25 @@ namespace CoreAI.Tests.EditMode
             });
             registry.RegisterCallback("echo", (ctx, ct) =>
                 new System.Threading.Tasks.ValueTask<int>(ctx.Return(ctx.Arguments.ToArray())));
-            return env.Create(registry);
+            return env.Create(registry, liveResumeBudget);
+        }
+
+        /// <summary>
+        /// Raw-coroutine budget settings with CoreAI's default step budget and a wall-clock allowance no host load
+        /// reaches: a raw <c>coroutine.resume</c> gets
+        /// <see cref="LuaCsSecureEnvironment.RawCoroutineResumeTimeoutMultiplier"/> times 30 s, 60 s, instead of the
+        /// default 1 s. For a test whose raw coroutines do work that is not about the time budget and whose guard
+        /// already allows its run a minute.
+        /// </summary>
+        /// <remarks>
+        /// WHY: the 1 s default is wall time, and on a loaded host (four cores shared with several test processes)
+        /// the 80 MB body of RawCoroutineResume_UnderAResumerWithTheDefaultBudget_KeepsItsEightyMegabytes, about
+        /// 0.4 s idle, crossed it and was cut partway with "Lua coroutine resume exceeded 1000 ms.": a budget that
+        /// test does not measure, failing it as if the allocation budget had.
+        /// </remarks>
+        internal static LuaCsCoroutineBudgetSettings UnhurriedRawResumes()
+        {
+            return new LuaCsCoroutineBudgetSettings(LuaCsCoroutineHandle.DefaultBudgetPerResume, 30_000);
         }
 
         [Test]
@@ -1361,20 +1390,16 @@ namespace CoreAI.Tests.EditMode
             // its wall time depends on the host, so the capped run is timed against the same shape failing on its
             // own at 150 levels on the same host. Capped, the ratio is about (200/150)^2 = 1.8; uncapped at 1,000
             // it was about (1000/150)^2 = 44.
+            string referenceChunk = CStackPrelude(150) + shape;
+            string cappedChunk = CStackPrelude(1000) + shape + "\nrecord(maxDepth)";
             List<string> reference = new();
-            System.Diagnostics.Stopwatch referenceClock = System.Diagnostics.Stopwatch.StartNew();
-            Assert.IsNull(RunRecordingChunk(CStackPrelude(150) + shape, new LuaCsExecutionGuard(60_000, 50_000_000, 0),
-                reference));
-            referenceClock.Stop();
+            long referenceMs = TimeCStackRun(referenceChunk, reference, out LuaRuntimeException referenceEnded);
+            Assert.IsNull(referenceEnded, referenceEnded?.Message);
             Assert.AreEqual(new[] { "boolean:false|string:mod cap" }, reference.ToArray(),
                 "the reference run fails on the mod's own cap, below the C-stack limit");
 
             List<string> rows = new();
-            System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
-            LuaRuntimeException ended = RunRecordingChunk(
-                CStackPrelude(1000) + shape + "\nrecord(maxDepth)",
-                new LuaCsExecutionGuard(60_000, 50_000_000, 0), rows);
-            clock.Stop();
+            long cappedMs = TimeCStackRun(cappedChunk, rows, out LuaRuntimeException ended);
 
             Assert.IsNull(ended, "the error is an ordinary one that pcall catches: " + ended?.Message);
             Assert.AreEqual(2, rows.Count, string.Join(" / ", rows));
@@ -1385,9 +1410,89 @@ namespace CoreAI.Tests.EditMode
             AssertIsOnlyTheErrorLine(expectedLine);
             Assert.AreEqual("number:" + deepestLuaLevel, rows[1],
                 "the nesting stops at the limit, not at the mod's own cap of 1,000");
-            Assert.Less(clock.ElapsedMilliseconds, 4 * referenceClock.ElapsedMilliseconds + 250,
-                "the capped nesting must unwind about as fast as 150 levels do (" + referenceClock.ElapsedMilliseconds
-                + " ms), not quadratically in the mod's own depth");
+            AssertCappedNestingUnwindsLikeItsReference(referenceMs, cappedMs,
+                () => RunCStackChunkAgain(referenceChunk, reference),
+                () => RunCStackChunkAgain(cappedChunk, rows));
+        }
+
+        /// <summary>How many times each C-stack shape is timed; the fastest run of each is what is compared.</summary>
+        internal const int CStackTimingRounds = 3;
+
+        /// <summary>
+        /// The timing half of every C-stack test: fails unless a nesting stopped at
+        /// <see cref="LuaCsSecureEnvironment.MaxCCallDepth"/> unwinds about as fast as a reference run of the same
+        /// shape that fails on the mod's own cap below it, i.e. capped &lt; 4 x reference + 250 ms, comparing the
+        /// fastest of <see cref="CStackTimingRounds"/> runs of each. <paramref name="referenceMs"/> and
+        /// <paramref name="cappedMs"/> time the first run of each, whose outcome the caller has already asserted;
+        /// the two actions run their shape once more and fail unless it ends exactly as its first run did, so every
+        /// timed run does the same work.
+        /// </summary>
+        /// <remarks>
+        /// WHY the fastest run of each shape: host load only ever adds wall time, so the fastest run is the closest
+        /// reading of a shape's own cost. One run of each compared what the scheduler did to two runs: on a loaded
+        /// host a stall inside one capped run (440 ms against a 47 ms reference) failed the bound while every other
+        /// assertion held. Without the cap every run of the capped shape is slow, not only an unlucky one, so the
+        /// fastest still fails the bound: 3.1 s against a 62 ms reference for table.sort, 2.9 s against 58 ms for
+        /// string.format. WHY the order alternates: neither shape is always the one that pays for the garbage the
+        /// other left behind.
+        /// </remarks>
+        internal static void AssertCappedNestingUnwindsLikeItsReference(long referenceMs, long cappedMs,
+            System.Action runReferenceAgain, System.Action runCappedAgain)
+        {
+            for (int round = 1; round < CStackTimingRounds; round++)
+            {
+                bool cappedFirst = round % 2 == 1;
+                if (cappedFirst)
+                {
+                    cappedMs = System.Math.Min(cappedMs, ElapsedMs(runCappedAgain));
+                }
+
+                referenceMs = System.Math.Min(referenceMs, ElapsedMs(runReferenceAgain));
+                if (!cappedFirst)
+                {
+                    cappedMs = System.Math.Min(cappedMs, ElapsedMs(runCappedAgain));
+                }
+            }
+
+            Assert.Less(cappedMs, 4 * referenceMs + 250,
+                "the capped nesting must unwind about as fast as the reference shape failing below the limit ("
+                + referenceMs + " ms; the fastest of " + CStackTimingRounds
+                + " runs of each), not quadratically in the mod's own depth");
+        }
+
+        /// <summary>The wall time of one call of <paramref name="run"/>, in milliseconds.</summary>
+        internal static long ElapsedMs(System.Action run)
+        {
+            System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+            run();
+            clock.Stop();
+            return clock.ElapsedMilliseconds;
+        }
+
+        /// <summary>
+        /// Runs <paramref name="chunk"/> through <see cref="RunRecordingChunk"/> under a guard only the nesting can
+        /// end (a minute, 50M steps, no allocation cap), with <see cref="UnhurriedRawResumes"/>, and returns its
+        /// wall time in milliseconds.
+        /// </summary>
+        private static long TimeCStackRun(string chunk, List<string> rows, out LuaRuntimeException ended)
+        {
+            System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+            ended = RunRecordingChunk(chunk, new LuaCsExecutionGuard(60_000, 50_000_000, 0), rows,
+                UnhurriedRawResumes());
+            clock.Stop();
+            return clock.ElapsedMilliseconds;
+        }
+
+        /// <summary>
+        /// Runs <paramref name="chunk"/> once more like <see cref="TimeCStackRun"/> and fails unless it ended exactly
+        /// as its first run did, recorded in <paramref name="firstRows"/>.
+        /// </summary>
+        private static void RunCStackChunkAgain(string chunk, List<string> firstRows)
+        {
+            List<string> rows = new();
+            TimeCStackRun(chunk, rows, out LuaRuntimeException ended);
+            Assert.IsNull(ended, ended?.Message);
+            CollectionAssert.AreEqual(firstRows, rows, "every timed run of a shape must end the same way");
         }
 
         private const string NestSort =
@@ -1408,6 +1513,9 @@ namespace CoreAI.Tests.EditMode
             // WHY the negative twin: the cap must cost legitimate code nothing below Luau's own limit, and a
             // refused call must give back every level the calls under it held, or the thread would lose depth
             // with each caught refusal until nothing could call back into Lua at all.
+            // WHY unhurried raw resumes: a chain runs inside ONE resume of its outermost coroutine, which the
+            // default 1 s wall-clock allowance would cut on a slow or loaded host (a first, JIT-compiling chain
+            // of 200 took 0.6 s under load), and the time budget is not what this test measures.
             List<string> rows = new();
             int max = LuaCsSecureEnvironment.MaxCCallDepth;
             LuaRuntimeException ended = RunRecordingChunk(
@@ -1424,7 +1532,7 @@ namespace CoreAI.Tests.EditMode
                 "record(pcall(chain, " + max + "))\n" +
                 "record(pcall(chain, " + (max + 1) + "))\n" +
                 "record(pcall(chain, " + max + "))",
-                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
+                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows, UnhurriedRawResumes());
 
             Assert.IsNull(ended, ended?.Message);
             Assert.AreEqual(6, rows.Count, string.Join(" / ", rows));
@@ -1445,6 +1553,8 @@ namespace CoreAI.Tests.EditMode
             // WHY: the count is per Lua thread, not per .NET thread. A coroutine that yields inside a table.sort
             // comparator keeps that call open while it is suspended; a shared count would charge it to every
             // other thread, which on Unity's single main thread means every other mod.
+            // WHY unhurried raw resumes: the second resume runs 199 nested sorts inside one raw resume; its default
+            // 1 s wall-clock allowance is not what this test measures.
             List<string> rows = new();
             int max = LuaCsSecureEnvironment.MaxCCallDepth;
             LuaRuntimeException ended = RunRecordingChunk(
@@ -1460,7 +1570,7 @@ namespace CoreAI.Tests.EditMode
                 "record(coroutine.resume(co))\n" +
                 "record(pcall(nest, " + max + "))\n" +
                 "record(coroutine.resume(co))",
-                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
+                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows, UnhurriedRawResumes());
 
             Assert.IsNull(ended, ended?.Message);
             CollectionAssert.AreEqual(new[]

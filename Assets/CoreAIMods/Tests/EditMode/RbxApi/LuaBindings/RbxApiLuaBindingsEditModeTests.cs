@@ -2336,20 +2336,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             // under a 10 s budget.
             // WHY the reference run: the unwind left at the limit is intrinsic to Lua-CSharp and its wall time
             // depends on the host, so the capped run is timed against the same shape failing on the mod's own
-            // cap at 150 levels, as CallsBackIntoLua_NestedPastTheCStackLimit_FailFastWithOneCatchableLine does.
+            // cap at 150 levels, as CallsBackIntoLua_NestedPastTheCStackLimit_FailFastWithOneCatchableLine does,
+            // through the same comparison of the fastest of several runs of each.
             MemoryStore store = new();
             List<string> log = new();
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(log: log.Add), store);
-            System.Diagnostics.Stopwatch referenceClock = System.Diagnostics.Stopwatch.StartNew();
-            stack.Runtime.LoadMod("reference", WarnReenteredFromTheModsTostring(150));
-            referenceClock.Stop();
+            long referenceMs = LuaCsSecureSandboxEditModeTests.ElapsedMs(
+                () => stack.Runtime.LoadMod("reference", WarnReenteredFromTheModsTostring(150)));
             Assert.AreEqual("false", store.Get("reference", "ok"));
             Assert.AreEqual("mod cap", store.Get("reference", "err"),
                 "the reference run fails on the mod's own cap, below the C-stack limit");
 
-            System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
-            stack.Runtime.LoadMod("deep", WarnReenteredFromTheModsTostring(1000));
-            clock.Stop();
+            long cappedMs = LuaCsSecureSandboxEditModeTests.ElapsedMs(
+                () => stack.Runtime.LoadMod("deep", WarnReenteredFromTheModsTostring(1000)));
 
             Assert.IsTrue(stack.Runtime.IsLoaded("deep"), "pcall catches the error, so the mod loads");
             Assert.AreEqual("false", store.Get("deep", "ok"));
@@ -2363,9 +2362,28 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 store.Get("deep", "deepest"), "the nesting stops at the limit, not at the mod's own cap of 1,000");
             Assert.IsFalse(log.Exists(line => line.Contains("warn from")),
                 "no nested warn finished, so none of them logged: " + string.Join(" | ", log));
-            Assert.Less(clock.ElapsedMilliseconds, 4 * referenceClock.ElapsedMilliseconds + 250,
-                "the capped nesting must unwind about as fast as 150 levels do (" + referenceClock.ElapsedMilliseconds
-                + " ms), not quadratically in the mod's own depth");
+            int rerun = 0;
+            LuaCsSecureSandboxEditModeTests.AssertCappedNestingUnwindsLikeItsReference(referenceMs, cappedMs,
+                () => LoadWarnReentryAgain(stack, store, "reference", 150, "reference-" + ++rerun),
+                () => LoadWarnReentryAgain(stack, store, "deep", 1000, "deep-" + ++rerun));
+            Assert.IsFalse(log.Exists(line => line.Contains("warn from")),
+                "no nested warn of a timed run finished either: " + string.Join(" | ", log));
+        }
+
+        /// <summary>
+        /// Loads <see cref="WarnReenteredFromTheModsTostring"/> with <paramref name="modCap"/> once more as the new mod
+        /// <paramref name="modId"/> and fails unless it stored exactly what <paramref name="firstModId"/>, the first
+        /// mod of that shape, stored.
+        /// </summary>
+        private static void LoadWarnReentryAgain(LuaCsModStack stack, MemoryStore store, string firstModId, int modCap,
+            string modId)
+        {
+            stack.Runtime.LoadMod(modId, WarnReenteredFromTheModsTostring(modCap));
+            foreach (string key in new[] { "ok", "err", "deepest" })
+            {
+                Assert.AreEqual(store.Get(firstModId, key), store.Get(modId, key),
+                    "every timed run of a shape must end the same way (" + key + ")");
+            }
         }
 
         [Test]

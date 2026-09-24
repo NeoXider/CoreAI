@@ -763,7 +763,11 @@ namespace CoreAI.Tests.EditMode
         {
             LuaCsSecureEnvironment env = new();
             List<string> rows = new();
-            LuaState state = LuaCsSecureSandboxEditModeTests.CreateRecordingState(env, rows);
+            // WHY unhurried raw resumes: the body is cut by the resumer's allocation budget or not at all. Under
+            // the default 1 s raw-resume allowance a loaded host cut it partway by time ("Lua coroutine resume
+            // exceeded 1000 ms."), a budget neither test measures.
+            LuaState state = LuaCsSecureSandboxEditModeTests.CreateRecordingState(env, rows,
+                LuaCsSecureSandboxEditModeTests.UnhurriedRawResumes());
             if (resumer == "guarded chunk")
             {
                 try
