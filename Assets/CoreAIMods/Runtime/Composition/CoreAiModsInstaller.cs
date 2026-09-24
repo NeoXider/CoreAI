@@ -72,6 +72,12 @@ namespace CoreAI.Composition
         /// runtime and Hub through the stable active-session facade. It must implement
         /// <see cref="IRbxWorldModSourceStore"/>; null creates the default file-backed store.
         /// </param>
+        /// <param name="worldPackageStore">
+        /// Optional world-package store for manual slots, autosaves and, when it implements
+        /// <see cref="IRbxWorldStartupStore"/>, the world that opens on the next start. Null creates the
+        /// default file-backed store under <c>persistentDataPath</c> whose startup area is namespaced by
+        /// <paramref name="modStoreId"/>; composition tests pass a temporary or in-memory store.
+        /// </param>
         public static void RegisterCoreAiMods(
             this IContainerBuilder builder,
             System.Collections.Generic.IEnumerable<string> allowedLuaScenes = null,
@@ -82,7 +88,8 @@ namespace CoreAI.Composition
             int? worldAclVersion = InstanceRegistry.CurrentWorldAclVersion,
             System.Func<bool> applicationIsPlayingProvider = null,
             System.Func<string, string> skillTextProvider = null,
-            ILuaModSourceStore worldSessionSourceStore = null)
+            ILuaModSourceStore worldSessionSourceStore = null,
+            IRbxWorldPackageStore worldPackageStore = null)
         {
             LuaCapabilities scriptCapabilities = enableFullLuaAccess
                 ? LuaCapabilities.All | LuaCapabilities.Full
@@ -123,8 +130,19 @@ namespace CoreAI.Composition
                     c => new WorldSessionSourceBackend(c.Resolve<FileLuaModSourceStore>()),
                     Lifetime.Singleton);
             }
-            builder.Register(_ => new FileRbxWorldPackageStore(), Lifetime.Singleton)
-                .As<IRbxWorldPackageStore>();
+            if (worldPackageStore != null)
+            {
+                builder.RegisterInstance(worldPackageStore).As<IRbxWorldPackageStore>();
+            }
+            else
+            {
+                // WHY the startup area is namespaced by the mods store id: a world selected in one
+                // composition must never open in another whose Lua tier and mod set differ.
+                builder.Register(
+                        _ => new FileRbxWorldPackageStore(startupNamespace: modStoreId),
+                        Lifetime.Singleton)
+                    .As<IRbxWorldPackageStore>();
+            }
             builder.Register(c => new ConfirmedWorldMutationGate(
                     cancellationToken =>
                     {
@@ -458,7 +476,7 @@ namespace CoreAI.Composition
                         ?? Logging.Log.Instance).Warn(
                             "[CoreAI.WorldLoad] " + message,
                             Logging.LogTag.World));
-            }, Lifetime.Singleton).AsSelf().As<IRbxWorldRuntimeService>();
+            }, Lifetime.Singleton).AsSelf().As<IRbxWorldRuntimeService>().As<IRbxWorldStartupSelection>();
 
             builder.Register(c => c.Resolve<RbxWorldRuntimeSessionController>().Stack, Lifetime.Singleton)
                 .AsSelf();
@@ -510,24 +528,23 @@ namespace CoreAI.Composition
                         LuaCsModStack stack = container.Resolve<LuaCsModStack>();
                         RbxWorldRuntimeSessionController sessionController =
                             container.Resolve<RbxWorldRuntimeSessionController>();
-                        LuaCsModRuntime runtime = sessionController.CurrentConcreteRuntime;
-                        LuaCsRbxApiBindings stackRbxApi = stack.GameplayBindings.RbxApi;
 
                         GameObject tickerGo = new("CoreAI_LuaModTicker");
                         tickerHolder[0] = tickerGo;
                         Object.DontDestroyOnLoad(tickerGo);
 
-                        void RehydrateAndStartTicking()
+                        async Cysharp.Threading.Tasks.UniTaskVoid RestoreRehydrateAndStartTickingAsync()
                         {
-                            // Seed bundled mods into the store BEFORE rehydrate, so shipped mods load
-                            // exactly like persisted ones. Best-effort: a seeding failure never blocks
-                            // rehydrate.
+                            // WHY seeded into the default store and before the restore: a start that
+                            // falls back to the default world rehydrates shipped mods exactly like
+                            // persisted ones, and the restored world's exact source set never sees them.
+                            // Best-effort: a seeding failure never blocks the startup.
                             try
                             {
                                 System.Collections.Generic.IEnumerable<IBundledModSource> bundled =
                                     container.Resolve<System.Collections.Generic.IEnumerable<IBundledModSource>>();
                                 new BundledModSeeder(
-                                    container.Resolve<ILuaModSourceStore>(),
+                                    container.Resolve<WorldSessionSourceBackend>().Store,
                                     new System.Collections.Generic.List<IBundledModSource>(bundled),
                                     container.ResolveOrDefault<Logging.ILog>()).Seed();
                             }
@@ -541,12 +558,33 @@ namespace CoreAI.Composition
                                 fallbackHostIdentityProvider;
                             ActorContext hostActor = hostIdentityProvider.GetActorContext(
                                 BuiltInAgentRoleIds.Programmer);
-                            BindPersistedActorAttribution(
-                                container.ResolveOrDefault<ILuaModSourceStore>(),
-                                stackRbxApi?.Registry,
-                                hostActor);
-                            runtime.RehydrateFromStore(scriptCapabilities,
-                                (scriptCapabilities & LuaCapabilities.Full) != 0);
+                            Logging.ILog startupLog =
+                                container.ResolveOrDefault<Logging.ILog>() ?? Logging.Log.Instance;
+                            await RbxWorldStartupSequence.RunAsync(
+                                sessionController,
+                                () =>
+                                {
+                                    BindPersistedActorAttribution(
+                                        container.ResolveOrDefault<ILuaModSourceStore>(),
+                                        stack.GameplayBindings.RbxApi?.Registry,
+                                        hostActor);
+                                    sessionController.CurrentConcreteRuntime.RehydrateFromStore(
+                                        scriptCapabilities,
+                                        (scriptCapabilities & LuaCapabilities.Full) != 0);
+                                },
+                                message => startupLog.Warn(
+                                    "[CoreAI.WorldLoad] " + message,
+                                    Logging.LogTag.World));
+
+                            // WHY: the scope can be disposed while the restore awaited (leaving play mode).
+                            if (tickerGo == null)
+                            {
+                                return;
+                            }
+
+                            // WHY read only now: a restored startup world replaced the initial session, so
+                            // the pumps below must bind the published world's API, not the default one.
+                            LuaCsRbxApiBindings stackRbxApi = stack.GameplayBindings.RbxApi;
 
                             // WHY the driver gets the session controller and nothing else: one scaled
                             // frame is one ModScheduler.Advance on the PUBLISHED session. The scheduler
@@ -606,11 +644,13 @@ namespace CoreAI.Composition
                         IWorldStateManager worldState = container.ResolveOrDefault<IWorldStateManager>();
                         if (worldState != null)
                         {
-                            tickerGo.AddComponent<WorldRestoreGate>().Begin(worldState, RehydrateAndStartTicking);
+                            tickerGo.AddComponent<WorldRestoreGate>().Begin(
+                                worldState,
+                                () => RestoreRehydrateAndStartTickingAsync().Forget());
                         }
                         else
                         {
-                            RehydrateAndStartTicking();
+                            RestoreRehydrateAndStartTickingAsync().Forget();
                         }
                     }
                     }
@@ -1326,6 +1366,70 @@ namespace CoreAI.Composition
             private sealed class ActorAttributionBundle
             {
                 public LuaModManifest Manifest = new();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Play-mode startup order of the Rbx world, kept out of the build callback so it runs without
+    /// play mode in tests: the durable startup selection is restored first, and the default world's
+    /// persisted mods rehydrate only when nothing was restored.
+    /// </summary>
+    internal static class RbxWorldStartupSequence
+    {
+        /// <summary>
+        /// Restores the startup selection, then runs <paramref name="rehydrateDefault"/> unless the
+        /// selection is now the live world. Never throws: a failure keeps the default world and is
+        /// reported to <paramref name="diagnostics"/>. No thread and no blocking wait (WebGL).
+        /// </summary>
+        public static async Cysharp.Threading.Tasks.UniTask<RbxWorldStartupRestoreOutcome> RunAsync(
+            IRbxWorldStartupSelection startupSelection,
+            System.Action rehydrateDefault,
+            System.Action<string> diagnostics,
+            System.Threading.CancellationToken cancellationToken = default)
+        {
+            RbxWorldStartupRestoreOutcome outcome = RbxWorldStartupRestoreOutcome.NotSelected;
+            if (startupSelection != null)
+            {
+                try
+                {
+                    RbxWorldStartupRestoreResult restored =
+                        await startupSelection.RestoreStartupSelectionAsync(cancellationToken);
+                    outcome = restored?.Outcome ?? RbxWorldStartupRestoreOutcome.NotSelected;
+                }
+                catch (System.Exception ex)
+                {
+                    outcome = RbxWorldStartupRestoreOutcome.FellBack;
+                    Report(diagnostics, "The startup world restore failed, so the default world opens: "
+                                        + ex.Message);
+                }
+            }
+
+            if (outcome == RbxWorldStartupRestoreOutcome.Restored)
+            {
+                return outcome;
+            }
+
+            try
+            {
+                rehydrateDefault?.Invoke();
+            }
+            catch (System.Exception ex)
+            {
+                Report(diagnostics, "Rehydrating the default world's persisted mods failed: " + ex.Message);
+            }
+
+            return outcome;
+        }
+
+        private static void Report(System.Action<string> diagnostics, string message)
+        {
+            try
+            {
+                diagnostics?.Invoke(message);
+            }
+            catch (System.Exception)
+            {
             }
         }
     }

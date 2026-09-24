@@ -211,7 +211,7 @@ namespace CoreAI.Mods.WorldPackages
     }
 
     /// <summary>Named format/validation failure suitable for user-facing load diagnostics.</summary>
-    public sealed class RbxWorldPackageException : Exception
+    public class RbxWorldPackageException : Exception
     {
         public RbxWorldPackageException(string message)
             : base(message)
@@ -222,6 +222,32 @@ namespace CoreAI.Mods.WorldPackages
             : base(message, innerException)
         {
         }
+    }
+
+    /// <summary>
+    /// A world-load request the live session refused under its own rules before anything was queued.
+    /// <see cref="Status"/> is the machine-readable reason an AI tool reports.
+    /// </summary>
+    /// <remarks>
+    /// WHY it derives from <see cref="RbxWorldPackageException"/>: every caller that already turns a
+    /// package it cannot load into an ordinary result keeps doing so for a session-rule refusal,
+    /// instead of letting a new exception type cross a tool invocation boundary.
+    /// </remarks>
+    public sealed class RbxWorldLoadRefusedException : RbxWorldPackageException
+    {
+        /// <summary>The package is valid but cannot open in this session (for example a legacy ACL downgrade).</summary>
+        public const string IncompatiblePackageStatus = "invalid_package";
+
+        /// <summary>The live world has network sessions that cannot be handed to another world yet.</summary>
+        public const string NetworkSessionsActiveStatus = "network_sessions_active";
+
+        public RbxWorldLoadRefusedException(string status, string message)
+            : base(message)
+        {
+            Status = status ?? "";
+        }
+
+        public string Status { get; }
     }
 
     /// <summary>A disposable world candidate that remains invisible until commit.</summary>
@@ -275,10 +301,22 @@ namespace CoreAI.Mods.WorldPackages
     public sealed class RbxWorldLoadResult
     {
         internal RbxWorldLoadResult(bool success, string error, int activeModsStarted)
+            : this(success, error, activeModsStarted, false, "")
+        {
+        }
+
+        internal RbxWorldLoadResult(
+            bool success,
+            string error,
+            int activeModsStarted,
+            bool startupSelectionPersisted,
+            string startupSelectionError)
         {
             Success = success;
             Error = error ?? "";
             ActiveModsStarted = activeModsStarted;
+            StartupSelectionPersisted = startupSelectionPersisted;
+            StartupSelectionError = startupSelectionError ?? "";
         }
 
         public bool Success { get; }
@@ -286,6 +324,82 @@ namespace CoreAI.Mods.WorldPackages
         public string Error { get; }
 
         public int ActiveModsStarted { get; }
+
+        /// <summary>
+        /// True only when this player-confirmed load was also durably recorded as the world that opens
+        /// on the next start. A successful load with false stays live; the next start opens the
+        /// previous startup selection instead.
+        /// </summary>
+        public bool StartupSelectionPersisted { get; }
+
+        /// <summary>Why a successful confirmed load was not recorded for the next start; empty otherwise.</summary>
+        public string StartupSelectionError { get; }
+    }
+
+    /// <summary>What the boot-time restore of the durable startup selection did.</summary>
+    public enum RbxWorldStartupRestoreOutcome
+    {
+        /// <summary>Nothing is selected, or the player chose the default world; the default world stays.</summary>
+        NotSelected,
+
+        /// <summary>The selected package is now the live world.</summary>
+        Restored,
+
+        /// <summary>A package is selected but could not be restored; the default world stays live.</summary>
+        FellBack
+    }
+
+    /// <summary>Result of <see cref="IRbxWorldStartupSelection.RestoreStartupSelectionAsync"/>.</summary>
+    public sealed class RbxWorldStartupRestoreResult
+    {
+        internal RbxWorldStartupRestoreResult(
+            RbxWorldStartupRestoreOutcome outcome,
+            int sequence,
+            string worldId,
+            int activeModsStarted,
+            string error)
+        {
+            Outcome = outcome;
+            Sequence = sequence;
+            WorldId = worldId ?? "";
+            ActiveModsStarted = activeModsStarted;
+            Error = error ?? "";
+        }
+
+        public RbxWorldStartupRestoreOutcome Outcome { get; }
+
+        /// <summary>Sequence of the startup entry that was read; 0 when none exists.</summary>
+        public int Sequence { get; }
+
+        public string WorldId { get; }
+
+        public int ActiveModsStarted { get; }
+
+        /// <summary>Why a selected package was not restored; empty otherwise.</summary>
+        public string Error { get; }
+    }
+
+    /// <summary>
+    /// Trusted host surface for the world that opens on the next start. Deliberately separate from
+    /// <see cref="IRbxWorldRuntimeService"/>: no AI tool is given it, so only the player (through the
+    /// Hub) and the startup composition reach the durable selection.
+    /// </summary>
+    public interface IRbxWorldStartupSelection
+    {
+        /// <summary>
+        /// Makes the durable startup selection the live world, or keeps the default world. Never throws;
+        /// every failure is reported as <see cref="RbxWorldStartupRestoreOutcome.FellBack"/>.
+        /// </summary>
+        UniTask<RbxWorldStartupRestoreResult> RestoreStartupSelectionAsync(
+            CancellationToken cancellationToken = default);
+
+        /// <summary>Records that the next start opens the default world; the live world is unchanged.</summary>
+        UniTask<RbxWorldPackageWriteResult> ClearStartupSelectionAsync(
+            CancellationToken cancellationToken = default);
+
+        /// <summary>Reads the current selection's kind and metadata without decoding its package.</summary>
+        UniTask<RbxWorldStartupSelection> ReadStartupSelectionAsync(
+            CancellationToken cancellationToken = default);
     }
 
     /// <summary>Fail-closed AI restore request consumable only after player confirmation.</summary>
@@ -477,10 +591,30 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             ActorContext actor = _identityProvider.GetActorContext(_roleId);
-            RbxWorldPackageWriteResult result = await _service.SaveManualAsync(
-                actor,
-                slot,
-                cancellationToken);
+            RbxWorldPackageWriteResult result;
+            // WHY: the store turns every write failure into a result itself, so what still throws here is
+            // the capture of the live world (or a session that is gone), raised before any byte is
+            // written. Thrown, it crossed the tool invocation boundary and was traced as possibly
+            // executed; as a result the model can correct the world and retry. Cancellation propagates.
+            try
+            {
+                result = await _service.SaveManualAsync(
+                    actor,
+                    slot,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                return JsonConvert.SerializeObject(new
+                {
+                    success = false,
+                    status = RbxWorldPackageNames.CaptureFailedStatus,
+                    path = "",
+                    error = "The live world could not be captured into slot '" + slot + "': " + ex.Message
+                            + " Nothing was written. The tool was NOT executed. Fix the world and retry."
+                });
+            }
+
             return JsonConvert.SerializeObject(new
             {
                 success = result.Success,
@@ -547,10 +681,52 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             ActorContext actor = _identityProvider.GetActorContext(_roleId);
-            RbxWorldLoadRequest request = await _service.RequestManualLoadAsync(
-                actor,
-                slot,
-                cancellationToken);
+            RbxWorldLoadRequest request;
+            // WHY: only failures raised while the slot is read or checked against the live session are
+            // converted. They happen before any request is queued, so "not executed" is true, and a
+            // missing, corrupt, oversized or unreadable slot is an outcome the model can correct. Thrown,
+            // it crossed the tool invocation boundary and was traced as possibly executed. Cancellation
+            // propagates.
+            try
+            {
+                request = await _service.RequestManualLoadAsync(
+                    actor,
+                    slot,
+                    cancellationToken);
+            }
+            catch (RbxWorldLoadRefusedException ex)
+            {
+                return RefuseUnloadable(
+                    slot,
+                    ex.Status,
+                    "Manual slot '" + slot + "' cannot be loaded into this session: " + ex.Message
+                    + " The tool was NOT executed.");
+            }
+            catch (System.IO.FileNotFoundException)
+            {
+                return RefuseUnloadable(slot, RbxWorldPackageNames.NotFoundStatus, DescribeNotFound(slot));
+            }
+            catch (System.IO.DirectoryNotFoundException)
+            {
+                return RefuseUnloadable(slot, RbxWorldPackageNames.NotFoundStatus, DescribeNotFound(slot));
+            }
+            catch (RbxWorldPackageException ex)
+            {
+                return RefuseUnloadable(
+                    slot,
+                    RbxWorldPackageNames.InvalidPackageStatus,
+                    "Manual slot '" + slot + "' is not a loadable world package: " + ex.Message
+                    + " The tool was NOT executed. Pick another slot.");
+            }
+            catch (System.IO.IOException ex)
+            {
+                return RefuseUnloadable(slot, RbxWorldPackageNames.ReadFailedStatus, DescribeReadFailure(slot, ex));
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return RefuseUnloadable(slot, RbxWorldPackageNames.ReadFailedStatus, DescribeReadFailure(slot, ex));
+            }
+
             return JsonConvert.SerializeObject(new
             {
                 success = false,
@@ -559,6 +735,32 @@ namespace CoreAI.Mods.WorldPackages
                 request_id = request.RequestId,
                 slot = request.Slot,
                 world_id = request.WorldId
+            });
+        }
+
+        private static string DescribeNotFound(string slot)
+        {
+            return "Manual slot '" + slot + "' was not found. The tool was NOT executed."
+                   + " Save it with save_world first, or retry with an existing 'slot'.";
+        }
+
+        private static string DescribeReadFailure(string slot, Exception exception)
+        {
+            return "Manual slot '" + slot + "' could not be read: " + exception.Message
+                   + " The tool was NOT executed. Retry, or pick another slot.";
+        }
+
+        private static string RefuseUnloadable(string slot, string status, string error)
+        {
+            return JsonConvert.SerializeObject(new
+            {
+                success = false,
+                status,
+                player_confirmation_required = false,
+                request_id = "",
+                slot = slot ?? "",
+                world_id = "",
+                error
             });
         }
     }
@@ -1115,16 +1317,22 @@ namespace CoreAI.Mods.WorldPackages
     /// Owns the mutable production world/Lua session. A load restores an isolated tree, builds a
     /// fresh VM stack, starts every active source strictly once, atomically replaces the durable
     /// source set, publishes the candidate, then permanently tears down the outgoing runtime.
+    /// A player-confirmed load is also recorded as the world that opens on the next start when the
+    /// package store keeps a startup selection (<see cref="IRbxWorldStartupStore"/>).
     /// </summary>
-    public sealed class RbxWorldRuntimeSessionController : IRbxWorldRuntimeService, IDisposable
+    public sealed class RbxWorldRuntimeSessionController
+        : IRbxWorldRuntimeService, IRbxWorldStartupSelection, IDisposable
     {
         private const int MaximumPendingLoadRequests = 8;
         private static readonly TimeSpan DefaultPendingLoadTimeToLive = TimeSpan.FromMinutes(2d);
         private const string PreLoadAutosaveTrigger = "load_world-pre";
+        private const string ManualSourceKind = "manual";
+        private const string AutosaveSourceKind = "autosave";
 
         private readonly object _gate = new();
         private readonly IRbxWorldSessionHost _host;
         private readonly IRbxWorldPackageStore _packageStore;
+        private readonly IRbxWorldStartupStore _startupStore;
         private readonly IRbxWorldModSourceStore _transactionalSourceStore;
         private readonly Func<IRbxWorldSessionCandidate, INetworkBridge, LuaCsRbxApiBindings>
             _rbxApiFactory;
@@ -1146,6 +1354,8 @@ namespace CoreAI.Mods.WorldPackages
         private bool _loadInProgress;
         private Func<DateTime> _utcNow = () => DateTime.UtcNow;
         private TimeSpan _pendingLoadTimeToLive = DefaultPendingLoadTimeToLive;
+        private string _lastAdvanceFailure;
+        private string _lastTickFailure;
 
         public RbxWorldRuntimeSessionController(
             IRbxWorldSessionHost host,
@@ -1166,6 +1376,7 @@ namespace CoreAI.Mods.WorldPackages
         {
             _host = host ?? throw new ArgumentNullException(nameof(host));
             _packageStore = packageStore ?? throw new ArgumentNullException(nameof(packageStore));
+            _startupStore = packageStore as IRbxWorldStartupStore;
             ILuaModSourceStore initialSourceStore = durableSourceStore
                 ?? throw new ArgumentNullException(nameof(durableSourceStore));
             _transactionalSourceStore = initialSourceStore as IRbxWorldModSourceStore;
@@ -1285,55 +1496,48 @@ namespace CoreAI.Mods.WorldPackages
             return await _packageStore.CreateManualAsync(slot, payload, cancellationToken);
         }
 
+        /// <summary>
+        /// Reads a manual slot and queues a one-use player confirmation for it. A slot this session
+        /// would refuse to load (live network sessions, a legacy ACL downgrade) throws
+        /// <see cref="RbxWorldLoadRefusedException"/> instead, so the player is never asked to confirm
+        /// a package that cannot open.
+        /// </summary>
         public async UniTask<RbxWorldLoadRequest> RequestManualLoadAsync(
             ActorContext caller,
             string slot,
             CancellationToken cancellationToken = default)
         {
             DemandTrusted(caller);
+            DemandNoLiveNetworkSessions();
             RbxWorldPackagePayload payload = await _packageStore.LoadManualAsync(
                 slot, cancellationToken);
-            string requestId = Guid.NewGuid().ToString("N");
-            RbxPendingWorldLoadRequest publicRequest;
-            lock (_gate)
-            {
-                DemandActiveLocked();
-                DateTime requestedAtUtc = _utcNow();
-                RemoveExpiredPendingLoadsLocked(requestedAtUtc);
-                RemovePendingSlotLocked(slot);
-                if (_pendingLoads.Count >= MaximumPendingLoadRequests)
-                {
-                    RemoveOldestPendingLoadLocked();
-                }
-
-                PendingLoad pending = new(
-                    requestId,
-                    caller.ActorId,
-                    slot,
-                    payload,
-                    requestedAtUtc,
-                    requestedAtUtc + _pendingLoadTimeToLive);
-                _pendingLoads.Add(requestId, pending);
-                publicRequest = pending.ToPublicRequest();
-            }
-
-            RaiseManualLoadConfirmationRequested(publicRequest);
-            return new RbxWorldLoadRequest(
-                publicRequest.RequestId,
-                publicRequest.Slot,
-                publicRequest.WorldId,
-                publicRequest.RequestedAtUtc,
-                publicRequest.ExpiresAtUtc);
+            DemandAclCompatible(payload);
+            return QueuePendingLoad(caller, slot, ManualSourceKind, payload);
         }
 
+        /// <summary>
+        /// Reads an autosave and queues a one-use player confirmation for it, refusing exactly like
+        /// <see cref="RequestManualLoadAsync"/>.
+        /// </summary>
         public async UniTask<RbxWorldLoadRequest> RequestAutoLoadAsync(
             ActorContext caller,
             string autoFileName,
             CancellationToken cancellationToken = default)
         {
             DemandTrusted(caller);
+            DemandNoLiveNetworkSessions();
             RbxWorldPackagePayload payload = await _packageStore.LoadAutoAsync(
                 autoFileName, cancellationToken);
+            DemandAclCompatible(payload);
+            return QueuePendingLoad(caller, autoFileName, AutosaveSourceKind, payload);
+        }
+
+        private RbxWorldLoadRequest QueuePendingLoad(
+            ActorContext caller,
+            string name,
+            string sourceKind,
+            RbxWorldPackagePayload payload)
+        {
             string requestId = Guid.NewGuid().ToString("N");
             RbxPendingWorldLoadRequest publicRequest;
             lock (_gate)
@@ -1341,7 +1545,7 @@ namespace CoreAI.Mods.WorldPackages
                 DemandActiveLocked();
                 DateTime requestedAtUtc = _utcNow();
                 RemoveExpiredPendingLoadsLocked(requestedAtUtc);
-                RemovePendingSlotLocked(autoFileName);
+                RemovePendingSlotLocked(name);
                 if (_pendingLoads.Count >= MaximumPendingLoadRequests)
                 {
                     RemoveOldestPendingLoadLocked();
@@ -1350,7 +1554,8 @@ namespace CoreAI.Mods.WorldPackages
                 PendingLoad pending = new(
                     requestId,
                     caller.ActorId,
-                    autoFileName,
+                    name,
+                    sourceKind,
                     payload,
                     requestedAtUtc,
                     requestedAtUtc + _pendingLoadTimeToLive);
@@ -1398,12 +1603,122 @@ namespace CoreAI.Mods.WorldPackages
                     0);
             }
 
-            return await LoadConfirmedAsync(pending.Payload, cancellationToken);
+            return await LoadConfirmedCoreAsync(pending.Payload, true, pending, cancellationToken);
         }
 
-        public async UniTask<RbxWorldLoadResult> LoadConfirmedAsync(
+        /// <summary>
+        /// Trusted host load of an already confirmed payload. It never changes the world that opens on
+        /// the next start; a host that wants that records it through its own startup store.
+        /// </summary>
+        public UniTask<RbxWorldLoadResult> LoadConfirmedAsync(
             RbxWorldPackagePayload payload,
             CancellationToken cancellationToken = default)
+        {
+            return LoadConfirmedCoreAsync(payload, true, null, cancellationToken);
+        }
+
+        public async UniTask<RbxWorldStartupRestoreResult> RestoreStartupSelectionAsync(
+            CancellationToken cancellationToken = default)
+        {
+            if (_startupStore == null)
+            {
+                return new RbxWorldStartupRestoreResult(
+                    RbxWorldStartupRestoreOutcome.NotSelected, 0, "", 0, "");
+            }
+
+            RbxWorldStartupSelection selection;
+            try
+            {
+                DemandActive();
+                selection = await _startupStore.ReadStartupAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return FallBackAtStartup(0, "", "the startup selection could not be read: " + ex.Message);
+            }
+
+            if (selection == null
+                || selection.Kind == RbxWorldStartupSelectionKind.None
+                || selection.Kind == RbxWorldStartupSelectionKind.Default)
+            {
+                return new RbxWorldStartupRestoreResult(
+                    RbxWorldStartupRestoreOutcome.NotSelected, selection?.Sequence ?? 0, "", 0, "");
+            }
+
+            if (selection.Kind != RbxWorldStartupSelectionKind.Package || selection.Payload == null)
+            {
+                return FallBackAtStartup(
+                    selection.Sequence,
+                    selection.WorldId,
+                    selection.Error.Length > 0 ? selection.Error : "the selected entry holds no package");
+            }
+
+            RbxWorldLoadResult loaded;
+            try
+            {
+                // WHY no pre-load safety autosave: the outgoing world at boot is the reproducible
+                // default world, and one autosave per boot would evict the real backups from the
+                // bounded ring within a handful of restarts.
+                loaded = await LoadConfirmedCoreAsync(selection.Payload, false, null, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return FallBackAtStartup(selection.Sequence, selection.WorldId, ex.Message);
+            }
+
+            if (loaded == null || !loaded.Success)
+            {
+                return FallBackAtStartup(
+                    selection.Sequence,
+                    selection.WorldId,
+                    loaded?.Error ?? "the staged restore returned no result");
+            }
+
+            return new RbxWorldStartupRestoreResult(
+                RbxWorldStartupRestoreOutcome.Restored,
+                selection.Sequence,
+                selection.WorldId,
+                loaded.ActiveModsStarted,
+                "");
+        }
+
+        public async UniTask<RbxWorldPackageWriteResult> ClearStartupSelectionAsync(
+            CancellationToken cancellationToken = default)
+        {
+            DemandActive();
+            if (_startupStore == null)
+            {
+                return new RbxWorldPackageWriteResult(
+                    false,
+                    "",
+                    "The configured world package store keeps no startup selection.");
+            }
+
+            return await _startupStore.ClearStartupAsync(cancellationToken);
+        }
+
+        public async UniTask<RbxWorldStartupSelection> ReadStartupSelectionAsync(
+            CancellationToken cancellationToken = default)
+        {
+            DemandActive();
+            if (_startupStore == null)
+            {
+                return RbxWorldStartupSelection.NoneSelected;
+            }
+
+            return await _startupStore.ReadStartupInfoAsync(cancellationToken);
+        }
+
+        /// <param name="writeSafetyAutosave">False only for the boot-time startup restore.</param>
+        /// <param name="startupSource">
+        /// The consumed player-confirmed request; non-null records the published payload as the
+        /// world that opens on the next start.
+        /// </param>
+        private async UniTask<RbxWorldLoadResult> LoadConfirmedCoreAsync(
+            RbxWorldPackagePayload payload,
+            bool writeSafetyAutosave,
+            PendingLoad startupSource,
+            CancellationToken cancellationToken)
         {
             DemandActive();
             if (payload == null)
@@ -1411,18 +1726,16 @@ namespace CoreAI.Mods.WorldPackages
                 return new RbxWorldLoadResult(false, "World package payload is required.", 0);
             }
 
-            if (_worldAclFloor.HasValue && payload.Tree != null
-                && !payload.Tree.WorldAclVersion.HasValue)
+            string networkRefusal = DescribeLiveNetworkSessions();
+            if (networkRefusal.Length > 0)
             {
-                return new RbxWorldLoadResult(
-                    false,
-                    "World package has no world ACL version (legacy compatibility mode), but this "
-                        + "session was composed with world ACL version "
-                        + _worldAclFloor.Value.ToString(CultureInfo.InvariantCulture)
-                        + "; loading it would switch off per-actor access control. The live world was "
-                        + "not changed; compose the session with worldAclVersion: null to open a "
-                        + "legacy world.",
-                    0);
+                return new RbxWorldLoadResult(false, networkRefusal, 0);
+            }
+
+            string aclRefusal = DescribeAclDowngrade(payload);
+            if (aclRefusal.Length > 0)
+            {
+                return new RbxWorldLoadResult(false, aclRefusal, 0);
             }
 
             string activeFullMod = FindActiveFullCapabilityMod(payload.Mods);
@@ -1464,32 +1777,35 @@ namespace CoreAI.Mods.WorldPackages
             bool published = false;
             try
             {
-                RbxWorldPackagePayload currentPayload;
-                try
+                if (writeSafetyAutosave)
                 {
-                    currentPayload = CaptureCurrent();
-                }
-                catch (Exception ex)
-                {
-                    return new RbxWorldLoadResult(
-                        false,
-                        "Pre-load safety autosave capture failed: " + ex.Message,
-                        0);
-                }
+                    RbxWorldPackagePayload currentPayload;
+                    try
+                    {
+                        currentPayload = CaptureCurrent();
+                    }
+                    catch (Exception ex)
+                    {
+                        return new RbxWorldLoadResult(
+                            false,
+                            "Pre-load safety autosave capture failed: " + ex.Message,
+                            0);
+                    }
 
-                RbxWorldPackageWriteResult safetyAutosave = await _packageStore.CreateAutoAsync(
-                    PreLoadAutosaveTrigger,
-                    currentPayload,
-                    cancellationToken);
-                if (safetyAutosave == null || !safetyAutosave.Success)
-                {
-                    string reason = safetyAutosave == null || string.IsNullOrWhiteSpace(safetyAutosave.Error)
-                        ? "durability not confirmed"
-                        : safetyAutosave.Error;
-                    return new RbxWorldLoadResult(
-                        false,
-                        "Pre-load safety autosave '" + PreLoadAutosaveTrigger + "' failed: " + reason,
-                        0);
+                    RbxWorldPackageWriteResult safetyAutosave = await _packageStore.CreateAutoAsync(
+                        PreLoadAutosaveTrigger,
+                        currentPayload,
+                        cancellationToken);
+                    if (safetyAutosave == null || !safetyAutosave.Success)
+                    {
+                        string reason = safetyAutosave == null || string.IsNullOrWhiteSpace(safetyAutosave.Error)
+                            ? "durability not confirmed"
+                            : safetyAutosave.Error;
+                        return new RbxWorldLoadResult(
+                            false,
+                            "Pre-load safety autosave '" + PreLoadAutosaveTrigger + "' failed: " + reason,
+                            0);
+                    }
                 }
 
                 sourceReplacement = await _transactionalSourceStore.PrepareExactReplacementAsync(
@@ -1588,7 +1904,20 @@ namespace CoreAI.Mods.WorldPackages
                             + "was retained and was not disposed: " + ex.Message);
                 }
 
-                return new RbxWorldLoadResult(true, "", started);
+                if (startupSource == null)
+                {
+                    return new RbxWorldLoadResult(true, "", started);
+                }
+
+                // WHY still inside the load: the next confirmed load cannot publish until this one's
+                // selection is recorded, so the newest startup entry always names the newest live world.
+                string selectionError = await RecordStartupSelectionAsync(startupSource);
+                return new RbxWorldLoadResult(
+                    true,
+                    "",
+                    started,
+                    selectionError.Length == 0,
+                    selectionError);
             }
             catch (Exception ex)
             {
@@ -1624,12 +1953,36 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
-        /// <summary>Advances only the currently published scheduler and runtime.</summary>
+        /// <summary>
+        /// Advances only the currently published scheduler and runtime. A throw from either one is
+        /// reported through the diagnostics sink and does not skip the other.
+        /// </summary>
         public void PumpFrame(ActorContext actorContext, float deltaSeconds)
         {
             Session session = Current;
-            session.RbxApi.Scheduler.Advance(deltaSeconds);
-            session.Stack.Runtime.Tick(actorContext, deltaSeconds);
+            // WHY two containments: the scheduler and the mod runtime are independent frame owners. A
+            // throw from one (an unobserved host fault the scheduler rethrows after its frame, or a
+            // runtime that refuses the caller) used to skip the other, so mod timers and queued events
+            // stopped for as long as the unrelated fault repeated.
+            try
+            {
+                session.RbxApi.Scheduler.Advance(deltaSeconds);
+                _lastAdvanceFailure = null;
+            }
+            catch (Exception ex)
+            {
+                ReportPumpFailure(ref _lastAdvanceFailure, "scheduler Advance", ex);
+            }
+
+            try
+            {
+                session.Stack.Runtime.Tick(actorContext, deltaSeconds);
+                _lastTickFailure = null;
+            }
+            catch (Exception ex)
+            {
+                ReportPumpFailure(ref _lastTickFailure, "mod runtime Tick", ex);
+            }
         }
 
         public void Dispose()
@@ -1780,6 +2133,11 @@ namespace CoreAI.Mods.WorldPackages
 
         private void ReportDegradedActivation(string message)
         {
+            ReportDiagnostic(message);
+        }
+
+        private void ReportDiagnostic(string message)
+        {
             if (string.IsNullOrWhiteSpace(message) || _diagnostics == null)
             {
                 return;
@@ -1791,6 +2149,159 @@ namespace CoreAI.Mods.WorldPackages
             }
             catch
             {
+            }
+        }
+
+        private void ReportPumpFailure(ref string lastFailure, string phase, Exception exception)
+        {
+            string message = "Frame pump: the " + phase + " failed and the rest of the frame still ran: "
+                             + exception.GetType().Name + ": " + exception.Message;
+            // WHY once per distinct failure: the pump runs every frame, and a fault that repeats each
+            // frame would otherwise bury the log under one identical warning per frame.
+            if (string.Equals(lastFailure, message, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            lastFailure = message;
+            ReportDiagnostic(message);
+        }
+
+        /// <summary>
+        /// Records the just-published confirmed payload as the world that opens on the next start.
+        /// Never throws: the live world is already published, so a failure is reported and returned
+        /// as the reason, never rolled back.
+        /// </summary>
+        private async UniTask<string> RecordStartupSelectionAsync(PendingLoad source)
+        {
+            string reason;
+            if (_startupStore == null)
+            {
+                reason = "the configured world package store keeps no startup selection";
+            }
+            else
+            {
+                try
+                {
+                    // WHY uncancelled: the player confirmed and the world is already live; abandoning the
+                    // bounded selection write half-way would only make the next start disagree with it.
+                    RbxWorldPackageWriteResult written = await _startupStore.SelectStartupAsync(
+                        source.Payload,
+                        source.SourceKind,
+                        source.Slot,
+                        CancellationToken.None);
+                    if (written != null && written.Success)
+                    {
+                        return "";
+                    }
+
+                    reason = written == null || string.IsNullOrWhiteSpace(written.Error)
+                        ? "durability not confirmed"
+                        : written.Error;
+                }
+                catch (Exception ex)
+                {
+                    reason = ex.Message;
+                }
+            }
+
+            ReportDiagnostic(
+                "The confirmed " + source.SourceKind + " '" + source.Slot + "' (world '"
+                + (source.Payload.Settings?.WorldId ?? "") + "') is live, but it was not recorded as the "
+                + "world that opens on the next start: " + reason
+                + " The next start opens the previous startup selection.");
+            return reason;
+        }
+
+        private RbxWorldStartupRestoreResult FallBackAtStartup(int sequence, string worldId, string reason)
+        {
+            ReportDiagnostic(
+                "The startup world selection #" + sequence.ToString(CultureInfo.InvariantCulture)
+                + " ('" + (worldId ?? "") + "') could not be restored, so the default world stays live: "
+                + reason + " The selection was kept; choose 'Start with the default world next time' on "
+                + "the Hub World Loads page to clear it.");
+            return new RbxWorldStartupRestoreResult(
+                RbxWorldStartupRestoreOutcome.FellBack,
+                sequence,
+                worldId,
+                0,
+                reason);
+        }
+
+        /// <summary>
+        /// Why a world load must be refused while the live session has network sessions; empty when
+        /// there are none.
+        /// </summary>
+        /// <remarks>
+        /// WHY registered bridge actors are the signal: a transport that admits a connection registers
+        /// its actor on the bridge before the world creates the Player, and the world unregisters it
+        /// when the connection is torn down, so a live remote session is always listed. The check is
+        /// conservative: it also counts an actor registered for a non-host mod context whose socket
+        /// is gone. The loopback (Solo) bridge is exempt because it has no connection to hand over.
+        /// </remarks>
+        private string DescribeLiveNetworkSessions()
+        {
+            RbxNetworkTopology topology;
+            int actorCount;
+            try
+            {
+                topology = _networkBridge.Topology;
+                actorCount = _networkBridge.ActorIds?.Count ?? 0;
+            }
+            catch (Exception ex)
+            {
+                return "The network bridge could not report its sessions (" + ex.Message + "), so the "
+                       + "world load was refused and the live world was not changed. Live network "
+                       + "sessions cannot be handed to a new world until MVP11 session handoff exists; "
+                       + "disconnect clients or stop the server first.";
+            }
+
+            if (topology == RbxNetworkTopology.Solo || actorCount == 0)
+            {
+                return "";
+            }
+
+            return "The live world has " + actorCount.ToString(CultureInfo.InvariantCulture)
+                   + " connected network actor(s) on its " + topology + " bridge. Live network sessions "
+                   + "cannot be handed to a new world until MVP11 session handoff exists, so the world "
+                   + "load was refused and the live world was not changed; disconnect clients or stop "
+                   + "the server first.";
+        }
+
+        private string DescribeAclDowngrade(RbxWorldPackagePayload payload)
+        {
+            if (!_worldAclFloor.HasValue || payload?.Tree == null || payload.Tree.WorldAclVersion.HasValue)
+            {
+                return "";
+            }
+
+            return "World package has no world ACL version (legacy compatibility mode), but this "
+                   + "session was composed with world ACL version "
+                   + _worldAclFloor.Value.ToString(CultureInfo.InvariantCulture)
+                   + "; loading it would switch off per-actor access control. The live world was "
+                   + "not changed; compose the session with worldAclVersion: null to open a "
+                   + "legacy world.";
+        }
+
+        private void DemandNoLiveNetworkSessions()
+        {
+            string refusal = DescribeLiveNetworkSessions();
+            if (refusal.Length > 0)
+            {
+                throw new RbxWorldLoadRefusedException(
+                    RbxWorldLoadRefusedException.NetworkSessionsActiveStatus,
+                    refusal);
+            }
+        }
+
+        private void DemandAclCompatible(RbxWorldPackagePayload payload)
+        {
+            string refusal = DescribeAclDowngrade(payload);
+            if (refusal.Length > 0)
+            {
+                throw new RbxWorldLoadRefusedException(
+                    RbxWorldLoadRefusedException.IncompatiblePackageStatus,
+                    refusal);
             }
         }
 
@@ -1947,6 +2458,7 @@ namespace CoreAI.Mods.WorldPackages
                 string requestId,
                 string actorId,
                 string slot,
+                string sourceKind,
                 RbxWorldPackagePayload payload,
                 DateTime requestedAtUtc,
                 DateTime expiresAtUtc)
@@ -1954,6 +2466,7 @@ namespace CoreAI.Mods.WorldPackages
                 RequestId = requestId ?? "";
                 ActorId = actorId;
                 Slot = slot?.Trim() ?? "";
+                SourceKind = sourceKind ?? "";
                 Payload = payload;
                 RequestedAtUtc = requestedAtUtc;
                 ExpiresAtUtc = expiresAtUtc;
@@ -1964,6 +2477,9 @@ namespace CoreAI.Mods.WorldPackages
             public string ActorId { get; }
 
             public string Slot { get; }
+
+            /// <summary><c>manual</c> or <c>autosave</c>; kept for startup provenance and diagnostics.</summary>
+            public string SourceKind { get; }
 
             public RbxWorldPackagePayload Payload { get; }
 

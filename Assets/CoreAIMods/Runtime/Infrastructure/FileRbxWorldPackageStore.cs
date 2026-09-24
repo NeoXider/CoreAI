@@ -1,12 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
 using CoreAI.Infrastructure;
+using CoreAI.Infrastructure.Lua;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Instances;
 using Cysharp.Threading.Tasks;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace CoreAI.Mods.WorldPackages
@@ -57,6 +61,101 @@ namespace CoreAI.Mods.WorldPackages
         IReadOnlyList<string> ListAutoFiles();
 
         IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves();
+    }
+
+    /// <summary>What the durable startup selection names.</summary>
+    public enum RbxWorldStartupSelectionKind
+    {
+        /// <summary>No selection was ever recorded; the default world opens on start.</summary>
+        None,
+
+        /// <summary>The player chose the default world for the next start.</summary>
+        Default,
+
+        /// <summary>A copy of a player-confirmed package opens on start.</summary>
+        Package,
+
+        /// <summary>The newest entry cannot be read; the default world opens and the entry is kept.</summary>
+        Invalid
+    }
+
+    /// <summary>
+    /// The current durable startup selection. <see cref="Payload"/> is set only by a full read of a
+    /// <see cref="RbxWorldStartupSelectionKind.Package"/> entry; the metadata read leaves it null and
+    /// does not validate the package.
+    /// </summary>
+    public sealed class RbxWorldStartupSelection
+    {
+        internal static readonly RbxWorldStartupSelection NoneSelected = new(
+            RbxWorldStartupSelectionKind.None, 0, null, "", null, "", "", "");
+
+        internal RbxWorldStartupSelection(
+            RbxWorldStartupSelectionKind kind,
+            int sequence,
+            RbxWorldPackagePayload payload,
+            string worldId,
+            DateTime? selectedAtUtc,
+            string sourceKind,
+            string sourceName,
+            string error)
+        {
+            Kind = kind;
+            Sequence = sequence;
+            Payload = payload;
+            WorldId = worldId ?? "";
+            SelectedAtUtc = selectedAtUtc;
+            SourceKind = sourceKind ?? "";
+            SourceName = sourceName ?? "";
+            Error = error ?? "";
+        }
+
+        public RbxWorldStartupSelectionKind Kind { get; }
+
+        /// <summary>Create-once sequence number of the entry; 0 when nothing is selected.</summary>
+        public int Sequence { get; }
+
+        public RbxWorldPackagePayload Payload { get; }
+
+        /// <summary>World id of the selected package; empty when unknown.</summary>
+        public string WorldId { get; }
+
+        /// <summary>When the player confirmed the selection; null when the metadata is unavailable.</summary>
+        public DateTime? SelectedAtUtc { get; }
+
+        /// <summary><c>manual</c> or <c>autosave</c>: where the confirmed package came from.</summary>
+        public string SourceKind { get; }
+
+        /// <summary>The manual slot or autosave file name the confirmed package came from.</summary>
+        public string SourceName { get; }
+
+        public string Error { get; }
+    }
+
+    /// <summary>
+    /// Durable record of the world that opens on the next start: a create-once copy of a package the
+    /// player confirmed, or a marker that asks for the default world. Only trusted host code writes it
+    /// (a player confirmation or the Hub reset); no AI tool reaches it.
+    /// </summary>
+    public interface IRbxWorldStartupStore
+    {
+        /// <summary>Records an exact copy of <paramref name="payload"/> as the newest startup selection.</summary>
+        UniTask<RbxWorldPackageWriteResult> SelectStartupAsync(
+            RbxWorldPackagePayload payload,
+            string sourceKind,
+            string sourceName,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>Records that the next start opens the default world.</summary>
+        UniTask<RbxWorldPackageWriteResult> ClearStartupAsync(
+            CancellationToken cancellationToken = default);
+
+        /// <summary>Reads and validates the newest entry, including its package.</summary>
+        UniTask<RbxWorldStartupSelection> ReadStartupAsync(
+            CancellationToken cancellationToken = default);
+
+        /// <summary>Reads only the newest entry's kind and informational metadata.</summary>
+        UniTask<RbxWorldStartupSelection> ReadStartupInfoAsync(
+            CancellationToken cancellationToken = default);
     }
 
     /// <summary>Filesystem seam used to verify volatile-versus-durable world-package behavior.</summary>
@@ -189,9 +288,56 @@ namespace CoreAI.Mods.WorldPackages
     /// <summary>
     /// Native/IDBFS implementation. File operations are isolated behind the async store contract;
     /// every mutation requests the shared WebGL persistence sync before reporting success.
+    /// <para>
+    /// The startup area <c>Startup/[Stores/&lt;storeId&gt;/]</c> sits next to <c>Manual</c> and
+    /// <c>Auto</c>. It holds create-once entries <c>&lt;N&gt;.world</c> (a copy of a confirmed
+    /// package) and <c>&lt;N&gt;.default</c> (boot the default world), plus an informational
+    /// <c>&lt;N&gt;.json</c> never needed to boot; the highest N among the entries is the selection.
+    /// </para>
     /// </summary>
-    public sealed class FileRbxWorldPackageStore : IRbxWorldPackageStore
+    public sealed class FileRbxWorldPackageStore : IRbxWorldPackageStore, IRbxWorldStartupStore
     {
+        private sealed class StartupEntry
+        {
+            public StartupEntry(int sequence, string path, bool isDefault)
+            {
+                Sequence = sequence;
+                Path = path;
+                IsDefault = isDefault;
+            }
+
+            public int Sequence { get; }
+
+            public string Path { get; }
+
+            public bool IsDefault { get; }
+        }
+
+        private sealed class StartupMetadata
+        {
+            public static readonly StartupMetadata Unavailable = new("", null, "", "");
+
+            public StartupMetadata(
+                string worldId,
+                DateTime? selectedAtUtc,
+                string sourceKind,
+                string sourceName)
+            {
+                WorldId = worldId ?? "";
+                SelectedAtUtc = selectedAtUtc;
+                SourceKind = sourceKind ?? "";
+                SourceName = sourceName ?? "";
+            }
+
+            public string WorldId { get; }
+
+            public DateTime? SelectedAtUtc { get; }
+
+            public string SourceKind { get; }
+
+            public string SourceName { get; }
+        }
+
         private sealed class RotatedFile
         {
             public RotatedFile(string path, byte[] bytes)
@@ -213,21 +359,39 @@ namespace CoreAI.Mods.WorldPackages
 
         private const string Extension = RbxWorldPackageNames.Extension;
         private const int MaximumNameLength = RbxWorldPackageNames.MaximumNameLength;
+        private const string StartupDefaultExtension = ".default";
+        private const string StartupMetadataExtension = ".json";
+        private const int StartupSequenceDigits = 10;
+        private const int MaximumStartupMetadataBytes = 64 * 1024;
+
+        private static readonly string[] StartupEntryExtensions =
+        {
+            Extension,
+            StartupDefaultExtension,
+            StartupMetadataExtension
+        };
 
         private readonly string _manualDirectory;
         private readonly string _autoDirectory;
+        private readonly string _startupDirectory;
         private readonly int _autoBackupCapacity;
         private readonly Func<CancellationToken, UniTask<bool>> _persistenceSyncAsync;
         private readonly Func<DateTime> _utcNow;
         private readonly IRbxWorldPackageFileSystem _fileSystem;
         private readonly SemaphoreSlim _mutationGate = new(1, 1);
 
+        /// <param name="startupNamespace">
+        /// Composition namespace of the startup area (production passes the mods store id), so a world
+        /// selected in one composition never opens in another with a different Lua tier. Empty keeps the
+        /// shared <c>Startup</c> directory. Manual slots and autosaves are not namespaced.
+        /// </param>
         public FileRbxWorldPackageStore(
             string rootDirectory = null,
             int autoBackupCapacity = DefaultAutoBackupCapacity,
             Func<CancellationToken, UniTask<bool>> persistenceSyncAsync = null,
             Func<DateTime> utcNow = null,
-            IRbxWorldPackageFileSystem fileSystem = null)
+            IRbxWorldPackageFileSystem fileSystem = null,
+            string startupNamespace = null)
         {
             if (autoBackupCapacity <= 0)
             {
@@ -245,6 +409,9 @@ namespace CoreAI.Mods.WorldPackages
                 : Path.GetFullPath(rootDirectory);
             _manualDirectory = Path.Combine(resolvedRoot, "Manual");
             _autoDirectory = Path.Combine(resolvedRoot, "Auto");
+            _startupDirectory = LuaModStoreId.ApplyTo(
+                Path.Combine(resolvedRoot, "Startup"),
+                startupNamespace);
             _autoBackupCapacity = autoBackupCapacity;
             _persistenceSyncAsync = persistenceSyncAsync ?? RequestPersistenceCompletionAsync;
             _utcNow = utcNow ?? (() => DateTime.UtcNow);
@@ -257,6 +424,234 @@ namespace CoreAI.Mods.WorldPackages
         /// use it to pin that default, which no EditMode run can observe through behaviour.
         /// </summary>
         internal Func<CancellationToken, UniTask<bool>> PersistenceSyncForTests => _persistenceSyncAsync;
+
+        /// <summary>The resolved startup directory, namespace included; read-only, for composition tests.</summary>
+        internal string StartupDirectoryForTests => _startupDirectory;
+
+        public async UniTask<RbxWorldPackageWriteResult> SelectStartupAsync(
+            RbxWorldPackagePayload payload,
+            string sourceKind,
+            string sourceName,
+            CancellationToken cancellationToken = default)
+        {
+            if (payload == null)
+            {
+                throw new ArgumentNullException(nameof(payload));
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            await _mutationGate.WaitAsync(cancellationToken);
+            try
+            {
+                int sequence;
+                try
+                {
+                    _fileSystem.CreateDirectory(_startupDirectory);
+                    sequence = AllocateStartupSequence();
+                }
+                catch (Exception ex)
+                {
+                    return new RbxWorldPackageWriteResult(
+                        false,
+                        _startupDirectory,
+                        "The startup selection entry could not be allocated: " + ex.Message);
+                }
+
+                string stem = FormatStartupSequence(sequence);
+                string packagePath = Path.Combine(_startupDirectory, stem + Extension);
+                string metadataPath = Path.Combine(_startupDirectory, stem + StartupMetadataExtension);
+                // WHY the metadata goes first: the package's own durability confirmation then covers
+                // both files, and an entry is only ever current once its package exists.
+                bool metadataInstalled = await TryInstallStartupMetadataAsync(
+                    metadataPath,
+                    sequence,
+                    payload,
+                    sourceKind,
+                    sourceName,
+                    cancellationToken);
+                RbxWorldPackageWriteResult written = await WriteCreateOnceAsync(
+                    packagePath,
+                    payload,
+                    false,
+                    cancellationToken,
+                    companionPath: metadataInstalled ? metadataPath : null);
+                if (written.Success)
+                {
+                    await PruneStartupEntriesAsync(sequence);
+                }
+
+                return written;
+            }
+            finally
+            {
+                _mutationGate.Release();
+            }
+        }
+
+        public async UniTask<RbxWorldPackageWriteResult> ClearStartupAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await _mutationGate.WaitAsync(cancellationToken);
+            try
+            {
+                int sequence;
+                try
+                {
+                    StartupEntry current = FindCurrentStartupEntry();
+                    if (current == null || current.IsDefault)
+                    {
+                        return new RbxWorldPackageWriteResult(true, current?.Path ?? "", "");
+                    }
+
+                    _fileSystem.CreateDirectory(_startupDirectory);
+                    sequence = AllocateStartupSequence();
+                }
+                catch (Exception ex)
+                {
+                    return new RbxWorldPackageWriteResult(
+                        false,
+                        _startupDirectory,
+                        "The startup selection could not be listed: " + ex.Message);
+                }
+
+                string markerPath = Path.Combine(
+                    _startupDirectory,
+                    FormatStartupSequence(sequence) + StartupDefaultExtension);
+                RbxWorldPackageWriteResult written = await WriteCreateOnceAsync(
+                    markerPath,
+                    null,
+                    false,
+                    cancellationToken,
+                    Array.Empty<byte>());
+                if (written.Success)
+                {
+                    await PruneStartupEntriesAsync(sequence);
+                }
+
+                return written;
+            }
+            finally
+            {
+                _mutationGate.Release();
+            }
+        }
+
+        public async UniTask<RbxWorldStartupSelection> ReadStartupAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await _mutationGate.WaitAsync(cancellationToken);
+            try
+            {
+                StartupEntry current;
+                try
+                {
+                    current = FindCurrentStartupEntry();
+                }
+                catch (Exception ex)
+                {
+                    return ListingFailure(ex);
+                }
+
+                if (current == null)
+                {
+                    return RbxWorldStartupSelection.NoneSelected;
+                }
+
+                if (current.IsDefault)
+                {
+                    return DefaultSelection(current);
+                }
+
+                StartupMetadata metadata = await TryReadStartupMetadataAsync(
+                    current.Sequence,
+                    cancellationToken);
+                try
+                {
+                    RbxWorldPackagePayload payload = await ReadValidatedAsync(current.Path, cancellationToken);
+                    string worldId = payload.Settings?.WorldId;
+                    return new RbxWorldStartupSelection(
+                        RbxWorldStartupSelectionKind.Package,
+                        current.Sequence,
+                        payload,
+                        string.IsNullOrEmpty(worldId) ? metadata.WorldId : worldId,
+                        metadata.SelectedAtUtc,
+                        metadata.SourceKind,
+                        metadata.SourceName,
+                        "");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    string problem = ex is FileNotFoundException || ex is DirectoryNotFoundException
+                        ? " disappeared before it could be read: "
+                        : " is not a loadable world package: ";
+                    return new RbxWorldStartupSelection(
+                        RbxWorldStartupSelectionKind.Invalid,
+                        current.Sequence,
+                        null,
+                        metadata.WorldId,
+                        metadata.SelectedAtUtc,
+                        metadata.SourceKind,
+                        metadata.SourceName,
+                        "Startup entry " + Path.GetFileName(current.Path) + problem + ex.Message);
+                }
+            }
+            finally
+            {
+                _mutationGate.Release();
+            }
+        }
+
+        public async UniTask<RbxWorldStartupSelection> ReadStartupInfoAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await _mutationGate.WaitAsync(cancellationToken);
+            try
+            {
+                StartupEntry current;
+                try
+                {
+                    current = FindCurrentStartupEntry();
+                }
+                catch (Exception ex)
+                {
+                    return ListingFailure(ex);
+                }
+
+                if (current == null)
+                {
+                    return RbxWorldStartupSelection.NoneSelected;
+                }
+
+                if (current.IsDefault)
+                {
+                    return DefaultSelection(current);
+                }
+
+                StartupMetadata metadata = await TryReadStartupMetadataAsync(
+                    current.Sequence,
+                    cancellationToken);
+                return new RbxWorldStartupSelection(
+                    RbxWorldStartupSelectionKind.Package,
+                    current.Sequence,
+                    null,
+                    metadata.WorldId,
+                    metadata.SelectedAtUtc,
+                    metadata.SourceKind,
+                    metadata.SourceName,
+                    "");
+            }
+            finally
+            {
+                _mutationGate.Release();
+            }
+        }
 
         public async UniTask<RbxWorldPackageWriteResult> CreateManualAsync(
             string slot,
@@ -429,11 +824,18 @@ namespace CoreAI.Mods.WorldPackages
             return default;
         }
 
+        /// <param name="rawBytes">Exact bytes to install instead of encoding <paramref name="payload"/>.</param>
+        /// <param name="companionPath">
+        /// An already installed file that belongs to this create; a failed create removes it before its
+        /// cleanup durability confirmation, so neither survives a reload.
+        /// </param>
         private async UniTask<RbxWorldPackageWriteResult> WriteCreateOnceAsync(
             string path,
             RbxWorldPackagePayload payload,
             bool rotateAutoRing,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            byte[] rawBytes = null,
+            string companionPath = null)
         {
             string temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             bool installed = false;
@@ -446,7 +848,7 @@ namespace CoreAI.Mods.WorldPackages
                     _fileSystem.CreateDirectory(directory);
                 }
 
-                byte[] bytes = await EncodeForStoreAsync(payload, cancellationToken);
+                byte[] bytes = rawBytes ?? await EncodeForStoreAsync(payload, cancellationToken);
                 await _fileSystem.WriteAllBytesCreateNewAsync(
                     temporaryPath,
                     bytes,
@@ -461,6 +863,7 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     _fileSystem.DeleteFile(path);
                     installed = false;
+                    TryDeleteCompanion(companionPath);
                     bool cleanupCompleted = await ConfirmPersistenceWithoutCancellationAsync();
                     return new RbxWorldPackageWriteResult(
                         false,
@@ -513,6 +916,12 @@ namespace CoreAI.Mods.WorldPackages
                 if (installed && _fileSystem.FileExists(path))
                 {
                     localRecoveryCompleted = TryDeleteFile(path) && localRecoveryCompleted;
+                    recoveryRequired = true;
+                }
+
+                if (companionPath != null)
+                {
+                    localRecoveryCompleted = TryDeleteCompanion(companionPath) && localRecoveryCompleted;
                     recoveryRequired = true;
                 }
 
@@ -776,6 +1185,23 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
+        private bool TryDeleteCompanion(string companionPath)
+        {
+            if (companionPath == null)
+            {
+                return true;
+            }
+
+            try
+            {
+                return !_fileSystem.FileExists(companionPath) || TryDeleteFile(companionPath);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
         private async UniTask<bool> ConfirmPersistenceWithoutCancellationAsync()
         {
             try
@@ -786,6 +1212,253 @@ namespace CoreAI.Mods.WorldPackages
             {
                 return false;
             }
+        }
+
+        private static string FormatStartupSequence(int sequence)
+        {
+            return sequence.ToString("D" + StartupSequenceDigits, CultureInfo.InvariantCulture);
+        }
+
+        private static bool TryParseStartupSequence(string path, out int sequence)
+        {
+            sequence = 0;
+            string stem = Path.GetFileNameWithoutExtension(path);
+            if (string.IsNullOrEmpty(stem) || stem.Length > StartupSequenceDigits)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < stem.Length; index++)
+            {
+                if (stem[index] < '0' || stem[index] > '9')
+                {
+                    return false;
+                }
+            }
+
+            return int.TryParse(stem, NumberStyles.None, CultureInfo.InvariantCulture, out sequence)
+                   && sequence > 0;
+        }
+
+        private List<string> ListStartupFiles(string extension)
+        {
+            List<string> files = new();
+            if (!_fileSystem.DirectoryExists(_startupDirectory))
+            {
+                return files;
+            }
+
+            foreach (string path in _fileSystem.GetFiles(_startupDirectory, extension))
+            {
+                if (path.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+                {
+                    files.Add(path);
+                }
+            }
+
+            return files;
+        }
+
+        /// <summary>The entry with the highest sequence among packages and default markers, or null.</summary>
+        private StartupEntry FindCurrentStartupEntry()
+        {
+            StartupEntry current = null;
+            foreach (string path in ListStartupFiles(Extension))
+            {
+                if (TryParseStartupSequence(path, out int sequence)
+                    && (current == null || sequence > current.Sequence))
+                {
+                    current = new StartupEntry(sequence, path, false);
+                }
+            }
+
+            foreach (string path in ListStartupFiles(StartupDefaultExtension))
+            {
+                // WHY a tie goes to the marker: create-once allocation never produces one, and if a
+                // foreign writer did, the reproducible default world is the only safe answer.
+                if (TryParseStartupSequence(path, out int sequence)
+                    && (current == null || sequence >= current.Sequence))
+                {
+                    current = new StartupEntry(sequence, path, true);
+                }
+            }
+
+            return current;
+        }
+
+        private int AllocateStartupSequence()
+        {
+            int highest = 0;
+            foreach (string extension in StartupEntryExtensions)
+            {
+                foreach (string path in ListStartupFiles(extension))
+                {
+                    if (TryParseStartupSequence(path, out int sequence) && sequence > highest)
+                    {
+                        highest = sequence;
+                    }
+                }
+            }
+
+            return checked(highest + 1);
+        }
+
+        /// <summary>
+        /// Deletes every startup entry older than the just-confirmed one, then asks for one more
+        /// durability confirmation whose answer is ignored.
+        /// </summary>
+        /// <remarks>
+        /// WHY a failed prune is harmless: an older entry that comes back after a reload is still older,
+        /// and only the highest sequence is ever read, so no journal or rollback is needed here.
+        /// </remarks>
+        private async UniTask PruneStartupEntriesAsync(int keptSequence)
+        {
+            bool removed = false;
+            try
+            {
+                foreach (string extension in StartupEntryExtensions)
+                {
+                    foreach (string path in ListStartupFiles(extension))
+                    {
+                        if (TryParseStartupSequence(path, out int sequence) && sequence < keptSequence)
+                        {
+                            removed = TryDeleteFile(path) || removed;
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            if (removed)
+            {
+                await ConfirmPersistenceWithoutCancellationAsync();
+            }
+        }
+
+        private async UniTask<bool> TryInstallStartupMetadataAsync(
+            string metadataPath,
+            int sequence,
+            RbxWorldPackagePayload payload,
+            string sourceKind,
+            string sourceName,
+            CancellationToken cancellationToken)
+        {
+            string temporaryPath = metadataPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                JObject metadata = new()
+                {
+                    ["format"] = 1,
+                    ["sequence"] = sequence,
+                    ["world_id"] = payload.Settings?.WorldId ?? "",
+                    ["selected_at_utc"] = NormalizeUtc(_utcNow()).ToString(
+                        "O",
+                        CultureInfo.InvariantCulture),
+                    ["source_kind"] = sourceKind ?? "",
+                    ["source_name"] = sourceName ?? ""
+                };
+                byte[] bytes = Encoding.UTF8.GetBytes(metadata.ToString(Formatting.None));
+                await _fileSystem.WriteAllBytesCreateNewAsync(temporaryPath, bytes, cancellationToken);
+                _fileSystem.MoveCreateNew(temporaryPath, metadataPath);
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+            finally
+            {
+                try
+                {
+                    if (_fileSystem.FileExists(temporaryPath))
+                    {
+                        _fileSystem.DeleteFile(temporaryPath);
+                    }
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        private async UniTask<StartupMetadata> TryReadStartupMetadataAsync(
+            int sequence,
+            CancellationToken cancellationToken)
+        {
+            string path = Path.Combine(
+                _startupDirectory,
+                FormatStartupSequence(sequence) + StartupMetadataExtension);
+            try
+            {
+                if (!_fileSystem.FileExists(path)
+                    || _fileSystem.GetFileLength(path) > MaximumStartupMetadataBytes)
+                {
+                    return StartupMetadata.Unavailable;
+                }
+
+                byte[] bytes = await _fileSystem.ReadAllBytesAsync(path, cancellationToken);
+                JObject metadata = JsonConvert.DeserializeObject<JObject>(
+                    Encoding.UTF8.GetString(bytes),
+                    new JsonSerializerSettings { DateParseHandling = DateParseHandling.None });
+                if (metadata == null)
+                {
+                    return StartupMetadata.Unavailable;
+                }
+
+                DateTime? selectedAtUtc = null;
+                if (DateTime.TryParseExact(
+                        (string)metadata["selected_at_utc"],
+                        "O",
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.RoundtripKind,
+                        out DateTime parsed))
+                {
+                    selectedAtUtc = NormalizeUtc(parsed);
+                }
+
+                return new StartupMetadata(
+                    (string)metadata["world_id"],
+                    selectedAtUtc,
+                    (string)metadata["source_kind"],
+                    (string)metadata["source_name"]);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return StartupMetadata.Unavailable;
+            }
+        }
+
+        private RbxWorldStartupSelection ListingFailure(Exception exception)
+        {
+            return new RbxWorldStartupSelection(
+                RbxWorldStartupSelectionKind.Invalid,
+                0,
+                null,
+                "",
+                null,
+                "",
+                "",
+                "The startup selection in '" + _startupDirectory + "' could not be listed: "
+                + exception.Message);
+        }
+
+        private static RbxWorldStartupSelection DefaultSelection(StartupEntry entry)
+        {
+            return new RbxWorldStartupSelection(
+                RbxWorldStartupSelectionKind.Default,
+                entry.Sequence,
+                null,
+                "",
+                null,
+                "",
+                "",
+                "");
         }
 
         private string AllocateUniqueAutoPath(string timestamp, string trigger)
@@ -885,6 +1558,18 @@ namespace CoreAI.Mods.WorldPackages
 
         /// <summary>The <c>status</c> a load tool reports when it refused the call on its argument alone.</summary>
         public const string InvalidArgumentStatus = "invalid_argument";
+
+        /// <summary>The <c>status</c> reported when the named package does not exist.</summary>
+        public const string NotFoundStatus = "not_found";
+
+        /// <summary>The <c>status</c> reported when the package is corrupt, above the read limits, or not loadable here.</summary>
+        public const string InvalidPackageStatus = "invalid_package";
+
+        /// <summary>The <c>status</c> reported when the package exists but could not be read.</summary>
+        public const string ReadFailedStatus = "read_failed";
+
+        /// <summary>The <c>status</c> <c>save_world</c> reports when the live world could not be captured.</summary>
+        public const string CaptureFailedStatus = "capture_failed";
 
         /// <summary>The tool-result text for a refused argument: the parameter, the rule, and that nothing ran.</summary>
         public static string DescribeInvalidArgument(string parameter, string ruleError)

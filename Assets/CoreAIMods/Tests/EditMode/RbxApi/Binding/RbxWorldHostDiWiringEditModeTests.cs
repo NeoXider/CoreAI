@@ -47,6 +47,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         private SynchronizationContext _savedContext;
         private CoreAISettingsAsset _settings;
         private RecordingLog _log;
+        private readonly List<string> _temporaryDirectories = new();
 
         [SetUp]
         public void SetUp()
@@ -64,6 +65,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             SynchronizationContext.SetSynchronizationContext(_savedContext);
             Object.DestroyImmediate(_settings);
             RbxSpace.ResetForTests();
+            foreach (string directory in _temporaryDirectories)
+            {
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, true);
+                }
+            }
+
+            _temporaryDirectories.Clear();
         }
 
         [Test]
@@ -1239,11 +1249,17 @@ remote:FireServer('queued')");
                 Assert.AreEqual(baselineEventSubscribers, network.EventSubscriberCount);
                 Assert.AreEqual(baselineRequestSubscribers, network.RequestSubscriberCount);
 
+                // WHY the actor leaves first: the published sender registered its owner on this Host
+                // bridge, and a load with a registered network actor is refused up front (MVP11 guard);
+                // without it the injected subscription failure below would never be reached.
+                Assert.AreEqual(1, network.ActorIds.Count);
+                network.UnregisterActor("network-stage-client");
                 network.ThrowOnRequestSubscriptionAdd = true;
                 InstanceRegistry published = host.Registry;
                 RbxWorldLoadResult subscriptionRejected = worlds.LoadConfirmedAsync(accepted)
                     .GetAwaiter().GetResult();
                 Assert.IsFalse(subscriptionRejected.Success);
+                StringAssert.Contains("injected request subscription failure", subscriptionRejected.Error);
                 Assert.AreSame(published, host.Registry);
                 Assert.IsFalse(published.IsDetached);
                 Assert.AreEqual(1, network.RegisterCalls);
@@ -1741,6 +1757,178 @@ camera_follow(p)"),
             });
         }
 
+        [Test]
+        public void Composition_RegistersControllerAsStartupSelection_AndNamespacesTheDefaultStartupArea()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            string storeId = "startup-ns-" + System.Guid.NewGuid().ToString("N");
+            ContainerBuilder builder = new();
+            // WHY the installer's own store is safe here: resolving it only computes paths; this test
+            // never saves, loads or selects through it.
+            RegisterMinimalModStack(
+                builder,
+                registry,
+                modStoreId: storeId,
+                worldSessionSourceStore: new TransactionalMemorySourceStore(),
+                useInstallerDefaultPackageStore: true);
+            IObjectResolver container = builder.Build();
+            try
+            {
+                RbxWorldRuntimeSessionController controller =
+                    container.Resolve<RbxWorldRuntimeSessionController>();
+                Assert.AreSame(controller, container.Resolve<IRbxWorldStartupSelection>());
+                Assert.AreSame(controller, container.Resolve<IRbxWorldRuntimeService>());
+                FileRbxWorldPackageStore store =
+                    container.Resolve<IRbxWorldPackageStore>() as FileRbxWorldPackageStore;
+                Assert.IsNotNull(store, "without an injected store the installer composes the file store");
+                StringAssert.StartsWith(Application.persistentDataPath, store.StartupDirectoryForTests);
+                StringAssert.EndsWith(
+                    Path.Combine("Saves", "Startup", "Stores", storeId),
+                    store.StartupDirectoryForTests,
+                    "the startup area is namespaced by the composition's mods store id");
+            }
+            finally
+            {
+                container.Dispose();
+                Object.DestroyImmediate(registry);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator ComposedConfirmedLoad_ReopensInAFreshCompositionOverTheSameStore()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                CoreAiPrefabRegistryAsset prefabs = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+                string storeId = "startup-compose-" + System.Guid.NewGuid().ToString("N");
+                string packageRoot = NewTemporaryDirectory();
+                ulong markerId;
+                try
+                {
+                    FileRbxWorldPackageStore firstStore = NewPackageStoreAt(packageRoot, storeId);
+                    ContainerBuilder firstBuilder = new();
+                    RegisterMinimalModStack(
+                        firstBuilder,
+                        prefabs,
+                        modStoreId: storeId,
+                        worldSessionSourceStore: new TransactionalMemorySourceStore(),
+                        worldPackageStore: firstStore);
+                    IObjectResolver first = firstBuilder.Build();
+                    try
+                    {
+                        Assert.AreSame(firstStore, first.Resolve<IRbxWorldPackageStore>());
+                        RbxWorldRuntimeSessionController controller =
+                            first.Resolve<RbxWorldRuntimeSessionController>();
+                        InstanceRegistry live = controller.CurrentRbxApi.Registry;
+                        RbxInstance marker = live.Create("Folder");
+                        marker.Name = "ComposedStartupMarker";
+                        marker.Parent = live.WorldRoot;
+                        markerId = marker.Id.Value;
+                        ActorContext actor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                            .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                        RbxWorldPackageWriteResult saved = await controller.SaveManualAsync(actor, "composed");
+                        Assert.IsTrue(saved.Success, saved.Error);
+                        RbxWorldLoadRequest request = await controller.RequestManualLoadAsync(actor, "composed");
+
+                        RbxWorldLoadResult confirmed = await controller.ConfirmManualLoadAsync(
+                            request.RequestId,
+                            true);
+
+                        Assert.IsTrue(confirmed.Success, confirmed.Error);
+                        Assert.IsTrue(confirmed.StartupSelectionPersisted, confirmed.StartupSelectionError);
+                        StringAssert.EndsWith(
+                            Path.Combine("Startup", "Stores", storeId),
+                            firstStore.StartupDirectoryForTests);
+                        Assert.IsTrue(File.Exists(
+                            Path.Combine(firstStore.StartupDirectoryForTests, "0000000001.world")));
+                    }
+                    finally
+                    {
+                        first.Dispose();
+                    }
+
+                    ContainerBuilder secondBuilder = new();
+                    RegisterMinimalModStack(
+                        secondBuilder,
+                        prefabs,
+                        modStoreId: storeId,
+                        worldSessionSourceStore: new TransactionalMemorySourceStore(),
+                        worldPackageStore: NewPackageStoreAt(packageRoot, storeId));
+                    IObjectResolver second = secondBuilder.Build();
+                    try
+                    {
+                        RbxWorldRuntimeSessionController controller =
+                            second.Resolve<RbxWorldRuntimeSessionController>();
+                        Assert.IsNull(
+                            controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("ComposedStartupMarker"),
+                            "precondition: a fresh composition boots its default world");
+
+                        RbxWorldStartupRestoreResult restored = await second
+                            .Resolve<IRbxWorldStartupSelection>()
+                            .RestoreStartupSelectionAsync();
+
+                        Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+                        RbxInstance reopened =
+                            controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("ComposedStartupMarker");
+                        Assert.IsNotNull(reopened);
+                        Assert.AreEqual(markerId, reopened.Id.Value);
+                    }
+                    finally
+                    {
+                        second.Dispose();
+                    }
+                }
+                finally
+                {
+                    Object.DestroyImmediate(prefabs);
+                }
+            });
+        }
+
+        [Test]
+        public void ProgrammerRole_WorldTools_AreExactlySaveLoadListAndLoadAutosave()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            ContainerBuilder builder = new();
+            RegisterMinimalModStack(
+                builder,
+                registry,
+                modStoreId: "world-tools-" + System.Guid.NewGuid().ToString("N"),
+                worldSessionSourceStore: new TransactionalMemorySourceStore());
+            IObjectResolver container = builder.Build();
+            try
+            {
+                AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
+                List<string> worldTools = new();
+                List<string> allTools = new();
+                foreach (ILlmTool tool in policy.GetToolsForRole(BuiltInAgentRoleIds.Programmer))
+                {
+                    allTools.Add(tool.Name);
+                    if (tool.GetType().Namespace == typeof(IRbxWorldRuntimeService).Namespace)
+                    {
+                        worldTools.Add(tool.Name);
+                    }
+                }
+
+                CollectionAssert.AreEquivalent(
+                    new[] { "save_world", "load_world", "list_autosaves", "load_autosave" },
+                    worldTools,
+                    "the Programmer's world tools: " + string.Join(", ", allTools));
+                foreach (string name in allTools)
+                {
+                    Assert.AreEqual(
+                        -1,
+                        name.IndexOf("startup", System.StringComparison.OrdinalIgnoreCase),
+                        "no AI tool may reach the startup selection: " + name);
+                }
+            }
+            finally
+            {
+                container.Dispose();
+                Object.DestroyImmediate(registry);
+            }
+        }
+
         /// <summary>Minimal registrations the LuaCsModStack factory resolves (mirrors the proven
         /// bootstrap in LuaModsLlmToolEditModeTests): required IGameLogger + IAiGameCommandSink, plus
         /// the ResolveOrDefault conveniences and the world-command executors the installer expects.</summary>
@@ -1750,13 +1938,22 @@ camera_follow(p)"),
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
         }
 
+        /// <param name="worldPackageStore">
+        /// The package store to compose; null gives a store over a temporary directory, so no test here
+        /// writes slots, autosaves or a startup selection into the real persistentDataPath.
+        /// </param>
+        /// <param name="useInstallerDefaultPackageStore">
+        /// True composes the installer's own default store; only tests that never write through it may.
+        /// </param>
         private void RegisterMinimalModStack(ContainerBuilder builder,
             CoreAiPrefabRegistryAsset registry,
             int? worldAclVersion = InstanceRegistry.CurrentWorldAclVersion,
             string modStoreId = null,
             ILuaScriptVersionStore versionStore = null,
             ILuaModSourceStore worldSessionSourceStore = null,
-            INetworkBridge networkBridge = null)
+            INetworkBridge networkBridge = null,
+            IRbxWorldPackageStore worldPackageStore = null,
+            bool useInstallerDefaultPackageStore = false)
         {
             builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
             // WHY: an explicit recorder, not the ambient Log.Instance — the factory's diagnostics are then
@@ -1781,11 +1978,44 @@ camera_follow(p)"),
                 builder.RegisterInstance(networkBridge).As<INetworkBridge>();
             }
 
+            IRbxWorldPackageStore packageStore = worldPackageStore;
+            if (packageStore == null && !useInstallerDefaultPackageStore)
+            {
+                packageStore = NewTemporaryPackageStore(modStoreId);
+            }
+
             builder.RegisterWorldCommands(registry);
             builder.RegisterCoreAiMods(
                 worldAclVersion: worldAclVersion,
                 modStoreId: modStoreId,
-                worldSessionSourceStore: worldSessionSourceStore);
+                worldSessionSourceStore: worldSessionSourceStore,
+                worldPackageStore: packageStore);
+        }
+
+        private FileRbxWorldPackageStore NewTemporaryPackageStore(string startupNamespace)
+        {
+            return NewPackageStoreAt(NewTemporaryDirectory(), startupNamespace);
+        }
+
+        private static FileRbxWorldPackageStore NewPackageStoreAt(string root, string startupNamespace)
+        {
+            return new FileRbxWorldPackageStore(
+                root,
+                FileRbxWorldPackageStore.DefaultAutoBackupCapacity,
+                cancellationToken => UniTask.FromResult(true),
+                null,
+                null,
+                startupNamespace);
+        }
+
+        private string NewTemporaryDirectory()
+        {
+            string directory = Path.Combine(
+                Path.GetTempPath(),
+                "CoreAI-DiWiring-" + System.Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            _temporaryDirectories.Add(directory);
+            return directory;
         }
 
         private const string RestoreOwnerActorId = "restore-owner-a";
@@ -1812,16 +2042,15 @@ camera_follow(p)"),
 
             MemoryPackageStore packageStore = new();
             ContainerBuilder builder = new();
+            // WHY an in-memory package store: the pre-load safety autosave stays out of every file
+            // ring, and a refused load can be shown to have written none.
             RegisterMinimalModStack(
                 builder,
                 prefabs,
                 worldAclVersion: worldAclVersion,
                 modStoreId: "rz-restore-" + System.Guid.NewGuid().ToString("N"),
-                worldSessionSourceStore: new TransactionalMemorySourceStore());
-            // WHY registered after the installer: the later registration wins the single-service
-            // resolve, so the pre-load safety autosave stays in memory instead of the real
-            // persistentDataPath ring, and a refused load can be shown to have written none.
-            builder.RegisterInstance<IRbxWorldPackageStore>(packageStore);
+                worldSessionSourceStore: new TransactionalMemorySourceStore(),
+                worldPackageStore: packageStore);
             if (host != null)
             {
                 builder.RegisterInstance(host);

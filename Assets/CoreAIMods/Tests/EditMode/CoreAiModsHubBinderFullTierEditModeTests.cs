@@ -439,6 +439,307 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>A world service that also owns the startup selection, as the production controller does.</summary>
+        private sealed class StartupWorldRuntimeService : IRbxWorldRuntimeService, IRbxWorldStartupSelection
+        {
+            private readonly List<RbxPendingWorldLoadRequest> _pending = new();
+            private int _nextRequest;
+
+            public event Action<RbxPendingWorldLoadRequest> ManualLoadConfirmationRequested;
+
+            public DateTime UtcNow { get; } = new(2035, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+
+            public RbxWorldStartupSelection Selection { get; set; } = RbxWorldStartupSelection.NoneSelected;
+
+            public RbxWorldLoadResult ConfirmResult { get; set; } = new(true, "", 1, true, "");
+
+            public int AppliedCount { get; private set; }
+
+            public int ClearCalls { get; private set; }
+
+            public int ReadCalls { get; private set; }
+
+            public RbxWorldLoadRequest Queue(string slot)
+            {
+                _nextRequest++;
+                RbxPendingWorldLoadRequest pending = new(
+                    "startup-request-" + _nextRequest,
+                    slot,
+                    "world-" + _nextRequest,
+                    UtcNow,
+                    UtcNow.AddMinutes(1));
+                _pending.Add(pending);
+                ManualLoadConfirmationRequested?.Invoke(pending);
+                return new RbxWorldLoadRequest(
+                    pending.RequestId,
+                    slot,
+                    pending.WorldId,
+                    pending.RequestedAtUtc,
+                    pending.ExpiresAtUtc);
+            }
+
+            public RbxWorldPackagePayload CaptureCurrent()
+            {
+                return null;
+            }
+
+            public IReadOnlyList<RbxPendingWorldLoadRequest> GetPendingManualLoads()
+            {
+                return _pending.ToArray();
+            }
+
+            public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+            {
+                return Array.Empty<RbxAutoSaveInfo>();
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> SaveManualAsync(
+                ActorContext caller,
+                string slot,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public UniTask<RbxWorldLoadRequest> RequestManualLoadAsync(
+                ActorContext caller,
+                string slot,
+                CancellationToken cancellationToken = default)
+            {
+                return UniTask.FromResult(Queue(slot));
+            }
+
+            public UniTask<RbxWorldLoadRequest> RequestAutoLoadAsync(
+                ActorContext caller,
+                string autoFileName,
+                CancellationToken cancellationToken = default)
+            {
+                return UniTask.FromResult(Queue(autoFileName));
+            }
+
+            public UniTask<RbxWorldLoadResult> ConfirmManualLoadAsync(
+                string requestId,
+                bool playerConfirmed,
+                CancellationToken cancellationToken = default)
+            {
+                int index = _pending.FindIndex(request =>
+                    string.Equals(request.RequestId, requestId, StringComparison.Ordinal));
+                if (index < 0)
+                {
+                    return UniTask.FromResult(new RbxWorldLoadResult(false, "unknown", 0));
+                }
+
+                _pending.RemoveAt(index);
+                if (!playerConfirmed)
+                {
+                    return UniTask.FromResult(new RbxWorldLoadResult(false, "rejected", 0));
+                }
+
+                AppliedCount++;
+                return UniTask.FromResult(ConfirmResult);
+            }
+
+            public UniTask<RbxWorldLoadResult> LoadConfirmedAsync(
+                RbxWorldPackagePayload payload,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public UniTask<RbxWorldStartupRestoreResult> RestoreStartupSelectionAsync(
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException("The Hub never restores; only the startup composition does.");
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> ClearStartupSelectionAsync(
+                CancellationToken cancellationToken = default)
+            {
+                ClearCalls++;
+                Selection = new RbxWorldStartupSelection(
+                    RbxWorldStartupSelectionKind.Default,
+                    Selection.Sequence + 1,
+                    null,
+                    "",
+                    null,
+                    "",
+                    "",
+                    "");
+                return UniTask.FromResult(new RbxWorldPackageWriteResult(true, "startup.default", ""));
+            }
+
+            public UniTask<RbxWorldStartupSelection> ReadStartupSelectionAsync(
+                CancellationToken cancellationToken = default)
+            {
+                ReadCalls++;
+                return UniTask.FromResult(Selection);
+            }
+        }
+
+        [Test]
+        public void WorldLoadPage_StartupSection_ShowsSelectedWorldAndUtcTime_AndResetChoosesDefault()
+        {
+            StartupWorldRuntimeService service = new()
+            {
+                Selection = new RbxWorldStartupSelection(
+                    RbxWorldStartupSelectionKind.Package,
+                    3,
+                    null,
+                    "castle-world",
+                    new DateTime(2035, 1, 2, 3, 4, 5, DateTimeKind.Utc),
+                    "manual",
+                    "castle",
+                    "")
+            };
+            HubWorldLoadConfirmationPage page = new(service);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+                Label startup = root.Q<Label>("coreai-world-startup-selection");
+                Button reset = root.Q<Button>("coreai-world-startup-reset");
+                Assert.IsNotNull(startup, "a startup-aware service gets the startup section");
+                Assert.IsNotNull(reset);
+                Assert.AreEqual("Opens on start: castle-world (selected 2035-01-02 03:04:05 UTC)", startup.text);
+                Assert.IsTrue(reset.enabledSelf);
+
+                InvokeButton(reset);
+
+                Assert.AreEqual(1, service.ClearCalls);
+                Assert.AreEqual("Opens on start: default world", startup.text);
+                Assert.IsFalse(reset.enabledSelf, "there is nothing left to reset");
+                Assert.AreEqual(0, service.AppliedCount, "choosing the default world for the next start loads nothing");
+                StringAssert.Contains(
+                    "next start opens the default world",
+                    root.Q<Label>("coreai-world-load-outcome").text);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        [Test]
+        public void WorldLoadPage_StartupSection_WithoutSelection_ShowsDefaultWorld()
+        {
+            StartupWorldRuntimeService service = new();
+            HubWorldLoadConfirmationPage page = new(service);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+
+                Assert.AreEqual(
+                    "Opens on start: default world",
+                    root.Q<Label>("coreai-world-startup-selection").text);
+                Assert.IsFalse(root.Q<Button>("coreai-world-startup-reset").enabledSelf);
+                Assert.AreEqual(1, service.ReadCalls);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        [Test]
+        public void WorldLoadPage_ConfirmTooltipAndOutcome_SayWhetherTheWorldReopensOnNextStart()
+        {
+            StartupWorldRuntimeService service = new()
+            {
+                ConfirmResult = new RbxWorldLoadResult(true, "", 2, false, "browser storage is not armed")
+            };
+            HubWorldLoadConfirmationPage page = new(service);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+                RbxWorldLoadRequest unpersisted = service.Queue("castle");
+                Button confirm = root.Q<Button>("coreai-world-load-confirm-" + unpersisted.RequestId);
+                Assert.IsNotNull(confirm);
+                StringAssert.Contains("reopen on the next start", confirm.tooltip);
+
+                InvokeButton(confirm);
+
+                Label outcome = root.Q<Label>("coreai-world-load-outcome");
+                Assert.AreEqual(1, service.AppliedCount);
+                StringAssert.Contains("will NOT reopen after a restart", outcome.text);
+                StringAssert.Contains("browser storage is not armed", outcome.text);
+                Assert.AreEqual(2, service.ReadCalls, "a confirmed load refreshes the startup section");
+
+                service.ConfirmResult = new RbxWorldLoadResult(true, "", 2, true, "");
+                RbxWorldLoadRequest persisted = service.Queue("castle");
+                InvokeButton(root.Q<Button>("coreai-world-load-confirm-" + persisted.RequestId));
+
+                Assert.AreEqual(2, service.AppliedCount);
+                Assert.AreEqual("World loaded. It will also reopen on the next start.", outcome.text);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        [Test]
+        public void WorldLoadPage_ServiceWithoutStartupSelection_HasNoStartupSection_AndSaysSo()
+        {
+            RecordingWorldRuntimeService service = new();
+            HubWorldLoadConfirmationPage page = new(service);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+                RbxWorldLoadRequest request = service.RequestManualLoadAsync(
+                    default,
+                    "manual-no-startup").GetAwaiter().GetResult();
+                Button confirm = root.Q<Button>("coreai-world-load-confirm-" + request.RequestId);
+
+                Assert.IsNull(root.Q<Label>("coreai-world-startup-selection"));
+                Assert.IsNull(root.Q<Button>("coreai-world-startup-reset"));
+                Assert.AreEqual("Replace the live world with this saved world.", confirm.tooltip);
+
+                InvokeButton(confirm);
+
+                StringAssert.Contains(
+                    "will NOT reopen after a restart: this world service keeps no startup selection",
+                    root.Q<Label>("coreai-world-load-outcome").text);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        [Test]
+        public void WorldLoadPage_RegisteredWithAnExplicitStartupSelection_ShowsIt()
+        {
+            StartupWorldRuntimeService startup = new()
+            {
+                Selection = new RbxWorldStartupSelection(
+                    RbxWorldStartupSelectionKind.Package,
+                    1,
+                    null,
+                    "explicit-world",
+                    null,
+                    "autosave",
+                    "auto.world",
+                    "")
+            };
+            CoreAI.Hub.HubPageRegistry registry = new();
+            HubWorldLoadConfirmationPage page = HubModsPages.RegisterWorldLoadConfirmation(
+                registry,
+                new RecordingWorldRuntimeService(),
+                startupSelection: startup);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+
+                Assert.AreEqual(
+                    "Opens on start: explicit-world",
+                    root.Q<Label>("coreai-world-startup-selection").text);
+                Assert.IsTrue(root.Q<Button>("coreai-world-startup-reset").enabledSelf);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
         private static void InvokeButton(Button button)
         {
             MethodInfo invoke = typeof(Clickable).GetMethod(

@@ -94,28 +94,44 @@ namespace CoreAI.Ai.Hub
         }
 
         /// <summary>Registers the reusable player confirmation surface for pending world loads.</summary>
+        /// <param name="startupSelection">
+        /// The world that opens on the next start; null uses <paramref name="service"/> when it
+        /// implements <see cref="IRbxWorldStartupSelection"/>, otherwise the page has no startup section.
+        /// </param>
         public static HubWorldLoadConfirmationPage RegisterWorldLoadConfirmation(
             HubPageRegistry registry,
             IRbxWorldRuntimeService service,
             Action attentionRequested = null,
             int order = DefaultWorldLoadsOrder,
-            ActorContext actorContext = default)
+            ActorContext actorContext = default,
+            IRbxWorldStartupSelection startupSelection = null)
         {
             if (registry == null)
             {
                 throw new ArgumentNullException(nameof(registry));
             }
 
-            HubWorldLoadConfirmationPage page = new(service, attentionRequested, order, actorContext);
+            HubWorldLoadConfirmationPage page = new(
+                service,
+                attentionRequested,
+                order,
+                actorContext,
+                startupSelection);
             registry.Register(WorldLoadsPageId, () => page, order);
             return page;
         }
     }
 
-    /// <summary>Runtime UI Toolkit surface that exposes only metadata and one-shot load decisions.</summary>
+    /// <summary>
+    /// Runtime UI Toolkit surface that exposes only metadata and one-shot load decisions, plus the
+    /// player's own control over which world opens on the next start.
+    /// </summary>
     public sealed class HubWorldLoadConfirmationPage : IHubPage
     {
+        private const string DefaultWorldStartupText = "Opens on start: default world";
+
         private readonly IRbxWorldRuntimeService _service;
+        private readonly IRbxWorldStartupSelection _startupSelection;
         private readonly Action _attentionRequested;
         private readonly ActorContext _actorContext;
         private readonly HashSet<string> _autoLoadsInFlight = new(StringComparer.Ordinal);
@@ -125,18 +141,29 @@ namespace CoreAI.Ai.Hub
         private VisualElement _autoSaveRows;
         private VisualElement _rows;
         private Label _status;
+        private Label _outcome;
+        private Label _startupLabel;
+        private Button _startupResetButton;
         private IVisualElementScheduledItem _refreshSchedule;
+        private int _startupReadVersion;
+        private bool _startupClearInFlight;
         private bool _subscribed;
         private bool _destroyed;
 
         /// <summary>Creates a confirmation page and immediately listens for future requests.</summary>
+        /// <param name="startupSelection">
+        /// The world that opens on the next start; null uses <paramref name="service"/> when it
+        /// implements <see cref="IRbxWorldStartupSelection"/>, otherwise the page has no startup section.
+        /// </param>
         public HubWorldLoadConfirmationPage(
             IRbxWorldRuntimeService service,
             Action attentionRequested = null,
             int order = HubModsPages.DefaultWorldLoadsOrder,
-            ActorContext actorContext = default)
+            ActorContext actorContext = default,
+            IRbxWorldStartupSelection startupSelection = null)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
+            _startupSelection = startupSelection ?? service as IRbxWorldStartupSelection;
             _attentionRequested = attentionRequested;
             _actorContext = actorContext;
             Order = order;
@@ -159,6 +186,7 @@ namespace CoreAI.Ai.Hub
         public void OnActivated()
         {
             Refresh(false);
+            RefreshStartupSelection();
         }
 
         /// <inheritdoc />
@@ -198,11 +226,34 @@ namespace CoreAI.Ai.Hub
             _status.name = "coreai-hub-world-loads-status";
             _root.Add(_status);
 
+            // WHY a second line: the status above is rewritten by every refresh, so the outcome of a
+            // confirmed load (above all "it will not reopen after a restart") would vanish at once.
+            _outcome = HubModWidgets.MakeNote("");
+            _outcome.name = "coreai-world-load-outcome";
+            _root.Add(_outcome);
+
             ScrollView scroll = new(ScrollViewMode.Vertical)
             {
                 name = "coreai-hub-world-loads-scroll"
             };
             scroll.style.flexGrow = 1f;
+            if (_startupSelection != null)
+            {
+                scroll.contentContainer.Add(HubModWidgets.MakeTitle("Next start"));
+                _startupLabel = HubModWidgets.MakeFieldLabel("Opens on start: checking...");
+                _startupLabel.name = "coreai-world-startup-selection";
+                scroll.contentContainer.Add(_startupLabel);
+                _startupResetButton = HubModWidgets.MakeButton(
+                    "Start with the default world next time",
+                    ResetStartupSelection);
+                _startupResetButton.name = "coreai-world-startup-reset";
+                _startupResetButton.tooltip =
+                    "The next start opens the default world instead of the last world you confirmed. "
+                    + "The live world and your saves are not changed.";
+                _startupResetButton.SetEnabled(false);
+                scroll.contentContainer.Add(_startupResetButton);
+            }
+
             scroll.contentContainer.Add(HubModWidgets.MakeTitle("Autosaves"));
             _autoSaveRows = new VisualElement { name = "coreai-autosaves-rows" };
             scroll.contentContainer.Add(_autoSaveRows);
@@ -213,7 +264,124 @@ namespace CoreAI.Ai.Hub
 
             _refreshSchedule = _root.schedule.Execute(() => Refresh(false)).Every(1000);
             Refresh(false);
+            RefreshStartupSelection();
             return _root;
+        }
+
+        private async void RefreshStartupSelection()
+        {
+            if (_destroyed || _startupSelection == null || _startupLabel == null)
+            {
+                return;
+            }
+
+            // WHY a version: a slower earlier read must never overwrite what a later read showed.
+            int version = ++_startupReadVersion;
+            try
+            {
+                RbxWorldStartupSelection selection = await _startupSelection.ReadStartupSelectionAsync();
+                if (!_destroyed && version == _startupReadVersion)
+                {
+                    ShowStartupSelection(selection);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!_destroyed && version == _startupReadVersion)
+                {
+                    _startupLabel.text = "Opens on start: unknown (" + ex.Message + ")";
+                    _startupResetButton?.SetEnabled(!_startupClearInFlight);
+                }
+            }
+        }
+
+        private void ShowStartupSelection(RbxWorldStartupSelection selection)
+        {
+            RbxWorldStartupSelectionKind kind = selection?.Kind ?? RbxWorldStartupSelectionKind.None;
+            if (kind == RbxWorldStartupSelectionKind.Package)
+            {
+                string world = selection.WorldId.Length > 0 ? selection.WorldId : "a saved world";
+                _startupLabel.text = "Opens on start: " + world
+                    + (selection.SelectedAtUtc.HasValue
+                        ? " (selected " + FormatUtc(selection.SelectedAtUtc.Value) + ")"
+                        : "");
+            }
+            else if (kind == RbxWorldStartupSelectionKind.Invalid)
+            {
+                _startupLabel.text = DefaultWorldStartupText
+                    + " (the selected world cannot be read: " + selection.Error + ")";
+            }
+            else
+            {
+                _startupLabel.text = DefaultWorldStartupText;
+            }
+
+            bool canReset = kind == RbxWorldStartupSelectionKind.Package
+                            || kind == RbxWorldStartupSelectionKind.Invalid;
+            _startupResetButton?.SetEnabled(canReset && !_startupClearInFlight);
+        }
+
+        private void ResetStartupSelection()
+        {
+            if (_destroyed || _startupSelection == null || _startupClearInFlight)
+            {
+                return;
+            }
+
+            _startupClearInFlight = true;
+            _startupResetButton?.SetEnabled(false);
+            ResetStartupSelectionAsync();
+        }
+
+        private async void ResetStartupSelectionAsync()
+        {
+            try
+            {
+                RbxWorldPackageWriteResult result = await _startupSelection.ClearStartupSelectionAsync();
+                if (_destroyed)
+                {
+                    return;
+                }
+
+                if (result != null && result.Success)
+                {
+                    SetOutcome(
+                        "The next start opens the default world. The live world was not changed.",
+                        HubModWidgets.Muted);
+                }
+                else
+                {
+                    SetOutcome(
+                        "Could not choose the default world for the next start: "
+                        + (result?.Error ?? "the world service returned no result"),
+                        HubModWidgets.Danger);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!_destroyed)
+                {
+                    SetOutcome(
+                        "Could not choose the default world for the next start: " + ex.Message,
+                        HubModWidgets.Danger);
+                }
+            }
+            finally
+            {
+                _startupClearInFlight = false;
+                RefreshStartupSelection();
+            }
+        }
+
+        private void SetOutcome(string text, Color color)
+        {
+            if (_outcome == null)
+            {
+                return;
+            }
+
+            _outcome.text = text;
+            _outcome.style.color = color;
         }
 
         private void Subscribe()
@@ -443,7 +611,9 @@ namespace CoreAI.Ai.Hub
                 "Confirm load",
                 () => Decide(requestId, true));
             confirmButton.name = "coreai-world-load-confirm-" + requestId;
-            confirmButton.tooltip = "Replace the live world with this saved world.";
+            confirmButton.tooltip = _startupSelection != null
+                ? "Replace the live world with this saved world. It will also reopen on the next start."
+                : "Replace the live world with this saved world.";
             actions.Add(confirmButton);
 
             Button rejectButton = HubModWidgets.MakeDangerButton(
@@ -472,6 +642,7 @@ namespace CoreAI.Ai.Hub
 
             _status.text = playerConfirmed ? "Loading the confirmed world…" : "Rejecting the world load…";
             _status.style.color = HubModWidgets.Muted;
+            SetOutcome("", HubModWidgets.Muted);
             DecideAsync(requestId, playerConfirmed);
         }
 
@@ -497,6 +668,21 @@ namespace CoreAI.Ai.Hub
                     _status.text = "World loaded successfully. Active mods started: "
                         + result.ActiveModsStarted + ".";
                     _status.style.color = HubModWidgets.Accent;
+                    if (result.StartupSelectionPersisted)
+                    {
+                        SetOutcome(
+                            "World loaded. It will also reopen on the next start.",
+                            HubModWidgets.Muted);
+                    }
+                    else
+                    {
+                        SetOutcome(
+                            "World loaded, but it will NOT reopen after a restart: "
+                            + (result.StartupSelectionError.Length > 0
+                                ? result.StartupSelectionError
+                                : "this world service keeps no startup selection"),
+                            HubModWidgets.Danger);
+                    }
                 }
                 else
                 {
@@ -516,6 +702,10 @@ namespace CoreAI.Ai.Hub
             {
                 _inFlight.Remove(requestId);
                 Refresh(false);
+                if (playerConfirmed)
+                {
+                    RefreshStartupSelection();
+                }
             }
         }
 
@@ -582,7 +772,7 @@ namespace CoreAI.Ai.Hub
 
         private static string FormatUtc(DateTime value)
         {
-            return value.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
+            return value.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
         }
     }
 }

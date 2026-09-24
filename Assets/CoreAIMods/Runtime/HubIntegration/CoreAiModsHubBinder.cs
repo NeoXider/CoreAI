@@ -93,6 +93,8 @@ namespace CoreAI.Ai.Hub
                 container.ResolveOrDefault<IRbxWorldRuntimeService>();
             if (worldRuntimeService != null)
             {
+                // WHY resolved separately: the startup selection is a player-only surface that no AI
+                // tool receives, so the page gets it from the container rather than through the service.
                 _worldLoadConfirmationPage = HubModsPages.RegisterWorldLoadConfirmation(
                     registry,
                     worldRuntimeService,
@@ -101,7 +103,8 @@ namespace CoreAI.Ai.Hub
                         window.SetCollapsed(false);
                         window.ActivatePage(HubModsPages.WorldLoadsPageId);
                     },
-                    actorContext: actorContext);
+                    actorContext: actorContext,
+                    startupSelection: container.ResolveOrDefault<IRbxWorldStartupSelection>());
             }
 
             if (window.Registry == null)
