@@ -399,12 +399,357 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
         }
 
         [Test]
+        public void B1_01_AServerWorldOnTheStagedBridge_HandsTheTransportItsClock_OnlyOnceItIsLive()
+        {
+            // WHY: every world loaded from a package keeps the staged bridge for life, and the bridge
+            // left AttachServerClock to the interface default, so the transport never got that
+            // world's clock: its anchors carried the raw wall clock with no hold (B1-01, A4-08).
+            FakeBridge transport = new(RbxNetworkTopology.Host);
+            LuaCsRbxApiBindings live = new(networkBridge: transport,
+                clockSource: new FakeClockSource { UnixTimeSecondsFractional = 1700000000d });
+            INetworkBridge staged = CreateStagedBridge(transport);
+            FakeClockSource incomingClock = new() { UnixTimeSecondsFractional = 1800000000d };
+            LuaCsRbxApiBindings incoming = null;
+            try
+            {
+                incoming = new LuaCsRbxApiBindings(networkBridge: staged, clockSource: incomingClock);
+
+                Assert.IsNotNull(transport.AttachedServerClock);
+                Assert.AreEqual(1700000000d, transport.AttachedServerClock(out _),
+                    "a world that is not live yet leaves the live world's clock on the transport");
+
+                ActivateStagedBridge(staged);
+
+                Assert.IsNotNull(transport.AttachedServerClock);
+                Assert.AreEqual(1800000000d, transport.AttachedServerClock(out double heldWhileRunning),
+                    "once live, the transport sends the incoming world's server time");
+                Assert.AreEqual(0d, heldWhileRunning);
+                incomingClock.UnixTimeSecondsFractional = 1799999990d;
+                Assert.AreEqual(1800000000d, transport.AttachedServerClock(out double heldAfterTheStep),
+                    "after a backward step the transport sends the reading the world's scripts hold");
+                Assert.AreEqual(10d, heldAfterTheStep);
+                Assert.AreEqual(1800000000d, incoming.GetServerTimeNow());
+
+                live.Dispose();
+
+                Assert.IsNotNull(transport.AttachedServerClock,
+                    "the outgoing world's dispose does not take the incoming world's clock back");
+                Assert.AreEqual(1800000000d, transport.AttachedServerClock(out _));
+
+                incoming.Dispose();
+
+                Assert.IsNull(transport.AttachedServerClock,
+                    "a world disposed on the staged bridge takes its own clock back from the transport");
+            }
+            finally
+            {
+                incoming?.Dispose();
+                live.Dispose();
+                ((IDisposable)staged).Dispose();
+            }
+        }
+
+        [Test]
+        public void B1_01_AClientWorldOnTheStagedBridge_HoldsWhileTheServersClockIsHeld()
+        {
+            // WHY: the staged bridge answered IsServerClockHeld with the interface default (false), so
+            // a client world loaded from a package slewed on at half speed through every hold of the
+            // server's clock and ended half the step apart from it (B1-01, A4-08).
+            FakeClockSource clock = new()
+            {
+                UnixTimeSecondsFractional = 1700000000d,
+                ProcessTimeSeconds = 100d
+            };
+            FakeBridge transport = new(RbxNetworkTopology.Client) { ServerClockOffsetSeconds = 0d };
+            INetworkBridge staged = CreateStagedBridge(transport);
+            LuaCsRbxApiBindings world = null;
+            try
+            {
+                world = new LuaCsRbxApiBindings(networkBridge: staged, clockSource: clock);
+                ActivateStagedBridge(staged);
+                Assert.IsNull(transport.AttachedServerClock,
+                    "a client's world hands the transport no server clock, staged or not");
+                double held = world.GetServerTimeNow();
+
+                transport.IsServerClockHeld = true;
+                Assert.IsTrue(staged.IsServerClockHeld, "the staged bridge answers the transport's hold");
+                for (int second = 1; second <= 10; second++)
+                {
+                    clock.UnixTimeSecondsFractional += 1d;
+                    clock.ProcessTimeSeconds += 1d;
+                    transport.ServerClockOffsetSeconds = held - clock.UnixTimeSecondsFractional;
+                    Assert.AreEqual(held, world.GetServerTimeNow(),
+                        "second " + second + " of the hold: the server's clock stands still, so does the client's");
+                }
+
+                transport.IsServerClockHeld = false;
+                Assert.IsFalse(staged.IsServerClockHeld);
+                clock.UnixTimeSecondsFractional += 1d;
+                clock.ProcessTimeSeconds += 1d;
+                transport.ServerClockOffsetSeconds = held + 1d - clock.UnixTimeSecondsFractional;
+
+                Assert.AreEqual(held + 1d, world.GetServerTimeNow(),
+                    "when the hold ends the clock runs on with the server");
+            }
+            finally
+            {
+                world?.Dispose();
+                ((IDisposable)staged).Dispose();
+            }
+        }
+
+        [Test]
+        public void B1_01_Negative_AStagedWorldThatNeverGoesLive_LeavesTheLiveWorldsClockAttached()
+        {
+            // WHY the attach is queued and not forwarded: a load that fails after its world was built
+            // must leave the transport sending the live world's time. Forwarded at once, the failed
+            // world's clock would have replaced it, and that world's dispose would then have left the
+            // live world's anchors with no clock at all.
+            FakeBridge transport = new(RbxNetworkTopology.Host);
+            LuaCsRbxApiBindings live = new(networkBridge: transport,
+                clockSource: new FakeClockSource { UnixTimeSecondsFractional = 1700000000d });
+            try
+            {
+                INetworkBridge rolledBack = CreateStagedBridge(transport);
+                LuaCsRbxApiBindings failed = new(networkBridge: rolledBack,
+                    clockSource: new FakeClockSource { UnixTimeSecondsFractional = 1800000000d });
+                failed.Dispose();
+                ((IDisposable)rolledBack).Dispose();
+
+                Assert.IsNotNull(transport.AttachedServerClock);
+                Assert.AreEqual(1700000000d, transport.AttachedServerClock(out _),
+                    "a staged world that was rolled back never reached the transport");
+
+                INetworkBridge disposedFirst = CreateStagedBridge(transport);
+                LuaCsRbxApiBindings orphan = new(networkBridge: disposedFirst,
+                    clockSource: new FakeClockSource { UnixTimeSecondsFractional = 1900000000d });
+                ((IDisposable)disposedFirst).Dispose();
+
+                Assert.DoesNotThrow(() => orphan.Dispose(),
+                    "a world disposed after its staged bridge still takes its clock back without a throw");
+                Assert.IsNotNull(transport.AttachedServerClock);
+                Assert.AreEqual(1700000000d, transport.AttachedServerClock(out _),
+                    "and what it takes back is only its own clock");
+            }
+            finally
+            {
+                live.Dispose();
+            }
+        }
+
+        [Test]
+        public void B1_01_EveryBridgeWrapper_ImplementsEveryDefaultBodiedMember()
+        {
+            // WHY a drift guard: a wrapper that leaves a default-bodied member to the interface answers
+            // with the loopback's default instead of the transport underneath it, and nothing fails to
+            // compile. The staged bridge lost IsServerClockHeld, AttachServerClock and
+            // DetachServerClock that way when they were added to the interface (B1-01).
+            List<MethodInfo> defaulted = new();
+            foreach (MethodInfo member in typeof(INetworkBridge).GetMethods())
+            {
+                if (!member.IsAbstract)
+                {
+                    defaulted.Add(member);
+                }
+            }
+
+            CollectionAssert.IsNotEmpty(defaulted,
+                "the interface has default-bodied members; without them this guard checks nothing");
+
+            List<Type> wrappers = FindShippedBridgeWrappers();
+            CollectionAssert.Contains(wrappers, StagedBridgeType(),
+                "the staged bridge wraps the live transport and must be found as a wrapper");
+
+            List<string> missing = new();
+            foreach (Type wrapper in wrappers)
+            {
+                foreach (MethodInfo member in defaulted)
+                {
+                    if (!ImplementsInterfaceMember(wrapper, member))
+                    {
+                        missing.Add(wrapper.FullName + " -> " + member.Name);
+                    }
+                }
+            }
+
+            CollectionAssert.IsEmpty(missing,
+                "every INetworkBridge wrapper forwards every default-bodied member to the bridge it "
+                + "wraps: " + string.Join(", ", missing));
+        }
+
+        [Test]
         public void Negative_ABridgeWithoutAClockOfItsOwn_IsSynchronizedByDefault()
         {
             // WHY: the loopback and every server are the clock, so the default must never make a solo
             // world wait for a synchronization that cannot come.
             INetworkBridge loopback = new NullNetworkBridge();
             Assert.IsTrue(loopback.IsServerClockSynchronized);
+        }
+
+        private static Type StagedBridgeType()
+        {
+            Type staged = typeof(CoreAI.Mods.WorldPackages.RbxWorldRuntimeSessionController)
+                .GetNestedType("StagedNetworkBridge", BindingFlags.NonPublic);
+            Assert.IsNotNull(staged, "the staged bridge wraps the live transport during a world swap");
+            return staged;
+        }
+
+        private static INetworkBridge CreateStagedBridge(INetworkBridge inner)
+        {
+            return (INetworkBridge)Activator.CreateInstance(StagedBridgeType(),
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
+                new object[] { inner }, null);
+        }
+
+        /// <summary>Runs the two steps a world swap runs on the staged bridge once the world is live.</summary>
+        private static void ActivateStagedBridge(INetworkBridge staged)
+        {
+            MethodInfo prepare = staged.GetType().GetMethod("PrepareActivation",
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo activate = staged.GetType().GetMethod("ActivateAfterPublication",
+                BindingFlags.Instance | BindingFlags.Public);
+            Assert.IsNotNull(prepare);
+            Assert.IsNotNull(activate);
+            prepare.Invoke(staged, null);
+            Assert.AreEqual("", activate.Invoke(staged, null), "the queued operations replay cleanly");
+        }
+
+        /// <summary>
+        /// Every class in a shipped CoreAI assembly that implements <see cref="INetworkBridge"/> around
+        /// another one: it takes a bridge in a constructor or keeps one in a field.
+        /// </summary>
+        /// <remarks>
+        /// WHY the assembly of the staged bridge is added by hand: an assembly is only in the domain
+        /// once something loaded it, and the portable runner loads them lazily.
+        /// </remarks>
+        private static List<Type> FindShippedBridgeWrappers()
+        {
+            HashSet<Assembly> assemblies = new()
+            {
+                typeof(INetworkBridge).Assembly,
+                StagedBridgeType().Assembly
+            };
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                string name = assembly.GetName().Name ?? "";
+                if (!assembly.IsDynamic
+                    && name.StartsWith("CoreAI", StringComparison.Ordinal)
+                    && name.IndexOf("Test", StringComparison.Ordinal) < 0)
+                {
+                    assemblies.Add(assembly);
+                }
+            }
+
+            List<Type> wrappers = new();
+            foreach (Assembly assembly in assemblies)
+            {
+                foreach (Type type in LoadableTypes(assembly))
+                {
+                    if (type.IsClass && !type.IsAbstract
+                                     && typeof(INetworkBridge).IsAssignableFrom(type)
+                                     && WrapsABridge(type))
+                    {
+                        wrappers.Add(type);
+                    }
+                }
+            }
+
+            return wrappers;
+        }
+
+        private static IEnumerable<Type> LoadableTypes(Assembly assembly)
+        {
+            Type[] types;
+            try
+            {
+                types = assembly.GetTypes();
+            }
+            catch (ReflectionTypeLoadException partial)
+            {
+                types = partial.Types;
+            }
+
+            List<Type> loaded = new();
+            foreach (Type type in types)
+            {
+                if (type != null)
+                {
+                    loaded.Add(type);
+                }
+            }
+
+            return loaded;
+        }
+
+        private static bool WrapsABridge(Type type)
+        {
+            const BindingFlags instanceMembers =
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            foreach (ConstructorInfo constructor in type.GetConstructors(instanceMembers))
+            {
+                foreach (ParameterInfo parameter in constructor.GetParameters())
+                {
+                    if (typeof(INetworkBridge).IsAssignableFrom(parameter.ParameterType))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            for (Type declaring = type; declaring != null; declaring = declaring.BaseType)
+            {
+                foreach (FieldInfo field in declaring.GetFields(instanceMembers | BindingFlags.DeclaredOnly))
+                {
+                    if (typeof(INetworkBridge).IsAssignableFrom(field.FieldType))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// True when <paramref name="type"/> or a base class declares its own body for
+        /// <paramref name="member"/>, implicitly (a public method of that name and signature) or
+        /// explicitly (<c>INetworkBridge.Member</c>).
+        /// </summary>
+        /// <remarks>
+        /// WHY by name and signature and not <see cref="Type.GetInterfaceMap"/>: an interface map
+        /// over default interface members is not answered the same way by every runtime Unity ships.
+        /// </remarks>
+        private static bool ImplementsInterfaceMember(Type type, MethodInfo member)
+        {
+            ParameterInfo[] expected = member.GetParameters();
+            string explicitSuffix = nameof(INetworkBridge) + "." + member.Name;
+            for (Type declaring = type; declaring != null; declaring = declaring.BaseType)
+            {
+                foreach (MethodInfo candidate in declaring.GetMethods(BindingFlags.Instance
+                             | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                {
+                    bool named = (candidate.IsPublic && candidate.Name == member.Name)
+                                 || candidate.Name.EndsWith(explicitSuffix, StringComparison.Ordinal);
+                    if (!named || candidate.ReturnType != member.ReturnType)
+                    {
+                        continue;
+                    }
+
+                    ParameterInfo[] actual = candidate.GetParameters();
+                    bool sameParameters = actual.Length == expected.Length;
+                    for (int index = 0; sameParameters && index < actual.Length; index++)
+                    {
+                        sameParameters = actual[index].ParameterType == expected[index].ParameterType;
+                    }
+
+                    if (sameParameters)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private static LuaCsModStack StackWith(double localClockSeconds,
@@ -707,6 +1052,58 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
             Assert.AreEqual(3, before, "payloads 1, 2 and 4 are said");
             Assert.AreEqual(1, world.Log.Count,
                 "the returning sender's first payload is said again, however many came before it left");
+        }
+
+        [Test]
+        public void B1_06_AFloodOfServerPayloadsNamingAnUnknownInstance_IsSaidAtPowersOfTwo_AndAllCounted()
+        {
+            // WHY: a payload from the server naming an Instance the receiving registry does not hold
+            // wrote one log line each, while the enum branch beside it was throttled (A4-02). A Mirror
+            // client's registry is not a replica yet (MP-11), so every runtime-created Instance a
+            // server remote carries is such a reference, and a 20-60 Hz remote logged every frame.
+            ReceivingWorld world = new();
+            byte[] payload = Encoding.UTF8.GetBytes("[{\"$rbx\":\"Instance\",\"id\":\"987654321\"},"
+                                                    + "{\"$rbx\":\"Instance\",\"id\":\"987654322\"}]");
+
+            object[] first = world.Bindings.NetworkCodec.DecodeArguments(payload);
+            for (int packet = 1; packet < 1000; packet++)
+            {
+                world.Bindings.NetworkCodec.DecodeArguments(payload);
+            }
+
+            Assert.AreEqual(2, first.Length);
+            Assert.IsNull(first[0], "an unknown Instance still decodes as nil");
+            Assert.IsNull(first[1]);
+            Assert.AreEqual(10, world.Log.Count, "payloads 1, 2, 4 ... 512 of 1000 are said");
+            Assert.AreEqual("Remote payload InstanceId 987654321 is not visible in the receiving registry;"
+                            + " decoded as nil (2 such Instance references in this payload).",
+                world.Log[0], "the first payload is said at once, in the words it always was");
+            Assert.AreEqual(2000L, world.Bindings.NetworkCodec.UnresolvedInstanceReferences,
+                "every reference is counted, said or not");
+            Assert.AreEqual(1000L, world.Bindings.NetworkCodec.UnresolvedInstanceReferencePayloads);
+            Assert.AreEqual(0L, world.Bindings.NetworkCodec.HiddenClientReferencePayloads,
+                "the server's payloads are not counted as a client's");
+        }
+
+        [Test]
+        public void B1_06_Negative_AClientsFirstHiddenReference_IsStillSaid_WhileTheServersPayloadsFlood()
+        {
+            // WHY: the server's payloads are throttled under a key of their own, so their flood must
+            // not push out a client sender's first report (A4-12).
+            ReceivingWorld world = new();
+            byte[] hidden = Encoding.UTF8.GetBytes("[{\"$rbx\":\"Instance\",\"id\":\"987654321\"}]");
+            for (int packet = 0; packet < 5; packet++)
+            {
+                world.Bindings.NetworkCodec.DecodeArguments(hidden);
+            }
+
+            int serverLines = world.Log.Count;
+            world.Raise(Sender, hidden);
+
+            Assert.AreEqual(serverLines + 1, world.Log.Count, "the client's first hidden reference is said at once");
+            StringAssert.Contains("'" + Sender + "'", world.Log[world.Log.Count - 1]);
+            Assert.AreEqual(1L, world.Bindings.NetworkCodec.HiddenClientReferencePayloads);
+            Assert.AreEqual(1, world.Handled, "the event still reaches the handler, the Instance as nil");
         }
 
         [Test]

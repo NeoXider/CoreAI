@@ -258,6 +258,8 @@ namespace CoreAI.Ai.LuaCs
         private long _hiddenClientReferencePayloads;
         private long _unresolvedEnumItems;
         private long _unresolvedEnumItemPayloads;
+        private long _unresolvedInstanceReferences;
+        private long _unresolvedInstanceReferencePayloads;
 
         /// <summary>
         /// Creates the codec over the receiving world. <paramref name="clientVisibility"/> is the
@@ -290,6 +292,13 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Decoded payloads that carried at least one such EnumItem.</summary>
         internal long UnresolvedEnumItemPayloads => _unresolvedEnumItemPayloads;
+
+        /// <summary>Instance references in trusted payloads (<see cref="DecodeArguments"/>) that
+        /// decoded as nil because the receiving registry holds no such instance.</summary>
+        internal long UnresolvedInstanceReferences => _unresolvedInstanceReferences;
+
+        /// <summary>Trusted payloads that carried at least one such reference.</summary>
+        internal long UnresolvedInstanceReferencePayloads => _unresolvedInstanceReferencePayloads;
 
         /// <summary>Senders whose unresolved-value reports are currently throttled apart.</summary>
         internal int ThrottledSenderCount =>
@@ -851,9 +860,19 @@ namespace CoreAI.Ai.LuaCs
 
             if (!state.FromClient)
             {
-                _log?.Invoke("Remote payload InstanceId " + state.FirstUnresolvedInstanceId
-                             + " is not visible in the receiving registry; decoded as nil"
-                             + CountSuffix(count, "Instance references") + ".");
+                // WHY throttled like a client's (B1-06): a Mirror client's registry is not a replica
+                // yet (MP-11), so every runtime-created Instance a server remote carries lands here,
+                // and a remote fired every frame logged every frame.
+                _unresolvedInstanceReferences += count;
+                _unresolvedInstanceReferencePayloads++;
+                long trustedPayloads = CountSenderPayload(_hiddenReferencePayloadsBySender, null, out _);
+                if (IsPowerOfTwo(trustedPayloads))
+                {
+                    _log?.Invoke("Remote payload InstanceId " + state.FirstUnresolvedInstanceId
+                                 + " is not visible in the receiving registry; decoded as nil"
+                                 + CountSuffix(count, "Instance references") + ".");
+                }
+
                 return;
             }
 

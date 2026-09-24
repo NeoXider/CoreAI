@@ -3084,6 +3084,36 @@ namespace CoreAI.Mods.WorldPackages
             /// </summary>
             public bool IsServerClockSynchronized => _inner.IsServerClockSynchronized;
 
+            /// <summary>
+            /// Delegated with the offset: left to the interface default (false), a client world loaded
+            /// from a package slewed on through every hold of the server's clock (B1-01, A4-08).
+            /// </summary>
+            public bool IsServerClockHeld => _inner.IsServerClockHeld;
+
+            /// <inheritdoc />
+            /// <remarks>
+            /// Queued like a registration: a world that is not live yet must not displace the clock
+            /// the live world handed the transport, and one whose load fails never reaches it. WHY
+            /// implemented here and not left to the interface default: a world loaded from a package
+            /// keeps this bridge for its whole life, and the default dropped its clock, so the
+            /// transport sent clients its raw wall clock with no hold (B1-01).
+            /// </remarks>
+            public void AttachServerClock(RbxServerClockReader serverClock)
+            {
+                QueueOrRun(() => _inner.AttachServerClock(serverClock));
+            }
+
+            /// <inheritdoc />
+            /// <remarks>
+            /// Forwarded at once, even after <see cref="Dispose"/>: the transport takes back only the
+            /// clock it is handed, so a staged world that never went live clears nothing, and a world
+            /// disposed after this bridge still takes its own clock back.
+            /// </remarks>
+            public void DetachServerClock(RbxServerClockReader serverClock)
+            {
+                _inner.DetachServerClock(serverClock);
+            }
+
             /// <inheritdoc />
             /// <remarks>
             /// Forwarded rather than queued: a peer that dropped during staging has already gone, and

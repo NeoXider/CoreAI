@@ -1749,7 +1749,7 @@ namespace CoreAI.Ai.LuaCs
                 string property = ReadString(ctx, 1, "Instance:GetPropertyChangedSignal", 1);
                 RbxScriptSignal propertySignal = IsKnownPropertyName(context, methods, self, property)
                     ? self.GetPropertyChangedSignal(property)
-                    : CreateUnmodelledPropertySignal(context, self, property);
+                    : GetUnmodelledPropertySignal(context, self, property);
                 return LuaCsRbxDatatypeBindings.Wrap(propertySignal, context);
             });
 
@@ -2096,6 +2096,52 @@ namespace CoreAI.Ai.LuaCs
             public bool OverflowNoted;
         }
 
+        /// <summary>The unmodelled-property signals of each world's instances.</summary>
+        private static readonly ConditionalWeakTable<InstanceRegistry, UnmodelledPropertySignals>
+            UnmodelledPropertySignalsByRegistry = new();
+
+        /// <summary>
+        /// The signals GetPropertyChangedSignal handed out for unmodelled properties in one world,
+        /// per instance, in a <see cref="KeyedSignalTable"/> like attribute signals: a name gets the
+        /// same signal for as long as anything holds it, only connected ones are held strongly past
+        /// the table's budget, and the instance's destruction disconnects them all.
+        /// </summary>
+        /// <remarks>
+        /// WHY keyed weakly by the instance: an entry must not keep alive an instance nothing else
+        /// holds. WHY the registry's Unregistered and not the instance's Destroying signal: every
+        /// signal is deferred, so a Destroying handler would run after Destroy had already
+        /// disconnected it; Unregistered is raised inside Destroy, for the instance and for each of
+        /// its descendants.
+        /// </remarks>
+        private sealed class UnmodelledPropertySignals
+        {
+            private readonly ConditionalWeakTable<RbxInstance, KeyedSignalTable> _byInstance = new();
+
+            public UnmodelledPropertySignals(InstanceRegistry registry)
+            {
+                registry.Unregistered += OnUnregistered;
+            }
+
+            public RbxScriptSignal GetOrCreate(RbxInstance instance, string property)
+            {
+                KeyedSignalTable signals = _byInstance.GetValue(instance,
+                    owner => new KeyedSignalTable(owner.ClassName + ".GetPropertyChangedSignal("));
+                return signals.GetOrCreate(property, out _);
+            }
+
+            private void OnUnregistered(InstanceRecord record)
+            {
+                RbxInstance instance = record?.Instance;
+                if (instance == null || !_byInstance.TryGetValue(instance, out KeyedSignalTable signals))
+                {
+                    return;
+                }
+
+                _byInstance.Remove(instance);
+                signals.DisconnectAll();
+            }
+        }
+
         /// <summary>
         /// Sorts a GetPropertyChangedSignal name. True for a bound property, a catalogued real one,
         /// or an empty name (which <see cref="RbxInstance.GetPropertyChangedSignal"/> refuses
@@ -2317,16 +2363,23 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// A signal for a real property CoreAI does not model: it never fires, and nothing keeps
-        /// it — asking again makes a new one, so an unknown name leaves nothing behind in the
-        /// instance. The first time a world sees a class and name, it logs one note saying so.
+        /// The signal for a real property CoreAI does not model: it never fires, and the instance's
+        /// Destroy disconnects it like a modelled property's (<see cref="UnmodelledPropertySignals"/>).
+        /// The first time a world sees a class and name, it logs one note saying so.
         /// </summary>
-        private static RbxScriptSignal CreateUnmodelledPropertySignal(LuaCsRbxModContext context,
+        /// <remarks>
+        /// WHY kept per instance and not made afresh on each call (B1-04): a fresh signal belonged to
+        /// nothing, so Destroy never reached what a script connected to it, and every character a
+        /// footstep script watched (Humanoid.FloorMaterial) left its connection, and the destroyed
+        /// character its handler captured, in the mod's ledger until the mod unloaded.
+        /// </remarks>
+        private static RbxScriptSignal GetUnmodelledPropertySignal(LuaCsRbxModContext context,
             RbxInstance instance, string property)
         {
             NoteUnmodelledProperty(context, instance.ClassName, property);
-            return new RbxScriptSignal(instance.ClassName + ".GetPropertyChangedSignal(" + property
-                                       + ")");
+            UnmodelledPropertySignals signals = UnmodelledPropertySignalsByRegistry.GetValue(
+                context.Bindings.Registry, registry => new UnmodelledPropertySignals(registry));
+            return signals.GetOrCreate(instance, property);
         }
 
         /// <summary>

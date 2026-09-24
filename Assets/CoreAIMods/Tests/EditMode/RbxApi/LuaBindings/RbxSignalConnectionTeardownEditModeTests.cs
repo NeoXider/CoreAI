@@ -108,11 +108,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         /// </summary>
         private static LuaCsModStack BuildWiredStack(out LuaCsRbxApiBindings roblox,
             MemoryStore store, IInputSource inputSource = null,
-            TeardownProbe teardownProbe = null)
+            TeardownProbe teardownProbe = null, System.Action<string> log = null)
         {
             ModConnectionRegistry connections = new();
             LuaCsRbxApiBindings bindings = new(
-                connections: connections, inputSource: inputSource);
+                connections: connections, inputSource: inputSource, log: log);
             roblox = bindings;
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
@@ -535,6 +535,82 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual("payload", store.Get("m", "seen"),
                 "the destroyed child is the same table key the script stored");
             Assert.AreEqual("true", store.Get("m", "same"));
+        }
+
+        [Test]
+        public void B1_04_Destroy_DisconnectsWhatAScriptConnectedToAnUnmodelledPropertySignal()
+        {
+            // WHY: the signal GetPropertyChangedSignal hands out for a real property CoreAI does not
+            // model belonged to nothing, so Destroy never reached it: every character a footstep
+            // script watched (Humanoid.FloorMaterial) left its connection, and the destroyed
+            // character its handler captured, in the mod's ledger until the mod unloaded (B1-04).
+            List<string> log = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store, log: log.Add);
+
+            stack.Runtime.LoadMod("footsteps", @"
+                local kept = Instance.new('Model')
+                kept.Parent = workspace
+                kept:GetPropertyChangedSignal('LevelOfDetail'):Connect(function()
+                    store_set('fired', kept.Name)
+                end)
+                for index = 1, 50 do
+                    local model = Instance.new('Model')
+                    model.Parent = workspace
+                    model:GetPropertyChangedSignal('LevelOfDetail'):Connect(function()
+                        store_set('fired', model.Name)
+                    end)
+                    local part = Instance.new('Part')
+                    part.Parent = model
+                    part:GetPropertyChangedSignal('LocalTransparencyModifier'):Connect(function()
+                        store_set('fired', part.Name)
+                    end)
+                    model:Destroy()
+                end
+                local late = Instance.new('Model')
+                late.Parent = workspace
+                local held = late:GetPropertyChangedSignal('LevelOfDetail')
+                for index = 1, 200 do
+                    late:GetPropertyChangedSignal('Unmodelled' .. index)
+                end
+                held:Connect(function()
+                    store_set('fired', late.Name)
+                end)
+                late:Destroy()
+                store_set('loaded', 'true')");
+            roblox.Scheduler.Advance(0d);
+
+            Assert.AreEqual("true", store.Get("footsteps", "loaded"));
+            Assert.AreEqual(1, log.FindAll(line =>
+                    line.Contains("CoreAI does not model Model.LevelOfDetail")).Count,
+                "the watched property is one CoreAI does not model, which is the case under test");
+            Assert.AreEqual(1, roblox.Connections.GetOwnedBy("footsteps").Count,
+                "a destroyed instance's unmodelled-property connections are gone, its descendants' and a "
+                + "signal taken before 200 other names included; the live instance's one stays");
+            Assert.AreEqual("", store.Get("footsteps", "fired"), "an unmodelled property's signal never fires");
+        }
+
+        [Test]
+        public void B1_04_Negative_Destroy_StillDisconnectsAModelledPropertySignal()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store);
+
+            stack.Runtime.LoadMod("footsteps", @"
+                for index = 1, 50 do
+                    local model = Instance.new('Model')
+                    model.Parent = workspace
+                    model:GetPropertyChangedSignal('Name'):Connect(function()
+                        store_set('fired', model.Name)
+                    end)
+                    model:Destroy()
+                end
+                store_set('loaded', 'true')");
+            roblox.Scheduler.Advance(0d);
+
+            Assert.AreEqual("true", store.Get("footsteps", "loaded"));
+            Assert.AreEqual(0, roblox.Connections.GetOwnedBy("footsteps").Count,
+                "Destroy disconnects a modelled property's signal, as it always did");
         }
 
         private static LuaCsRbxModContext CreateHostContext(LuaCsRbxApiBindings bindings,
