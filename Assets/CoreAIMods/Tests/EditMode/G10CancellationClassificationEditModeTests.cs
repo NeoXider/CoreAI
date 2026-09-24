@@ -106,6 +106,39 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(observation.Cancelled);
         }
 
+#if !COREAI_LLM
+        [Test]
+        public void RealProviderWithoutLlmModule_RefusesInsteadOfMeasuringAStub()
+        {
+            // WHY: without COREAI_LLM the HTTP provider is stripped. A composition that quietly
+            // substituted the scripted stub would publish stub latencies as a real-provider capacity
+            // measurement, so RealProvider mode must refuse and name the missing module.
+            G10MeasurementConfiguration configuration = new()
+            {
+                Provider = new G10ProviderConfiguration
+                {
+                    ProviderMode = G10ProviderMode.RealProvider,
+                    Endpoint = "http://127.0.0.1:1/v1",
+                    ModelId = "g10-no-llm-regression",
+                    ContextCapTokens = 4096,
+                    OutputCapTokens = 256,
+                    BackendConcurrency = 1,
+                    OrchestratorConcurrency = 1,
+                    RequestTimeoutSeconds = 30
+                }
+            };
+            Assert.That(configuration.Validate(), Is.Empty,
+                "the configuration must be valid, so the refusal can only come from the missing LLM module");
+
+            InvalidOperationException error = Assert.Throws<InvalidOperationException>(
+                () => G10MeasurementComposition.Compose(configuration),
+                "RealProvider mode must refuse in a build without COREAI_LLM, not fall back to a stub provider");
+
+            StringAssert.Contains("RealProvider", error.Message);
+            StringAssert.Contains("COREAI_LLM", error.Message);
+        }
+#endif
+
         private sealed class StubLlmClient : ILlmClient
         {
             private readonly LlmCompletionResult _result;

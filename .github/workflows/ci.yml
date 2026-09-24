@@ -48,14 +48,24 @@ jobs:
           --results-directory artifacts/portable-lua
           --logger "trx;LogFileName=portable-lua.trx"
       # WHY: an Inconclusive result does not fail dotnet test, so a broken link list or a shim that
-      # refuses too much could otherwise go green having run almost nothing.
+      # refuses too much could otherwise go green having run almost nothing. The passed floor alone
+      # would absorb tests drifting one by one into Inconclusive, so not-executed cases (Inconclusive,
+      # ignored, skipped: all outcome="NotExecuted" in the TRX log) have a ceiling too: 37 when it was
+      # set, plus 5 (tools/portable/LuaTests/README.md lists them).
       - name: Enforce that the Lua-tier suite actually ran
         if: always()
         run: |
-          count=$(grep -o 'outcome="Passed"' artifacts/portable-lua/portable-lua.trx | wc -l)
-          echo "Passed Lua-tier test cases: $count"
-          if [ "$count" -lt 1400 ]; then
+          trx=artifacts/portable-lua/portable-lua.trx
+          passed=$(grep -o 'outcome="Passed"' "$trx" | wc -l)
+          not_executed=$(grep -o 'outcome="NotExecuted"' "$trx" | wc -l)
+          echo "Passed Lua-tier test cases: $passed"
+          echo "Not executed Lua-tier test cases (Inconclusive, ignored or skipped): $not_executed"
+          if [ "$passed" -lt 1400 ]; then
             echo "::error::The portable Lua-tier suite ran fewer than 1400 passing cases."
+            exit 1
+          fi
+          if [ "$not_executed" -gt 42 ]; then
+            echo "::error::The portable Lua-tier suite has $not_executed not-executed cases, more than 42; list the Inconclusive ones with their PORTABLE_ENGINE_UNAVAILABLE reason in the TRX log."
             exit 1
           fi
       - name: Upload test results

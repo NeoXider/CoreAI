@@ -691,10 +691,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         [Test]
         public void Negative_CorruptedTierBFixtures_Fail()
         {
-            // The zero-work counter for the gate above: if the runner reported success for anything,
-            // these three deliberately broken twins of the named MVP8 fixtures would pass too. Each
-            // also has to fail with ITS code: tweening CanCollide is valid Roblox CoreAI cannot do
-            // yet, so it is the NOT_IMPLEMENTED stub the stub counter classifies, never a
+            // WHY: this is the zero-work counter for the gate above. If the runner reported success
+            // for anything, these three deliberately broken twins of the named MVP8 fixtures would
+            // pass too. Each also has to fail with ITS code: tweening CanCollide is valid Roblox CoreAI
+            // cannot do yet, so it is the NOT_IMPLEMENTED stub the stub counter classifies, never a
             // BAD_ARGUMENT that reads as the author's mistake (M8-14).
             (string Id, string Source, string Expected, string ExpectedCode)[] corrupted =
             {

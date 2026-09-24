@@ -61,6 +61,7 @@
   <ItemGroup>
     <Compile Include="../Tests/RepositoryTestSetup.cs" Link="RepositoryTestSetup.cs" />
     <Compile Include="PortableUnityTestScope.cs" />
+    <Compile Include="PortableRunnerSelfTests.cs" />
     <Compile Include="UnityTestToolsConstraints.cs" />
   </ItemGroup>
   <ItemGroup>

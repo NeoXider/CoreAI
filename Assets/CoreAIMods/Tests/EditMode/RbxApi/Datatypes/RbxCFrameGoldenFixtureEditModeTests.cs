@@ -242,15 +242,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
             Assert.AreEqual(0.41664919, oy, 1e-6);
             Assert.AreEqual(0.11988357, oz, 1e-6);
 
-            // The same Rx(a) * Ry(b) read in ZYX: ry = asin(-R20), rz = atan2(R10, R00), rx = atan2(R21, R22).
+            // WHY: the ZYX expectations below read the same Rx(a) * Ry(b) as ry = asin(-R20),
+            // rz = atan2(R10, R00), rx = atan2(R21, R22).
             (float zx, float zy, float zz) =
                 RbxCFrame.Angles((float)a, (float)b, 0f).ToEulerAngles(RbxRotationOrder.ZYX);
             Assert.AreEqual(Math.Atan2(Math.Sin(a), Math.Cos(a) * Math.Cos(b)), zx, 1e-6, "ZYX rx = atan2(sa, ca cb)");
             Assert.AreEqual(Math.Asin(Math.Cos(a) * Math.Sin(b)), zy, 1e-6, "ZYX ry = asin(ca sb)");
             Assert.AreEqual(Math.Atan2(Math.Sin(a) * Math.Sin(b), Math.Cos(b)), zz, 1e-6, "ZYX rz = atan2(sa sb, cb)");
 
-            // CFrame.fromOrientation(a, b, 0) = Ry(b) * Rx(a) = [[cb, sb sa, sb ca], [0, ca, -sa], [-sb, cb sa, cb ca]]
-            // read in XYZ: ry = asin(R02), rx = atan2(-R12, R22), rz = atan2(-R01, R00).
+            // WHY: CFrame.fromOrientation(a, b, 0) is Ry(b) * Rx(a) = [[cb, sb sa, sb ca], [0, ca, -sa],
+            // [-sb, cb sa, cb ca]], and the XYZ expectations below read it as ry = asin(R02),
+            // rx = atan2(-R12, R22), rz = atan2(-R01, R00).
             (float xx, float xy, float xz) =
                 RbxCFrame.FromOrientation((float)a, (float)b, 0f).ToEulerAnglesXYZ();
             Assert.AreEqual(Math.Atan2(Math.Sin(a), Math.Cos(b) * Math.Cos(a)), xx, 1e-6, "XYZ rx = atan2(sa, cb ca)");

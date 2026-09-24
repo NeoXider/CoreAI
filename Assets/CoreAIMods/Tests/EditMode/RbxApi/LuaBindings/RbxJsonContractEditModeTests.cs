@@ -681,9 +681,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             StringAssert.Contains("remote payload root must be an argument array", store.Get("m", "err"));
         }
 
-        // ---------------------------------------------------------------------------------------
-        // Remote codec wire contract: non-finite numbers, bounded decode cost, diagnostic paths.
-        // ---------------------------------------------------------------------------------------
+        // ---- Remote codec wire contract: non-finite numbers, bounded decode cost, diagnostic paths ----
 
         [Test]
         public void NetworkCodec_NaNAndInfinity_CrossTheWireAsNumbersInBothDirections()
@@ -1006,10 +1004,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 new InstanceRegistry(), RbxEnumRegistry.CreateWithBuiltins(), null);
         }
 
-        // ---------------------------------------------------------------------------------------
-        // Remote codec: Instance references a client sends to the server resolve only when the
-        // sender can see them (remote-events guide, "Non-replicated instances").
-        // ---------------------------------------------------------------------------------------
+        // ---- Remote codec: Instance references a client sends to the server -------------------
+        // WHY: such a reference resolves on the server only when the sending client can see the
+        // instance (Roblox remote-events guide, "Non-replicated instances").
 
         [Test]
         public void ClientPayload_NamingAServerStorageChild_DecodesAsNilOnTheServer()

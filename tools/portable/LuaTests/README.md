@@ -20,8 +20,10 @@ Reading a result:
 |---|---|
 | Passed | The test ran its real code path and every assertion held. |
 | Failed | A real assertion failed, or the Unity Test Framework log rule failed it (below). Triage it: it is either a runtime/test bug Unity would hit too, or a .NET-versus-Mono difference. |
-| Skipped / NotExecuted with `PORTABLE_ENGINE_UNAVAILABLE` | The test reached an engine member the shim refuses. Its portable outcome is not evidence either way; only Unity decides it. |
-| Skipped for another reason | The fixture skipped itself (for example a live-model check, or a demo assembly that is absent). |
+| Inconclusive with `PORTABLE_ENGINE_UNAVAILABLE` | The test depends on an engine member the shim refuses (the refusal rule below). Its portable outcome is not evidence either way; only Unity decides it. |
+| Skipped or ignored for another reason | The fixture skipped itself (for example a live-model check, or a demo assembly that is absent). |
+
+Count all four. The summary line `dotnet test` prints leaves Inconclusive tests and tests ignored in a `OneTimeSetUp` out of both "Skipped" and "Total"; a TRX log (`--logger trx`) records every one of them as `outcome="NotExecuted"`. So a result is stated as "N passed, 0 failed, M not executed", with M taken from the TRX log, never as the summary line alone.
 
 ## Design
 
@@ -34,7 +36,7 @@ Reading a result:
 | `../LuaTier/CoreAI.RbxApi.Unity` | `CoreAI.RbxApi.Unity` | `RbxSpace.cs` and the assembly's `InternalsVisibleTo` file |
 | `../LuaTier/CoreAI.RbxApi.Binding` | `CoreAI.RbxApi.Binding` | the part-property, camera and click-pick seams with their in-memory implementations, `IRbxCharacterMotorProvider`, `WorldQuerySceneWalker`, `UnityRbxCharacterMotor` |
 | `../LuaTier/CoreAI.Mods` | `CoreAI.Mods` | `Scripting/**`, `LuaExecution/**`, `LuaAssets/**`, `Logging/**`, `Infrastructure/**`, `WorldBindings/**` (exclusions below) |
-| `CoreAI.Portable.LuaTests.csproj` | `CoreAI.Mods.Tests` | the linked fixtures |
+| `CoreAI.Portable.LuaTests.csproj` | `CoreAI.Mods.Tests` | the linked fixtures, the two rules below and the runner self-tests |
 | `../CoreAI.Core.csproj`, `../CoreAI.RbxApi.Datatypes`, `../CoreAI.RbxApi.Instances`, `../CoreAI.LuauDownlevel` | same names | reused unchanged from the engine-free suite |
 
 WHY the Unity names and boundaries: `InternalsVisibleTo` grants are by assembly name (`CoreAI.Mods`, `CoreAI.Source`, `CoreAI.Core`, `CoreAI.RbxApi.Instances` and `CoreAI.RbxApi.Unity` all trust `CoreAI.Mods.Tests`; `CoreAI.Core` trusts `CoreAI.Source`; `CoreAI.Source` and `CoreAI.RbxApi.Instances` trust `CoreAI.Mods`). Merging assemblies would let code reach internals it cannot reach in the editor, and a portable pass would then prove less. Every runtime project compiles as C# 9 with nullable off against .NET Standard 2.1, like Unity, with the project-wide scripting defines `COREAI_LLM` and `COREAI_LUA` (`../LuaTier/LuaTier.props`). `UNITY_EDITOR`, `UNITY_WEBGL` and `COREAI_HAS_HUB` are not defined: no linked runtime file branches on `UNITY_EDITOR`, the WebGL branches are a separate target, and the Hub package is not part of this build. The test project is `net8.0`, C# 9, NUnit 3.14 with the same test packages as the engine-free suite.
@@ -64,7 +66,20 @@ WHY refusing surfaces exist at all: the production mod stack (`LuaCsModRuntimeFa
 `PortableUnityTestScope.cs` is an assembly-level NUnit action:
 
 - **The Unity Test Framework log rule.** An `Error`, `Assert` or `Exception` log that no `LogAssert.Expect` consumed fails the test; an expectation that never matched fails it too. Expectations match in order against the test's log stream, by exact message or regex, optionally by type; `LogAssert.ignoreFailingMessages` and `LogAssert.NoUnexpectedReceived` behave as in Unity. The scope covers SetUp, the test body and TearDown and is evaluated after TearDown; where Unity draws the scope boundary around SetUp and TearDown may differ.
-- **The refusal rule.** A test that reached any refused member is reported Inconclusive with the refused members listed and its portable outcome appended, whatever that outcome was. A pass may come from code that caught the refusal and carried on; a failure is usually a missing side effect downstream of it. Neither says anything about Unity.
+- **The refusal rule.** A test that depends on any refused member is reported Inconclusive with the refused members listed and its portable outcome appended, whatever that outcome was. A pass may come from code that caught the refusal and carried on; a failure is usually a missing side effect downstream of it. Neither says anything about Unity. A test depends on a refusal raised:
+  - in its own SetUp, body or TearDown, or by work still running from an earlier test when it is collected;
+  - in the constructor or `OneTimeSetUp` of its fixture, or the `OneTimeSetUp` of an enclosing `SetUpFixture`: every test of that suite that has not reported yet is charged, because each one runs on the state that setup built;
+  - while NUnit built the test tree (a `TestCaseSource`, `ValueSource` or `TestFixtureSource`, which run before any test): every test of the run is charged, because nothing says which test used the result, so the run fails loudly through the CI bound below.
+
+  A refusal raised in a `OneTimeTearDown` comes after every outcome of its fixture was reported; it is written to the progress log and charges nobody.
+
+  WHY the rule needs to know who was running: the shim records each refusal with the answer of `PortableRefusalLog.OwnerProbe`, which the test assembly installs from a module initializer (before NUnit runs any of its code) and which returns NUnit's current test or suite. NUnit flows that context into async continuations and tasks, and uses an ad hoc context that names no test while it builds the tree.
+
+### Self-tests of the runner
+
+`PortableRunnerSelfTests.cs` exists only in this project. Its tests run witness fixtures in a nested NUnit run rooted at this assembly, so the assembly-level scope wraps them exactly as it wraps every linked fixture, and assert on the outcome each witness got: a refusal in `OneTimeSetUp`, a fixture constructor, `SetUp`, `TearDown` or the body makes the witness Inconclusive and leaves a clean sibling fixture Passed; one in a `TestCaseSource` makes every test of the nested run Inconclusive, the clean sibling included; one in `OneTimeTearDown` charges nobody; an unexpected `Debug.LogError` or an expectation that never matched fails the witness while a matched `LogAssert.Expect` passes; `Is.Not.AllocatingGCMemory()` fails for an allocating delegate and passes for an allocation-free one. It also pins shim math against Unity's reference source (`Vector3.normalized` is zero at or below `kEpsilon`).
+
+WHY the witnesses are generic classes closed only by the nested run: NUnit does not build fixtures from an open generic class without a fixture attribute, so the outer run never discovers a witness, and its deliberate Inconclusive or Failed outcome is an assertion here instead of a red or inconclusive line in the published result. A regression in the scope therefore fails an ordinary test.
 
 ### `Is.Not.AllocatingGCMemory()`
 
@@ -94,7 +109,26 @@ The real `CoreServicesInstaller` is a VContainer/MessagePipe installer, but the 
 
 Linked from `Assets/CoreAIMods/Tests/EditMode` (75 fixture files, 4 helpers, 1 derived helper), plus `Assets/CoreAiUnity/Tests/EditMode/LuaModAutoRepairPolicyEditModeTests.cs` (a Lua-tier policy tested through public API only). The explicit list is in the project file. 36 files of the same folder already run in the engine-free suite and are not linked again.
 
-A linked fixture holds only tests that run here. Where a fixture's subject is engine-free but a few of its tests drive that subject through the engine, those tests live in a Unity-only fixture class next to the engine code they need, so the rest of the fixture is linked whole:
+Linked fixtures still contain tests that do not run here. Counted on 2026-09-24, the Lua-tier run is 1464 passed (11 of them the runner self-tests above), 0 failed, 37 not executed:
+
+| Not executed | Fixture | Tests | Why |
+|---|---|---|---|
+| Inconclusive (`PORTABLE_ENGINE_UNAVAILABLE`) | `BundledLuaSamplesEditModeTests` | 11 | `Resources.Load`, `Resources.LoadAll` (the bundled samples ship as Resources text assets) |
+| | `RbxApi/LuaBindings/RbxSignalConnectionTeardownEditModeTests` | 5 | `GameObject` constructor (the host frame pump) |
+| | `LuaCsModRuntimeEditModeTests` | 4 | `JsonUtility.ToJson` (world-command envelopes) |
+| | `LuaModdingSkillEditModeTests` | 3 | `Resources.Load` (the skill text override) |
+| | `RbxApi/Acceptance/Mvp1RbxSpaceSizeAndDirectionRoundTripEditModeTests` | 2 | `Quaternion.Euler` |
+| | `RbxApi/Datatypes/RbxSpaceRoundTripEditModeTests` | 2 | `Quaternion.Euler` |
+| | `RbxApi/Acceptance/Mvp8PlayersCompletionEditModeTests` | 2 | `GameObject` constructor (the character motor) |
+| | `RbxApi/Acceptance/Mvp8HumanoidEditModeTests` | 1 | `GameObject.CreatePrimitive` |
+| | `DemoModProductionSurfaceEditModeTests` | 1 | `GameObject` constructor, `GameObject.Find` |
+| | `RbxApi/LuaBindings/RbxTaskSchedulerLuaBindingsEditModeTests` | 1 | `GameObject` constructor |
+| Ignored in `OneTimeSetUp` | `RbxApi/LiveCheck/RbxApi4BLiveCheckEditModeTests` | 3 | a live-model check, run by hand against a local endpoint |
+| Skipped | `DemoModProductionSurfaceEditModeTests` | 2 | the `CoreAI.Demos` assembly is not part of this build |
+
+That is 32 Inconclusive tests in 10 fixtures, plus 5 the fixtures themselves ignore or skip. The CI job `portable-lua` fails when the TRX log holds fewer than 1400 passed cases or more than 42 not-executed ones (37 when the bound was set, plus 5), so tests that drift one by one into Inconclusive are noticed before the passed floor would absorb them. A change that moves tests out of this table lowers the bound with it.
+
+Where a fixture's subject is engine-free but a few of its tests drive that subject through the engine, those tests can live in a Unity-only fixture class next to the engine code they need, so the rest of the fixture runs here:
 
 | Linked fixture | Its engine-bound tests live in |
 |---|---|
@@ -103,7 +137,7 @@ A linked fixture holds only tests that run here. Where a fixture's subject is en
 | `RbxApi/Instances/InstanceRegistryEditModeTests`, `RbxApi/Datatypes/RbxSpaceGoldenFixtureEditModeTests` | `RbxWorldHostLazyWorldWrapEditModeTests` in `RbxApi/Binding/RbxWorldHostEditModeTests.cs` |
 | `RbxApi/Acceptance/Mvp2StanceConformanceEditModeTests` | `UnityRbxCharacterMotorLifecycleEditModeTests` in `RbxApi/Binding/UnityRbxCharacterMotorJumpGravityEditModeTests.cs` |
 
-A new test that needs the engine goes into such a class, not into a linked fixture: there it would break this build, or report Inconclusive on every run.
+A new test that needs the engine goes into such a class, not into a linked fixture: there it would break this build, or report Inconclusive on every run and count against the CI bound.
 
 Excluded, by what they need (31 files):
 

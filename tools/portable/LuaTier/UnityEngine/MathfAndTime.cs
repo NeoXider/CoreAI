@@ -191,33 +191,59 @@ namespace UnityEngine
     /// <summary>
     /// Every refusal raised since the last <see cref="Drain"/>. Runtime code may catch a refusal and
     /// carry on (a generic catch turning it into an error status), which could make a test pass for
-    /// the wrong reason; the portable test assembly drains this after each test and never reports such
-    /// a test as passed.
+    /// the wrong reason; the portable test assembly drains this around each test and never reports a
+    /// test that depends on a refusal as passed.
     /// </summary>
     public static class PortableRefusalLog
     {
         private static readonly object Gate = new object();
-        private static readonly System.Collections.Generic.List<string> Refused =
-            new System.Collections.Generic.List<string>();
+        private static readonly System.Collections.Generic.List<PortableRefusal> Refused =
+            new System.Collections.Generic.List<PortableRefusal>();
+
+        /// <summary>
+        /// Called on the refusing thread when a refusal is raised; its answer is stored as
+        /// <see cref="PortableRefusal.Owner"/>. The portable test assembly installs one that returns the
+        /// NUnit test or fixture that was running, so a refusal raised in a fixture constructor or a
+        /// OneTimeSetUp can be charged to that fixture's tests. Null leaves every owner null.
+        /// </summary>
+        public static Func<object> OwnerProbe { get; set; }
 
         internal static void Record(string api)
         {
+            Func<object> probe = OwnerProbe;
+            PortableRefusal refusal = new PortableRefusal(api, probe != null ? probe() : null);
             lock (Gate)
             {
-                Refused.Add(api);
+                Refused.Add(refusal);
             }
         }
 
-        /// <summary>Returns the refused members recorded so far and clears the log.</summary>
-        public static string[] Drain()
+        /// <summary>Returns the refusals recorded so far and clears the log.</summary>
+        public static PortableRefusal[] Drain()
         {
             lock (Gate)
             {
-                string[] snapshot = Refused.ToArray();
+                PortableRefusal[] snapshot = Refused.ToArray();
                 Refused.Clear();
                 return snapshot;
             }
         }
+    }
+
+    /// <summary>One refused engine member and whatever <see cref="PortableRefusalLog.OwnerProbe"/> said was running.</summary>
+    public sealed class PortableRefusal
+    {
+        public PortableRefusal(string api, object owner)
+        {
+            Api = api;
+            Owner = owner;
+        }
+
+        /// <summary>The refused member, e.g. <c>GameObject.Find</c>.</summary>
+        public string Api { get; }
+
+        /// <summary>The probe's answer when the refusal was raised; null without a probe.</summary>
+        public object Owner { get; }
     }
 
     internal static class PortableEngine

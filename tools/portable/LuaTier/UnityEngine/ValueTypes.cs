@@ -60,12 +60,16 @@ namespace UnityEngine
 
         public float sqrMagnitude => x * x + y * y + z * z;
 
+        /// <summary>
+        /// Unity's <c>Vector3.Normalize(in Vector3)</c> (UnityCsReference, Runtime/Export/Math/Vector3.cs):
+        /// zero unless the magnitude exceeds <see cref="kEpsilon"/>.
+        /// </summary>
         public Vector3 normalized
         {
             get
             {
                 float mag = magnitude;
-                return mag > kEpsilonNormalSqrt ? this / mag : zero;
+                return mag > kEpsilon ? this / mag : zero;
             }
         }
 

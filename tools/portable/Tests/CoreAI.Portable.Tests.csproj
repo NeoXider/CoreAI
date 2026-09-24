@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
+    <!--
+      WHY LangVersion 9.0: Unity compiles every linked test file as C# 9; a newer language feature in one
+      of them must break this build as it breaks the editor's, not pass here and fail there.
+    -->
+    <LangVersion>9.0</LangVersion>
     <!--
       WHY CoreAI.Mods.Tests: it is the one name both linked runtimes already trust. CoreAI.Core and
       CoreAI.RbxApi.Instances each grant it InternalsVisibleTo, and the scheduler, registry and
