@@ -47,6 +47,22 @@ Every substantial feature ships as up to three assemblies with references pointi
   contracts live in a contracts assembly; cross-feature events are immutable
   `readonly struct`s with null-coalesced constructor fields.
 
+### 2.1 Composability (the framework is a set of building blocks)
+
+CoreAI is a framework for many AI-driven games, not one game (`AGENTS.md`). Normative for every package:
+
+- **Every subsystem is a block** with a public contract, an installer and a documented configuration surface:
+  agents (roles, prompts, policies, memory), LLM endpoints/routing, tools, skills, mods and capability tiers,
+  Hub pages, stores, world/scale settings, network topology (solo / player-host / dedicated / client), host embedding.
+- **Configure, replace, or leave out** — each of the three must be possible without editing package code: options or
+  profile data to configure, an interface registration to replace, and no hard dependency on a block a game omits.
+- **Opinions live in presets, not in blocks.** Defaults are one preset among several (e.g. solo AI sandbox,
+  player-host co-op, dedicated N-player server, embed-in-my-game); a product (such as the planned Roblox-like
+  Studio+Play app) is a preset plus its own code on top, never a special case inside a package.
+- **Proof by test:** each shipped preset has a boot test, and a block that claims to be replaceable has a test that
+  replaces it with a fake.
+- Existing code that violates this is tracked in `TODO.md` and fixed when touched (the grandfathering rule above).
+
 ## 3. Async, determinism, errors
 
 - New async code is **UniTask / IAsyncEnumerable** (`com.cysharp.unitask` is installed);

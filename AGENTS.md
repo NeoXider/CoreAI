@@ -15,6 +15,22 @@ player on device?"**
   not drive `FS.syncfs` by hand (deprecated since Unity 6.3, its callback never fires) and do not
   await a durability confirmation the browser never sends. No threads/blocking waits on the WebGL path.
 
+## Project goal: a framework of building blocks, not one game
+
+CoreAI exists to build **AI-driven dynamic games** of any kind. A Roblox-like app with Studio and Play in one
+application (creator/play mode switch, Roblox API, template export/import, ~100 players per room) is ONE planned
+product built from the framework — it is not the framework. The same blocks must build a single-player game, a
+player-hosted co-op game, a dedicated-server game, or an AI layer embedded into someone else's Unity game.
+
+- **Everything is a configurable, replaceable block**: agent behaviour (roles, prompts, policies, memory), LLM
+  endpoints and routing, tools and tool calls, skills, mods and capability tiers, Hub pages, stores/persistence,
+  world and scale settings, network topology (solo / player-host / dedicated / client), host-game embedding.
+- A game developer composes blocks through documented seams (interfaces + installers + profiles/config); changing
+  a behaviour must never require forking or editing package code. Each block works without the ones it does not need.
+- When reviewing a feature, ask: **"can a different game configure or replace this without touching our code?"**
+  A hardcoded opinion, a static singleton, demo-only glue on the main path, or a product-specific assumption in a
+  package is a bug. Normative detail: `Docs/ARCHITECTURE_RULES.md` §2.1.
+
 ## Conventions (enforced)
 
 - **Explicit types**: never use `var` for C# locals, fields, or return values — declare explicit types. Only exception: anonymous types (`var x = new { ... }`), where an explicit type is impossible.
