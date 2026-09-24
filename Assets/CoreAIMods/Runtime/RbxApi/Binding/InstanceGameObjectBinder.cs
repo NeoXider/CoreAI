@@ -35,12 +35,23 @@ namespace CoreAI.Mods.Rbx.Binding
     /// GameObject, localScale = Size * MetersPerStud); Cylinder needs an axis correction, so its
     /// mesh lives on a rotated child (see <see cref="BuildCylinderVisual"/>); Wedge and CornerWedge
     /// use custom normalized meshes on the root.
-    /// TODO: MVP1 follow-up — a Part parented under another Part inherits the parent's Size-driven
-    /// localScale (compound world scale); Roblox Size is absolute regardless of ancestry, so parts
-    /// should materialize under an unscaled container (generalize the Cylinder Shape-child pattern).
+    /// A part's instance children never sit under the part's own GameObject: they materialize in
+    /// the part's child container, an unscaled, identity-pose sibling named after the part plus
+    /// <see cref="ChildContainerSuffix"/> that follows the part through re-parenting and world
+    /// membership. Roblox Size is absolute and a part under a part is independent unless welded,
+    /// so a nested part neither inherits its parent's Size-driven scale nor moves with it, and its
+    /// collider never joins the parent's Rigidbody as a compound collider.
+    /// A simulated (unanchored) part reads back the pose its body actually has, and every write
+    /// starts from that pose, so gravity or a character motor is never undone by a later Size,
+    /// Shape or Anchored write. A destroyed part keeps its last-known state, bounded by
+    /// <see cref="InMemoryPartPropertySink.DestroyedPartRetention"/>, for destruction handlers.
+    /// Writes are held to Roblox's bounds at this boundary: Size is clamped per axis by
+    /// <see cref="PartPropertyBounds"/>, and a non-finite Position, CFrame or Size is refused with
+    /// BAD_ARGUMENT, because the engine cannot hold such a pose and the stored value would stop
+    /// matching what renders.
     /// TODO: MVP8 — colliders approximate the visual (non-uniform Ball → SphereCollider on the max
     /// axis; Cylinder → CapsuleCollider with rounded ends); swap to exact colliders with physics.
-    /// TODO: MVP8 — per-body gravity force (DEV-6) and reverse physics sync.
+    /// TODO: MVP8 — velocity read-back (AssemblyLinearVelocity) for simulated parts.
     /// </summary>
     public sealed class InstanceGameObjectBinder : IInstanceBackingBinder, IPartPropertySink
     {
@@ -72,6 +83,18 @@ namespace CoreAI.Mods.Rbx.Binding
             new(GameObjectReferenceComparer.Instance);
 
         private readonly Dictionary<InstanceId, PartProperties> _partProperties = new();
+
+        private readonly DestroyedPartStateStore _destroyedParts =
+            new(InMemoryPartPropertySink.DestroyedPartRetention);
+
+        // WHY keyed by part id, apart from the binding: a part GameObject destroyed behind the
+        // binder's back drops its binding, while its container and the children bound inside it are
+        // still alive; the re-materialized part must find that container again, and the part's
+        // Destroy must still release it.
+        private readonly Dictionary<InstanceId, GameObject> _childContainers = new();
+
+        private readonly Dictionary<GameObject, InstanceId> _childContainerOwners =
+            new(GameObjectReferenceComparer.Instance);
 
         private ILog _log;
         private bool _hostTeardownStarted;
@@ -166,6 +189,10 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <summary>Count of live backing GameObjects (materialized or parked-deactivated).</summary>
         public int BoundCount => _bindings.Count;
+
+        /// <summary>Diagnostic: last-known bundles held for destroyed parts; never above
+        /// <see cref="InMemoryPartPropertySink.DestroyedPartRetention"/>.</summary>
+        public int RetainedDestroyedPartCount => _destroyedParts.Count;
 
         /// <summary>
         /// Diagnostic: how many GameObjects the GameObject → instance lookups have examined in total.
@@ -381,8 +408,15 @@ namespace CoreAI.Mods.Rbx.Binding
                 return false;
             }
 
-            for (Transform current = gameObject.transform.parent; current != null; current = current.parent)
+            for (Transform current = gameObject.transform; current != null; current = current.parent)
             {
+                // WHY checked before the bound-ancestor rule: a part's child container is binder-owned
+                // even where its nearest bound ancestor is the host-owned DataModel GameObject.
+                if (_childContainerOwners.ContainsKey(current.gameObject))
+                {
+                    return true;
+                }
+
                 if (_idsByGameObject.TryGetValue(current.gameObject, out InstanceId candidate))
                 {
                     return _bindings.TryGetValue(candidate, out BindingEntry entry) && entry.OwnsGameObject;
@@ -444,6 +478,9 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
+            // WHY: a destroyed instance never re-enters the world, so an id arriving here with
+            // retained state is a new instance under a restored id and starts from its own state.
+            _destroyedParts.Forget(record.Id);
             if (_bindings.TryGetValue(record.Id, out BindingEntry entry))
             {
                 if (entry.GameObject == null)
@@ -468,6 +505,7 @@ namespace CoreAI.Mods.Rbx.Binding
                         entry.GameObject.SetActive(DesiredActiveSelf(record.Instance, parentIsBound));
                     }
 
+                    PlaceChildContainer(record.Instance);
                     return;
                 }
             }
@@ -476,6 +514,7 @@ namespace CoreAI.Mods.Rbx.Binding
             {
                 entry = CreateEntry(record.Instance);
                 AddBinding(record.Id, entry);
+                PlaceChildContainer(record.Instance);
                 if (entry.IsPart)
                 {
                     Apply(entry, GetPartPropertiesOrDefault(record.Id));
@@ -514,6 +553,7 @@ namespace CoreAI.Mods.Rbx.Binding
             // WHY: a MaterialVariant owns no GameObject, so the binding guard below returns before
             // the repaint would ever run.
             RepaintIfMaterialVariant(record);
+            ParkChildContainer(record.Id);
 
             // WHY: the DataModel host GameObject never leaves its own tree; guard so nothing
             // deactivates or re-parents the host.
@@ -531,7 +571,10 @@ namespace CoreAI.Mods.Rbx.Binding
         public void OnDestroyed(InstanceRecord record)
         {
             RepaintIfMaterialVariant(record);
-            _partProperties.Remove(record.Id);
+            // WHY first: the last-known pose of a simulated part is read from its GameObject, which
+            // the lines below release.
+            OnPartDestroyed(record.Id);
+            DestroyChildContainer(record.Id);
             if (!_bindings.TryGetValue(record.Id, out BindingEntry entry))
             {
                 return;
@@ -569,6 +612,8 @@ namespace CoreAI.Mods.Rbx.Binding
                 // its parent instead of relying on the new parent's activeInHierarchy alone.
                 entry.GameObject.SetActive(DesiredActiveSelf(record.Instance, parentIsBound));
             }
+
+            PlaceChildContainer(record.Instance);
         }
 
         public void OnNameChanged(InstanceRecord record)
@@ -577,6 +622,130 @@ namespace CoreAI.Mods.Rbx.Binding
             if (TryGetLiveEntry(record.Id, out BindingEntry entry) && entry.OwnsGameObject)
             {
                 entry.GameObject.name = record.Instance.Name;
+            }
+
+            if (TryGetChildContainer(record.Id, out GameObject container))
+            {
+                container.name = record.Instance.Name + ChildContainerSuffix;
+            }
+        }
+
+        /// <summary>
+        /// Moves the last-known state of a destroyed part out of the live store into the bounded
+        /// retained store (see <see cref="IPartPropertySink.OnPartDestroyed"/>). The registry calls
+        /// <see cref="OnDestroyed"/>, which runs this before the backing object is released, so a
+        /// simulated part is remembered where its body actually was.
+        /// </summary>
+        public void OnPartDestroyed(InstanceId id)
+        {
+            bool boundPart = _bindings.TryGetValue(id, out BindingEntry entry) && entry.IsPart;
+            if (!boundPart && !_partProperties.ContainsKey(id))
+            {
+                return;
+            }
+
+            PartProperties last = GetPartPropertiesOrDefault(id);
+            _partProperties.Remove(id);
+            _destroyedParts.Remember(id, in last);
+        }
+
+        // ---- Child containers ----------------------------------------------------------------
+
+        /// <summary>Suffix of a part's child-container name, so the Unity hierarchy reads
+        /// "Handle", "Handle (children)/Blade" and a name lookup never mistakes one for the other.</summary>
+        public const string ChildContainerSuffix = " (children)";
+
+        private bool TryGetChildContainer(InstanceId partId, out GameObject container)
+        {
+            if (!_childContainers.TryGetValue(partId, out container))
+            {
+                return false;
+            }
+
+            if (container != null)
+            {
+                return true;
+            }
+
+            // WHY: destroyed outside the binder; the next child to need it builds a fresh one.
+            ForgetChildContainer(partId, container);
+            container = null;
+            return false;
+        }
+
+        /// <summary>
+        /// The transform a child of <paramref name="part"/> parents under: the part's own child
+        /// container, created on first use next to the part's GameObject with an identity local
+        /// pose and unit scale, carrying the part's active verdict.
+        /// </summary>
+        /// <remarks>
+        /// WHY not the part's GameObject: its localScale is the part's Size and its pose is the
+        /// part's CFrame, so a child parented there rendered at the product of both sizes, was
+        /// dragged along by every move of the parent while its own Position still read the old
+        /// value, and its collider became part of the parent's Rigidbody (welded in all but name).
+        /// </remarks>
+        private Transform ChildContainerOf(RbxInstance part)
+        {
+            if (TryGetChildContainer(part.Id, out GameObject container))
+            {
+                return container.transform;
+            }
+
+            Transform parent = ResolveParentTransform(part, out bool parentIsBound);
+            container = new GameObject(part.Name + ChildContainerSuffix);
+            container.transform.SetParent(parent, false);
+            container.SetActive(DesiredActiveSelf(part, parentIsBound));
+            _childContainers[part.Id] = container;
+            _childContainerOwners[container] = part.Id;
+            return container.transform;
+        }
+
+        /// <summary>Puts an existing child container where its part now is in the instance tree,
+        /// with the part's active verdict. No container, nothing to do.</summary>
+        private void PlaceChildContainer(RbxInstance part)
+        {
+            if (part == null || !TryGetChildContainer(part.Id, out GameObject container))
+            {
+                return;
+            }
+
+            Transform parent = ResolveParentTransform(part, out bool parentIsBound);
+            // WHY worldPositionStays=false: every ancestor a container can sit under is itself an
+            // unscaled identity transform, so keeping the local identity is what keeps it one too.
+            container.transform.SetParent(parent, false);
+            container.name = part.Name + ChildContainerSuffix;
+            container.SetActive(DesiredActiveSelf(part, parentIsBound));
+        }
+
+        /// <summary>Deactivates and parks a leaving part's child container beside its parked part.</summary>
+        private void ParkChildContainer(InstanceId partId)
+        {
+            if (!TryGetChildContainer(partId, out GameObject container))
+            {
+                return;
+            }
+
+            container.SetActive(false);
+            container.transform.SetParent(_worldParent, false);
+        }
+
+        private void DestroyChildContainer(InstanceId partId)
+        {
+            if (!_childContainers.TryGetValue(partId, out GameObject container))
+            {
+                return;
+            }
+
+            ForgetChildContainer(partId, container);
+            SafeDestroy(container);
+        }
+
+        private void ForgetChildContainer(InstanceId partId, GameObject container)
+        {
+            _childContainers.Remove(partId);
+            if (!ReferenceEquals(container, null))
+            {
+                _childContainerOwners.Remove(container);
             }
         }
 
@@ -640,24 +809,32 @@ namespace CoreAI.Mods.Rbx.Binding
 
         // ---- IPartPropertySink (one-way push) -----------------------------------------------
 
+        /// <summary>Sets the pose; a non-finite CFrame is refused with BAD_ARGUMENT and changes nothing.</summary>
         public void SetCFrame(InstanceId id, in RbxCFrame cframe)
         {
+            RequireFinitePose(id, in cframe, "CFrame");
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.CFrame = cframe;
             Store(id, properties, PartAspect.Transform);
         }
 
+        /// <summary>Moves the part keeping its current orientation (the body's own, for a simulated
+        /// part); a non-finite position is refused with BAD_ARGUMENT and changes nothing.</summary>
         public void SetPosition(InstanceId id, RbxVector3 position)
         {
+            RequireFiniteVector(id, position, "Position");
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.Position = position;
             Store(id, properties, PartAspect.Transform);
         }
 
+        /// <summary>Sets Size clamped per axis into <see cref="PartPropertyBounds"/>; a non-finite
+        /// size is refused with BAD_ARGUMENT and changes nothing.</summary>
         public void SetSize(InstanceId id, RbxVector3 size)
         {
+            RequireFiniteVector(id, size, "Size");
             PartProperties properties = GetPartPropertiesOrDefault(id);
-            properties.Size = size;
+            properties.Size = PartPropertyBounds.ClampSize(size);
             Store(id, properties, PartAspect.Size);
         }
 
@@ -780,21 +957,115 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private IRbxMaterialVariantSource _materialVariantSource;
 
+        /// <summary>Whole-bundle push; the pose is applied verbatim (a restore or clone teleports).
+        /// Size is clamped like <see cref="SetSize"/>, and a non-finite CFrame or Size refuses the
+        /// whole bundle with BAD_ARGUMENT.</summary>
         public void SetPartProperties(InstanceId id, in PartProperties properties)
         {
-            Store(id, properties, PartAspect.Full);
+            RequireFinitePose(id, in properties.CFrame, "CFrame");
+            RequireFiniteVector(id, properties.Size, "Size");
+            PartProperties bounded = properties;
+            bounded.Size = PartPropertyBounds.ClampSize(properties.Size);
+            _destroyedParts.Forget(id);
+            Store(id, bounded, PartAspect.Full);
         }
 
+        /// <summary>The stored bundle — with the body's live pose for a simulated part — or the
+        /// retained last-known bundle of a recently destroyed part.</summary>
         public bool TryGetPartProperties(InstanceId id, out PartProperties properties)
         {
-            return _partProperties.TryGetValue(id, out properties);
+            if (_partProperties.TryGetValue(id, out properties))
+            {
+                properties = WithSimulatedPose(id, properties);
+                return true;
+            }
+
+            return _destroyedParts.TryGet(id, out properties);
         }
 
+        /// <summary>
+        /// What a script reads: <see cref="TryGetPartProperties"/>, or Roblox defaults (still
+        /// carrying the live pose of a materialized simulated part) when nothing was stored.
+        /// </summary>
         public PartProperties GetPartPropertiesOrDefault(InstanceId id)
         {
-            return _partProperties.TryGetValue(id, out PartProperties properties)
+            return TryGetPartProperties(id, out PartProperties properties)
                 ? properties
-                : PartProperties.CreateDefault();
+                : WithSimulatedPose(id, PartProperties.CreateDefault());
+        }
+
+        // WHY these tolerances: a pose written through RbxSpace and read straight back from the
+        // Transform differs only by float rounding (none at all under the identity parents the
+        // binder builds), and a simulated part at rest must read back exactly what the script wrote.
+        // Movement below them is too small to matter, so the scripted value is kept.
+        private const float SimulatedPoseAbsoluteToleranceMetres = 1e-4f;
+        private const float SimulatedPoseRelativeTolerance = 1e-6f;
+        private const float SimulatedRotationDotTolerance = 0.999999f;
+
+        /// <summary>
+        /// Replaces the pose in <paramref name="properties"/> with the pose the part's body actually
+        /// has, when the part is simulated (it has a Rigidbody) and physics has moved it away from
+        /// the last scripted pose. Anchored and unmaterialized parts keep the stored pose.
+        /// </summary>
+        /// <remarks>
+        /// WHY: gravity and the character motor move the Rigidbody directly, so the stored pose froze
+        /// at spawn: a fallen part read its spawn height, a kill plane never fired, PivotTo computed
+        /// offsets from spawn poses, and every later Size, Shape or Anchored write re-applied the
+        /// stored pose and teleported the part back. Every setter starts from this refreshed bundle,
+        /// so a partial write keeps the pose the part really has.
+        /// </remarks>
+        private PartProperties WithSimulatedPose(InstanceId id, PartProperties properties)
+        {
+            if (!_bindings.TryGetValue(id, out BindingEntry entry) || !entry.IsPart
+                || entry.Rigidbody == null || entry.GameObject == null)
+            {
+                return properties;
+            }
+
+            Transform transform = entry.GameObject.transform;
+            Vector3 livePosition = transform.position;
+            Quaternion liveRotation = transform.rotation;
+            (Vector3 scriptedPosition, Quaternion scriptedRotation) = RbxSpace.ToUnityPose(properties.CFrame);
+            float tolerance = SimulatedPoseAbsoluteToleranceMetres
+                              + SimulatedPoseRelativeTolerance * scriptedPosition.magnitude;
+            if ((livePosition - scriptedPosition).sqrMagnitude <= tolerance * tolerance
+                && Mathf.Abs(Quaternion.Dot(scriptedRotation, liveRotation)) >= SimulatedRotationDotTolerance)
+            {
+                return properties;
+            }
+
+            properties.CFrame = RbxSpace.FromUnity(livePosition, liveRotation);
+            return properties;
+        }
+
+        private static void RequireFiniteVector(InstanceId id, RbxVector3 value, string member)
+        {
+            if (!PartPropertyBounds.IsFinite(value))
+            {
+                throw NonFiniteWrite(id, member);
+            }
+        }
+
+        private static void RequireFinitePose(InstanceId id, in RbxCFrame value, string member)
+        {
+            if (!PartPropertyBounds.IsFinite(in value))
+            {
+                throw NonFiniteWrite(id, member);
+            }
+        }
+
+        /// <summary>
+        /// The refusal a host-side writer gets for a NaN or infinite spatial value — the same rule
+        /// and code a Lua assignment gets, raised here because tweens, restores, character seeding
+        /// and the world adapter reach the sink without passing the Lua checks.
+        /// </summary>
+        private static RbxError NonFiniteWrite(InstanceId id, string member)
+        {
+            return RbxError.BadArgument(
+                "Part." + member + " of instance " + id.Value
+                + " must have finite components, got NaN or infinity; the part keeps its previous "
+                + member,
+                "check the arithmetic that produced it (0/0, math.huge, an overflow) before writing it");
         }
 
         /// <summary>
@@ -832,6 +1103,14 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private void Store(InstanceId id, in PartProperties properties, PartAspect aspect)
         {
+            // WHY: a per-property write to a destroyed part lands in its retained copy, never back
+            // in the live store, so a late host write to a dead id cannot re-grow what destruction
+            // released. A whole-bundle push revives the id before it gets here.
+            if (!_partProperties.ContainsKey(id) && _destroyedParts.TryReplace(id, in properties))
+            {
+                return;
+            }
+
             _partProperties[id] = properties;
             if (!TryGetLiveEntry(id, out BindingEntry entry) || !entry.IsPart)
             {
@@ -847,8 +1126,12 @@ namespace CoreAI.Mods.Rbx.Binding
             switch (aspect)
             {
                 case PartAspect.Transform:
+                    ApplyPose(entry, properties);
+                    break;
                 case PartAspect.Size:
-                    ApplyTransform(entry, properties);
+                    // WHY scale only: the pose is unchanged by a Size write, and re-applying it
+                    // would teleport a simulated part to whatever pose the bundle last held.
+                    ApplyScale(entry, properties);
                     break;
                 case PartAspect.Appearance:
                     ApplyAppearance(entry, properties);
@@ -971,7 +1254,7 @@ namespace CoreAI.Mods.Rbx.Binding
             if (parent != null && TryGetLiveEntry(parent.Id, out BindingEntry parentEntry))
             {
                 parentIsBound = true;
-                return parentEntry.GameObject.transform;
+                return parentEntry.IsPart ? ChildContainerOf(parent) : parentEntry.GameObject.transform;
             }
 
             parentIsBound = false;
@@ -992,9 +1275,15 @@ namespace CoreAI.Mods.Rbx.Binding
         private static void ApplyTransform(BindingEntry entry, in PartProperties properties)
         {
             ApplyPose(entry, properties);
+            ApplyScale(entry, properties);
+        }
+
+        private static void ApplyScale(BindingEntry entry, in PartProperties properties)
+        {
             // WHY: for every shape the part root carries Size * MetersPerStud (D3); shape
             // primitives are authored so 1 local unit = 1 stud (Cylinder's child corrects
-            // Unity's 2-unit-tall mesh, see BuildCylinderVisual).
+            // Unity's 2-unit-tall mesh, see BuildCylinderVisual). No other part's scale multiplies
+            // into it, because a part is never parented under another part (see ChildContainerOf).
             entry.GameObject.transform.localScale = RbxSpace.SizeToUnity(properties.Size);
         }
 

@@ -7,7 +7,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
     /// instances have no backing; entering the DataModel (scene) subtree materializes — the whole
     /// explorer mirrors, storage services included; detaching deactivates; Destroy releases the
     /// backing object. Which materialized objects are physical (only Workspace and its descendants,
-    /// Workspace.yaml) is the Unity adapter's job; this seam only tracks tree membership.</summary>
+    /// Workspace.yaml) is the Unity adapter's job; this seam only tracks tree membership, plus the
+    /// leave-then-release order a destroyed subtree follows.</summary>
     [TestFixture]
     public sealed class BackingBinderSeamEditModeTests
     {
@@ -142,6 +143,32 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             int destroyIndex = IndexOf(_binder.Events, "destroy:" + part.Id.Value);
             Assert.GreaterOrEqual(leaveIndex, 0);
             Assert.Greater(destroyIndex, leaveIndex, "backing must deactivate before release");
+        }
+
+        [Test]
+        public void D6_DestroyNestedPart_WholeSubtreeLeavesFirst_ThenChildrenAreReleasedBeforeTheirParent()
+        {
+            // WHY this order is pinned: the Unity adapter keeps a part's instance children in a child
+            // container beside the part and destroys that container with the part. Leaving first parks
+            // every child outside it, and releasing children first means the container is empty when
+            // the parent's own release destroys it, so no child is ever destroyed behind its own
+            // OnDestroyed.
+            RbxInstance handle = _registry.Create("Part");
+            RbxInstance blade = _registry.Create("Part");
+            blade.Parent = handle;
+            handle.Parent = _registry.WorldRoot;
+
+            handle.Destroy();
+
+            int handleLeave = IndexOf(_binder.Events, "leave:" + handle.Id.Value);
+            int bladeLeave = IndexOf(_binder.Events, "leave:" + blade.Id.Value);
+            int bladeDestroy = IndexOf(_binder.Events, "destroy:" + blade.Id.Value);
+            int handleDestroy = IndexOf(_binder.Events, "destroy:" + handle.Id.Value);
+            Assert.GreaterOrEqual(handleLeave, 0);
+            Assert.GreaterOrEqual(bladeLeave, 0, "the child leaves the world with its parent");
+            Assert.Less(handleLeave, bladeDestroy, "the whole subtree leaves before anything is released");
+            Assert.Less(bladeLeave, bladeDestroy);
+            Assert.Less(bladeDestroy, handleDestroy, "children are released before their parent");
         }
 
         private static int IndexOf(System.Collections.Generic.IReadOnlyList<string> events,

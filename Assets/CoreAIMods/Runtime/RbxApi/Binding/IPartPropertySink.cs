@@ -9,7 +9,8 @@ namespace CoreAI.Mods.Rbx.Binding
     /// updates the backing GameObject. Signatures are engine-free (Roblox datatypes + ids
     /// only) so callers never touch UnityEngine types (D2 lint). <see cref="GetLivePositionStuds"/>
     /// is the one read that crosses back the other way, for the same reason.
-    /// TODO: MVP8 — reverse sync for unanchored bodies (full CFrame/AssemblyLinearVelocity reads).
+    /// TODO: MVP8 — AssemblyLinearVelocity/AssemblyAngularVelocity reads for unanchored bodies (the
+    /// pose already reads back through <see cref="GetPartPropertiesOrDefault"/>).
     /// </summary>
     public interface IPartPropertySink
     {
@@ -18,6 +19,8 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <summary>Sets the position keeping the orientation (Roblox Part.Position).</summary>
         void SetPosition(InstanceId id, RbxVector3 position);
 
+        /// <summary>Sets Part.Size; every finite axis is clamped into
+        /// <see cref="PartPropertyBounds"/>' Roblox range.</summary>
         void SetSize(InstanceId id, RbxVector3 size);
 
         void SetColor(InstanceId id, RbxColor3 color);
@@ -41,13 +44,19 @@ namespace CoreAI.Mods.Rbx.Binding
         /// variant's own properties changed.</summary>
         void RefreshMaterialVariant(string variantName);
 
-        /// <summary>Full-state push (bulk restore / Instance.new initialization).</summary>
+        /// <summary>Full-state push (bulk restore / Instance.new initialization). The id is a live
+        /// part from here on, even if an earlier instance with the same id was destroyed.</summary>
         void SetPartProperties(InstanceId id, in PartProperties properties);
 
-        /// <summary>True when a state bundle has been stored for the id.</summary>
+        /// <summary>True when a state bundle has been stored for the id, including the retained
+        /// last-known state of a recently destroyed part.</summary>
         bool TryGetPartProperties(InstanceId id, out PartProperties properties);
 
-        /// <summary>Stored state, or Roblox Part defaults when none was pushed yet.</summary>
+        /// <summary>
+        /// Stored state, or Roblox Part defaults when none was pushed yet. A part the physics
+        /// simulation moves answers with the pose its body actually has, and a recently destroyed
+        /// part answers with its last-known state (see <see cref="OnPartDestroyed"/>).
+        /// </summary>
         PartProperties GetPartPropertiesOrDefault(InstanceId id);
 
         /// <summary>
@@ -66,6 +75,76 @@ namespace CoreAI.Mods.Rbx.Binding
         RbxVector3 GetLivePositionStuds(InstanceId id)
         {
             return GetPartPropertiesOrDefault(id).Position;
+        }
+
+        /// <summary>
+        /// The part was destroyed: its live state is released and a bounded last-known copy is kept
+        /// (<see cref="InMemoryPartPropertySink.DestroyedPartRetention"/> parts, oldest forgotten
+        /// first), so reads made by Destroying/AncestryChanged handlers — which run after the
+        /// destruction completed — answer with the part's final values instead of defaults.
+        /// Idempotent; a no-op for an id with no stored state.
+        /// </summary>
+        /// <remarks>
+        /// WHY a default body: added after the interface shipped, so a host outside this repo with
+        /// its own implementation keeps compiling without one.
+        /// </remarks>
+        void OnPartDestroyed(InstanceId id)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Roblox's documented bounds for BasePart values, applied at the sink boundary so a host-side
+    /// writer (tween host, restore, world adapter, character seeding) gets the same answer a Lua
+    /// assignment gets.
+    /// </summary>
+    public static class PartPropertyBounds
+    {
+        /// <summary>Smallest Part.Size axis ("as low as 0.001", BasePart.yaml).</summary>
+        public const float MinimumSizeStuds = 0.001f;
+
+        /// <summary>Largest Part.Size axis ("as high as 2048", BasePart.yaml).</summary>
+        public const float MaximumSizeStuds = 2048f;
+
+        /// <summary>
+        /// Clamps every finite axis into [<see cref="MinimumSizeStuds"/>, <see cref="MaximumSizeStuds"/>];
+        /// a zero or negative axis rises to the minimum instead of mirroring the mesh. A non-finite
+        /// axis is returned unchanged, because whether it is refused or kept is the caller's rule.
+        /// </summary>
+        public static RbxVector3 ClampSize(RbxVector3 size)
+        {
+            return new RbxVector3(ClampSizeAxis(size.X), ClampSizeAxis(size.Y), ClampSizeAxis(size.Z));
+        }
+
+        /// <summary>True when no component is NaN or infinite.</summary>
+        public static bool IsFinite(RbxVector3 vector)
+        {
+            return IsFinite(vector.X) && IsFinite(vector.Y) && IsFinite(vector.Z);
+        }
+
+        /// <summary>True when neither the position nor any rotation axis holds NaN or infinity.</summary>
+        public static bool IsFinite(in RbxCFrame cframe)
+        {
+            return IsFinite(cframe.Position) && IsFinite(cframe.XVector)
+                                             && IsFinite(cframe.YVector)
+                                             && IsFinite(cframe.ZVector);
+        }
+
+        private static bool IsFinite(float component)
+        {
+            return !float.IsNaN(component) && !float.IsInfinity(component);
+        }
+
+        private static float ClampSizeAxis(float axis)
+        {
+            if (!IsFinite(axis))
+            {
+                return axis;
+            }
+
+            return axis < MinimumSizeStuds ? MinimumSizeStuds
+                : axis > MaximumSizeStuds ? MaximumSizeStuds
+                : axis;
         }
     }
 }

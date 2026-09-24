@@ -1,5 +1,8 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
+using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
@@ -15,7 +18,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
     /// expected RbxSpace-transposed Unity transforms; rebuilt at 1:1 to prove a scale switch
     /// touches only the RbxSpace constant, and rebuilt twice to prove id determinism. The same tree
     /// moved out of Workspace (to Lighting, or straight under game) leaves the physical world and
-    /// comes back unchanged.
+    /// comes back unchanged. A part nested under one of its parts keeps the item-11 formula for its
+    /// own Size and pose, and a Destroying handler on one of its parts reads that part's last values
+    /// in both the rendered and the headless world.
     /// </summary>
     [TestFixture]
     public sealed class Mvp1GoldenTreeFixtureEditModeTests
@@ -44,6 +49,29 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             wedge.Parent = root
             wedge.Position = Vector3.new(-2, 0.5, 8)
             wedge.Size = Vector3.new(2, 1, 4)";
+
+        /// <summary>Appended to <see cref="GoldenTreeLua"/> (same chunk, so its locals are in
+        /// scope): a Blade parented under the Block, then the Block moved and turned.</summary>
+        private const string NestBladeUnderBlockLua = @"
+            block.Anchored = true
+            local blade = Instance.new('Part')
+            blade.Name = 'Blade'
+            blade.Anchored = true
+            blade.Parent = block
+            blade.Position = Vector3.new(10, 8, -4)
+            blade.Size = Vector3.new(1, 4, 1)
+            block.CFrame = CFrame.new(30, 5, -4) * CFrame.Angles(0, math.rad(45), 0)";
+
+        /// <summary>Appended to <see cref="GoldenTreeLua"/>: the Ball's own Destroying handler records
+        /// what it reads, then the Ball is destroyed.</summary>
+        private const string DestroyBallLua = @"
+            ball.Destroying:Connect(function()
+                local p = ball.Position
+                local s = ball.Size
+                store_set('destroyed_position', p.X .. ',' .. p.Y .. ',' .. p.Z)
+                store_set('destroyed_size', s.X .. ',' .. s.Y .. ',' .. s.Z)
+            end)
+            ball:Destroy()";
 
         private SynchronizationContext _savedContext;
 
@@ -176,6 +204,92 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 new Vector3(1.12f, 0.28f, 0.56f),
                 new RbxVector3(10f, 5f, -4f),
                 new RbxVector3(4f, 1f, 2f));
+        }
+
+        [Test]
+        public void GoldenTree_PartNestedUnderBlock_KeepsItsOwnScale_AndStaysWhenBlockMoves()
+        {
+            using Mvp1AcceptanceWorld world = new(0.28f);
+            world.Stack.Runtime.LoadMod("golden", GoldenTreeLua + "\n" + NestBladeUnderBlockLua);
+            RbxInstance root = world.Workspace.FindFirstChild("GoldenTree");
+            Assert.IsNotNull(root, "the golden fixture root must exist");
+            RbxInstance block = root.FindFirstChild("Block");
+            RbxInstance blade = block.FindFirstChild("Blade");
+            Assert.IsNotNull(blade, "the Blade must be parented under the Block");
+            Assert.Less((world.BoundObject(block).transform.position - new Vector3(8.4f, 1.4f, 1.12f)).magnitude,
+                Epsilon, "precondition: the Block moved");
+
+            // WHY: item 11 is Size * 0.28 for EVERY part; under the Block's scaled, posed GameObject the
+            // Blade came out as the product of both sizes and was dragged 20 studs along with the Block.
+            Transform bladeTransform = world.BoundObject(blade).transform;
+            Assert.Less((bladeTransform.lossyScale - new Vector3(0.28f, 1.12f, 0.28f)).magnitude, Epsilon,
+                "Blade world scale " + bladeTransform.lossyScale + " must be its own Size * 0.28");
+            Assert.Less((bladeTransform.position - new Vector3(2.8f, 2.24f, 1.12f)).magnitude, Epsilon,
+                "Blade world position " + bladeTransform.position + " must stay where the script put it");
+            Assert.IsTrue(world.Binder.GetPartPropertiesOrDefault(blade.Id).Position
+                    .FuzzyEq(new RbxVector3(10f, 8f, -4f), Epsilon),
+                "and Blade.Position reads the same place");
+        }
+
+        [Test]
+        public void GoldenTree_DestroyingHandler_ReadsTheDestroyedPartsLastValues()
+        {
+            using Mvp1AcceptanceWorld world = new(0.28f);
+            world.Stack.Runtime.LoadMod("golden", GoldenTreeLua + "\n" + DestroyBallLua);
+            world.Bindings.Scheduler.Advance(0d);
+
+            Assert.IsNull(world.Workspace.FindFirstChild("GoldenTree").FindFirstChild("Ball"),
+                "precondition: the Ball is destroyed");
+            // WHY: Destroying handlers run after the destruction completed, when the part's state had
+            // already been dropped, so the canonical 'explode at part.Position' idiom read the origin.
+            AssertStoredVector(world.Store, "destroyed_position", new RbxVector3(0f, 3f, 6f));
+            AssertStoredVector(world.Store, "destroyed_size", new RbxVector3(6f, 6f, 6f));
+        }
+
+        [Test]
+        public void Headless_DestroyingHandler_ReadsTheDestroyedPartsLastValues()
+        {
+            InstanceRegistry registry = new();
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            InMemoryPartPropertySink sink = new(registry);
+            LuaCsRbxApiBindings bindings = new(registry, game, partSink: sink);
+            Mvp1AcceptanceMemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new Mvp1AcceptanceNullLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings
+            });
+            try
+            {
+                stack.Runtime.LoadMod("golden", GoldenTreeLua + "\n" + DestroyBallLua);
+                bindings.Scheduler.Advance(0d);
+
+                AssertStoredVector(store, "destroyed_position", new RbxVector3(0f, 3f, 6f));
+                AssertStoredVector(store, "destroyed_size", new RbxVector3(6f, 6f, 6f));
+                Assert.AreEqual(1, sink.RetainedDestroyedPartCount,
+                    "the headless sink released the destroyed Ball from its live store and kept one " +
+                    "bounded last-known copy for the handler");
+            }
+            finally
+            {
+                game.Destroy();
+            }
+        }
+
+        private static void AssertStoredVector(Mvp1AcceptanceMemoryStore store, string key, RbxVector3 expected)
+        {
+            string stored = store.Get("golden", key);
+            string[] parts = stored.Split(',');
+            Assert.AreEqual(3, parts.Length, key + " must hold three components, got '" + stored + "'");
+            RbxVector3 actual = new(
+                float.Parse(parts[0], CultureInfo.InvariantCulture),
+                float.Parse(parts[1], CultureInfo.InvariantCulture),
+                float.Parse(parts[2], CultureInfo.InvariantCulture));
+            Assert.IsTrue(actual.FuzzyEq(expected, Epsilon),
+                key + " read inside the Destroying handler was " + actual + ", expected the part's last " + expected);
         }
 
         private static void AssertPartsActive(Mvp1AcceptanceWorld world, IReadOnlyList<RbxInstance> parts,

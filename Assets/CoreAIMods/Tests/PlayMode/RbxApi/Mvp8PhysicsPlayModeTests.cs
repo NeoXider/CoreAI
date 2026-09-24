@@ -292,6 +292,105 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         }
 
         [UnityTest]
+        public IEnumerator UnanchoredPart_PositionReadFollowsBody()
+        {
+            RbxInstance part = _world.CreatePart("faller", new RbxVector3(0f, 100f, 0f), anchored: false);
+            yield return null;
+
+            _world.Simulate(0.5f);
+
+            RbxVector3 read = _world.ReadPosition(part);
+            RbxVector3 body = RbxSpace.FromUnity(_world.UnityPosition(part));
+            Assert.Less(read.Y, 90f,
+                "gravity moved the body, so Part.Position must not keep answering the spawn height 100");
+            Assert.AreEqual(body.Y, read.Y, 0.01f, "Part.Position reads where the body is");
+        }
+
+        [UnityTest]
+        public IEnumerator UnanchoredPart_SizeWrite_DoesNotResetPosition()
+        {
+            RbxInstance part = _world.CreatePart("grower", new RbxVector3(0f, 100f, 0f), anchored: false);
+            yield return null;
+            _world.Simulate(0.5f);
+            Vector3 fallen = _world.UnityPosition(part);
+
+            _world.SetSize(part, new RbxVector3(4.04f, 1.01f, 2.02f));
+            _world.SetShape(part, RbxPartShape.Ball);
+
+            Assert.Less((_world.UnityPosition(part) - fallen).magnitude, 1e-3f,
+                "the grow-effect idiom (p.Size = p.Size * 1.01) must not teleport a falling part back to " +
+                "its spawn pose every frame");
+        }
+
+        [UnityTest]
+        public IEnumerator NestedAnchoredPart_UnderAFallingPart_StaysWhereItWasPut()
+        {
+            RbxInstance carrier = _world.CreatePart("carrier", new RbxVector3(0f, 100f, 0f), anchored: false);
+            RbxInstance rider = _world.CreatePart("rider", new RbxVector3(0f, 104f, 0f), anchored: true,
+                parent: carrier);
+            yield return null;
+            Vector3 carrierStart = _world.UnityPosition(carrier);
+            Vector3 riderStart = _world.UnityPosition(rider);
+
+            _world.Simulate(0.5f);
+
+            Assert.Greater(carrierStart.y - _world.UnityPosition(carrier).y, 1f, "precondition: the carrier fell");
+            Assert.Less((_world.UnityPosition(rider) - riderStart).magnitude, 1e-3f,
+                "a part under a part is independent unless welded: the anchored rider must not ride along as " +
+                "part of the carrier's compound body");
+        }
+
+        [UnityTest]
+        public IEnumerator Character_StandingOverANonCollidingPart_IsNotGrounded()
+        {
+            // WHY: the ground probe once used the global trigger setting, so a CanCollide=false part
+            // (kept as a trigger so Touched still fires) counted as floor: a character falling through
+            // a coin or a kill zone reported Grounded, could jump off thin air, and never entered Freefall.
+            RbxInstance ghostFloor = _world.CreatePart("ghostFloor", new RbxVector3(300f, 0f, 0f), anchored: true);
+            _world.SetSize(ghostFloor, new RbxVector3(20f, 2f, 20f));
+            _world.SetCanCollide(ghostFloor, false);
+            yield return null;
+
+            Assert.IsFalse(IsGroundedJustAbove(new RbxVector3(300f, 1f, 0f)),
+                "a non-colliding part is not something to stand on");
+        }
+
+        [UnityTest]
+        public IEnumerator Negative_Character_StandingOverASolidPart_IsGrounded()
+        {
+            RbxInstance floor = _world.CreatePart("solidFloor", new RbxVector3(300f, 0f, 0f), anchored: true);
+            _world.SetSize(floor, new RbxVector3(20f, 2f, 20f));
+            yield return null;
+
+            Assert.IsTrue(IsGroundedJustAbove(new RbxVector3(300f, 1f, 0f)),
+                "the same geometry with CanCollide=true must still ground the character");
+        }
+
+        /// <summary>
+        /// Builds a collider-less character body a little above <paramref name="surfaceStuds"/>, well
+        /// inside its motor's ground probe, and answers <see cref="UnityRbxCharacterMotor.IsGrounded"/>.
+        /// </summary>
+        private static bool IsGroundedJustAbove(RbxVector3 surfaceStuds)
+        {
+            GameObject character = new("CoreAI_GroundProbeCharacter");
+            try
+            {
+                Rigidbody body = character.AddComponent<Rigidbody>();
+                body.useGravity = false;
+                character.transform.position = RbxSpace.ToUnity(surfaceStuds) + Vector3.up * 0.3f;
+                // WHY: nothing is simulated here, so the part writes and this pose reach the physics
+                // scene only through an explicit sync.
+                Physics.SyncTransforms();
+                UnityRbxCharacterMotor motor = new(body, capsuleHalfHeightMetres: 0.5f);
+                return motor.IsGrounded;
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(character);
+            }
+        }
+
+        [UnityTest]
         public IEnumerator Humanoid_WalksAtWalkSpeedInStudsPerSecond()
         {
             // The one number the whole metric contract rests on: WalkSpeed is studs per second, and
@@ -395,14 +494,21 @@ namespace CoreAI.Tests.PlayMode.RbxApi
 
             public List<string> Contacts { get; }
 
-            public RbxInstance CreatePart(string name, RbxVector3 position, bool anchored)
+            public RbxInstance CreatePart(string name, RbxVector3 position, bool anchored,
+                RbxInstance parent = null)
             {
                 RbxInstance part = Registry.Create("Part");
                 part.Name = name;
-                part.Parent = Registry.WorldRoot;
+                part.Parent = parent ?? Registry.WorldRoot;
                 _binder.SetPosition(part.Id, position);
                 _binder.SetAnchored(part.Id, anchored);
                 return part;
+            }
+
+            /// <summary>Part.Position as a script reads it, in studs.</summary>
+            public RbxVector3 ReadPosition(RbxInstance part)
+            {
+                return _binder.GetPartPropertiesOrDefault(part.Id).Position;
             }
 
             public void SetCanCollide(RbxInstance part, bool canCollide)

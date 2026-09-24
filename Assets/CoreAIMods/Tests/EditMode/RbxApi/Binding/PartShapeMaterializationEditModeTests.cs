@@ -14,7 +14,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
     /// height-halved mesh child; Wedge and CornerWedge use custom normalized meshes on the root.
     /// Shape switches rebuild the visual while keeping the GameObject identity. CanCollide=false
     /// turns whichever collider the shape built into a trigger, and a Cylinder's Shape child carries
-    /// its own contact relay and resolves back to the part.
+    /// its own contact relay and resolves back to the part. A part nested under another part keeps
+    /// its own shape and scale, because it never sits under the parent's GameObject.
     /// </summary>
     [TestFixture]
     public sealed class PartShapeMaterializationEditModeTests
@@ -276,6 +277,33 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             Assert.AreEqual(0f, childColor.r, Epsilon,
                 "the nested child part must not pick up the parent's red");
             Assert.AreEqual(1f, childColor.g, Epsilon, "the child keeps its own green");
+        }
+
+        [Test]
+        public void NestedBall_UnderACylinder_KeepsItsOwnScale_AndThePartRootHoldsOnlyItsShapeChild()
+        {
+            // WHY a Cylinder parent: its root carries the Size-driven scale and its Shape child a
+            // rotation, so a child parented under it inherited both and came out as a squashed,
+            // rotated ellipsoid instead of a 3-stud Ball.
+            RbxInstance drum = CreatePartInWorld();
+            _binder.SetShape(drum.Id, RbxPartShape.Cylinder);
+            _binder.SetSize(drum.Id, new RbxVector3(4f, 2f, 2f));
+            RbxInstance ball = _registry.Create("Part");
+            ball.Parent = drum;
+            _binder.SetShape(ball.Id, RbxPartShape.Ball);
+            _binder.SetSize(ball.Id, new RbxVector3(3f, 3f, 3f));
+
+            Vector3 lossy = BoundObject(ball).transform.lossyScale;
+            Assert.AreEqual(0.84f, lossy.x, Epsilon, "a 3-stud Ball is 0.84 m on every axis wherever it is parented");
+            Assert.AreEqual(0.84f, lossy.y, Epsilon);
+            Assert.AreEqual(0.84f, lossy.z, Epsilon);
+
+            Transform drumRoot = BoundObject(drum).transform;
+            Assert.AreEqual(1, drumRoot.childCount,
+                "a part's GameObject holds only its own binder-built visual; instance children live in its " +
+                "child container");
+            Assert.AreEqual("Shape", drumRoot.GetChild(0).name);
+            Assert.IsFalse(BoundObject(ball).transform.IsChildOf(drumRoot));
         }
 
         [Test]
