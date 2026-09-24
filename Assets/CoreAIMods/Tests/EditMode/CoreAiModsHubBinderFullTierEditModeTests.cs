@@ -987,6 +987,124 @@ namespace CoreAI.Tests.EditMode
                 runtime.ListMods(actorContext)[0].Capabilities & LuaCapabilities.Full,
                 "Full must survive import only when the host explicitly opted in and grants Full.");
         }
+
+        // ==================== A1-02: Hub writes keep the load order ====================
+
+        private static long StoredLoadOrder(ILuaModSourceStore store, string id)
+        {
+            Assert.IsTrue(store.TryLoad(id, out _, out LuaModManifest manifest), "'" + id + "' must be stored.");
+            return manifest.LoadOrder;
+        }
+
+        /// <summary>
+        /// A1-02: a Hub save rewrites the manifest after the runtime load or reload. It used to build a new
+        /// manifest without the load order, so every mod saved from the Hub lost its place.
+        /// </summary>
+        [Test]
+        public void HubService_SaveOrReload_EditKeepsTheModsLoadOrder()
+        {
+            ActorContext actorContext = CreateHostActor();
+            FakeSourceStore store = new();
+            LuaCsModRuntime runtime = new(sourceStore: store);
+            IHubModService service = new LuaCsModRuntimeHubService(runtime, actorContext, store);
+
+            service.SaveOrReload("first", "local x = 1");
+            service.SaveOrReload("second", "local x = 2");
+            service.SaveOrReload("first", "local x = 10");
+
+            Assert.AreEqual(1L, StoredLoadOrder(store, "first"), "A Hub edit must keep the mod's place.");
+            Assert.AreEqual(2L, StoredLoadOrder(store, "second"));
+        }
+
+        /// <summary>
+        /// A1-02: a mod created in the Hub after another one, whose chunk reads that one's export at init,
+        /// restarts after it although the ids sort the other way.
+        /// </summary>
+        [Test]
+        public void HubService_SaveOrReload_NewModAfterAnExistingOne_RestartsAfterIt()
+        {
+            ActorContext actorContext = CreateHostActor();
+            FakeSourceStore store = new();
+            LuaCsModRuntime runtime = new(sourceStore: store);
+            IHubModService service = new LuaCsModRuntimeHubService(runtime, actorContext, store);
+            service.SaveOrReload("zz-base", "mods_export('marker', 'base-ready')");
+            service.SaveOrReload(
+                "aa-user",
+                "if mods_get('zz-base', 'marker') ~= 'base-ready' then error('zz-base has not started') end");
+
+            LuaCsModRuntime restarted = new(sourceStore: store);
+
+            Assert.AreEqual(2, restarted.RehydrateFromStore(LuaCapabilities.All),
+                "The mod created in the Hub must restart after the mod it reads at init.");
+            Assert.Greater(StoredLoadOrder(store, "aa-user"), StoredLoadOrder(store, "zz-base"));
+        }
+
+        /// <summary>
+        /// A Hub save into a store the runtime does not write (the runtime persisted nothing there) is a
+        /// first-time write: it gets the next load order after every stored mod.
+        /// </summary>
+        [Test]
+        public void HubService_SaveOrReload_IntoAStoreTheRuntimeDoesNotWrite_StampsTheNextLoadOrder()
+        {
+            ActorContext actorContext = CreateHostActor();
+            FakeSourceStore store = new();
+            store.Save("existing", "local x = 1", new LuaModManifest
+            {
+                Id = "existing",
+                Capabilities = LuaCapabilities.Read.ToString(),
+                Active = false,
+                LoadOrder = 4
+            });
+            LuaCsModRuntime runtime = new();
+            IHubModService service = new LuaCsModRuntimeHubService(runtime, actorContext, store);
+
+            service.SaveOrReload("new-mod", "local x = 2");
+
+            Assert.AreEqual(5L, StoredLoadOrder(store, "new-mod"));
+            Assert.AreEqual(4L, StoredLoadOrder(store, "existing"));
+        }
+
+        /// <summary>
+        /// A1-02: applying a bundled update to a loaded mod reloads it and rewrites its manifest twice (the
+        /// Hub save, then the seed markers); neither may move the mod in the restart order. Uses the
+        /// shipped <c>sample_welcome</c> resource, the only source ApplyBundledUpdate reads.
+        /// </summary>
+        [Test]
+        public void HubService_ApplyBundledUpdate_KeepsTheModsLoadOrder()
+        {
+            const string welcomeId = "sample_welcome";
+            ActorContext actorContext = CreateHostActor();
+            FakeSourceStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new CoreAI.Tests.EditMode.RbxApi.Acceptance.Mvp1AcceptanceNullLogger(),
+                ModSourceStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = new LuaCsRbxApiBindings(),
+                RegisterWorldEditBuildBindings = false
+            });
+            LuaCsModRuntime runtime = stack.Runtime;
+            IHubModService service = new LuaCsModRuntimeHubService(runtime, actorContext, store);
+            store.Save(welcomeId, "local seeded = 1", new LuaModManifest
+            {
+                Id = welcomeId,
+                Origin = "resources",
+                SeededVersion = "0.0.1",
+                Capabilities = LuaCapabilities.All.ToString(),
+                Active = true
+            });
+            runtime.LoadMod(actorContext, "earlier", "local x = 1");
+            runtime.LoadMod(actorContext, welcomeId, "local seeded = 1");
+            long placed = StoredLoadOrder(store, welcomeId);
+            Assert.Greater(placed, StoredLoadOrder(store, "earlier"), "precondition: the runtime placed the mod");
+
+            Assert.IsTrue(service.ApplyBundledUpdate(welcomeId), "The shipped sample_welcome must apply.");
+
+            Assert.AreEqual(placed, StoredLoadOrder(store, welcomeId), "A bundled update must keep the mod's place.");
+            Assert.IsTrue(store.TryLoad(welcomeId, out _, out LuaModManifest updated));
+            Assert.AreNotEqual("0.0.1", updated.SeededVersion, "precondition: the bundled update was applied");
+        }
 #endif
     }
 }

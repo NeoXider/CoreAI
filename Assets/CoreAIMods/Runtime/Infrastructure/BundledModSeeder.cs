@@ -144,6 +144,10 @@ namespace CoreAI.Infrastructure.Lua
 
             if (!_store.TryLoad(id, out string existingSource, out LuaModManifest existing) || existing == null)
             {
+                // WHY no load order on a fresh install: seeding runs before the startup rehydrate, so an
+                // active bundled mod starts before any mod the player loads later, and a mod without a
+                // recorded order restores first. A bundled library therefore still starts before the
+                // player's mods that use it.
                 _store.Save(id, mod.Source, BuildManifest(mod, origin, newHash, HeaderActive(mod.Source)));
                 return Outcome.Installed;
             }
@@ -163,6 +167,7 @@ namespace CoreAI.Infrastructure.Lua
             // stays reliable — editing a sample changes its hash but not its version, so a hash-based
             // staleness check alone would leave it stuck on stale content forever.
             LuaModManifest updated = BuildManifest(mod, origin, newHash, existing.Active);
+            updated.LoadOrder = existing.LoadOrder;
             _store.Save(id, mod.Source, updated);
             return Outcome.Updated;
         }

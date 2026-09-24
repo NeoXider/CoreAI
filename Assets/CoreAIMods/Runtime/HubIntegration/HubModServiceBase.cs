@@ -365,7 +365,10 @@ namespace CoreAI.Ai.Hub
             return hash.ToString("x8");
         }
 
-        /// <summary>Writes source + a header-derived manifest to the store, preserving bundling markers.</summary>
+        /// <summary>
+        /// Writes source + a header-derived manifest to the store, preserving bundling markers and the
+        /// mod's <see cref="LuaModManifest.LoadOrder"/>.
+        /// </summary>
         private void Persist(string modId, string code, LuaCapabilities caps, bool active)
         {
             if (_store == null)
@@ -388,7 +391,10 @@ namespace CoreAI.Ai.Hub
             };
 
             // WHY: Preserve origin/seed markers already recorded for this package so persisting a user edit
-            // does not erase that the mod was seeded from resources/streamingassets/etc.
+            // does not erase that the mod was seeded from resources/streamingassets/etc., and its load
+            // order so the edit does not move it in the restart order. The runtime load/reload that ran
+            // just before normally wrote that order already (stamped on a first load, kept on a reload);
+            // a mod this store has never held is a first load and gets the next order.
             try
             {
                 if (_store.TryLoad(modId, out _, out LuaModManifest existing) && existing != null)
@@ -398,6 +404,11 @@ namespace CoreAI.Ai.Hub
                     manifest.SeededHash = existing.SeededHash;
                     manifest.Entry = string.IsNullOrEmpty(existing.Entry) ? manifest.Entry : existing.Entry;
                     manifest.OwnerActorId = existing.OwnerActorId ?? "";
+                    manifest.LoadOrder = existing.LoadOrder;
+                }
+                else
+                {
+                    manifest.LoadOrder = LuaModManifest.NextLoadOrder(_store);
                 }
             }
             catch

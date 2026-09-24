@@ -631,6 +631,8 @@ namespace CoreAI.Mods.WorldPackages
                     + "world can be captured again.");
             }
 
+            // WHY id order, not load order: the bytes stay deterministic and the reader requires ascending
+            // ids; the order the mods start in travels in each manifest's LoadOrder.
             List<LuaModManifest> manifests = new(listed);
             manifests.Sort((left, right) => string.CompareOrdinal(left?.Id, right?.Id));
             List<RbxWorldModSource> mods = new(manifests.Count);
@@ -1782,7 +1784,8 @@ namespace CoreAI.Mods.WorldPackages
                 Capabilities = source.Capabilities ?? "",
                 Active = source.Active,
                 UpdateAvailable = source.UpdateAvailable,
-                Entry = source.Entry ?? "main.lua"
+                Entry = source.Entry ?? "main.lua",
+                LoadOrder = source.LoadOrder
             };
         }
 

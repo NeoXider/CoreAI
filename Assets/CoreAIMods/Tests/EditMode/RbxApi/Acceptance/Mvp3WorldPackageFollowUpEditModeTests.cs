@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -336,6 +337,192 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual("load_world-pre", successStore.LastTrigger);
         }
 
+        // ==================== A1-02: mods restart in their load order ====================
+
+        private const string CastleModId = "z-castle";
+        private const string DoorModId = "a-door";
+
+        private const string CastleModSource =
+            "local castle = Instance.new('Folder'); castle.Name = 'Castle'; castle.Parent = workspace";
+
+        private const string DoorModSource =
+            "local door = Instance.new('Folder'); door.Name = 'Door'; door.Parent = workspace.Castle";
+
+        /// <summary>
+        /// A1-02: the door mod parents its instance under the castle the castle mod made at init, and the
+        /// ids sort the other way. The package keeps its mods in id order (deterministic bytes) and each
+        /// manifest carries the mod's load order, so a confirmed load of the world's own save starts them
+        /// as they were loaded; it used to start them by id and fail all-or-nothing. The join snapshot is
+        /// the same capture and carries the same order.
+        /// </summary>
+        [Test]
+        public async Task WorldPackage_ModsThatNeedEachOtherAtInit_ReloadTheirOwnSave_InLoadOrder()
+        {
+            RbxWorldRuntimeSessionController controller = CreateController(
+                CreateHeadlessHost(), NewSafetyAutosaveStore(), NewModSourceStore());
+            ActorContext host = new LocalActorIdentityProvider().GetActorContext(BuiltInAgentRoleIds.Programmer);
+            controller.Runtime.LoadMod(host, CastleModId, CastleModSource);
+            controller.Runtime.LoadMod(host, DoorModId, DoorModSource);
+            Assert.IsNotNull(
+                controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("Castle")?.FindFirstChild("Door"),
+                "precondition: both mods ran in the live world");
+
+            RbxWorldPackagePayload saved = RbxWorldPackageSerializer.ReadPackage(
+                RbxWorldPackageSerializer.WritePackage(controller.CaptureCurrent()));
+            RbxWorldPackagePayload joinSnapshot = RbxWorldPackageSerializer.ExportSnapshot(
+                new RbxWorldPackageCaptureContext(
+                    controller.CurrentRbxApi.Registry,
+                    controller.CurrentRbxApi.Game,
+                    controller.CurrentRbxApi.PartSink,
+                    NewSettings(),
+                    modSourceStore: controller.SourceStore));
+            RbxWorldLoadResult result = await controller.LoadConfirmedAsync(saved, CancellationToken.None);
+
+            Assert.IsTrue(result.Success, result.Error);
+            Assert.AreEqual(2, result.ActiveModsStarted);
+            Assert.IsNotNull(
+                controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("Castle")?.FindFirstChild("Door"),
+                "the restored world runs both mods again, the castle first");
+            CollectionAssert.AreEqual(new[] { DoorModId, CastleModId }, PayloadModIds(saved),
+                "the package keeps its mods in id order");
+            long castleOrder = PayloadLoadOrder(saved, CastleModId);
+            long doorOrder = PayloadLoadOrder(saved, DoorModId);
+            Assert.Greater(castleOrder, 0L);
+            Assert.Greater(doorOrder, castleOrder);
+            Assert.AreEqual(castleOrder, PayloadLoadOrder(joinSnapshot, CastleModId));
+            Assert.AreEqual(doorOrder, PayloadLoadOrder(joinSnapshot, DoorModId));
+            RbxWorldPackagePayload resaved = controller.CaptureCurrent();
+            Assert.AreEqual(castleOrder, PayloadLoadOrder(resaved, CastleModId), "a restore never restamps");
+            Assert.AreEqual(doorOrder, PayloadLoadOrder(resaved, DoorModId), "a restore never restamps");
+        }
+
+        /// <summary>
+        /// A1-02: a package written before mods carried a load order has no LoadOrder key in its mod
+        /// manifests. It still restores, its mods starting by ordinal id exactly as before.
+        /// </summary>
+        [Test]
+        public async Task WorldPackage_WrittenWithoutLoadOrder_StillRestores_ModsStartByOrdinalId()
+        {
+            RbxWorldRuntimeSessionController controller = CreateController(
+                CreateHeadlessHost(), NewSafetyAutosaveStore(), NewModSourceStore());
+            RbxWorldPackagePayload legacy = CastleAndDoorPayload(
+                ModManifest("a-castle", 0), ModManifest("b-door", 0));
+            byte[] package = RbxWorldPackageSerializer.WritePackage(legacy);
+            StringAssert.DoesNotContain("LoadOrder", ReadPackageEntry(package, "Mods/0000/manifest.json"),
+                "a mod without a recorded order is written exactly as before the field existed");
+
+            RbxWorldLoadResult result = await controller.LoadConfirmedAsync(
+                RbxWorldPackageSerializer.ReadPackage(package), CancellationToken.None);
+
+            Assert.IsTrue(result.Success, result.Error);
+            Assert.AreEqual(2, result.ActiveModsStarted);
+            Assert.IsNotNull(
+                controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("Castle")?.FindFirstChild("Door"));
+            Assert.AreEqual(0L, PayloadLoadOrder(controller.CaptureCurrent(), "a-castle"),
+                "a restore never stamps a legacy mod");
+        }
+
+        /// <summary>
+        /// A1-02: a negative load order in an untrusted package is not rejected; it counts as no recorded
+        /// order, so "b-door" (-3) starts after "a-castle" (0) by id instead of before it by value.
+        /// </summary>
+        [Test]
+        public async Task WorldPackage_NegativeLoadOrder_IsNotRejected_AndCountsAsNoRecordedOrder()
+        {
+            RbxWorldRuntimeSessionController controller = CreateController(
+                CreateHeadlessHost(), NewSafetyAutosaveStore(), NewModSourceStore());
+            RbxWorldPackagePayload read = RbxWorldPackageSerializer.ReadPackage(
+                RbxWorldPackageSerializer.WritePackage(
+                    CastleAndDoorPayload(ModManifest("a-castle", 0), ModManifest("b-door", -3))));
+            Assert.AreEqual(-3L, PayloadLoadOrder(read, "b-door"));
+
+            RbxWorldLoadResult result = await controller.LoadConfirmedAsync(read, CancellationToken.None);
+
+            Assert.IsTrue(result.Success, result.Error);
+            Assert.AreEqual(2, result.ActiveModsStarted);
+            Assert.IsNotNull(
+                controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("Castle")?.FindFirstChild("Door"));
+        }
+
+        private FileLuaModSourceStore NewModSourceStore()
+        {
+            return new FileLuaModSourceStore(
+                NewTemporaryDirectory(),
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true));
+        }
+
+        private static IRbxWorldPackageStore NewSafetyAutosaveStore()
+        {
+            return new InMemoryAutosaveStore(
+                null,
+                new RbxAutoSaveInfo("unused.world", "unused", CapturedAtUtc, 0L));
+        }
+
+        private static LuaModManifest ModManifest(string id, long loadOrder)
+        {
+            return new LuaModManifest
+            {
+                Id = id,
+                Name = id,
+                Capabilities = LuaCapabilities.All.ToString(),
+                Active = true,
+                LoadOrder = loadOrder
+            };
+        }
+
+        /// <summary>An empty world whose two mods are the castle and the door that needs it at init.</summary>
+        private RbxWorldPackagePayload CastleAndDoorPayload(LuaModManifest castle, LuaModManifest door)
+        {
+            RbxWorldPackagePayload world = CreateMinimalPayload(CapturedAtUtc);
+            return new RbxWorldPackagePayload(
+                world.CapturedAtUtc,
+                world.Settings,
+                world.Tree,
+                world.Parts,
+                world.CameraCFrame,
+                new[]
+                {
+                    new RbxWorldModSource(castle, CastleModSource),
+                    new RbxWorldModSource(door, DoorModSource)
+                });
+        }
+
+        private static List<string> PayloadModIds(RbxWorldPackagePayload payload)
+        {
+            List<string> ids = new(payload.Mods.Count);
+            foreach (RbxWorldModSource mod in payload.Mods)
+            {
+                ids.Add(mod.Manifest.Id);
+            }
+
+            return ids;
+        }
+
+        private static long PayloadLoadOrder(RbxWorldPackagePayload payload, string modId)
+        {
+            foreach (RbxWorldModSource mod in payload.Mods)
+            {
+                if (string.Equals(mod.Manifest.Id, modId, StringComparison.Ordinal))
+                {
+                    return mod.Manifest.LoadOrder;
+                }
+            }
+
+            Assert.Fail("The payload holds no mod '" + modId + "'.");
+            return 0L;
+        }
+
+        private static string ReadPackageEntry(byte[] package, string entryName)
+        {
+            using MemoryStream input = new(package, false);
+            using ZipArchive archive = new(input, ZipArchiveMode.Read, false);
+            ZipArchiveEntry entry = archive.GetEntry(entryName);
+            Assert.IsNotNull(entry, "Missing package entry '" + entryName + "'.");
+            using Stream stream = entry.Open();
+            using StreamReader reader = new(stream);
+            return reader.ReadToEnd();
+        }
+
         private HeadlessRbxWorldSessionHost CreateHeadlessHost()
         {
             InstanceRegistry registry = new(worldId: WorldId);
@@ -348,7 +535,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         private RbxWorldRuntimeSessionController CreateController(
             HeadlessRbxWorldSessionHost host,
             IRbxWorldPackageStore packageStore,
-            DelegateModSourceStore sourceStore)
+            ILuaModSourceStore sourceStore)
         {
             IRbxWorldPackageStore storeForController = packageStore;
             LuaCsRbxApiBindings initialRbxApi = new(host.Registry, host.Game);

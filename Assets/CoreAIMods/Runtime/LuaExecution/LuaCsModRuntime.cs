@@ -1379,7 +1379,7 @@ namespace CoreAI.Ai.LuaCs
             RecordRevision(modId, luaCode);
             if (persistToStore)
             {
-                PersistMod(modId, luaCode, capabilities, ownerActorId);
+                PersistMod(modId, luaCode, capabilities, ownerActorId, true);
             }
 
             RaiseModSourceLoaded(modId, luaCode, capabilities);
@@ -1827,7 +1827,7 @@ namespace CoreAI.Ai.LuaCs
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' reloaded (caps={caps}).");
             RecordRevision(modId, luaCode);
-            PersistMod(modId, luaCode, caps, ownerActorId);
+            PersistMod(modId, luaCode, caps, ownerActorId, false);
             RaiseModSourceLoaded(modId, luaCode, caps);
         }
 
@@ -3575,12 +3575,54 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
+        /// The order both restore paths start stored mods in: mods without a recorded
+        /// <see cref="LuaModManifest.LoadOrder"/> (0 or below: written before the field existed, or
+        /// seeded on install) first, by ordinal id, which is the order every restore used before the load
+        /// order was persisted; then mods with one, ascending. An active unordered mod had already started
+        /// at startup before any ordered mod was first loaded, so an ordered mod may depend on it, never
+        /// the other way round. Equal load orders fall back to the ordinal id so the order is total, and a
+        /// nil manifest sorts first so the exact restore refuses it before any mod starts.
+        /// </summary>
+        internal static int CompareRestoreOrder(LuaModManifest left, LuaModManifest right)
+        {
+            if (ReferenceEquals(left, right))
+            {
+                return 0;
+            }
+
+            if (left == null)
+            {
+                return -1;
+            }
+
+            if (right == null)
+            {
+                return 1;
+            }
+
+            bool leftOrdered = left.LoadOrder > 0;
+            bool rightOrdered = right.LoadOrder > 0;
+            if (leftOrdered != rightOrdered)
+            {
+                return leftOrdered ? 1 : -1;
+            }
+
+            if (leftOrdered && left.LoadOrder != right.LoadOrder)
+            {
+                return left.LoadOrder < right.LoadOrder ? -1 : 1;
+            }
+
+            return string.CompareOrdinal(left.Id, right.Id);
+        }
+
+        /// <summary>
         /// Loads every stored mod whose manifest is <see cref="LuaModManifest.Active"/> and not already
-        /// loaded. Each mod's persisted capability request is intersected with
-        /// <paramref name="hostGrant"/> and (unless <paramref name="allowFull"/>) stripped of
-        /// <see cref="LuaCapabilities.Full"/>, so a persisted or shared mod can never auto-acquire full
-        /// reflection. Loads run in independent try/catch blocks so one bad package does not abort the
-        /// rest. Returns the count successfully loaded.
+        /// loaded, in <see cref="CompareRestoreOrder"/> order (the order the mods were loaded, so a mod
+        /// can use at init what an earlier one made). Each mod's persisted capability request is
+        /// intersected with <paramref name="hostGrant"/> and (unless <paramref name="allowFull"/>)
+        /// stripped of <see cref="LuaCapabilities.Full"/>, so a persisted or shared mod can never
+        /// auto-acquire full reflection. Loads run in independent try/catch blocks so one bad package does
+        /// not abort the rest. Returns the count successfully loaded.
         /// </summary>
         internal int RehydrateFromStore(LuaCapabilities hostGrant, bool allowFull = false)
         {
@@ -3595,8 +3637,10 @@ namespace CoreAI.Ai.LuaCs
                 return 0;
             }
 
+            List<LuaModManifest> ordered = new(manifests);
+            ordered.Sort(CompareRestoreOrder);
             int loaded = 0;
-            foreach (LuaModManifest manifest in manifests)
+            foreach (LuaModManifest manifest in ordered)
             {
                 if (manifest == null || !manifest.Active)
                 {
@@ -3645,10 +3689,11 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Starts every active package from an exact staged source set and fails the whole candidate
-        /// on the first missing or invalid chunk. World-session replacement calls this only after the
-        /// restored tree exists and before the candidate is exposed; dormant packages are retained in
-        /// the source store but never acquire a VM state.
+        /// Starts every active package from an exact staged source set, in
+        /// <see cref="CompareRestoreOrder"/> order, and fails the whole candidate on the first missing or
+        /// invalid chunk. World-session replacement calls this only after the restored tree exists and
+        /// before the candidate is exposed; dormant packages are retained in the source store but never
+        /// acquire a VM state.
         /// </summary>
         internal int RehydrateExactOrThrow(LuaCapabilities hostGrant, bool allowFull = false)
         {
@@ -3657,7 +3702,7 @@ namespace CoreAI.Ai.LuaCs
                 ?? throw new InvalidOperationException(
                     "The staged mod source store returned a nil manifest list.");
             List<LuaModManifest> ordered = new(manifests);
-            ordered.Sort((left, right) => string.CompareOrdinal(left?.Id, right?.Id));
+            ordered.Sort(CompareRestoreOrder);
             int loaded = 0;
             for (int index = 0; index < ordered.Count; index++)
             {
@@ -3840,7 +3885,7 @@ namespace CoreAI.Ai.LuaCs
                     LoadModInternal(
                         modId, bundle.Source, ownerActorId, effectiveCaps, false,
                         ownerHasHostAuthority);
-                    PersistMod(modId, bundle.Source, effectiveCaps, ownerActorId);
+                    PersistMod(modId, bundle.Source, effectiveCaps, ownerActorId, true);
                 }
 
                 return true;
@@ -3862,8 +3907,14 @@ namespace CoreAI.Ai.LuaCs
             public string Source = "";
         }
 
-        /// <summary>Best-effort persist of a mod's source + manifest; a store failure is logged, never thrown.</summary>
-        private void PersistMod(string modId, string source, LuaCapabilities caps, string ownerActorId)
+        /// <summary>
+        /// Best-effort persist of a mod's source + manifest; a store failure is logged, never thrown.
+        /// <paramref name="firstLoad"/> stamps the next <see cref="LuaModManifest.LoadOrder"/> (the mod
+        /// was not loaded before: a new mod, or one loaded again after an unload); a reload keeps the
+        /// stored one, and is stamped like a first load only when the store holds no manifest for it.
+        /// </summary>
+        private void PersistMod(string modId, string source, LuaCapabilities caps, string ownerActorId,
+            bool firstLoad)
         {
             if (!_autoPersistMods)
             {
@@ -3885,14 +3936,35 @@ namespace CoreAI.Ai.LuaCs
                     existing = null;
                 }
 
-                _sourceStore.Save(
-                    modId,
-                    source,
-                    BuildManifest(modId, source ?? "", caps, true, existing, ownerActorId));
+                LuaModManifest manifest = BuildManifest(modId, source ?? "", caps, true, existing, ownerActorId);
+                // WHY no lock: two first loads racing may read the same maximum and share a value;
+                // CompareRestoreOrder breaks such a tie by id.
+                manifest.LoadOrder = firstLoad || existing == null
+                    ? NextStoredLoadOrder()
+                    : existing.LoadOrder;
+                _sourceStore.Save(modId, source, manifest);
             }
             catch (Exception ex)
             {
                 _log?.Error($"[LuaCsModRuntime] Source store Save('{modId}') failed: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// <see cref="LuaModManifest.NextLoadOrder"/> over this runtime's source store (read from the
+        /// store, dormant packages included, not from the loaded mods or the per-session counter). A store
+        /// that cannot list yields 0 (no recorded order).
+        /// </summary>
+        private long NextStoredLoadOrder()
+        {
+            try
+            {
+                return LuaModManifest.NextLoadOrder(_sourceStore);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Source store List() failed while stamping a load order: {ex}");
+                return 0;
             }
         }
 

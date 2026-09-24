@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Infrastructure.Lua;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -12,12 +14,14 @@ namespace CoreAI.Tests.EditMode
     /// auto-persist on load, rehydrate of active (and skip of dormant)
     /// mods, dormant-marking on unload, deletion on forget, an export/import round-trip between two
     /// runtimes, capability masking that strips <see cref="LuaCapabilities.Full"/> from persisted/shared
-    /// mods unless explicitly allowed, and the version history growing per edit / restoring on revert.
-    /// The runtime is constructed directly (no gameplay bindings needed) as a bare
-    /// <see cref="LuaCsModRuntime"/>; the fakes are simple in-memory stores.
+    /// mods unless explicitly allowed, the version history growing per edit / restoring on revert, and
+    /// mods restarting in the order they were loaded. The runtime is constructed directly (no gameplay
+    /// bindings needed) as a bare <see cref="LuaCsModRuntime"/>; the fakes are simple in-memory stores,
+    /// and the restart tests use the real <see cref="FileLuaModSourceStore"/> over a temporary directory.
     /// </summary>
     public sealed class LuaCsModRuntimePersistenceEditModeTests
     {
+        private readonly List<string> _temporaryDirectories = new();
         private SynchronizationContext _savedContext;
 
         /// <summary>
@@ -40,6 +44,15 @@ namespace CoreAI.Tests.EditMode
         public void RestoreSynchronizationContext()
         {
             SynchronizationContext.SetSynchronizationContext(_savedContext);
+            foreach (string directory in _temporaryDirectories)
+            {
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, true);
+                }
+            }
+
+            _temporaryDirectories.Clear();
         }
 
         /// <summary>
@@ -121,9 +134,51 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-        private static LuaCsModRuntime NewRuntime(FakeSourceStore store)
+        private static LuaCsModRuntime NewRuntime(ILuaModSourceStore store)
         {
             return new LuaCsModRuntime(sourceStore: store);
+        }
+
+        /// <summary>
+        /// The production store over a fresh temporary directory: it lists mods by ordinal id and keeps
+        /// every manifest as JSON on disk, so a second runtime over it is a real restart.
+        /// </summary>
+        private FileLuaModSourceStore NewFileStore()
+        {
+            string directory = Path.Combine(
+                Path.GetTempPath(), "CoreAI-LuaCsPersistence-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            _temporaryDirectories.Add(directory);
+            return new FileLuaModSourceStore(directory);
+        }
+
+        private static string[] LoadedIds(LuaCsModRuntime runtime)
+        {
+            IReadOnlyList<LuaModInfo> mods = runtime.ListMods();
+            string[] ids = new string[mods.Count];
+            for (int index = 0; index < mods.Count; index++)
+            {
+                ids[index] = mods[index].Id;
+            }
+
+            return ids;
+        }
+
+        private static long StoredLoadOrder(ILuaModSourceStore store, string id)
+        {
+            Assert.IsTrue(store.TryLoad(id, out _, out LuaModManifest manifest), "'" + id + "' must be stored.");
+            return manifest.LoadOrder;
+        }
+
+        private static void SaveStoredMod(ILuaModSourceStore store, string id, long loadOrder)
+        {
+            store.Save(id, "local x = 1", new LuaModManifest
+            {
+                Id = id,
+                Capabilities = LuaCapabilities.Read.ToString(),
+                Active = true,
+                LoadOrder = loadOrder
+            });
         }
 
         /// <summary>In-memory <see cref="CoreAI.Logging.ILog"/> capturing per-level messages for assertions.</summary>
@@ -262,6 +317,218 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsFalse(runtime.IsLoaded("m"));
             Assert.IsFalse(store.Contains("m"), "ForgetMod must delete the persisted package entirely.");
+        }
+
+        // ==================== Load order across restarts ====================
+
+        private const string BaseModId = "zz-base";
+        private const string UserModId = "aa-user";
+        private const string BaseModSource = "mods_export('marker', 'base-ready')";
+
+        private const string UserModSource =
+            "if mods_get('zz-base', 'marker') ~= 'base-ready' then error('zz-base has not started') end";
+
+        /// <summary>
+        /// A1-02: the user mod reads the base mod's export at init and the ids sort the other way. The
+        /// file store lists by ordinal id, so a restart used to start the user mod first and skip it.
+        /// </summary>
+        [Test]
+        public void LuaCs_RehydrateFromStore_AfterRestart_StartsModsInTheirLoadOrder_NotInIdOrder()
+        {
+            FileLuaModSourceStore store = NewFileStore();
+            LuaCsModRuntime first = NewRuntime(store);
+            first.LoadMod(BaseModId, BaseModSource, LuaCapabilities.Read);
+            first.LoadMod(UserModId, UserModSource, LuaCapabilities.Read);
+
+            LuaCsModRuntime restarted = NewRuntime(store);
+            int loaded = restarted.RehydrateFromStore(LuaCapabilities.All);
+
+            Assert.AreEqual(2, loaded, "Both mods must start again: the user mod reads the base mod's export at init.");
+            CollectionAssert.AreEqual(new[] { BaseModId, UserModId }, LoadedIds(restarted),
+                "A restart must start the mods in the order they were loaded, not by id.");
+        }
+
+        /// <summary>
+        /// A1-02: the exact restore behind a world load is all-or-nothing, so one mod started out of its
+        /// load order used to make the whole set unloadable.
+        /// </summary>
+        [Test]
+        public void LuaCs_RehydrateExactOrThrow_AfterRestart_StartsModsInTheirLoadOrder_NotInIdOrder()
+        {
+            FileLuaModSourceStore store = NewFileStore();
+            LuaCsModRuntime first = NewRuntime(store);
+            first.LoadMod(BaseModId, BaseModSource, LuaCapabilities.Read);
+            first.LoadMod(UserModId, UserModSource, LuaCapabilities.Read);
+
+            LuaCsModRuntime restarted = NewRuntime(store);
+            int started = 0;
+            Assert.DoesNotThrow(
+                () => started = restarted.RehydrateExactOrThrow(LuaCapabilities.All),
+                "The exact restore must start the base mod before the user mod that reads it at init.");
+
+            Assert.AreEqual(2, started);
+            CollectionAssert.AreEqual(new[] { BaseModId, UserModId }, LoadedIds(restarted));
+        }
+
+        [Test]
+        public void LuaCs_LoadOrder_ReloadKeepsItsPlace_UnloadThenLoadMovesToTheEnd()
+        {
+            FileLuaModSourceStore store = NewFileStore();
+            LuaCsModRuntime runtime = NewRuntime(store);
+            runtime.LoadMod("c-first", "local x = 1", LuaCapabilities.Read);
+            runtime.LoadMod("b-second", "local x = 2", LuaCapabilities.Read);
+            runtime.LoadMod("a-third", "local x = 3", LuaCapabilities.Read);
+
+            runtime.ReloadMod("c-first", "local x = 10");
+            Assert.IsTrue(runtime.UnloadMod("b-second"));
+            runtime.LoadMod("b-second", "local x = 20", LuaCapabilities.Read);
+
+            LuaCsModRuntime restarted = NewRuntime(store);
+            Assert.AreEqual(3, restarted.RehydrateFromStore(LuaCapabilities.All));
+            CollectionAssert.AreEqual(new[] { "c-first", "a-third", "b-second" }, LoadedIds(restarted),
+                "A reload keeps the mod's place; an unload followed by a load moves it to the end.");
+            Assert.AreEqual(1L, StoredLoadOrder(store, "c-first"));
+            Assert.AreEqual(3L, StoredLoadOrder(store, "a-third"));
+            Assert.AreEqual(4L, StoredLoadOrder(store, "b-second"));
+        }
+
+        [Test]
+        public void LuaCs_LoadOrder_GrowsAcrossRestartsPastDormantMods_AndRehydrateNeverRestamps()
+        {
+            FakeSourceStore store = new();
+            LuaCsModRuntime first = NewRuntime(store);
+            first.LoadMod("m-one", "local x = 1", LuaCapabilities.Read);
+            first.LoadMod("m-two", "local x = 2", LuaCapabilities.Read);
+            Assert.IsTrue(first.UnloadMod("m-two"));
+
+            LuaCsModRuntime second = NewRuntime(store);
+            Assert.AreEqual(1, second.RehydrateFromStore(LuaCapabilities.All));
+            second.LoadMod("m-three", "local x = 3", LuaCapabilities.Read);
+            int savesAfterLastLoad = store.SaveCount;
+
+            LuaCsModRuntime third = NewRuntime(store);
+            Assert.AreEqual(2, third.RehydrateFromStore(LuaCapabilities.All));
+            LuaCsModRuntime fourth = NewRuntime(store);
+            Assert.AreEqual(2, fourth.RehydrateExactOrThrow(LuaCapabilities.All));
+
+            Assert.AreEqual(1L, StoredLoadOrder(store, "m-one"));
+            Assert.AreEqual(2L, StoredLoadOrder(store, "m-two"), "A dormant mod keeps its place.");
+            Assert.AreEqual(3L, StoredLoadOrder(store, "m-three"),
+                "A first load after a restart must land past every stored mod, the dormant one included.");
+            Assert.AreEqual(savesAfterLastLoad, store.SaveCount, "A rehydrate never writes a manifest.");
+        }
+
+        /// <summary>
+        /// Mods without a recorded order (0, or a negative value from an untrusted package, which is not
+        /// rejected) start first by ordinal id, then the ordered ones ascending, through both paths.
+        /// </summary>
+        [Test]
+        public void LuaCs_Rehydrate_ModsWithoutLoadOrder_StartBeforeOrderedOnes_ByOrdinalId()
+        {
+            FakeSourceStore store = new();
+            SaveStoredMod(store, "b-legacy", 0);
+            SaveStoredMod(store, "y-ordered", 7);
+            SaveStoredMod(store, "c-negative", -4);
+            SaveStoredMod(store, "a-legacy", 0);
+            SaveStoredMod(store, "z-ordered", 5);
+            string[] expected = { "a-legacy", "b-legacy", "c-negative", "z-ordered", "y-ordered" };
+
+            LuaCsModRuntime rehydrated = NewRuntime(store);
+            Assert.AreEqual(5, rehydrated.RehydrateFromStore(LuaCapabilities.All));
+            CollectionAssert.AreEqual(expected, LoadedIds(rehydrated));
+
+            LuaCsModRuntime exact = NewRuntime(store);
+            Assert.AreEqual(5, exact.RehydrateExactOrThrow(LuaCapabilities.All));
+            CollectionAssert.AreEqual(expected, LoadedIds(exact));
+        }
+
+        /// <summary>
+        /// A1-02: a store written before load order existed holds a library with no recorded order; the
+        /// player then loads a mod that reads the library at init, and the ids sort the other way. The
+        /// library had already started at startup, so it must start first again, through both paths.
+        /// </summary>
+        [Test]
+        public void LuaCs_Restart_ModLoadedAfterALegacyMod_StartsAfterIt_ThroughBothPaths()
+        {
+            FileLuaModSourceStore store = NewFileStore();
+            store.Save("zz-lib", "mods_export('marker', 'lib-ready')", new LuaModManifest
+            {
+                Id = "zz-lib",
+                Capabilities = LuaCapabilities.Read.ToString(),
+                Active = true
+            });
+            LuaCsModRuntime session = NewRuntime(store);
+            Assert.AreEqual(1, session.RehydrateFromStore(LuaCapabilities.All));
+            session.LoadMod(
+                "aa-mod",
+                "if mods_get('zz-lib', 'marker') ~= 'lib-ready' then error('zz-lib has not started') end",
+                LuaCapabilities.Read);
+
+            LuaCsModRuntime rehydrated = NewRuntime(store);
+            Assert.AreEqual(2, rehydrated.RehydrateFromStore(LuaCapabilities.All),
+                "The mod loaded after the legacy library must start after it.");
+            CollectionAssert.AreEqual(new[] { "zz-lib", "aa-mod" }, LoadedIds(rehydrated));
+
+            LuaCsModRuntime exact = NewRuntime(store);
+            int started = 0;
+            Assert.DoesNotThrow(() => started = exact.RehydrateExactOrThrow(LuaCapabilities.All));
+            Assert.AreEqual(2, started);
+            CollectionAssert.AreEqual(new[] { "zz-lib", "aa-mod" }, LoadedIds(exact));
+            Assert.AreEqual(0L, StoredLoadOrder(store, "zz-lib"), "A rehydrate never stamps a legacy mod.");
+            Assert.AreEqual(1L, StoredLoadOrder(store, "aa-mod"));
+        }
+
+        /// <summary>
+        /// A store written before mods carried a load order restores exactly as before: by ordinal id,
+        /// through both paths.
+        /// </summary>
+        [Test]
+        public void LuaCs_Rehydrate_LegacyStoreWithoutLoadOrder_StartsModsByOrdinalId_AsBefore()
+        {
+            FileLuaModSourceStore store = NewFileStore();
+            SaveStoredMod(store, "c-legacy", 0);
+            SaveStoredMod(store, "a-legacy", 0);
+            SaveStoredMod(store, "b-legacy", 0);
+            string[] expected = { "a-legacy", "b-legacy", "c-legacy" };
+
+            LuaCsModRuntime rehydrated = NewRuntime(store);
+            Assert.AreEqual(3, rehydrated.RehydrateFromStore(LuaCapabilities.All));
+            CollectionAssert.AreEqual(expected, LoadedIds(rehydrated));
+
+            LuaCsModRuntime exact = NewRuntime(store);
+            Assert.AreEqual(3, exact.RehydrateExactOrThrow(LuaCapabilities.All));
+            CollectionAssert.AreEqual(expected, LoadedIds(exact));
+            Assert.AreEqual(0L, StoredLoadOrder(store, "a-legacy"), "A rehydrate never stamps a legacy mod.");
+        }
+
+        [Test]
+        public void LuaCs_Restart_IndependentMods_BothStartThroughBothPaths()
+        {
+            FileLuaModSourceStore store = NewFileStore();
+            LuaCsModRuntime first = NewRuntime(store);
+            first.LoadMod("zz-one", "mods_export('value', 1)", LuaCapabilities.Read);
+            first.LoadMod("aa-two", "mods_export('value', 2)", LuaCapabilities.Read);
+
+            LuaCsModRuntime rehydrated = NewRuntime(store);
+            Assert.AreEqual(2, rehydrated.RehydrateFromStore(LuaCapabilities.All));
+            LuaCsModRuntime exact = NewRuntime(store);
+            Assert.AreEqual(2, exact.RehydrateExactOrThrow(LuaCapabilities.All));
+        }
+
+        [Test]
+        public void LuaCs_RestoreOrder_NilFirst_ThenUnorderedById_ThenAscending_TiesById_NegativeIsUnordered()
+        {
+            LuaModManifest tieB = new() { Id = "b", LoadOrder = 2 };
+            LuaModManifest tieA = new() { Id = "a", LoadOrder = 2 };
+            LuaModManifest earliest = new() { Id = "c", LoadOrder = 1 };
+            LuaModManifest negative = new() { Id = "d", LoadOrder = -4 };
+            LuaModManifest legacy = new() { Id = "0", LoadOrder = 0 };
+            List<LuaModManifest> manifests = new() { tieB, legacy, negative, tieA, null, earliest };
+
+            manifests.Sort(LuaCsModRuntime.CompareRestoreOrder);
+
+            CollectionAssert.AreEqual(new[] { null, legacy, negative, earliest, tieA, tieB }, manifests,
+                "A negative order counts as no recorded order: it sorts by id with the legacy mods.");
         }
 
         // ==================== Export / import round-trip ====================

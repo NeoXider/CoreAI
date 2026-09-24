@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.Lua;
 using NUnit.Framework;
 
@@ -10,10 +12,30 @@ namespace CoreAI.Tests.EditMode
     /// Unit tests for <see cref="BundledModSeeder"/>: fresh install, idempotent re-seed, version-gated
     /// update of an unmodified entry (preserving the player's enabled state), respect for player edits
     /// (flag instead of overwrite), never clobbering a user-authored mod that shares an id, and the
-    /// dotted-numeric version comparison. Uses an in-memory store + fake source, no file system.
+    /// dotted-numeric version comparison, and the load order an update keeps and a fresh install leaves
+    /// unset. Uses an in-memory store + fake source, no file system.
     /// </summary>
     public sealed class BundledModSeederEditModeTests
     {
+        private SynchronizationContext _savedContext;
+
+        /// <summary>
+        /// See LuaCsModRuntimePersistenceEditModeTests: the load-order test runs a mod runtime, whose
+        /// sync-over-async execution guard must not post back to the blocked Unity main thread.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _savedContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_savedContext);
+        }
+
         private static string Mod(string id, string version, bool active = true, string body = "report('hi')")
         {
             return $"--[[@coreai\nid: {id}\nname: {id}\nversion: {version}\nactive: {(active ? "true" : "false")}\n" +
@@ -185,6 +207,54 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("v2", store.SourceOf("welcome"));
             Assert.AreEqual("2.0.0", store.ManifestOf("welcome").SeededVersion);
             Assert.IsFalse(store.ManifestOf("welcome").UpdateAvailable);
+        }
+
+        /// <summary>
+        /// A1-02: an update used to build a new manifest without the load order the runtime had stamped,
+        /// so the mod moved in the restart order.
+        /// </summary>
+        [Test]
+        public void Newer_version_update_keeps_the_stored_load_order()
+        {
+            MemStore store = new();
+            FakeSource v1 = new();
+            v1.Add("welcome", "1.0.0", body: "report('v1')");
+            new BundledModSeeder(store, new IBundledModSource[] { v1 }).Seed();
+            // The player loaded it after other mods, so the runtime recorded its place.
+            store.ManifestOf("welcome").LoadOrder = 7;
+
+            FakeSource v2 = new();
+            v2.Add("welcome", "1.1.0", body: "report('v2')");
+            BundledModSeeder.SeedResult r = new BundledModSeeder(store, new IBundledModSource[] { v2 }).Seed();
+
+            Assert.AreEqual(1, r.Updated);
+            Assert.AreEqual(7L, store.ManifestOf("welcome").LoadOrder, "an update must not move the mod");
+        }
+
+        /// <summary>
+        /// A1-02: a fresh install records no load order, so the bundled library restarts before a player
+        /// mod that reads it at init, although the ids sort the other way.
+        /// </summary>
+        [Test]
+        public void Fresh_install_has_no_load_order_and_restarts_before_a_player_mod_that_uses_it()
+        {
+            MemStore store = new();
+            FakeSource src = new();
+            src.Add("zz-library", "1.0.0", body: "mods_export('marker', 'library-ready')");
+            new BundledModSeeder(store, new IBundledModSource[] { src }).Seed();
+            Assert.AreEqual(0L, store.ManifestOf("zz-library").LoadOrder);
+            LuaCsModRuntime session = new(sourceStore: store);
+            Assert.AreEqual(1, session.RehydrateFromStore(LuaCapabilities.All));
+            session.LoadMod(
+                "aa-player",
+                "if mods_get('zz-library', 'marker') ~= 'library-ready' then error('zz-library has not started') end",
+                LuaCapabilities.Read);
+
+            LuaCsModRuntime restarted = new(sourceStore: store);
+
+            Assert.AreEqual(2, restarted.RehydrateFromStore(LuaCapabilities.All),
+                "the bundled library must restart before the player mod that reads it");
+            Assert.AreEqual(0L, store.ManifestOf("zz-library").LoadOrder, "a rehydrate never stamps a seeded mod");
         }
 
         [Test]

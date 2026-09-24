@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using Newtonsoft.Json;
+
 namespace CoreAI.Ai
 {
     /// <summary>
@@ -75,5 +78,50 @@ namespace CoreAI.Ai
 
         /// <summary>Entry-point file name within the package; defaults to <c>main.lua</c>.</summary>
         public string Entry = "main.lua";
+
+        /// <summary>
+        /// Where the mod sits in its world's load order, so a restart or a world restore starts mods in
+        /// the order they were loaded and a mod may use what an earlier one made at init. Stamped with
+        /// <see cref="NextLoadOrder"/> when a mod is first loaded (or loaded again after an unload), kept
+        /// by every rewrite of an existing mod, never changed by a rehydrate. <c>0</c> (or any value
+        /// below 1) means no recorded order: a package written before the field existed, or a bundled
+        /// mod seeded on install. Such mods start first, by ordinal id, because an active one had
+        /// already started at startup before any mod with a recorded order was first loaded.
+        /// </summary>
+        // WHY omitted when 0 and no format_version bump: an unordered manifest stays byte-identical to
+        // the one written before this field existed, so a store or world package without load order
+        // reads and writes exactly as before. A reader that predates the field refuses a world package
+        // whose mods carry a load order, explicitly (strict unknown-member check: "Could not find
+        // member 'LoadOrder'"); it never restores such a package in the wrong order.
+        [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public long LoadOrder;
+
+        /// <summary>
+        /// The <see cref="LoadOrder"/> for a mod that is being loaded for the first time into
+        /// <paramref name="store"/>: one past the highest value stored there, dormant packages included,
+        /// so the value keeps growing across restarts and never reuses a dormant mod's place. The one
+        /// rule every writer of a first-time manifest uses (the runtime, and a Hub save the runtime did
+        /// not already persist). A failing <see cref="ILuaModSourceStore.List"/> propagates; callers
+        /// treat it as no recorded order.
+        /// </summary>
+        // WHY public, not internal: the Hub service that writes manifests lives in its own assembly
+        // (CoreAI.Mods.Hub), and any host tool that writes a manifest into the store needs the same rule.
+        public static long NextLoadOrder(ILuaModSourceStore store)
+        {
+            IReadOnlyList<LuaModManifest> stored = store?.List();
+            long highest = 0;
+            if (stored != null)
+            {
+                foreach (LuaModManifest manifest in stored)
+                {
+                    if (manifest != null && manifest.LoadOrder > highest)
+                    {
+                        highest = manifest.LoadOrder;
+                    }
+                }
+            }
+
+            return highest < long.MaxValue ? highest + 1 : long.MaxValue;
+        }
     }
 }
