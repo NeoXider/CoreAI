@@ -283,24 +283,6 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void CompactSchema_LongSchema_ClippedWithCount_Deterministic_LoggedOncePerSchema()
-        {
-            TruncationMarker.ResetLogOnce();
-            using ContractLogCapture log = new();
-            string schema = "{\"type\":\"object\",\"description\":\"" + new string('s', 1500) + "\"}";
-
-            string first = CoreAI.Infrastructure.Llm.ToolExecutionPolicy.CompactSchema(
-                schema, CoreAI.Infrastructure.Llm.ToolExecutionPolicy.SchemaHintMaxChars, "big_schema_tool", Log.Instance);
-            string second = CoreAI.Infrastructure.Llm.ToolExecutionPolicy.CompactSchema(
-                schema, CoreAI.Infrastructure.Llm.ToolExecutionPolicy.SchemaHintMaxChars, "big_schema_tool", Log.Instance);
-
-            Assert.AreEqual(first, second);
-            int dropped = schema.Length - CoreAI.Infrastructure.Llm.ToolExecutionPolicy.SchemaHintMaxChars;
-            StringAssert.EndsWith("…[+" + dropped + " chars]", first);
-            Assert.AreEqual(1, log.Lines.Count(l => l.Contains("Tool 'big_schema_tool' schema clipped")));
-        }
-
-        [Test]
         public void VersioningFormatters_LongSnapshots_ClipInsideTheFence_WithCount_LoggedOncePerSnapshot()
         {
             TruncationMarker.ResetLogOnce();

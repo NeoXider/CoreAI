@@ -40,6 +40,24 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(policy.TurnEndingToolSucceeded);
         }
 
+        [Test]
+        public void CompactSchema_LongSchema_ClippedWithCount_Deterministic_LoggedOncePerSchema()
+        {
+            TruncationMarker.ResetLogOnce();
+            StubLogger log = new();
+            string schema = "{\"type\":\"object\",\"description\":\"" + new string('s', 1500) + "\"}";
+
+            string first = ToolExecutionPolicy.CompactSchema(
+                schema, ToolExecutionPolicy.SchemaHintMaxChars, "big_schema_tool", log);
+            string second = ToolExecutionPolicy.CompactSchema(
+                schema, ToolExecutionPolicy.SchemaHintMaxChars, "big_schema_tool", log);
+
+            Assert.AreEqual(first, second);
+            int dropped = schema.Length - ToolExecutionPolicy.SchemaHintMaxChars;
+            StringAssert.EndsWith("…[+" + dropped + " chars]", first);
+            Assert.AreEqual(1, log.Logs.Count(l => l.Contains("Tool 'big_schema_tool' schema clipped")));
+        }
+
         // ==================== Helpers ====================
 
         private sealed class StubLogger : ILog
