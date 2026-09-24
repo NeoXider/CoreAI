@@ -42,7 +42,8 @@ namespace CoreAI.Ai.LuaCs
         private bool _iterationCompleted;
 
         internal LuaCsRbxSignalRunner(LuaState ownerState, LuaValue bodyFactory,
-            LuaCsCoroutineBudgetSettings resumeBudget = null)
+            LuaCsCoroutineBudgetSettings resumeBudget = null,
+            long maxAllocatedBytes = LuaCsCoroutineHandle.DefaultMaxAllocatedBytesPerResume)
         {
             _ownerState = ownerState ?? throw new ArgumentNullException(nameof(ownerState));
             LuaFunction run = new("signal_runner.run", RunPendingAsync);
@@ -61,11 +62,16 @@ namespace CoreAI.Ai.LuaCs
             // owning mod's signal handlers (Heartbeat, RunService.*, custom signals), so its budget must
             // be the composition's configurable default and must stay live so a later
             // ScriptContext:SetTimeout reaches every future resume, not just a freshly built runner.
+            // WHY UnlimitedLifetimeSteps: a handler that loops on task.wait keeps this one runner for its
+            // whole life, and a Roblox handler may run forever as long as each resume yields in time; a
+            // lifetime cap killed such a handler silently after about a million instructions.
             LuaCsCoroutineBudgetSettings liveBudget = resumeBudget ?? new LuaCsCoroutineBudgetSettings();
             _handle = new LuaCsCoroutineHandle(ownerState, made[0].Read<LuaFunction>(),
                 budgetPerResume: liveBudget.BudgetPerResume,
                 resumeTimeoutMs: liveBudget.ResumeTimeoutMs,
-                liveResumeBudget: liveBudget);
+                totalLifetimeSteps: LuaCsCoroutineHandle.UnlimitedLifetimeSteps,
+                liveResumeBudget: liveBudget,
+                maxAllocatedBytes: maxAllocatedBytes);
             _coroutine = new LuaCsScriptCoroutine(_handle);
             // WHY: the envelope takes a Func; one delegate per runner instead of one per fire.
             ResumeDelegate = Resume;
@@ -133,7 +139,7 @@ namespace CoreAI.Ai.LuaCs
             _pendingArgumentCount = 0;
         }
 
-        /// <summary>Restarts the lifetime step budget for the next handler (see <see cref="LuaCsCoroutineHandle.ResetLifetime"/>).</summary>
+        /// <summary>Restarts the consumed-step count for the next handler (see <see cref="LuaCsCoroutineHandle.ResetLifetime"/>).</summary>
         internal void ResetLifetime()
         {
             _handle.ResetLifetime();

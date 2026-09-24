@@ -144,6 +144,216 @@ namespace CoreAI.Tests.EditMode
             GC.KeepAlive(retained);
         }
 
+        private const long MB = 1024 * 1024;
+
+        /// <summary>
+        /// Retains a fresh 512 KB string per iteration (64 MB if never cut) while dropping about 1 MB of
+        /// garbage beside each one, so a garbage-inclusive sample keeps raising suspicions that a
+        /// collection then clears — the exact shape the old re-baselining forgave, one confirmation at a
+        /// time, all the way to the end of the loop.
+        /// </summary>
+        private const string RetentionWithGarbageChurn =
+            "local keep = {}\n" +
+            "local chunk = string.rep('k', 262144)\n" +
+            "for i = 1, 128 do\n" +
+            "  keep[i] = chunk .. i\n" +
+            "  local garbage = string.rep('g', 262144) .. i\n" +
+            "end\n" +
+            "return #keep";
+
+        private static void CollectGarbage()
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+
+        [Test]
+        public void ClearedSuspicion_NeverMovesTheTripReferenceUp()
+        {
+            // WHY (audit M2-05): a cleared suspicion used to re-baseline the trip reference to the
+            // post-collection reading, forgiving the live growth it had just measured. Two confirmations
+            // of 10 MB each then both passed a 16 MB budget, and a doubling bomb walked a 256 MB budget up
+            // to a 1 GB string. The readings are explicit so the rule is pinned, not the GC's timing.
+            LuaCsAllocationBudget budget = default;
+            budget.Reset(16 * MB, 100 * MB);
+
+            Assert.IsFalse(budget.IsExceeded(120 * MB, () => 110 * MB),
+                "10 MB of live growth is within the 16 MB budget; the other 10 MB sampled was garbage");
+            Assert.AreEqual(100 * MB, budget.BaselineBytes,
+                "a cleared suspicion must never raise the trip reference");
+            Assert.IsTrue(budget.IsExceeded(124 * MB, () => 120 * MB),
+                "20 MB of live growth since the execution started exceeds 16 MB, however many " +
+                "confirmations it was split across");
+        }
+
+        [Test]
+        public void ClearedSuspicion_ReArmsOnlyAfterAQuarterBudgetOfFreshGrowth()
+        {
+            // WHY: never raising the trip reference must not turn every later sample into a forced full
+            // collection. What a cleared suspicion raises is the SUSPICION line: the next confirmation
+            // waits for a quarter budget of sampled growth past the post-collection reading, and never
+            // sits below the budget line itself.
+            LuaCsAllocationBudget budget = default;
+            budget.Reset(16 * MB, 100 * MB);
+            int confirmations = 0;
+
+            Assert.IsFalse(budget.IsExceeded(130 * MB, () =>
+            {
+                confirmations++;
+                return 114 * MB;
+            }));
+            Assert.AreEqual(1, confirmations);
+            Assert.AreEqual(118 * MB, budget.SuspicionBytes,
+                "re-armed a quarter budget (4 MB) above the 114 MB post-collection reading");
+
+            Assert.IsFalse(budget.IsExceeded(118 * MB, () =>
+            {
+                confirmations++;
+                return 114 * MB;
+            }));
+            Assert.AreEqual(1, confirmations, "a sample at the re-armed line must not force a collection");
+
+            Assert.IsTrue(budget.IsExceeded(119 * MB, () =>
+            {
+                confirmations++;
+                return 117 * MB;
+            }), "past the line, a confirmation that finds 17 MB of live growth trips");
+            Assert.AreEqual(2, confirmations);
+
+            budget.Reset(16 * MB, 100 * MB);
+            Assert.IsFalse(budget.IsExceeded(117 * MB, () => 101 * MB));
+            Assert.AreEqual(116 * MB, budget.SuspicionBytes,
+                "a clearance far below the budget line keeps the exact budget line as the next suspicion");
+        }
+
+        [Test]
+        public void PostCollectionReadingBelowTheBaseline_LowersTheTripReference()
+        {
+            // WHY: the baseline is a garbage-INCLUSIVE sample, so a collection can show the real start
+            // was lower. Moving the reference DOWN only makes a trip earlier for growth that really
+            // happened inside this execution; that is the one direction it may move.
+            LuaCsAllocationBudget budget = default;
+            budget.Reset(16 * MB, 100 * MB);
+
+            Assert.IsFalse(budget.IsExceeded(120 * MB, () => 90 * MB));
+            Assert.AreEqual(90 * MB, budget.BaselineBytes);
+            Assert.IsTrue(budget.IsExceeded(110 * MB, () => 107 * MB),
+                "17 MB of live growth past the truer 90 MB reference trips a 16 MB budget");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void LinearRetentionWithGarbageChurn_TripsTheGuardBudget_InsteadOfRatchetingPastIt()
+        {
+            CollectGarbage();
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+            RecordingObserver observer = new();
+            LuaCsExecutionGuard guard = new(
+                30_000,
+                5_000_000_000L,
+                16 * MB,
+                guardObserver: observer);
+
+            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+                env.RunChunk(state, RetentionWithGarbageChurn, guard),
+                "64 MB of retained growth under a 16 MB budget must be cut, however much garbage hides it");
+
+            Assert.AreEqual(1, observer.Records.Count);
+            Assert.AreEqual(LuaCsGuardTripKind.Memory, observer.Records[0].TrippedBudget);
+            Assert.IsTrue(LuaCsExecutionGuard.IsMemoryBudgetTrip(ex));
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void CoroutineResume_LinearRetentionWithGarbageChurn_TripsTheMemoryBudget()
+        {
+            // WHY (audit M2-05): a scheduler thread's resume hook sampled no allocation at all, so this
+            // resume kept all 64 MB under a 16 MB budget. It is the same backstop, sampled per
+            // millisecond of execution instead of per instruction batch.
+            CollectGarbage();
+            LuaCsScriptEngine engine = new();
+            IScriptState state = engine.CreateState();
+            object[] fn = engine.RunChunk(state, "return function()\n" + RetentionWithGarbageChurn + "\nend");
+
+            IScriptCoroutine co = engine.CreateCoroutine(state, fn[0],
+                new ExecutionBudget(timeoutMs: 30_000, maxSteps: 50_000_000, maxAllocatedBytes: 16 * MB));
+            ScriptResumeResult result = co.Resume();
+
+            Assert.IsFalse(result.Ok, "the resume must be cut, not keep 64 MB under a 16 MB budget");
+            StringAssert.Contains(LuaCsExecutionGuard.MemoryBudgetTripMarker, result.Error,
+                "error was: " + result.Error);
+            Assert.AreEqual(LuaCsGuardTripKind.Memory, ((LuaCsScriptCoroutine)co).Handle.LastTrip);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void CoroutineResume_OneDoublingPerResume_IsChargedToTheResumeThatAllocates()
+        {
+            // WHY: the per-resume baseline must be read before the resume's first instruction. A
+            // baseline taken lazily at the first sample would already contain the one long concat a
+            // resume starts with, so a thread doubling its string once per resume would grow forever
+            // without a single resume being charged. Here the resume that builds the 32 MB string must be
+            // cut; five doublings from 1M chars would otherwise end at a 64 MB string.
+            CollectGarbage();
+            LuaCsScriptEngine engine = new();
+            IScriptState state = engine.CreateState();
+            object[] fn = engine.RunChunk(state,
+                "return function()\n" +
+                "  local s = string.rep('x', 1000000)\n" +
+                "  for r = 1, 5 do\n" +
+                "    s = s .. s\n" +
+                "    coroutine.yield(#s)\n" +
+                "  end\n" +
+                "  return #s\n" +
+                "end");
+
+            IScriptCoroutine co = engine.CreateCoroutine(state, fn[0],
+                new ExecutionBudget(timeoutMs: 30_000, maxSteps: 50_000_000, maxAllocatedBytes: 16 * MB));
+            ScriptResumeResult result = default;
+            int resumes = 0;
+            while (co.CanResume && resumes < 6)
+            {
+                result = co.Resume();
+                resumes++;
+            }
+
+            Assert.IsFalse(result.Ok,
+                "one of the resumes must be cut for its own doubling — ran " + resumes + " resumes");
+            StringAssert.Contains(LuaCsExecutionGuard.MemoryBudgetTripMarker, result.Error,
+                "error was: " + result.Error);
+            Assert.AreEqual(LuaCsGuardTripKind.Memory, ((LuaCsScriptCoroutine)co).Handle.LastTrip);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void CoroutineResume_ThatOnlyChurnsGarbage_IsNotCutByTheAllocationBackstop()
+        {
+            // WHY the negative twin: sampling allocation inside every scheduler resume must not turn
+            // transient garbage into a kill. About 96 MB of garbage passes through a 16 MB budget here;
+            // every suspicion it raises is cleared by the confirming collection.
+            CollectGarbage();
+            LuaCsScriptEngine engine = new();
+            IScriptState state = engine.CreateState();
+            object[] fn = engine.RunChunk(state,
+                "return function()\n" +
+                "  local n = 0\n" +
+                "  for i = 1, 96 do\n" +
+                "    local garbage = string.rep('g', 262144) .. i\n" +
+                "    n = n + #garbage\n" +
+                "  end\n" +
+                "  return n\n" +
+                "end");
+
+            IScriptCoroutine co = engine.CreateCoroutine(state, fn[0],
+                new ExecutionBudget(timeoutMs: 30_000, maxSteps: 50_000_000, maxAllocatedBytes: 16 * MB));
+            ScriptResumeResult result = co.Resume();
+
+            Assert.IsTrue(result.Ok, "garbage is not the script's cost — error was: " + result.Error);
+            Assert.AreEqual(LuaCsGuardTripKind.None, ((LuaCsScriptCoroutine)co).Handle.LastTrip);
+        }
+
         [Test]
         [Timeout(60000)]
         public void UnboundedArithmeticLoop_TripsTimeout_NotTheAllocationBackstop()

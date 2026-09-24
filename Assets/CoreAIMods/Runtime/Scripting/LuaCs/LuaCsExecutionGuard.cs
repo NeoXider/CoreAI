@@ -43,6 +43,12 @@ namespace CoreAI.Sandbox.LuaCs
 
         /// <summary>The process-heap allocation budget tripped.</summary>
         Memory,
+
+        /// <summary>
+        /// A directly constructed coroutine handle's lifetime step cap (steps across all of its resumes) tripped.
+        /// Scheduler-owned threads have no such cap; see <see cref="LuaCsCoroutineHandle.UnlimitedLifetimeSteps"/>.
+        /// </summary>
+        LifetimeSteps,
     }
 
     /// <summary>
@@ -202,8 +208,9 @@ namespace CoreAI.Sandbox.LuaCs
         /// <param name="timeoutMs">Maximum wall-clock time allowed for one guarded call.</param>
         /// <param name="maxSteps">Maximum Lua-CSharp instruction steps allowed for one guarded call.</param>
         /// <param name="maxAllocatedBytes">
-        /// Maximum total GC allocation (bytes) permitted for one guarded call, checked on every
-        /// instruction. Defaults to <see cref="DefaultMaxAllocatedBytesBudget"/> (256MB).
+        /// Maximum live heap growth (bytes) permitted for one guarded call, checked every
+        /// <see cref="HookInstructionBatch"/> instructions against a reference that never moves up (see
+        /// <see cref="LuaCsAllocationBudget"/>). Defaults to <see cref="DefaultMaxAllocatedBytesBudget"/> (256MB).
         /// <c>&lt;= 0</c> disables the check.
         /// </param>
         /// <param name="guardObserver">

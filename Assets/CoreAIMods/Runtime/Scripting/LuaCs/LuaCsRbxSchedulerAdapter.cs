@@ -203,10 +203,22 @@ namespace CoreAI.Ai.LuaCs
             public Stack<LuaCsRbxSignalRunner> Idle { get; } = new();
         }
 
+        /// <summary>The per-resume allocation budget a mod's state was loaded with (see <see cref="CaptureChunk"/>).</summary>
+        private sealed class StateAllocationBudget
+        {
+            public long MaxAllocatedBytes;
+        }
+
         // WHY: keyed by the mod's LuaState (an ephemeron table), so a runner can only ever be rented for
         // handlers captured on the state it was built on, and a torn-down mod's runners die with its
         // state instead of needing explicit teardown plumbing.
         private readonly ConditionalWeakTable<LuaState, RunnerPool> _runnerPools = new();
+
+        // WHY keyed by the mod's LuaState like the runner pools: the mod's IExecutionBudget reaches this
+        // factory once, with its main chunk, while its task.* threads and signal runners are created later
+        // from bare callables captured on the same state. Without this record they fell back to a default
+        // and a host's lowered HandlerMaxAllocatedBytes never reached a single handler.
+        private readonly ConditionalWeakTable<LuaState, StateAllocationBudget> _allocationBudgets = new();
         private readonly IScriptEngine _scriptEngine;
         private readonly IRbxRuntimeObservabilitySink _observability;
         private readonly Func<string, Func<ScriptResumeResult>, ScriptResumeResult>
@@ -332,7 +344,8 @@ namespace CoreAI.Ai.LuaCs
             // WHY the live settings object, not a frozen snapshot: this runner is pooled and reused for
             // every future fire of this mod's signal handlers, so a later ScriptContext:SetTimeout must
             // reach it too — see LuaCsCoroutineHandle's liveResumeBudget parameter.
-            LuaCsRbxSignalRunner runner = new(ownerState, pool.BodyFactory, _coroutineResumeBudget);
+            LuaCsRbxSignalRunner runner = new(ownerState, pool.BodyFactory, _coroutineResumeBudget,
+                ResolveAllocationBudget(ownerState, null));
             SignalRunnersCreated++;
             return new LuaCsRbxScriptThread(this, _scriptEngine, launch, ownerModId, runner);
         }
@@ -340,6 +353,34 @@ namespace CoreAI.Ai.LuaCs
         private static RunnerPool CreateRunnerPool(LuaState ownerState)
         {
             return new RunnerPool(ownerState);
+        }
+
+        private static StateAllocationBudget CreateStateAllocationBudget(LuaState ownerState)
+        {
+            return new StateAllocationBudget
+            {
+                MaxAllocatedBytes = LuaCsCoroutineHandle.DefaultMaxAllocatedBytesPerResume
+            };
+        }
+
+        /// <summary>
+        /// The per-resume allocation budget a thread on <paramref name="ownerState"/> runs under: the
+        /// explicit <paramref name="resumeBudget"/>'s when there is one, else the budget the mod's main
+        /// chunk was captured with on that state, else
+        /// <see cref="LuaCsCoroutineHandle.DefaultMaxAllocatedBytesPerResume"/>. <c>&lt;= 0</c> means the
+        /// check is disabled, exactly as <see cref="IExecutionBudget.MaxAllocatedBytes"/> documents.
+        /// </summary>
+        internal long ResolveAllocationBudget(LuaState ownerState, IExecutionBudget resumeBudget)
+        {
+            if (resumeBudget != null)
+            {
+                return resumeBudget.MaxAllocatedBytes;
+            }
+
+            return ownerState != null
+                   && _allocationBudgets.TryGetValue(ownerState, out StateAllocationBudget recorded)
+                ? recorded.MaxAllocatedBytes
+                : LuaCsCoroutineHandle.DefaultMaxAllocatedBytesPerResume;
         }
 
         /// <summary>
@@ -395,6 +436,12 @@ namespace CoreAI.Ai.LuaCs
 
             LuaState state = LuaCsScriptState.Unwrap(ownerState);
             LuaClosure closure = state.Load(source ?? string.Empty, "sandbox_chunk");
+            if (resumeBudget != null)
+            {
+                _allocationBudgets.GetValue(state, CreateStateAllocationBudget).MaxAllocatedBytes =
+                    resumeBudget.MaxAllocatedBytes;
+            }
+
             return new LuaCsRbxSchedulerCallable(
                 ownerState, new LuaValue(closure), false, resumeBudget, true);
         }
@@ -666,8 +713,7 @@ namespace CoreAI.Ai.LuaCs
                     return CreateUnprotectedCoroutine();
                 }
 
-                return _scriptEngine.CreateCoroutine(
-                    _launch.OwnerState, _launch.Callable, _launch.ResumeBudget);
+                return CreateEngineCoroutine(_launch.Callable);
             }
 
             LuaValue callable = LuaCsValueMarshaller.Unbox(_launch.Callable);
@@ -683,13 +729,28 @@ namespace CoreAI.Ai.LuaCs
                     callable, luaArguments.AsSpan(), ct);
                 return ctx.Return(results);
             });
-            return _scriptEngine.CreateCoroutine(
-                _launch.OwnerState, boundCallable, _launch.ResumeBudget);
+            return CreateEngineCoroutine(boundCallable);
+        }
+
+        private IScriptCoroutine CreateEngineCoroutine(object callable)
+        {
+            // WHY the concrete overload when the engine is Lua-CSharp: the neutral seam can only carry an
+            // allocation budget inside an IExecutionBudget, and passing one would also freeze the live
+            // step/time default a task.* thread must keep reading (see LuaCsCoroutineBudgetSettings).
+            if (_scriptEngine is LuaCsScriptEngine luaEngine)
+            {
+                return luaEngine.CreateCoroutine(_launch.OwnerState, callable, _launch.ResumeBudget,
+                    _factory.ResolveAllocationBudget(
+                        LuaCsScriptState.Unwrap(_launch.OwnerState), _launch.ResumeBudget));
+            }
+
+            return _scriptEngine.CreateCoroutine(_launch.OwnerState, callable, _launch.ResumeBudget);
         }
 
         private IScriptCoroutine CreateUnprotectedCoroutine()
         {
             LuaState ownerState = LuaCsScriptState.Unwrap(_launch.OwnerState);
+            long maxAllocatedBytes = _factory.ResolveAllocationBudget(ownerState, _launch.ResumeBudget);
             LuaCsCoroutineHandle handle;
             if (_launch.ResumeBudget != null)
             {
@@ -702,13 +763,17 @@ namespace CoreAI.Ai.LuaCs
                 int resumeTimeoutMs = _launch.ResumeBudget.TimeoutMs > 0
                     ? _launch.ResumeBudget.TimeoutMs
                     : LuaCsCoroutineHandle.DefaultResumeTimeoutMs;
+                // WHY UnlimitedLifetimeSteps: this is a mod's main chunk, which Roblox lets run for as long
+                // as every resume yields in time — a lifetime cap here silently killed any mod that did
+                // heavy setup before its first yield, or looped on task.wait for longer than ~16 s.
                 handle = new LuaCsCoroutineHandle(
                     ownerState,
                     LuaCsScriptExecutionGuard.UnwrapCallable(_launch.Callable),
                     budgetPerResume,
                     resumeTimeoutMs,
-                    LuaCsCoroutineHandle.DefaultTotalLifetimeSteps,
-                    false);
+                    LuaCsCoroutineHandle.UnlimitedLifetimeSteps,
+                    false,
+                    maxAllocatedBytes: maxAllocatedBytes);
             }
             else
             {
@@ -720,9 +785,10 @@ namespace CoreAI.Ai.LuaCs
                     LuaCsScriptExecutionGuard.UnwrapCallable(_launch.Callable),
                     liveDefaults.BudgetPerResume,
                     liveDefaults.ResumeTimeoutMs,
-                    LuaCsCoroutineHandle.DefaultTotalLifetimeSteps,
+                    LuaCsCoroutineHandle.UnlimitedLifetimeSteps,
                     false,
-                    liveResumeBudget: liveDefaults);
+                    liveResumeBudget: liveDefaults,
+                    maxAllocatedBytes: maxAllocatedBytes);
             }
 
             return new LuaCsScriptCoroutine(handle);
@@ -736,9 +802,15 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         private bool LastResumeTrippedBudget()
         {
+            return LastResumeTrip() != LuaCsGuardTripKind.None;
+        }
+
+        private LuaCsGuardTripKind LastResumeTrip()
+        {
             IScriptCoroutine coroutine = _coroutine ?? _runner?.Coroutine;
             return coroutine is LuaCsScriptCoroutine luaCoroutine
-                   && luaCoroutine.Handle.LastTrip != LuaCsGuardTripKind.None;
+                ? luaCoroutine.Handle.LastTrip
+                : LuaCsGuardTripKind.None;
         }
 
         private RbxError ToRbxError(string message, bool budgetTripped)
@@ -756,12 +828,20 @@ namespace CoreAI.Ai.LuaCs
                                       StringComparison.Ordinal) >= 0
                                   || error.IndexOf("resume exceeded",
                                       StringComparison.OrdinalIgnoreCase) >= 0;
+            // WHY a separate hint for the memory trip: "reduce the work" steers a repair toward the loop,
+            // while the fix for EXCEEDED_MEMORY_BUDGET is to keep less data alive inside one resume.
+            bool memoryExceeded = budgetExceeded
+                                  && (LastResumeTrip() == LuaCsGuardTripKind.Memory
+                                      || error.IndexOf("EXCEEDED_MEMORY_BUDGET",
+                                          StringComparison.Ordinal) >= 0);
             return new RbxError(
                 budgetExceeded ? RbxErrorCode.BudgetExceeded : RbxErrorCode.BadArgument,
                 error,
-                budgetExceeded
-                    ? "reduce the work performed between yields"
-                    : "fix the Lua error before scheduling the thread again",
+                memoryExceeded
+                    ? "keep less memory alive between two yields"
+                    : budgetExceeded
+                        ? "reduce the work performed between yields"
+                        : "fix the Lua error before scheduling the thread again",
                 OwnerModId);
         }
     }

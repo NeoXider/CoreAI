@@ -15,7 +15,9 @@ namespace CoreAI.Sandbox.LuaCs
     /// Each frame every SUSPENDED handle is advanced exactly one step (to its next <c>coroutine.yield</c>).
     /// A handle that is still suspended afterwards is simply left for the next frame — the runner NEVER
     /// blocks waiting on a yielded coroutine, which is what keeps a single-threaded WebGL/WASM player loop
-    /// from deadlocking. Finished, killed and faulted handles are removed.
+    /// from deadlocking. Finished, killed and faulted handles are removed; a handle cut by one of its
+    /// budgets (including the lifetime step cap a directly constructed handle carries) is logged as
+    /// <c>BUDGET_EXCEEDED</c> with the bound and the author line, never dropped silently.
     /// </summary>
     public sealed class LuaCsCoroutineRunner : MonoBehaviour
     {
@@ -156,10 +158,13 @@ namespace CoreAI.Sandbox.LuaCs
 
                     if (!h.LastOk)
                     {
-                        // Protected-mode Lua error: the handle already transitioned to Dead and
-                        // captured the error object; log it and drop the handle.
-                        Logger.LogError(GameLogFeature.Core,
-                            $"[LuaCsCoroutineRunner] Lua error: {h.LastErrorText}");
+                        // WHY the budget label: a handle cut by a budget (per-resume steps, time, memory,
+                        // or the lifetime step cap it was built with) fails exactly like a Lua error, so
+                        // only its typed trip tells the reader of this log that the script ran out of
+                        // budget rather than raised an error of its own.
+                        Logger.LogError(GameLogFeature.Core, h.LastTrip != LuaCsGuardTripKind.None
+                            ? $"[LuaCsCoroutineRunner] BUDGET_EXCEEDED ({h.LastTrip}): {h.LastErrorText}"
+                            : $"[LuaCsCoroutineRunner] Lua error: {h.LastErrorText}");
                         _toRemove.Add(h);
                         continue;
                     }

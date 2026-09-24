@@ -80,10 +80,33 @@ namespace CoreAI.Scripting.LuaCs
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// The coroutine has NO lifetime step cap: its per-resume budget is its only CPU limit, as a
+        /// Roblox thread's is (<see cref="LuaCsCoroutineHandle.UnlimitedLifetimeSteps"/>). Every resume
+        /// also enforces <paramref name="resumeBudget"/>'s <see cref="IExecutionBudget.MaxAllocatedBytes"/>,
+        /// or <see cref="LuaCsCoroutineHandle.DefaultMaxAllocatedBytesPerResume"/> when no budget is given.
+        /// </remarks>
         public IScriptCoroutine CreateCoroutine(
             IScriptState ownerState,
             object callable,
             IExecutionBudget resumeBudget = null)
+        {
+            return CreateCoroutine(ownerState, callable, resumeBudget,
+                resumeBudget?.MaxAllocatedBytes ?? LuaCsCoroutineHandle.DefaultMaxAllocatedBytesPerResume);
+        }
+
+        /// <summary>
+        /// <see cref="CreateCoroutine(IScriptState, object, IExecutionBudget)"/> with the per-resume
+        /// allocation budget given separately, so a caller can keep the LIVE composition step/time
+        /// default (a null <paramref name="resumeBudget"/>) while still applying its mod's own allocation
+        /// budget — the scheduler's <c>task.*</c> threads need exactly that combination.
+        /// </summary>
+        /// <param name="maxAllocatedBytes">Per-resume live heap growth allowed; <c>&lt;= 0</c> disables the check.</param>
+        internal IScriptCoroutine CreateCoroutine(
+            IScriptState ownerState,
+            object callable,
+            IExecutionBudget resumeBudget,
+            long maxAllocatedBytes)
         {
             LuaState owner = LuaCsScriptState.Unwrap(ownerState);
             // WHY the branch: an explicit resumeBudget (e.g. a mod's HandlerMaxSteps/HandlerTimeoutMs)
@@ -100,13 +123,17 @@ namespace CoreAI.Scripting.LuaCs
                         : LuaCsCoroutineHandle.DefaultBudgetPerResume,
                     resumeBudget.TimeoutMs > 0
                         ? resumeBudget.TimeoutMs
-                        : LuaCsCoroutineHandle.DefaultResumeTimeoutMs)
+                        : LuaCsCoroutineHandle.DefaultResumeTimeoutMs,
+                    LuaCsCoroutineHandle.UnlimitedLifetimeSteps,
+                    maxAllocatedBytes: maxAllocatedBytes)
                 : new LuaCsCoroutineHandle(
                     owner,
                     LuaCsScriptExecutionGuard.UnwrapCallable(callable),
                     _coroutineResumeBudget.BudgetPerResume,
                     _coroutineResumeBudget.ResumeTimeoutMs,
-                    liveResumeBudget: _coroutineResumeBudget);
+                    LuaCsCoroutineHandle.UnlimitedLifetimeSteps,
+                    liveResumeBudget: _coroutineResumeBudget,
+                    maxAllocatedBytes: maxAllocatedBytes);
             return new LuaCsScriptCoroutine(handle);
         }
 

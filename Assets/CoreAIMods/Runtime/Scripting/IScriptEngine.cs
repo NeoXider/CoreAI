@@ -28,7 +28,11 @@ namespace CoreAI.Scripting
         /// <summary>Creates an execution guard enforcing <paramref name="budget"/> (null = defaults).</summary>
         IScriptExecutionGuard CreateGuard(IExecutionBudget budget = null);
 
-        /// <summary>Creates a budgeted coroutine from a script function on the owning state.</summary>
+        /// <summary>
+        /// Creates a budgeted coroutine from a script function on the owning state. The budget applies
+        /// to EACH resume (steps, wall clock and <see cref="IExecutionBudget.MaxAllocatedBytes"/>); there is
+        /// no cap across resumes, so a coroutine that yields in time may run for as long as it likes.
+        /// </summary>
         IScriptCoroutine CreateCoroutine(IScriptState ownerState, object callable,
             IExecutionBudget resumeBudget = null);
 

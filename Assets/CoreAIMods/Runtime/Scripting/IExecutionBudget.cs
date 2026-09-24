@@ -13,7 +13,10 @@ namespace CoreAI.Scripting
         /// <summary>Maximum VM instruction steps for one guarded call.</summary>
         long MaxSteps { get; }
 
-        /// <summary>Maximum GC allocation (bytes) for one guarded call; &lt;= 0 disables the check.</summary>
+        /// <summary>
+        /// Maximum live heap growth (bytes) for one guarded call, or for one resume of a coroutine built
+        /// with this budget; &lt;= 0 disables the check.
+        /// </summary>
         long MaxAllocatedBytes { get; }
     }
 

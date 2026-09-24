@@ -270,5 +270,51 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 "exactly one runner per mod, never one shared across mods");
             Assert.AreEqual(0, roblox.Scheduler.LiveThreadCount);
         }
+
+        [Test]
+        [Timeout(180000)]
+        public void Lua_HeartbeatHandlerThatLoopsOnTaskWait_OutlivesOneMillionInstructionsOnItsRunner()
+        {
+            // WHY (audit M2-01): a pooled runner restarted its lifetime step count only when it was rented
+            // for a new handler, so a handler that never returns — `while true do ... task.wait() end` —
+            // kept one runner and was killed silently by the hidden 1,000,000-step lifetime cap, about
+            // 990 iterations in. Here it runs about 1,000 instructions per frame for 2,000 frames.
+            const int frames = 2000;
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+            List<string> errors = new();
+            stack.Runtime.ModHandlerErrored += (modId, message, streak) =>
+                errors.Add(modId + ": " + message);
+            stack.Runtime.LoadMod("m", @"
+                local rs = game:GetService('RunService')
+                local started = false
+                rs.Heartbeat:Connect(function(dt)
+                    if started then
+                        return
+                    end
+                    started = true
+                    local n = 0
+                    while true do
+                        local acc = 0
+                        for i = 1, 500 do acc = acc + i end
+                        n = n + 1
+                        store_set('n', tostring(n))
+                        task.wait()
+                    end
+                end)");
+
+            for (int frame = 0; frame < frames; frame++)
+            {
+                PumpFrame(roblox, 1f / 60f);
+            }
+
+            Assert.IsEmpty(errors, "a handler that yields every frame must never raise an error");
+            Assert.AreEqual(frames.ToString(), store.Get("m", "n"),
+                "the looping handler must run once per frame for all " + frames + " frames (about 2M "
+                + "instructions on one runner), not stop at a lifetime cap");
+            Assert.AreEqual(1, roblox.Scheduler.LiveThreadCount,
+                "the looping handler is still a live scheduler thread; every other fire returned");
+        }
     }
 }

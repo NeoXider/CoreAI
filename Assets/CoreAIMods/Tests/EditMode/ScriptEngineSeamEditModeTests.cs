@@ -333,6 +333,113 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(co.IsFinished);
         }
 
+        [Test]
+        [Timeout(120000)]
+        public void Engine_Coroutine_HasNoLifetimeCap_ResumesPastOneMillionInstructions()
+        {
+            // WHY (audit M2-01): every coroutine this seam builds is a scheduler thread (task.spawn/defer/
+            // delay). They carried a hidden 1,000,000-step lifetime cap: around resume 990 of this loop
+            // the handle killed itself after a SUCCESSFUL resume and the next Resume threw. A Roblox
+            // thread may run forever as long as each resume yields in time.
+            const int resumes = 1500;
+            LuaCsScriptEngine engine = NewEngine();
+            IScriptState state = engine.CreateState();
+            object[] fn = engine.RunChunk(state,
+                "return function()\n" +
+                "  while true do\n" +
+                "    local acc = 0\n" +
+                "    for i = 1, 500 do acc = acc + i end\n" +
+                "    coroutine.yield()\n" +
+                "  end\n" +
+                "end");
+
+            IScriptCoroutine co = engine.CreateCoroutine(state, fn[0]);
+            for (int i = 0; i < resumes; i++)
+            {
+                ScriptResumeResult result = co.Resume();
+                Assert.IsTrue(result.Ok, "resume " + i + " failed: " + result.Error);
+            }
+
+            LuaCsCoroutineHandle handle = ((LuaCsScriptCoroutine)co).Handle;
+            Assert.Greater(handle.ConsumedSteps, 1_000_000L,
+                "the loop must really have run past the old cumulative cap");
+            Assert.IsFalse(co.IsFinished, "a thread that keeps yielding in time is never finished for it");
+            Assert.IsFalse(handle.HasLifetimeCap);
+        }
+
+        [Test]
+        [Timeout(15000)]
+        public void Handle_ExplicitLifetimeCap_FailsTheResumeLoudly_NeverAsASilentKill()
+        {
+            // WHY: where a lifetime cap is still asked for (a directly built handle, e.g. the per-frame
+            // LuaCsCoroutineRunner), exhausting it used to Kill() the handle after a resume that REPORTED
+            // success — LastOk true, no error, nothing for a log or a repair loop to see. It must fail
+            // that resume the way a per-resume budget does: bound, author line and a typed trip.
+            LuaCsScriptEngine engine = NewEngine();
+            IScriptState state = engine.CreateState();
+            object[] fn = engine.RunChunk(state,
+                "return function()\n" +
+                "  while true do\n" +
+                "    for i = 1, 500 do end\n" +
+                "    coroutine.yield()\n" +
+                "  end\n" +
+                "end");
+            LuaCsCoroutineHandle handle = new(
+                LuaCsScriptState.Unwrap(state),
+                LuaCsScriptExecutionGuard.UnwrapCallable(fn[0]),
+                budgetPerResume: 100_000,
+                resumeTimeoutMs: 5_000,
+                totalLifetimeSteps: 5_000);
+
+            int resumes = 0;
+            while (handle.LastOk && resumes < 50)
+            {
+                handle.Resume();
+                resumes++;
+            }
+
+            Assert.IsFalse(handle.LastOk,
+                "the resume that crosses the lifetime cap must FAIL, after " + resumes + " resumes");
+            StringAssert.Contains("EXCEEDED_LIFETIME_STEP_BUDGET (5000)", handle.LastErrorText,
+                "the error must name the lifetime bound — error was: " + handle.LastErrorText);
+            StringAssert.Contains("at line", handle.LastErrorText,
+                "and the author line it was cut on — error was: " + handle.LastErrorText);
+            Assert.AreEqual(LuaCsGuardTripKind.LifetimeSteps, handle.LastTrip);
+            Assert.IsTrue(handle.IsFinished);
+            Assert.LessOrEqual(handle.ConsumedSteps, 5_001L,
+                "the cap is enforced inside the resume, at the instruction that crosses it");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void Engine_Coroutine_HonoursTheBudgetsMaxAllocatedBytesPerResume()
+        {
+            // WHY (audit M2-05): CreateCoroutine read only MaxSteps/TimeoutMs from its budget and dropped
+            // MaxAllocatedBytes, and the resume hook sampled no allocation at all, so this 64 MB doubling
+            // bomb finished under a 16 MB budget.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            LuaCsScriptEngine engine = NewEngine();
+            IScriptState state = engine.CreateState();
+            object[] fn = engine.RunChunk(state,
+                "return function()\n" +
+                "  local s = 'xxxxxxxxxxxxxxxx'\n" +
+                "  for i = 1, 21 do s = s .. s end\n" +
+                "  return #s\n" +
+                "end");
+
+            IScriptCoroutine co = engine.CreateCoroutine(state, fn[0],
+                new ExecutionBudget(timeoutMs: 30_000, maxSteps: 50_000_000, maxAllocatedBytes: 16L * 1024 * 1024));
+            ScriptResumeResult result = co.Resume();
+
+            Assert.IsFalse(result.Ok, "a resume that grows the live heap past the budget must be cut");
+            StringAssert.Contains("EXCEEDED_MEMORY_BUDGET (16777216 bytes)", result.Error,
+                "error was: " + result.Error);
+            StringAssert.Contains("at line 3", result.Error, "error was: " + result.Error);
+            Assert.AreEqual(LuaCsGuardTripKind.Memory, ((LuaCsScriptCoroutine)co).Handle.LastTrip);
+        }
+
         private static object Find(List<KeyValuePair<object, object>> pairs, object key)
         {
             foreach (KeyValuePair<object, object> pair in pairs)

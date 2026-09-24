@@ -23,8 +23,16 @@ namespace CoreAI.Sandbox.LuaCs
     /// from Lua-CSharp v0.5.6 on: earlier builds posted a suspended resume's continuation to the
     /// ambient <c>SynchronizationContext</c> — which on Unity's main thread is the very thread parked
     /// in <c>GetResult()</c> — and froze a WebGL player (upstream #327/#329). A runaway that
-    /// never yields is cut by the per-resume instruction/time budget armed via <see cref="LuaState.SetHook"/>
-    /// (the same mechanism as <see cref="LuaCsExecutionGuard"/>) or by the lifetime step cap.
+    /// never yields is cut by the per-resume instruction/time/allocation budget armed via
+    /// <see cref="LuaState.SetHook"/> (the same mechanism as <see cref="LuaCsExecutionGuard"/>).
+    ///
+    /// The per-resume budget is the ONLY CPU limit a scheduler-owned thread has: like a Roblox script,
+    /// a thread may run forever as long as every resume yields in time, so every scheduler site passes
+    /// <see cref="UnlimitedLifetimeSteps"/>. A lifetime step cap remains only for direct users of this
+    /// constructor (its default is <see cref="DefaultTotalLifetimeSteps"/>), and exhausting it fails the
+    /// resume LOUDLY — <see cref="LastOk"/> false, an <c>EXCEEDED_LIFETIME_STEP_BUDGET</c> error naming
+    /// the author line, <see cref="LastTrip"/> <see cref="LuaCsGuardTripKind.LifetimeSteps"/> — exactly
+    /// like a per-resume trip, never as a silent kill after a successful resume.
     ///
     /// There is deliberately NO MoonSharp-style <c>AutoYieldCounter</c>/<c>YieldRequest</c> loop:
     /// Lua-CSharp has no preemptive auto-yield, so one resume already returns at exactly one yield.
@@ -38,10 +46,25 @@ namespace CoreAI.Sandbox.LuaCs
         public const int DefaultResumeTimeoutMs = 500;
 
         /// <summary>
-        /// Default cap on instruction steps a coroutine may consume across all resumes.
-        /// Without it an infinite yield loop lives forever, burning the per-resume budget every frame.
+        /// Default cap on instruction steps a DIRECTLY constructed coroutine may consume across all
+        /// resumes. Scheduler-owned threads never use it (see <see cref="UnlimitedLifetimeSteps"/>);
+        /// exhausting it fails the resume with <c>EXCEEDED_LIFETIME_STEP_BUDGET</c>.
         /// </summary>
         public const long DefaultTotalLifetimeSteps = 1_000_000;
+
+        /// <summary>
+        /// Lifetime step cap meaning "none": only the per-resume budget limits the thread. Every
+        /// scheduler-owned thread (a mod's main chunk, <c>task.*</c> threads, pooled signal runners) and
+        /// every coroutine built through <see cref="CoreAI.Scripting.LuaCs.LuaCsScriptEngine"/> uses it.
+        /// </summary>
+        public const long UnlimitedLifetimeSteps = long.MaxValue;
+
+        /// <summary>
+        /// Default per-resume allocation budget (bytes of LIVE heap growth one resume may add); the same
+        /// value as <see cref="LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget"/>. A mod's own
+        /// <c>IExecutionBudget.MaxAllocatedBytes</c> replaces it for every thread of that mod.
+        /// </summary>
+        public const long DefaultMaxAllocatedBytesPerResume = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
 
         private static readonly LuaValue[] EmptyValues = Array.Empty<LuaValue>();
 
@@ -52,6 +75,7 @@ namespace CoreAI.Sandbox.LuaCs
         private readonly int _budgetPerResume;
         private readonly int _resumeTimeoutMs;
         private readonly long _totalLifetimeSteps;
+        private readonly long _maxAllocatedBytes;
         private readonly LuaCsCoroutineBudgetSettings _liveResumeBudget;
 
         private bool _killed;
@@ -68,7 +92,10 @@ namespace CoreAI.Sandbox.LuaCs
         /// <param name="function">The coroutine body (bare function or loaded closure).</param>
         /// <param name="budgetPerResume">Instruction-step budget re-armed before every resume.</param>
         /// <param name="resumeTimeoutMs">Wall-clock budget, in ms, for a single resume.</param>
-        /// <param name="totalLifetimeSteps">Cap on instruction steps across the whole coroutine lifetime.</param>
+        /// <param name="totalLifetimeSteps">
+        /// Cap on instruction steps across the whole coroutine lifetime; <see cref="UnlimitedLifetimeSteps"/>
+        /// disables it, <c>&lt;= 0</c> falls back to <see cref="DefaultTotalLifetimeSteps"/>.
+        /// </param>
         /// <param name="isProtectedMode">Whether Lua errors are returned as protected resume results.</param>
         /// <param name="liveResumeBudget">
         /// Optional shared, mutable budget re-read on every <see cref="Resume"/> instead of the frozen
@@ -80,6 +107,10 @@ namespace CoreAI.Sandbox.LuaCs
         /// every explicit per-call budget (e.g. a mod's main-chunk <c>HandlerMaxSteps</c>/
         /// <c>HandlerTimeoutMs</c>) still uses.
         /// </param>
+        /// <param name="maxAllocatedBytes">
+        /// Live heap growth one resume may add before it is cut with <c>EXCEEDED_MEMORY_BUDGET</c>
+        /// (see <see cref="LuaCsAllocationBudget"/>); <c>&lt;= 0</c> disables the check.
+        /// </param>
         public LuaCsCoroutineHandle(
             LuaState ownerState,
             LuaFunction function,
@@ -87,7 +118,8 @@ namespace CoreAI.Sandbox.LuaCs
             int resumeTimeoutMs = DefaultResumeTimeoutMs,
             long totalLifetimeSteps = DefaultTotalLifetimeSteps,
             bool isProtectedMode = true,
-            LuaCsCoroutineBudgetSettings liveResumeBudget = null)
+            LuaCsCoroutineBudgetSettings liveResumeBudget = null,
+            long maxAllocatedBytes = DefaultMaxAllocatedBytesPerResume)
         {
             if (ownerState == null)
             {
@@ -102,6 +134,7 @@ namespace CoreAI.Sandbox.LuaCs
             _budgetPerResume = budgetPerResume > 0 ? budgetPerResume : DefaultBudgetPerResume;
             _resumeTimeoutMs = resumeTimeoutMs > 0 ? resumeTimeoutMs : DefaultResumeTimeoutMs;
             _totalLifetimeSteps = totalLifetimeSteps > 0 ? totalLifetimeSteps : DefaultTotalLifetimeSteps;
+            _maxAllocatedBytes = maxAllocatedBytes;
             _liveResumeBudget = liveResumeBudget;
 
             _coroutine = ownerState.CreateCoroutine(function, isProtectedMode);
@@ -118,10 +151,11 @@ namespace CoreAI.Sandbox.LuaCs
             int resumeTimeoutMs = DefaultResumeTimeoutMs,
             long totalLifetimeSteps = DefaultTotalLifetimeSteps,
             bool isProtectedMode = true,
-            LuaCsCoroutineBudgetSettings liveResumeBudget = null)
+            LuaCsCoroutineBudgetSettings liveResumeBudget = null,
+            long maxAllocatedBytes = DefaultMaxAllocatedBytesPerResume)
         {
             return new LuaCsCoroutineHandle(ownerState, function, budgetPerResume, resumeTimeoutMs,
-                totalLifetimeSteps, isProtectedMode, liveResumeBudget);
+                totalLifetimeSteps, isProtectedMode, liveResumeBudget, maxAllocatedBytes);
         }
 
         /// <summary>Current Lua-CSharp thread status (Suspended/Normal/Running/Dead), or Dead once killed.</summary>
@@ -139,13 +173,23 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>Instruction steps consumed across all resumes so far.</summary>
         public long ConsumedSteps => _consumedSteps;
 
-        /// <summary>Cap on instruction steps across the whole coroutine lifetime.</summary>
+        /// <summary>
+        /// Cap on instruction steps across the whole coroutine lifetime, or
+        /// <see cref="UnlimitedLifetimeSteps"/> when the per-resume budget is the only limit.
+        /// </summary>
         public long TotalLifetimeSteps => _totalLifetimeSteps;
 
+        /// <summary>True when a lifetime step cap applies (see <see cref="TotalLifetimeSteps"/>).</summary>
+        public bool HasLifetimeCap => _totalLifetimeSteps != UnlimitedLifetimeSteps;
+
+        /// <summary>Live heap growth one resume may add; <c>&lt;= 0</c> when the check is disabled.</summary>
+        public long MaxAllocatedBytes => _maxAllocatedBytes;
+
         /// <summary>
-        /// Restarts the lifetime step budget. Only a pooled signal runner calls this, at the moment it is
-        /// re-armed for a fresh handler: each handler is a new logical thread, so it starts its lifetime
-        /// budget from zero exactly as a freshly created coroutine would.
+        /// Restarts the consumed-step count. Only a pooled signal runner calls this, at the moment it is
+        /// re-armed for a fresh handler: each handler is a new logical thread, so it starts counting from
+        /// zero exactly as a freshly created coroutine would (and, for a handle built with a lifetime
+        /// cap, starts that cap afresh too).
         /// </summary>
         internal void ResetLifetime()
         {
@@ -168,8 +212,9 @@ namespace CoreAI.Sandbox.LuaCs
         public string LastErrorText => _lastOk ? string.Empty : _lastError.ToString();
 
         /// <summary>
-        /// Which per-resume budget cut the most recent resume, or <see cref="LuaCsGuardTripKind.None"/>
-        /// when it ended by yield, return, or a script error of its own. Recorded by the guard hook at
+        /// Which budget cut the most recent resume (per-resume steps, time or memory, or the lifetime
+        /// step cap), or <see cref="LuaCsGuardTripKind.None"/> when it ended by yield, return, or a
+        /// script error of its own. Recorded by the guard hook at
         /// throw time — the typed counterpart of the budget text in <see cref="LastErrorText"/>, so a
         /// consumer can classify a budget kill without matching message wording a script could forge.
         /// </summary>
@@ -208,7 +253,11 @@ namespace CoreAI.Sandbox.LuaCs
             // change on its very next resume — not only on a freshly constructed handle.
             int budgetPerResume = _liveResumeBudget?.BudgetPerResume ?? _budgetPerResume;
             int resumeTimeoutMs = _liveResumeBudget?.ResumeTimeoutMs ?? _resumeTimeoutMs;
-            _hook.Arm(budgetPerResume, resumeTimeoutMs);
+            long lifetimeRemaining = HasLifetimeCap
+                ? Math.Max(0L, _totalLifetimeSteps - _consumedSteps)
+                : UnlimitedLifetimeSteps;
+            _hook.Arm(budgetPerResume, resumeTimeoutMs, lifetimeRemaining, _totalLifetimeSteps,
+                _maxAllocatedBytes);
             _coroutine.SetHook(_hook.Function, string.Empty, 1);
 
             int count;
@@ -232,12 +281,6 @@ namespace CoreAI.Sandbox.LuaCs
 
             _consumedSteps += _hook.Steps;
             CaptureResults(count);
-
-            if (_consumedSteps >= _totalLifetimeSteps)
-            {
-                Kill();
-            }
-
             return _lastValues;
         }
 
@@ -389,13 +432,32 @@ namespace CoreAI.Sandbox.LuaCs
         /// </summary>
         private sealed class ResumeGuardHook
         {
+            // WHY the allocation budget is sampled per MILLISECOND of execution, not every few
+            // instructions like LuaCsExecutionGuard: this hook fires on every instruction of every
+            // scheduler thread, the hottest path in the runtime, and a GC.GetTotalMemory(false) read was
+            // measured at ~5.4 us on Unity's bundled Mono CLI against ~27 ns on CoreCLR
+            // (tools/vmbench/RESULTS.md) — more than the ~0.55 us this whole hook costs per instruction
+            // there. A 4-instruction batch would have tripled the cost of every handler and task.wait
+            // loop; one sample per millisecond costs under 1%, plus the one baseline read per resume in
+            // Arm. The bound the guard's small batch gives still holds: the growth between two samples
+            // is limited by what the VM can copy in one millisecond, and an instruction that takes
+            // longer than that (a large concat) is followed by a sample at once, so a doubling bomb
+            // overshoots by about one doubling at most.
+            private static readonly long AllocationSampleIntervalTicks =
+                Math.Max(1L, Stopwatch.Frequency / 1000);
+
             public readonly LuaFunction Function;
 
             private long _steps;
+            private long _stepLimit;
             private int _budget;
+            private bool _lifetimeBinds;
+            private long _lifetimeCap;
             private int _timeoutMs;
             private long _startTimestamp;
             private long _timeoutTicks;
+            private long _nextAllocationSampleTimestamp;
+            private LuaCsAllocationBudget _allocation;
             private LuaCsGuardTripKind _trip;
 
             public ResumeGuardHook()
@@ -409,33 +471,80 @@ namespace CoreAI.Sandbox.LuaCs
             /// <summary>Which budget tripped during the current resume, or <see cref="LuaCsGuardTripKind.None"/>.</summary>
             public LuaCsGuardTripKind Trip => _trip;
 
-            public void Arm(int budget, int timeoutMs)
+            /// <summary>
+            /// Re-arms the hook for one resume. <paramref name="lifetimeRemaining"/> is what is left of the
+            /// handle's lifetime cap (<see cref="UnlimitedLifetimeSteps"/> when there is none); whichever of
+            /// it and <paramref name="budget"/> is smaller is the step limit of this resume, and the trip
+            /// names the one that bound.
+            /// </summary>
+            public void Arm(int budget, int timeoutMs, long lifetimeRemaining, long lifetimeCap,
+                long maxAllocatedBytes)
             {
                 _steps = 0;
                 _trip = LuaCsGuardTripKind.None;
                 _budget = budget;
+                _lifetimeBinds = lifetimeRemaining < budget;
+                _stepLimit = _lifetimeBinds ? lifetimeRemaining : budget;
+                _lifetimeCap = lifetimeCap;
                 _timeoutMs = timeoutMs;
                 _startTimestamp = Stopwatch.GetTimestamp();
                 _timeoutTicks = (long)timeoutMs * Stopwatch.Frequency / 1000;
+                // WHY the baseline is read here, once per resume, and not lazily at the first sample: a
+                // baseline taken a millisecond in would already contain whatever one long instruction
+                // allocated first — a resume that does one `s = s .. s` and yields would double its
+                // string every frame, forever, without a single resume ever being charged for it.
+                _allocation.Reset(maxAllocatedBytes);
+                _nextAllocationSampleTimestamp = maxAllocatedBytes > 0
+                    ? _startTimestamp + AllocationSampleIntervalTicks
+                    : long.MaxValue;
             }
 
             private ValueTask<int> Hook(LuaFunctionExecutionContext ctx, CancellationToken ct)
             {
                 _steps++;
-                if (_steps > _budget)
+                if (_steps > _stepLimit)
                 {
+                    if (_lifetimeBinds)
+                    {
+                        _trip = LuaCsGuardTripKind.LifetimeSteps;
+                        throw CreateBudgetTrip(ctx.State,
+                            $"LuaCsCoroutineHandle: EXCEEDED_LIFETIME_STEP_BUDGET ({_lifetimeCap})");
+                    }
+
                     _trip = LuaCsGuardTripKind.Steps;
                     throw CreateBudgetTrip(ctx.State,
                         $"LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET ({_budget})");
                 }
 
-                if (Stopwatch.GetTimestamp() - _startTimestamp > _timeoutTicks)
+                long now = Stopwatch.GetTimestamp();
+                if (now - _startTimestamp > _timeoutTicks)
                 {
                     _trip = LuaCsGuardTripKind.Timeout;
                     throw CreateBudgetTrip(ctx.State, $"Lua coroutine resume exceeded {_timeoutMs} ms.");
                 }
 
+                if (now >= _nextAllocationSampleTimestamp)
+                {
+                    SampleAllocation(ctx.State, now);
+                }
+
                 return new ValueTask<int>(ctx.Return());
+            }
+
+            private void SampleAllocation(LuaState state, long now)
+            {
+                _nextAllocationSampleTimestamp = now + AllocationSampleIntervalTicks;
+
+                // WHY the confirming collection IsExceeded may force stays on this resume's wall clock:
+                // excluding it would let a script that holds live memory near the budget and churns
+                // garbage buy a forced collection per quarter budget of allocation, off the clock, and
+                // hold the frame far past its slice; the timeout is the one hard bound on that.
+                if (_allocation.IsExceeded())
+                {
+                    _trip = LuaCsGuardTripKind.Memory;
+                    throw CreateBudgetTrip(state,
+                        $"LuaCsCoroutineHandle: {LuaCsExecutionGuard.MemoryBudgetTripMarker} ({_allocation.BudgetBytes} bytes)");
+                }
             }
         }
     }
