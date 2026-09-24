@@ -64,9 +64,11 @@ MVP4 (RBXL import/export) starts only after MVP3 is closed, verified in Unity an
 - [x] W5C landed: disconnect unloads the actor's mods after its code returns, warn -> mod log, tweened root ends MoveTo
       (c233c9cf); Lua kick message to the client, server/solo clock without drift, ModActorLedger in the bindings (0e51e982).
 - [x] pcall/xpcall/coroutine.resume get only the error line, no C# stack trace or machine paths (0321448a).
-- [ ] W6 in progress: remaining error-text leaks (sandbox caps, guard trips, scheduler double prefix), runtime tails
-      (failed-load attribution leak, quarantined mods on disconnect, LoadMod self-kick, logic-slot depth), unlocking
-      RbxApiLuaBindings tests on Linux. Then DOCS-2, then 3 audit rounds.
+- [x] W6 landed: runtime tails (7aa6f47c), error-text leaks (354e6248), 175 more Lua-tier tests on Linux (80f2f30c);
+      CI floor 1400 (b094d878). DOCS-2 landed (300eb6a4): docs/skill/TODO/CHANGELOG up to b094d878.
+- [ ] GUARD in progress (security): a budget trip disabled the guard on that LuaState; trips become uncatchable.
+- [ ] Audit round 1 running on snapshot 300eb6a4: A1 world package/MVP3, A3 instances+bindings, A4 multiplayer,
+      A5 tests/docs/conventions; A2 Lua runtime/guard after GUARD lands. Then fix wave, rounds 2 and 3.
 - [x] Portable Lua-tier EditMode runner (tools/portable/LuaTests, 1459086c): Lua-tier EditMode fixtures run on Linux
-      and in CI (job portable-lua); at 0e51e982: 1237 passed / 0 failed.
+      and in CI (job portable-lua); at 300eb6a4: 1437 passed / 0 failed; engine-free suite 2105 / 0.
 
