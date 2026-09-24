@@ -882,10 +882,11 @@ namespace CoreAI.Infrastructure.Llm
                     // Truncation is made visible to the model with an explicit marker rather than silently:
                     // without it the cut-off JSON reads as complete. The success/failure verdict was
                     // already taken from the FULL text above.
-                    resultText = resultText.Substring(0, maxResultChars) +
-                                 $"\n{TruncatedResultMarker}{originalLen} chars total -> {maxResultChars} shown]";
+                    int shown = char.IsHighSurrogate(resultText[maxResultChars - 1]) ? maxResultChars - 1 : maxResultChars;
+                    resultText = resultText.Substring(0, shown) +
+                                 $"\n{TruncatedResultMarker}{originalLen} chars total -> {shown} shown]";
                     _logger.Info(
-                        $"[ToolPolicy] Tool '{fc.Name}' result truncated: {originalLen} -> {maxResultChars} chars",
+                        $"[ToolPolicy] Tool '{fc.Name}' result truncated: {originalLen} -> {shown} chars",
                         LogTag.Llm);
                 }
 
@@ -1051,10 +1052,12 @@ namespace CoreAI.Infrastructure.Llm
                 string.Equals(t.Name, toolName, StringComparison.Ordinal));
             if (IsMeaningfulSchema(tool?.ParametersSchema))
             {
-                return CompactSchema(tool.ParametersSchema, 1200);
+                return CompactSchema(tool.ParametersSchema, SchemaHintMaxChars, toolName, _logger);
             }
 
-            return FunctionDeclaresProperties(aiFunc) ? CompactSchema(aiFunc.JsonSchema.GetRawText(), 1200) : "";
+            return FunctionDeclaresProperties(aiFunc)
+                ? CompactSchema(aiFunc.JsonSchema.GetRawText(), SchemaHintMaxChars, toolName, _logger)
+                : "";
         }
 
         private static bool IsMeaningfulSchema(string schema)
@@ -1154,7 +1157,14 @@ namespace CoreAI.Infrastructure.Llm
             return $"Error: Tool '{fc?.Name}' is missing required argument(s): {string.Join(", ", missing)}.{hint}";
         }
 
-        private static string CompactSchema(string schema, int maxChars)
+        /// <summary>Longest parameter schema a retry hint carries.</summary>
+        internal const int SchemaHintMaxChars = 1200;
+
+        /// <summary>
+        /// The schema on one line, clipped with <c>…[+N chars]</c>. Deterministic for a given schema; the cut is
+        /// logged once per tool and schema length, not on every retry.
+        /// </summary>
+        internal static string CompactSchema(string schema, int maxChars, string toolName, ILog logger)
         {
             if (string.IsNullOrWhiteSpace(schema))
             {
@@ -1162,7 +1172,15 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             string compact = schema.Trim().Replace("\r", "").Replace("\n", "");
-            return compact.Length <= maxChars ? compact : compact.Substring(0, maxChars) + "...";
+            string clipped = TruncationMarker.ClipPrefix(compact, maxChars, out int dropped);
+            if (dropped > 0)
+            {
+                TruncationMarker.LogOnce(logger, $"schema-hint|{toolName}|{compact.Length}",
+                    $"[ToolPolicy] Tool '{toolName}' schema clipped in the retry hint: {compact.Length} chars total -> " +
+                    $"{compact.Length - dropped} shown, {dropped} dropped (limit {maxChars}). Logged once per schema.");
+            }
+
+            return clipped;
         }
 
         /// <summary>
@@ -2010,10 +2028,14 @@ namespace CoreAI.Infrastructure.Llm
             if (hasFailure && !string.IsNullOrWhiteSpace(lastFailure.Name))
             {
                 const int maxDetailChars = 200;
-                string detail = (lastFailure.Detail ?? "").Replace('\n', ' ').Trim();
-                if (detail.Length > maxDetailChars)
+                string fullDetail = (lastFailure.Detail ?? "").Replace('\n', ' ').Trim();
+                string detail = TruncationMarker.ClipPrefix(fullDetail, maxDetailChars, out int dropped);
+                if (dropped > 0)
                 {
-                    detail = detail.Substring(0, maxDetailChars) + "...";
+                    _logger.Info(
+                        $"[ToolPolicy] Stop reply: last failure detail of '{lastFailure.Name}' clipped, " +
+                        $"{fullDetail.Length} chars total -> {fullDetail.Length - dropped} kept, {dropped} dropped.",
+                        LogTag.Llm);
                 }
 
                 text += string.IsNullOrEmpty(detail)

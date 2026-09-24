@@ -26,6 +26,26 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Apply_KeptSuffix_NeverStartsInsideASurrogatePair()
+        {
+            OnePerCharEstimator est = new();
+            string text = new string('a', 50) + char.ConvertFromUtf32(0x1F600) + "tail";
+
+            string cut = ConversationRolledSummaryLimiter.Apply(text, est, 5);
+
+            Assert.AreEqual("…tail", cut, "the budget reaches into the emoji, so the whole pair is dropped");
+            Assert.IsFalse(char.IsLowSurrogate(cut[1]));
+        }
+
+        private sealed class OnePerCharEstimator : ITokenEstimator
+        {
+            public int EstimateText(string text)
+            {
+                return text?.Length ?? 0;
+            }
+        }
+
+        [Test]
         public void Apply_ZeroOrNegativeCap_ReturnsOriginal()
         {
             HeuristicTokenEstimator est = new();

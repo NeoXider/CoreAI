@@ -29,6 +29,12 @@ namespace CoreAI.Chat
         int ChatWidth { get; }
         int ChatHeight { get; }
         bool SendOnShiftEnter { get; }
+
+        /// <summary>
+        /// Longest message the user may type; 0 disables the limit. Longer input is cut, logged as a warning and
+        /// reported through the chat panel's <c>OnMessageTruncated</c> event. Host-submitted messages
+        /// (<c>SubmitMessageFromExternal*</c>) are never cut by this limit.
+        /// </summary>
         int MaxMessageLength { get; }
         bool EnableOpenChatKeyboardShortcut { get; }
         bool EnableEscapeChatShortcuts { get; }

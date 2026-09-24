@@ -4,6 +4,49 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.46.0] - 2026-09-24
+
+### Added
+
+- **`CoreAiChatPanel.OnMessageTruncated(int originalLength, int maxLength)`** - raised when typed input was longer than
+  `MaxMessageLength` and was cut, after a warning with the typed / sent / dropped counts is logged, so a host can tell
+  the user their message was shortened. A throwing handler is logged and does not stop the send.
+
+### Fixed
+
+- **`MaxMessageLength` no longer cuts host-submitted text.** `SubmitMessageFromExternalAsync` /
+  `SubmitMessageFromExternalResultAsync` cut the message to the TYPING limit without a trace, so a long briefing or
+  task statement lost its end before the model saw it (RedoSchool worked around it with `_maxMessageLength: 0`). The
+  limit now applies only to what the user types; external submits are never cut. Serialized settings are unchanged
+  (`_maxMessageLength` keeps its value and meaning for typed input; `0` still disables it), so no asset migrates.
+- **Typed input over `MaxMessageLength` is no longer cut silently**: a warning names the typed length, the limit and
+  the dropped count, and `OnMessageTruncated` fires. The cut never splits a surrogate pair and never empties the
+  message: with a limit of 1 and an emoji first, the whole pair is kept (one character over) instead of sending
+  nothing and clearing what the user typed.
+- **The retry instruction's failed-tool detail** (`MeaiLlmClient`) keeps its pre-7.46.0 contract - a JSON
+  `message`/`error` whole, plain text clipped to 240 - with `…[+N chars]` and a log line on the plain-text clip. The
+  detail is read by the orchestrator's `ExtractToolTraceMessage`, so both paths read it alike.
+- **The render cap is logged, and covers user bubbles too.** A bubble clipped at `MaxAssistantRenderChars` logs total /
+  drawn / not drawn (a Warning when the message arrives, Info when history hydration or a role-cache restore redraws
+  it); a streamed reply logs once when it reaches the cap. User bubbles are now capped as well: host text is no longer
+  bounded by `MaxMessageLength`, and a long briefing appended to the chat would otherwise overflow the WebGL vertex
+  buffer like a long reply. The clamp keeps surrogate pairs whole. The full text still stays in history.
+
+### Tests
+
+- EditMode: typed-input cut (warning text, event arguments, text sent to the model), external submit not cut, render
+  cap log, `TruncationMarker` shapes (count, surrogate pairs, marker counted against a storage limit), summary bullets
+  and the single aggregate fold line, legacy `...` probe still matching, compaction payload / summary clip logs,
+  `MaxRolledSummaryTokens` reporting, orchestrator history-window lines (Warning when unsummarized, Info when folded),
+  summary-budget warning split, tool-results block markers and totals, Lua repair fields, versioning snapshots
+  inside the fence (logged once per snapshot), tool-contract description and retry-hint schema (byte-identical across
+  calls, logged once), failed-tool retry detail (plain text clipped, JSON whole), the audit fixes: five tool turns
+  without compaction log pruning as Info and never warn, the `MaxChatHistoryMessages` cap with summarization off warns
+  and sends the cap, the compaction payload defers whole messages and the fold marker stops where the payload ends
+  (next compaction folds the rest), the LLM-assisted summary cap is not re-applied on the next turn, user-bubble
+  render cap, limit 1 with an emoji first, surrogate-safe render clamp, the "tool calls in a row failed" detail, and
+  `manage_mods get_source` (in `CoreAI.Mods.Tests`).
+
 ## [7.45.0] - 2026-09-24
 
 ### Added

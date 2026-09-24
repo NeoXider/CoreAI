@@ -1704,40 +1704,29 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             string name = string.IsNullOrWhiteSpace(failed.Name) ? "tool" : failed.Name.Trim();
-            string detail = ExtractToolTraceMessage(failed.Detail);
+            string detail = ClipFailedToolDetail(name, failed.Detail);
             return string.IsNullOrWhiteSpace(detail)
                 ? $"The previous `{name}` tool call failed. Fix the arguments or code and retry with a corrected tool call. Do not return an empty response."
                 : $"The previous `{name}` tool call failed with this error: {detail}. Fix the arguments or code and retry with a corrected tool call. Do not return an empty response.";
         }
 
-        private static string ExtractToolTraceMessage(string detail)
+        /// <summary>
+        /// The failed tool's message for the retry instruction. A JSON <c>message</c>/<c>error</c> goes whole; plain
+        /// text is clipped to 240 chars with <c>…[+N chars]</c> and the cut is logged with its numbers. Extraction is
+        /// the orchestrator's, so both paths read a detail alike.
+        /// </summary>
+        internal static string ClipFailedToolDetail(string toolName, string detail)
         {
-            if (string.IsNullOrWhiteSpace(detail))
+            string clipped = AiOrchestrator.ExtractToolTraceMessage(detail, out int total, out int dropped);
+            if (dropped > 0)
             {
-                return "";
+                Log.Instance.Info(
+                    $"[MeaiLlmClient] Failed tool '{toolName}' detail clipped in the retry instruction: " +
+                    $"{total} chars total -> {total - dropped} kept, {dropped} dropped.",
+                    LogTag.Llm);
             }
 
-            string trimmed = detail.Trim();
-            try
-            {
-                JObject json = JObject.Parse(trimmed);
-                JToken token = json["message"] ?? json["Message"] ?? json["error"] ?? json["Error"];
-                if (token != null)
-                {
-                    string message = token.Type == JTokenType.String ? token.Value<string>() : token.ToString();
-                    if (!string.IsNullOrWhiteSpace(message))
-                    {
-                        return message.Trim();
-                    }
-                }
-            }
-            catch
-            {
-                // Tool details may be plain text.
-            }
-
-            const int maxChars = 240;
-            return trimmed.Length <= maxChars ? trimmed : trimmed.Substring(0, maxChars) + "...";
+            return clipped;
         }
 
         /// <summary>

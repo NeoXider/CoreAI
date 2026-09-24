@@ -1441,6 +1441,25 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("world not loaded", text);
         }
 
+        [Test]
+        public async Task BuildMaxErrorsResponse_LongFailureDetail_ClippedWithCount_AndLogged()
+        {
+            StubLogger logger = new();
+            ToolExecutionPolicy policy = new(logger, new StubSettings(), new List<ILlmTool>(), false, "test", 3);
+            string error = "{\"Success\":false,\"Error\":\"" + new string('w', 400) + "\"}";
+            MEAI.ChatOptions opts = MakeChatOptions(("broken", error));
+            await policy.ExecuteBatchAsync(new List<MEAI.FunctionCallContent> { MakeToolCall("broken") },
+                opts, CancellationToken.None);
+
+            string text = policy.BuildMaxErrorsResponse().Text;
+
+            StringAssert.Contains("…[+", text);
+            StringAssert.DoesNotContain(new string('w', 300), text);
+            Assert.IsTrue(logger.Logs.Any(l => l.Contains("Stop reply: last failure detail of 'broken' clipped") &&
+                                               l.Contains("-> 200 kept")),
+                string.Join("\n", logger.Logs));
+        }
+
         // ==================== TryRepairToolName ====================
 
         [Test]

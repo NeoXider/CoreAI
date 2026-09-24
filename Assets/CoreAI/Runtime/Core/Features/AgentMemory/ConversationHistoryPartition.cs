@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
+using CoreAI.Logging;
 
 namespace CoreAI.Ai
 {
@@ -152,12 +153,30 @@ namespace CoreAI.Ai
 
     internal static class ConversationBulletSummary
     {
+        /// <summary>Longest message content a summary bullet carries before it is clipped with a marker.</summary>
+        internal const int SummaryBulletMaxChars = 280;
+
         public static string Format(
             string existingSummary,
             ChatMessage[] history,
             int splitExclusive,
             int startInclusive = 0)
         {
+            return Format(existingSummary, history, splitExclusive, startInclusive, out _);
+        }
+
+        /// <summary>
+        /// Same as <see cref="Format(string,ChatMessage[],int,int)"/>, and reports what the fold clipped so the
+        /// caller can log it once with aggregate numbers instead of once per bullet.
+        /// </summary>
+        public static string Format(
+            string existingSummary,
+            ChatMessage[] history,
+            int splitExclusive,
+            int startInclusive,
+            out ConversationSummaryClipStats clip)
+        {
+            clip = default;
             if (history == null || splitExclusive <= startInclusive)
             {
                 return existingSummary?.Trim() ?? "";
@@ -183,7 +202,8 @@ namespace CoreAI.Ai
                     continue;
                 }
 
-                sb.AppendLine(FormatMessageForSummary(history[i]));
+                clip.FoldedMessages++;
+                sb.AppendLine(FormatMessageForSummary(history[i], ref clip));
             }
 
             return sb.ToString().Trim();
@@ -198,11 +218,11 @@ namespace CoreAI.Ai
         /// <see cref="FindFoldStart(string,ChatMessage[],int,out ConversationFoldProbeResult)"/> match
         /// bullets against text written by the OLD code and must keep formatting the old way.
         /// </summary>
-        private static string FormatMessageForSummary(ChatMessage message)
+        private static string FormatMessageForSummary(ChatMessage message, ref ConversationSummaryClipStats clip)
         {
             string role = string.IsNullOrWhiteSpace(message.Role) ? "unknown" : message.Role.Trim();
             string content = ToolResultPromptProjection.ForPrompt(message.Role, message.Content ?? "");
-            return FormatBullet(role, content);
+            return FormatSummaryBullet(role, content, ref clip);
         }
 
         /// <summary>
@@ -410,14 +430,192 @@ namespace CoreAI.Ai
             return FormatBullet(role, message.Content ?? "");
         }
 
+        /// <summary>
+        /// Legacy bullet shape (<c>"..."</c> with no count). The probes compare whole bullets against summaries
+        /// written by the OLD code, so this must keep producing exactly what that code produced; new bullets
+        /// go through <see cref="FormatSummaryBullet"/>.
+        /// </summary>
         private static string FormatBullet(string role, string content)
         {
-            if (content.Length > 280)
+            if (content.Length > SummaryBulletMaxChars)
             {
-                content = content.Substring(0, 280).TrimEnd() + "...";
+                content = content.Substring(0, SummaryBulletMaxChars).TrimEnd() + "...";
             }
 
             return "- " + role + ": " + content;
+        }
+
+        private static string FormatSummaryBullet(string role, string content, ref ConversationSummaryClipStats clip)
+        {
+            int originalLength = content.Length;
+            content = TruncationMarker.ClipPrefix(content, SummaryBulletMaxChars, out int dropped);
+            if (dropped > 0)
+            {
+                clip.ClippedBullets++;
+                clip.OriginalChars += originalLength;
+                clip.DroppedChars += dropped;
+            }
+
+            return "- " + role + ": " + content;
+        }
+    }
+
+    /// <summary>
+    /// What <see cref="ConversationBulletSummary.Format(string,ChatMessage[],int,int,out ConversationSummaryClipStats)"/>
+    /// cut while folding: callers log it once per fold instead of once per bullet.
+    /// </summary>
+    internal struct ConversationSummaryClipStats
+    {
+        /// <summary>Messages written as new bullets by this fold.</summary>
+        public int FoldedMessages;
+
+        /// <summary>Bullets whose content was longer than <see cref="ConversationBulletSummary.SummaryBulletMaxChars"/>.</summary>
+        public int ClippedBullets;
+
+        /// <summary>Total content length of the clipped bullets before clipping.</summary>
+        public int OriginalChars;
+
+        /// <summary>Characters removed from the clipped bullets; each one carries a <c>…[+N chars]</c> marker.</summary>
+        public int DroppedChars;
+
+        /// <summary>One log line with the aggregate numbers, or <c>null</c> when nothing was clipped.</summary>
+        public string Describe(string owner, string roleId)
+        {
+            if (ClippedBullets <= 0)
+            {
+                return null;
+            }
+
+            return $"[{owner}] Folded {FoldedMessages} message(s) into the rolling summary for role '{roleId}'; " +
+                   $"{ClippedBullets} bullet(s) clipped to {ConversationBulletSummary.SummaryBulletMaxChars} chars: " +
+                   $"{OriginalChars} chars total -> {OriginalChars - DroppedChars} kept, {DroppedChars} dropped.";
+        }
+    }
+
+    /// <summary>
+    /// The one visible shape for text CoreAI shortens before it reaches a model or a store: the kept
+    /// prefix followed by <c>…[+N chars]</c>. A reader - person or model - sees both that and how much
+    /// was cut; a bare <c>"..."</c> reads as the author's own ellipsis.
+    /// </summary>
+    internal static class TruncationMarker
+    {
+        /// <summary>The marker appended after a clipped prefix.</summary>
+        internal static string Format(int droppedChars)
+        {
+            return "…[+" + droppedChars + " chars]";
+        }
+
+        /// <summary>
+        /// Keeps at most <paramref name="maxChars"/> characters of <paramref name="text"/> (trailing
+        /// whitespace of the kept part trimmed, a surrogate pair never split) and appends
+        /// <see cref="Format"/>. Text that fits, or a non-positive limit, is returned unchanged with
+        /// <paramref name="droppedChars"/> = 0.
+        /// </summary>
+        internal static string ClipPrefix(string text, int maxChars, out int droppedChars)
+        {
+            droppedChars = 0;
+            if (string.IsNullOrEmpty(text) || maxChars <= 0 || text.Length <= maxChars)
+            {
+                return text;
+            }
+
+            int cut = maxChars;
+            if (char.IsHighSurrogate(text[cut - 1]))
+            {
+                cut--;
+            }
+
+            string kept = text.Substring(0, cut).TrimEnd();
+            droppedChars = text.Length - kept.Length;
+            return kept + Format(droppedChars);
+        }
+
+        /// <summary>
+        /// Block variant for text inside a fenced code/JSON block: the first <paramref name="maxChars"/> characters
+        /// verbatim (a surrogate pair never split), then the marker on its own line so it cannot fuse with code.
+        /// </summary>
+        internal static string ClipBlock(string text, int maxChars, out int droppedChars)
+        {
+            droppedChars = 0;
+            if (string.IsNullOrEmpty(text) || maxChars <= 0 || text.Length <= maxChars)
+            {
+                return text;
+            }
+
+            int cut = char.IsHighSurrogate(text[maxChars - 1]) ? maxChars - 1 : maxChars;
+            droppedChars = text.Length - cut;
+            return text.Substring(0, cut) + "\n" + Format(droppedChars);
+        }
+
+        private const int MaxRememberedLogKeys = 4096;
+        private static readonly HashSet<string> LoggedKeys = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Logs <paramref name="message"/> at Info the first time <paramref name="key"/> is seen in this process.
+        /// For cuts that repeat identically every turn (tool contract, schema hints, stored Lua / data snapshots):
+        /// the clipped text depends only on its input, so one line per distinct input says everything. The key
+        /// carries the input length, so a changed input logs again.
+        /// </summary>
+        internal static void LogOnce(ILog log, string key, string message)
+        {
+            if (IsFirstTime(key))
+            {
+                (log ?? Log.Instance).Info(message, LogTag.Llm);
+            }
+        }
+
+        /// <summary>
+        /// True the first time <paramref name="key"/> is seen in this process (same memory as <see cref="LogOnce"/>);
+        /// for a cut that deserves a Warning once and an Info line on every repeat.
+        /// </summary>
+        internal static bool IsFirstTime(string key)
+        {
+            lock (LoggedKeys)
+            {
+                if (LoggedKeys.Count >= MaxRememberedLogKeys)
+                {
+                    LoggedKeys.Clear();
+                }
+
+                return LoggedKeys.Add(key ?? "");
+            }
+        }
+
+        /// <summary>
+        /// Forgets which keys <see cref="LogOnce"/> has logged. Called from <c>CoreAi.ResetForSubsystemRegistration</c>
+        /// so a play session with Domain Reload disabled logs its cuts again, and from tests.
+        /// </summary>
+        internal static void ResetLogOnce()
+        {
+            lock (LoggedKeys)
+            {
+                LoggedKeys.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Like <see cref="ClipPrefix"/>, but the result INCLUDING the marker is at most
+        /// <paramref name="maxChars"/> long - for limits that bound what is stored, not just what is kept.
+        /// A limit too small to hold the marker keeps a bare prefix (the caller still logs the numbers).
+        /// </summary>
+        internal static string ClipToFit(string text, int maxChars, out int droppedChars)
+        {
+            droppedChars = 0;
+            if (string.IsNullOrEmpty(text) || maxChars <= 0 || text.Length <= maxChars)
+            {
+                return text;
+            }
+
+            // WHY text.Length: the real marker names a smaller count, so it is never longer than this one.
+            int room = maxChars - Format(text.Length).Length;
+            if (room <= 0)
+            {
+                int cut = char.IsHighSurrogate(text[maxChars - 1]) ? maxChars - 1 : maxChars;
+                droppedChars = text.Length - cut;
+                return text.Substring(0, cut);
+            }
+
+            return ClipPrefix(text, room, out droppedChars);
         }
     }
 

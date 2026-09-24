@@ -1,4 +1,5 @@
-﻿using System;
+﻿using CoreAI.Logging;
+using System;
 using System.Collections.Generic;
 using CoreAI.Session;
 using System.Text;
@@ -369,12 +370,22 @@ namespace CoreAI.Ai
                 return body;
             }
 
-            string err = ShortenForPrompt(task.LuaRepairErrorMessage, 500);
-            string code = ShortenForPrompt(task.LuaRepairPreviousCode ?? "", 1200);
+            string err = ShortenForPrompt(task.LuaRepairErrorMessage, LuaRepairErrorMaxChars, "lua_error");
+            string code = ShortenForPrompt(task.LuaRepairPreviousCode ?? "", LuaRepairCodeMaxChars, "fix_this_lua");
             return $"{body}; lua_repair_generation={task.LuaRepairGeneration}; lua_error={err}; fix_this_lua={code}";
         }
 
-        private static string ShortenForPrompt(string s, int max)
+        /// <summary>Longest Lua error text a repair prompt carries.</summary>
+        internal const int LuaRepairErrorMaxChars = 500;
+
+        /// <summary>Longest failed Lua code a repair prompt carries.</summary>
+        internal const int LuaRepairCodeMaxChars = 1200;
+
+        /// <summary>
+        /// Flattens <paramref name="s"/> to one line and clips it to <paramref name="max"/> with a
+        /// <c>…[+N chars]</c> marker; a clip is logged with its numbers (repairs are rare, so every one).
+        /// </summary>
+        internal static string ShortenForPrompt(string s, int max, string field)
         {
             if (string.IsNullOrEmpty(s))
             {
@@ -382,7 +393,16 @@ namespace CoreAI.Ai
             }
 
             s = s.Replace('\r', ' ').Replace('\n', ' ');
-            return s.Length <= max ? s : s.Substring(0, max) + "...";
+            string clipped = TruncationMarker.ClipPrefix(s, max, out int dropped);
+            if (dropped > 0)
+            {
+                Log.Instance.Info(
+                    $"[AiPromptComposer] Lua repair {field} clipped for the prompt: {s.Length} chars total -> " +
+                    $"{s.Length - dropped} kept, {dropped} dropped (limit {max}).",
+                    LogTag.Llm);
+            }
+
+            return clipped;
         }
     }
 }

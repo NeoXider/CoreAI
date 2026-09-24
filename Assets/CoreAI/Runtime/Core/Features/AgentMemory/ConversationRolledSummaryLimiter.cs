@@ -42,6 +42,12 @@ namespace CoreAI.Ai
                 }
             }
 
+            // WHY: the suffix must not start on the low half of a surrogate pair.
+            if (lo > 0 && char.IsLowSurrogate(trimmed[trimmed.Length - lo]))
+            {
+                lo--;
+            }
+
             if (lo <= 0)
             {
                 return "…";

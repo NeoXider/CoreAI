@@ -111,7 +111,7 @@ namespace CoreAI.Ai.LuaCs
                 string compileLua = LuauSourceGate.ToLua52(lua, "envelope");
                 object[] results = _engine.RunChunk(state, compileLua);
                 string summary = Truncate(LuaCsGameToolExecutor.Summarize(results),
-                    MaxResultSummaryLength);
+                    MaxResultSummaryLength, "result summary");
                 if (!string.IsNullOrWhiteSpace(cmd.LuaScriptVersionKey))
                 {
                     _luaScriptVersions.RecordSuccessfulExecution(cmd.LuaScriptVersionKey.Trim(), lua);
@@ -151,14 +151,23 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private static string Truncate(string value, int maxLength)
+        /// <summary>
+        /// Clips Lua output or error text to <paramref name="maxLength"/> with a <c>…[+N chars]</c> marker (it
+        /// travels into tool results, payloads and repair prompts) and logs the cut with its numbers.
+        /// </summary>
+        private static string Truncate(string value, int maxLength, string what)
         {
             if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
             {
                 return value ?? "";
             }
 
-            return value.Substring(0, maxLength) + " ...(truncated)";
+            string clipped = TruncationMarker.ClipPrefix(value, maxLength, out int dropped);
+            CoreAI.Logging.Log.Instance.Info(
+                $"[LuaCsAiEnvelopeProcessor] Lua {what} clipped: {value.Length} chars total -> {value.Length - dropped} kept, " +
+                $"{dropped} dropped (limit {maxLength}).",
+                CoreAI.Logging.LogTag.Llm);
+            return clipped;
         }
 
         // WHY: Error text travels into payloads and repair prompts; collapse newlines so host exception
@@ -166,7 +175,7 @@ namespace CoreAI.Ai.LuaCs
         private static string NormalizeError(string message)
         {
             string flat = (message ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
-            return Truncate(flat, MaxErrorMessageLength);
+            return Truncate(flat, MaxErrorMessageLength, "error");
         }
 
         private void PublishLuaFailure(ApplyAiGameCommand cmd, string message)

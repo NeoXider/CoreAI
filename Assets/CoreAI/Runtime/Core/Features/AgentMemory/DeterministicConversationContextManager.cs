@@ -76,7 +76,8 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot
                 {
                     Summary = storedOut,
-                    RecentMessages = PruneIfEnabled(history, buildArgs),
+                    RecentMessages = PruneIfEnabled(history, buildArgs, out int pruned1),
+                    PrunedMessageCount = pruned1,
                     WasCompacted = false,
                     SummaryTokensDropped = storedDropped
                 };
@@ -91,7 +92,8 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot
                 {
                     Summary = summaryOut,
-                    RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs),
+                    RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs, out int pruned2),
+                    PrunedMessageCount = pruned2,
                     WasCompacted = !string.IsNullOrWhiteSpace(summaryOut),
                     SummaryTokensDropped = summaryDropped
                 };
@@ -108,14 +110,20 @@ namespace CoreAI.Ai
                     LogTag.Llm);
             }
 
-            string compactedSummary = LimitSummaryToBudget(
-                ConversationBulletSummary.Format(cleanStoredSummary, history, splitExclusive, foldStart),
-                buildArgs,
-                out int compactedDropped);
+            string folded = ConversationBulletSummary.Format(
+                cleanStoredSummary, history, splitExclusive, foldStart, out ConversationSummaryClipStats clip);
+            string clipLine = clip.Describe(nameof(DeterministicConversationContextManager), roleId);
+            if (clipLine != null)
+            {
+                Log.Instance.Info(clipLine, LogTag.Llm);
+            }
+
+            string compactedSummary = LimitSummaryToBudget(folded, buildArgs, out int compactedDropped);
             ConversationContextSnapshot snapshot = new()
             {
                 Summary = compactedSummary,
-                RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs),
+                RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs, out int pruned3),
+                PrunedMessageCount = pruned3,
                 WasCompacted = true,
                 SummaryTokensDropped = compactedDropped
             };
@@ -235,14 +243,18 @@ namespace CoreAI.Ai
             return limited;
         }
 
-        private static ChatMessage[] PruneIfEnabled(ChatMessage[] history, ConversationContextBuildArgs buildArgs)
+        private static ChatMessage[] PruneIfEnabled(ChatMessage[] history, ConversationContextBuildArgs buildArgs,
+            out int prunedCount)
         {
+            prunedCount = 0;
             if (buildArgs == null || !buildArgs.EnableContextPruning)
             {
                 return history;
             }
 
-            return ConversationHistoryPruner.Prune(history, buildArgs.MaxRetainedToolResultMessages);
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, buildArgs.MaxRetainedToolResultMessages);
+            prunedCount = Math.Max(0, (history?.Length ?? 0) - (pruned?.Length ?? 0));
+            return pruned;
         }
     }
 }

@@ -207,7 +207,7 @@ namespace CoreAI.Ai
                     if (!string.IsNullOrWhiteSpace(tool.Description))
                     {
                         sb.Append(": ");
-                        sb.Append(SingleLine(tool.Description, 500));
+                        sb.Append(ClipToolDescription(tool.Name.Trim(), tool.Description));
                     }
 
                     sb.AppendLine();
@@ -308,6 +308,28 @@ namespace CoreAI.Ai
             }
         }
 
+        /// <summary>Longest tool description the tool contract carries.</summary>
+        internal const int ToolDescriptionMaxChars = 500;
+
+        /// <summary>
+        /// One-line tool description clipped with <c>…[+N chars]</c>. The result depends only on the description,
+        /// so the cacheable prefix stays byte-identical across turns; the cut is logged once per tool and length.
+        /// </summary>
+        internal static string ClipToolDescription(string toolName, string description)
+        {
+            string line = SingleLine(description, 0);
+            string clipped = TruncationMarker.ClipPrefix(line, ToolDescriptionMaxChars, out int dropped);
+            if (dropped > 0)
+            {
+                TruncationMarker.LogOnce(null, $"tool-description|{toolName}|{line.Length}",
+                    $"[AiToolContractPromptFormatter] Tool '{toolName}' description clipped in the tool contract: " +
+                    $"{line.Length} chars total -> {line.Length - dropped} shown, {dropped} dropped " +
+                    $"(limit {ToolDescriptionMaxChars}). Logged once per description.");
+            }
+
+            return clipped;
+        }
+
         private static string SingleLine(string value, int maxChars)
         {
             if (string.IsNullOrEmpty(value))
@@ -321,12 +343,7 @@ namespace CoreAI.Ai
                 normalized = normalized.Replace("  ", " ");
             }
 
-            if (maxChars > 0 && normalized.Length > maxChars)
-            {
-                return normalized.Substring(0, maxChars) + "...";
-            }
-
-            return normalized;
+            return TruncationMarker.ClipPrefix(normalized, maxChars, out _);
         }
 
         /// <summary>Upper bound on memoized canonical schemas; the table is cleared when reached.</summary>

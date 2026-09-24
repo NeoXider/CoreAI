@@ -29,9 +29,9 @@ namespace CoreAI.Ai
 
             sb.Append("revision_count: ").Append(snapshot.History.Count).Append('\n');
             sb.Append("original_lua_baseline (first accepted / seeded; use as revert target):\n```lua\n");
-            sb.Append(Clamp(snapshot.OriginalLua)).Append("\n```\n");
+            sb.Append(Clamp(snapshot.OriginalLua, scriptKey, "original_lua_baseline")).Append("\n```\n");
             sb.Append("current_saved_lua (last successful execution):\n```lua\n");
-            sb.Append(Clamp(snapshot.CurrentLua)).Append("\n```\n");
+            sb.Append(Clamp(snapshot.CurrentLua, scriptKey, "current_saved_lua")).Append("\n```\n");
             if (!string.Equals(snapshot.OriginalLua, snapshot.CurrentLua))
             {
                 sb.Append(
@@ -41,19 +41,9 @@ namespace CoreAI.Ai
             return sb.ToString();
         }
 
-        private static string Clamp(string s)
+        private static string Clamp(string s, string key, string field)
         {
-            if (string.IsNullOrEmpty(s))
-            {
-                return "";
-            }
-
-            if (s.Length <= MaxLuaChars)
-            {
-                return s;
-            }
-
-            return s.Substring(0, MaxLuaChars) + "\n...";
+            return VersionPromptClip.Clamp(s, MaxLuaChars, nameof(LuaScriptVersionPromptFormatter), key, field);
         }
     }
 }

@@ -365,7 +365,14 @@ namespace CoreAI.Ai
 
             if (source.Length > MaxSourceLengthReturned)
             {
-                source = source.Substring(0, MaxSourceLengthReturned) + "\n--[[ ...(truncated) ]]";
+                int cut = char.IsHighSurrogate(source[MaxSourceLengthReturned - 1])
+                    ? MaxSourceLengthReturned - 1
+                    : MaxSourceLengthReturned;
+                int dropped = source.Length - cut;
+                _logger.Info(
+                    $"[manage_mods] get_source '{modId.Trim()}': {source.Length} chars total -> {cut} returned, " +
+                    $"{dropped} dropped (limit {MaxSourceLengthReturned}).");
+                source = source.Substring(0, cut) + "\n--[[ " + TruncationMarker.Format(dropped) + " ]]";
             }
 
             return Ok($"Source of mod '{modId.Trim()}'.", source);
@@ -469,9 +476,7 @@ namespace CoreAI.Ai
             foreach (LuaScriptRevision rev in history)
             {
                 string source = rev.Source ?? "";
-                string preview = source.Length > RevisionPreviewLength
-                    ? source.Substring(0, RevisionPreviewLength) + "..."
-                    : source;
+                string preview = TruncationMarker.ClipPrefix(source, RevisionPreviewLength, out _);
                 items.Add(new
                 {
                     revision = rev.Index,

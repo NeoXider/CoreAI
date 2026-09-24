@@ -845,8 +845,348 @@ namespace CoreAI.Tests.EditMode
                 "t", CancellationToken.None).ConfigureAwait(false);
 
             Assert.IsTrue(snap.WasCompacted);
-            Assert.LessOrEqual(snap.Summary.Length, 4001, "Summary should be truncated to MaxSummaryChars (4000).");
-            Assert.IsTrue(snap.Summary.EndsWith("…"), "Truncated summary should end with ellipsis.");
+            Assert.LessOrEqual(snap.Summary.Length, 4000,
+                "MaxSummaryChars bounds the stored text, the count marker included.");
+            StringAssert.EndsWith("…[+" + (6000 - snap.Summary.IndexOf('…')) + " chars]", snap.Summary,
+                "The clipped summary names how many characters were dropped.");
+        }
+
+        [Test]
+        public async Task LlmAssisted_LongSummary_ClipIsLoggedWithNumbers()
+        {
+            using CapturingLog log = new();
+            InMemoryConversationSummaryStore store = new();
+            LlmAssistedConversationContextManager mgr =
+                new(store, new FlatTokenEstimator(10), new LongResultLlmClient(new string('A', 6000)));
+
+            ConversationContextSnapshot snap = await mgr.BuildSnapshotAsync(
+                "r", MakeHistory(6),
+                new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
+                new ConversationContextBuildArgs { HistoryTokenBudget = 25, UseLlmContextCompaction = true },
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            int kept = snap.Summary.IndexOf('…');
+            Assert.AreEqual(1, log.Warnings.Count(w => w.Contains("Compacted summary for role 'r' clipped")),
+                string.Join("\n", log.Warnings));
+            StringAssert.Contains(
+                $"MaxSummaryChars=4000: 6000 chars total -> {kept} kept, {6000 - kept} dropped.",
+                log.Warnings.Single(w => w.Contains("Compacted summary")));
+        }
+
+        [Test]
+        public void TruncationMarker_ClipPrefix_NamesTheDroppedCount()
+        {
+            string clipped = TruncationMarker.ClipPrefix(new string('a', 300), 280, out int dropped);
+
+            Assert.AreEqual(20, dropped);
+            Assert.AreEqual(new string('a', 280) + "…[+20 chars]", clipped);
+        }
+
+        [Test]
+        public void TruncationMarker_ClipPrefix_FittingTextOrNoLimit_Unchanged()
+        {
+            Assert.AreEqual("abc", TruncationMarker.ClipPrefix("abc", 10, out int fits));
+            Assert.AreEqual(0, fits);
+            Assert.AreEqual("abcdef", TruncationMarker.ClipPrefix("abcdef", 0, out int off));
+            Assert.AreEqual(0, off);
+        }
+
+        [Test]
+        public void TruncationMarker_ClipPrefix_NeverSplitsASurrogatePair()
+        {
+            string text = new string('a', 279) + char.ConvertFromUtf32(0x1F600) + "b";
+
+            string clipped = TruncationMarker.ClipPrefix(text, 280, out int dropped);
+
+            Assert.AreEqual(3, dropped, "the cut falls inside the pair, so the whole pair goes");
+            Assert.AreEqual(new string('a', 279) + "…[+3 chars]", clipped);
+        }
+
+        [Test]
+        public void TruncationMarker_ClipToFit_MarkerCountsAgainstTheLimit()
+        {
+            string clipped = TruncationMarker.ClipToFit(new string('z', 6000), 4000, out int dropped);
+
+            Assert.LessOrEqual(clipped.Length, 4000);
+            Assert.AreEqual(6000, clipped.IndexOf('…') + dropped, "kept + dropped must add up to the input");
+            StringAssert.EndsWith("…[+" + dropped + " chars]", clipped);
+        }
+
+        /// <summary>
+        /// Regression: a folded message longer than 280 chars became "...", indistinguishable from the speaker's
+        /// own ellipsis, and nothing was logged. Each clipped bullet now names its dropped count, and the fold
+        /// writes ONE log line with the aggregate numbers, not one per bullet.
+        /// </summary>
+        [Test]
+        public void DeterministicManager_LongFoldedMessages_BulletsCarryCount_AndOneAggregateLogLine()
+        {
+            using CapturingLog log = new();
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = new string('a', 500) },
+                new() { Role = "assistant", Content = new string('b', 400) },
+                new() { Role = "user", Content = "short question" },
+                new() { Role = "assistant", Content = "tail-1" },
+                new() { Role = "user", Content = "tail-2" }
+            };
+            DeterministicConversationContextManager mgr = new(new RecordingSummaryStore(), new FlatTokenEstimator(10));
+
+            ConversationContextSnapshot snap = mgr.BuildSnapshot(
+                "r", history, DefaultRoleConfig(),
+                new ConversationContextBuildArgs { HistoryTokenBudget = 25, CompactionTriggerRatio = 0.8f });
+
+            Assert.IsTrue(snap.WasCompacted);
+            StringAssert.Contains("- user: " + new string('a', 280) + "…[+220 chars]", snap.Summary);
+            StringAssert.Contains("- assistant: " + new string('b', 280) + "…[+120 chars]", snap.Summary);
+            StringAssert.Contains("- user: short question", snap.Summary);
+            StringAssert.DoesNotContain("...", snap.Summary, "the old count-less ellipsis is gone from new bullets");
+
+            string[] foldLines = log.All.Where(l => l.Contains("into the rolling summary for role 'r'")).ToArray();
+            Assert.AreEqual(1, foldLines.Length, string.Join("\n", log.All));
+            StringAssert.Contains(
+                "Folded 3 message(s) into the rolling summary for role 'r'; 2 bullet(s) clipped to 280 chars: " +
+                "900 chars total -> 560 kept, 340 dropped.",
+                foldLines[0]);
+        }
+
+        /// <summary>
+        /// The legacy probes compare whole bullets against summaries written by the OLD code, so a marker-less
+        /// summary with the old "..." bullet must still be recognised after the bullet format changed.
+        /// </summary>
+        [Test]
+        public void FindFoldStart_LegacyEllipsisBullet_StillMatches()
+        {
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = new string('a', 500) },
+                new() { Role = "assistant", Content = "tail" }
+            };
+            string legacySummary = "Previous conversation summary:\n- user: " + new string('a', 280) + "...";
+
+            Assert.AreEqual(1, ConversationBulletSummary.FindFoldStart(legacySummary, history, 1));
+        }
+
+        [Test]
+        public void CompactionPayload_ClippedLine_NamesItsCount()
+        {
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = new string('m', 500) },
+                new() { Role = "assistant", Content = "ok" }
+            };
+            LlmContextCompactionOptions options = new() { MaxPerMessageChars = 100, MaxPayloadChars = 12000 };
+
+            string payload = LlmAssistedConversationContextManager.BuildCompactionUserPayload(
+                "", history, 2, 0, options, out LlmAssistedConversationContextManager.CompactionPayloadClipStats clip,
+                out int foldedExclusive);
+
+            StringAssert.Contains("- user: " + new string('m', 100) + "…[+400 chars]", payload);
+            Assert.AreEqual(1, clip.ClippedMessages);
+            Assert.AreEqual(400, clip.MessageDroppedChars);
+            Assert.AreEqual(0, clip.DeferredMessages);
+            Assert.AreEqual(2, foldedExclusive);
+        }
+
+        /// <summary>
+        /// Regression (data loss): a payload over MaxPayloadChars was cut at the end - the later dialogue lines AND the
+        /// closing instruction never reached the compactor, yet the fold marker declared every one of those messages
+        /// retold, so a bounded store could evict them for good. Now whole lines are added while they fit, the
+        /// instruction always closes the payload, and the fold ends where the payload really ends.
+        /// </summary>
+        [Test]
+        public void CompactionPayload_OverPayloadCap_DefersWholeMessages_AndKeepsTheInstruction()
+        {
+            ChatMessage[] history = Enumerable.Range(0, 4)
+                .Select(i => new ChatMessage { Role = "user", Content = $"line-{i}-" + new string('p', 90) })
+                .ToArray();
+            LlmContextCompactionOptions unlimited = new() { MaxPerMessageChars = 800, MaxPayloadChars = 0 };
+            string full = LlmAssistedConversationContextManager.BuildCompactionUserPayload(
+                "", history, 4, 0, unlimited, out _, out _);
+            int twoLines = ("- user: " + history[2].Content + Environment.NewLine).Length +
+                           ("- user: " + history[3].Content + Environment.NewLine).Length;
+            LlmContextCompactionOptions options = new() { MaxPerMessageChars = 800, MaxPayloadChars = full.Length - twoLines };
+
+            string payload = LlmAssistedConversationContextManager.BuildCompactionUserPayload(
+                "", history, 4, 0, options, out LlmAssistedConversationContextManager.CompactionPayloadClipStats clip,
+                out int foldedExclusive);
+
+            Assert.AreEqual(2, foldedExclusive, "only the lines that went to the compactor count as folded");
+            Assert.LessOrEqual(payload.Length, options.MaxPayloadChars);
+            StringAssert.Contains("line-1-", payload);
+            StringAssert.DoesNotContain("line-2-", payload);
+            StringAssert.Contains("Output a compact updated rolling summary", payload,
+                "the closing instruction must never be cut off");
+            Assert.AreEqual(2, clip.DeferredMessages);
+            StringAssert.Contains(
+                $"2 message(s) ({history[2].Content.Length + history[3].Content.Length} chars) did not fit",
+                clip.Describe("r", options));
+        }
+
+        /// <summary>
+        /// A first dialogue line longer than the whole payload budget must not stall compaction: it goes in clipped
+        /// to fit (with its count), the fold moves forward by exactly that message, and the cut is a Warning.
+        /// </summary>
+        [Test]
+        public async Task LlmAssisted_FirstLineLongerThanPayloadCap_FoldAdvancesByOne_WithMarkerAndWarning()
+        {
+            using CapturingLog log = new();
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmContextCompactionOptions options = new() { MaxPerMessageChars = 5000, MaxPayloadChars = 600 };
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm, options);
+            ChatMessage[] history = new ChatMessage[8];
+            history[0] = new ChatMessage { Role = "user", Content = "HUGE-" + new string('h', 3000) };
+            for (int i = 1; i < history.Length; i++)
+            {
+                history[i] = new ChatMessage { Role = i % 2 == 0 ? "user" : "assistant", Content = $"small-{i}" };
+            }
+
+            ConversationContextBuildArgs args = new() { HistoryTokenBudget = 25, UseLlmContextCompaction = true };
+            await mgr.BuildSnapshotAsync("r", history, DefaultRoleConfig(), args, "t", CancellationToken.None)
+                .ConfigureAwait(false);
+
+            string payload = llm.LastRequest.UserPayload;
+            Assert.LessOrEqual(payload.Length, options.MaxPayloadChars);
+            StringAssert.Contains("- user: HUGE-", payload);
+            StringAssert.Contains("…[+", payload, "the clipped first line names its dropped count");
+            StringAssert.Contains("Output a compact updated rolling summary", payload);
+            (int split, _) = DeterministicConversationContextManager.PartitionHistory(
+                history, new FlatTokenEstimator(10), 25, DefaultRoleConfig());
+            Assert.AreEqual(1, ConversationBulletSummary.FindFoldStart(store.LoadSummary("r"), history, split),
+                "compaction advances by the one message it could send");
+            Assert.IsTrue(log.Warnings.Any(w => w.Contains("the first line alone exceeded MaxPayloadChars")),
+                string.Join("\n", log.All));
+        }
+
+        [Test]
+        public async Task LlmAssisted_PayloadCap_FoldMarkerStopsAtWhatTheCompactorReceived_NextTurnFoldsTheRest()
+        {
+            using CapturingLog log = new();
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmContextCompactionOptions options = new() { MaxPerMessageChars = 800, MaxPayloadChars = 600 };
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm, options);
+            ChatMessage[] history = Enumerable.Range(0, 12)
+                .Select(i => new ChatMessage { Role = i % 2 == 0 ? "user" : "assistant", Content = $"m{i}-" + new string('q', 150) })
+                .ToArray();
+            ConversationContextBuildArgs args = new() { HistoryTokenBudget = 25, UseLlmContextCompaction = true };
+
+            await mgr.BuildSnapshotAsync("r", history, DefaultRoleConfig(), args, "t", CancellationToken.None)
+                .ConfigureAwait(false);
+
+            (int split, _) = DeterministicConversationContextManager.PartitionHistory(
+                history, new FlatTokenEstimator(10), 25, DefaultRoleConfig());
+            int folded = ConversationBulletSummary.FindFoldStart(store.LoadSummary("r"), history, split);
+            Assert.Greater(folded, 0);
+            Assert.Less(folded, split, "messages that did not fit the payload must not be marked folded");
+            StringAssert.DoesNotContain($"m{folded}-", llm.LastRequest.UserPayload);
+            Assert.IsTrue(log.Warnings.Any(w => w.Contains("did not fit")), string.Join("\n", log.All));
+
+            await mgr.BuildSnapshotAsync("r", history, DefaultRoleConfig(), args, "t2", CancellationToken.None)
+                .ConfigureAwait(false);
+
+            StringAssert.Contains($"m{folded}-", llm.LastRequest.UserPayload,
+                "the next compaction starts where the previous payload stopped");
+        }
+
+        /// <summary>
+        /// Regression: the LLM-assisted cap fitted the suffix to the cap itself and the ellipsis made it one token over,
+        /// so the persisted summary was cut - and warned about - again on every later turn.
+        /// </summary>
+        [Test]
+        public void LlmAssisted_MaxRolledSummaryTokens_LimitedSummaryFitsOnTheNextTurn()
+        {
+            LlmAssistedConversationContextManager mgr =
+                new(new InMemoryConversationSummaryStore(), new CharTokenEstimator(), new RecordingLlmClient());
+            ConversationContextBuildArgs args = new() { MaxRolledSummaryTokens = 50 };
+            string summary = string.Join("\n", Enumerable.Range(0, 60).Select(i => $"- fact number {i}"));
+
+            string limited = mgr.LimitSummaryIfNeeded(summary, args, out int firstDrop);
+            string again = mgr.LimitSummaryIfNeeded(limited, args, out int secondDrop);
+
+            Assert.Greater(firstDrop, 0);
+            Assert.AreEqual(0, secondDrop, "a summary the cap already bounded must not be cut again next turn");
+            Assert.AreEqual(limited, again);
+        }
+
+        /// <summary>One token per four characters, rounded up - enough to make the limiter's ellipsis count.</summary>
+        private sealed class CharTokenEstimator : ITokenEstimator
+        {
+            public int EstimateText(string text)
+            {
+                return string.IsNullOrEmpty(text) ? 0 : (text.Length + 3) / 4;
+            }
+        }
+
+        [Test]
+        public async Task LlmAssisted_ClippedCompactionPayload_LogsOnceWithNumbers()
+        {
+            using CapturingLog log = new();
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = new string('X', 5000) },
+                new() { Role = "assistant", Content = "short" },
+                new() { Role = "user", Content = "latest" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", history, DefaultRoleConfig(),
+                new ConversationContextBuildArgs { HistoryTokenBudget = 15, UseLlmContextCompaction = true },
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            StringAssert.Contains(new string('X', 800) + "…[+4200 chars]", llm.LastRequest.UserPayload);
+            string[] lines = log.All.Where(l => l.Contains("Compaction payload for role 'r' clipped")).ToArray();
+            Assert.AreEqual(1, lines.Length, string.Join("\n", log.All));
+            StringAssert.Contains("1 line(s) over MaxPerMessageChars=800 lost 4200 chars", lines[0]);
+        }
+
+        [Test]
+        public async Task LlmAssisted_MaxRolledSummaryTokensCap_ReportsDroppedTokensOnTheSnapshot()
+        {
+            InMemoryConversationSummaryStore store = new();
+            LlmAssistedConversationContextManager mgr =
+                new(store, new FlatTokenEstimator(10), new RecordingLlmClient());
+            ConversationContextBuildArgs args = LlmArgs();
+            args.MaxRolledSummaryTokens = 5;
+
+            ConversationContextSnapshot snap = await mgr.BuildSnapshotAsync(
+                "r", MakeHistory(6), DefaultRoleConfig(), args, "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.GreaterOrEqual(snap.SummaryTokensDropped, 1,
+                "the explicit cap cut the summary, so the orchestrator must be told (it logs the numbers)");
+        }
+
+        /// <summary>Captures every CoreAI log line for the duration of a test and restores the previous log.</summary>
+        private sealed class CapturingLog : CoreAI.Logging.ILog, IDisposable
+        {
+            private readonly CoreAI.Logging.ILog _previous = CoreAI.Logging.Log.Instance;
+
+            public CapturingLog()
+            {
+                CoreAI.Logging.Log.Instance = this;
+            }
+
+            public List<string> All { get; } = new();
+            public List<string> Warnings { get; } = new();
+
+            public void Debug(string message, string tag = null) => All.Add(message);
+            public void Info(string message, string tag = null) => All.Add(message);
+
+            public void Warn(string message, string tag = null)
+            {
+                All.Add(message);
+                Warnings.Add(message);
+            }
+
+            public void Error(string message, string tag = null) => All.Add(message);
+
+            public void Dispose()
+            {
+                CoreAI.Logging.Log.Instance = _previous;
+            }
         }
 
         private sealed class LongResultLlmClient : ILlmClient

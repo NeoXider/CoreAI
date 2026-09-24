@@ -2143,6 +2143,356 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Regression: the prompt window dropped stored messages with no trace. With summarization off
+        /// nothing retells them, so the turn logs ONE warning with the numbers.
+        /// </summary>
+        [Test]
+        public async Task RunTaskAsync_WindowDropsMessages_SummarizationOff_OneWarningWithNumbers()
+        {
+            using TruncationLogCapture log = new();
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            for (int i = 0; i < 10; i++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = $"window-{i}-".PadRight(90, 'x')
+                });
+            }
+
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 8192, false, 50);
+            TestSettings settings = new()
+            {
+                EnableConversationHistorySummarization = false,
+                ConversationHistoryRecentTokenBudgetOverride = 100
+            };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(new InMemoryConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "window" });
+
+            int sent = llm.LastRequest.ChatHistory.Count(m => m.Role != ChatRole.System);
+            Assert.Less(sent, 10, "precondition: the budget must leave messages out");
+            string[] lines = log.Warnings.Where(l => l.Contains("history window:")).ToArray();
+            Assert.AreEqual(1, lines.Length, string.Join("\n", log.All));
+            StringAssert.Contains(
+                $"history window: 10 stored message(s) -> {sent} sent verbatim, {10 - sent} left out by the window " +
+                "with no rolling summary (history summarization is off): the model does not see them.",
+                lines[0]);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_WindowFoldsMessagesIntoSummary_OneInfoLineWithNumbers()
+        {
+            using TruncationLogCapture log = new();
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            for (int i = 0; i < 10; i++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = $"folded-{i}"
+                });
+            }
+
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 8192, false, 4);
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(new InMemoryConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "fold" });
+
+            string[] lines = log.All.Where(l => l.Contains("history window:")).ToArray();
+            Assert.AreEqual(1, lines.Length, string.Join("\n", log.All));
+            StringAssert.Contains("history window: 10 stored message(s) -> 4 sent verbatim, 6 folded into the " +
+                                  "rolling summary (~", lines[0]);
+            Assert.IsFalse(log.Warnings.Any(l => l.Contains("history window:")),
+                "a retold prefix is not a loss, so it is not a warning");
+        }
+
+        /// <summary>
+        /// Regression (audit F1): with default settings every turn after a few tool calls warned that messages were
+        /// "left out" - they were superseded tool results removed by pruning, a routine cut, not a loss.
+        /// </summary>
+        [Test]
+        public async Task RunTaskAsync_FiveToolTurnsWithoutCompaction_PruningIsNotAWarning()
+        {
+            using TruncationLogCapture log = new();
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            for (int turn = 0; turn < 5; turn++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = $"question {turn}" });
+                memory.FakeHistory.Add(new Ai.ChatMessage { Role = "assistant", Content = $"answer {turn}" });
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = "tool",
+                    Content = $"## Tool Results\n- quiz_tool: ok result-{turn}"
+                });
+            }
+
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 8192, false, 50);
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(new InMemoryConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "next" });
+
+            Assert.IsFalse(log.Warnings.Any(l => l.Contains("history window:")),
+                "pruned tool results are not a loss: " + string.Join("\n", log.Warnings));
+            string line = log.All.Single(l => l.Contains("history window:"));
+            StringAssert.Contains("pruned (superseded tool results / exact duplicates)", line);
+            StringAssert.DoesNotContain("left out", line);
+        }
+
+        /// <summary>
+        /// Audit F2: with summarization off the store applies MaxChatHistoryMessages itself, so the older messages
+        /// never reached the orchestrator and no log said so. One extra message is read to detect it.
+        /// </summary>
+        [Test]
+        public async Task RunTaskAsync_SummarizationOff_MessageCapHit_WarnsAndSendsTheCap()
+        {
+            TruncationMarker.ResetLogOnce();
+            using TruncationLogCapture log = new();
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            for (int i = 0; i < 10; i++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = $"capped-{i}"
+                });
+            }
+
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 8192, false, 4);
+            TestSettings settings = new() { EnableConversationHistorySummarization = false };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(new InMemoryConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "cap" });
+
+            Assert.AreEqual(4, llm.LastRequest.ChatHistory.Count(m => m.Role != ChatRole.System),
+                "the extra message read for detection is never sent");
+            Assert.IsFalse(llm.LastRequest.ChatHistory.Any(m => (m.Text ?? "").Contains("capped-5")));
+            string line = log.Warnings.Single(l => l.Contains("history window:"));
+            StringAssert.Contains("≥1 older message(s) not sent (MaxChatHistoryMessages=4)", line);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "cap again" });
+
+            Assert.AreEqual(1, log.Warnings.Count(l => l.Contains("history window:")),
+                "the configured cap is news once per role; later turns are Info");
+            Assert.AreEqual(2, log.All.Count(l => l.Contains("MaxChatHistoryMessages=4")));
+        }
+
+        /// <summary>
+        /// Messages the compactor could not take this turn are not in the prompt and not yet in the summary; the
+        /// window line must not report them as folded.
+        /// </summary>
+        [Test]
+        public async Task RunTaskAsync_DeferredFoldMessages_AreNotReportedAsFolded()
+        {
+            using TruncationLogCapture log = new();
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            for (int i = 0; i < 10; i++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = $"deferred-{i}"
+                });
+            }
+
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 8192, false, 50);
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeferringContextManager());
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "defer" });
+
+            string line = log.All.Single(l => l.Contains("history window:"));
+            StringAssert.Contains("10 stored message(s) -> 2 sent verbatim, 5 folded into the rolling summary", line);
+            StringAssert.Contains("3 deferred to the next compaction (not in this prompt, not yet in the summary)", line);
+        }
+
+        /// <summary>Folds the prefix, keeps the last two messages, and reports three messages as deferred.</summary>
+        private sealed class DeferringContextManager : IConversationContextManager
+        {
+            public ConversationContextSnapshot BuildSnapshot(
+                string roleId,
+                Ai.ChatMessage[] history,
+                AgentMemoryPolicy.RoleMemoryConfig roleConfig,
+                ConversationContextBuildArgs buildArgs = null)
+            {
+                return new ConversationContextSnapshot
+                {
+                    Summary = "recap of the early turns",
+                    RecentMessages = history.Skip(history.Length - 2).ToArray(),
+                    WasCompacted = true,
+                    DeferredFoldMessageCount = 3
+                };
+            }
+        }
+
+        [Test]
+        public async Task RunTaskAsync_SummarizationOff_WithinMessageCap_NoWindowLine()
+        {
+            using TruncationLogCapture log = new();
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            for (int i = 0; i < 4; i++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = $"fits-{i}"
+                });
+            }
+
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 8192, false, 4);
+            TestSettings settings = new() { EnableConversationHistorySummarization = false };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(new InMemoryConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "fits" });
+
+            Assert.AreEqual(4, llm.LastRequest.ChatHistory.Count(m => m.Role != ChatRole.System));
+            Assert.IsFalse(log.All.Any(l => l.Contains("history window:")), string.Join("\n", log.All));
+        }
+
+        [Test]
+        public async Task RunTaskAsync_SummaryCutToRequestReserve_WarningNamesBothSources()
+        {
+            using TruncationLogCapture log = new();
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = "earlier question" });
+            memory.FakeHistory.Add(new Ai.ChatMessage { Role = "assistant", Content = "earlier answer" });
+            AgentMemoryPolicy policy = BuildSlimHistoryPolicy("test_role", 4096);
+            TestSettings settings = new() { ConversationRolledSummaryMaxTokens = 0 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(SeedOversizedSummary("test_role")));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "short" });
+
+            string line = log.Warnings.FirstOrDefault(l => l.Contains("Rolling summary for role 'test_role' trimmed"));
+            Assert.IsNotNull(line, string.Join("\n", log.All));
+            StringAssert.Contains("~0 by the context manager's MaxRolledSummaryTokens cap", line);
+            StringAssert.Contains("-token request reserve; ~", line);
+            StringAssert.Contains(" tokens sent.", line);
+        }
+
+        [Test]
+        public void BuildToolResultsMemoryBlock_FullPolicy_LongDetail_NamesTheCutAndReportsIt()
+        {
+            string detail = "HEAD-" + new string('d', 5000) + "-TAIL";
+            LlmToolCallTrace[] traces = { new("big_tool", true, 1, "test", detail) };
+
+            string block = AiOrchestrator.BuildToolResultsMemoryBlock(
+                traces, ToolResultMemoryPolicy.Full, out AiOrchestrator.ToolResultsClipStats clip);
+
+            Assert.AreEqual(1, clip.ClippedEntries);
+            Assert.AreEqual(detail.Length, clip.OriginalChars);
+            StringAssert.Contains("...[truncated " + clip.DroppedChars + " chars]...", block);
+            StringAssert.Contains("HEAD-", block);
+            StringAssert.Contains("-TAIL", block);
+            Assert.LessOrEqual(detail.Length - clip.DroppedChars, AiOrchestrator.ToolResultDetailMaxChars);
+        }
+
+        [Test]
+        public void BuildToolResultsMemoryBlock_CompactPolicy_LongMessage_CarriesCountMarker()
+        {
+            LlmToolCallTrace[] traces = { new("chatty_tool", false, 1, "test", new string('e', 1000)) };
+
+            string block = AiOrchestrator.BuildToolResultsMemoryBlock(
+                traces, ToolResultMemoryPolicy.CompactSummary, out AiOrchestrator.ToolResultsClipStats clip);
+
+            StringAssert.Contains("- chatty_tool: FAILED " + new string('e', 240) + "…[+760 chars]", block);
+            Assert.AreEqual(1, clip.ClippedEntries);
+            Assert.AreEqual(1000, clip.OriginalChars);
+            Assert.AreEqual(760, clip.DroppedChars);
+        }
+
+        [Test]
+        public void TruncateHeadTail_StaysWithinLimit_AndCountsWhatItDropped()
+        {
+            string value = new string('h', 3000) + new string('t', 3000);
+
+            string cut = AiOrchestrator.TruncateHeadTail(value, 2000, out int dropped);
+
+            Assert.LessOrEqual(cut.Length, 2000);
+            Assert.AreEqual(value.Length, cut.Replace("\n...[truncated " + dropped + " chars]...\n", "").Length + dropped);
+        }
+
+        [Test]
+        public void ExtractToolTraceMessage_LongPlainText_CarriesCountMarker()
+        {
+            string message = AiOrchestrator.ExtractToolTraceMessage(new string('p', 300));
+
+            Assert.AreEqual(new string('p', 240) + "…[+60 chars]", message);
+        }
+
+        /// <summary>Captures CoreAI log lines for one test and restores the previous log.</summary>
+        private sealed class TruncationLogCapture : ILog, IDisposable
+        {
+            private readonly ILog _previous = Log.Instance;
+
+            public TruncationLogCapture()
+            {
+                Log.Instance = this;
+            }
+
+            public List<string> All { get; } = new();
+            public List<string> Warnings { get; } = new();
+
+            public void Debug(string message, string tag = null) => All.Add(message);
+            public void Info(string message, string tag = null) => All.Add(message);
+
+            public void Warn(string message, string tag = null)
+            {
+                All.Add(message);
+                Warnings.Add(message);
+            }
+
+            public void Error(string message, string tag = null) => All.Add(message);
+
+            public void Dispose()
+            {
+                Log.Instance = _previous;
+            }
+        }
+
         private static AgentMemoryPolicy BuildToolResultPolicy(string roleId, params ILlmTool[] tools)
         {
             AgentMemoryPolicy policy = new();
