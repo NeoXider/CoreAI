@@ -243,6 +243,7 @@ namespace CoreAI.Ai.LuaCs
             _resumeEnvelope;
         private readonly LuaCsCoroutineBudgetSettings _coroutineResumeBudget;
         private LuaCsRbxScriptThread _currentThread;
+        private LuaState _lastCaller;
 
         /// <summary>Signal runners built so far (diagnostic; tests prove reuse through it).</summary>
         internal long SignalRunnersCreated { get; private set; }
@@ -425,6 +426,9 @@ namespace CoreAI.Ai.LuaCs
         internal object CaptureCallable(LuaState ownerState, LuaValue callable,
             bool recyclable = false, bool resumableByHandle = false)
         {
+            // WHY: the Lua thread asking for a scheduler thread. task.spawn resumes that thread before it returns,
+            // nested in this caller's run, and that resume is held to what the run has left (see TakeResumer).
+            _lastCaller = ownerState;
             if (callable.Type != LuaValueType.Function)
             {
                 if (LuaCsRbxLua.TryUnbox(callable, out LuaCsRbxScriptThread thread))
@@ -477,6 +481,31 @@ namespace CoreAI.Ai.LuaCs
         internal void PrepareWaitBindings(IScriptState ownerState)
         {
             _scriptEngine.RunChunk(ownerState, WaitBridgeSource);
+        }
+
+        /// <summary>
+        /// The Lua thread whose run a thread resumed now is nested in (see <see cref="LuaCsGuardedRun"/>): the one
+        /// that last asked this factory for a scheduler thread - whose <c>task.spawn</c> is resuming it - when a run
+        /// on it is executing, else the thread of <paramref name="previous"/>, the scheduler thread whose host
+        /// callback is running. Null for a resume the scheduler drives from its own frame, which keeps its full
+        /// per-resume budget and starts its count of calls back into Lua from zero. Reading it forgets the caller.
+        /// </summary>
+        /// <remarks>
+        /// WHY both are checked for a run that is still executing: the caller is remembered until the next resume,
+        /// which may come frames later (a task.defer), when that caller's run has long ended; and only a run on
+        /// the stack right now can enclose this resume, since a handle's resume never waits for a frame.
+        /// </remarks>
+        internal LuaState TakeResumer(LuaCsRbxScriptThread previous)
+        {
+            LuaState caller = _lastCaller;
+            _lastCaller = null;
+            if (LuaCsGuardedRun.FindExecuting(caller) != null)
+            {
+                return caller;
+            }
+
+            LuaState previousThread = previous?.LuaThread;
+            return LuaCsGuardedRun.FindExecuting(previousThread) != null ? previousThread : null;
         }
 
         internal LuaCsRbxScriptThread Enter(LuaCsRbxScriptThread thread)
@@ -624,6 +653,9 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>True while this thread's handler runs on a pooled signal runner.</summary>
         internal bool IsSignalRunner => _runner != null;
 
+        /// <summary>The Lua thread this scheduler thread currently runs on; null before its first resume.</summary>
+        internal LuaState LuaThread => (_coroutine as LuaCsScriptCoroutine)?.Handle.Thread;
+
         /// <summary>
         /// True while this thread's own coroutine is the one executing Lua. False while it has resumed a
         /// nested <c>coroutine.create</c> coroutine, whose code then runs with this thread still current
@@ -681,7 +713,9 @@ namespace CoreAI.Ai.LuaCs
             bool observe = _factory.IsObservabilityEnabled;
             long consumedStepsBefore = observe ? ReadConsumedSteps() : 0;
             LuaCsRbxScriptThread previous = _factory.Enter(this);
+            LuaState resumer = _factory.TakeResumer(previous);
             LuaCsRbxSignalRunner finishedRunner = null;
+            LuaCsCoroutineHandle handle = null;
             _resumeArguments = args == null || args.Length == 0
                 ? Array.Empty<object>()
                 : (object[])args.Clone();
@@ -700,6 +734,11 @@ namespace CoreAI.Ai.LuaCs
                     _coroutine = CreateCoroutine(_resumeArguments);
                 }
 
+                // WHY: a task.spawn runs this thread inside the caller's run, whose hook cannot fire until it
+                // returns; the resume is held to what that run has left and continues its count of calls back
+                // into Lua (see LuaCsGuardedRun, LuaCsSecureEnvironment.MaxCCallDepth).
+                handle = (_coroutine as LuaCsScriptCoroutine)?.Handle;
+                handle?.ResumeNextNestedIn(resumer);
                 ScriptResumeResult result = resumeValuesToYield
                     ? _factory.Resume(OwnerModId, ResumeWithValuesForYield)
                     : _factory.Resume(OwnerModId, _resumeCore ??= ResumeCore);
@@ -744,6 +783,7 @@ namespace CoreAI.Ai.LuaCs
             }
             finally
             {
+                handle?.ResumeNextNestedIn(null);
                 _resumeArguments = Array.Empty<object>();
                 _factory.Exit(this, previous);
                 if (observe)

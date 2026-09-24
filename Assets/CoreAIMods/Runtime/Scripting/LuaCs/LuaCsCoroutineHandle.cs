@@ -35,6 +35,12 @@ namespace CoreAI.Sandbox.LuaCs
     /// the author line, <see cref="LastTrip"/> <see cref="LuaCsGuardTripKind.LifetimeSteps"/> — exactly
     /// like a per-resume trip, never as a silent kill after a successful resume.
     ///
+    /// A resume that runs while another guarded run is executing - a <c>task.spawn</c> that runs the new or
+    /// parked thread at once, named through <see cref="ResumeNextNestedIn"/> - is NESTED in that run: it is held
+    /// to what is left of that run's allowance (see <see cref="LuaCsGuardedRun"/>) and continues its count of
+    /// calls back into Lua (see <see cref="LuaCsSecureEnvironment.MaxCCallDepth"/>). A resume the scheduler drives
+    /// from its own frame keeps the full per-resume budget and starts that count from zero.
+    ///
     /// There is deliberately NO MoonSharp-style <c>AutoYieldCounter</c>/<c>YieldRequest</c> loop:
     /// Lua-CSharp has no preemptive auto-yield, so one resume already returns at exactly one yield.
     ///
@@ -100,6 +106,7 @@ namespace CoreAI.Sandbox.LuaCs
         private bool _lastOk = true;
         private LuaValue[] _lastValues = EmptyValues;
         private LuaValue _lastError = LuaValue.Nil;
+        private LuaState _nextResumer;
 
         /// <summary>
         /// Creates a coroutine from <paramref name="function"/> on the owning <paramref name="ownerState"/>.
@@ -156,13 +163,13 @@ namespace CoreAI.Sandbox.LuaCs
             _isProtectedMode = isProtectedMode;
 
             _coroutine = ownerState.CreateCoroutine(function, isProtectedMode);
-            HandleThreads.Add(_coroutine, new HandleThread(maxAllocatedBytes));
             _callStack = new LuaStack(8);
             _cts = new CancellationTokenSource();
             // WHY the handle's own source doubles as the trip source: it is already the token every resume
             // runs with, and a tripped thread is Dead and never resumed again, so cancelling it for good
             // costs nothing, where a separate linked source would allocate on every resume of every thread.
             _hook = new ResumeGuardHook(_cts);
+            HandleThreads.Add(_coroutine, new HandleThread(_hook));
         }
 
         /// <summary>Convenience factory mirroring the constructor.</summary>
@@ -218,19 +225,30 @@ namespace CoreAI.Sandbox.LuaCs
         }
 
         /// <summary>
-        /// The per-resume allocation budget (<see cref="MaxAllocatedBytes"/>) of the handle whose thread
-        /// <paramref name="state"/> is; false when it is no handle's thread.
+        /// The resume of the handle whose thread <paramref name="state"/> is, while that resume executes; null
+        /// otherwise. See <see cref="LuaCsGuardedRun.FindExecuting"/>.
         /// </summary>
-        internal static bool TryGetHandleAllocationBudget(LuaState state, out long maxAllocatedBytes)
+        internal static LuaCsGuardedRun ExecutingRunOn(LuaState state)
         {
-            if (state != null && HandleThreads.TryGetValue(state, out HandleThread thread))
-            {
-                maxAllocatedBytes = thread.MaxAllocatedBytes;
-                return true;
-            }
+            return HandleThreads.TryGetValue(state, out HandleThread thread) && thread.Run.IsExecuting
+                ? thread.Run
+                : null;
+        }
 
-            maxAllocatedBytes = 0;
-            return false;
+        /// <summary>This handle's Lua thread.</summary>
+        internal LuaState Thread => _coroutine;
+
+        /// <summary>
+        /// Names the thread whose run the NEXT <see cref="Resume"/> is nested in: the Lua thread resuming this
+        /// handle right now from inside its own run (a <c>task.spawn</c> that runs the thread at once). That resume
+        /// is held to what is left of the run executing on <paramref name="resumer"/> (see
+        /// <see cref="LuaCsGuardedRun"/>) and continues its count of calls back into Lua. Null, and every resume
+        /// nothing names, keeps the handle's full per-resume budget and a count from zero: the scheduler resuming
+        /// a thread from its own frame. The name is used by one resume only.
+        /// </summary>
+        internal void ResumeNextNestedIn(LuaState resumer)
+        {
+            _nextResumer = resumer;
         }
 
         /// <summary>
@@ -275,6 +293,11 @@ namespace CoreAI.Sandbox.LuaCs
         /// </summary>
         public LuaValue[] Resume(params LuaValue[] args)
         {
+            // WHY only while its run still executes: the name was given for this resume, and a run that has ended
+            // or is parked in a frame yield no longer encloses anything (see LuaCsGuardedRun).
+            LuaCsGuardedRun enclosing = LuaCsGuardedRun.FindExecuting(_nextResumer);
+            LuaState resumer = enclosing != null ? _nextResumer : null;
+            _nextResumer = null;
             if (_killed)
             {
                 throw new ObjectDisposedException(nameof(LuaCsCoroutineHandle));
@@ -287,6 +310,15 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             args ??= EmptyValues;
+
+            // WHY refused before anything runs, the thread left as it was: the resume would nest one more run on
+            // the native stack past the limit every other call back into Lua is held to (see
+            // LuaCsSecureEnvironment.MaxCCallDepth); like Luau's resume at LUAI_MAXCCALLS it fails with the line.
+            string cStackRefusal = LuaCsSecureEnvironment.ContinueCCallCount(resumer, _coroutine, "task.spawn");
+            if (cStackRefusal != null)
+            {
+                return EndRefused(cStackRefusal);
+            }
 
             // WHY the stack is emptied and refilled on every resume: ResumeAsync takes the WHOLE stack
             // as the values coroutine.yield (or the first call) receives, and the previous resume left
@@ -317,12 +349,12 @@ namespace CoreAI.Sandbox.LuaCs
                 ? Math.Max(0L, _totalLifetimeSteps - _consumedSteps)
                 : UnlimitedLifetimeSteps;
             _hook.Arm(budgetPerResume, resumeTimeoutMs, lifetimeRemaining, _totalLifetimeSteps,
-                _maxAllocatedBytes);
-            _coroutine.SetHook(_hook.Function, string.Empty, 1);
+                _maxAllocatedBytes, enclosing);
 
             int count = 0;
             try
             {
+                _coroutine.SetHook(_hook.Function, string.Empty, 1);
                 // WHY: Single-step drive: a well-behaved handler reaches coroutine.yield synchronously, so
                 // GetResult does not block the (single WASM) thread. A runaway is cut by the hook above.
                 count = _coroutine.ResumeAsync(_callStack, _cts.Token).GetAwaiter().GetResult();
@@ -334,6 +366,7 @@ namespace CoreAI.Sandbox.LuaCs
             }
             finally
             {
+                _hook.End();
                 try
                 {
                     _coroutine.SetHook(null, string.Empty, 0);
@@ -372,6 +405,24 @@ namespace CoreAI.Sandbox.LuaCs
             _lastValues = EmptyValues;
             _lastError = trip.ErrorObject;
             _coroutine.UnsafeSetStatus(LuaThreadStatus.Dead);
+        }
+
+        /// <summary>
+        /// Reports a resume refused before it ran: <see cref="LastOk"/> false and <paramref name="line"/> as the
+        /// error, raised when the handle is not in protected mode; the thread itself is untouched.
+        /// </summary>
+        private LuaValue[] EndRefused(string line)
+        {
+            _hook.ClearOutcome();
+            _lastOk = false;
+            _lastValues = EmptyValues;
+            _lastError = line;
+            if (!_isProtectedMode)
+            {
+                throw new LuaCsHostFunctionException(null, line, null);
+            }
+
+            return _lastValues;
         }
 
         /// <summary>Advances the coroutine one step with no resume arguments.</summary>
@@ -600,12 +651,15 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>What <see cref="HandleThreads"/> records about a handle's thread.</summary>
         private sealed class HandleThread
         {
-            /// <summary>The handle's <see cref="LuaCsCoroutineHandle.MaxAllocatedBytes"/>.</summary>
-            public readonly long MaxAllocatedBytes;
+            /// <summary>
+            /// The handle's per-resume hook, the live allowance of its resume in progress (see
+            /// <see cref="LuaCsGuardedRun"/>). It holds no reference to the thread.
+            /// </summary>
+            public readonly LuaCsGuardedRun Run;
 
-            public HandleThread(long maxAllocatedBytes)
+            public HandleThread(LuaCsGuardedRun run)
             {
-                MaxAllocatedBytes = maxAllocatedBytes;
+                Run = run;
             }
         }
 
@@ -614,7 +668,7 @@ namespace CoreAI.Sandbox.LuaCs
         /// a non-suspended coroutine is rejected by the VM before any instruction runs), so one hook per
         /// handle is enough; its counters live in fields and are reset by <see cref="Arm"/>.
         /// </summary>
-        private sealed class ResumeGuardHook
+        private sealed class ResumeGuardHook : LuaCsGuardedRun
         {
             // WHY the allocation budget is sampled per MILLISECOND of execution, not every few
             // instructions like LuaCsExecutionGuard: this hook fires on every instruction of every
@@ -639,8 +693,7 @@ namespace CoreAI.Sandbox.LuaCs
             private bool _lifetimeBinds;
             private long _lifetimeCap;
             private int _timeoutMs;
-            private long _startTimestamp;
-            private long _timeoutTicks;
+            private long _deadline;
             private long _nextAllocationSampleTimestamp;
             private LuaCsAllocationBudget _allocation;
             private LuaCsGuardTripKind _trip;
@@ -667,14 +720,33 @@ namespace CoreAI.Sandbox.LuaCs
             /// <summary>The trip of the current resume, or null.</summary>
             public LuaCsHostFunctionException TripError => _tripError;
 
+            /// <inheritdoc />
+            internal override long RemainingSteps => _stepLimit - _steps;
+
+            /// <inheritdoc />
+            internal override long DeadlineTimestamp => _deadline;
+
+            /// <inheritdoc />
+            internal override long AllocationLineBytes => _allocation.LineBytes;
+
+            /// <inheritdoc />
+            internal override long AllocationBudgetBytes => _allocation.BudgetBytes;
+
+            /// <inheritdoc />
+            protected override LuaCsHostFunctionException RecordedTrip => _tripError;
+
+            /// <inheritdoc />
+            protected override bool AllocationLineIsLent => _allocation.LineIsCeiling;
+
             /// <summary>
             /// Re-arms the hook for one resume. <paramref name="lifetimeRemaining"/> is what is left of the
             /// handle's lifetime cap (<see cref="UnlimitedLifetimeSteps"/> when there is none); whichever of
             /// it and <paramref name="budget"/> is smaller is the step limit of this resume, and the trip
-            /// names the one that bound.
+            /// names the one that bound. A non-null <paramref name="enclosing"/> is the executing run this
+            /// resume is nested in, which may lower every limit further (see <see cref="LuaCsGuardedRun"/>).
             /// </summary>
             public void Arm(int budget, int timeoutMs, long lifetimeRemaining, long lifetimeCap,
-                long maxAllocatedBytes)
+                long maxAllocatedBytes, LuaCsGuardedRun enclosing)
             {
                 _steps = 0;
                 _trip = LuaCsGuardTripKind.None;
@@ -684,16 +756,75 @@ namespace CoreAI.Sandbox.LuaCs
                 _stepLimit = _lifetimeBinds ? lifetimeRemaining : budget;
                 _lifetimeCap = lifetimeCap;
                 _timeoutMs = timeoutMs;
-                _startTimestamp = Stopwatch.GetTimestamp();
-                _timeoutTicks = (long)timeoutMs * Stopwatch.Frequency / 1000;
+                long startTimestamp = Stopwatch.GetTimestamp();
+                _deadline = startTimestamp + (long)timeoutMs * Stopwatch.Frequency / 1000;
+                BeginRun(enclosing, ref _stepLimit, ref _deadline);
                 // WHY the baseline is read here, once per resume, and not lazily at the first sample: a
                 // baseline taken a millisecond in would already contain whatever one long instruction
                 // allocated first — a resume that does one `s = s .. s` and yields would double its
                 // string every frame, forever, without a single resume ever being charged for it.
-                _allocation.Reset(maxAllocatedBytes);
-                _nextAllocationSampleTimestamp = maxAllocatedBytes > 0
-                    ? _startTimestamp + AllocationSampleIntervalTicks
+                _allocation.ResetNested(maxAllocatedBytes, CeilingOf(enclosing));
+                _nextAllocationSampleTimestamp = _allocation.IsEnabled
+                    ? startTimestamp + AllocationSampleIntervalTicks
                     : long.MaxValue;
+            }
+
+            /// <summary>Ends the resume: its steps are charged to the run it was nested in, if any.</summary>
+            public void End()
+            {
+                EndRun(_steps);
+            }
+
+            /// <summary>Forgets the previous resume's steps and trip, for a resume refused before it ran.</summary>
+            public void ClearOutcome()
+            {
+                _steps = 0;
+                _trip = LuaCsGuardTripKind.None;
+                _tripError = null;
+            }
+
+            /// <inheritdoc />
+            protected override void ChargeNestedSteps(long steps)
+            {
+                _stepLimit -= steps;
+            }
+
+            /// <inheritdoc />
+            protected override LuaCsHostFunctionException CreateOwnTrip(LuaCsGuardTripKind kind, LuaState where)
+            {
+                return CreatePendingBudgetTrip(where, OwnTripMessage(kind));
+            }
+
+            /// <inheritdoc />
+            protected override void RecordNestedTrip(LuaCsGuardTripKind kind, LuaCsHostFunctionException trip,
+                bool ownLimit)
+            {
+                _trip = ownLimit && kind == LuaCsGuardTripKind.Steps && _lifetimeBinds
+                    ? LuaCsGuardTripKind.LifetimeSteps
+                    : kind;
+                _tripError = trip;
+            }
+
+            /// <inheritdoc />
+            protected override void CancelRun()
+            {
+                CancelGuardedRun(_runSource, CancellationToken.None);
+            }
+
+            private string OwnTripMessage(LuaCsGuardTripKind kind)
+            {
+                switch (kind)
+                {
+                    case LuaCsGuardTripKind.Timeout:
+                        return $"Lua coroutine resume exceeded {_timeoutMs} ms.";
+                    case LuaCsGuardTripKind.Memory:
+                        return $"LuaCsCoroutineHandle: {LuaCsExecutionGuard.MemoryBudgetTripMarker} "
+                               + $"({_allocation.BudgetBytes} bytes)";
+                    default:
+                        return _lifetimeBinds
+                            ? $"LuaCsCoroutineHandle: EXCEEDED_LIFETIME_STEP_BUDGET ({_lifetimeCap})"
+                            : $"LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET ({_budget})";
+                }
             }
 
             private ValueTask<int> Hook(LuaFunctionExecutionContext ctx, CancellationToken ct)
@@ -708,38 +839,44 @@ namespace CoreAI.Sandbox.LuaCs
                 _steps++;
                 if (_steps > _stepLimit)
                 {
-                    if (_lifetimeBinds)
-                    {
-                        return RecordTrip(ctx, ct, LuaCsGuardTripKind.LifetimeSteps,
-                            $"LuaCsCoroutineHandle: EXCEEDED_LIFETIME_STEP_BUDGET ({_lifetimeCap})");
-                    }
-
-                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Steps,
-                        $"LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET ({_budget})");
+                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Steps, false);
                 }
 
                 long now = Stopwatch.GetTimestamp();
-                if (now - _startTimestamp > _timeoutTicks)
+                if (now > _deadline)
                 {
-                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Timeout,
-                        $"Lua coroutine resume exceeded {_timeoutMs} ms.");
+                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Timeout, false);
                 }
 
                 if (now >= _nextAllocationSampleTimestamp && IsAllocationExceeded(now))
                 {
-                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Memory,
-                        $"LuaCsCoroutineHandle: {LuaCsExecutionGuard.MemoryBudgetTripMarker} "
-                        + $"({_allocation.BudgetBytes} bytes)");
+                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Memory, _allocation.CeilingExceeded);
                 }
 
                 return new ValueTask<int>(ctx.Return());
             }
 
+            /// <summary>
+            /// Records the trip of <paramref name="kind"/> - the enclosing run's when it lent the exhausted limit
+            /// (see <see cref="LuaCsGuardedRun"/>), else this resume's own - and ends the resume.
+            /// </summary>
             private ValueTask<int> RecordTrip(LuaFunctionExecutionContext ctx, CancellationToken ct,
-                LuaCsGuardTripKind kind, string message)
+                LuaCsGuardTripKind kind, bool ceilingExceeded)
             {
-                _trip = kind;
-                _tripError = CreatePendingBudgetTrip(ctx.State, message);
+                LuaCsHostFunctionException lenderTrip = TripOfLender(kind, ceilingExceeded, ctx.State);
+                if (lenderTrip != null)
+                {
+                    _trip = kind;
+                    _tripError = lenderTrip;
+                }
+                else
+                {
+                    _trip = kind == LuaCsGuardTripKind.Steps && _lifetimeBinds
+                        ? LuaCsGuardTripKind.LifetimeSteps
+                        : kind;
+                    _tripError = CreateOwnTrip(kind, ctx.State);
+                }
+
                 return SignalTrip(ctx, ct);
             }
 

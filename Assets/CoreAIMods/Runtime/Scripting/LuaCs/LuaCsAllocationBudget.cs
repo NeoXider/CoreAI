@@ -45,6 +45,12 @@ namespace CoreAI.Sandbox.LuaCs
     /// host allocate into the same heap, so a reference carried across resumes would bill one thread for
     /// the whole world's growth.
     /// </para>
+    /// <para>
+    /// An execution that runs NESTED inside another one (a coroutine resumed while another guarded run is
+    /// executing, see <see cref="LuaCsGuardedRun"/>) is also held under a CEILING: the enclosing run's own
+    /// line, an absolute live-heap reading. Its own budget still counts from its own baseline, so whichever
+    /// line is lower trips it, and <see cref="CeilingExceeded"/> tells which one did.
+    /// </para>
     /// </summary>
     public struct LuaCsAllocationBudget
     {
@@ -59,12 +65,15 @@ namespace CoreAI.Sandbox.LuaCs
         private long _budgetBytes;
         private long _baselineBytes;
         private long _suspicionBytes;
+        private long _ceilingBytes;
+        private bool _hasCeiling;
+        private bool _ceilingExceeded;
 
         /// <summary>The budget in bytes; <c>&lt;= 0</c> disables the check entirely.</summary>
         public long BudgetBytes => _budgetBytes;
 
-        /// <summary>True when a budget is armed and <see cref="IsExceeded"/> does real work.</summary>
-        public bool IsEnabled => _budgetBytes > 0;
+        /// <summary>True when a budget or a ceiling is armed and <see cref="IsExceeded"/> does real work.</summary>
+        public bool IsEnabled => _budgetBytes > 0 || _hasCeiling;
 
         /// <summary>The trip reference of the current execution; it may only ever move down.</summary>
         internal long BaselineBytes => _baselineBytes;
@@ -72,11 +81,44 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>The sampled reading above which the next confirming collection is forced.</summary>
         internal long SuspicionBytes => _suspicionBytes;
 
+        /// <summary>
+        /// The live-heap reading above which this execution trips: the lower of its own line (baseline plus
+        /// budget) and its ceiling; <see cref="long.MaxValue"/> when neither is armed. A run nested inside this
+        /// one takes it as its ceiling.
+        /// </summary>
+        internal long LineBytes
+        {
+            get
+            {
+                long own = _budgetBytes > 0 ? SaturatingAdd(_baselineBytes, _budgetBytes) : long.MaxValue;
+                return _hasCeiling && _ceilingBytes < own ? _ceilingBytes : own;
+            }
+        }
+
+        /// <summary>
+        /// True when the ceiling is what the lower line is: the run this one is nested in lent the
+        /// allowance that is left, so exhausting it exhausts that run too.
+        /// </summary>
+        internal bool LineIsCeiling
+        {
+            get
+            {
+                long own = _budgetBytes > 0 ? SaturatingAdd(_baselineBytes, _budgetBytes) : long.MaxValue;
+                return _hasCeiling && _ceilingBytes <= own;
+            }
+        }
+
+        /// <summary>
+        /// True once <see cref="IsExceeded()"/> returned true because the live heap passed the ceiling (the
+        /// enclosing run's line) rather than this execution's own budget.
+        /// </summary>
+        internal bool CeilingExceeded => _ceilingExceeded;
+
         /// <summary>Arms a fresh per-execution budget and takes the (cheap, sampled) baseline.</summary>
         /// <param name="budgetBytes">Allowed growth in bytes; <c>&lt;= 0</c> disables the check.</param>
         public void Reset(long budgetBytes)
         {
-            Reset(budgetBytes, budgetBytes > 0 ? GC.GetTotalMemory(false) : 0);
+            ResetNested(budgetBytes, long.MaxValue);
         }
 
         /// <summary>
@@ -85,9 +127,33 @@ namespace CoreAI.Sandbox.LuaCs
         /// </summary>
         internal void Reset(long budgetBytes, long sampledBaselineBytes)
         {
+            ResetNested(budgetBytes, long.MaxValue, sampledBaselineBytes);
+        }
+
+        /// <summary>
+        /// Arms a fresh per-execution budget held under <paramref name="ceilingBytes"/>, the
+        /// <see cref="LineBytes"/> of the run this execution is nested in (<see cref="long.MaxValue"/> for none),
+        /// and takes the (cheap, sampled) baseline.
+        /// </summary>
+        internal void ResetNested(long budgetBytes, long ceilingBytes)
+        {
+            bool enabled = budgetBytes > 0 || ceilingBytes != long.MaxValue;
+            ResetNested(budgetBytes, ceilingBytes, enabled ? GC.GetTotalMemory(false) : 0);
+        }
+
+        /// <summary>
+        /// <see cref="ResetNested(long, long)"/> against an explicit baseline reading, so the rule can be pinned
+        /// with exact numbers.
+        /// </summary>
+        internal void ResetNested(long budgetBytes, long ceilingBytes, long sampledBaselineBytes)
+        {
             _budgetBytes = budgetBytes;
-            _baselineBytes = budgetBytes > 0 ? sampledBaselineBytes : 0;
-            _suspicionBytes = budgetBytes > 0 ? SaturatingAdd(_baselineBytes, budgetBytes) : long.MaxValue;
+            _hasCeiling = ceilingBytes != long.MaxValue;
+            _ceilingBytes = ceilingBytes;
+            _ceilingExceeded = false;
+            bool enabled = budgetBytes > 0 || _hasCeiling;
+            _baselineBytes = enabled ? sampledBaselineBytes : 0;
+            _suspicionBytes = enabled ? LineBytes : long.MaxValue;
         }
 
         /// <summary>
@@ -96,7 +162,7 @@ namespace CoreAI.Sandbox.LuaCs
         /// </summary>
         public bool IsExceeded()
         {
-            if (_budgetBytes <= 0)
+            if (!IsEnabled)
             {
                 return false;
             }
@@ -111,7 +177,7 @@ namespace CoreAI.Sandbox.LuaCs
         /// </summary>
         internal bool IsExceeded(long sampledBytes, Func<long> readLiveBytes)
         {
-            if (_budgetBytes <= 0 || sampledBytes <= _suspicionBytes)
+            if (!IsEnabled || sampledBytes <= _suspicionBytes)
             {
                 return false;
             }
@@ -121,7 +187,16 @@ namespace CoreAI.Sandbox.LuaCs
             // therefore understated by at most that garbage, i.e. the confirmation can only ever be
             // late, never early — it cannot invent a trip for a script that retained nothing.
             long liveBytes = readLiveBytes();
-            if (liveBytes - _baselineBytes > _budgetBytes)
+            // WHY the ceiling first: past it the enclosing run's own allowance is gone as well, and a trip
+            // that names its budget ends that run too; this execution's own line may be passed at the same
+            // reading, but the enclosing run is the one that has to stop.
+            if (_hasCeiling && liveBytes > _ceilingBytes)
+            {
+                _ceilingExceeded = true;
+                return true;
+            }
+
+            if (_budgetBytes > 0 && liveBytes - _baselineBytes > _budgetBytes)
             {
                 return true;
             }
@@ -131,8 +206,9 @@ namespace CoreAI.Sandbox.LuaCs
                 _baselineBytes = liveBytes;
             }
 
-            long budgetLine = SaturatingAdd(_baselineBytes, _budgetBytes);
-            long rearmed = SaturatingAdd(liveBytes, Math.Max(1L, _budgetBytes / SuspicionSlackDivisor));
+            long budgetLine = LineBytes;
+            long allowance = budgetLine == long.MaxValue ? long.MaxValue : budgetLine - _baselineBytes;
+            long rearmed = SaturatingAdd(liveBytes, Math.Max(1L, allowance / SuspicionSlackDivisor));
             _suspicionBytes = rearmed > budgetLine ? rearmed : budgetLine;
             return false;
         }

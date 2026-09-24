@@ -852,6 +852,374 @@ namespace CoreAI.Tests.EditMode
         }
 
         #endregion
+
+        #region B3-02 (R2 B3A): a nested run is held to what is left of the run it is nested in
+
+        /// <summary>
+        /// Each level keeps six 1M-char strings (about 12 MB) alive and then resumes the next level from inside
+        /// itself; the innermost level records that it ran.
+        /// </summary>
+        private const string TwelveMegabytesPerNestedLevel =
+            "local function level(k)\n" +
+            "  local keep = {}\n" +
+            "  for i = 1, 6 do keep[i] = string.rep('x', 1000000) .. i end\n" +
+            "  if k > 1 then\n" +
+            "    local ok, err = coroutine.resume(coroutine.create(level), k - 1)\n" +
+            "    record('level', k, ok, err)\n" +
+            "  else\n" +
+            "    record('innermost')\n" +
+            "  end\n" +
+            "  return #keep\n" +
+            "end\n" +
+            "record('outer', coroutine.resume(coroutine.create(level), 12))";
+
+        [Test]
+        [Timeout(120000)]
+        public void NestedCoroutineChain_UnderA16MegabyteGuard_IsCutLongBeforeItsInnermostLevel()
+        {
+            // WHY (audit B3-02): each nested coroutine.create level got a fresh allocation budget measured from
+            // its own baseline, and the resumer's hook cannot fire while its child runs, so 12 levels of 12 MB
+            // held 138 MB live under a 16 MB guard and ran to the end. A nested level's line is now the lower of
+            // its own and its resumer's, so the chain is cut once the heap passes the guard's 16 MB, whichever
+            // level happens to be running, and no line names another budget.
+            CollectGarbage();
+            List<string> rows = new();
+
+            LuaRuntimeException ended = LuaCsSecureSandboxEditModeTests.RunRecordingChunk(
+                TwelveMegabytesPerNestedLevel, new LuaCsExecutionGuard(60_000, 50_000_000, 16 * MB), rows,
+                LuaCsSecureSandboxEditModeTests.UnhurriedRawResumes());
+            CollectGarbage();
+
+            List<string> lines = new(rows);
+            if (ended != null)
+            {
+                lines.Add(ended.Message);
+            }
+
+            string all = string.Join(" / ", lines);
+            CollectionAssert.DoesNotContain(rows, "string:innermost", "the innermost level ran: " + all);
+            StringAssert.Contains(LuaCsExecutionGuard.MemoryBudgetTripMarker + " (" + 16 * MB + " bytes)", all,
+                "the cut must be reported as the 16 MB budget");
+            foreach (string line in lines)
+            {
+                if (line.Contains(LuaCsExecutionGuard.MemoryBudgetTripMarker))
+                {
+                    StringAssert.Contains("(" + 16 * MB + " bytes)", line, "no trip may name another budget");
+                }
+            }
+
+            Assert.IsFalse(all.Contains("|boolean:true|number:6"), "no level may complete: " + all);
+        }
+
+        [Test]
+        [Timeout(120000)]
+        public void NestedCoroutineChain_WithinTheGuardsAllocationBudget_RunsToTheEnd()
+        {
+            // WHY the negative twin: nesting under the resumer's line costs nothing while the chain as a whole stays
+            // within it - two levels of 4 MB each under 16 MB run to the end.
+            CollectGarbage();
+            List<string> rows = new();
+
+            LuaRuntimeException ended = LuaCsSecureSandboxEditModeTests.RunRecordingChunk(
+                "local function level(k)\n" +
+                "  local keep = {}\n" +
+                "  for i = 1, 2 do keep[i] = string.rep('x', 1000000) .. i end\n" +
+                "  if k > 1 then record('level', k, coroutine.resume(coroutine.create(level), k - 1))\n" +
+                "  else record('innermost') end\n" +
+                "  return #keep\n" +
+                "end\n" +
+                "record('outer', coroutine.resume(coroutine.create(level), 2))",
+                new LuaCsExecutionGuard(60_000, 50_000_000, 16 * MB), rows,
+                LuaCsSecureSandboxEditModeTests.UnhurriedRawResumes());
+            CollectGarbage();
+
+            Assert.IsNull(ended, ended?.Message);
+            CollectionAssert.AreEqual(new[]
+            {
+                "string:innermost",
+                "string:level|number:2|boolean:true|number:2",
+                "string:outer|boolean:true|number:2"
+            }, rows);
+        }
+
+        [Test]
+        [Timeout(120000)]
+        public void NestedCoroutineChain_UnderA500MsHandle_EndsWithTheHandlesTimeTrip()
+        {
+            // WHY (audit B3-02): each nested raw level got a fresh allowance of its own, so five levels that each
+            // burn 850 ms with capped pattern calls held one 500 ms resume for 4.4 s, the innermost level included.
+            // A nested level's deadline is now the resumer's when that is earlier, so the chain ends at the
+            // handle's 500 ms, with the handle's own trip, uncaught. WHY unhurried raw resumes: a level's own
+            // allowance is then a minute, so only the handle's budget can end the chain; under the default 1 s a
+            // loaded host could end a level on its own time and hide the escape.
+            LuaCsSecureEnvironment env = new();
+            List<string> rows = new();
+            LuaState state = LuaCsSecureSandboxEditModeTests.CreateRecordingState(env, rows,
+                LuaCsSecureSandboxEditModeTests.UnhurriedRawResumes());
+            System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+            state.Environment["now"] = new LuaFunction("now",
+                (ctx, ct) => new ValueTask<int>(ctx.Return(clock.Elapsed.TotalMilliseconds)));
+            LuaFunction body = env.RunChunk(state,
+                "return function()\n" +
+                "  local subject = string.rep('a', 400)\n" +
+                "  local function level(k)\n" +
+                "    local started = now()\n" +
+                "    while now() - started < 850 do pcall(string.find, subject, '.-.-.-.-b') end\n" +
+                "    if k > 1 then coroutine.resume(coroutine.create(level), k - 1) else record('innermost') end\n" +
+                "  end\n" +
+                "  coroutine.resume(coroutine.create(level), 5)\n" +
+                "  record('after the chain')\n" +
+                "end")[0].Read<LuaFunction>();
+            LuaCsCoroutineHandle handle = new(state, body, budgetPerResume: 10_000, resumeTimeoutMs: 500,
+                totalLifetimeSteps: LuaCsCoroutineHandle.UnlimitedLifetimeSteps);
+
+            long elapsedMs = LuaCsSecureSandboxEditModeTests.ElapsedMs(() => handle.Resume());
+
+            CollectionAssert.IsEmpty(rows, "no level may outlive the handle's 500 ms: " + string.Join(" / ", rows));
+            Assert.IsFalse(handle.LastOk);
+            Assert.AreEqual(LuaCsGuardTripKind.Timeout, handle.LastTrip);
+            StringAssert.StartsWith("Lua coroutine resume exceeded 500 ms.", handle.LastErrorText);
+            Assert.Less(elapsedMs, 3000, "backstop: the uncapped chain took 4.4 s");
+        }
+
+        /// <summary>A coroutine body spending about two steps per iteration.</summary>
+        private const string SpendSteps =
+            "local function spend(iterations) local n = 0 for i = 1, iterations do n = n + 1 end return n end\n";
+
+        [Test]
+        [Timeout(60000)]
+        public void NestedCoroutines_SpendTheGuardsSteps_AndCannotSpendThemTwice()
+        {
+            // WHY (audit B3-02): a raw resume armed 500,000 steps of its own however few the resumer had left,
+            // and the resumer never saw them. Each coroutine below spends about 60,000 steps: the first fits the
+            // guard's 100,000 and is charged to it when it returns, so the second only gets the 40,000 left, runs
+            // out, and the guard's own step trip ends the run.
+            List<string> rows = new();
+
+            LuaRuntimeException ended = LuaCsSecureSandboxEditModeTests.RunRecordingChunk(
+                SpendSteps +
+                "record('first', coroutine.resume(coroutine.create(spend), 30000))\n" +
+                "record('second', coroutine.resume(coroutine.create(spend), 30000))\n" +
+                "record('after')",
+                new LuaCsExecutionGuard(60_000, 100_000, 0), rows, LuaCsSecureSandboxEditModeTests.UnhurriedRawResumes());
+
+            CollectionAssert.AreEqual(new[] { "string:first|boolean:true|number:30000" }, rows);
+            Assert.IsNotNull(ended, "the guard's steps are spent: the run must end");
+            Assert.AreEqual("LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (100000)", ended.Message);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void NestedCoroutine_WithinTheGuardsSteps_RunsToTheEnd()
+        {
+            // WHY the negative twin: one coroutine that fits the resumer's remaining steps runs fully.
+            List<string> rows = new();
+
+            LuaRuntimeException ended = LuaCsSecureSandboxEditModeTests.RunRecordingChunk(
+                SpendSteps + "record(coroutine.resume(coroutine.create(spend), 30000))",
+                new LuaCsExecutionGuard(60_000, 100_000, 0), rows, LuaCsSecureSandboxEditModeTests.UnhurriedRawResumes());
+
+            Assert.IsNull(ended, ended?.Message);
+            CollectionAssert.AreEqual(new[] { "boolean:true|number:30000" }, rows);
+        }
+
+        [Test]
+        [Timeout(120000)]
+        public void NestedTaskSpawnChain_UnderTheModsAllocationBudget_IsCutLongBeforeItsInnermostLevel()
+        {
+            // WHY (audit B3-02): task.spawn resumes the new thread at once, inside the caller's resume, and each
+            // thread got a fresh per-resume allocation budget, so 12 nested levels of 12 MB held 137 MB live
+            // under a mod's 16 MB HandlerMaxAllocatedBytes. The spawned thread is now held to what is left of
+            // the caller's allowance.
+            CollectGarbage();
+            CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new();
+            LuaCsSecureSandboxEditModeTests.NestedRunModStore store = new();
+            CoreAI.Ai.LuaCs.LuaCsModStack stack = LuaCsSecureSandboxEditModeTests.NewNestedRunModStack(bindings, store,
+                handlerMaxAllocatedBytes: 16 * MB);
+            string loadError = "";
+
+            try
+            {
+                stack.Runtime.LoadMod("m",
+                    "local function level(k)\n" +
+                    "  local keep = {}\n" +
+                    "  for i = 1, 6 do keep[i] = string.rep('x', 1000000) .. i end\n" +
+                    "  if k > 1 then task.spawn(level, k - 1) else store_set('innermost', 'ran') end\n" +
+                    "  store_set('done' .. k, 'yes')\n" +
+                    "end\n" +
+                    "task.spawn(level, 12)");
+            }
+            catch (Exception ex)
+            {
+                loadError = ex.Message;
+            }
+
+            CollectGarbage();
+            string all = loadError + " / " + LuaCsSecureSandboxEditModeTests.HandlerErrorsOf(stack);
+            Assert.AreEqual("", store.Get("m", "innermost"), "the innermost level ran: " + all);
+            Assert.AreEqual("", store.Get("m", "done12"), "no level may complete: " + all);
+            StringAssert.Contains(LuaCsExecutionGuard.MemoryBudgetTripMarker + " (" + 16 * MB + " bytes)", all,
+                "the cut must be reported as the mod's 16 MB budget");
+            StringAssert.DoesNotContain(LuaCsExecutionGuard.MemoryBudgetTripMarker + " ("
+                                        + LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget, all);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void TaskThreads_SpawnedWithinTheirSpawnersSteps_RunFully_AndAParkedOneResumedByTheSchedulerGetsItsWholeBudget()
+        {
+            // WHY the negative twins: a task.spawn that fits what its spawner has left runs to the end, and its
+            // steps are charged to the spawner, which still finishes within its own 20,000. A thread the scheduler
+            // resumes from its own frame is nested in nothing: the worker below needs about 8,000 steps after its
+            // task.wait(), more than the main chunk had left, and must get its full 10,000.
+            CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new();
+            LuaCsSecureSandboxEditModeTests.NestedRunModStore store = new();
+            CoreAI.Ai.LuaCs.LuaCsModStack stack = LuaCsSecureSandboxEditModeTests.NewNestedRunModStack(bindings, store,
+                handlerMaxSteps: 20_000);
+
+            stack.Runtime.LoadMod("m",
+                "task.spawn(function()\n" +
+                "  task.wait()\n" +
+                "  local n = 0 for i = 1, 4000 do n = n + 1 end\n" +
+                "  store_set('worker', tostring(n))\n" +
+                "end)\n" +
+                "task.spawn(function()\n" +
+                "  local n = 0 for i = 1, 2000 do n = n + 1 end\n" +
+                "  store_set('nested', tostring(n))\n" +
+                "end)\n" +
+                "local n = 0 for i = 1, 6000 do n = n + 1 end\n" +
+                "store_set('main', tostring(n))");
+            bindings.Scheduler.Advance(1d / 60d);
+
+            string errors = LuaCsSecureSandboxEditModeTests.HandlerErrorsOf(stack);
+            Assert.AreEqual("2000", store.Get("m", "nested"), errors);
+            Assert.AreEqual("6000", store.Get("m", "main"), errors);
+            Assert.AreEqual("4000", store.Get("m", "worker"), errors);
+            Assert.AreEqual("", errors);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void RemainingAllowance_OfTheExecutingRun_IsWhatItHasLeft_AndANestedRunReportsItsOwnCappedShare()
+        {
+            // WHY: host code that starts another guarded run inside an executing one on another state (a
+            // mods_call export) reads the executing run's remaining allowance through this query to hold that run
+            // to it (audit A2-10 residual).
+            LuaCsSecureEnvironment env = new();
+            List<string> rows = new();
+            LuaState state = LuaCsSecureSandboxEditModeTests.CreateRecordingState(env, rows);
+            List<long> steps = new();
+            List<int> milliseconds = new();
+            List<long> bytes = new();
+            state.Environment["allowance"] = new LuaFunction("allowance", (ctx, ct) =>
+            {
+                Assert.IsTrue(LuaCsExecutionGuard.TryGetRemainingAllowance(ctx.State, out long remainingSteps,
+                    out int remainingMilliseconds, out long remainingBytes), "a guarded run is executing");
+                steps.Add(remainingSteps);
+                milliseconds.Add(remainingMilliseconds);
+                bytes.Add(remainingBytes);
+                return new ValueTask<int>(ctx.Return());
+            });
+
+            env.RunChunk(state,
+                "local n = 0 for i = 1, 1000 do n = n + 1 end\n" +
+                "allowance()\n" +
+                "coroutine.resume(coroutine.create(function() local m = 0 for i = 1, 1000 do m = m + 1 end allowance() end))\n" +
+                "allowance()",
+                new LuaCsExecutionGuard(30_000, 100_000, 64 * MB));
+
+            Assert.AreEqual(3, steps.Count);
+            Assert.That(steps[0], Is.InRange(90_000L, 98_000L), "about 2,000 of 100,000 steps were spent");
+            Assert.That(steps[1], Is.InRange(80_000L, steps[0] - 1_000L),
+                "the coroutine has the guard's remainder less its own 2,000 steps");
+            Assert.That(steps[2], Is.InRange(80_000L, steps[0] - 1_000L),
+                "the coroutine's steps were charged to the guard when it returned");
+            foreach (int remaining in milliseconds)
+            {
+                Assert.That(remaining, Is.InRange(1, 30_000));
+            }
+
+            foreach (long remaining in bytes)
+            {
+                Assert.That(remaining, Is.InRange(1L, 128 * MB));
+            }
+
+            Assert.IsFalse(LuaCsExecutionGuard.TryGetRemainingAllowance(state, out long _, out int _, out long _),
+                "nothing is executing once the run ended");
+        }
+
+        [Test]
+        public void NestedAllocationBudget_IsCutAtTheCeiling_AndReportsThatTheEnclosingLineWasPassed()
+        {
+            LuaCsAllocationBudget budget = default;
+            budget.ResetNested(100 * MB, 1_016 * MB, 1_000 * MB);
+
+            Assert.AreEqual(1_016 * MB, budget.LineBytes, "the lower line is the enclosing run's");
+            Assert.IsTrue(budget.LineIsCeiling);
+            Assert.AreEqual(1_016 * MB, budget.SuspicionBytes);
+            Assert.IsFalse(budget.IsExceeded(1_010 * MB, () => throw new AssertionException("no collection yet")));
+            Assert.IsTrue(budget.IsExceeded(1_020 * MB, () => 1_017 * MB));
+            Assert.IsTrue(budget.CeilingExceeded);
+        }
+
+        [Test]
+        public void NestedAllocationBudget_BelowItsCeiling_IsCutAtItsOwnLine()
+        {
+            LuaCsAllocationBudget budget = default;
+            budget.ResetNested(10 * MB, 1_016 * MB, 1_000 * MB);
+
+            Assert.AreEqual(1_010 * MB, budget.LineBytes);
+            Assert.IsFalse(budget.LineIsCeiling);
+            Assert.IsTrue(budget.IsExceeded(1_012 * MB, () => 1_011 * MB));
+            Assert.IsFalse(budget.CeilingExceeded, "its own budget tripped, not the enclosing run's");
+        }
+
+        [Test]
+        public void NestedAllocationBudget_WithNoBudgetOfItsOwn_IsStillHeldToItsCeiling()
+        {
+            LuaCsAllocationBudget budget = default;
+            budget.ResetNested(0, 1_016 * MB, 1_000 * MB);
+
+            Assert.IsTrue(budget.IsEnabled);
+            Assert.AreEqual(0, budget.BudgetBytes);
+            Assert.IsTrue(budget.IsExceeded(1_020 * MB, () => 1_017 * MB));
+            Assert.IsTrue(budget.CeilingExceeded);
+        }
+
+        [Test]
+        public void NestedAllocationBudget_ClearedSuspicion_RearmsWithinWhatTheCeilingLeaves()
+        {
+            // WHY: the slack a cleared suspicion allows before the next forced collection is a quarter of what is
+            // left under the LOWER line, not of the run's own, possibly far larger, budget - or live growth could
+            // pass the enclosing run's line by that much unseen.
+            LuaCsAllocationBudget budget = default;
+            budget.ResetNested(256 * MB, 1_016 * MB, 1_000 * MB);
+
+            Assert.IsFalse(budget.IsExceeded(1_020 * MB, () => 1_004 * MB));
+            Assert.AreEqual(1_000 * MB, budget.BaselineBytes);
+            Assert.AreEqual(1_016 * MB, budget.SuspicionBytes, "never above the lower line");
+            Assert.IsTrue(budget.IsExceeded(1_017 * MB, () => 1_017 * MB));
+            Assert.IsTrue(budget.CeilingExceeded);
+        }
+
+        [Test]
+        public void AllocationBudget_WithoutACeiling_KeepsTheRuleItHadBefore()
+        {
+            LuaCsAllocationBudget nested = default;
+            nested.ResetNested(16 * MB, long.MaxValue, 1_000 * MB);
+            LuaCsAllocationBudget plain = default;
+            plain.Reset(16 * MB, 1_000 * MB);
+
+            Assert.IsFalse(nested.LineIsCeiling);
+            Assert.AreEqual(plain.SuspicionBytes, nested.SuspicionBytes);
+            Assert.AreEqual(plain.LineBytes, nested.LineBytes);
+            Assert.AreEqual(plain.IsExceeded(1_020 * MB, () => 1_010 * MB), nested.IsExceeded(1_020 * MB, () => 1_010 * MB));
+            Assert.AreEqual(plain.SuspicionBytes, nested.SuspicionBytes);
+            Assert.AreEqual(plain.BaselineBytes, nested.BaselineBytes);
+            Assert.IsFalse(nested.CeilingExceeded);
+        }
+
+        #endregion
     }
 }
 #endif
