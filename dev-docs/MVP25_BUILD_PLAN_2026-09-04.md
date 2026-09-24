@@ -64,9 +64,9 @@ Notation: **ships** = 1:1 member bound to production behaviour; **stub** = regis
 
 ### A.1 MVP8 — full Players and gameplay services
 
-> **Delivery status, 2026-09-06.** This table is the PLAN. The closure audit
-> (`dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md`) checked it against the code and found rows that
-> diverge; read the audit for what actually shipped. Known divergences, since a stale plan read as
+> **Delivery status, 2026-09-06.** This table is the PLAN. The 2026-09-06 closure audit checked it
+> against the code and found rows that diverge; its findings are items in `TODO.md` ("MVP2.5 rungs"),
+> which records what actually shipped. Known divergences, since a stale plan read as
 > truth is worse than no plan: `Players.RespawnTime`/`CharacterAutoLoads`/`MaxPlayers` were absent
 > and now ship; the whole `Player` character pipeline (`LoadCharacterAsync`, `LoadCharacter`,
 > `CharacterAdded`, `CharacterRemoving`, `DistanceFromCharacter`) is still a loud stub and is the

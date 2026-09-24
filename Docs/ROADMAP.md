@@ -171,8 +171,8 @@ existing Roblox places a content on-ramp.
 revert, and the self-contained shareable mod bundle (`ExportMod`/import with capability masking) are
 shipped. **MVP3 is code complete (2026-09-24); its Unity verification gate is pending** — EditMode 0
 failed and PlayMode `FastNoLlm` 0 failed still have to be run in Unity (on Linux the portable
-`dotnet test` suites report engine-free 2105 passed / 0 failed / 3 skipped and Lua tier 1437 passed /
-0 failed / 2 skipped), so the rung is not closed yet. Built: the `.world` ZIP place package (deterministic
+`dotnet test` suites report engine-free 2112 passed / 0 failed / 3 skipped and Lua tier 1575 passed /
+0 failed / 37 not executed), so the rung is not closed yet. Built: the `.world` ZIP place package (deterministic
 `manifest.json` + `world.json` + indexed `Mods/`), `FileRbxWorldPackageStore` with create-once manual
 slots and a two-phase-durable autosave ring, `ConfirmedWorldMutationGate` in front of every
 `execute_lua` and every mutating `manage_mods` action, `RbxWorldRuntimeSessionController` for
@@ -185,7 +185,12 @@ failure instead of throwing (`capture_failed`, `not_found`, `invalid_package`, `
 composed with a world ACL refuses a legacy package; restored trees charge the instance quota; and the
 W3.5 tail is implemented — a player-confirmed world survives a process restart (durable startup
 selection under `Saves/Startup`, restored through the same staged swap, the default world on any
-failure, a Hub reset button). Each MVP3 DoD item (a)–(f) is proven by a named test, listed with the
+failure, a Hub reset button). The first audit round of the world package added: the startup
+selection follows the live world after every gated AI change, a world stores at most 256 distinct mod
+sources (the package limit, enforced before a 257th mod runs), a confirmed load runs under the shared
+gate and re-checks the network and ACL rules right before publication, and manual slots are capped at
+64 / 256 MiB per store; mods still restart in id order rather than load order (A1-02, open). Each MVP3
+DoD item (a)–(f) is proven by a named test, listed with the
 rung-zero envelope, ACL-floor and startup-selection tests in
 [`WORLD_PACKAGE.md`](CoreAIMods/WORLD_PACKAGE.md#acceptance-status-mvp3) and ROBLOX_API_ROADMAP §MVP3.
 The real WebGL page-reload gate stays open. RBXL is not built.

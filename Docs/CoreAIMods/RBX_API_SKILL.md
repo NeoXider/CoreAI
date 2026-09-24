@@ -150,6 +150,24 @@ Keep these in step with the runtime when the skill text is edited:
 A ratchet test reads the shipped-versus-stubbed truth out of `ServiceCatalog` at test time, so a
 future rung cannot ship a service while the skill text still calls it unimplemented.
 
+### Where the runtime has moved past the skill text
+
+The skill text has not been edited since these runtime changes, so it is behind the runtime in three
+places (the edit is tracked in `TODO.md`; `RBX_API.md` already describes the runtime):
+
+- **`GetPropertyChangedSignal`.** Section 4 says it refuses an unknown or wrong-case name. The runtime
+  refuses only an event, a method or a callback, a near miss of a known property name (one letter of
+  the wrong case, missing, added, changed or swapped; never a digit) and a name over 100 characters;
+  a real property CoreAI does not model gets a signal that never fires and one log note.
+- **Budget trips.** Section 13 says to catch errors with `pcall`. A budget trip (steps, time, memory)
+  cannot be caught: `pcall`/`xpcall` inside the tripped run let it through and `xpcall`'s handler
+  does not run; only a raw coroutine's resumer sees it (`coroutine.resume` returns `false`, the
+  coroutine is dead). An instance-quota `BUDGET_EXCEEDED` refusal and the per-call pattern-step
+  refusal are ordinary errors and are caught.
+- **Clocks.** Section 1 does not say that `os.time(t)` returns `nil` for a date before 1970, that a
+  non-number field counts as missing, or that a client's `GetServerTimeNow` holds while the server's
+  clock holds.
+
 The user-facing companion to this skill is
 [`Assets/CoreAI/Docs/RBX_API.md`](../../Assets/CoreAI/Docs/RBX_API.md); world saving/loading is
 specified in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md).

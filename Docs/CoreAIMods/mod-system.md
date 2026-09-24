@@ -157,7 +157,9 @@ transactions (`coreai_world_begin/commit`), persistence (`store_set/get`), and c
 ## 5a. Error policy: quarantine, not unload
 
 Runtime failures never auto-unload a mod. Every hook/timer call runs under a per-call guard; a
-failure increments the mod's **consecutive-error streak** (any successful call resets it to zero).
+failure increments the mod's **consecutive-error streak** (a successful call resets it to zero, except
+in a frame in which one of the mod's scheduler threads has already faulted: that frame's fault stays
+counted).
 When the streak reaches the threshold — `LuaCsModRuntime.MaxErrorsBeforeQuarantine`, default 8,
 configurable via `LuaCsModStackOptions.MaxErrorsBeforeQuarantine` — the mod is **quarantined**:
 
@@ -185,6 +187,15 @@ kicked its own player — is released once that code has returned, or at the nex
 whose main chunk disconnects its own actor fails with `InvalidOperationException` ("did not load: its actor …
 disconnected while its main chunk ran") and is rolled back.
 
+**A failed load or reload leaves nothing behind.** Its handlers are never added; the `logic_define`
+and `logic_reset` changes its chunk made are put back as they were (a successful reload still replaces
+them); a failed first load also drops its instance-quota attribution and removes the `OnServerInvoke`
+callbacks, tweens and pending waits its chunk created, and an unload drops the attribution too, so the
+attribution map no longer grows with every mod id ever tried. Still open (`TODO.md`): a failed
+reload's candidate tweens and waits are not cancelled, the instances a failed first load's chunk
+created are not swept, and a failure after the build itself succeeded (a concurrent load or reload
+of the same id, the second capacity check) skips the rollback.
+
 Observability: quarantine entry raises `LuaCsModRuntime.ModQuarantined(modId, errorCount)`, and every
 teardown of a mod instance's side effects (unload, reload pre-swap, quarantine entry) raises
 `ModTearingDown(modId, reason)` — future subsystems (instance registries, signals) hook the same
@@ -196,7 +207,9 @@ every failure). `LuaModAutoRepairPolicy` still attempts its first repair at a st
 `DefaultMinConsecutiveErrors` (3; unchanged by the 2026-09-24 fix waves), but for scheduler threads the
 streak now counts faulting frames (M2-08): any number of faults in one frame count once, and a frame whose
 threads ran cleanly resets it, so a burst inside one frame no longer triggers a repair on its own while an
-error repeated every frame does.
+error repeated every frame does. A successful hook or timer call in a frame whose scheduler fault was
+already charged no longer forgives that fault (A2-06), so a mod whose thread faults every frame while a
+timer succeeds every frame is still quarantined.
 
 ## 5b. Multiplayer write policy (decision core implemented; not on the network yet)
 

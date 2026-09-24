@@ -5,10 +5,59 @@
 MVP3 (the world/place package) is code complete; its Unity verification gate (EditMode 0 failed, PlayMode
 `FastNoLlm` 0 failed) is still to be run. The entries below also cover the fix waves that followed the
 2026-09-24 audits of the MVP1 instance core, the MVP2 scheduler and sandbox, the MVP8 gameplay services and the
-multiplayer foundation (audit ids in parentheses; details in `TODO.md`).
+multiplayer foundation, and the first audit round over those waves (audit ids in parentheses — A1-xx world package,
+A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for that round; details in `TODO.md`).
 
 ### Security
 
+- **A budget trip could be caught, and switched the guard off for good.** Lua-CSharp's per-instruction hook sets
+  `LuaState.IsInHook` and clears it only when the hook returns normally; the guard's hook threw, so after one trip no
+  hook fired on that state again — the next runaway handler hung the host (a frozen page on WebGL), and
+  `pcall(runaway); pcall(work)` ran `work` without any limit. The hook now records the trip, cancels the token the run
+  executes with and returns, so the VM ends the run with a cancellation that `pcall` and `xpcall` do not catch
+  (`xpcall`'s handler does not run) and the state stays guarded for every later run. The guard's entry points turn
+  that cancellation back into the same one-line trip (`LuaCsHostFunctionException`, the typed cause in
+  `HostException`), so hosts and both memory-trip classifiers see what they saw before. The same holds for the
+  per-resume budget of scheduler threads and for the sandbox's guarded `coroutine.resume`: each raw coroutine has
+  its own trip source for life, a tripped coroutine is dead, and its resumer gets `false` plus the trip line. Host
+  code that runs Lua with its own token still sees the hook throw; `EndGuard` then clears the stuck flag through the
+  public `DebugLibrary.SetHook`. Ordinary Lua errors, sandbox cap refusals and the per-call pattern-step refusal are
+  still catchable.
+- **`coroutine.resume` of a task thread ran a runaway unguarded and could crash the process (A2-01, A2-02).** A mod
+  that took `coroutine.running()` inside a task, a signal handler or its main chunk and resumed it with
+  `coroutine.resume` ran that body under a hook whose trip cancelled a token the body never reads, so the hook had to
+  throw; `xpcall` swallowed it and its handler and every later frame ran without a budget (60 million iterations in
+  the probe), and the thread, marked dead while the handle still held registrations, crashed the .NET process when
+  the scheduler later killed it. `coroutine.resume` now refuses a thread that belongs to a `LuaCsCoroutineHandle`
+  before touching it, returning `false` and "cannot resume a task or signal-handler thread with coroutine.resume;
+  resume a parked task thread with task.spawn(thread, ...), passing the handle task.spawn, task.defer or task.delay
+  returned" (`LuaCsSecureEnvironment.SchedulerThreadResumeRefusal`).
+- **Nested calls from library functions back into Lua outran the budget (A2-05).** Each such call — a `table.sort`
+  comparator, a `__tostring` run by `tostring`/`print`/`string.format`, a `gsub` replacement function or
+  `__index`, a `__pairs`/`__ipairs` metamethod, a coroutine run by `coroutine.resume` — is a nested VM run, and an
+  error raised N levels deep unwound in about N² time with no instruction running, so no hook could stop it: a
+  comparator 1,000 deep took 8.1 s to fail, and unbounded it ran 64 s under a 10 s budget. They now nest at most 200
+  deep per thread (`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's `LUAI_MAXCCALLS`); the next one raises
+  `C stack overflow (<function>: more than 200 nested calls from library functions back into Lua)`
+  (`CStackOverflowMessage`), which `pcall` catches. Plain Lua recursion is not limited; `__concat` is not counted
+  yet (`TODO.md`).
+- **A raw coroutine escaped its mod's memory budget (A2-09).** A `coroutine.create` body ran under a fixed 256 MB
+  budget, so a mod held to 16 MB kept 80 MB alive inside one. It now gets the budget of the run that resumes it — the
+  mod's `HandlerMaxAllocatedBytes` for its handlers, tasks and main chunk — and a coroutine it resumes inherits it.
+- **A remote client could still fill the host's thread quota (A4-01).** A `task.spawn`/`task.defer`/`task.delay`
+  from a handler that a client's remote started was charged to the handler's owner, so one client firing at a
+  handler that calls `task.delay(60, f)` filled the host's whole quota and got its gameplay mod quarantined. Such
+  threads, and every thread they start, are charged to the sender and held to its limit; a start over it raises
+  `BUDGET_EXCEEDED` inside the handler, and a handler that ends on that refusal is not charged to its owner.
+- **A client could write the server's log at its own packet rate (A4-02, A4-12).** Reports of an unknown
+  `EnumItem` or a hidden instance reference in a client payload are logged per sender at its 1st, 2nd, 4th, 8th…
+  such payload (256 senders tracked apart, the rest share one count), names are cut to 64 characters (a 60 KB name
+  used to be copied into every line), a failure text in a network warning to 200, and a sender is forgotten when
+  its actor disconnects. The exact totals stay in the counters.
+- **An actor the identity source does not know joined a server world with a counter UserId (A4-05, MP-12).** On
+  `Host` and `DedicatedServer`, an actor the `Players.IdentitySource` does not know — or whose identity has no
+  UserId above 0 or no name — is refused with `NOT_AUTHORITY` like a missing source; local actors still join with
+  the session counter.
 - **Loading a legacy world package switched off per-actor access control.** A session composed with a world ACL
   accepted a package without `world_acl_version`, ran it in compatibility mode — no cross-actor mutation or
   destruction refusal — and wrote that downgrade into every later save. Such a package is now refused before any
@@ -188,7 +237,8 @@ multiplayer foundation (audit ids in parentheses; details in `TODO.md`).
   instance (a value object passes its `Value`); script, tween and `PivotTo` writes to parts and the camera fire
   `Changed` and `GetPropertyChangedSignal` only on a real change, derived members included, and so does
   `Workspace.Gravity`. `GetPropertyChangedSignal` refuses an unknown name (a typo, an event, a method, the wrong case)
-  with `X is not a valid property name.`; catalogued properties are accepted. `game:IsLoaded()` is true and
+  with `X is not a valid property name.`; catalogued properties are accepted (narrowed by A3-02 below: a real
+  property CoreAI does not model is accepted too). `game:IsLoaded()` is true and
   `game.Loaded` never fires; `Model:MoveTo` stays a loud stub. The method table is keyed by name and declaring class
   (the nearest declaration wins). `Camera` is a `PVInstance` with `GetPivot`/`PivotTo`. Property-assignment errors
   read `Part.Name expects a string, got number`. Boolean, EnumItem, UDim and Vector2 tween goals reach the service.
@@ -318,6 +368,114 @@ multiplayer foundation (audit ids in parentheses; details in `TODO.md`).
   once, and drops the transport on a later frame's `Pump`, because Mirror discards unflushed messages on a drop; the
   deferred drop checks the connection object, so a reused id is never hit. A client whose own player is kicked
   disconnects itself.
+- **A world could hold more mods than its package can save (A1-01).** A live world stores at most 256 distinct mod
+  sources, the most one package holds: a load that would add a 257th is refused before its chunk runs, with a hint
+  to `manage_mods` action `forget` (an `unload` keeps the source); `FileLuaModSourceStore` refuses a 257th stored id
+  and a larger exact replacement set. A world already past the limit cannot be captured
+  (`RbxWorldPackageFormatLimitException`), so `forget` and `unload` run without their pre-mutation backup until it
+  is back under the limit, while every other gated mutation stays refused.
+- **The world that reopens on the next start forgot what the AI did after the confirmation (A1-03).** The startup
+  entry stayed the package confirmed at load time, so every later AI change — mods whose sources lived only in the
+  session's source version included — was gone after a restart although the Hub said the world would reopen. While
+  the selected world is live, every mutation through the shared gate now records it again as a new create-once
+  startup entry (tree and exact sources from one capture, inside the gate); a refresh that fails keeps the previous
+  entry and logs that the change was not recorded for the next start. The default world and raw host loads are
+  never recorded, and the Hub's Confirm tooltip says "together with the changes the AI makes to it afterwards".
+- **A load could replace the world of a client that joined during its safety autosave, and could miss an
+  `execute_lua` in flight (A1-04, A1-07).** A confirmed load takes the shared pre-mutation gate, so its
+  `load_world-pre` safety autosave is written inside it, and the network-session and ACL rules are checked again
+  under the lock right before publication; a refusal there rolls the staged world back.
+  `RbxWorldLoadResult.Status` names the reason of a refused load.
+- **An autosave name holding `"`, `<`, `>`, `|`, a control character or `\0` threw across the tool boundary on
+  Mono (A1-05).** The name is checked character by character instead of through `Path.GetFileName`, and refused as
+  an ordinary `invalid_argument` result.
+- **The WebGL write budget did not count value strings or Humanoid state (A1-06),** so eleven 200,000-character
+  `StringValue`s passed it. The budget counts every string the encoding writes and is testable outside a WebGL
+  player.
+- **A load the confirmation would refuse still asked the player first (A1-08).** An active `Full`-capability mod
+  or a source store that cannot atomically replace a source set is `invalid_package` at request time.
+- **Manual slots had no limit (A1-10).** A store keeps at most 64 manual slots and 256 MiB of them
+  (`FileRbxWorldPackageStore.DefaultMaximumManualSlots`/`DefaultMaximumManualSlotBytes`, constructor parameters
+  `maximumManualSlots`/`maximumManualSlotBytes`); a save past either writes nothing and `save_world` returns an
+  ordinary failed result that says so.
+- **The load tools threw `ObjectDisposedException` on a shut-down world session (A1-11);** they return
+  `session_unavailable`.
+- **Temporary files a crash left behind were never removed (A1-13).** Opening a store deletes exactly the
+  `<entry>.<32 hex>.tmp` files in its manual, autosave and startup directories.
+- **An `execute_lua` whose world a confirmed load replaced blamed the scene host (A1-14).** It used to fail with
+  `WORLD_DETACHED`/`INSTANCE_DESTROYED` and tell the model to reload mods that were already running; it now says
+  that it ran against the previous world and none of its changes reached the live one.
+- **Many settable properties never fired `Changed` (A3-01).** `ClickDetector.MaxActivationDistance`, the
+  `Players` settings (`CharacterAutoLoads`, `RespawnTime`, a host's `MaxPlayers`), `UserInputService.MouseBehavior`,
+  every `MaterialVariant` property, `Tween.PlaybackState` (also when a tween is dropped because its target was
+  destroyed), `Humanoid.RootPart`, `Humanoid.Jump` and `Humanoid.MoveDirection` (sampled per `Heartbeat`, reported
+  past a 0.01 change, `RbxHumanoid.MoveDirectionResolution`) now fire `Changed` and their property signal on a real
+  change; a drift guard walks every settable `BoundProperties` row.
+- **`GetPropertyChangedSignal` refused real Roblox properties (A3-02).** A script watching a property CoreAI has
+  not modelled (`Humanoid.FloorMaterial`, `Players.NumPlayers`) failed to load. Now only an event, a method or a
+  callback, a near miss of a known property name (one letter of the wrong case, missing, added, changed or swapped
+  with its neighbour; never a digit) and a name over 100 characters are refused; any other name gets a signal that
+  never fires and one log note per class and name (64 per world, then one overflow line). Roblox's deprecated
+  lower-case aliases (`archivable`, `maxHealth`, …) are near misses and are refused with the current spelling.
+- **Tag and attribute signal tables grew without bound (A3-03).** Asking for 20,000 distinct tag or attribute
+  signals kept all of them in memory; a signal without connections is now held weakly (`KeyedSignalTable`) and one
+  that is held or connected still fires. A tag a script creates is at most 100 characters
+  (`InstanceTagStore.MaxTagLength`, `ValidateNewTag`; a million-character tag used to be accepted and saved), while
+  longer tags from older worlds still load, replicate and can be removed.
+- **Removal handlers could not read a destroyed instance (A3-07).** `ChildRemoved`, `DescendantRemoving` and the
+  CollectionService removed signal fired by a `Destroy` read the destroyed instance, as `Destroying` handlers do.
+- **An equal `MaterialVariant` write repainted every part wearing it (A3-08);** it now changes nothing, and a real
+  change repaints only the current wearers (the binder indexes them).
+- **`TweenService` allocated an array every frame (A3-09);** its step reuses one snapshot array.
+- **A failed load or reload left its logic-slot formulas behind (A2-04).** The `logic_define`/`logic_reset`
+  changes a failed build's chunk made are put back, so a mod that never loaded no longer answers the game's formula
+  calls and a failed reload leaves the loaded mod's formulas untouched; a successful reload still replaces them.
+- **A mod whose thread faulted every frame escaped quarantine while any timer succeeded (A2-06).** A successful
+  hook or timer call no longer resets a streak that a scheduler fault of the same frame lengthened.
+- **Mod-API argument errors named CLR types (A2-08).** `store_set({}, 'v')` read "Cannot convert LuaValueType.Table
+  to System.String." and some errors were prefixed twice (`hooks_on: hooks_on: …`); they now read like Lua's own,
+  `bad argument #1 to 'store_set' (string expected, got table)`.
+- **`mods_call` could stall a frame for seconds (A2-10, in part).** An export ran under a fresh handler budget
+  (50,000,000 steps, 10 s) with no cancellation, so one call from a `Heartbeat` handler held the frame. It now runs
+  with its caller's token (stopping the caller stops the export) and, from a signal handler, within that handler's
+  per-resume budget; from other callers it keeps the handler budget (`TODO.md`).
+- **The quota attribution map grew with every mod id ever tried (A2-11);** a failed first load and an unload drop
+  their entry.
+- **Instance quota and ceiling refusals carried no code (A3-05).** They were plain `InvalidOperationException`s
+  that began with "Instance.new:" even for `Clone`. They are now `BUDGET_EXCEEDED` lines led by the refused call —
+  `Instance.new("Part")`, `cloning Part`, `TweenService:Create`, `restoring Part`, `creating Part` — with a fix hint
+  to `Destroy()` what is no longer needed; a refusal an admission check writes as plain text stays an
+  `InvalidOperationException` with that text.
+- **A cancellation that crossed a stopped run's host function became an error `pcall` could catch;** it stays a
+  cancellation.
+- **A client's remote sent before its admission could get it disconnected (A4-04).** A client drops every send
+  until the server has admitted it — counted in `MirrorNetworkBridge.UnadmittedSendsDropped`, said once, never
+  charged — and an `InvokeServer` fails at once.
+- **A malformed client payload threw inside the transport's handler (A4-06),** which on Mirror logged an error and
+  dropped the client for one bad packet; the world drops and counts it.
+- **`InvokeClient` to a player without a connection waited 30 s (A4-07);** it fails at once and leaves nothing
+  pending.
+- **A client's server time ran on while the server's stood still (A4-08, A3-04).** After the server's wall clock
+  stepped back, its `GetServerTimeNow` held while clients extrapolated past it. The server world hands its clock to
+  the bridge (`INetworkBridge.AttachServerClock`), anchors carry the held value and
+  `CoreAiServerClockMessage.HeldAheadOfWallSeconds`, a hold change or a jump over 1 s sends a reliable step anchor
+  at once, and a client holds while `INetworkBridge.IsServerClockHeld` is true.
+- **One late clock anchor pulled a client's clock seconds back (A4-13).** A single anchor more than 1 s behind the
+  estimate is set aside (`ClockAnchorsSetAside`) and taken only when the next anchor agrees with it.
+- **A host's own `DisconnectActor` left the connection open and bound to nobody (A4-09).** The client is sent a
+  `Kicked` notice, the session is forgotten and the transport drops the connection on a later `Pump`
+  (`WorldReleasedConnections`).
+- **Mirror host mode's own local client was admitted as a remote player and dropped ten seconds later (A4-10);** it
+  is refused as a player with a log line (`CoreAiMirrorSessionHost.HostModeConnectionsRefused`) and left to Mirror.
+  The limits of the protocol-mismatch detection are written down in the code and the Mirror README (A4-11).
+- **`os.time(t)` returned a negative number for a date before 1970 (A3-06);** it returns `nil`, as in Luau, and a
+  field that is not a number counts as missing.
+- **`camera_set_cframe`/`camera_follow` half-moved the camera in a world without one (A3-10);** they raise
+  `BAD_ARGUMENT` before anything moves.
+- **A mod whose first load failed kept answering clients as the host (A2-03).** Its `OnServerInvoke` callbacks,
+  tweens and pending waits are removed with the failed load.
+- **The caller of an `OnServerInvoke` callback stopped by its budget read Lua-CSharp's cancellation text (A2-07);**
+  it is answered "the RemoteFunction callback was stopped: it exceeded its execution budget".
 
 ### Added
 
@@ -381,13 +539,26 @@ multiplayer foundation (audit ids in parentheses; details in `TODO.md`).
   `ReadyAcknowledgementRetrySeconds`, `ClockAnchorIntervalSeconds`, `ClockStepThresholdSeconds`,
   `DefaultKickMessage`, `SupersededNoticeMessage`, `MaxNoticeMessageBytes`; the messages `CoreAiClientReadyMessage`,
   `CoreAiServerClockMessage`, `CoreAiDisconnectNoticeMessage` and `CoreAiDisconnectNoticeKind`.
+- Audit round 1: `LuaCsSecureEnvironment.MaxCCallDepth` (200), `CStackOverflowMessage` and
+  `SchedulerThreadResumeRefusal`; `RbxWorldPackageFormatLimitException`; `RbxWorldLoadResult.Status`;
+  `RbxWorldPackageNames.SessionUnavailableStatus` and `DescribeSessionUnavailable`;
+  `FileRbxWorldPackageStore.DefaultMaximumManualSlots`, `DefaultMaximumManualSlotBytes` and the
+  `maximumManualSlots`/`maximumManualSlotBytes` constructor parameters; `InstanceTagStore.MaxTagLength` and
+  `ValidateNewTag`; `RbxHumanoid.MoveDirectionResolution`; the `RbxServerClockReader` delegate and
+  `INetworkBridge.IsServerClockHeld`, `AttachServerClock` and `DetachServerClock` (default interface members, so
+  existing bridges compile unchanged; the world-session staging wrapper does not forward them yet, see `TODO.md`).
+- Mirror (`com.neoxider.coreaimirror`), audit round 1: `CoreAiServerClockMessage.HeldAheadOfWallSeconds`;
+  `MirrorNetworkBridge.IsServerClockHeld`, `AttachServerClock`, `DetachServerClock` and the counters
+  `UnadmittedSendsDropped`, `WorldReleasedConnections`, `ClockStepAnchorsSent`, `ClockAnchorsSetAside`;
+  `CoreAiMirrorSessionHost.HostModeConnectionsRefused` and an optional `log` constructor parameter (where a refused
+  host-mode connection is reported; a Unity error by default).
 
 ### Changed
 
 - **Behaviour changes a mod may notice:** `task.cancel` on a finished thread no longer raises; a known Roblox class
   or service raises `NOT_IMPLEMENTED` instead of `BAD_ARGUMENT`/`UNKNOWN_SERVICE`; `GetPropertyChangedSignal`
-  refuses a name that is not a property of the class; `CanCollide = false` parts fire `Touched` and are hit by
-  raycasts; parts outside the Workspace are inactive; a mod without `WorldEdit` can no longer `TakeDamage`, tween or
+  refuses a name that is not a property of the class (narrowed after the audit round, below); `CanCollide = false`
+  parts fire `Touched` and are hit by raycasts; parts outside the Workspace are inactive; a mod without `WorldEdit` can no longer `TakeDamage`, tween or
   schedule Debris, and no mod can do so to another actor's instances; the one-off `execute_lua` surface refuses
   signal connections; names are truncated at 100 characters; more than 256 attributes or tags, and trees deeper than
   2,048 levels, are refused; NaN and ±Infinity travel as bare numbers on the remote wire (MP-17; the decoder always
@@ -398,17 +569,29 @@ multiplayer foundation (audit ids in parentheses; details in `TODO.md`).
   non-ASCII attribute name is refused; a read-only script sees an `Instance` global whose `Instance.new` raises the
   capability error; a disconnected actor's mods are unloaded; a load whose chunk kicks its own actor fails; a
   client's `GetServerTimeNow` is the local clock until its first synchronization; and every error a script receives
-  is one line.
-- **Breaking wire change (Mirror).** The readiness, clock and notice messages are new, so server and client must
-  run the same CoreAI version, and a mismatch fails loudly: an older server has no handler for
-  `CoreAiClientReadyMessage` and Mirror disconnects a newer client right after admission; an older client never
-  acknowledges readiness and a newer server drops it at the 10 s deadline, with a log line naming the cause.
+  is one line. After the first audit round: a budget trip can no longer be caught by `pcall`/`xpcall`;
+  `GetPropertyChangedSignal` accepts every name except an event, a method, a near miss of a known property and a
+  name over 100 characters (a real unmodelled property gets a signal that never fires); a new tag is at most 100
+  characters; a world holds at most 256 distinct mod sources; an instance quota refusal is `BUDGET_EXCEEDED`; a
+  mod-API argument error reads `bad argument #n to 'fn' (x expected, got y)`; `task.*` threads started by a
+  remote-started handler count against the sender; `os.time(t)` before 1970 is `nil`; a client sends no remote
+  before its admission; `coroutine.resume` refuses a task, signal-handler or main-chunk thread; and library calls
+  back into Lua nest at most 200 deep.
+- **Breaking wire change (Mirror).** The readiness, clock and notice messages are new and the clock anchor gained
+  `HeldAheadOfWallSeconds`, so server and client must run the same CoreAI version. A missing message fails loudly
+  with Mirror's default `exceptionsDisconnect`: an older server has no handler for `CoreAiClientReadyMessage` and
+  Mirror disconnects a newer client right after admission; an older client never acknowledges readiness and a newer
+  server drops it at the 10 s deadline, with a log line naming the cause. An added field is not detected: the older
+  reader throws inside Mirror's handler, which disconnects only with `exceptionsDisconnect` on and otherwise loses
+  that one message. Nothing on the wire negotiates the version.
 - **The "Rbx API" skill** describes all of the above (signals, budgets, datatypes, Enum, instances, tweens, Debris,
   part writes, `CanCollide`, Humanoid, errors) and lists the 42 service registrations instead of "13". The error
   section now documents the `[mod:<id> script:main.lua line:N]` prefix it used to deny. It also covers task handles
   and native `coroutine.yield`, the clocks, `typeof`/`warn` and the loud global stubs, the 1,000-byte unreliable
   ceiling, `ClickDetector`, the tag globals, `Humanoid:Clone`, the non-archivable character,
-  `Player:Kick(message)`, new attribute names, and that a player's mods leave with the player.
+  `Player:Kick(message)`, new attribute names, and that a player's mods leave with the player. It has not caught up
+  with the first audit round yet: `Docs/CoreAIMods/RBX_API_SKILL.md`, "Where the runtime has moved past the skill
+  text", lists the gaps (`GetPropertyChangedSignal`, uncatchable budget trips, the clocks).
 
 ## [7.45.0] - 2026-09-24
 
@@ -759,64 +942,59 @@ it needs a drop-and-count design rather than a two-line insertion.
 
 ### Fixed
 
-- **Обычное короткое сообщение переставало работать, когда переписка накапливалась.** Из CoreAI
-  уходил запрос на 61849 токенов при окне бэкенда в 40192, и виноват был не размер истории:
-  накопленный пересказ на ~272 тысячи символов добавлялся ПОСЛЕ расчёта бюджета и потому в него не
-  входил вовсе, а его собственный лимит стоял в ноль, что означало «без границ». Сверху CoreAI
-  считал своё окно равным 16 миллионам токенов. Теперь бюджет покрывает весь исходящий запрос, у
-  пересказа есть доля этого бюджета, и пересказ, который в неё не влезает, подрезается до отправки с
-  сохранением новейшей части. Ноль сохранил документированный смысл «нет явного лимита», но больше
-  не означает «без ограничений».
-- **Отказ бэкенда по переполнению контекста не распознавался, поэтому восстановление не включалось
-  никогда.** Ответ теперь опознаётся и по структурному типу, и по пяти человеческим формулировкам,
-  потому что бэкенды пишут их по-разному. Сам повтор перестал быть пустой формальностью: он ужимал
-  историю на четверть за попытку, что бессмысленно при многомиллионном допуске. Теперь повтор
-  укладывается в предел, который сообщил САМ бэкенд, и запоминает его для маршрута, чтобы следующие
-  обращения считались правильно сразу.
-- **Действие, требующее вызова инструмента, могло «успешно» завершиться, не сделав ничего.**
-  Контракт обещает гарантированный вызов, и непотоковый путь это проверял, а потоковый — нет: он
-  подталкивал только полностью пустой ответ. Модель писала текст с описанием того, что она сделала
-  бы, вызовов не делала, и вызывающему сообщался успех. Нашлось три пути потери требования, а не
-  один: обычное завершение, итоговый ход при исчерпании лимита обходов, и сброс режима в «на
-  усмотрение» после первой итерации. Теперь требование держится до первого настоящего вызова, при
-  его отсутствии идёт ограниченная корректирующая попытка, а при исчерпании — явная ошибка.
-  Текст, который модель написала как код, НЕ исполняется: это превратило бы нарушение контракта в
-  исполнение произвольного кода.
-- **Проверка «модель звала инструменты» принимала чужие следы.** Она смотрела на любое историческое
-  событие, поэтому её удовлетворяли вызовы фикстуры, отработавшей раньше в том же прогоне: она
-  рапортовала «восемь вызовов», и все восемь принадлежали другому тесту. Теперь окно ограничено
-  собственным вызовом, а сообщение об ошибке прямо говорит, сколько посторонних событий отброшено.
+- **An ordinary short message stopped working once a conversation had grown.** CoreAI sent a request of 61,849
+  tokens to a backend window of 40,192, and the history size was not the cause: the accumulated summary of about
+  272 thousand characters was added AFTER the budget was computed, so it was not counted at all, and its own limit
+  was zero, which meant "unbounded". On top of that, CoreAI took its own window to be 16 million tokens. The budget
+  now covers the whole outgoing request, the summary has a share of that budget, and a summary that does not fit is
+  trimmed before sending, keeping its newest part. Zero keeps its documented meaning "no explicit limit" but no
+  longer means "no limit at all".
+- **A backend's context-overflow refusal was not recognised, so recovery never started.** The response is now
+  recognised both by its structural type and by five human-readable phrasings, because backends word it
+  differently. The retry itself stopped being an empty formality: it shrank the history by a quarter per attempt,
+  which is pointless against a multi-million-token allowance. The retry now fits within the limit the backend
+  ITSELF reported and remembers it for the route, so later calls are sized correctly from the start.
+- **An action that requires a tool call could "succeed" without doing anything.** The contract promises a
+  guaranteed call; the non-streaming path checked it, the streaming path did not: it nudged only a completely
+  empty answer. The model wrote text describing what it would do, made no calls, and the caller was told it
+  succeeded. There were three ways the requirement got lost, not one: the ordinary finish, the final turn when the
+  round-trip limit ran out, and the mode resetting to "auto" after the first iteration. The requirement now holds
+  until the first real call; without one there is a bounded corrective attempt, and when that runs out, an explicit
+  error. Text the model wrote as code is NOT executed: that would turn a contract violation into arbitrary code
+  execution.
+- **The "the model called tools" check accepted someone else's traces.** It looked at any historical event, so
+  calls from a fixture that had run earlier in the same run satisfied it: it reported "eight calls", and all eight
+  belonged to another test. The window is now limited to its own call, and the failure message says how many
+  foreign events were discarded.
 
 ### Changed
 
-- **Хранение и передача пересказа разведены.** Слияние с параллельной линией столкнуло два
-  законных инварианта: их тест требует, чтобы ХРАНИЛИЩЕ держало пересказ целиком (вытеснение
-  старейшего сообщения безопасно только потому, что оно уже пересказано), а моя правка ограничивала
-  пересказ, чтобы запрос влезал в бэкенд. Конфликт был в конструкции: у менеджера одно поле
-  обслуживало и хранилище, и запрос. Теперь менеджер ограничивает сохраняемое только явным лимитом
-  пользователя и держит текст целым, а оркестратор ограничивает КОПИЮ, которая уходит в запрос, не
-  трогая снимок. Добавлен тест ровно на это противоречие, чтобы два бюджета нельзя было снова слить
-  в один.
-- **Инструмент подъёма версии перестал молча пропускать документы.** Он переписывает строку релиза
-  по жёстко заданным шаблонам, а количество пакетов в прозе изменилось с шести на семь — шаблон
-  перестал совпадать, строка осталась со старой версией, и падал уже релизный шлюз, называя файл, но
-  не причину. Оба места исправлены на семь, а ненайденная строка теперь останавливает подъём версии
-  там, где проблема возникла. Проверено намеренной поломкой прозы.
+- **Storing and sending the summary are separated.** A merge with a parallel line collided two legitimate
+  invariants: their test requires the STORE to keep the summary whole (evicting the oldest message is safe only
+  because it has already been summarised), while this change limited the summary so the request would fit the
+  backend. The conflict was in the design: one field of the manager served both the store and the request. The
+  manager now limits what it stores only by the user's explicit limit and keeps the text whole, and the
+  orchestrator limits the COPY that goes into the request without touching the snapshot. A test pins exactly this
+  contradiction so the two budgets cannot be merged into one again.
+- **The version bump tool no longer silently skips documents.** It rewrites the release line from hard-coded
+  patterns, and the package count in the prose changed from six to seven — the pattern stopped matching, the line
+  kept the old version, and the release gate failed later, naming the file but not the cause. Both places now say
+  seven, and a line that is not found stops the bump where the problem arises. Verified by deliberately breaking
+  the prose.
 
 
-- **Запись о закрытии MVP приведена в соответствие с кодом.** Манифест приёмки MVP8 перечислял
-  замороженные идентификаторы, которых на диске нет, а существующая перекрёстная проверка сверяла
-  каталог с файлами и markdown не читала — поэтому манифест мог врать сколько угодно; добавлена
-  проверка, разбирающая список прямо из манифеста. Записаны обе мерки закрытия: плановая (MVP2.5 =
-  MVP3 + MVP8 + MVP11 + MVP12) и мерка владельца (ядровый скриптинг на Lua плюс ядровая основа
-  мультиплеера), потому что большая часть разночтений в истории этого файла — от того, что двое
-  молча мерили разным.
+- **The MVP closure record matches the code.** The MVP8 acceptance manifest listed frozen ids that are not on disk,
+  and the existing cross-check compared the catalog with the files without reading the markdown — so the manifest
+  could be wrong without limit; a check that parses the list straight from the manifest was added. Both closure bars
+  are recorded: the plan's (MVP2.5 = MVP3 + MVP8 + MVP11 + MVP12) and the owner's (core Lua scripting plus the core
+  foundation of multiplayer), because most of the disagreements in this file's history came from two people
+  silently measuring against different bars.
 
 ### Notes
 
-- Прогон на этом дереве: EditMode 4498 / 4489 прошли / 0 упали / 9 пропущено; полный PlayMode
-  149 / 134 / 5 / 10, без обрыва. Ошибок переполнения контекста в логе не осталось ни одной.
-  Пять оставшихся падений требуют живой модели: три таймаута ожидания и прямое «модель выгружена».
+- Run on this tree: EditMode 4498 / 4489 passed / 0 failed / 9 skipped; full PlayMode 149 / 134 / 5 / 10, with no
+  abort. Not a single context-overflow error is left in the log. The five remaining failures need a live model:
+  three wait timeouts and one outright "model unloaded".
 
 ## [7.41.0] - 2026-09-10
 
@@ -1676,7 +1854,7 @@ stream**, not the individual figures below; the allocation assertions run on the
 
 ## [7.35.0] - 2026-09-06
 
-Release following the MVP1, MVP2 and MVP2.5 closure audit (`dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md`).
+Release following the MVP1, MVP2 and MVP2.5 closure audit (its open findings are items in `TODO.md`).
 Three independent checkers verified each criterion against a green run, not against the source.
 **Honest verdict: MVP1 is closed, MVP2 is not, MVP8 (and therefore MVP2.5) is not.** Below is what was fixed;
 what remains is named in TODO and in the audit by name.

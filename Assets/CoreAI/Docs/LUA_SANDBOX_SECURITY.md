@@ -155,7 +155,33 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
   so a single backtracking pattern can no longer run for seconds inside one resume.
 - `coroutine.wrap` is removed from the secured environment (its resumer would bypass the guard hook);
   `coroutine.resume` is replaced by a budget-guarded wrapper that arms the per-resume step, time and
-  allocation limits on the coroutine's own state.
+  allocation limits on the coroutine's own state. The allocation limit is the budget of the run that
+  resumes the coroutine — a mod's `HandlerMaxAllocatedBytes` for its handlers, task threads and main
+  chunk — and a coroutine it resumes in turn inherits it; a fixed 256 MB used to let a mod held to 16 MB
+  keep 80 MB alive inside `coroutine.create`.
+- **`coroutine.resume` never touches a scheduler-owned thread.** A task thread, a signal runner or a
+  mod's main chunk belongs to its `LuaCsCoroutineHandle`, which runs it with the handle's own token for
+  life; the wrapper looks the thread up (`LuaCsCoroutineHandle.IsHandleThread`) and refuses it before
+  arming anything, returning `false` and "cannot resume a task or signal-handler thread with
+  coroutine.resume; …" (`SchedulerThreadResumeRefusal`). Resumed raw, such a body ran under a hook
+  whose trip cancelled a source the body never reads, so the hook had to throw, `xpcall` swallowed it
+  and its handler and every later frame ran unguarded (60 million iterations in the audit probe); the
+  thread was also marked dead with live registrations on the handle's token and crashed the .NET
+  process when the scheduler later killed it. The rule this keeps: no mod code runs with a token other
+  than the one its own hook cancels.
+- **Calls from library functions back into Lua nest at most 200 deep per thread**
+  (`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's `LUAI_MAXCCALLS`): a `table.sort` comparator, a
+  `__tostring` run by `tostring`, `print` or `string.format`, a `gsub` replacement function or
+  `__index`, a `__pairs`/`__ipairs` metamethod, and a coroutine run by `coroutine.resume`, which
+  continues its resumer's count. The next call raises `C stack overflow (<function>: more than 200
+  nested calls from library functions back into Lua)`, an ordinary error `pcall` catches. Each of these
+  calls is a nested VM run on the .NET stack, and an error raised N levels deep is rethrown once per
+  level with a growing stack trace, so unwinding cost about N² with no instruction running and no hook
+  able to fire: a comparator re-entering `table.sort` 1,000 deep took 8.1 s to fail, and unbounded it ran
+  64 s under a 10 s budget. Plain Lua recursion and the metamethods the VM runs in its own loop are not
+  counted. Open (`TODO.md`): `__concat`, which the VM calls as a nested run where no sandbox code sits;
+  a scheduler-owned thread resumed by host code from inside a library call starts from zero; and host
+  callbacks that re-enter Lua outside `CallCountedAsync`.
 - `execute_lua` (`LuaCsGameToolExecutor`) and `LuaCsAiEnvelopeProcessor` normalize and truncate results:
   the result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** (`LuaCsAiEnvelopeProcessor.MaxResultSummaryLength` / `MaxErrorMessageLength`) before they reach the model or the repair path.
 - **An error value is one line, never a CLR dump.** `LuaCsApiRegistry` (and the Rbx bindings) turn a
@@ -168,12 +194,31 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
   sandbox's own refusals (the `string.rep`, `table.concat` and `string.format` caps, a `gsub` result
   cap) raise the same kind of error at level 0, so `pcall`, `xpcall` and `coroutine.resume` read the
   same line for them too. A trip of the guard's step, time or memory budget carries its own one-line
-  error value of the same kind (its text, with no CLR type name), which is the line a host sees. C#
+  error value of the same kind (its text, with no CLR type name), which is the line a host sees; unlike
+  the refusals above, no script ever catches it (next item). C#
   code reaches the original exception through `HostException`, which engine-neutral code reads via
   `IScriptHostFailure` / `ScriptExecutionErrors.NextCause` (the memory-trip classifiers walk the chain
   that way). A Lua error raised inside a registered delegate crosses unchanged. The one path left
   unwrapped is a raw `LuaFunction` registered through `RegisterCallback(string, LuaFunction)`, which
   no production code uses.
+- **A budget trip is final and cannot be caught.** A trip of the guard's step, time or memory budget,
+  of a scheduler thread's per-resume budget or of a raw coroutine's per-resume budget ends the run
+  it tripped in: `pcall` and `xpcall` inside that run let it through, `xpcall`'s handler does not run,
+  and the state stays guarded for every later run. Only the host sees the trip line — or, for a raw
+  coroutine, the code that called `coroutine.resume`, which gets `false` plus the line while the
+  coroutine is dead. Mechanism: Lua-CSharp's per-instruction hook sets `LuaState.IsInHook` and clears it
+  only when the hook returns normally, so a hook that throws leaves every later hook on that state
+  silent — one trip used to switch the guard off for good, the next runaway handler hung the host (a
+  frozen page on WebGL), and `pcall(runaway); pcall(work)` ran `work` unguarded. The hook therefore
+  records the trip, cancels the token the run executes with and returns; the VM raises the
+  cancellation itself at its next jump, loop or call, `pcall`/`xpcall` do not catch a cancellation,
+  and the guard's entry points turn it back into the trip's one-line `LuaCsHostFunctionException`
+  (the typed cause in `HostException`), so hosts and classifiers see what they saw before. Each raw
+  coroutine has its own trip source for its whole life. A hook that fires inside host code running Lua
+  with its own token still has to throw; `EndGuard` then clears the stuck flag through the public
+  `DebugLibrary.SetHook` (no reflection). Sandbox cap refusals and the per-call string-pattern step
+  refusal stay ordinary errors that `pcall` catches. The fix rests on Lua-CSharp internals verified on
+  .NET 8; the Mono/IL2CPP run is part of the Unity verification gate in `TODO.md`.
 - `coreai_world_load_scene` supports an optional scene whitelist check. (This is one of the classic
   build bindings: in the default production composition it is **disabled** — a stub raises an error
   pointing at the Rbx API — and the whitelist only matters on hosts that opt into the build bindings.)
@@ -289,6 +334,18 @@ Maintain EditMode tests for attempts to:
   thread that loops forever while yielding (it must keep running).
 - `pcall`/`xpcall`/`coroutine.resume` of a failing host call and of a sandbox cap: the error value must
   be the one line, with no CLR type name, stack trace or path; a guard trip's error text likewise.
+- A budget trip (steps, time, memory; the guard, a scheduler thread's resume, a raw coroutine's resume)
+  wrapped in `pcall`/`xpcall` inside the tripped run: it must end the run, `xpcall`'s handler must not
+  run, a later runaway on the same state must trip again, and an ordinary Lua error must still be
+  caught (`LuaCsGuardFrameAndAllocationEditModeTests`, `LuaCsSecureSandboxEditModeTests`,
+  `LuaCsModRuntimeEditModeTests`).
+- `coroutine.resume(coroutine.running())` from a task, a signal handler or the main chunk, with a
+  runaway inside an `xpcall`: refused before the thread is touched, nothing runs unguarded, and the
+  thread still ends safely on kill or unload (`RbxTaskSchedulerLuaBindingsEditModeTests`,
+  `LuaCsSecureSandboxEditModeTests`).
+- Library calls back into Lua nested past 200 (`table.sort`, `tostring`, `print`, `string.format`,
+  `gsub`, `pairs`, `ipairs`, `coroutine.resume`): one catchable line, fast; deep plain recursion still
+  allowed; a raw coroutine held to its resumer's memory budget.
 - World binding validations for NaN/Infinity and coordinate bounds (`|value| <= 100000`).
 - Rate-limit behavior for `execute_lua` and repair-generation lockout.
 

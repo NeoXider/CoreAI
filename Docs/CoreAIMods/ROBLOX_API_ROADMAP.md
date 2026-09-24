@@ -480,10 +480,11 @@ Ordering changes vs. the seed roadmap, with justification:
   conversion boundary, the `IInstanceBackingBinder`/`InstanceGameObjectBinder` materialization
   slice, and the Lua surface (`Instance.new`/`game`/`workspace`, datatype globals, Part spatial
   properties pushed through `IPartPropertySink`) are on disk in
-  `Assets/CoreAIMods/Runtime/RobloxApi/` + `Runtime/Scripting/LuaCs/LuaCsRoblox*.cs` and wired by
+  `Assets/CoreAIMods/Runtime/RbxApi/` + `Runtime/Scripting/LuaCs/LuaCsRbx*.cs` and wired by
   `CoreAiModsInstaller`. Shipped in 6.3.0 with the §5.1.8 acceptance gate green (build/query/clone/
   destroy + RobloxSpace round-trip + golden fixtures + conversion lint), `Part.Shape`
-  (Ball/Cylinder/Wedge meshes; CornerWedge → Block fallback), and — pulled forward from MVP10/§camera —
+  (Ball/Cylinder/Wedge meshes; CornerWedge, a Block fallback then, has its own mesh now), and — pulled
+  forward from MVP10/§camera —
   a Roblox-1:1 `UserInputService` slice (behind a swappable `IInputSource` seam) and
   `workspace.CurrentCamera` (over a swappable camera rig), so mini-games are playable on the MVP1 base.
 - **Goal**: `game`, `workspace`, `Instance.new`, the full navigation/lifecycle member set,
@@ -541,7 +542,7 @@ Ordering changes vs. the seed roadmap, with justification:
 
 - **Status**: code complete (2026-09-24); the Unity verification gate is pending — EditMode 0 failed
   and PlayMode `FastNoLlm` 0 failed must be run in Unity (the portable `dotnet test` suites on Linux:
-  engine-free 2105 passed / 0 failed / 3 skipped; Lua tier 1437 passed / 0 failed / 2 skipped, with
+  engine-free 2112 passed / 0 failed / 3 skipped; Lua tier 1575 passed / 0 failed / 37 not executed,
   the engine-bound cases Inconclusive by design). The rung closes, and MVP4 starts, only after that
   gate and the release.
 - **Current state**: the deliverables below are built and covered by EditMode tests.
@@ -557,7 +558,14 @@ Ordering changes vs. the seed roadmap, with justification:
   closed: restore as one host-enveloped operation (rung-zero residue), the ACL floor (an ACL-composed
   session refuses a legacy package), restored trees charging the instance quota, JSON failures from
   every world tool, and a refusal of world loads while network sessions are live (the MVP11 entry
-  guard). The real WebGL page-reload gate is still open.
+  guard). After the first audit round of the world package: the startup selection follows the live
+  world (every gated mutation records it again, so the AI's later changes reopen too), a world stores
+  at most 256 distinct mod sources (the package limit, enforced before a 257th mod runs), a confirmed
+  load takes the shared gate and re-checks the network and ACL rules right before publication, the
+  load tools refuse at request time what the confirmation would refuse and answer
+  `session_unavailable` after shutdown, and manual slots are capped at 64 / 256 MiB per store. Still
+  open: mods restart in id order rather than load order (A1-02, `TODO.md`). The real WebGL page-reload
+  gate is still open.
 
 - **Goal**: the world is a savable, shareable artifact — the single serializer that disk save,
   backups, and (later) the multiplayer join snapshot all share (§2, world file / backups).
@@ -915,7 +923,13 @@ Ordering changes vs. the seed roadmap, with justification:
   it (MP-22), the in-process loopback refusing an `UnreliableRemoteEvent` over 1,000 B like the wire,
   and a per-sender budget of 32 live handler threads for remote-started
   `OnServerEvent`/`OnServerInvoke` work (MP-10); a disconnected actor's mods are unloaded once their
-  running code has returned (M2-24). Mixed CoreAI versions on server and client fail loudly. Host
+  running code has returned (M2-24). After the first audit round of the multiplayer layer: threads a
+  remote-started handler schedules are charged to the sender too (A4-01), a client sends nothing
+  before its admission (A4-04), the server's clock hold reaches clients through the anchors (A4-08,
+  A4-13), a host's own `DisconnectActor` ends the connection (A4-09), Mirror's host-mode local client
+  is refused as a player loudly (A4-10), and a sender's unresolved-value reports are throttled (A4-02,
+  A4-12). Mixed CoreAI versions on server and client must not run together (a missing message fails
+  loudly with Mirror's default `exceptionsDisconnect`; an added field is not detected). Host
   mode, world-state replication, the join snapshot over the wire and handing live sessions to a world
   loaded at runtime are still open — until MVP11 a world load is refused while network sessions are
   live (`network_sessions_active`). See `Assets/CoreAIMirror/README.md` (Sessions, Known limits) and
@@ -1255,7 +1269,7 @@ Globals installed: `game`, `workspace` (== `game.Workspace`), `Instance`, `Vecto
 | Class | Lua members shipped by the current release | Planned loud stubs (has rung) | Backlog loud errors (no rung) | Unsupported loud errors (deliberate) |
 |---|---|---|---|---|
 | `Instance` (static) | `Instance.new(className)`; deprecated second `parent` arg accepted with a once-per-mod log; about ninety known Roblox classes that are not built (`WedgePart`, `SpawnLocation`, `Weld`, `Attachment`, …) raise `NOT_IMPLEMENTED` instead of "Unable to create" | — | `Instance.fromExisting` | — |
-| `Instance` (members) | §5.1.2 navigation/lifecycle/attributes/tags; `WaitForChild` including the absent-child yield, 5 s infinite-yield warning and timeout overload; general Instance-tree signals; `Changed` on every instance; `GetPropertyChangedSignal` refusing a name that is not a property of the class | — | `FindFirstDescendant`, `QueryDescendants`, `GetActor`, the styling and sandboxing members | — |
+| `Instance` (members) | §5.1.2 navigation/lifecycle/attributes/tags; `WaitForChild` including the absent-child yield, 5 s infinite-yield warning and timeout overload; general Instance-tree signals; `Changed` on every instance; `GetPropertyChangedSignal` refusing an event, a method or a near miss of a known property name (a typo), and handing a never-firing signal with one log note to a real property CoreAI does not model | — | `FindFirstDescendant`, `QueryDescendants`, `GetActor`, the styling and sandboxing members | — |
 | `Folder` | pure container | — | — | — |
 | `PVInstance` descendants | ancestry/API shape plus `PivotTo`, `GetPivot` | — | — | — |
 | `Model` | container plus `PrimaryPart`, `WorldPivot`, `GetPivot`, `PivotTo` | — | `MoveTo` (use `PivotTo`), `TranslateBy`, `GetBoundingBox`, `GetExtentsSize`, `ScaleTo`/`GetScale`, the persistent-player and legacy primary-part members | — |
@@ -1267,7 +1281,7 @@ Globals installed: `game`, `workspace` (== `game.Workspace`), `Instance`, `Vecto
 | `Lighting` | structural service/tree node | — | `ClockTime`, `Ambient`, `GeographicLatitude` | — |
 | `UserInputService` | `InputBegan`, `InputEnded`, `InputChanged`; `MouseBehavior`; `IsKeyDown`, `GetKeysPressed`, `GetMouseLocation`; signal `Wait` | — | — | — |
 | `RunService` | `PreAnimation`, `PreSimulation`, `PostSimulation`, `PreRender`; legacy `Heartbeat`, `Stepped`, `RenderStepped`; `IsServer`, `IsClient`, `IsRunning`, `IsStudio`; signal `Wait` | `BindToRenderStep`, `UnbindFromRenderStep` → MVP2 | — | — |
-| `ClickDetector` | `MouseClick`, `MouseHoverEnter`, `MouseHoverLeave`, `MaxActivationDistance`; signal `Wait` | — | — | — |
+| `ClickDetector` | `MouseClick`, `MaxActivationDistance`; signal `Wait` | — | `MouseHoverEnter`, `MouseHoverLeave` — they exist as signals but never fire: the click pump tracks no hovered part across frames | — |
 | `InputObject` | read-only `KeyCode`, `UserInputType`, `UserInputState`, `Position`, `Delta` | — | — | — |
 | `RBXScriptSignal` | deferred `Connect`/`Once`/`Wait` on every shipped signal; handlers may yield with `task.wait` | — | — | — |
 | `RBXScriptConnection` | read-only `Connected`; `Disconnect()` | — | — | — |
@@ -1395,7 +1409,7 @@ records its C# marker; scheduled stubs normally use `// TODO: MVP<n> — ...`.
 |---|---|---|---|
 | shipped | `PVInstance:PivotTo/GetPivot`; `Model.PrimaryPart/WorldPivot` | landed in the MVP2 Model-pivot slice; no longer a stub | `ClassCatalog` |
 | shipped | `WorldRoot:Raycast`; `Workspace.Gravity` | landed in MVP8 slice 8.5: `Raycast(origin, direction, raycastParams?)` with the mirror's 15,000-stud cap, `Gravity` 196.2 studs/s² per-body | `ClassCatalog` |
-| shipped | `Workspace:GetServerTimeNow` | landed in MVP2: epoch seconds over `IRbxClockSource` plus the bridge's server offset on a client; monotonic after a client's first synchronization, backward corrections slewed (D9 table) | Lua binding |
+| shipped | `Workspace:GetServerTimeNow` | landed in MVP2: epoch seconds over `IRbxClockSource` plus the bridge's server offset on a client; monotonic after a client's first synchronization, backward corrections slewed, and held while the server's own clock holds (D9 table) | Lua binding |
 | shipped | `BasePart.Material` | landed: all 45 `Enum.Material` items render, unmapped ids resolve to a magenta diagnostic material ([research](../../dev-docs/MATERIALS_RESEARCH.md)) | `ClassCatalog` |
 | shipped | `MaterialVariant` / `MaterialService` | landed in 7.10.0: `Instance.new("MaterialVariant")` parented to `MaterialService`; parts wear one via the string property `BasePart.MaterialVariant` (`""` for none); an unknown name renders the plain `Material`, not an error | `ClassCatalog` |
 | planned | `RunService:BindToRenderStep`/`UnbindFromRenderStep` | MVP2; the four topology queries (`IsServer`/`IsClient`/`IsStudio`/`IsRunning`) and the modern frame events (`PreAnimation`/`PreSimulation`/`PostSimulation`/`PreRender`) have shipped | `ClassCatalog` |
@@ -1418,8 +1432,8 @@ handed to a newly loaded world stayed wired to the physics port the load was abo
 instead of the one it had just published, so every raycast against the second (and any later)
 world missed and no contact signal fired again — with nothing in the log. Fixed by attaching the
 post-publish port after the world commits rather than while it is still staging
-(`RbxWorldRuntimeSessionController.LoadConfirmedAsync`); see
-`dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` §6.
+(`RbxWorldRuntimeSessionController.LoadConfirmedAsync`); see `TODO.md`, "Third review round —
+2026-09-09".
 
 #### 5.1.7 Risks and mitigations
 
@@ -1445,7 +1459,9 @@ post-publish port after the world commits rather than while it is still staging
 7. Attributes: set/get/enumerate; wrong types rejected with `BAD_ARGUMENT` naming the type.
 8. Tags: add/remove/has/list.
 9. Datatypes: operator table (Vector3 arithmetic, CFrame composition), `tostring` formats,
-   `Color3.fromRGB` rounding — golden fixtures against documented Roblox values.
+   `Color3.fromRGB` of whole channels — golden fixtures against documented Roblox values; a
+   fractional channel follows CoreAI's locked nearest-integer, midpoint-away-from-zero rounding,
+   because the mirror documents none (`Color3_FromRGB_FractionalChannelsUseLockedCoreAiRounding`).
 10. `RobloxSpace` suite (§5.1.1): round-trip identity at 0.28 and 1:1; lookAt/Angles chirality
     goldens; usage lint clean; mod-space z = −Unity z asserted explicitly.
 11. Asset-scale rule: `Part` with `Size = Vector3.new(4, 1, 2)` produces
@@ -1689,7 +1705,12 @@ Notes:
   rescheduled/cancelled, but a thread from `coroutine.create()` cannot be accepted or returned:
   `IScriptEngine` cannot wrap an existing native thread, and `IScriptCoroutine` exposes neither
   the native VM value nor a stable native identity. Passing one (or a `coroutine.running()` value)
-  to `task.spawn`/`defer`/`delay` is `BAD_ARGUMENT` naming this rule.
+  to `task.spawn`/`defer`/`delay` is `BAD_ARGUMENT` naming this rule. The other direction is refused
+  too: the sandbox's `coroutine.resume` of a task, signal-handler or main-chunk thread (a
+  `coroutine.running()` value) returns `false` and "cannot resume a task or signal-handler thread with
+  coroutine.resume; …" without touching the thread, because only its handle may resume it (A2-01: a
+  budget trip inside such a resume was swallowed by `xpcall` and the rest ran unguarded) — a parked task
+  is resumed with `task.spawn(handle)`.
 - Legacy aliases: `wait(t)` → `task.wait(t)` but returning the legacy pair
   `(elapsed, time())` per R4.9; `spawn(fn)` → `task.defer` passing the legacy args
   `(elapsedTime, engineUptime)` per R4.9; `delay(t, fn)` → `task.delay` — each logs a
@@ -1701,7 +1722,9 @@ Notes:
   `workspace:GetServerTimeNow()`. As built: `DateTime` is a loud backlog stub (M2-15) whose error
   points at `os.time()` and `GetServerTimeNow()`; `os.time(t)` reads the date table as UTC (Luau's
   choice), `hour` defaulting to 12, out-of-range fields carrying over, a missing `year`/`month`/`day`
-  `BAD_ARGUMENT` (M2-22). `typeof` answers Roblox type names and `warn` writes to the mod's log at
+  `BAD_ARGUMENT` (M2-22); as in Luau, a field that is not a number counts as missing and a date
+  before 1970 returns `nil` (A3-06). The sandbox has no `os.date`, so no round trip through it is
+  promised. `typeof` answers Roblox type names and `warn` writes to the mod's log at
   `Warn` (M1-06); `BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Ray`,
   `Region3`, `Rect`, `PhysicalProperties`, `OverlapParams` and `shared` are loud stubs too.
 - `RunService`: events per §5.2.3; `IsServer()`, `IsClient()`, `IsRunning()` — answered from
@@ -1792,8 +1815,8 @@ Game logic runs on scaled time; wall-clock APIs exist under their Roblox names. 
 | `task.wait` / `task.delay` / tween durations / `Debris` | scheduler time | `Time.time` accumulation via the phase pump | **yes** |
 | `RunService` event `dt` args | frame/physics deltas | `Time.deltaTime` / `Time.fixedDeltaTime` | **yes** |
 | `time()` | game-simulation time since world start | `Time.time` minus world-start offset | **yes** |
-| `workspace:GetServerTimeNow()` | server-synchronized clock, monotonic, **Unix epoch seconds** | `IRbxClockSource` Unix seconds plus `INetworkBridge.ServerClockOffsetSeconds`. Where this process is the server clock (no bridge, `Solo`, `Host`, `DedicatedServer`): the local clock, held at its last reading while that clock steps back. On a `Client`: the local clock, unsmoothed, until `INetworkBridge.IsServerClockSynchronized`; re-based once at the first synchronization; from then on never decreasing — an estimate ahead is taken at once, one behind is slewed onto at half speed (`ServerTimeSlewRate` 0.5; Roblox's 0.6% would take half an hour for a ten-second correction). The Mirror offset comes from the server's own clock anchors (sent at readiness and every 5 s, corrected by half the round trip), not from `NetworkTime.offset`, which compares process uptimes | no |
-| `os.time()` | Unix epoch seconds (UTC), integer | `DateTimeOffset.UtcNow.ToUnixTimeSeconds()` | no |
+| `workspace:GetServerTimeNow()` | server-synchronized clock, monotonic, **Unix epoch seconds** | `IRbxClockSource` Unix seconds plus `INetworkBridge.ServerClockOffsetSeconds`. Where this process is the server clock (no bridge, `Solo`, `Host`, `DedicatedServer`): the local clock, held at its last reading while that clock steps back; the server world hands that reading, hold included, to its bridge (`INetworkBridge.AttachServerClock`). On a `Client`: the local clock, unsmoothed, until `INetworkBridge.IsServerClockSynchronized`; re-based once at the first synchronization; from then on never decreasing — an estimate ahead is taken at once, one behind is slewed onto at half speed (`ServerTimeSlewRate` 0.5; Roblox's 0.6% would take half an hour for a ten-second correction), and while `INetworkBridge.IsServerClockHeld` says the server's clock holds, the client holds too. The Mirror offset comes from the server's own clock anchors (sent at readiness, every 5 s and at once when the server's clock holds, releases or jumps; corrected by half the round trip; a single anchor more than 1 s behind is set aside until the next agrees), not from `NetworkTime.offset`, which compares process uptimes | no |
+| `os.time()` | Unix epoch seconds (UTC), integer; `os.time(t)` reads `t` as UTC and returns `nil` before 1970 | `IRbxClockSource.UnixTimeSeconds` | no |
 | `os.clock()` | CPU time for benchmarking | `Stopwatch`-based process time | no |
 | `DateTime.now()` etc. | calendar datatype | planned: `System.DateTimeOffset` wrapped as `RbxDateTime`; as built a loud backlog stub (M2-15) pointing at `os.time()`/`GetServerTimeNow()` | no |
 | `tick()` (legacy) | epoch seconds with fraction | `DateTimeOffset.UtcNow` fractional epoch; deprecation note once per mod | no |
@@ -1843,7 +1866,12 @@ The same line is the error value a script receives: `pcall`, `xpcall` and a prot
 `LuaCsHostFunctionException`, error level 0), and a sandbox cap its own one-line text the same way —
 never a CLR type name, a managed stack trace or a source path, which used to cost about 1,600
 characters per refusal and overflowed `execute_lua`'s 4,000-character result. A budget trip's error
-value is a one-line text of the same kind. C# still reads the original exception (`HostException`,
+value is a one-line text of the same kind, and no script can catch it: a trip of the step, time or
+memory budget (the guard, a scheduler thread's resume, a raw coroutine's resume) ends the run it
+tripped in — `pcall`/`xpcall` let it through, `xpcall`'s handler does not run, the state stays guarded
+for later runs — and only the host, or the resumer of a tripped raw coroutine (`coroutine.resume`
+returns `false` and the line; the coroutine is dead), sees it. Sandbox cap refusals and the per-call
+pattern-step refusal stay catchable. C# still reads the original exception (`HostException`,
 `IScriptHostFailure`, `ScriptExecutionErrors.NextCause`). When such a line ends a scheduler thread,
 the thread's fault keeps its code and context under one prefix (`RbxError.TryParse` is the exact
 inverse of the formatter); only a plain Lua error is wrapped as `BAD_ARGUMENT`, and a budget kill is

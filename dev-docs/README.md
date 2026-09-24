@@ -11,7 +11,6 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - MVP25_ONLINE_PLAN.md — MVP2.5 online play plan: entry gates, build order, acceptance gates, the owner's decisions of 2026-09-04
 - MVP25_BUILD_PLAN_2026-09-04.md — build plan for MVP8 / MVP11 / MVP12 against those decisions, every repository fact read from source
 - MVP8_ACCEPTANCE_MANIFEST.md — the frozen MVP8 Tier-A fixture manifest gate P8.5 cites
-- MVP_CLOSURE_AUDIT_2026-09-06.md — closure audit of MVP1 / MVP2 / MVP2.5 with post-fix verification; kept because the open `TODO.md` rows cite its sections
 - REPLICATION_PHASE0.md — the engine-free replication core as it exists after 7.39.0: what is built and tested registry-to-registry, what is not wired, the two named limits
 - MOD_INSTANCE_OWNERSHIP_PLAN.md — mod-owned instances + cleanup-on-unload design
 - MOD_SYSTEM_DESIGN_NOTES.md — the mod-panel 6 FPS investigation and the original mod-system phase plan (moved here from `Docs/CoreAIMods/mod-system.md`)
@@ -22,7 +21,6 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 
 - SCALE_CHARACTERIZATION.md — the 20 / 50 / 100 / 200 actor staircase: methodology, frozen workload, results
 - CAPACITY_UNBLOCKED_2026-09-05.md — the 100–200 actor target was blocked by two defaults and one broken metric
-- ALLOC_SIGNALS_FINDING_2026-09-05.md — measured finding: the heap budget failed because every signal fire spawned a thread
 - G11_RUN_RECORD_2026-09-02.md — the G11 WebGL browser-run record
 
 ## Chat, LLM path and context

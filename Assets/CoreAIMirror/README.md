@@ -121,7 +121,17 @@ and the Player is re-created with `PlayerAdded` firing again.
   (`StaleResponsesDropped`); a client's pending requests fail at once on a disconnect or `Dispose`
   instead of waiting out their timeout. A client does not need Mirror authentication for its handlers, so a remote that overtakes
   the admission response is dropped as unadmitted rather than disconnecting the joining client.
-  kcp2k's negative connection ids are real connections.
+  kcp2k's negative connection ids are real connections. A malformed client-to-server payload is
+  dropped and counted by the world too, never thrown into the transport.
+- **A client sends nothing before its admission.** The server's handlers require Mirror
+  authentication, and an unreliable remote queued with the admission request would overtake it and
+  make Mirror disconnect the joining client. So until the server has admitted it, a client drops every
+  remote it is asked to send — reliable ones too — counted in `UnadmittedSendsDropped` and said once in
+  the log; nothing is sent or charged to the rate budget, and an `InvokeServer` fails at once instead of
+  waiting 30 s. A script that fires a remote the moment it starts therefore loses it (queueing
+  reliable sends until admission is tracked in `TODO.md`).
+- **`InvokeClient` to a player with no connection fails at once** ("the player is not connected to
+  this server, so nothing was sent") and leaves nothing pending.
 - **A joining client acknowledges readiness before the server talks to it.** The server admits a
   connection one round trip before the client has read its admission, so until the client's bridge
   sends `CoreAiClientReadyMessage` the server holds that connection's reliable remotes and
@@ -133,13 +143,22 @@ and the Player is re-created with `PlayerAdded` firing again.
   The client repeats its acknowledgement every second (`ReadyAcknowledgementRetrySeconds`) until the
   server's first clock anchor arrives, so a client admitted before the server's world attached is not
   lost to the deadline. Accepted acknowledgements are counted (`ReadyAcknowledgements`).
-- **The server's clock reaches clients as anchors.** The server sends its Unix time
+- **The server's clock reaches clients as anchors.** The server sends its time
   (`CoreAiServerClockMessage`) when a connection acknowledges readiness and every
-  `ClockAnchorIntervalSeconds` (5 s) after that (`ClockAnchorsSent`/`ClockAnchorsReceived`). The
+  `ClockAnchorIntervalSeconds` (5 s) after that (`ClockAnchorsSent`/`ClockAnchorsReceived`). The time
+  is what the server world's own `workspace:GetServerTimeNow()` reads — the world hands its clock to
+  the bridge (`INetworkBridge.AttachServerClock`) — and `HeldAheadOfWallSeconds` says how far that
+  value is held ahead of the running clock after the server's wall clock stepped back (zero while it
+  runs). When that clock starts or ends a hold, or jumps more than 1 s ahead, the server sends a
+  reliable step anchor at once (`ClockStepAnchorsSent`, also counted in `ClockAnchorsSent`). The
   client corrects each anchor by half the measured round trip and carries it forward on its own
-  process clock: the first anchor of a connection, or one more than `ClockStepThresholdSeconds` (1 s)
-  away, replaces the estimate; a nearer one is blended in; a NaN, infinite or non-positive anchor is
-  dropped and counted as malformed (`MalformedPacketsDropped`). `ServerClockOffsetSeconds` is then
+  process clock: the first anchor of a connection, a held one, or one more than
+  `ClockStepThresholdSeconds` (1 s) ahead replaces the estimate; a single anchor more than 1 s behind —
+  which a late packet is — is set aside (`ClockAnchorsSetAside`) and taken only when the next anchor
+  agrees with it; a nearer one is blended in; a NaN, infinite or non-positive anchor, or a negative or
+  non-finite hold, is dropped and counted as malformed (`MalformedPacketsDropped`). While the last
+  anchor's hold lasts, `IsServerClockHeld` is true on the client and the world's
+  `GetServerTimeNow` holds with the server's instead of running on at half speed. `ServerClockOffsetSeconds` is then
   "the server's Unix time now minus this machine's wall-clock Unix time now" — zero on a server, and
   zero on a client until the first anchor, which `IsServerClockSynchronized` tells apart from "the
   clocks agree"; at the first anchor it steps to the whole skew between the two machines. It no longer
@@ -163,6 +182,12 @@ and the Player is re-created with `PlayerAdded` firing again.
   `LastDisconnectNotice` keeps the reason after the disconnect (cleared by the next admission), so the
   game can show it. A kick at join — a ban check in `PlayerAdded` — reaches the client after its
   admission response on the same ordered channel.
+- **A world that ends a player itself ends the connection.** A host's own
+  `DisconnectActor` — outside a kick or a transport drop — is treated like a kick: the client is sent
+  a `Kicked` notice, the session is forgotten at once (its identity with the actor's last session),
+  and the transport drops the connection on a later frame's `Pump` (`WorldReleasedConnections`). Before, the connection stayed
+  authenticated to Mirror and bound to nobody, holding its slot while every packet from it was
+  dropped.
 - **A client's own kick disconnects it.** `Players.LocalPlayer:Kick()` on a client makes the client
   bridge disconnect from the server, as Roblox does (`SelfKicks`); a client has no authority over any
   other actor's connection.
@@ -187,8 +212,10 @@ default, which will not match.
 
 - **Host mode is not supported.** A server bridge installs server handlers only, and the provider
   refuses a client bridge while the server is active, so a host - server and local client in one
-  process, the most common Mirror topology - has no Mirror client of its own. Actors registered in
-  the server process are served in process (see Sessions), which is not the same as a local client.
+  process, the most common Mirror topology - has no Mirror client of its own. Mirror's host-mode local
+  client connection is refused as a world player, loudly (a log line, counted in
+  `CoreAiMirrorSessionHost.HostModeConnectionsRefused`), and left to Mirror. Actors registered in the
+  server process are served in process (see Sessions), which is not the same as a local client.
 - **A refused client never learns it was refused.** The refusal is queued and then the connection is
   dropped synchronously, which discards the unsent batch, so the client cannot tell "refused" from
   "server vanished". The refusal itself is sound: the connection is dropped and no actor is created.
@@ -198,12 +225,20 @@ default, which will not match.
   at once (a `RemoteFunction` over that is answered `BUDGET_EXCEEDED`, an event is dropped, counted
   and logged once per sender), and repeated receive warnings are logged once per sender and kind
   every 10 s; decoding and dispatch themselves are still unmetered.
-- **Server and client must run the same CoreAI version, and a mismatch fails loudly.** Adding a field
-  to the admission response already broke older peers; the readiness, clock and notice messages are
-  new too. An older server has no handler for `CoreAiClientReadyMessage`, so Mirror disconnects a newer
-  client right after admission with an error in the server log; an older client never acknowledges
-  readiness, so a newer server drops it at the readiness deadline with a log line naming the cause.
-  There is no compatibility fallback.
+- **Server and client must run the same CoreAI version.** Adding a field to the admission response
+  already broke older peers; the readiness, clock and notice messages are new too, and the clock
+  anchor gained `HeldAheadOfWallSeconds`. A missing message fails loudly — provided Mirror's
+  `exceptionsDisconnect` is on, its default: an older server has no handler for
+  `CoreAiClientReadyMessage`, so Mirror disconnects a newer client right after admission with an error
+  in the server log; an older client never acknowledges readiness, so a newer server drops it at the
+  readiness deadline with a log line naming the cause. A field added to a message is not detected: the
+  older reader throws inside Mirror's handler, which disconnects only with `exceptionsDisconnect` on
+  and otherwise logs and keeps the connection, one message lost. Nothing on the wire negotiates the
+  version, and there is no compatibility fallback.
+- **A world loaded at runtime does not hand its clock to the bridge.** The world-session staging
+  wrapper does not forward `AttachServerClock`, `DetachServerClock` or `IsServerClockHeld` to the live
+  bridge, so the anchors never follow the `GetServerTimeNow` of a world loaded through it, and that
+  world's clock hold is not reproduced on clients.
 - **Live Mirror sessions cannot be handed to a world loaded at runtime (MVP11).** Until MVP11 brings
   session handoff, `RbxWorldRuntimeSessionController` refuses a world load — at request, at
   confirmation and on a raw host load — with status `network_sessions_active` while the bridge lists

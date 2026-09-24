@@ -46,6 +46,17 @@ boundary. Functions, closures, and live references never leave a mod's own state
 function in the provider and copies back the result. Nesting is capped (`CrossModTableDepth = 4`), cross-call
 depth is capped (`MaxCrossCallDepth = 8`). See `shared_stats_provider.lua` + `shared_stats_consumer.lua`.
 
+An export runs under the caller's limits: called from a signal handler (a `Heartbeat` handler, say) it gets
+at most that handler's per-resume budget, and it stops as soon as its caller is stopped (the calling mod
+killed, for example).
+Called from a `task.*` thread, the main chunk or a `hooks_on`/`hooks_every` handler it still gets the full
+handler budget (50,000,000 steps / 10 s; tracked in `TODO.md`).
+
+Wrong arguments to these functions fail the way stock Lua reports them —
+`bad argument #1 to 'store_set' (string expected, got table)` — with no CLR type name and no doubled
+`hooks_on: hooks_on:` prefix. A number is not converted to a string for a string parameter (stock Lua would
+convert it; see `TODO.md`).
+
 ## Capability tiers — gate the GAME bindings
 The mod-core + inter-mod API above is always present. Tiers gate the **game** bindings:
 - **Read** — query only.
@@ -160,6 +171,15 @@ is frame-pumped, so `coroutine.yield` works on WebGL too (a blocking wait would 
 this needs the bundled VM at v0.5.6 or newer — older builds froze the player on the first yield).
 See `coroutine_countdown.lua`. Do NOT busy-wait; yield and resume from a timer/handler.
 
+- `coroutine.resume` works only on a coroutine your code made with `coroutine.create`. Handed a task,
+  signal-handler or main-chunk thread (a `coroutine.running()` value) it returns `false` and "cannot resume a task
+  or signal-handler thread with coroutine.resume; resume a parked task thread with task.spawn(thread, ...), passing
+  the handle task.spawn, task.defer or task.delay returned", without touching the thread: resume a parked task with
+  `task.spawn(handle)`.
+- A `coroutine.create` body is held to the memory budget of the run that resumes it — your mod's
+  `HandlerMaxAllocatedBytes` from a handler, a task or the main chunk — and what it keeps alive counts toward its
+  resumer too.
+
 ## Design rule: native/Lua boundary
 C# owns per-frame hot loops (movement, camera, physics). Lua **tweaks parameters and reacts to discrete
 events** — it does not run the hot loop. "Change a mechanic while playing" should DECLARE the change / emit a
@@ -176,7 +196,10 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   the same setting). It is enforced through Lua-CSharp's per-instruction hook, so a runaway handler
   (`while true do end`) is cut on ALL platforms incl. WebGL — a buggy mod cannot hang a frame — and the
   failure reaches you as a budget kill, `BUDGET_EXCEEDED`, naming the bound and your line, not as a Lua
-  error to "fix".
+  error to "fix". A budget kill cannot be caught: `pcall`/`xpcall` inside the run that tripped let it
+  through (the `xpcall` handler does not run), so a runaway never outlives its budget. Only code that
+  resumed a raw `coroutine.create` coroutine sees its trip, as `false` plus the line from
+  `coroutine.resume`; that coroutine is dead.
 - **A thread may run forever as long as it yields.** The per-resume budget is the only CPU limit on a
   scheduler thread (the main chunk, `task.*`, signal handlers), exactly as in Roblox: `while true do
   task.wait() end` runs for the whole session. (A lifetime step cap survives only on coroutine handles
@@ -185,6 +208,12 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   is capped by the mod's allocation budget (`HandlerMaxAllocatedBytes`, 256 MB by default); a resume
   that exceeds it is cut with `BUDGET_EXCEEDED` / `EXCEEDED_MEMORY_BUDGET` and the fix hint "keep less
   memory alive between two yields" — build big data across several yields, or keep less of it.
+- **Library calls back into Lua nest at most 200 deep per thread.** A `table.sort` comparator, a `__tostring` run by
+  `tostring`, `print` or `string.format`, a `gsub` replacement function or `__index`, a `__pairs`/`__ipairs`
+  metamethod and a coroutine run by `coroutine.resume` each open one level; the 201st raises `C stack overflow
+  (<function>: more than 200 nested calls from library functions back into Lua)`, which `pcall` catches. Plain Lua
+  recursion and the metamethods the VM runs itself (`__index` on a table access, arithmetic, comparisons, `__call`)
+  are not limited by it.
 - **String patterns are budgeted per call.** `string.find`/`match`/`gmatch`/`gsub` stop after 5,000,000
   matcher steps with `BUDGET_EXCEEDED` (`EXCEEDED_PATTERN_STEP_BUDGET`), and a `gsub` or `string.format`
   result may not exceed 1,000,000 characters. Pattern semantics are Luau's. Yielding inside a

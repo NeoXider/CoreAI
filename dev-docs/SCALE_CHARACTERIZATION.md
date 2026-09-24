@@ -155,9 +155,14 @@ with the allocation storm (bottleneck 3).
 
 ## 12. Re-run after the signal runner pool (2026-09-05)
 
-`ALLOC_SIGNALS_FINDING_2026-09-05.md` traced 99.6% of per-frame allocation to one fresh Lua thread
-per signal handler fire; handlers now run on a parked runner coroutine per mod state (details and the
-per-field reset policy in that document). Host CoreCLR, `--only N --repeats 3`, same frozen workload:
+A bisect of the harness's per-frame allocation (2026-09-05) traced 99.6% of it to the signals phase:
+one fresh Lua thread, `ThreadRecord` and coroutine handle per signal handler fire, about 5.2 KB per
+invocation, independent of how much Lua the handler ran. Handlers now run on a parked runner coroutine
+per mod state (`LuaCsRbxSignalRunner`, at most 8 idle per state; a fresh `LuaCsRbxScriptThread` wrapper
+per fire) and a record whose thread died inside the resume that started it is pooled
+(`ModScheduler`, at most 64); the per-field reset policy of a reused record is documented on
+`ModScheduler.ThreadRecord`. The open heap-slope budget is tracked in `TODO.md` ("Final QA
+verdict"). Host CoreCLR, `--only N --repeats 3`, same frozen workload:
 
 ```text
 N=20: alloc/frame 105.6 KB -> 52.5 KB (median, every repeat); median frame 0.538 -> 0.453 ms;

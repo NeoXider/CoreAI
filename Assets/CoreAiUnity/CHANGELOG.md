@@ -34,14 +34,29 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   describe a `ClientWritePolicy.Open`: it does not exist (owner decision 3); co-building is a host grant. The
   Mirror package's runtime entries moved to the `com.neoxider.coreai` changelog, next to its 7.42/7.43
   entries; this changelog keeps its tests and build legs.
+- **The budget-trip fix and the first audit round are documented.** `RBX_API.md`, `LUA_SANDBOX_SECURITY.md`,
+  `mod-authoring.md` and the roadmap say that a budget trip cannot be caught by `pcall`/`xpcall`;
+  `WORLD_PACKAGE.md` covers the 256-source mod limit, the startup selection following the live world, loads under
+  the shared gate, the manual-slot caps, `session_unavailable`, the character-by-character autosave-name check,
+  the crash-left temporary files, the WebGL read path checking only the byte size, and why a package keeps
+  non-archivable instances; `RBX_API.md` covers the `GetPropertyChangedSignal` near-miss rule and the newly
+  notifying properties, the 100-character tag rule, instance-quota refusals, sender-charged handler threads, the
+  throttled network reports and the clock hold; `mod-system.md` and `mod-authoring.md` cover the failed-build
+  rollback, the streak rule and the `mods_call` budget; the Mirror README covers the pre-admission drop, the
+  clock-hold anchors, the world-released connection, the loud host-mode refusal and the limits of the version check.
+  `RBX_API_SKILL.md` lists where the runtime has moved past the skill text. The roadmaps list
+  `ClickDetector.MouseHoverEnter`/`MouseHoverLeave` as backlog (they exist and never fire).
+  `dev-docs/ALLOC_SIGNALS_FINDING_2026-09-05.md` and `dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` were folded into
+  `TODO.md` and removed.
 
 ### Tests
 
 - **Engine-free Roblox-API tests run on Linux.** `tools/portable` gained `CoreAI.RbxApi.Datatypes`,
   `CoreAI.RbxApi.Instances` and `CoreAI.LuauDownlevel` projects (netstandard2.1, C# 9, one per asmdef), and the
   portable suite links 33 test files (388 cases at the time) covering instances, ACL, scheduler, replication,
-  networking, the Luau downleveler and datatypes; later waves added more (2105 passed / 0 failed / 3 skipped at the
-  last docs pass). `.gitignore` now keeps `tools/**/*.csproj`: the capitalised `!Tools/` exception did not
+  networking, the Luau downleveler and datatypes; later waves added more (2112 passed / 0 failed / 3 skipped at the
+  last docs pass). The engine-free test project compiles as C# 9, like Unity, instead of
+  `latest`. `.gitignore` now keeps `tools/**/*.csproj`: the capitalised `!Tools/` exception did not
   match on Linux.
 - **Lua-tier EditMode tests run on Linux too** (`tools/portable/LuaTests`, see its README). The Lua runtime, the
   bindings, the mod runtime, the one-off executor, the world-package store and the MVP acceptance fixtures that need
@@ -51,13 +66,24 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   passed. The Unity Test Framework log rule (an unexpected error log fails the test) and
   `Is.Not.AllocatingGCMemory()` are reproduced. 75 fixture files of `Assets/CoreAIMods/Tests/EditMode` plus
   `LuaModAutoRepairPolicyEditModeTests` are linked; 31 are excluded with a reason. Result at the last docs pass:
-  1437 passed / 0 failed / 2 skipped, the engine-bound cases Inconclusive by design. The first run found two real
+  1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_ENGINE_UNAVAILABLE`, 3 ignored in a
+  `OneTimeSetUp`, 2 skipped; the README lists them by fixture). The first run found two real
   runtime bugs (the `pcall` stack-trace leak and a solo `GetServerTimeNow` drift, both fixed) and two
   platform-dependent tests (an ICU culture-sensitive tag search and a Lua `tostring` of a non-exact double, made
   platform-independent).
 - **CI job `portable-lua`** runs that suite on every push and fails when fewer than 1,400 cases pass, because an
   Inconclusive result does not fail `dotnet test` and a broken link list could otherwise go green having run
-  almost nothing.
+  almost nothing, and when more than 42 cases are not executed (Inconclusive, ignored or skipped in the TRX log), so
+  a growing pile of engine-bound refusals cannot hide either.
+- **The portable runner no longer passes a test whose setup reached the engine.** A refusal of an engine member
+  recorded in a fixture constructor, a `OneTimeSetUp`, a `SetUpFixture` or a `TestCaseSource` used to be discarded
+  before the next test began, so a test built on that state could pass; it now makes every dependent test
+  Inconclusive (a `TestCaseSource` refusal charges the whole run). `PortableRunnerSelfTests` run witness fixtures in
+  a nested NUnit run and pin these rules, the Unity Test Framework log rule and `Is.Not.AllocatingGCMemory()`, so a
+  regression in the runner fails an ordinary test. The shim's `Vector3.normalized` returns zero at or below Unity's
+  `kEpsilon` (1e-5) instead of `kEpsilonNormalSqrt`. Narrative comments in three test files became `// WHY:`.
+- **G10 without `COREAI_LLM`.** `RealProviderWithoutLlmModule_RefusesInsteadOfMeasuringAStub` (`#if !COREAI_LLM`,
+  so it runs in the `core` and `lua` legs) pins that `RealProvider` mode refuses instead of measuring a stub.
 - **Engine-bound tests moved out of the linked fixtures, verbatim.** The production-container tests of
   `RbxApiLuaBindingsEditModeTests` now live in `RbxApiLuaBindingsProductionContainerEditModeTests`
   (`CoreAiModsLifetimeScopeNoNetworkBridgeEditModeTests.cs`); the binder-bound tests of it,
@@ -70,8 +96,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   fixtures (`Mvp3WorldPackageEditModeTests`, `Mvp3WorldPackageFollowUpEditModeTests`,
   `RbxWorldHostDiWiringEditModeTests`, `CoreAiModsHubBinderFullTierEditModeTests`), the Mirror suites (53 new tests,
   then 32 more for the readiness handshake, the clock anchors, the kick and supersede notices and the kick message;
-  compiled against the Mirror v96.0.1 sources), the disconnect, task-handle, coroutine, `ClickDetector`, clock and
-  error-line fixtures, and a PlayMode check that a character above a `CanCollide = false` part does not stand on it.
+  compiled against the Mirror v96.0.1 sources, and 13 more for the first audit round's multiplayer fixes), the
+  disconnect, task-handle, coroutine, `ClickDetector`, clock and error-line fixtures, the budget-trip fixtures
+  (`LuaCsGuardFrameAndAllocationEditModeTests`, `LuaCsSecureSandboxEditModeTests`), the first audit round's world
+  package, instance, runtime and network fixtures, and a PlayMode check that a character above a
+  `CanCollide = false` part does not stand on it.
   None of the new EditMode and PlayMode fixtures has run in Unity yet; the Lua-tier ones that the portable runner
   links have run on Linux.
 
