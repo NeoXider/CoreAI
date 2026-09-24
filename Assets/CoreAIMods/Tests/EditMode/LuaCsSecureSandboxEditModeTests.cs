@@ -724,6 +724,8 @@ namespace CoreAI.Tests.EditMode
             StringAssert.DoesNotContain("/Assets/", text, "no source path may leak: " + text);
             StringAssert.DoesNotContain(":\\", text, "no Windows source path may leak: " + text);
             StringAssert.DoesNotContain("\n", text, "the error must stay one line: " + text);
+            StringAssert.DoesNotContain("System.", text, "no CLR type name may leak: " + text);
+            StringAssert.DoesNotContain("LuaValueType", text, "no Lua-CSharp value type name may leak: " + text);
         }
 
         [Test]

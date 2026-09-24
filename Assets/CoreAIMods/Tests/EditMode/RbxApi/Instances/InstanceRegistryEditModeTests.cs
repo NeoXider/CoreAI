@@ -642,6 +642,65 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         }
 
         /// <summary>
+        /// WHY (A3-05): a quota refusal reached the script as a plain InvalidOperationException with no
+        /// code a repair loop could classify and no fix. A check that answers with a §5.2.7 line fails
+        /// the creation with that coded error, led by what was being created; plain text is unchanged.
+        /// </summary>
+        [Test]
+        public void RegistrationAdmission_ACodedRefusal_FailsWithThatRbxError_LedByTheRefusedCreation()
+        {
+            InstanceRegistry registry = new();
+            CodedRefusalAdmission admission = new(RbxError.Format(RbxErrorCode.BudgetExceeded,
+                "actor 'a' is over its quota", "destroy something first", null, null, 0));
+            registry.AddRegistrationAdmission(admission);
+            List<InstanceRecord> registered = new();
+            registry.Registered += record => registered.Add(record);
+
+            foreach ((TestDelegate create, string created) in new (TestDelegate, string)[]
+                     {
+                         (() => registry.CreateScripted("Folder"), "Instance.new(\"Folder\")"),
+                         (() => registry.Create("Part"), "creating Part"),
+                         (() => registry.Create("Part", operation: "Part:Clone()"), "Part:Clone()"),
+                         (() => registry.RestoreInstance("Folder", new InstanceId(700UL)), "restoring Folder")
+                     })
+            {
+                RbxError refusal = Assert.Throws<RbxError>(create, created);
+                Assert.AreEqual(RbxErrorCode.BudgetExceeded, refusal.Code);
+                Assert.AreEqual(created + ": actor 'a' is over its quota", refusal.RawMessage);
+                Assert.AreEqual("destroy something first", refusal.Fix);
+                Assert.IsNull(refusal.ModId, "the mod context is attached at the Lua boundary, not here");
+            }
+
+            Assert.AreEqual(4, admission.Refusals, "every creation path asked the check");
+            Assert.IsEmpty(registered, "a refused record is never announced");
+            Assert.AreEqual(0, registry.Count, "a refused record is never added");
+        }
+
+        /// <summary>An admission check that refuses every record with one fixed answer.</summary>
+        private sealed class CodedRefusalAdmission : IInstanceRegistrationAdmission
+        {
+            private readonly string _refusal;
+
+            public CodedRefusalAdmission(string refusal)
+            {
+                _refusal = refusal;
+            }
+
+            public int Refusals { get; private set; }
+
+            public string Admit(InstanceRecord record)
+            {
+                Refusals++;
+                return _refusal;
+            }
+
+            public void Revoke(InstanceRecord record)
+            {
+                Assert.Fail("a check that refused is never revoked");
+            }
+        }
+
+        /// <summary>
         /// An admission check that logs every call into a shared list, refuses one class, and can
         /// throw instead of answering.
         /// </summary>

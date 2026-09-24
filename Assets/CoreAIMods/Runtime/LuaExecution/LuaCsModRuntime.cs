@@ -52,9 +52,10 @@ namespace CoreAI.Ai.LuaCs
     /// per-call instruction/time guard (<see cref="LuaCsExecutionGuard"/>).
     ///
     /// ERROR POLICY — QUARANTINE, NOT UNLOAD: a mod failing <see cref="MaxErrorsBeforeQuarantine"/>
-    /// times in a row (a failed hook/timer call counts once and a successful one resets the streak; for
-    /// scheduler threads a frame with any fault counts once and a frame whose threads ran cleanly resets
-    /// it) is QUARANTINED at the end of a <see cref="Tick"/>: it stops dispatching
+    /// times in a row (a failed hook/timer call counts once and a successful one resets the streak unless
+    /// a scheduler fault was charged in the same frame; for scheduler threads a frame with any fault
+    /// counts once and a frame whose threads ran cleanly resets it) is QUARANTINED at the end of a
+    /// <see cref="Tick"/>: it stops dispatching
     /// (handlers, timers, and queued events are all skipped and its logic-slot overrides revert to
     /// vanilla) but it STAYS loaded and fully addressable — <c>manage_mods list/get_source/diagnostics</c>
     /// keep seeing it and <see cref="ReloadMod"/> works normally, clearing the quarantine and the error
@@ -313,6 +314,9 @@ namespace CoreAI.Ai.LuaCs
             new(StringComparer.Ordinal);
         private bool _releasingActorMods;
         private int _guardedCallDepth;
+        private IScriptExecutionGuard _signalHandlerExportGuard;
+        private int _signalHandlerExportTimeoutMs;
+        private long _signalHandlerExportMaxSteps;
 
         private int _registeredInstanceCount;
         private bool _hostFaultOverflowLogged;
@@ -358,8 +362,9 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Raised when a loaded mod's hook/timer throws while running under <see cref="Tick"/>, or one of
         /// its scheduler threads faults: (modId, error, consecutiveErrorCount). Fired asynchronously on the
-        /// host thread; the count resets to zero after any successful call (for scheduler threads, after a
-        /// frame that ran cleanly), so a host can debounce an auto-repair loop on the streak length.
+        /// host thread; the count resets to zero after a successful hook/timer call in a frame without a
+        /// scheduler fault (for scheduler threads, after a frame that ran cleanly), so a host can debounce
+        /// an auto-repair loop on the streak length.
         /// </summary>
         internal event Action<string, string, int> ModHandlerErrored;
 
@@ -397,9 +402,10 @@ namespace CoreAI.Ai.LuaCs
         public int MaxEventSubscriptionsPerActor { get; }
 
         /// <summary>
-        /// Consecutive-error streak (reset by any successful call) at which a mod is quarantined. Scheduler
-        /// threads count per frame: a frame with any fault adds one, and a frame whose threads only ran
-        /// cleanly resets the streak.
+        /// Consecutive-error streak (reset by a successful hook/timer call) at which a mod is quarantined.
+        /// Scheduler threads count per frame: a frame with any fault adds one, a frame whose threads only
+        /// ran cleanly resets the streak, and a successful hook/timer call does not forgive a frame whose
+        /// scheduler fault was already charged.
         /// Quarantine suspends dispatch (handlers, timers, queued events) and reverts the mod's
         /// logic-slot overrides to vanilla, but the mod stays loaded; <see cref="ReloadMod"/> clears
         /// both the quarantine and the streak.
@@ -1221,11 +1227,12 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// The registry admission body (<see cref="InstanceQuotaAdmission"/>): charges
-        /// <paramref name="record"/> to its quota actor and returns null, or returns the refusal text and
+        /// <paramref name="record"/> to its quota actor and returns null, or returns the refusal and
         /// charges nothing when the runtime's emergency ceiling or the actor's quota is full. The
-        /// registry then throws that text as an <see cref="InvalidOperationException"/> before the
-        /// record is added or announced. Runtime infrastructure is admitted uncharged, and a record
-        /// already charged is not charged twice.
+        /// refusal is a <see cref="RbxErrorCode.BudgetExceeded"/> §5.2.7 line, which the registry
+        /// raises as that <see cref="RbxError"/>, led by the creation it refused, before the record is
+        /// added or announced. Runtime infrastructure is admitted uncharged, and a record already
+        /// charged is not charged twice.
         /// </summary>
         private string ChargeRegisteredInstance(InstanceRecord record)
         {
@@ -1247,14 +1254,23 @@ namespace CoreAI.Ai.LuaCs
                 _registeredInstancesByActor.TryGetValue(actorId, out int actorCount);
                 if (_registeredInstanceCount >= EmergencyRegisteredInstanceCeiling)
                 {
-                    return $"Instance.new: actor '{actorId}' cannot register instance '{record.Id.Value}': "
-                        + $"emergency registered instances ceiling reached ({EmergencyRegisteredInstanceCeiling}).";
+                    return RbxError.Format(
+                        RbxErrorCode.BudgetExceeded,
+                        $"actor '{actorId}' cannot register instance '{record.Id.Value}': "
+                        + $"emergency registered instances ceiling reached ({EmergencyRegisteredInstanceCeiling})",
+                        "destroy instances you no longer need with Instance:Destroy(); this ceiling is shared "
+                        + "by every actor in the world",
+                        null, null, 0);
                 }
 
                 if (actorCount >= MaxRegisteredInstancesPerActor)
                 {
-                    return $"Instance.new: actor '{actorId}' cannot register instance '{record.Id.Value}': "
-                        + $"registered instances quota reached (limit {MaxRegisteredInstancesPerActor}).";
+                    return RbxError.Format(
+                        RbxErrorCode.BudgetExceeded,
+                        $"actor '{actorId}' cannot register instance '{record.Id.Value}': "
+                        + $"registered instances quota reached (limit {MaxRegisteredInstancesPerActor})",
+                        "destroy instances you no longer need with Instance:Destroy() before creating more",
+                        null, null, 0);
                 }
 
                 _quotaActorByInstanceId.Add(record.Id, actorId);
@@ -1372,7 +1388,9 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Creates the sandboxed state with capability-scoped gameplay bindings plus mod-core APIs and
         /// runs the chunk (hook registration happens there). Errors propagate to the caller and the mod
-        /// is never added, so a failed build leaves no handlers behind.
+        /// is never added, so a failed build leaves no handlers behind; the logic-slot formulas its chunk
+        /// defined or reset are put back as they were, and a failed first load drops the quota
+        /// attribution it recorded.
         /// </summary>
         private Mod BuildMod(
             string modId,
@@ -1391,6 +1409,7 @@ namespace CoreAI.Ai.LuaCs
                 LoadedAtUtc = DateTime.UtcNow
             };
             LuaCsRbxApiBindings.ModLoadCandidate rbxLoadCandidate = null;
+            LuaCsLogicSlots.OverrideSnapshot slotsBeforeBuild = CaptureLogicSlots(modId);
             EnterModBuild(modId);
 
             try
@@ -1464,6 +1483,9 @@ namespace CoreAI.Ai.LuaCs
                         _log?.Error($"[LuaCsModRuntime] Failed-load rollback for '{modId}' failed: {rollbackException}");
                     }
                 }
+
+                RestoreLogicSlotsAfterFailedBuild(slotsBeforeBuild, modId, mod.State);
+                DropUnusedQuotaAttribution(modId, 1);
 
                 // WHY: A failed load/parse never reaches the tick-time error channel, yet it is the
                 // self-repair loop's most important signal — record it before rethrowing so get_mod_logs
@@ -1548,6 +1570,99 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
+        /// Captures the installed logic-slot formulas before a build of <paramref name="modId"/>; null
+        /// without a slot surface or when the surface cannot be read.
+        /// </summary>
+        private LuaCsLogicSlots.OverrideSnapshot CaptureLogicSlots(string modId)
+        {
+            if (_logicSlots == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return _logicSlots.CaptureOverrides();
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Capturing logic-slot overrides before building '{modId}' failed: {ex}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Puts the logic-slot formulas back as they were before a failed build of
+        /// <paramref name="modId"/> (<see cref="LuaCsLogicSlots.RestoreAfterFailedBuild"/>). Best-effort:
+        /// a failing slot surface must not replace the load error.
+        /// </summary>
+        private void RestoreLogicSlotsAfterFailedBuild(LuaCsLogicSlots.OverrideSnapshot snapshot,
+            string modId, IScriptState candidateState)
+        {
+            if (snapshot == null)
+            {
+                return;
+            }
+
+            try
+            {
+                int restored = snapshot.Owner.RestoreAfterFailedBuild(
+                    snapshot, modId, candidateState, IsLogicSlotOwnerLive);
+                if (restored > 0)
+                {
+                    _log?.Info(
+                        $"[LuaCsModRuntime] Put back {restored} logic-slot override(s) the failed build of mod '{modId}' changed.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Restoring logic-slot overrides after the failed build of '{modId}' failed: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// True when a logic-slot formula of <paramref name="ownerModId"/> may be installed again: its
+        /// mod is loaded and not quarantined (an ownerless formula always may).
+        /// </summary>
+        private bool IsLogicSlotOwnerLive(string ownerModId)
+        {
+            string modId = Normalize(ownerModId);
+            if (modId.Length == 0)
+            {
+                return true;
+            }
+
+            lock (_gate)
+            {
+                return _mods.TryGetValue(modId, out Mod mod) && !mod.Quarantined && !mod.Removed;
+            }
+        }
+
+        /// <summary>
+        /// Drops the quota attribution of <paramref name="modId"/> once no loaded instance and no build
+        /// other than the caller's own <paramref name="callerBuilds"/> still charges to it.
+        /// </summary>
+        /// <remarks>
+        /// WHY: every load records the actor its mod id is charged to before its chunk runs, and nothing
+        /// removed the record, so the map grew by one entry for every mod id ever attempted (A2-11).
+        /// WHY only then: a loaded instance and a build in flight of the same id resolve their
+        /// scheduler threads and instances through this record.
+        /// </remarks>
+        private void DropUnusedQuotaAttribution(string modId, int callerBuilds)
+        {
+            lock (_gate)
+            {
+                if (_mods.ContainsKey(modId)
+                    || _buildDepthByModId.TryGetValue(modId, out int builds) && builds > callerBuilds)
+                {
+                    return;
+                }
+
+                _quotaActorByOwnerModId.Remove(modId);
+            }
+        }
+
+        /// <summary>
         /// SEAM — <c>// TODO(migration): connect ported world/unity gameplay bindings here.</c>
         /// The MoonSharp runtime registers ~36 capability-scoped world/unity APIs via
         /// <c>IGameLuaRuntimeBindings.RegisterGameplayApis(LuaApiRegistry)</c> (optionally scoped by
@@ -1621,6 +1736,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             TeardownModEffects(modId, LuaModTeardownReason.Unload);
+            DropUnusedQuotaAttribution(modId, 0);
             _log?.Info(disconnectedActorId == null
                 ? $"[LuaCsModRuntime] Mod '{modId}' unloaded."
                 : $"[LuaCsModRuntime] Mod '{modId}' unloaded: its actor '{disconnectedActorId}' disconnected; its stored package, if any, is left as it was.");
@@ -2621,7 +2737,15 @@ namespace CoreAI.Ai.LuaCs
                         });
                 }
 
-                mod.ErrorCount = 0;
+                // WHY not after a scheduler fault of the same frame: that fault is counted once per
+                // frame and only a clean frame forgives it (CloseModFrame). Reset here, it was erased
+                // by any healthy hook or timer, so a Heartbeat handler that failed in every frame was
+                // never quarantined while its mod also ran a timer (A2-06). A mod with no scheduler
+                // fault in the frame keeps the per-call rule: a successful call resets the streak.
+                if (!mod.SchedulerFaultChargedThisFrame)
+                {
+                    mod.ErrorCount = 0;
+                }
             }
             catch (Exception ex)
             {
@@ -3089,6 +3213,11 @@ namespace CoreAI.Ai.LuaCs
                         _marshaller.ToPortable(call.GetArgument(i + 2), CrossModTableDepth));
                 }
 
+                // WHY the caller's token: every host function that calls back into mod code passes on the
+                // token it was called with (see LuaCsCoroutineHandle.ForeignContextTrip). With None, a
+                // kill of the calling thread left the export running to the end of its own budget.
+                CancellationToken callerToken = CallerToken(call);
+                IScriptExecutionGuard exportGuard = ResolveExportGuard();
                 _crossCallDepth++;
 
                 // WHY: The callee runs on a DIFFERENT state but shares this runtime's single world binding
@@ -3102,8 +3231,8 @@ namespace CoreAI.Ai.LuaCs
                     object[] results;
                     if (_rbxApi == null)
                     {
-                        results = _handlerGuard.Invoke(
-                            target.State, export, CancellationToken.None, marshalled);
+                        results = exportGuard.Invoke(
+                            target.State, export, callerToken, marshalled);
                     }
                     else
                     {
@@ -3114,8 +3243,8 @@ namespace CoreAI.Ai.LuaCs
                             targetActor.Grants.IsUnrestricted,
                             targetActor.WorldId,
                             "invoke export owned by mod '" + target.Id + "'",
-                            () => _handlerGuard.Invoke(
-                                target.State, export, CancellationToken.None, marshalled));
+                            () => exportGuard.Invoke(
+                                target.State, export, callerToken, marshalled));
                     }
 
                     object first = results.Length > 0 ? results[0] : null;
@@ -3234,6 +3363,66 @@ namespace CoreAI.Ai.LuaCs
         private static object ReadFunction(ScriptCallContext call, int index)
         {
             return call.GetKind(index) == ScriptValueKind.Function ? call.GetArgument(index) : null;
+        }
+
+        /// <summary>
+        /// The token the VM called a host function with; <see cref="CancellationToken.None"/> for an
+        /// engine whose call context does not carry one.
+        /// </summary>
+        private static CancellationToken CallerToken(ScriptCallContext call)
+        {
+            return call is LuaCsScriptCallContext luaCall ? luaCall.CancellationToken : CancellationToken.None;
+        }
+
+        /// <summary>
+        /// The guard a <c>mods_call</c> export runs under: the handler guard, capped at the per-resume
+        /// budget of a signal handler that calls it.
+        /// </summary>
+        /// <remarks>
+        /// WHY capped: the export used to get the whole handler budget (50,000,000 steps, 10 s) whatever
+        /// called it, so a Heartbeat handler held to its per-resume budget ran for seconds through one
+        /// call of its own export and stalled the frame (A2-10). The handler's own hook checks its wall
+        /// clock at its first instruction after the export returns, so a resume now overruns its
+        /// wall-clock budget by at most one more budget.
+        /// WHY only a signal handler: a pooled signal runner always runs under the composition's live
+        /// per-resume budget, so its budget is known here. The remaining budget of any other caller is
+        /// not: a task.spawn/defer/delay thread and a mod's main-chunk thread look the same from this
+        /// side, though the main chunk resumes under the handler budget and a task thread under the
+        /// per-resume one; when a resume started lives in the coroutine handle's private hook; and a
+        /// hook or timer call's guard does not expose the steps it has used. Their exports keep the
+        /// handler budget.
+        /// TODO: cap every export at its caller's remaining budget once the running guard exposes it
+        /// (LuaCsCoroutineHandle / LuaCsExecutionGuard) (A2-10).
+        /// </remarks>
+        private IScriptExecutionGuard ResolveExportGuard()
+        {
+            if (_rbxApi == null
+                || !(_rbxApi.SchedulerThreadFactory.CurrentThread is LuaCsRbxScriptThread { IsSignalRunner: true }))
+            {
+                return _handlerGuard;
+            }
+
+            LuaCsCoroutineBudgetSettings resumeBudget = _rbxApi.CoroutineResumeBudget;
+            int timeoutMs = Math.Min(_scriptExecutionBudget.TimeoutMs, resumeBudget.ResumeTimeoutMs);
+            long maxSteps = Math.Min(_scriptExecutionBudget.MaxSteps, resumeBudget.BudgetPerResume);
+            if (timeoutMs == _scriptExecutionBudget.TimeoutMs && maxSteps == _scriptExecutionBudget.MaxSteps)
+            {
+                return _handlerGuard;
+            }
+
+            // WHY cached by value: ScriptContext:SetTimeout changes the live budget, and a guard per call
+            // would put two allocations on every export call of every signal handler.
+            if (_signalHandlerExportGuard == null
+                || _signalHandlerExportTimeoutMs != timeoutMs
+                || _signalHandlerExportMaxSteps != maxSteps)
+            {
+                _signalHandlerExportGuard = _engine.CreateGuard(new ExecutionBudget(
+                    timeoutMs, maxSteps, _scriptExecutionBudget.MaxAllocatedBytes));
+                _signalHandlerExportTimeoutMs = timeoutMs;
+                _signalHandlerExportMaxSteps = maxSteps;
+            }
+
+            return _signalHandlerExportGuard;
         }
 
         private void EmitFromMod(Mod sender, string evt, string payload)

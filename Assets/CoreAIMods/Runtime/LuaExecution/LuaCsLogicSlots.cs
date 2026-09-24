@@ -40,13 +40,32 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Instruction budget for a single slot invocation.</summary>
         public const long DefaultInvokeMaxSteps = 200_000;
 
-        private sealed class OverrideEntry
+        internal sealed class OverrideEntry
         {
             public object Fn;
             public IScriptState State;
 
             /// <summary>Id of the mod whose registry defined this override; null/empty for ownerless surfaces.</summary>
             public string OwnerModId;
+        }
+
+        /// <summary>
+        /// The overrides installed when a mod chunk's build started (<see cref="CaptureOverrides"/>), so a
+        /// build that fails can put back what its chunk changed (<see cref="RestoreAfterFailedBuild"/>).
+        /// </summary>
+        internal sealed class OverrideSnapshot
+        {
+            internal OverrideSnapshot(LuaCsLogicSlots owner, Dictionary<string, OverrideEntry> entries)
+            {
+                Owner = owner;
+                Entries = entries;
+            }
+
+            /// <summary>The surface the snapshot was taken from, which alone may restore it.</summary>
+            internal LuaCsLogicSlots Owner { get; }
+
+            /// <summary>Slot name to the override installed at capture time.</summary>
+            internal Dictionary<string, OverrideEntry> Entries { get; }
         }
 
         private readonly object _gate = new();
@@ -333,6 +352,113 @@ namespace CoreAI.Ai.LuaCs
             }
 
             return removed.Count;
+        }
+
+        /// <summary>
+        /// Captures the installed overrides before a mod chunk is built, for
+        /// <see cref="RestoreAfterFailedBuild"/>.
+        /// </summary>
+        internal OverrideSnapshot CaptureOverrides()
+        {
+            LuaCsLogicSlots target = ActiveTarget;
+            if (target != null)
+            {
+                return target.CaptureOverrides();
+            }
+
+            lock (_gate)
+            {
+                return new OverrideSnapshot(
+                    this, new Dictionary<string, OverrideEntry>(_overrides, StringComparer.Ordinal));
+            }
+        }
+
+        /// <summary>
+        /// Undoes what the chunk of a failed build of <paramref name="modId"/> did to the overrides since
+        /// <paramref name="snapshot"/>: a formula the candidate state (<paramref name="candidateState"/>)
+        /// defined is removed, and a formula it replaced or reset is put back while
+        /// <paramref name="isOwnerLive"/> still reports its owning mod loaded (ownerless formulas always
+        /// are). Changes made by any other code during the build are left alone. Returns the number of
+        /// slots changed.
+        /// </summary>
+        /// <remarks>
+        /// WHY a failed build needs this at all: <c>logic_define</c> installs its formula at once,
+        /// while the chunk is still running, so a chunk that failed after it left a mod that never
+        /// loaded answering the game's formula calls, and a failed reload replaced the formulas of the
+        /// mod it promised to leave untouched (A2-04).
+        /// WHY a formula that vanished since the capture is put back only when it belonged to the
+        /// candidate's own mod id: <c>logic_reset</c> records no caller, and a reload chunk resetting its
+        /// own mod's formulas is the change a failed reload must undo. Another mod's formula that vanished
+        /// during the build was reset by that mod's code or its unload, and stays removed.
+        /// </remarks>
+        internal int RestoreAfterFailedBuild(OverrideSnapshot snapshot, string modId,
+            IScriptState candidateState, Func<string, bool> isOwnerLive)
+        {
+            if (snapshot == null)
+            {
+                return 0;
+            }
+
+            if (!ReferenceEquals(snapshot.Owner, this))
+            {
+                return snapshot.Owner.RestoreAfterFailedBuild(snapshot, modId, candidateState, isOwnerLive);
+            }
+
+            string owner = Normalize(modId);
+            if (owner.Length == 0 || candidateState == null)
+            {
+                return 0;
+            }
+
+            // WHY decided before taking the gate: the callback reads the runtime's own lock, and the
+            // runtime calls into this surface without holding it; asking it under this gate would nest
+            // the two locks in the opposite order.
+            Dictionary<string, bool> ownerLive = new(StringComparer.Ordinal);
+            foreach (OverrideEntry before in snapshot.Entries.Values)
+            {
+                string beforeOwner = before.OwnerModId ?? "";
+                if (!ownerLive.ContainsKey(beforeOwner))
+                {
+                    ownerLive[beforeOwner] = beforeOwner.Length == 0 || isOwnerLive == null
+                                             || isOwnerLive(beforeOwner);
+                }
+            }
+
+            int changed = 0;
+            lock (_gate)
+            {
+                HashSet<string> slots = new(snapshot.Entries.Keys, StringComparer.Ordinal);
+                slots.UnionWith(_overrides.Keys);
+                foreach (string slot in slots)
+                {
+                    _overrides.TryGetValue(slot, out OverrideEntry current);
+                    snapshot.Entries.TryGetValue(slot, out OverrideEntry before);
+                    bool definedByCandidate = current != null
+                                              && !ReferenceEquals(current, before)
+                                              && string.Equals(current.OwnerModId, owner, StringComparison.Ordinal)
+                                              && SameUnderlyingState(current.State, candidateState);
+                    bool ownFormulaRemoved = current == null
+                                             && before != null
+                                             && string.Equals(before.OwnerModId, owner, StringComparison.Ordinal);
+                    if (!definedByCandidate && !ownFormulaRemoved)
+                    {
+                        continue;
+                    }
+
+                    if (before != null && ownerLive[before.OwnerModId ?? ""])
+                    {
+                        _overrides[slot] = before;
+                        changed++;
+                    }
+                    else if (current != null)
+                    {
+                        _overrides.Remove(slot);
+                        changed++;
+                    }
+                }
+            }
+
+            return changed;
         }
 
         /// <summary>

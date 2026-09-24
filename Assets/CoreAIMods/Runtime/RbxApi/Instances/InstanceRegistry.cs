@@ -24,6 +24,10 @@ namespace CoreAI.Mods.Rbx.Instances
         /// Returns null to admit <paramref name="record"/> (reserving whatever the check accounts for),
         /// or the refusal text the creation fails with. The record is complete but not yet reachable
         /// through the registry. An implementation must not create or destroy instances.
+        /// A refusal written as a §5.2.7 line (<see cref="RbxError.Format"/>) fails the creation with
+        /// that coded <see cref="RbxError"/>, its message led by the creation that was refused (for
+        /// example <c>Instance.new("Part")</c>); any other text fails it with an
+        /// <see cref="InvalidOperationException"/> carrying exactly that text.
         /// </summary>
         string Admit(InstanceRecord record);
 
@@ -991,13 +995,18 @@ namespace CoreAI.Mods.Rbx.Instances
         /// Instance.new goes through <see cref="CreateScripted"/> which additionally enforces
         /// the creatable flag.
         /// </summary>
+        /// <param name="operation">
+        /// The script-level call this creation serves (for example <c>Part:Clone()</c>), which leads a
+        /// coded admission refusal; null reads as "creating ClassName".
+        /// </param>
         public RbxInstance Create(string className, string ownerModId = null, string originTag = null,
             InstanceIdAuthority authority = InstanceIdAuthority.Server, string ownerActorId = null,
-            InstanceAccessScope? accessScope = null, bool isRuntimeInfrastructure = false)
+            InstanceAccessScope? accessScope = null, bool isRuntimeInfrastructure = false,
+            string operation = null)
         {
             ClassDescriptor descriptor = ResolveConcrete(className);
             return RegisterNew(Instantiate(descriptor), Allocator.Next(ResolveIdAuthority(authority)), ownerModId, originTag,
-                ownerActorId, accessScope, isRuntimeInfrastructure);
+                ownerActorId, accessScope, isRuntimeInfrastructure, CreationPath.Host, operation);
         }
 
         /// <summary>Roblox Instance.new semantics: unknown/abstract/non-creatable class names
@@ -1035,7 +1044,7 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             return RegisterNew(Instantiate(descriptor), Allocator.Next(ResolveIdAuthority(authority)), ownerModId, originTag,
-                ownerActorId, accessScope, false);
+                ownerActorId, accessScope, false, CreationPath.Scripted, null);
         }
 
         /// <summary>
@@ -1061,7 +1070,7 @@ namespace CoreAI.Mods.Rbx.Instances
             ClassDescriptor descriptor = ResolveConcrete(className);
             Allocator.EnsureNotBelow(id);
             return RegisterNew(Instantiate(descriptor), id, ownerModId, originTag, ownerActorId,
-                accessScope, false);
+                accessScope, false, CreationPath.Restore, null);
         }
 
         private ClassDescriptor ResolveConcrete(string className)
@@ -1097,9 +1106,17 @@ namespace CoreAI.Mods.Rbx.Instances
             return Authority == RegistryAuthority.Replica ? InstanceIdAuthority.Local : requested;
         }
 
+        /// <summary>Which public creation entry point a registration came through.</summary>
+        private enum CreationPath
+        {
+            Host,
+            Scripted,
+            Restore
+        }
+
         private RbxInstance RegisterNew(RbxInstance instance, InstanceId id, string ownerModId,
             string originTag, string ownerActorId, InstanceAccessScope? accessScope,
-            bool isRuntimeInfrastructure)
+            bool isRuntimeInfrastructure, CreationPath path, string operation)
         {
             if (!OriginTag.IsValid(originTag))
             {
@@ -1130,7 +1147,7 @@ namespace CoreAI.Mods.Rbx.Instances
             string refusal = AdmitRegistration(record);
             if (refusal != null)
             {
-                throw new InvalidOperationException(refusal);
+                throw RegistrationRefused(refusal, path, operation, instance.ClassName);
             }
 
             _byId.Add(id, record);
@@ -1141,6 +1158,47 @@ namespace CoreAI.Mods.Rbx.Instances
 
             Registered?.Invoke(record);
             return instance;
+        }
+
+        /// <summary>
+        /// The exception a refused registration fails with. A refusal written as a §5.2.7 line
+        /// (<see cref="RbxError.Format"/>) becomes that coded <see cref="RbxError"/>, its message led by the
+        /// creation that was refused; any other refusal text stays the <see cref="InvalidOperationException"/>
+        /// it has always been, unwrapped.
+        /// </summary>
+        /// <remarks>
+        /// WHY the registry names the creation and not the check: a check sees only the record, and the
+        /// same record comes from Instance.new, a Clone or a tween. A quota refusal that always said
+        /// "Instance.new" sent the reader hunting an Instance.new call that was never made.
+        /// </remarks>
+        private static Exception RegistrationRefused(string refusal, CreationPath path, string operation,
+            string className)
+        {
+            if (!RbxError.TryParse(refusal, out RbxError coded))
+            {
+                return new InvalidOperationException(refusal);
+            }
+
+            string creation;
+            if (!string.IsNullOrWhiteSpace(operation))
+            {
+                creation = operation;
+            }
+            else if (path == CreationPath.Scripted)
+            {
+                creation = "Instance.new(\"" + className + "\")";
+            }
+            else if (path == CreationPath.Restore)
+            {
+                creation = "restoring " + className;
+            }
+            else
+            {
+                creation = "creating " + className;
+            }
+
+            return new RbxError(coded.Code, creation + ": " + coded.RawMessage, coded.Fix,
+                coded.ModId, coded.Script, coded.Line);
         }
 
         /// <summary>

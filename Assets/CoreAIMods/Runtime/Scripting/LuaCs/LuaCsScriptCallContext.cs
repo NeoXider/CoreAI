@@ -1,3 +1,5 @@
+using System.Threading;
+using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using Lua;
 
@@ -6,17 +8,27 @@ namespace CoreAI.Scripting.LuaCs
     /// <summary>
     /// Lua-CSharp adapter for <see cref="ScriptCallContext"/> wrapping one
     /// <see cref="LuaFunctionExecutionContext"/>. Typed accessors mirror the typed-delegate coercion:
-    /// nil/absent maps to null/0/false; wrong non-nil kinds surface the engine's own cast error.
+    /// nil/absent maps to null/0/false; a wrong non-nil kind raises Lua's own
+    /// "bad argument #n (x expected, got y)" error (<see cref="LuaCsBadArgumentException"/>), never the
+    /// engine's CLR conversion text.
     /// </summary>
     internal sealed class LuaCsScriptCallContext : ScriptCallContext
     {
         private readonly LuaFunctionExecutionContext _ctx;
         private LuaCsScriptState _state;
 
-        internal LuaCsScriptCallContext(LuaFunctionExecutionContext ctx)
+        internal LuaCsScriptCallContext(LuaFunctionExecutionContext ctx, CancellationToken cancellationToken)
         {
             _ctx = ctx;
+            CancellationToken = cancellationToken;
         }
+
+        /// <summary>
+        /// The token the VM called this host function with: the running context's own, which a guard
+        /// trip or a kill of the calling thread cancels. A host function that runs mod code on behalf
+        /// of its caller passes it on.
+        /// </summary>
+        internal CancellationToken CancellationToken { get; }
 
         /// <inheritdoc />
         public override IScriptState State => _state ??= new LuaCsScriptState(_ctx.State);
@@ -43,28 +55,56 @@ namespace CoreAI.Scripting.LuaCs
         public override string GetString(int index)
         {
             LuaValue value = Raw(index);
-            return value.Type == LuaValueType.Nil ? null : value.Read<string>();
+            if (value.Type == LuaValueType.Nil)
+            {
+                return null;
+            }
+
+            return value.TryRead(out string text)
+                ? text
+                : throw LuaCsBadArgumentException.TypeMismatch(index + 1, "string", value);
         }
 
         /// <inheritdoc />
         public override double GetNumber(int index)
         {
             LuaValue value = Raw(index);
-            return value.Type == LuaValueType.Nil ? 0d : value.Read<double>();
+            if (value.Type == LuaValueType.Nil)
+            {
+                return 0d;
+            }
+
+            return value.TryRead(out double number)
+                ? number
+                : throw LuaCsBadArgumentException.TypeMismatch(index + 1, "number", value);
         }
 
         /// <inheritdoc />
         public override bool GetBoolean(int index)
         {
             LuaValue value = Raw(index);
-            return value.Type != LuaValueType.Nil && value.Read<bool>();
+            if (value.Type == LuaValueType.Nil)
+            {
+                return false;
+            }
+
+            return value.TryRead(out bool flag)
+                ? flag
+                : throw LuaCsBadArgumentException.TypeMismatch(index + 1, "boolean", value);
         }
 
         /// <inheritdoc />
         public override IScriptTable GetTable(int index)
         {
             LuaValue value = Raw(index);
-            return value.Type == LuaValueType.Nil ? null : new LuaCsScriptTable(value.Read<LuaTable>());
+            if (value.Type == LuaValueType.Nil)
+            {
+                return null;
+            }
+
+            return value.TryRead(out LuaTable table)
+                ? new LuaCsScriptTable(table)
+                : throw LuaCsBadArgumentException.TypeMismatch(index + 1, "table", value);
         }
 
         /// <inheritdoc />

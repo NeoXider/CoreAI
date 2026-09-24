@@ -612,9 +612,10 @@ namespace CoreAI.Tests.EditMode
 
             Assert.DoesNotThrow(() => rbxApi.Registry.Create("Folder"),
                 "the restored DataModel, services and Camera are not charged; only the restored host folder is");
-            InvalidOperationException refused = Assert.Throws<InvalidOperationException>(
+            RbxError refused = Assert.Throws<RbxError>(
                 () => rbxApi.Registry.Create("Folder"),
                 "the restored host folder plus one new one fill the host/system quota");
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, refused.Code);
             StringAssert.Contains("host/system", refused.Message);
             StringAssert.Contains(
                 "registered instances quota reached (limit " + quota + ")", refused.Message);
@@ -633,8 +634,9 @@ namespace CoreAI.Tests.EditMode
 
             Assert.DoesNotThrow(() => rbxApi.Registry.Create("Folder"),
                 "a world that was not restored keeps its whole host/system quota");
-            InvalidOperationException refused = Assert.Throws<InvalidOperationException>(
+            RbxError refused = Assert.Throws<RbxError>(
                 () => rbxApi.Registry.Create("Folder"));
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, refused.Code);
             StringAssert.Contains("host/system", refused.Message);
             StringAssert.Contains("registered instances quota reached (limit 1)", refused.Message);
         }
@@ -664,15 +666,16 @@ namespace CoreAI.Tests.EditMode
             Assert.AreSame(admitted, registered[0].Instance);
             int liveBeforeRefusal = registry.Count;
 
-            InvalidOperationException refused = Assert.Throws<InvalidOperationException>(
+            RbxError refused = Assert.Throws<RbxError>(
                 () => registry.Create("Folder"));
 
             Assert.AreEqual(
-                "Instance.new: actor 'host/system' cannot register instance '"
+                "BUDGET_EXCEEDED: creating Folder: actor 'host/system' cannot register instance '"
                 + earlier.Admitted[1].Id.Value
-                + "': registered instances quota reached (limit 1).",
+                + "': registered instances quota reached (limit 1) | fix: destroy instances you no longer "
+                + "need with Instance:Destroy() before creating more",
                 refused.Message,
-                "the refusal text is unchanged by the move to an admission");
+                "the refusal is a coded budget error that names what was being created (A3-05)");
             Assert.IsNull(refused.InnerException, "nothing was built, so there is no cleanup to fail");
             Assert.AreEqual(1, registered.Count, "the refused record is never announced");
             Assert.IsEmpty(unregistered,
@@ -733,9 +736,11 @@ namespace CoreAI.Tests.EditMode
             }
 
             int liveBeforeRefusal = rbxApi.Registry.Count;
-            InvalidOperationException refused = Assert.Throws<InvalidOperationException>(
+            RbxError refused = Assert.Throws<RbxError>(
                 () => rbxApi.Registry.Create("Folder"),
                 "the injected ceiling, not the 16384 constant, bounds the world");
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, refused.Code);
+            StringAssert.Contains("destroy instances you no longer need", refused.Fix);
             StringAssert.Contains(
                 "emergency registered instances ceiling reached (" + ceiling + ")", refused.Message);
             Assert.AreEqual(liveBeforeRefusal, rbxApi.Registry.Count,
@@ -774,7 +779,7 @@ namespace CoreAI.Tests.EditMode
                 runtime.EmergencyRegisteredInstanceCeiling);
 
             int created = 0;
-            InvalidOperationException refusal = null;
+            RbxError refusal = null;
             for (int attempt = 0;
                  attempt <= LuaCsModRuntime.WebGlEmergencyMaxRegisteredInstances && refusal == null;
                  attempt++)
@@ -785,7 +790,7 @@ namespace CoreAI.Tests.EditMode
                     folder.Parent = rbxApi.Registry.WorldRoot;
                     created++;
                 }
-                catch (InvalidOperationException exception)
+                catch (RbxError exception)
                 {
                     refusal = exception;
                 }
@@ -3207,6 +3212,369 @@ namespace CoreAI.Tests.EditMode
                 () => bindings.Scheduler.Advance(1d / 60d),
                 "with nowhere to report it, the runtime must leave the fault to the scheduler's rethrow");
             StringAssert.Contains("host-fault-probe unlogged", rethrown.Message);
+        }
+
+        /// <summary>The stack a logic-slot rollback test runs on: legacy only, or with the Rbx scheduler.</summary>
+        private static LuaCsModStack BuildLogicSlotStack(bool withRbxApi)
+        {
+            return withRbxApi
+                ? BuildMutationStack(new LuaCsRbxApiBindings())
+                : BuildStack(new MemoryStore());
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void LuaCs_LogicSlots_FailedFirstLoad_LeavesNoFormula_AndPutsBackTheFormulaItReplaced(
+            bool withRbxApi)
+        {
+            // WHY (A2-04): logic_define installs its formula at once, and a load that failed after it
+            // never took it back, so a mod that never loaded kept answering the game's formula calls.
+            LuaCsModStack stack = BuildLogicSlotStack(withRbxApi);
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("dmg");
+            slots.DeclareSlot("loot");
+            stack.Runtime.LoadMod("owner", "logic_define('loot', function() return 7 end)");
+
+            Assert.Catch(() => stack.Runtime.LoadMod("never-loaded", @"
+                logic_define('dmg', function(x) return x * 100 end)
+                logic_define('loot', function() return 999 end)
+                error('the first load fails')"));
+
+            Assert.IsFalse(stack.Runtime.IsLoaded("never-loaded"), "precondition: the load failed");
+            Assert.IsFalse(slots.IsOverridden("dmg"),
+                "a mod that never loaded must not leave its formula installed");
+            Assert.IsTrue(slots.TryInvokeNumber("loot", out double loot), slots.LastError);
+            Assert.AreEqual(7d, loot, "the loaded mod's formula that the failed load replaced is back");
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void LuaCs_LogicSlots_FailedReload_KeepsTheLiveModsFormulas_AndASuccessfulReloadStillReplacesThem(
+            bool withRbxApi)
+        {
+            // WHY (A2-04): ReloadMod promises that a failed reload leaves the loaded mod untouched, yet
+            // the candidate chunk's logic_define and logic_reset calls had already changed the live
+            // formulas before its error.
+            LuaCsModStack stack = BuildLogicSlotStack(withRbxApi);
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("dmg");
+            slots.DeclareSlot("loot");
+            stack.Runtime.LoadMod("kept", @"
+                logic_define('loot', function() return 10 end)
+                logic_define('dmg', function(x) return x * 2 end)");
+
+            Assert.Catch(() => stack.Runtime.ReloadMod("kept", @"
+                logic_reset('dmg')
+                logic_define('loot', function() return 999 end)
+                error('the reload fails')"));
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("kept"), "precondition: a failed reload keeps the mod");
+            Assert.IsTrue(slots.TryInvokeNumber("loot", out double loot), slots.LastError);
+            Assert.AreEqual(10d, loot, "the failed reload must not replace the live mod's formula");
+            Assert.IsTrue(slots.TryInvokeNumber("dmg", out double damage, 5d),
+                "the failed reload must not reset the live mod's formula either: " + slots.LastError);
+            Assert.AreEqual(10d, damage);
+
+            stack.Runtime.ReloadMod("kept", "logic_define('loot', function() return 11 end)");
+
+            Assert.IsTrue(slots.TryInvokeNumber("loot", out double reloaded), slots.LastError);
+            Assert.AreEqual(11d, reloaded, "the negative twin: a reload that succeeds replaces the formula");
+            Assert.IsFalse(slots.IsOverridden("dmg"),
+                "and drops the formula the new version no longer defines");
+        }
+
+        [Test]
+        public void LuaCs_M2_08_AHealthyTimerDoesNotForgiveAFrameInWhichASchedulerHandlerFaulted()
+        {
+            // WHY (A2-06): a successful hook or timer call reset the streak right after the frame's
+            // scheduler fault had lengthened it, so a Heartbeat handler that failed in every frame was
+            // never quarantined as long as its mod also ran any healthy timer.
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildSchedulerStack(bindings, store, 2);
+            stack.Runtime.LoadMod("mixed-timer", @"
+                hooks_every(0, function() store_set('timer', 'ran') end)
+                game:GetService('RunService').Heartbeat:Connect(function() error('every frame') end)");
+
+            PumpSchedulerFrame(stack, bindings);
+
+            Assert.AreEqual("ran", store.Get("mixed-timer", "timer"),
+                "precondition: the healthy timer ran in the faulting frame");
+            Assert.AreEqual(1, ModInfo(stack, "mixed-timer").ErrorCount,
+                "the timer that succeeded after the Heartbeat fault must not erase it");
+            Assert.IsFalse(ModInfo(stack, "mixed-timer").Quarantined);
+
+            PumpSchedulerFrame(stack, bindings);
+
+            Assert.IsTrue(ModInfo(stack, "mixed-timer").Quarantined,
+                "two faulting frames in a row reach the threshold of two");
+            Assert.AreEqual(2, ModInfo(stack, "mixed-timer").ErrorCount);
+        }
+
+        [Test]
+        public void LuaCs_M2_08_AModWithoutSchedulerFaultsKeepsPerCallForgiveness()
+        {
+            // WHY: the negative twin of the test above. A mod that faults only in hooks and timers keeps
+            // the per-call rule: the handler that succeeds after the failing timer in the same frame
+            // resets the streak, so a failure followed by a success never adds up to a quarantine.
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildSchedulerStack(bindings, store, 2);
+            stack.Runtime.LoadMod("legacy-only", @"
+                hooks_every(0, function() error('timer boom') end)
+                hooks_on('work', function() store_set('work', 'done') end)");
+
+            const int frames = 4;
+            for (int frame = 1; frame <= frames; frame++)
+            {
+                stack.Runtime.EmitEvent("work", "");
+                PumpSchedulerFrame(stack, bindings);
+                Assert.IsFalse(ModInfo(stack, "legacy-only").Quarantined,
+                    "a success after each failure resets the streak; quarantined after frame " + frame);
+            }
+
+            Assert.AreEqual("done", store.Get("legacy-only", "work"));
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("legacy-only");
+            Assert.AreEqual(frames, errors.Count);
+            Assert.IsTrue(errors.All(error => error.ConsecutiveCount == 1),
+                "every timer failure starts a fresh streak: "
+                + string.Join(", ", errors.Select(error => error.ConsecutiveCount)));
+            Assert.AreEqual(0, ModInfo(stack, "legacy-only").ErrorCount);
+        }
+
+#if COREAI_LUA
+        [TestCase("store_set, {}, 'v'", "bad argument #1 to 'store_set' (string expected, got table)")]
+        [TestCase("store_set, 'k', {}", "bad argument #2 to 'store_set' (string expected, got table)")]
+        [TestCase("hooks_every, 'soon', function() end",
+            "bad argument #1 to 'hooks_every' (number expected, got string)")]
+        [TestCase("hooks_on, {}, function() end", "bad argument #1 to 'hooks_on' (string expected, got table)")]
+        [TestCase("hooks_on", "hooks_on: event name and function are required.")]
+        [TestCase("logic_define, 'undeclared', function() end",
+            "logic_define: slot 'undeclared' is not declared by the game. Use logic_list().")]
+        [TestCase("mods_call, 'missing', 'f'", "mods_call: mod 'missing' is not loaded.")]
+        public void LuaCs_ModApiErrors_ReadAsLuaErrorLines_WithoutClrTypeNamesOrADoubledPrefix(
+            string call, string expected)
+        {
+            // WHY (A2-08): a wrong argument type reached pcall as Lua-CSharp's conversion text
+            // ("store_set: Cannot convert LuaValueType.Table to System.String."), and a host function
+            // whose own message already named it was prefixed twice ("hooks_on: hooks_on: ...").
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(store);
+            stack.Runtime.LoadMod("api-errors", "local ok, err = pcall(" + call + ")\n"
+                                                + "store_set('ok', tostring(ok))\n"
+                                                + "store_set('err', tostring(err))");
+
+            Assert.AreEqual("false", store.Get("api-errors", "ok"));
+            string error = store.Get("api-errors", "err");
+            LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(error);
+            Assert.AreEqual(expected, error);
+        }
+
+        [Test]
+        public void LuaCs_HostFunctionReadingAnArgumentAsTheWrongType_ReportsOnlyTheLuaTypes()
+        {
+            // WHY (A2-08): a host function that reads an argument with LuaValue.Read handed the script
+            // Lua-CSharp's "Cannot convert LuaValueType.Table to System.String." through its pcall.
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                AdditionalGameplayBindings = (registry, capabilities) =>
+                    registry.RegisterCallback("raw_read", (ctx, ct) =>
+                    {
+                        string text = ctx.GetArgument(0).Read<string>();
+                        return new ValueTask<int>(ctx.Return(text.Length));
+                    })
+            });
+            stack.Runtime.LoadMod("raw-read", "local ok, err = pcall(raw_read, {})\n"
+                                              + "store_set('err', tostring(err))\n"
+                                              + "store_set('length', tostring(raw_read('four')))");
+
+            string error = store.Get("raw-read", "err");
+            LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(error);
+            Assert.AreEqual("bad argument to 'raw_read' (string expected, got table)", error);
+            Assert.AreEqual("4", store.Get("raw-read", "length"), "the negative twin: a string argument reads");
+        }
+#endif
+
+        [Test]
+        [Timeout(60000)]
+        public void LuaCs_ModsCall_FromASignalHandler_RunsTheExportWithinTheHandlersResumeBudget()
+        {
+            // WHY (A2-10): the export ran under a fresh handler budget (50,000,000 steps, 10 s), so a
+            // Heartbeat handler held to its per-resume budget got the whole handler budget through
+            // one call of its own export, and the frame stalled for seconds.
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildSchedulerStack(bindings, store, 8);
+            stack.Runtime.LoadMod("spinner", @"
+                local spins = 0
+                mods_export('spin', function()
+                    while true do spins = spins + 1 end
+                end)
+                local fired = false
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    if fired then return end
+                    fired = true
+                    local ok, err = pcall(mods_call, mod_id(), 'spin')
+                    store_set('ok', tostring(ok))
+                    store_set('err', tostring(err))
+                    store_set('spins', tostring(spins))
+                end)");
+
+            PumpSchedulerFrame(stack, bindings);
+
+            int resumeSteps = bindings.CoroutineResumeBudget.BudgetPerResume;
+            Assert.AreEqual("false", store.Get("spinner", "ok"),
+                "the export must be cut, and the handler must still be inside its own budget afterwards");
+            StringAssert.StartsWith(
+                "LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (" + InvariantText(resumeSteps) + ")",
+                store.Get("spinner", "err"));
+            int spins = int.Parse(store.Get("spinner", "spins"), System.Globalization.CultureInfo.InvariantCulture);
+            Assert.Greater(spins, 0, "precondition: the export ran");
+            Assert.LessOrEqual(spins, resumeSteps,
+                "the export ran no further than the handler's own per-resume step budget");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void LuaCs_ModsCall_ExportStopsAtOnceWhenItsCallingThreadIsKilled()
+        {
+            // WHY (A2-10): the export ran with CancellationToken.None instead of the token its caller
+            // was called with, so stopping the calling thread left the export running to the end of
+            // its own budget.
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings,
+                AdditionalGameplayBindings = (registry, capabilities) =>
+                    registry.Register("stop_my_threads",
+                        new Func<int>(() => bindings.Scheduler.KillOwnedBy("stopped")))
+            });
+            stack.Runtime.LoadMod("stopped", @"
+                local spins = 0
+                mods_export('spin', function()
+                    stop_my_threads()
+                    for i = 1, 2000000 do spins = spins + 1 end
+                end)
+                hooks_on('read', function() store_set('spins', tostring(spins)) end)
+                task.defer(function() mods_call(mod_id(), 'spin') end)");
+
+            Assert.DoesNotThrow(() => bindings.Scheduler.Advance(1d / 60d),
+                "a thread killed inside its own export call must not abort the frame");
+
+            stack.Runtime.EmitEvent("read", "");
+            stack.Runtime.Tick(1d / 60d);
+
+            Assert.AreEqual("0", store.Get("stopped", "spins"),
+                "the export must end at its first check after its calling thread was killed");
+        }
+
+        private static IDictionary QuotaAttribution(LuaCsModRuntime runtime)
+        {
+            FieldInfo field = typeof(LuaCsModRuntime).GetField(
+                "_quotaActorByOwnerModId", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(field, "the runtime's quota attribution map was renamed");
+            return (IDictionary)field.GetValue(runtime);
+        }
+
+        [Test]
+        public void LuaCs_QuotaAttribution_IsDroppedByAFailedFirstLoadAndByUnload_AndKeptByAFailedReload()
+        {
+            // WHY (A2-11): every load recorded the actor its mod id is charged to, and nothing ever
+            // removed the record, so the map grew by one entry for every mod id ever attempted.
+            LuaCsRbxApiBindings rbxApi = new();
+            LuaCsModStack stack = BuildMutationStack(rbxApi);
+            ActorContext actor = QuotaActor("attribution-actor");
+            IDictionary attribution = QuotaAttribution(stack.Runtime);
+
+            Assert.Catch(() => stack.Runtime.LoadMod(
+                actor, "never-loaded", "error('the first load fails')", persistToStore: false));
+            Assert.IsFalse(attribution.Contains("never-loaded"),
+                "a mod whose first load failed keeps no attribution");
+
+            stack.Runtime.LoadMod(actor, "kept", "local loaded = true", persistToStore: false);
+            Assert.AreEqual(actor.ActorId, attribution["kept"]);
+            Assert.Catch(() => stack.Runtime.ReloadMod("kept", "error('the reload fails')"));
+            Assert.AreEqual(actor.ActorId, attribution["kept"],
+                "the negative twin: a failed reload keeps the loaded mod's attribution");
+
+            Assert.IsTrue(stack.Runtime.UnloadMod("kept"));
+            Assert.IsFalse(attribution.Contains("kept"), "an unloaded mod keeps no attribution");
+
+            for (int index = 0; index < 50; index++)
+            {
+                Assert.Catch(() => stack.Runtime.LoadMod(
+                    actor, "churn-" + index, "error('fails')", persistToStore: false));
+            }
+
+            Assert.AreEqual(0, attribution.Count, "the map stays bounded by the loaded mods");
+        }
+
+        [Test]
+        public void LuaCs_RegisteredInstanceQuota_RefusalIsACodedBudgetError_NamingWhatWasCreated_WithAFix()
+        {
+            // WHY (A3-05): the refusal was a plain InvalidOperationException that began with
+            // "Instance.new:" even for Clone and TweenService:Create, carried no code a repair loop
+            // could classify and no hint how to get back under the quota.
+            const int quota = 3;
+            LuaCsRbxApiBindings rbxApi = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = rbxApi,
+                MaxRegisteredInstancesPerActor = quota
+            });
+            ActorContext actor = QuotaActor("coded-quota-actor");
+
+            stack.Runtime.LoadMod(actor, "coded-quota", @"
+                local function grab(key, fn)
+                    local ok, err = pcall(fn)
+                    store_set(key .. '_ok', tostring(ok))
+                    store_set(key .. '_err', tostring(err))
+                end
+                local model = Instance.new('Model')
+                local part = Instance.new('Part')
+                part.Parent = model
+                local spare = Instance.new('Part')
+                grab('new', function() return Instance.new('Folder') end)
+                grab('clone', function() return part:Clone() end)
+                grab('tween', function()
+                    return game:GetService('TweenService'):Create(part, TweenInfo.new(1), {Transparency = 1})
+                end)", persistToStore: false);
+
+            string limit = "registered instances quota reached (limit " + InvariantText(quota) + ")";
+            foreach ((string key, string created) in new[]
+                     {
+                         ("new", "Instance.new(\"Folder\")"),
+                         ("clone", "creating Part"),
+                         ("tween", "creating Tween")
+                     })
+            {
+                Assert.AreEqual("false", store.Get("coded-quota", key + "_ok"), key + " must be refused");
+                string error = store.Get("coded-quota", key + "_err");
+                StringAssert.Contains("BUDGET_EXCEEDED: " + created + ": actor '" + actor.ActorId + "'", error,
+                    key + " names what was being created and the actor it is charged to");
+                StringAssert.Contains(limit, error, key + " keeps the limit");
+                StringAssert.Contains(" | fix: destroy instances", error, key + " says how to get back under it");
+            }
+
+            StringAssert.DoesNotContain("Instance.new", store.Get("coded-quota", "clone_err"),
+                "a refused Clone must not be reported as an Instance.new");
+            StringAssert.DoesNotContain("Instance.new", store.Get("coded-quota", "tween_err"),
+                "a refused TweenService:Create must not be reported as an Instance.new");
         }
     }
 }

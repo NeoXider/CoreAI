@@ -84,7 +84,7 @@ namespace CoreAI.Sandbox.LuaCs
 
             RegisterCallback(name, (ctx, ct) =>
             {
-                ScriptCallResult result = callback(new LuaCsScriptCallContext(ctx));
+                ScriptCallResult result = callback(new LuaCsScriptCallContext(ctx, ct));
                 IReadOnlyList<object> values = result.Values;
                 if (values.Count == 0)
                 {
@@ -191,6 +191,14 @@ namespace CoreAI.Sandbox.LuaCs
                     {
                         throw;
                     }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        // WHY rethrown as it is: the run that called this function was stopped (its guard
+                        // tripped or its thread was killed) while mod code this function ran on its behalf
+                        // was still going. As a Lua error it would be catchable by a pcall of the stopped
+                        // run; as a cancellation it crosses every protected boundary, as the guard's own does.
+                        throw;
+                    }
                     catch (Exception ex)
                     {
                         throw ToLuaRuntimeException(ctx.State, name, ex);
@@ -251,7 +259,16 @@ namespace CoreAI.Sandbox.LuaCs
             {
                 LuaValue value = ctx.HasArgument(i) ? ctx.GetArgument(i) : LuaValue.Nil;
                 Type parameterType = parameters[i].ParameterType;
-                args[i] = LuaCsValueMarshaller.CoerceArgument(value, parameterType);
+                try
+                {
+                    args[i] = LuaCsValueMarshaller.CoerceArgument(value, parameterType);
+                }
+                catch (Exception ex) when (!(ex is LuaRuntimeException))
+                {
+                    // WHY: the conversion's own text names CLR types ("Cannot convert LuaValueType.Table
+                    // to System.String."), which is neither Lua's error nor anything a script can act on.
+                    throw LuaCsBadArgumentException.ForParameter(i + 1, parameterType, value);
+                }
             }
 
             return args;
@@ -262,6 +279,8 @@ namespace CoreAI.Sandbox.LuaCs
         /// "<c>name: message</c>". A Lua error that crossed the function (a nested guarded call
         /// unwrapped from <see cref="TargetInvocationException"/>) is returned unchanged, as the
         /// callback path already rethrows it, so its own error value and budget-trip cause survive.
+        /// An argument of the wrong type reads as Lua's own "bad argument #n to 'name' (x expected,
+        /// got y)", and a message that already starts with the function's name is not prefixed again.
         /// </summary>
         private static LuaRuntimeException ToLuaRuntimeException(LuaState state, string name, Exception ex)
         {
@@ -270,13 +289,177 @@ namespace CoreAI.Sandbox.LuaCs
                 return lua;
             }
 
+            if (ex is LuaCsBadArgumentException badArgument)
+            {
+                return new LuaCsHostFunctionException(state, badArgument.Describe(name), ex);
+            }
+
+            if (LuaCsBadArgumentException.TryDescribeReadFailure(ex, out string readFailure))
+            {
+                return new LuaCsHostFunctionException(state, $"bad argument to '{name}' ({readFailure})", ex);
+            }
+
             string message = ex.Message;
             if (string.IsNullOrWhiteSpace(message))
             {
                 message = ex.GetType().Name;
             }
 
-            return new LuaCsHostFunctionException(state, $"{name}: {message}", ex);
+            return new LuaCsHostFunctionException(
+                state, IsNamedBy(message, name) ? message : $"{name}: {message}", ex);
+        }
+
+        /// <summary>
+        /// True when <paramref name="message"/> already begins with the function's name as its prefix:
+        /// "<c>name: ...</c>" or a call spelled "<c>name(...)</c>".
+        /// </summary>
+        /// <remarks>
+        /// WHY: most host functions name themselves in their own refusals ("hooks_on: event name and
+        /// function are required."), and prefixing those again read "hooks_on: hooks_on: ..." (A2-08).
+        /// </remarks>
+        private static bool IsNamedBy(string message, string name)
+        {
+            if (message.Length <= name.Length
+                || !message.StartsWith(name, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            char next = message[name.Length];
+            return next == ':' || next == '(';
+        }
+    }
+
+    /// <summary>
+    /// A host function argument of the wrong Lua type. A registered host function reports it the way
+    /// Lua reports its own library's: "<c>bad argument #n to 'name' (string expected, got table)</c>",
+    /// never as the CLR conversion that failed.
+    /// </summary>
+    internal sealed class LuaCsBadArgumentException : ArgumentException
+    {
+        private const string ReadFailurePrefix = "Cannot convert LuaValueType.";
+
+        private LuaCsBadArgumentException(int argumentNumber, string detail)
+            : base("bad argument #" + argumentNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                   + " (" + detail + ")")
+        {
+            ArgumentNumber = argumentNumber;
+            Detail = detail;
+        }
+
+        /// <summary>The 1-based position of the argument, as Lua counts it.</summary>
+        internal int ArgumentNumber { get; }
+
+        /// <summary>Lua's parenthesised reason, for example "string expected, got table".</summary>
+        internal string Detail { get; }
+
+        /// <summary>The line Lua code receives for this argument of <paramref name="functionName"/>.</summary>
+        internal string Describe(string functionName)
+        {
+            return "bad argument #" + ArgumentNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                   + " to '" + functionName + "' (" + Detail + ")";
+        }
+
+        /// <summary>
+        /// The error for argument <paramref name="argumentNumber"/> that should have been a
+        /// <paramref name="expected"/> (a Lua type name) and was <paramref name="actual"/>.
+        /// </summary>
+        internal static LuaCsBadArgumentException TypeMismatch(int argumentNumber, string expected, LuaValue actual)
+        {
+            return new LuaCsBadArgumentException(argumentNumber, expected + " expected, got " + actual.TypeToString());
+        }
+
+        /// <summary>
+        /// The error for argument <paramref name="argumentNumber"/> that <paramref name="actual"/> could
+        /// not be converted to a <paramref name="parameterType"/> parameter for.
+        /// </summary>
+        internal static LuaCsBadArgumentException ForParameter(int argumentNumber, Type parameterType,
+            LuaValue actual)
+        {
+            string expected = ExpectedTypeName(Nullable.GetUnderlyingType(parameterType) ?? parameterType);
+            // WHY a separate reason for a number: the value had the right Lua type and was refused for
+            // its value (an int parameter given 1e300 or NaN), which Lua words this way.
+            if (expected == "number" && actual.Type == LuaValueType.Number)
+            {
+                return new LuaCsBadArgumentException(argumentNumber, "number has no integer representation");
+            }
+
+            return TypeMismatch(argumentNumber, expected, actual);
+        }
+
+        /// <summary>
+        /// Reads a failed <see cref="LuaValue.Read{T}"/> inside a host function back as Lua's
+        /// "x expected, got y"; false for any other exception.
+        /// </summary>
+        /// <remarks>
+        /// WHY the engine's message is parsed: Lua-CSharp raises a plain
+        /// <see cref="InvalidOperationException"/> whose only structure is this text, and a host function
+        /// reading its arguments with Read would otherwise hand the script "Cannot convert
+        /// LuaValueType.Table to System.String.". Any other wording is left as it is.
+        /// </remarks>
+        internal static bool TryDescribeReadFailure(Exception exception, out string detail)
+        {
+            detail = null;
+            string message = exception is InvalidOperationException ? exception.Message : null;
+            if (message == null
+                || !message.StartsWith(ReadFailurePrefix, StringComparison.Ordinal)
+                || !message.EndsWith(".", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            string rest = message.Substring(ReadFailurePrefix.Length, message.Length - ReadFailurePrefix.Length - 1);
+            int to = rest.IndexOf(" to ", StringComparison.Ordinal);
+            if (to <= 0 || !Enum.TryParse(rest.Substring(0, to), false, out LuaValueType actual))
+            {
+                return false;
+            }
+
+            detail = ExpectedTypeName(rest.Substring(to + 4)) + " expected, got " + LuaValue.ToString(actual);
+            return true;
+        }
+
+        private static string ExpectedTypeName(Type type)
+        {
+            if (type == typeof(double) || type == typeof(float) || type == typeof(int) || type == typeof(long)
+                || type.IsEnum)
+            {
+                return "number";
+            }
+
+            return typeof(LuaFunction).IsAssignableFrom(type) ? "function" : ExpectedTypeName(type.FullName);
+        }
+
+        private static string ExpectedTypeName(string clrTypeName)
+        {
+            if (clrTypeName == typeof(string).FullName)
+            {
+                return "string";
+            }
+
+            if (clrTypeName == typeof(bool).FullName)
+            {
+                return "boolean";
+            }
+
+            if (clrTypeName == typeof(double).FullName || clrTypeName == typeof(float).FullName
+                || clrTypeName == typeof(int).FullName || clrTypeName == typeof(long).FullName
+                || clrTypeName == typeof(uint).FullName || clrTypeName == typeof(ulong).FullName)
+            {
+                return "number";
+            }
+
+            if (clrTypeName == typeof(LuaTable).FullName || clrTypeName == typeof(IScriptTable).FullName)
+            {
+                return "table";
+            }
+
+            if (clrTypeName == typeof(LuaFunction).FullName)
+            {
+                return "function";
+            }
+
+            return clrTypeName == typeof(LuaState).FullName ? "thread" : "userdata";
         }
     }
 
