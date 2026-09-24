@@ -1514,6 +1514,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [TestCase("invalid-package", "invalid_package")]
         [TestCase("io", "read_failed")]
         [TestCase("unauthorized", "read_failed")]
+        [TestCase("device-not-supported", "read_failed")]
+        [TestCase("device-argument", "read_failed")]
         public async Task LoadAutoSaveTool_ReadPhaseFailures_AreReturnedAsJsonResults(
             string fault,
             string expectedStatus)
@@ -1600,6 +1602,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     return new IOException("Injected read failure.");
                 case "unauthorized":
                     return new UnauthorizedAccessException("Injected permission failure.");
+                case "device-not-supported":
+                    // WHY (B2-14): opening a Windows device name such as CON.world throws this or the
+                    // next one instead of an IOException, and it used to escape the tool.
+                    return new NotSupportedException("Injected device path refusal.");
+                case "device-argument":
+                    return new ArgumentException("Injected device path refusal.");
                 default:
                     throw new ArgumentOutOfRangeException(nameof(fault), fault, "Unknown injected fault.");
             }
@@ -2536,6 +2544,300 @@ end)";
                 RbxWorldStartupRestoreResult restored = await second.Controller.RestoreStartupSelectionAsync();
 
                 Assert.AreEqual(RbxWorldStartupRestoreOutcome.NotSelected, restored.Outcome, restored.Error);
+            });
+        }
+
+        /// <summary>
+        /// B2-01: the startup restore refuses a world holding an active Full-capability mod (it cannot
+        /// be isolated during a staged restore), yet a gated change recorded exactly such a world as the
+        /// startup entry, so every later start fell back to the default world without a word. The
+        /// refresh now runs the restore's own checks, keeps the previous entry, and says why in the
+        /// result of the tool whose change was not recorded.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_ChangeWithAnActiveFullCapabilityMod_KeepsThePreviousEntryAndSaysWhy()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                using (StartupProcess first = new(disk, "world-a", withMutationGate: true))
+                {
+                    first.AuthorKeptPart();
+                    await ConfirmStartupLoadAsync(first, "chosen");
+                    LuaModsLlmTool fullTierTool = new(
+                        first.Controller.Runtime,
+                        new StartupToolSettings(),
+                        CoreAI.Logging.NullLog.Instance,
+                        StartupCapabilities | LuaCapabilities.Full,
+                        true,
+                        ToolIdentity(),
+                        BuiltInAgentRoleIds.Programmer,
+                        first.Gate);
+
+                    JObject fullLoad = JObject.Parse(await fullTierTool.ExecuteAsync("load", "fullmod", "local x = 1"));
+                    LuaTool.LuaResult marker = await first.Controller.Executor.ExecuteAsync(
+                        "local marker = Instance.new('Folder') marker.Name = 'AfterFull' marker.Parent = workspace "
+                        + "return 'placed'",
+                        CancellationToken.None);
+                    LuaTool.LuaResult readOnly = await first.Controller.Executor.ExecuteAsync(
+                        "return #workspace:GetChildren()",
+                        CancellationToken.None);
+
+                    Assert.IsTrue(fullLoad.Value<bool>("success"), fullLoad.ToString());
+                    string loadNote = fullLoad.Value<string>(ConfirmedWorldMutationGate.StartupNoteField);
+                    Assert.IsNotNull(loadNote, "the manage_mods result says the change was not recorded: " + fullLoad);
+                    StringAssert.Contains("Startup world not updated", loadNote);
+                    StringAssert.Contains("'fullmod'", loadNote);
+                    Assert.IsTrue(marker.Success, marker.Error);
+                    StringAssert.StartsWith("placed", marker.Output, "the chunk's own output stays first");
+                    StringAssert.Contains("Startup world not updated", marker.Output,
+                        "the execute_lua result says its change was not recorded either");
+                    Assert.IsTrue(readOnly.Success, readOnly.Error);
+                    StringAssert.DoesNotContain("Startup world not updated", readOnly.Output ?? "",
+                        "a call that changed nothing since the last refused state repeats no note");
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000001.json", "0000000001.world" },
+                        FileNames(disk.StartupDirectory),
+                        "the entry the player confirmed stays the startup world");
+                    Assert.AreEqual(1, first.Diagnostics.Count, string.Join(" | ", first.Diagnostics));
+                    StringAssert.Contains("'fullmod'", first.Diagnostics[0], "the refusal is logged once");
+                }
+
+                using StartupProcess second = new(disk, "default-world");
+                RbxWorldStartupRestoreResult restored = await second.Controller.RestoreStartupSelectionAsync();
+
+                Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+                InstanceRegistry live = second.Controller.CurrentRbxApi.Registry;
+                Assert.IsNotNull(live.WorldRoot.FindFirstChild(KeptPartName));
+                Assert.AreEqual(0, CountNamed(live, "AfterFull"));
+                CollectionAssert.AreEqual(
+                    new[] { StartupActiveModId, StartupDormantModId },
+                    ModIds(second.Controller.SourceStore.List()));
+            });
+        }
+
+        /// <summary>
+        /// B2-01 twin: once the Full-capability mod is forgotten the startup restore accepts the world
+        /// again, so the next change is recorded as before and reopens after a restart.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_FullCapabilityModForgotten_ChangesAreRecordedAgain()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                using (StartupProcess first = new(disk, "world-a", withMutationGate: true))
+                {
+                    first.AuthorKeptPart();
+                    await ConfirmStartupLoadAsync(first, "chosen");
+                    LuaModsLlmTool fullTierTool = new(
+                        first.Controller.Runtime,
+                        new StartupToolSettings(),
+                        CoreAI.Logging.NullLog.Instance,
+                        StartupCapabilities | LuaCapabilities.Full,
+                        true,
+                        ToolIdentity(),
+                        BuiltInAgentRoleIds.Programmer,
+                        first.Gate);
+                    JObject fullLoad = JObject.Parse(await fullTierTool.ExecuteAsync("load", "fullmod", "local x = 1"));
+                    JObject forgotten = JObject.Parse(await fullTierTool.ExecuteAsync("forget", "fullmod"));
+                    LuaTool.LuaResult marker = await first.Controller.Executor.ExecuteAsync(
+                        "local marker = Instance.new('Folder') marker.Name = 'AfterForget' marker.Parent = workspace",
+                        CancellationToken.None);
+
+                    Assert.IsTrue(fullLoad.Value<bool>("success"), fullLoad.ToString());
+                    Assert.IsTrue(forgotten.Value<bool>("success"), forgotten.ToString());
+                    Assert.IsNull(forgotten[ConfirmedWorldMutationGate.StartupNoteField], forgotten.ToString());
+                    Assert.IsTrue(marker.Success, marker.Error);
+                    StringAssert.DoesNotContain("Startup world not updated", marker.Output ?? "");
+                    List<string> entries = FileNames(disk.StartupDirectory);
+                    Assert.AreEqual(2, entries.Count, string.Join(", ", entries));
+                    CollectionAssert.DoesNotContain(entries, "0000000001.world", "a newer entry was recorded");
+                    Assert.AreEqual(1, first.Diagnostics.Count, "only the load of the Full mod was refused: "
+                                                                + string.Join(" | ", first.Diagnostics));
+                }
+
+                using StartupProcess second = new(disk, "default-world");
+                RbxWorldStartupRestoreResult restored = await second.Controller.RestoreStartupSelectionAsync();
+
+                Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+                Assert.AreEqual(1, CountNamed(second.Controller.CurrentRbxApi.Registry, "AfterForget"));
+                CollectionAssert.AreEqual(
+                    new[] { StartupActiveModId, StartupDormantModId },
+                    ModIds(second.Controller.SourceStore.List()));
+            });
+        }
+
+        /// <summary>
+        /// B2-02: a mod change made without the shared gate on the startup world (the Hub Mods page and
+        /// editor, host code calling the runtime facade) never reached the startup selection, so the
+        /// player's own edits were gone after a restart. Every write to the world's mod sources now
+        /// marks the startup world, and the next frame records the finished changes once.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_HubAndHostModChangesOnTheStartupWorld_ReopenAfterRestart()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                using (StartupProcess first = new(disk, "world-a", withMutationGate: true))
+                {
+                    first.AuthorKeptPart();
+                    await ConfirmStartupLoadAsync(first, "chosen");
+                    ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                        .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                    CoreAI.Ai.Hub.LuaCsModRuntimeHubService hub = new(
+                        first.Controller.Runtime,
+                        host,
+                        first.Controller.SourceStore,
+                        StartupCapabilities);
+
+                    first.Controller.Runtime.LoadMod(
+                        host,
+                        "hostmod",
+                        "local f = Instance.new('Folder') f.Name = 'HostModStart' f.Parent = workspace",
+                        StartupCapabilities);
+                    hub.SaveOrReload(
+                        "hubedit",
+                        "--[[@coreai\ncapabilities: Read, WorldEdit\n]]\n"
+                        + "local f = Instance.new('Folder') f.Name = 'HubEditStart' f.Parent = workspace");
+                    hub.Disable(StartupActiveModId);
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000001.json", "0000000001.world" },
+                        FileNames(disk.StartupDirectory),
+                        "nothing is recorded in the middle of a change");
+
+                    first.Controller.PumpFrame(host, 1f / 60f);
+                    await first.Controller.StartupRefreshForTests;
+
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000002.json", "0000000002.world" },
+                        FileNames(disk.StartupDirectory),
+                        "one frame records all of the frame's changes as one entry");
+                    first.Controller.PumpFrame(host, 1f / 60f);
+                    await first.Controller.StartupRefreshForTests;
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000002.json", "0000000002.world" },
+                        FileNames(disk.StartupDirectory),
+                        "a frame without a change records nothing");
+                    CollectionAssert.IsEmpty(first.Diagnostics);
+                }
+
+                using StartupProcess second = new(disk, "default-world");
+                RbxWorldStartupRestoreResult restored = await second.Controller.RestoreStartupSelectionAsync();
+
+                Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+                Assert.AreEqual(2, restored.ActiveModsStarted, "the host's mod and the Hub edit; the disabled mod stays dormant");
+                InstanceRegistry live = second.Controller.CurrentRbxApi.Registry;
+                Assert.AreEqual(1, CountNamed(live, "HostModStart"));
+                Assert.AreEqual(1, CountNamed(live, "HubEditStart"));
+                Assert.AreEqual(0, CountNamed(live, ModStartFolderName), "the mod disabled on the Hub did not start");
+                CollectionAssert.AreEqual(
+                    new[] { "hostmod", "hubedit", StartupActiveModId, StartupDormantModId },
+                    ModIds(second.Controller.SourceStore.List()));
+            });
+        }
+
+        /// <summary>
+        /// B2-02 twin: a gated change refreshes the selection itself before it lets the gate go, so the
+        /// source writes it made are not recorded a second time on the next frame.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_GatedModLoad_IsRecordedOnce_NotAgainOnTheNextFrame()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                using StartupProcess first = new(disk, "world-a", withMutationGate: true);
+                first.AuthorKeptPart();
+                await ConfirmStartupLoadAsync(first, "chosen");
+                LuaModsLlmTool manageMods = new(
+                    first.Controller.Runtime,
+                    new StartupToolSettings(),
+                    CoreAI.Logging.NullLog.Instance,
+                    StartupCapabilities,
+                    true,
+                    ToolIdentity(),
+                    BuiltInAgentRoleIds.Programmer,
+                    first.Gate);
+
+                JObject castle = JObject.Parse(await manageMods.ExecuteAsync(
+                    "load",
+                    "castle",
+                    "local castle = Instance.new('Folder') castle.Name = 'CastleStart' castle.Parent = workspace"));
+                first.Controller.PumpFrame(
+                    CoreServicesInstaller.DefaultLocalHostIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer),
+                    1f / 60f);
+                await first.Controller.StartupRefreshForTests;
+
+                Assert.IsTrue(castle.Value<bool>("success"), castle.ToString());
+                CollectionAssert.AreEqual(
+                    new[] { "0000000002.json", "0000000002.world" },
+                    FileNames(disk.StartupDirectory));
+                CollectionAssert.IsEmpty(first.Diagnostics);
+            });
+        }
+
+        /// <summary>
+        /// B2-09: every gated call, a read-only execute_lua included, recorded a whole new startup
+        /// entry (capture, encode, write, sync, prune) while it held the gate. A world that did not
+        /// change since its entry is not written again; a change is written exactly once.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_UnchangedWorldWritesNoEntry_AChangeWritesExactlyOne()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                using (StartupProcess first = new(disk, "world-a", withMutationGate: true))
+                {
+                    first.AuthorKeptPart();
+                    await ConfirmStartupLoadAsync(first, "chosen");
+                    LuaTool.LuaResult changed = await first.Controller.Executor.ExecuteAsync(
+                        "local marker = Instance.new('Folder') marker.Name = 'FirstChange' marker.Parent = workspace",
+                        CancellationToken.None);
+                    Dictionary<string, byte[]> afterChange = FileContents(disk.StartupDirectory);
+
+                    LuaTool.LuaResult readOnly = await first.Controller.Executor.ExecuteAsync(
+                        "return #workspace:GetChildren()",
+                        CancellationToken.None);
+                    LuaTool.LuaResult readOnlyAgain = await first.Controller.Executor.ExecuteAsync(
+                        "local count = 0 for _ in pairs(workspace:GetChildren()) do count = count + 1 end return count",
+                        CancellationToken.None);
+
+                    Assert.IsTrue(changed.Success, changed.Error);
+                    Assert.IsTrue(readOnly.Success, readOnly.Error);
+                    Assert.IsTrue(readOnlyAgain.Success, readOnlyAgain.Error);
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000002.json", "0000000002.world" },
+                        FileNames(disk.StartupDirectory),
+                        "the change was recorded once");
+                    AssertSameFiles(afterChange, FileContents(disk.StartupDirectory));
+
+                    LuaTool.LuaResult changedAgain = await first.Controller.Executor.ExecuteAsync(
+                        "local marker = Instance.new('Folder') marker.Name = 'SecondChange' marker.Parent = workspace",
+                        CancellationToken.None);
+
+                    Assert.IsTrue(changedAgain.Success, changedAgain.Error);
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000003.json", "0000000003.world" },
+                        FileNames(disk.StartupDirectory),
+                        "the next change is recorded exactly once");
+                    CollectionAssert.IsEmpty(first.Diagnostics);
+                }
+
+                using StartupProcess second = new(disk, "default-world");
+                RbxWorldStartupRestoreResult restored = await second.Controller.RestoreStartupSelectionAsync();
+
+                Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+                InstanceRegistry live = second.Controller.CurrentRbxApi.Registry;
+                Assert.AreEqual(1, CountNamed(live, "FirstChange"));
+                Assert.AreEqual(1, CountNamed(live, "SecondChange"));
             });
         }
 

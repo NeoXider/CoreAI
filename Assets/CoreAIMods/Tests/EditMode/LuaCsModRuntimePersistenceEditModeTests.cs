@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.Lua;
 using NUnit.Framework;
 
@@ -773,6 +774,79 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsFalse(runtime.TryRevertMod("m", 1, out _),
                 "Revision 1 was evicted by retention; revert must fail cleanly, not resolve the wrong revision.");
+        }
+
+        // ==================== B2-04: a first load refused after its chunk ran ====================
+
+        /// <summary>
+        /// B2-04: a first load refused after its chunk ran (another load took the last mod slot of its
+        /// actor while the chunk ran) was refused after the failed-build rollback, so a mod reported as
+        /// not loaded kept its logic-slot formula, its quota attribution and its signal connections,
+        /// and answered formula calls. The refusal now runs inside that rollback.
+        /// </summary>
+        [TestCase(false)]
+        [TestCase(true)]
+        public void LuaCs_FirstLoadRefusedAfterItsChunkRan_LeavesNoFormulaNoAttributionAndNoConnection(bool withRbxApi)
+        {
+            ActorContext actor = new LocalActorIdentityProvider("capacity-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            LuaCsRbxApiBindings rbxApi = withRbxApi ? new LuaCsRbxApiBindings() : null;
+            CoreAI.Tests.EditMode.RbxApi.Acceptance.Mvp1AcceptanceMemoryStore modData = new();
+            LuaCsModStack stack = null;
+            stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new CoreAI.Tests.EditMode.RbxApi.Acceptance.Mvp1AcceptanceNullLogger(),
+                ModStore = modData,
+                Capabilities = CapacityCapabilities,
+                OneOffCapabilities = CapacityCapabilities,
+                RbxApi = rbxApi,
+                MaxMods = 1,
+                AdditionalGameplayBindings = (registry, capabilities) =>
+                    registry.Register("load_sibling", new Func<bool>(() =>
+                    {
+                        stack.Runtime.LoadMod(actor, "sibling", "local sibling = 1", CapacityCapabilities, false);
+                        return true;
+                    }))
+            });
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("dmg");
+            string connect = withRbxApi
+                ? "game:GetService('RunService').Heartbeat:Connect(function() store_set('beat', 'yes') end)\n"
+                : "";
+
+            Exception refused = Assert.Catch(() => stack.Runtime.LoadMod(
+                actor,
+                "first",
+                "logic_define('dmg', function() return 777 end)\n" + connect + "load_sibling()",
+                CapacityCapabilities,
+                false));
+
+            StringAssert.Contains("quota", refused.Message, "precondition: the sibling took the last slot");
+            Assert.IsFalse(stack.Runtime.IsLoaded("first"));
+            Assert.IsTrue(stack.Runtime.IsLoaded("sibling"), "the load that took the slot stays");
+            Assert.IsFalse(slots.IsOverridden("dmg"), "a mod whose load was refused answers no formula");
+            Assert.IsFalse(QuotaAttributionOf(stack.Runtime).Contains("first"),
+                "a refused first load drops the quota attribution it recorded");
+            if (withRbxApi)
+            {
+                CollectionAssert.IsEmpty(rbxApi.Connections.GetOwnedBy("first"),
+                    "the refused chunk's signal connection was rolled back");
+                rbxApi.Scheduler.Advance(1d / 60d);
+                stack.Runtime.Tick(1d / 60d);
+                Assert.AreEqual("", modData.Get("first", "beat"), "no handler of the refused mod ran");
+            }
+        }
+
+        private const LuaCapabilities CapacityCapabilities =
+            LuaCapabilities.Read | LuaCapabilities.WorldEdit | LuaCapabilities.LogicOverride;
+
+        private static System.Collections.IDictionary QuotaAttributionOf(LuaCsModRuntime runtime)
+        {
+            System.Reflection.FieldInfo field = typeof(LuaCsModRuntime).GetField(
+                "_quotaActorByOwnerModId",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            Assert.IsNotNull(field, "the runtime's quota attribution map was renamed");
+            return (System.Collections.IDictionary)field.GetValue(runtime);
         }
     }
 }

@@ -1021,6 +1021,12 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        /// <summary>
+        /// True when a load or reload writes the mod's source and manifest to the source store (the
+        /// composition's auto-persist setting).
+        /// </summary>
+        internal bool PersistsModSources => _autoPersistMods;
+
         /// <summary>True when a mod with this id is currently loaded.</summary>
         internal bool IsLoaded(string id)
         {
@@ -1349,26 +1355,9 @@ namespace CoreAI.Ai.LuaCs
                 EnsureModCapacity(modId, ownerActorId);
             }
 
-            Mod mod = BuildMod(
-                modId, luaCode, capabilities, ownerActorId, ownerHasHostAuthority);
-
-            lock (_gate)
-            {
-                if (_mods.ContainsKey(modId))
-                {
-                    throw new InvalidOperationException($"Mod '{modId}' was loaded concurrently.");
-                }
-
-                EnsureModCapacity(modId, ownerActorId);
-                mod.LoadOrder = ++_nextLoadOrder;
-                _mods[modId] = mod;
-                _modsInLoadOrder.Add(mod);
-                lock (_subscriptionGate)
-                {
-                    ActivateSubscriptionsLocked(mod);
-                    PublishSubscriptionSnapshotLocked();
-                }
-            }
+            BuildMod(
+                modId, luaCode, capabilities, ownerActorId, ownerHasHostAuthority,
+                built => InstallFirstLoad(modId, ownerActorId, built));
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
 
@@ -1386,18 +1375,62 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Creates the sandboxed state with capability-scoped gameplay bindings plus mod-core APIs and
-        /// runs the chunk (hook registration happens there). Errors propagate to the caller and the mod
-        /// is never added, so a failed build leaves no handlers behind; the logic-slot formulas its chunk
+        /// Adds a first load whose chunk built to the loaded mods, unless another load took its id or
+        /// the last mod slot of its actor while the chunk ran.
+        /// </summary>
+        private void InstallFirstLoad(string modId, string ownerActorId, Mod mod)
+        {
+            lock (_gate)
+            {
+                if (_mods.ContainsKey(modId))
+                {
+                    throw new InvalidOperationException($"Mod '{modId}' was loaded concurrently.");
+                }
+
+                EnsureModCapacity(modId, ownerActorId);
+                mod.LoadOrder = ++_nextLoadOrder;
+                _mods[modId] = mod;
+                _modsInLoadOrder.Add(mod);
+                lock (_subscriptionGate)
+                {
+                    ActivateSubscriptionsLocked(mod);
+                    PublishSubscriptionSnapshotLocked();
+                }
+            }
+        }
+
+        /// <summary>Refuses a reload whose mod another reload or an unload replaced while its chunk ran.</summary>
+        private void DemandStillLoaded(string modId, Mod existing)
+        {
+            lock (_gate)
+            {
+                if (!_mods.TryGetValue(modId, out Mod live) || !ReferenceEquals(live, existing))
+                {
+                    throw new InvalidOperationException($"Mod '{modId}' was reloaded concurrently.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Creates the sandboxed state with capability-scoped gameplay bindings plus mod-core APIs, runs
+        /// the chunk (hook registration happens there) and then <paramref name="commit"/>. Errors,
+        /// including a refusal from <paramref name="commit"/>, propagate to the caller and the mod is
+        /// never added, so a failed build leaves no handlers behind; the logic-slot formulas its chunk
         /// defined or reset are put back as they were, and a failed first load drops the quota
         /// attribution it recorded.
         /// </summary>
+        /// <param name="commit">
+        /// The last step of a successful build, inside its rollback: the checks that can still refuse a
+        /// built candidate (another load took the id or the last mod slot meanwhile) and, for a first
+        /// load, adding it to the loaded mods.
+        /// </param>
         private Mod BuildMod(
             string modId,
             string luaCode,
             LuaCapabilities capabilities,
             string ownerActorId,
-            bool ownerHasHostAuthority)
+            bool ownerHasHostAuthority,
+            Action<Mod> commit)
         {
             Mod mod = new()
             {
@@ -1462,6 +1495,10 @@ namespace CoreAI.Ai.LuaCs
                     throw ActorDisconnectedDuringLoad(modId, departedActorId, null);
                 }
 
+                // WHY inside the try: a candidate refused after its chunk ran used to be refused after
+                // this rollback, so a load reported as failed kept the formulas its chunk defined, its
+                // quota attribution and its connections and threads, and answered formula calls.
+                commit(mod);
                 return mod;
             }
             catch (Exception ex)
@@ -1794,7 +1831,8 @@ namespace CoreAI.Ai.LuaCs
             }
 
             Mod replacement = BuildMod(
-                modId, luaCode, caps, ownerActorId, ownerHasHostAuthority);
+                modId, luaCode, caps, ownerActorId, ownerHasHostAuthority,
+                built => DemandStillLoaded(modId, existing));
 
             // WHY: Teardown BEFORE the swap so the old instance's effects (its logic-slot overrides)
             // are gone by the time the replacement is live — the old formula must never be invoked
@@ -3216,6 +3254,9 @@ namespace CoreAI.Ai.LuaCs
                 // WHY the caller's token: every host function that calls back into mod code passes on the
                 // token it was called with (see LuaCsCoroutineHandle.ForeignContextTrip). With None, a
                 // kill of the calling thread left the export running to the end of its own budget.
+                // The price: a caller token that can be cancelled (every hook, timer and scheduler
+                // thread) makes the guard link it into a new CancellationTokenSource, about 96 bytes
+                // per call; only an uncancellable caller runs on the guard's pooled source.
                 CancellationToken callerToken = CallerToken(call);
                 IScriptExecutionGuard exportGuard = ResolveExportGuard();
                 _crossCallDepth++;
@@ -3411,7 +3452,8 @@ namespace CoreAI.Ai.LuaCs
             }
 
             // WHY cached by value: ScriptContext:SetTimeout changes the live budget, and a guard per call
-            // would put two allocations on every export call of every signal handler.
+            // would add two more allocations to every export call of every signal handler, on top of
+            // the linked token source the caller's token already costs (see mods_call).
             if (_signalHandlerExportGuard == null
                 || _signalHandlerExportTimeoutMs != timeoutMs
                 || _signalHandlerExportMaxSteps != maxSteps)

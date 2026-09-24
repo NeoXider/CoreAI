@@ -455,6 +455,7 @@ namespace CoreAI.Tests.EditMode
         /// A1-01: a source beyond the world-package mod limit is never created. The store used to write
         /// a 257th distinct id, after which every capture of the world threw, so no autosave, save or
         /// gated mutation could run until a mod was forgotten; the store kept it across restarts.
+        /// B2-07: the refusal is thrown to the caller, which used to go on as if the source were kept.
         /// </summary>
         [Test]
         public void Save_DistinctIdBeyondTheWorldPackageModLimit_IsRefused_ExistingIdsStillUpdate()
@@ -467,7 +468,11 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, _store.List().Count, "precondition: the store is full");
 
-            _store.Save("one-too-many", "return 'refused'", Manifest("one-too-many"));
+            RbxWorldPackageFormatLimitException refused = Assert.Throws<RbxWorldPackageFormatLimitException>(
+                () => _store.Save("one-too-many", "return 'refused'", Manifest("one-too-many")),
+                "the caller hears that the source was not kept");
+            StringAssert.Contains("'one-too-many'", refused.Message);
+            StringAssert.Contains("'forget'", refused.Message, "the refusal names the way out");
 
             Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, _store.List().Count);
             Assert.IsFalse(_store.TryLoad("one-too-many", out _, out _), "the 257th distinct source must not be created");
@@ -486,6 +491,41 @@ namespace CoreAI.Tests.EditMode
 
             RbxWorldPackagePayload captured = CaptureWith(_store);
             Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, captured.Mods.Count, "the full store stays capturable");
+        }
+
+        /// <summary>
+        /// B2-07: the session admitted a new mod by counting the manifests <see cref="FileLuaModSourceStore.List"/>
+        /// could read, while <see cref="FileLuaModSourceStore.Save"/> counted every folder holding a manifest
+        /// file, so one unreadable manifest let a mod run whose source the store then refused. The store's
+        /// admission answers exactly what its save does, with the same refusal.
+        /// </summary>
+        [Test]
+        public void Admission_CountsAFolderWhoseManifestCannotBeRead_AndAgreesWithSave()
+        {
+            for (int index = 0; index < RbxWorldPackageSerializer.MaximumMods - 1; index++)
+            {
+                string id = "mod" + index.ToString("D3");
+                _store.Save(id, "return " + index, Manifest(id, active: false));
+            }
+
+            Directory.CreateDirectory(Path.Combine(_root, "broken"));
+            File.WriteAllText(Path.Combine(_root, "broken", "manifest.json"), "{ not json");
+            File.WriteAllText(Path.Combine(_root, "broken", "main.lua"), "return 0");
+            ILuaModSourceAdmission admission = _store;
+
+            Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods - 1, _store.List().Count,
+                "precondition: the unreadable manifest is not listed");
+            Assert.IsFalse(admission.CanAdmit("newcomer", out string refusal), "the unreadable folder still counts");
+            RbxWorldPackageFormatLimitException refused = Assert.Throws<RbxWorldPackageFormatLimitException>(
+                () => _store.Save("newcomer", "return 'x'", Manifest("newcomer")));
+            Assert.AreEqual(refusal, refused.Message, "one rule, one refusal");
+            Assert.IsTrue(admission.CanAdmit("mod000", out string existing), "a stored id is always kept");
+            Assert.AreEqual("", existing);
+
+            _store.Delete("broken");
+            Assert.IsTrue(admission.CanAdmit("newcomer", out _), "a freed folder makes room");
+            _store.Save("newcomer", "return 'x'", Manifest("newcomer"));
+            Assert.IsTrue(_store.TryLoad("newcomer", out _, out _));
         }
 
         /// <summary>A1-01 twin: an exact world source set larger than one package can hold is refused before any byte is written.</summary>

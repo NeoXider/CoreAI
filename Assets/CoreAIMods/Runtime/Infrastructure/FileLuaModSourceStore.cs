@@ -20,7 +20,8 @@ namespace CoreAI.Infrastructure.Lua
     /// gate; exact world imports are written into an isolated session-version directory and durably
     /// synced before that directory can become a runtime session's source store.
     /// </summary>
-    public sealed class FileLuaModSourceStore : ILuaModSourceStore, IRbxWorldModSourceStore, IDisposable
+    public sealed class FileLuaModSourceStore
+        : ILuaModSourceStore, IRbxWorldModSourceStore, ILuaModSourceAdmission, IDisposable
     {
         private const string ManifestFileName = "manifest.json";
         private const string SourceFileName = "main.lua";
@@ -80,6 +81,10 @@ namespace CoreAI.Infrastructure.Lua
         /// </summary>
         internal Func<CancellationToken, UniTask<bool>> PersistenceSyncForTests => _persistenceSyncAsync;
 
+        /// <summary>
+        /// Saves the mod's source and manifest. A new mod id past the world-package mod limit is
+        /// refused with <see cref="RbxWorldPackageFormatLimitException"/>; any other failure is logged.
+        /// </summary>
         public void Save(string id, string source, LuaModManifest manifest)
         {
             string modId = Normalize(id);
@@ -97,14 +102,12 @@ namespace CoreAI.Infrastructure.Lua
                 // WHY refused here, where a source is created: an unloaded mod keeps its source, so a
                 // 257th stored id makes every capture of this world throw, which blocks every gated
                 // mutation and every save until a mod is forgotten, and persists across restarts.
-                if (!File.Exists(Path.Combine(modDirectory, ManifestFileName))
-                    && CountStoredMods() >= RbxWorldPackageSerializer.MaximumMods)
+                // WHY thrown rather than logged: a caller that goes on as if the source were kept runs
+                // a mod that is missing from every save and from the next start.
+                if (!AdmitsLocked(modDirectory, modId, out string refusal))
                 {
-                    _log?.Error(
-                        "[FileLuaModSourceStore] Save refused for " + modId + ": the store already holds "
-                        + RbxWorldPackageSerializer.MaximumMods + " mod sources, the most one world "
-                        + "package can hold. Forget a mod that is no longer needed first.");
-                    return;
+                    _log?.Error("[FileLuaModSourceStore] Save refused: " + refusal);
+                    throw new RbxWorldPackageFormatLimitException(refusal);
                 }
 
                 Directory.CreateDirectory(modDirectory);
@@ -116,9 +119,39 @@ namespace CoreAI.Infrastructure.Lua
                     source ?? "");
                 CoreAiWebGlPersistence.Sync();
             }
+            catch (RbxWorldPackageFormatLimitException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _log?.Error("[FileLuaModSourceStore] Save failed for " + modId + ": " + ex);
+            }
+            finally
+            {
+                ExitRoot();
+            }
+        }
+
+        /// <summary>
+        /// True when <see cref="Save"/> would keep the source of <paramref name="id"/> now: the store
+        /// already holds a manifest file for it, or fewer mod folders than one world package holds.
+        /// Throws when the store is busy.
+        /// </summary>
+        bool ILuaModSourceAdmission.CanAdmit(string id, out string refusal)
+        {
+            refusal = "";
+            string modId = Normalize(id);
+            if (modId.Length == 0)
+            {
+                return true;
+            }
+
+            EnterRoot("check room for mod '" + modId + "'");
+            try
+            {
+                return AdmitsLocked(
+                    GetModDirectory(_dir, modId, _useCaseSafeFolderNames), modId, out refusal);
             }
             finally
             {
@@ -452,7 +485,34 @@ namespace CoreAI.Infrastructure.Lua
             Monitor.Exit(_rootState.Gate);
         }
 
-        /// <summary>Stored mod ids: the store root's folders that hold a manifest.</summary>
+        /// <summary>
+        /// The one admission rule of this store, shared by <see cref="Save"/> and
+        /// <see cref="ILuaModSourceAdmission.CanAdmit"/>: an id whose folder holds a manifest file is
+        /// always kept, a new one only while fewer folders hold one than a world package can.
+        /// </summary>
+        private bool AdmitsLocked(string modDirectory, string modId, out string refusal)
+        {
+            refusal = "";
+            if (File.Exists(Path.Combine(modDirectory, ManifestFileName)))
+            {
+                return true;
+            }
+
+            int stored = CountStoredMods();
+            if (stored < RbxWorldPackageSerializer.MaximumMods)
+            {
+                return true;
+            }
+
+            refusal = RbxWorldPackageFormatLimitException.DescribeModSourceLimit(modId, stored);
+            return false;
+        }
+
+        /// <summary>Stored mod ids: the store root's folders that hold a manifest file, readable or not.</summary>
+        /// <remarks>
+        /// WHY an unreadable manifest counts: once repaired it is listed and captured again, and a store
+        /// that had admitted a new mod in its place would then hold more mods than one package captures.
+        /// </remarks>
         private int CountStoredMods()
         {
             if (!Directory.Exists(_dir))

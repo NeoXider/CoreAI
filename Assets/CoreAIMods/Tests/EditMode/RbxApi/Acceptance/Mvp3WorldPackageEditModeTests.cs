@@ -2578,11 +2578,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         /// <summary>
         /// A1-01: a world already past the mod limit (saved before the limit was enforced) cannot be
         /// captured, and the gate used to refuse every mutation, including the forget that is the only
-        /// way back under the limit. Forget and unload now run without their impossible backup; every
-        /// other mutation stays refused until the world fits again.
+        /// way back under the limit. Forget now runs without its impossible backup; every other
+        /// mutation stays refused until the world fits again.
+        /// B2-13: unload also skipped its backup, although an unloaded mod keeps its source, so an
+        /// unload never brings the world back under the limit; it is refused like the other mutations.
         /// </summary>
         [Test]
-        public async Task ConfirmedBackup_WorldPastTheModLimit_RunsForgetAndUnloadWithoutBackup_AndRefusesOtherMutations()
+        public async Task ConfirmedBackup_WorldPastTheModLimit_RunsOnlyForgetWithoutBackup_AndRefusesOtherMutations()
         {
             MemorySourceStore sources = new();
             for (int index = 0; index <= RbxWorldPackageSerializer.MaximumMods; index++)
@@ -2631,16 +2633,21 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.IsFalse(load.Value<bool>("success"), load.ToString());
             StringAssert.Contains("'forget'", load.Value<string>("message"));
             Assert.IsFalse(runtime.IsLoaded(actor, "new-mod"));
-            Assert.IsTrue(unload.Value<bool>("success"), unload.ToString());
-            Assert.IsFalse(runtime.IsLoaded(actor, "stored-000"));
+            Assert.IsFalse(unload.Value<bool>("success"), "an unload keeps the source, so it stays refused: " + unload);
+            Assert.IsTrue(runtime.IsLoaded(actor, "stored-000"), "the refused unload left the mod running");
             Assert.IsTrue(forget.Value<bool>("success"), forget.ToString());
             Assert.IsFalse(sources.TryLoad("stored-001", out _, out _));
             CollectionAssert.IsEmpty(store.AutoTriggers, "a world past the limit cannot be captured, so no backup exists");
 
+            JObject unloadAfterForget = JObject.Parse(await tool.ExecuteAsync("unload", "stored-000"));
             JObject afterForget = JObject.Parse(await tool.ExecuteAsync("load", "new-mod", "local value = 2"));
 
+            Assert.IsTrue(unloadAfterForget.Value<bool>("success"), unloadAfterForget.ToString());
+            Assert.IsFalse(runtime.IsLoaded(actor, "stored-000"));
             Assert.IsTrue(afterForget.Value<bool>("success"), afterForget.ToString());
-            CollectionAssert.AreEqual(new[] { LuaModsLlmTool.LoadBackupTrigger }, store.AutoTriggers,
+            CollectionAssert.AreEqual(
+                new[] { LuaModsLlmTool.UnloadBackupTrigger, LuaModsLlmTool.LoadBackupTrigger },
+                store.AutoTriggers,
                 "back under the limit, every mutation is backed up again");
             Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, backups[0].Mods.Count);
         }
@@ -2758,6 +2765,196 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.IsFalse(ordinaryFailure.Success);
             StringAssert.Contains("plain failure", ordinaryFailure.Error,
                 "a chunk whose world was not replaced keeps its own error");
+        }
+
+        /// <summary>
+        /// B2-06: every failure of an execute_lua that waited behind a confirmed load was replaced by
+        /// the replaced-world explanation, the chunk's own syntax error included, so the model retried
+        /// the same broken chunk before it saw the real error. Only a failure the replaced world caused
+        /// is replaced; any other keeps its own error, followed by the explanation.
+        /// </summary>
+        [Test]
+        public async Task ExecuteLua_QueuedBehindAConfirmedLoad_KeepsItsOwnErrorAndExplainsTheReplacedWorld()
+        {
+            ScriptedWorldPackageStore packages = new() { HoldNextWrite = true };
+            using GatedHeadlessSession session = new(packages, new RecordingTransactionalSourceStore());
+
+            UniTask<RbxWorldLoadResult> loading = session.Controller.LoadConfirmedAsync(
+                CreateMinimalPayload(CapturedAtUtc));
+            Task<LuaTool.LuaResult> executing = session.Controller.Executor.ExecuteAsync(
+                "local broken = = 1",
+                CancellationToken.None);
+            packages.ReleaseHeldWrite(true);
+            RbxWorldLoadResult loaded = await loading;
+            LuaTool.LuaResult queued = await executing;
+            LuaTool.LuaResult direct = await session.Controller.Executor.ExecuteAsync(
+                "local broken = = 1",
+                CancellationToken.None);
+
+            Assert.IsTrue(loaded.Success, loaded.Error);
+            Assert.IsFalse(direct.Success, "precondition: the chunk does not compile");
+            Assert.IsFalse(queued.Success, queued.Output);
+            StringAssert.Contains(direct.Error, queued.Error, "the chunk's own error reaches the caller");
+            StringAssert.Contains("a confirmed world load replaced the live world", queued.Error,
+                "and so does why the chunk ran against the previous world");
+        }
+
+        /// <summary>
+        /// B2-10: the boot-time startup restore published outside the shared gate, so a manage_mods
+        /// call that arrived during boot backed up the default world, then changed the restored one
+        /// once the facade resolved it, and the change missed the startup selection. The restore now
+        /// holds the gate: the call waits, is backed up from the restored world, changes it, and its
+        /// change is recorded for the next start.
+        /// </summary>
+        [Test]
+        public async Task StartupRestore_HoldsTheSharedGate_SoAModChangeArrivingDuringBootLandsOnTheRestoredWorld()
+        {
+            RbxWorldPackagePayload selected = CreatePayloadWithFolder("RestoredWorldMarker");
+            ScriptedStartupWorldPackageStore packages = new(selected) { HoldNextStartupRead = true };
+            using GatedHeadlessSession session = new(packages, new RecordingTransactionalSourceStore());
+            InstanceRegistry bootWorld = session.Controller.CurrentRbxApi.Registry;
+            LocalActorIdentityProvider identity = new("boot-actor");
+            LuaModsLlmTool tool = new(
+                session.Controller.Runtime,
+                new TestCoreAiSettings(),
+                NullLog.Instance,
+                SessionCapabilities,
+                true,
+                identity,
+                BuiltInAgentRoleIds.Programmer,
+                session.Gate);
+
+            UniTask<RbxWorldStartupRestoreResult> restoring = session.Controller.RestoreStartupSelectionAsync();
+            Task<string> loading = tool.ExecuteAsync("load", "bootmod", "local value = 1");
+            CollectionAssert.IsEmpty(packages.AutoTriggers,
+                "the mod change must not back up or change a world while the boot restore holds the gate");
+
+            packages.ReleaseHeldStartupRead();
+            RbxWorldStartupRestoreResult restored = await restoring;
+            JObject loaded = JObject.Parse(await loading);
+
+            Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+            Assert.IsTrue(loaded.Value<bool>("success"), loaded.ToString());
+            Assert.AreNotSame(bootWorld, session.Controller.CurrentRbxApi.Registry);
+            Assert.IsTrue(session.Controller.Runtime.IsLoaded(
+                identity.GetActorContext(BuiltInAgentRoleIds.Programmer), "bootmod"));
+            CollectionAssert.AreEqual(new[] { LuaModsLlmTool.LoadBackupTrigger }, packages.AutoTriggers);
+            Assert.IsNotNull(FindNodeOrNull(packages.AutoPayloads[0], "RestoredWorldMarker"),
+                "the backup is of the restored world the change went to");
+            Assert.AreEqual(1, packages.SelectedPayloads.Count,
+                "the change to the restored startup world is recorded for the next start");
+            Assert.IsNotNull(FindNodeOrNull(packages.SelectedPayloads[0], "RestoredWorldMarker"));
+            CollectionAssert.AreEqual(
+                new[] { "bootmod" },
+                ModIdsOf(packages.SelectedPayloads[0]));
+            CollectionAssert.IsEmpty(session.Diagnostics);
+        }
+
+        /// <summary>
+        /// B2-10 twin: an execute_lua that arrived during boot waits for the restore like one that
+        /// waited behind a confirmed load, and says it ran against the previous world instead of
+        /// changing the default world that the restore then discarded without a word.
+        /// </summary>
+        [Test]
+        public async Task StartupRestore_ExecuteLuaArrivingDuringBoot_WaitsAndReportsTheReplacedWorld()
+        {
+            RbxWorldPackagePayload selected = CreatePayloadWithFolder("RestoredWorldMarker");
+            ScriptedStartupWorldPackageStore packages = new(selected) { HoldNextStartupRead = true };
+            using GatedHeadlessSession session = new(packages, new RecordingTransactionalSourceStore());
+
+            UniTask<RbxWorldStartupRestoreResult> restoring = session.Controller.RestoreStartupSelectionAsync();
+            Task<LuaTool.LuaResult> executing = session.Controller.Executor.ExecuteAsync(
+                "local work = Instance.new('Folder') work.Name = 'BootWork' work.Parent = workspace return true",
+                CancellationToken.None);
+            CollectionAssert.IsEmpty(packages.AutoTriggers, "the chunk waits for the boot restore");
+
+            packages.ReleaseHeldStartupRead();
+            RbxWorldStartupRestoreResult restored = await restoring;
+            LuaTool.LuaResult executed = await executing;
+
+            Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+            Assert.IsFalse(executed.Success, executed.Output);
+            StringAssert.Contains("a confirmed world load replaced the live world", executed.Error);
+            Assert.IsNull(session.Controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("BootWork"));
+        }
+
+        /// <summary>
+        /// B2-07: the session counted the manifests the store could list while the file store counted
+        /// the folders holding a manifest file. With one unreadable manifest the session admitted a new
+        /// mod that the store then refused to keep, silently: the mod ran and was missing from every
+        /// save. Both now ask the same rule, and the session refuses with the store's own refusal.
+        /// </summary>
+        [Test]
+        public void ModSourceLimit_UnreadableManifest_TheSessionRefusesWithTheStoresOwnRefusal()
+        {
+            string root = NewTemporaryDirectory();
+            CoreAI.Infrastructure.Lua.FileLuaModSourceStore sources = new(
+                root, persistenceSyncAsync: _ => UniTask.FromResult(true));
+            for (int index = 0; index < RbxWorldPackageSerializer.MaximumMods - 1; index++)
+            {
+                string id = "mod" + index.ToString("D3", CultureInfo.InvariantCulture);
+                sources.Save(id, "local value = " + index, new LuaModManifest
+                {
+                    Id = id,
+                    Name = id,
+                    Capabilities = SessionCapabilities.ToString(),
+                    Active = false
+                });
+            }
+
+            Directory.CreateDirectory(Path.Combine(root, "broken"));
+            File.WriteAllText(Path.Combine(root, "broken", "manifest.json"), "{ not json");
+            File.WriteAllText(Path.Combine(root, "broken", "main.lua"), "local value = 0");
+            Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods - 1, sources.List().Count,
+                "precondition: the unreadable manifest is not listed");
+            RbxWorldPackageFormatLimitException storeRefusal = Assert.Throws<RbxWorldPackageFormatLimitException>(
+                () => sources.Save("probe", "local value = 1", new LuaModManifest { Id = "probe", Name = "probe" }),
+                "precondition: the store refuses a new source");
+
+            using GatedHeadlessSession session = new(new ScriptedWorldPackageStore(), sources);
+            ActorContext host = new LocalActorIdentityProvider("limit-host")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            RbxWorldPackageFormatLimitException refused = Assert.Throws<RbxWorldPackageFormatLimitException>(
+                () => session.Controller.Runtime.LoadMod(host, "probe", "local value = 1", SessionCapabilities));
+
+            Assert.AreEqual(storeRefusal.Message, refused.Message, "one rule, one refusal");
+            StringAssert.Contains("'forget'", refused.Message);
+            Assert.IsFalse(session.Controller.Runtime.IsLoaded(host, "probe"), "the refused mod never ran");
+            Assert.IsFalse(sources.TryLoad("probe", out _, out _));
+        }
+
+        /// <summary>
+        /// B2-07: the runtime persists best-effort and only logs a refused save, so a mod whose store
+        /// did not keep its source ran on, missing from every save and from the next start, and the tool
+        /// that loaded it reported success. The load is now undone and the tool reports why.
+        /// </summary>
+        [Test]
+        public async Task ModSourceLoad_StoreThatDoesNotKeepTheSource_UndoesTheLoadAndTheToolSaysWhy()
+        {
+            MemorySourceStore sources = new() { DroppedSaveId = "unkept" };
+            ScriptedWorldPackageStore packages = new();
+            using GatedHeadlessSession session = new(packages, sources);
+            LocalActorIdentityProvider identity = new("drop-host");
+            LuaModsLlmTool tool = new(
+                session.Controller.Runtime,
+                new TestCoreAiSettings(),
+                NullLog.Instance,
+                SessionCapabilities,
+                true,
+                identity,
+                BuiltInAgentRoleIds.Programmer,
+                session.Gate);
+
+            JObject refused = JObject.Parse(await tool.ExecuteAsync("load", "unkept", "local value = 1"));
+            JObject kept = JObject.Parse(await tool.ExecuteAsync("load", "kept", "local value = 1"));
+
+            Assert.IsFalse(refused.Value<bool>("success"), refused.ToString());
+            StringAssert.Contains("did not keep its source", refused.Value<string>("message"));
+            Assert.IsFalse(
+                session.Controller.Runtime.IsLoaded(identity.GetActorContext(BuiltInAgentRoleIds.Programmer), "unkept"),
+                "the mod whose source was not kept no longer runs");
+            Assert.IsTrue(kept.Value<bool>("success"), kept.ToString());
+            Assert.IsTrue(sources.TryLoad("kept", out _, out _));
         }
 
         /// <summary>
@@ -3268,6 +3465,35 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     new InMemoryPartPropertySink(),
                     NewSettings(),
                     capturedAtUtc: capturedAtUtc));
+        }
+
+        private static List<string> ModIdsOf(RbxWorldPackagePayload payload)
+        {
+            List<string> ids = new(payload.Mods.Count);
+            foreach (RbxWorldModSource mod in payload.Mods)
+            {
+                ids.Add(mod.Manifest.Id);
+            }
+
+            return ids;
+        }
+
+        /// <summary>A minimal captured world whose workspace holds one Folder named <paramref name="folderName"/>.</summary>
+        private RbxWorldPackagePayload CreatePayloadWithFolder(string folderName)
+        {
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            RbxInstance folder = registry.Create("Folder");
+            folder.Name = folderName;
+            folder.Parent = registry.WorldRoot;
+            return RbxWorldPackageSerializer.Capture(
+                new RbxWorldPackageCaptureContext(
+                    registry,
+                    game,
+                    new InMemoryPartPropertySink(),
+                    NewSettings(),
+                    capturedAtUtc: CapturedAtUtc));
         }
 
         private FileRbxWorldPackageStore CreateDurabilityStore(
@@ -4462,8 +4688,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
 
+            /// <summary>A mod id whose saves this store drops without a word, like a store that fails quietly.</summary>
+            public string DroppedSaveId { get; set; }
+
             public void Save(string id, string source, LuaModManifest manifest)
             {
+                if (string.Equals(id, DroppedSaveId, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
                 _entries[id] = new Entry
                 {
                     Source = source,
@@ -4705,6 +4939,139 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 }
 
                 return UniTask.FromResult(AutoPayload);
+            }
+
+            public IReadOnlyList<string> ListManualSlots()
+            {
+                return Array.Empty<string>();
+            }
+
+            public IReadOnlyList<string> ListAutoFiles()
+            {
+                return Array.Empty<string>();
+            }
+
+            public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+            {
+                return Array.Empty<RbxAutoSaveInfo>();
+            }
+        }
+
+        /// <summary>
+        /// A package store that also keeps the startup selection: it answers one selected package, can
+        /// hold its read open, and records every autosave and every recorded startup entry.
+        /// </summary>
+        private sealed class ScriptedStartupWorldPackageStore : IRbxWorldPackageStore, IRbxWorldStartupStore
+        {
+            private readonly RbxWorldPackagePayload _selected;
+            private UniTaskCompletionSource<bool> _heldRead;
+
+            public ScriptedStartupWorldPackageStore(RbxWorldPackagePayload selected)
+            {
+                _selected = selected;
+            }
+
+            /// <summary>When set, the next full startup read stays pending until <see cref="ReleaseHeldStartupRead"/>.</summary>
+            public bool HoldNextStartupRead { get; set; }
+
+            public List<string> AutoTriggers { get; } = new();
+
+            public List<RbxWorldPackagePayload> AutoPayloads { get; } = new();
+
+            public List<RbxWorldPackagePayload> SelectedPayloads { get; } = new();
+
+            public void ReleaseHeldStartupRead()
+            {
+                UniTaskCompletionSource<bool> held = _heldRead
+                    ?? throw new InvalidOperationException("No startup read is held.");
+                _heldRead = null;
+                held.TrySetResult(true);
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> SelectStartupAsync(
+                RbxWorldPackagePayload payload,
+                string sourceKind,
+                string sourceName,
+                CancellationToken cancellationToken = default)
+            {
+                SelectedPayloads.Add(payload);
+                return UniTask.FromResult(new RbxWorldPackageWriteResult(true, "startup.world", ""));
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> ClearStartupAsync(
+                CancellationToken cancellationToken = default)
+            {
+                return UniTask.FromResult(new RbxWorldPackageWriteResult(true, "startup.default", ""));
+            }
+
+            public async UniTask<RbxWorldStartupSelection> ReadStartupAsync(
+                CancellationToken cancellationToken = default)
+            {
+                if (HoldNextStartupRead)
+                {
+                    HoldNextStartupRead = false;
+                    _heldRead = new UniTaskCompletionSource<bool>();
+                    await _heldRead.Task;
+                }
+
+                return new RbxWorldStartupSelection(
+                    RbxWorldStartupSelectionKind.Package,
+                    1,
+                    _selected,
+                    _selected.Settings.WorldId,
+                    CapturedAtUtc,
+                    "manual",
+                    "boot-slot",
+                    "");
+            }
+
+            public UniTask<RbxWorldStartupSelection> ReadStartupInfoAsync(
+                CancellationToken cancellationToken = default)
+            {
+                return UniTask.FromResult(new RbxWorldStartupSelection(
+                    RbxWorldStartupSelectionKind.Package,
+                    1,
+                    null,
+                    _selected.Settings.WorldId,
+                    CapturedAtUtc,
+                    "manual",
+                    "boot-slot",
+                    ""));
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> CreateAutoAsync(
+                string trigger,
+                RbxWorldPackagePayload payload,
+                CancellationToken cancellationToken = default)
+            {
+                AutoTriggers.Add(trigger);
+                AutoPayloads.Add(payload);
+                return UniTask.FromResult(new RbxWorldPackageWriteResult(true, trigger + ".world", ""));
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> CreateManualAsync(
+                string slot,
+                RbxWorldPackagePayload payload,
+                CancellationToken cancellationToken = default)
+            {
+                return UniTask.FromResult(new RbxWorldPackageWriteResult(
+                    false,
+                    "",
+                    "Manual slots are outside this test seam."));
+            }
+
+            public UniTask<RbxWorldPackagePayload> LoadManualAsync(
+                string slot,
+                CancellationToken cancellationToken = default)
+            {
+                throw new FileNotFoundException("No manual payload is scripted.", slot);
+            }
+
+            public UniTask<RbxWorldPackagePayload> LoadAutoAsync(
+                string fileName,
+                CancellationToken cancellationToken = default)
+            {
+                throw new FileNotFoundException("No autosave payload is scripted.", fileName);
             }
 
             public IReadOnlyList<string> ListManualSlots()

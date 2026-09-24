@@ -16,6 +16,7 @@ using CoreAI.Scripting.LuaCs;
 using Cysharp.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Mods.WorldPackages
 {
@@ -32,9 +33,13 @@ namespace CoreAI.Mods.WorldPackages
     /// <summary>Requires a durable world-package autosave before allowing a runtime mutation.</summary>
     public sealed class ConfirmedWorldMutationGate : IConfirmedWorldMutationGate
     {
+        /// <summary>The manage_mods result field that carries the after-mutation note.</summary>
+        internal const string StartupNoteField = "startup_warning";
+
         private readonly Func<CancellationToken, UniTask<RbxWorldPackagePayload>> _captureCurrentAsync;
         private readonly IRbxWorldPackageStore _packageStore;
         private readonly SemaphoreSlim _singleFlight = new(1, 1);
+        private int _held;
 
         /// <summary>Creates a shared gate over the host capture port and durable package store.</summary>
         public ConfirmedWorldMutationGate(
@@ -49,9 +54,14 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>
         /// Runs after every mutation that returned, while the gate is still held, with the mutation's
         /// trigger. The world session sets it to keep the durable startup selection in step with the
-        /// live world. It must not throw; a throw is contained so it never replaces the mutation result.
+        /// live world; it answers a note for the caller (why the change was not recorded) or an empty
+        /// string, and the gate adds a note to the mutation's result. It must not throw; a throw is
+        /// contained so it never replaces the mutation result.
         /// </summary>
-        internal Func<string, CancellationToken, UniTask> AfterMutationAsync { get; set; }
+        internal Func<string, CancellationToken, UniTask<string>> AfterMutationAsync { get; set; }
+
+        /// <summary>True while a mutation, a confirmed world load or a boot-time restore holds the gate.</summary>
+        internal bool IsHeld => Volatile.Read(ref _held) != 0;
 
         /// <inheritdoc />
         public async Task<TResult> ExecuteAsync<TResult>(
@@ -70,6 +80,7 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             await _singleFlight.WaitAsync(cancellationToken);
+            Volatile.Write(ref _held, 1);
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -79,11 +90,11 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     payload = await _captureCurrentAsync(cancellationToken);
                 }
-                catch (RbxWorldPackageFormatLimitException) when (RemovesContentOnly(trigger))
+                catch (RbxWorldPackageFormatLimitException) when (BringsTheWorldUnderTheLimit(trigger))
                 {
                     // WHY: a world past a format limit cannot be captured, so no backup of it can exist.
-                    // An action that only removes content is the one way back under the limit;
-                    // refusing it too would leave the world unable to change or save forever.
+                    // Forget is the one way back under the limit; refusing it too would leave the world
+                    // unable to change or save forever.
                     payload = null;
                     backupImpossible = true;
                 }
@@ -112,39 +123,132 @@ namespace CoreAI.Mods.WorldPackages
 
                 cancellationToken.ThrowIfCancellationRequested();
                 TResult result = await mutationAsync(cancellationToken);
-                await NotifyAfterMutationAsync(trigger);
-                return result;
+                string note = await NotifyAfterMutationAsync(trigger);
+                return note.Length == 0 ? result : WithNote(result, note);
             }
             finally
             {
+                Volatile.Write(ref _held, 0);
                 _singleFlight.Release();
             }
         }
 
-        /// <summary>True for the triggers of actions that only remove content: forget and unload.</summary>
-        private static bool RemovesContentOnly(string trigger)
+        /// <summary>
+        /// Runs <paramref name="operationAsync"/> alone under the gate, with no backup and no
+        /// after-mutation follow-up: the boot-time startup restore, whose outgoing world is the
+        /// reproducible default world. No thread and no blocking wait (WebGL).
+        /// </summary>
+        internal async Task<TResult> ExecuteWithoutBackupAsync<TResult>(
+            Func<CancellationToken, Task<TResult>> operationAsync,
+            CancellationToken cancellationToken)
         {
-            return string.Equals(trigger, LuaModsLlmTool.ForgetBackupTrigger, StringComparison.Ordinal)
-                   || string.Equals(trigger, LuaModsLlmTool.UnloadBackupTrigger, StringComparison.Ordinal);
+            if (operationAsync == null)
+            {
+                throw new ArgumentNullException(nameof(operationAsync));
+            }
+
+            await _singleFlight.WaitAsync(cancellationToken);
+            Volatile.Write(ref _held, 1);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return await operationAsync(cancellationToken);
+            }
+            finally
+            {
+                Volatile.Write(ref _held, 0);
+                _singleFlight.Release();
+            }
         }
 
-        private async UniTask NotifyAfterMutationAsync(string trigger)
+        /// <summary>
+        /// True for the trigger of forget, the one action that removes a mod's source and so brings a
+        /// world past the mod limit back under it.
+        /// </summary>
+        /// <remarks>
+        /// WHY not unload as well: an unloaded mod keeps its source, so an unload never brings the
+        /// world back under the limit, and letting it skip its backup only removed the backup.
+        /// </remarks>
+        private static bool BringsTheWorldUnderTheLimit(string trigger)
         {
-            Func<string, CancellationToken, UniTask> afterMutation = AfterMutationAsync;
+            return string.Equals(trigger, LuaModsLlmTool.ForgetBackupTrigger, StringComparison.Ordinal);
+        }
+
+        private async UniTask<string> NotifyAfterMutationAsync(string trigger)
+        {
+            Func<string, CancellationToken, UniTask<string>> afterMutation = AfterMutationAsync;
             if (afterMutation == null)
             {
-                return;
+                return "";
             }
 
             // WHY uncancelled and contained: the mutation already ran, so its result must reach the
             // caller whatever the follow-up does.
             try
             {
-                await afterMutation(trigger, CancellationToken.None);
+                return await afterMutation(trigger, CancellationToken.None) ?? "";
             }
             catch (Exception)
             {
+                return "";
             }
+        }
+
+        /// <summary>
+        /// Adds <paramref name="note"/> to the result of the two gated tools: an execute_lua
+        /// <see cref="LuaTool.LuaResult"/> (after its output, or its error when it failed) or a
+        /// manage_mods JSON object (as <see cref="StartupNoteField"/>). Any other result is returned as is.
+        /// </summary>
+        /// <remarks>
+        /// WHY on the result: the note says a change will not survive a restart, and the one reader who
+        /// can act on it is the caller of the tool that made the change.
+        /// </remarks>
+        private static TResult WithNote<TResult>(TResult result, string note)
+        {
+            if (result is LuaTool.LuaResult luaResult)
+            {
+                LuaTool.LuaResult noted = luaResult.Success
+                    ? new LuaTool.LuaResult
+                    {
+                        Success = true,
+                        Output = AppendNote(luaResult.Output, note, true),
+                        Error = luaResult.Error
+                    }
+                    : new LuaTool.LuaResult
+                    {
+                        Success = false,
+                        Output = luaResult.Output,
+                        Error = AppendNote(luaResult.Error, note, false)
+                    };
+                return (TResult)(object)noted;
+            }
+
+            if (result is string json)
+            {
+                try
+                {
+                    // WHY no date parsing: the result is re-serialized, and a timestamp read back as a
+                    // DateTime would come out in another format than the tool wrote it.
+                    using System.IO.StringReader text = new(json);
+                    using JsonTextReader reader = new(text) { DateParseHandling = DateParseHandling.None };
+                    JObject parsed = JObject.Load(reader);
+                    parsed[StartupNoteField] = note;
+                    return (TResult)(object)parsed.ToString(Formatting.None);
+                }
+                catch (JsonException)
+                {
+                    return result;
+                }
+            }
+
+            return result;
+        }
+
+        private static string AppendNote(string text, string note, bool isOutput)
+        {
+            bool empty = string.IsNullOrEmpty(text)
+                         || (isOutput && string.Equals(text, "nil", StringComparison.Ordinal));
+            return empty ? note : text.TrimEnd() + "\n" + note;
         }
     }
 }
@@ -821,6 +925,16 @@ namespace CoreAI.Mods.WorldPackages
                 return RefuseUnloadable(name, ReadFailedStatus, DescribeReadFailure(name, ex));
             }
             catch (UnauthorizedAccessException ex)
+            {
+                return RefuseUnloadable(name, ReadFailedStatus, DescribeReadFailure(name, ex));
+            }
+            catch (NotSupportedException ex)
+            {
+                // WHY this and the next: on a Windows player a name such as CON.world names a device,
+                // not a file, and opening it throws one of these instead of an IOException.
+                return RefuseUnloadable(name, ReadFailedStatus, DescribeReadFailure(name, ex));
+            }
+            catch (ArgumentException ex)
             {
                 return RefuseUnloadable(name, ReadFailedStatus, DescribeReadFailure(name, ex));
             }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -255,16 +256,29 @@ namespace CoreAI.Mods.WorldPackages
     /// sources than one package holds), so it cannot be captured until something is removed.
     /// </summary>
     /// <remarks>
-    /// WHY a type of its own: the pre-mutation backup gate lets an action that only removes content
-    /// (forget, unload) run without its backup when capture fails for exactly this reason; any other
-    /// capture failure still blocks every mutation. Without that exception the world could never be
-    /// brought back under the limit.
+    /// WHY a type of its own: the pre-mutation backup gate lets forget, the one action that brings the
+    /// world back under the limit, run without its backup when capture fails for exactly this reason;
+    /// any other capture failure still blocks every mutation. Without that exception the world could
+    /// never be brought back under the limit.
     /// </remarks>
     public sealed class RbxWorldPackageFormatLimitException : RbxWorldPackageException
     {
         public RbxWorldPackageFormatLimitException(string message)
             : base(message)
         {
+        }
+
+        /// <summary>
+        /// The refusal of a new mod source past the world-package mod limit, worded the same wherever
+        /// it is raised: by the session before a mod runs and by the source store that refuses to keep it.
+        /// </summary>
+        internal static string DescribeModSourceLimit(string modId, int storedSources)
+        {
+            return "Mod '" + modId + "' cannot be added: this world already stores "
+                   + storedSources.ToString(CultureInfo.InvariantCulture) + " mod sources, the most one world "
+                   + "package holds (" + RbxWorldPackageSerializer.MaximumMods.ToString(CultureInfo.InvariantCulture)
+                   + "). An unloaded mod keeps its source; forget a mod that is no longer needed with "
+                   + "manage_mods action 'forget', then retry.";
         }
     }
 
@@ -566,6 +580,25 @@ namespace CoreAI.Mods.WorldPackages
         UniTask<IRbxWorldModSourceReplacement> PrepareExactReplacementAsync(
             IReadOnlyList<RbxWorldModSource> mods,
             CancellationToken cancellationToken = default);
+    }
+
+    /// <summary>
+    /// A mod source store that refuses, in <see cref="ILuaModSourceStore.Save"/>, a new mod id past the
+    /// world-package mod limit, and answers the same question before anything runs.
+    /// </summary>
+    /// <remarks>
+    /// WHY one rule for both sides: the session counted the manifests the store could list while the
+    /// file store counted the folders holding a manifest file, so one unreadable manifest let the session
+    /// admit a mod whose source the store then refused to keep. The mod ran, and was missing from every
+    /// save and from the next start.
+    /// </remarks>
+    internal interface ILuaModSourceAdmission
+    {
+        /// <summary>
+        /// True when <see cref="ILuaModSourceStore.Save"/> would keep the source of
+        /// <paramref name="modId"/> now; otherwise <paramref name="refusal"/> is the refusal that save raises.
+        /// </summary>
+        bool CanAdmit(string modId, out string refusal);
     }
 
     /// <summary>AI tool that writes a create-once manual world package through the runtime service.</summary>
@@ -1370,6 +1403,7 @@ namespace CoreAI.Mods.WorldPackages
         private const string AutosaveSourceKind = "autosave";
         private const string NonTransactionalSourceStoreRefusal =
             "The configured mod source store cannot atomically replace a world source set.";
+        private const string SourceChangeTrigger = "mod source change";
 
         private readonly object _gate = new();
         private readonly IRbxWorldSessionHost _host;
@@ -1395,6 +1429,11 @@ namespace CoreAI.Mods.WorldPackages
             new(StringComparer.Ordinal);
         private Session _current;
         private StartupSource _liveStartupSource;
+        private bool _startupRefreshPending;
+        private bool _startupRefreshRunning;
+        private Task _startupRefreshAfterSourceChanges = Task.CompletedTask;
+        private byte[] _lastRefusedStartupContent;
+        private string _lastReportedStartupRefusal = "";
         private bool _disposed;
         private bool _loadInProgress;
         private Func<DateTime> _utcNow = () => DateTime.UtcNow;
@@ -1482,6 +1521,21 @@ namespace CoreAI.Mods.WorldPackages
         public LuaCsModRuntime CurrentConcreteRuntime => Current.Stack.Runtime;
 
         public LuaCsRbxApiBindings CurrentRbxApi => Current.RbxApi;
+
+        /// <summary>
+        /// The refresh of the startup selection that <see cref="PumpFrame"/> last started after mod
+        /// sources changed outside the shared gate; completed when none is running. For tests.
+        /// </summary>
+        internal Task StartupRefreshForTests
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _startupRefreshAfterSourceChanges;
+                }
+            }
+        }
 
         public RbxWorldPackagePayload CaptureCurrent()
         {
@@ -1664,7 +1718,7 @@ namespace CoreAI.Mods.WorldPackages
                     0);
             }
 
-            return await LoadConfirmedCoreAsync(pending.Payload, true, pending, cancellationToken);
+            return await LoadConfirmedCoreAsync(pending.Payload, true, pending, null, cancellationToken);
         }
 
         /// <summary>
@@ -1675,7 +1729,7 @@ namespace CoreAI.Mods.WorldPackages
             RbxWorldPackagePayload payload,
             CancellationToken cancellationToken = default)
         {
-            return LoadConfirmedCoreAsync(payload, true, null, cancellationToken);
+            return LoadConfirmedCoreAsync(payload, true, null, null, cancellationToken);
         }
 
         public async UniTask<RbxWorldStartupRestoreResult> RestoreStartupSelectionAsync(
@@ -1687,6 +1741,32 @@ namespace CoreAI.Mods.WorldPackages
                     RbxWorldStartupRestoreOutcome.NotSelected, 0, "", 0, "");
             }
 
+            if (!(_worldMutationGate is ConfirmedWorldMutationGate confirmedGate))
+            {
+                return await RestoreStartupSelectionCoreAsync(cancellationToken);
+            }
+
+            // WHY the whole restore holds the shared gate, as a confirmed load does: an execute_lua or
+            // manage_mods call that arrives during boot otherwise backed up the default world and then
+            // changed the restored one, and the change missed the startup selection because the restored
+            // world was not yet marked as the startup world. Held here, it waits and runs against the
+            // restored world, which is by then the startup world its refresh records.
+            try
+            {
+                return await confirmedGate.ExecuteWithoutBackupAsync(
+                    token => RestoreStartupSelectionCoreAsync(token).AsTask(),
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return FallBackAtStartup(
+                    0, "", "the startup restore could not take the world mutation gate: " + ex.Message);
+            }
+        }
+
+        private async UniTask<RbxWorldStartupRestoreResult> RestoreStartupSelectionCoreAsync(
+            CancellationToken cancellationToken)
+        {
             RbxWorldStartupSelection selection;
             try
             {
@@ -1720,7 +1800,15 @@ namespace CoreAI.Mods.WorldPackages
                 // WHY no pre-load safety autosave: the outgoing world at boot is the reproducible
                 // default world, and one autosave per boot would evict the real backups from the
                 // bounded ring within a handful of restarts.
-                loaded = await LoadConfirmedCoreAsync(selection.Payload, false, null, cancellationToken);
+                loaded = await LoadConfirmedCoreAsync(
+                    selection.Payload,
+                    false,
+                    null,
+                    new StartupSource(
+                        selection.SourceKind,
+                        selection.SourceName,
+                        ComputeStartupContentOrNull(selection.Payload)),
+                    cancellationToken);
             }
             catch (Exception ex)
             {
@@ -1735,7 +1823,6 @@ namespace CoreAI.Mods.WorldPackages
                     loaded?.Error ?? "the staged restore returned no result");
             }
 
-            SetLiveStartupSource(new StartupSource(selection.SourceKind, selection.SourceName));
             return new RbxWorldStartupRestoreResult(
                 RbxWorldStartupRestoreOutcome.Restored,
                 selection.Sequence,
@@ -1792,10 +1879,15 @@ namespace CoreAI.Mods.WorldPackages
         /// The consumed player-confirmed request; non-null records the published payload as the
         /// world that opens on the next start.
         /// </param>
+        /// <param name="restoredStartup">
+        /// The startup entry the boot-time restore publishes; non-null marks the published world as
+        /// the startup world without recording it again.
+        /// </param>
         private async UniTask<RbxWorldLoadResult> LoadConfirmedCoreAsync(
             RbxWorldPackagePayload payload,
             bool writeSafetyAutosave,
             PendingLoad startupSource,
+            StartupSource restoredStartup,
             CancellationToken cancellationToken)
         {
             DemandActive();
@@ -1814,22 +1906,12 @@ namespace CoreAI.Mods.WorldPackages
                     RbxWorldLoadRefusedException.NetworkSessionsActiveStatus);
             }
 
-            string aclRefusal = DescribeAclDowngrade(payload);
-            if (aclRefusal.Length > 0)
+            string packageRefusal = DescribeUnloadablePackage(payload);
+            if (packageRefusal.Length > 0)
             {
                 return new RbxWorldLoadResult(
                     false,
-                    aclRefusal,
-                    0,
-                    RbxWorldLoadRefusedException.IncompatiblePackageStatus);
-            }
-
-            string activeFullMod = FindActiveFullCapabilityMod(payload.Mods);
-            if (activeFullMod.Length > 0)
-            {
-                return new RbxWorldLoadResult(
-                    false,
-                    DescribeActiveFullCapabilityMod(activeFullMod),
+                    packageRefusal,
                     0,
                     RbxWorldLoadRefusedException.IncompatiblePackageStatus);
             }
@@ -1858,7 +1940,7 @@ namespace CoreAI.Mods.WorldPackages
             {
                 if (!writeSafetyAutosave)
                 {
-                    return await ReplaceWorldAsync(payload, startupSource, cancellationToken);
+                    return await ReplaceWorldAsync(payload, startupSource, restoredStartup, cancellationToken);
                 }
 
                 if (_worldMutationGate == null)
@@ -1866,7 +1948,7 @@ namespace CoreAI.Mods.WorldPackages
                     string safetyFailure = await WriteSafetyAutosaveAsync(cancellationToken);
                     return safetyFailure.Length > 0
                         ? new RbxWorldLoadResult(false, safetyFailure, 0)
-                        : await ReplaceWorldAsync(payload, startupSource, cancellationToken);
+                        : await ReplaceWorldAsync(payload, startupSource, restoredStartup, cancellationToken);
                 }
 
                 // WHY the whole replacement runs inside the shared gate: execute_lua and manage_mods
@@ -1877,7 +1959,7 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     return await _worldMutationGate.ExecuteAsync(
                         PreLoadAutosaveTrigger,
-                        token => ReplaceWorldAsync(payload, startupSource, token).AsTask(),
+                        token => ReplaceWorldAsync(payload, startupSource, restoredStartup, token).AsTask(),
                         cancellationToken);
                 }
                 catch (Exception ex)
@@ -1946,6 +2028,7 @@ namespace CoreAI.Mods.WorldPackages
         private async UniTask<RbxWorldLoadResult> ReplaceWorldAsync(
             RbxWorldPackagePayload payload,
             PendingLoad startupSource,
+            StartupSource restoredStartup,
             CancellationToken cancellationToken)
         {
             IRbxWorldSessionCandidate candidate = null;
@@ -1964,9 +2047,10 @@ namespace CoreAI.Mods.WorldPackages
                 candidate = _host.Stage(payload);
                 stagedNetwork = new StagedNetworkBridge(_networkBridge);
                 stagedRbxApi = _rbxApiFactory(candidate, stagedNetwork);
+                SessionSourceStore stagedSources = new(this, sourceReplacement.SourceStore);
                 stagedStack = _stackFactory(
                     stagedRbxApi,
-                    sourceReplacement.SourceStore,
+                    stagedSources,
                     stagedModStore,
                     stagedVersions);
                 _wireTeardown(stagedStack, stagedRbxApi);
@@ -1990,7 +2074,7 @@ namespace CoreAI.Mods.WorldPackages
                 Session incoming = new(
                     stagedStack,
                     stagedRbxApi,
-                    sourceReplacement.SourceStore,
+                    stagedSources,
                     candidate,
                     stagedNetwork);
                 LuaCsLogicSlots previousSlots;
@@ -2039,7 +2123,8 @@ namespace CoreAI.Mods.WorldPackages
                     }
 
                     _current = incoming;
-                    _liveStartupSource = null;
+                    _startupRefreshPending = false;
+                    SetLiveStartupSourceLocked(restoredStartup);
                     published = true;
                 }
 
@@ -2142,7 +2227,9 @@ namespace CoreAI.Mods.WorldPackages
 
         /// <summary>
         /// Advances only the currently published scheduler and runtime. A throw from either one is
-        /// reported through the diagnostics sink and does not skip the other.
+        /// reported through the diagnostics sink and does not skip the other. When mod sources of the
+        /// live startup world changed outside the shared gate since the last frame, it also starts one
+        /// refresh of the startup selection.
         /// </summary>
         public void PumpFrame(ActorContext actorContext, float deltaSeconds)
         {
@@ -2170,6 +2257,8 @@ namespace CoreAI.Mods.WorldPackages
             {
                 ReportPumpFailure(ref _lastTickFailure, "mod runtime Tick", ex);
             }
+
+            StartPendingStartupRefresh();
         }
 
         public void Dispose()
@@ -2389,7 +2478,10 @@ namespace CoreAI.Mods.WorldPackages
                         CancellationToken.None);
                     if (written != null && written.Success)
                     {
-                        SetLiveStartupSource(new StartupSource(source.SourceKind, source.Slot));
+                        SetLiveStartupSource(new StartupSource(
+                            source.SourceKind,
+                            source.Slot,
+                            ComputeStartupContentOrNull(source.Payload)));
                         return "";
                     }
 
@@ -2418,47 +2510,82 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>
         /// After a gated mutation of a live world that is also the startup selection, records the
         /// world as it is now as the new startup selection. Never throws; a failure is reported and
-        /// the previous selection stays.
+        /// the previous selection stays. Answers the note the mutation's tool result carries: why the
+        /// change could not be recorded, or empty.
         /// </summary>
         /// <remarks>
-        /// WHY a whole new create-once entry per mutation: the entry is one self-contained package
+        /// WHY a whole new create-once entry per change: the entry is one self-contained package
         /// (tree and exact mod sources from one capture), so a crash at any point leaves either the
         /// previous state or the new one to open, never a tree from one moment with sources from
         /// another. Before this, the entry stayed the package confirmed at load time, so every later
         /// AI change, including mods whose sources lived only in the session's source version, was
         /// gone after a restart although the Hub promised the world would reopen.
         /// </remarks>
-        private async UniTask RefreshStartupSelectionAfterMutationAsync(
+        private UniTask<string> RefreshStartupSelectionAfterMutationAsync(
             string trigger,
             CancellationToken cancellationToken)
         {
-            if (_startupStore == null
-                || string.Equals(trigger, PreLoadAutosaveTrigger, StringComparison.Ordinal)
-                || ReadLiveStartupSource() == null)
+            // WHY the load's own trigger is skipped: a confirmed load records its selection itself,
+            // and the gate reports the load only after the new world is published.
+            return string.Equals(trigger, PreLoadAutosaveTrigger, StringComparison.Ordinal)
+                ? UniTask.FromResult("")
+                : RefreshStartupSelectionAsync(trigger);
+        }
+
+        /// <summary>
+        /// Records the live startup world as it is now, unless the newest entry already holds exactly
+        /// that world or the startup restore would refuse it. Serialized on the startup gate; never
+        /// throws. Answers the note for a caller's tool result: why the change was not recorded
+        /// because the restore refuses the world (once per refused state), or empty.
+        /// </summary>
+        private async UniTask<string> RefreshStartupSelectionAsync(string trigger)
+        {
+            if (_startupStore == null || ReadLiveStartupSource() == null)
             {
-                return;
+                return "";
             }
 
             await _startupSelectionGate.WaitAsync(CancellationToken.None);
             try
             {
-                StartupSource source = ReadLiveStartupSource();
+                StartupSource source = TakeLiveStartupSourceForRefresh();
                 if (source == null)
                 {
-                    return;
+                    return "";
                 }
 
                 string reason;
                 try
                 {
+                    RbxWorldPackagePayload captured = CaptureCurrent();
+                    byte[] content = ComputeStartupContent(captured);
+
+                    // WHY compared first: most gated calls change nothing (a read-only execute_lua),
+                    // and each recorded entry is a whole package written, synced and pruned while the
+                    // gate is held; on WebGL up to 4 MB handed to the browser per call.
+                    if (source.Holds(content))
+                    {
+                        return "";
+                    }
+
+                    // WHY the restore's own checks: an entry the startup restore refuses makes every
+                    // later start fall back to the default world without a word, which is worse than
+                    // keeping the previous entry and saying so now.
+                    string refusal = DescribeUnloadablePackage(captured);
+                    if (refusal.Length > 0)
+                    {
+                        return ReportStartupRefusal(content, refusal);
+                    }
+
                     RbxWorldPackageWriteResult written = await _startupStore.SelectStartupAsync(
-                        CaptureCurrent(),
+                        captured,
                         source.Kind,
                         source.Name,
                         CancellationToken.None);
                     if (written != null && written.Success)
                     {
-                        return;
+                        ReplaceLiveStartupSource(source, new StartupSource(source.Kind, source.Name, content));
+                        return "";
                     }
 
                     reason = written == null || string.IsNullOrWhiteSpace(written.Error)
@@ -2473,10 +2600,105 @@ namespace CoreAI.Mods.WorldPackages
                 ReportDiagnostic(
                     "The live world changed ('" + trigger + "'), but the change was not recorded for the "
                     + "next start: " + reason + " The next start opens the world as it was before it.");
+                return "";
             }
             finally
             {
                 _startupSelectionGate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Reports once per refused world state that the startup selection keeps its previous entry
+        /// because the startup restore would refuse the live world, and logs each distinct refusal once.
+        /// </summary>
+        private string ReportStartupRefusal(byte[] content, string refusal)
+        {
+            if (_lastRefusedStartupContent != null && SameContent(_lastRefusedStartupContent, content))
+            {
+                return "";
+            }
+
+            _lastRefusedStartupContent = content;
+            string note = "Startup world not updated: " + refusal.TrimEnd('.')
+                          + ". The startup restore refuses such a world, so the previous startup world is "
+                          + "kept and this change will not reopen after a restart.";
+            if (!string.Equals(_lastReportedStartupRefusal, refusal, StringComparison.Ordinal))
+            {
+                _lastReportedStartupRefusal = refusal;
+                ReportDiagnostic(note);
+            }
+
+            return note;
+        }
+
+        /// <summary>
+        /// Starts one refresh of the startup selection when mod sources of the live startup world
+        /// changed outside the shared gate, none is running, and no gated mutation or world load
+        /// holds the gate (a gated mutation refreshes the selection itself before it lets go).
+        /// </summary>
+        /// <remarks>
+        /// WHY from the frame pump and not from the change itself: one Hub action writes the sources
+        /// several times (the runtime persists the load, then the Hub its own manifest; an unload and
+        /// then the dormant flag), and a refresh started by the first write would record a state the
+        /// action had not finished. The pump records the finished action once, and a frame is the
+        /// longest a change waits.
+        /// </remarks>
+        private void StartPendingStartupRefresh()
+        {
+            lock (_gate)
+            {
+                if (!_startupRefreshPending
+                    || _startupRefreshRunning
+                    || _disposed
+                    || (_worldMutationGate is ConfirmedWorldMutationGate gate && gate.IsHeld))
+                {
+                    return;
+                }
+
+                _startupRefreshRunning = true;
+            }
+
+            Task refresh = RefreshAfterSourceChangesAsync().AsTask();
+            lock (_gate)
+            {
+                _startupRefreshAfterSourceChanges = refresh;
+            }
+        }
+
+        private async UniTask RefreshAfterSourceChangesAsync()
+        {
+            try
+            {
+                await RefreshStartupSelectionAsync(SourceChangeTrigger);
+            }
+            catch (Exception ex)
+            {
+                ReportDiagnostic("Recording a mod source change for the next start failed: " + ex.Message);
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    _startupRefreshRunning = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Called by a session's source store after every write: marks the live startup world for a
+        /// refresh on the next frame when the write reached the published session's sources.
+        /// </summary>
+        private void OnSessionSourcesChanged(ILuaModSourceStore sessionSources)
+        {
+            lock (_gate)
+            {
+                if (!_disposed
+                    && _liveStartupSource != null
+                    && ReferenceEquals(_current.SourceStore, sessionSources))
+                {
+                    _startupRefreshPending = true;
+                }
             }
         }
 
@@ -2488,12 +2710,111 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
+        /// <summary>
+        /// The live startup source for a refresh that is about to capture the world, clearing the
+        /// pending source-change mark that capture now covers.
+        /// </summary>
+        private StartupSource TakeLiveStartupSourceForRefresh()
+        {
+            lock (_gate)
+            {
+                _startupRefreshPending = false;
+                return _disposed ? null : _liveStartupSource;
+            }
+        }
+
         private void SetLiveStartupSource(StartupSource source)
         {
             lock (_gate)
             {
-                _liveStartupSource = source;
+                SetLiveStartupSourceLocked(source);
             }
+        }
+
+        private void SetLiveStartupSourceLocked(StartupSource source)
+        {
+            _liveStartupSource = source;
+            _lastRefusedStartupContent = null;
+            _lastReportedStartupRefusal = "";
+            if (source == null)
+            {
+                _startupRefreshPending = false;
+            }
+        }
+
+        /// <summary>
+        /// Replaces the live startup source after a refresh recorded a new entry, unless a load, a
+        /// restore or a clear replaced the source meanwhile.
+        /// </summary>
+        private void ReplaceLiveStartupSource(StartupSource refreshed, StartupSource recorded)
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_liveStartupSource, refreshed))
+                {
+                    SetLiveStartupSourceLocked(recorded);
+                }
+            }
+        }
+
+        /// <summary>
+        /// A digest of everything a startup entry of <paramref name="payload"/> restores: its encoded
+        /// package with the capture time left out, which differs on every capture of the same world.
+        /// </summary>
+        private static byte[] ComputeStartupContent(RbxWorldPackagePayload payload)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // WHY: the digest encodes the package in one frame, so it keeps to the same bounded work
+            // the package store's own WebGL encoder accepts, and a larger world is refused before it.
+            FileRbxWorldPackageStore.ValidateWebGlWorkBudget(payload);
+#endif
+            RbxWorldPackagePayload timeless = new(
+                DateTime.MinValue,
+                payload.Settings,
+                payload.Tree,
+                payload.Parts,
+                payload.CameraCFrame,
+                payload.Mods,
+                payload.Diagnostics);
+            byte[] encoded = RbxWorldPackageSerializer.WritePackage(timeless);
+            using (SHA256 algorithm = SHA256.Create())
+            {
+                return algorithm.ComputeHash(encoded);
+            }
+        }
+
+        /// <summary>
+        /// <see cref="ComputeStartupContent"/> of a package that was just recorded or restored, or
+        /// null when it cannot be encoded, in which case the next change is recorded unconditionally.
+        /// </summary>
+        private static byte[] ComputeStartupContentOrNull(RbxWorldPackagePayload payload)
+        {
+            try
+            {
+                return payload == null ? null : ComputeStartupContent(payload);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private static bool SameContent(byte[] left, byte[] right)
+        {
+            if (left == null || right == null || left.Length != right.Length)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < left.Length; index++)
+            {
+                if (left[index] != right[index])
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private RbxWorldStartupRestoreResult FallBackAtStartup(int sequence, string worldId, string reason)
@@ -2578,18 +2899,29 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         /// <summary>
+        /// Why a confirmed load, and so the boot-time startup restore, refuses
+        /// <paramref name="payload"/> in this session: a legacy ACL downgrade or an active
+        /// Full-capability mod. Empty when it would open.
+        /// </summary>
+        private string DescribeUnloadablePackage(RbxWorldPackagePayload payload)
+        {
+            string refusal = DescribeAclDowngrade(payload);
+            if (refusal.Length > 0)
+            {
+                return refusal;
+            }
+
+            string activeFullMod = FindActiveFullCapabilityMod(payload?.Mods);
+            return activeFullMod.Length > 0 ? DescribeActiveFullCapabilityMod(activeFullMod) : "";
+        }
+
+        /// <summary>
         /// Refuses, before the player is asked, a package the confirmed load would refuse: a legacy ACL
         /// downgrade or an active Full-capability mod.
         /// </summary>
         private void DemandLoadablePackage(RbxWorldPackagePayload payload)
         {
-            string refusal = DescribeAclDowngrade(payload);
-            if (refusal.Length == 0)
-            {
-                string activeFullMod = FindActiveFullCapabilityMod(payload?.Mods);
-                refusal = activeFullMod.Length > 0 ? DescribeActiveFullCapabilityMod(activeFullMod) : "";
-            }
-
+            string refusal = DescribeUnloadablePackage(payload);
             if (refusal.Length > 0)
             {
                 throw new RbxWorldLoadRefusedException(
@@ -2761,18 +3093,132 @@ namespace CoreAI.Mods.WorldPackages
             public StagedNetworkBridge Network { get; }
         }
 
-        /// <summary>Where the live world's startup selection came from, reused for each refresh of it.</summary>
+        /// <summary>
+        /// The source store of a session this controller staged: forwards every call to the source
+        /// version the load prepared and reports each write back to the controller.
+        /// </summary>
+        /// <remarks>
+        /// WHY here and not on the runtime's load events: every change to a world's mod set ends in a
+        /// write to its source store, whoever made it: a gated tool, the Hub Mods page (whose delete,
+        /// enable and disable also write the store directly), or host code calling the runtime
+        /// facade. Before this, only a change made through the shared gate reached the startup
+        /// selection, and a player's own Hub edits on the startup world were lost at restart.
+        /// </remarks>
+        private sealed class SessionSourceStore : ILuaModSourceStore, ILuaModSourceAdmission
+        {
+            private readonly RbxWorldRuntimeSessionController _owner;
+            private readonly ILuaModSourceStore _inner;
+
+            public SessionSourceStore(RbxWorldRuntimeSessionController owner, ILuaModSourceStore inner)
+            {
+                _owner = owner;
+                _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            }
+
+            public void Save(string id, string source, LuaModManifest manifest)
+            {
+                try
+                {
+                    _inner.Save(id, source, manifest);
+                }
+                finally
+                {
+                    _owner.OnSessionSourcesChanged(this);
+                }
+            }
+
+            public bool TryLoad(string id, out string source, out LuaModManifest manifest)
+            {
+                return _inner.TryLoad(id, out source, out manifest);
+            }
+
+            public IReadOnlyList<LuaModManifest> List()
+            {
+                return _inner.List();
+            }
+
+            public void SetActive(string id, bool active)
+            {
+                try
+                {
+                    _inner.SetActive(id, active);
+                }
+                finally
+                {
+                    _owner.OnSessionSourcesChanged(this);
+                }
+            }
+
+            public void Delete(string id)
+            {
+                try
+                {
+                    _inner.Delete(id);
+                }
+                finally
+                {
+                    _owner.OnSessionSourcesChanged(this);
+                }
+            }
+
+            public bool CanAdmit(string modId, out string refusal)
+            {
+                return CanAdmitSource(_inner, modId, out refusal);
+            }
+        }
+
+        /// <summary>
+        /// Whether <paramref name="sources"/> would keep a source for <paramref name="modId"/> without
+        /// passing the world-package mod limit: the store's own rule when it has one, otherwise a mod it
+        /// already holds or a listing below the limit. Throws when the store cannot answer.
+        /// </summary>
+        private static bool CanAdmitSource(ILuaModSourceStore sources, string modId, out string refusal)
+        {
+            if (sources is ILuaModSourceAdmission admission)
+            {
+                return admission.CanAdmit(modId, out refusal);
+            }
+
+            refusal = "";
+            if (sources.TryLoad(modId, out _, out _))
+            {
+                return true;
+            }
+
+            int stored = sources.List()?.Count ?? 0;
+            if (stored < RbxWorldPackageSerializer.MaximumMods)
+            {
+                return true;
+            }
+
+            refusal = RbxWorldPackageFormatLimitException.DescribeModSourceLimit(modId, stored);
+            return false;
+        }
+
+        /// <summary>
+        /// Where the live world's startup selection came from, reused for each refresh of it, and the
+        /// <see cref="ComputeStartupContent"/> digest of what its newest entry holds (null when unknown).
+        /// </summary>
         private sealed class StartupSource
         {
-            public StartupSource(string kind, string name)
+            private readonly byte[] _recordedContent;
+
+            public StartupSource(string kind, string name, byte[] recordedContent)
             {
                 Kind = kind ?? "";
                 Name = name ?? "";
+                _recordedContent = recordedContent;
             }
 
             public string Kind { get; }
 
             public string Name { get; }
+
+            /// <summary>True when the newest entry is known to hold exactly <paramref name="content"/>.</summary>
+            public bool Holds(byte[] content)
+            {
+                return SameContent(_recordedContent, content);
+            }
         }
 
         private sealed class PendingLoad
@@ -3364,14 +3810,17 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             /// <summary>
-            /// Replaces the failure of a chunk whose world was replaced by a confirmed load while it
-            /// waited or ran with an explanation of what happened.
+            /// Explains the failure of a chunk whose world was replaced by a confirmed load while it
+            /// waited or ran: a failure caused by the replaced world is replaced by the explanation, and
+            /// any other failure keeps its own error with the explanation after it.
             /// </summary>
             /// <remarks>
-            /// WHY: such a chunk runs against the outgoing world, so its first write fails with
+            /// WHY replaced: such a chunk runs against the outgoing world, so its first write fails with
             /// WORLD_DETACHED or INSTANCE_DESTROYED, whose text tells the reader that the scene host was
             /// destroyed and to reload the mods; neither is true after a world load, and the mods of the
             /// new world are already running.
+            /// WHY only those: the chunk's own error (a syntax or runtime error) is what the caller has
+            /// to fix, and replacing it made the model retry the same broken chunk before it saw why.
             /// </remarks>
             private async Task<LuaTool.LuaResult> ReportReplacedWorldAsync(
                 Session served,
@@ -3383,16 +3832,29 @@ namespace CoreAI.Mods.WorldPackages
                     return result;
                 }
 
+                string explanation = "execute_lua ran against the previous world: a confirmed world load "
+                                     + "replaced the live world while this call was waiting or running, so "
+                                     + "none of its changes reached the live world. The mods of the loaded "
+                                     + "world are already running and nothing needs to be reloaded; inspect "
+                                     + "the loaded world and retry the change there.";
                 return new LuaTool.LuaResult
                 {
                     Success = false,
                     Output = result.Output,
-                    Error = "execute_lua ran against the previous world: a confirmed world load replaced "
-                            + "the live world while this call was waiting or running, so none of its "
-                            + "changes reached the live world. The mods of the loaded world are already "
-                            + "running and nothing needs to be reloaded; inspect the loaded world and "
-                            + "retry the change there."
+                    Error = IsReplacedWorldFailure(result.Error)
+                        ? explanation
+                        : (result.Error ?? "").TrimEnd() + "\n" + explanation
                 };
+            }
+
+            /// <summary>True for the failures a write to a world that was replaced raises.</summary>
+            private static bool IsReplacedWorldFailure(string error)
+            {
+                return !string.IsNullOrEmpty(error)
+                       && (error.IndexOf(
+                               RbxError.ToWireName(RbxErrorCode.WorldDetached), StringComparison.Ordinal) >= 0
+                           || error.IndexOf(
+                               RbxError.ToWireName(RbxErrorCode.InstanceDestroyed), StringComparison.Ordinal) >= 0);
             }
         }
 
@@ -3432,21 +3894,23 @@ namespace CoreAI.Mods.WorldPackages
                 bool persistToStore = true)
             {
                 string modId = Normalize(id);
-                if (persistToStore)
-                {
-                    DemandSourceCapacity(modId);
-                }
-
+                bool addsSource = persistToStore && DemandSourceCapacity(modId);
                 AttributionSnapshot snapshot = Capture(modId);
                 PrepareNewOwner(caller, modId);
+                LuaCsModRuntime runtime = Inner;
                 try
                 {
-                    Inner.LoadMod(caller, id, luaCode, capabilities, persistToStore);
+                    runtime.LoadMod(caller, id, luaCode, capabilities, persistToStore);
                 }
                 catch
                 {
                     Restore(modId, snapshot);
                     throw;
+                }
+
+                if (addsSource)
+                {
+                    DemandSourceKept(caller, runtime, modId, snapshot);
                 }
             }
 
@@ -3479,24 +3943,31 @@ namespace CoreAI.Mods.WorldPackages
                 bool allowFull = false)
             {
                 string modId = ReadBundleModId(bundleJson);
-                DemandSourceCapacity(modId);
+                bool addsSource = DemandSourceCapacity(modId);
                 AttributionSnapshot snapshot = Capture(modId);
                 PrepareNewOwner(caller, modId);
+                LuaCsModRuntime runtime = Inner;
+                bool imported;
                 try
                 {
-                    bool imported = Inner.ImportMod(caller, bundleJson, hostGrant, allowFull);
+                    imported = runtime.ImportMod(caller, bundleJson, hostGrant, allowFull);
                     if (!imported)
                     {
                         Restore(modId, snapshot);
                     }
-
-                    return imported;
                 }
                 catch
                 {
                     Restore(modId, snapshot);
                     throw;
                 }
+
+                if (imported && addsSource)
+                {
+                    DemandSourceKept(caller, runtime, modId, snapshot);
+                }
+
+                return imported;
             }
 
             public bool ForgetMod(ActorContext caller, string id)
@@ -3753,22 +4224,70 @@ namespace CoreAI.Mods.WorldPackages
 
             /// <summary>
             /// Refuses a mod that would become the live world's source beyond the world-package limit,
-            /// before anything runs. A mod whose source is already stored is never refused.
+            /// before anything runs. A mod whose source is already stored is never refused. True when
+            /// the load adds a source the store does not hold yet.
             /// </summary>
             /// <remarks>
-            /// WHY here as well as in the file source store: the store can only log a refusal, and a mod
-            /// that loaded without its source would run now and be missing from every save; here the
-            /// caller is told why and what to forget.
+            /// WHY here as well as in the file source store: the store can only refuse the source after
+            /// the mod ran, and a mod that loaded without its source would run now and be missing from
+            /// every save; here the caller is told why and what to forget. Both sides ask the same rule
+            /// (<see cref="ILuaModSourceAdmission"/>), so they cannot disagree about the count.
+            /// WHY a store that cannot answer refuses the load: its save of the new source fails the
+            /// same way, so the mod would run without it.
             /// </remarks>
-            private void DemandSourceCapacity(string modId)
+            private bool DemandSourceCapacity(string modId)
             {
-                if (modId.Length == 0)
+                ILuaModSourceStore sources = _owner.Current.SourceStore;
+                // WHY the null store is exempt: a session composed without persistence keeps no source
+                // by design, so there is neither a limit to pass nor a source to verify.
+                if (modId.Length == 0 || sources is NullLuaModSourceStore)
+                {
+                    return false;
+                }
+
+                bool stored;
+                string refusal;
+                try
+                {
+                    stored = sources.TryLoad(modId, out _, out _);
+                    if (stored || CanAdmitSource(sources, modId, out refusal))
+                    {
+                        return !stored;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        "Mod '" + modId + "' cannot be added right now: the mod source store could not "
+                        + "confirm there is room for its source (" + ex.Message + "). Retry.",
+                        ex);
+                }
+
+                throw new RbxWorldPackageFormatLimitException(refusal);
+            }
+
+            /// <summary>
+            /// After a load or import that added a new source, undoes the mod when its store did not
+            /// keep that source, and throws why.
+            /// </summary>
+            /// <remarks>
+            /// WHY: the runtime persists best-effort and only logs a refused save, so the mod ran and
+            /// was missing from every save and from the next start, and the caller heard nothing.
+            /// </remarks>
+            private void DemandSourceKept(
+                ActorContext caller,
+                LuaCsModRuntime runtime,
+                string modId,
+                AttributionSnapshot snapshot)
+            {
+                if (!runtime.PersistsModSources)
                 {
                     return;
                 }
 
                 ILuaModSourceStore sources = _owner.Current.SourceStore;
-                int stored;
+                string limitRefusal = "";
+                string failure;
                 try
                 {
                     if (sources.TryLoad(modId, out _, out _))
@@ -3776,27 +4295,32 @@ namespace CoreAI.Mods.WorldPackages
                         return;
                     }
 
-                    stored = sources.List()?.Count ?? 0;
+                    failure = CanAdmitSource(sources, modId, out limitRefusal)
+                        ? "the mod source store did not keep its source (the store's log names the error)"
+                        : limitRefusal;
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    // WHY: a store that cannot answer right now (busy with a durable world-source
-                    // preparation) still refuses a source past the limit itself when it is written;
-                    // refusing here would turn that transient state into a failed load.
-                    return;
+                    failure = "the mod source store could not confirm it kept the source (" + ex.Message + ")";
                 }
 
-                if (stored < RbxWorldPackageSerializer.MaximumMods)
+                try
                 {
-                    return;
+                    runtime.UnloadMod(caller, modId);
+                }
+                finally
+                {
+                    Restore(modId, snapshot);
                 }
 
-                throw new RbxWorldPackageFormatLimitException(
-                    "Mod '" + modId + "' cannot be added: this world already stores "
-                    + stored.ToString(CultureInfo.InvariantCulture) + " mod sources, the most one world "
-                    + "package holds (" + RbxWorldPackageSerializer.MaximumMods.ToString(CultureInfo.InvariantCulture)
-                    + "). An unloaded mod keeps its source; forget a mod that is no longer needed with "
-                    + "manage_mods action 'forget', then retry.");
+                if (limitRefusal.Length > 0)
+                {
+                    throw new RbxWorldPackageFormatLimitException(limitRefusal);
+                }
+
+                throw new InvalidOperationException(
+                    "Mod '" + modId + "' was not loaded: " + failure + ". A mod whose source is not stored "
+                    + "would be missing from every save and from the next start, so the load was undone.");
             }
 
             private AttributionSnapshot Capture(string modId)
