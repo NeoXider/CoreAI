@@ -833,6 +833,252 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             CollectionAssert.AreEqual(new[] { false }, createdFinished);
         }
 
+        [Test]
+        public void R6_11_EveryHumanoidPropertyWrite_FiresChangedWithItsName_AndAnEqualWriteFiresNothing()
+        {
+            // WHY (M1-03): the Humanoid setters fired neither Changed nor the per-property signal,
+            // so a health bar bound to GetPropertyChangedSignal("Health") never updated and no
+            // error said why. Object.yaml: Changed "fires immediately after an object property is
+            // changed", with the property's name.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid humanoid = harness.Humanoid();
+            humanoid.Changed.BindScheduler(harness.Bindings.Scheduler);
+            List<string> changed = new();
+            harness.Connect(humanoid.Changed, args => changed.Add((string)args[0]));
+
+            for (int pass = 0; pass < 2; pass++)
+            {
+                humanoid.Health = 40d;
+                humanoid.MaxHealth = 150d;
+                humanoid.WalkSpeed = 20d;
+                humanoid.JumpPower = 60d;
+                humanoid.JumpHeight = 9d;
+                humanoid.UseJumpPower = false;
+                humanoid.DisplayName = "Guard";
+            }
+
+            harness.Bindings.Scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    "Health", "MaxHealth", "WalkSpeed", "JumpPower", "JumpHeight", "UseJumpPower",
+                    "DisplayName"
+                },
+                changed,
+                "each real change fires Changed once with its name; the second, equal pass is no change");
+        }
+
+        [Test]
+        public void R6_11_HumanoidHealth_FiresItsPropertyChangedSignal_ThroughLua()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("health-signal");
+
+            harness.Stack.Runtime.LoadMod(actor, "health-signal-mod", @"
+                local h = Instance.new('Humanoid')
+                h.Parent = workspace
+                h:GetPropertyChangedSignal('Health'):Connect(function()
+                    store_set('fired', tostring((tonumber(store_get('fired')) or 0) + 1))
+                    store_set('seen', tostring(h.Health))
+                end)
+                h.Health = 50
+                h.Health = 50
+                h:TakeDamage(10)",
+                persistToStore: false);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("2", harness.Store.Get("health-signal-mod", "fired"),
+                "two real changes, one equal write; log: " + string.Join(" || ", harness.LogLines));
+            Assert.AreEqual("40", harness.Store.Get("health-signal-mod", "seen"));
+        }
+
+        [Test]
+        public void MoveTo_ArrivalIsMeasuredOnTheGroundPlane_ATargetBelowTheRootIsReached()
+        {
+            // WHY (M8-18): Humanoid.yaml MoveTo ends "assuming a ~1 stud threshold". The old 2-stud
+            // radius counted height too, so a target on the ground five studs under the root centre
+            // was never reached and the walk timed out false while the character stood on it.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid humanoid = harness.Humanoid();
+            List<bool> finished = new();
+            harness.Connect(humanoid.MoveToFinished, args => finished.Add((bool)args[0]));
+
+            humanoid.MoveTo(new RbxVector3(10f, 0f, 0f));
+            harness.Motor.PositionValue = new RbxVector3(10f, 5f, 0f);
+            harness.Bindings.Scheduler.Advance(0.1d);
+
+            CollectionAssert.AreEqual(new[] { true }, finished,
+                "straight above the target on the ground plane is arrived");
+            Assert.IsNull(harness.Motor.Target, "arriving must also stop the walk");
+        }
+
+        [Test]
+        public void Negative_MoveTo_OneAndAHalfStudsAwayOnTheGroundPlane_IsNotYetReached()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid humanoid = harness.Humanoid();
+            List<bool> finished = new();
+            harness.Connect(humanoid.MoveToFinished, args => finished.Add((bool)args[0]));
+
+            humanoid.MoveTo(new RbxVector3(10f, 0f, 0f));
+            harness.Motor.PositionValue = new RbxVector3(10f, 0f, 1.5f);
+            harness.Bindings.Scheduler.Advance(0.1d);
+
+            Assert.IsEmpty(finished, "1.5 studs is past the mirror's ~1 stud threshold");
+            Assert.IsTrue(harness.Motor.Target.HasValue, "the walk goes on");
+        }
+
+        [Test]
+        public void Negative_HealthZero_OutsideTheWorkspace_DoesNotKillTheHumanoid()
+        {
+            // WHY (M8-19): Humanoid.yaml Died "only fires if the Humanoid is a descendant of the
+            // Workspace". A script configuring an NPC template in ReplicatedStorage used to fire
+            // Died, and with it every respawn or cleanup handler.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid template = harness.Humanoid(harness.Bindings.Game.GetService("ReplicatedStorage"));
+            int died = 0;
+            harness.Connect(template.Died, _ => died++);
+
+            template.Health = 0d;
+            harness.Bindings.Scheduler.Advance(0.1d);
+
+            Assert.AreEqual(0d, template.Health, 1e-9d, "the property itself still reaches 0");
+            Assert.IsFalse(template.IsDead);
+            Assert.AreNotEqual(RbxHumanoidState.Dead, template.GetState());
+            Assert.AreEqual(0, died);
+        }
+
+        [Test]
+        public void HealthZero_OutsideTheWorkspace_DiesOnceOnTheFirstHeartbeatInside()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid template = harness.Humanoid(harness.Bindings.Game.GetService("ReplicatedStorage"));
+            int died = 0;
+            harness.Connect(template.Died, _ => died++);
+            template.Health = 0d;
+            harness.Bindings.Scheduler.Advance(0.1d);
+            Assert.AreEqual(0, died, "not yet: it is outside the Workspace");
+            Assert.IsFalse(template.IsDead);
+
+            template.Parent = harness.Registry.WorldRoot;
+            harness.Bindings.Scheduler.Advance(0.1d);
+            harness.Bindings.Scheduler.Advance(0.1d);
+
+            Assert.IsTrue(template.IsDead, "a Humanoid at 0 health dies once it is simulated");
+            Assert.AreEqual(RbxHumanoidState.Dead, template.GetState());
+            Assert.AreEqual(1, died, "Died fires once, on the first Heartbeat inside the Workspace");
+        }
+
+        [Test]
+        public void JumpPower_IsClampedToTheMirrorsRange()
+        {
+            // WHY (M8-27): Humanoid.yaml JumpPower "is constrained between 0 and 1000"; 5000 was
+            // stored as is and launched the character five times higher than Roblox can.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid humanoid = harness.Humanoid();
+
+            humanoid.JumpPower = 5000d;
+            Assert.AreEqual(RbxHumanoid.MaxJumpPower, humanoid.JumpPower, 1e-9d);
+            Assert.AreEqual(1000d, RbxHumanoid.MaxJumpPower, 1e-9d);
+
+            humanoid.JumpPower = -5d;
+            Assert.AreEqual(0d, humanoid.JumpPower, 1e-9d);
+        }
+
+        [Test]
+        public void MaxHealthMathHuge_TheInvulnerabilityIdiom_KeepsTheHumanoidAlive()
+        {
+            // WHY (M8-27): MaxHealth = math.huge; Health = math.huge is the common Roblox god-mode
+            // idiom and the mirror forbids neither; both used to raise BAD_ARGUMENT.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("god");
+
+            harness.Stack.Runtime.LoadMod(actor, "god-mod", @"
+                local h = Instance.new('Humanoid')
+                h.Name = 'God'
+                h.Parent = workspace
+                local ok, err = pcall(function()
+                    h.MaxHealth = math.huge
+                    h.Health = math.huge
+                    h:TakeDamage(1e12)
+                end)
+                store_set('ok', tostring(ok) .. '|' .. tostring(err))
+                store_set('full', tostring(h.Health == h.MaxHealth))",
+                persistToStore: false);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            StringAssert.StartsWith("true|", harness.Store.Get("god-mod", "ok"),
+                "log: " + string.Join(" || ", harness.LogLines));
+            Assert.AreEqual("true", harness.Store.Get("god-mod", "full"),
+                "a trillion damage is nothing next to the largest finite health");
+            RbxHumanoid god = (RbxHumanoid)harness.Registry.WorldRoot.FindFirstChild("God");
+            Assert.IsNotNull(god);
+            Assert.IsFalse(god.IsDead);
+            Assert.AreEqual(double.MaxValue, god.MaxHealth,
+                "math.huge is stored as the largest finite value (see RbxHumanoid remarks)");
+        }
+
+        [Test]
+        public void MaxHealthMathHuge_StaysSaveable_ThroughTheWorldSnapshot()
+        {
+            // WHY: the snapshot refuses non-finite Humanoid numbers, so storing infinity would
+            // build a world that can never be saved or replicated again.
+            InstanceRegistry source = new(worldId: "humanoid-huge-world");
+            RbxDataModel sourceGame = DataModelBootstrap.CreateGame(source);
+            RbxHumanoid original = (RbxHumanoid)source.Create("Humanoid");
+            original.Name = "God";
+            original.Parent = source.WorldRoot;
+            original.MaxHealth = double.PositiveInfinity;
+            original.Health = double.PositiveInfinity;
+
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(sourceGame);
+            InstanceRegistry target = new(worldId: "humanoid-huge-world");
+            RbxDataModel restoredGame = (RbxDataModel)InstanceTreeSerializer.Restore(snapshot, target);
+            DataModelBootstrap.AttachWorldRoot(target, restoredGame);
+            RbxHumanoid restored = (RbxHumanoid)target.WorldRoot.FindFirstChild("God");
+
+            Assert.IsNotNull(restored);
+            Assert.AreEqual(double.MaxValue, restored.MaxHealth);
+            Assert.AreEqual(double.MaxValue, restored.Health);
+            Assert.IsFalse(restored.IsDead);
+        }
+
+        [Test]
+        public void TakeDamageMathHuge_KillsAHumanoidInsideTheWorkspace()
+        {
+            // WHY: TakeDamage(math.huge) is the common instant-kill idiom; it used to raise
+            // BAD_ARGUMENT and leave the target alive.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid humanoid = harness.Humanoid();
+            int died = 0;
+            harness.Connect(humanoid.Died, _ => died++);
+
+            humanoid.TakeDamage(double.PositiveInfinity);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual(0d, humanoid.Health, 1e-9d);
+            Assert.IsTrue(humanoid.IsDead);
+            Assert.AreEqual(1, died);
+        }
+
+        [Test]
+        public void Negative_NaN_IsStillRefused_ForHealthMaxHealthAndTakeDamage()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid humanoid = harness.Humanoid();
+
+            RbxError health = Assert.Throws<RbxError>(() => humanoid.Health = double.NaN);
+            RbxError maxHealth = Assert.Throws<RbxError>(() => humanoid.MaxHealth = double.NaN);
+            RbxError damage = Assert.Throws<RbxError>(() => humanoid.TakeDamage(double.NaN));
+
+            Assert.AreEqual(RbxErrorCode.BadArgument, health.Code);
+            Assert.AreEqual(RbxErrorCode.BadArgument, maxHealth.Code);
+            Assert.AreEqual(RbxErrorCode.BadArgument, damage.Code);
+            Assert.AreEqual(100d, humanoid.Health, 1e-9d, "a refused write changes nothing");
+            Assert.AreEqual(100d, humanoid.MaxHealth, 1e-9d);
+        }
+
         /// <summary>
         /// Captures a world holding one Humanoid named <paramref name="humanoidName"/> with a
         /// non-default WalkSpeed and restores it into a fresh registry the way a world load stages
@@ -1013,6 +1259,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 _humanoid = (RbxHumanoid)Registry.Create("Humanoid");
                 _humanoid.Parent = Registry.WorldRoot;
                 return _humanoid;
+            }
+
+            /// <summary>Creates a further Humanoid under <paramref name="parent"/>.</summary>
+            public RbxHumanoid Humanoid(RbxInstance parent)
+            {
+                Assert.IsNotNull(parent, "the Humanoid's parent must exist");
+                RbxHumanoid humanoid = (RbxHumanoid)Registry.Create("Humanoid");
+                humanoid.Parent = parent;
+                return humanoid;
             }
 
             /// <summary>Connects a C# handler to a signal that already has a scheduler.</summary>

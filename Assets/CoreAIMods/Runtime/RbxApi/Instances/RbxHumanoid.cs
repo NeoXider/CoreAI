@@ -191,6 +191,29 @@ namespace CoreAI.Mods.Rbx.Instances
     /// Mirror-pinned defaults: <c>MaxHealth</c> 100, <c>WalkSpeed</c> 16 studs/s,
     /// <c>JumpPower</c> 50, <c>JumpHeight</c> 7.2 studs, <c>UseJumpPower</c> true.
     /// <para>
+    /// Every property write that changes a value fires <c>Changed</c> with the property name and
+    /// that property's <c>GetPropertyChangedSignal</c>; an equal write fires nothing.
+    /// </para>
+    /// <para>
+    /// <c>math.huge</c> health (OURS): the mirror types MaxHealth as a float and forbids nothing,
+    /// and <c>MaxHealth = math.huge; Health = math.huge</c> is the common invulnerability idiom, so
+    /// it is accepted rather than refused. <c>MaxHealth = math.huge</c> stores the largest finite
+    /// double instead of infinity, and Health clamps to it, because the world package and the
+    /// replication snapshot carry finite numbers only; a script comparing
+    /// <c>Health == math.huge</c> reads false. Health and TakeDamage accept either infinity and
+    /// clamp the result to [0, MaxHealth], so <c>TakeDamage(math.huge)</c> kills. NaN is refused
+    /// everywhere, and WalkSpeed and JumpHeight still refuse infinity, which has no meaning for a
+    /// speed or a height.
+    /// </para>
+    /// <para>
+    /// Death follows the mirror's Died contract: the event "only fires if the Humanoid is a
+    /// descendant of the Workspace". A Humanoid outside the Workspace (a template in
+    /// ServerStorage) whose Health reaches 0 keeps Health 0 without dying, and dies on the first
+    /// Heartbeat after it enters the Workspace (OURS: the mirror does not say when such a Humanoid
+    /// dies, and a Humanoid living on at 0 health inside the Workspace would be a corpse that
+    /// still walks).
+    /// </para>
+    /// <para>
     /// Passive health regeneration is deliberately NOT here. The mirror says a regeneration SCRIPT is
     /// inserted into humanoids, and that adding an empty <c>Script</c> named <c>Health</c> disables
     /// it — so regeneration belongs to the character template, not to this class. Baking it in would
@@ -209,18 +232,27 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Mirror default: 50.</summary>
         public const double DefaultJumpPower = 50d;
 
+        /// <summary>Mirror: JumpPower "is constrained between 0 and 1000".</summary>
+        public const double MaxJumpPower = 1000d;
+
         /// <summary>Mirror default: 7.2 studs.</summary>
         public const double DefaultJumpHeight = 7.2d;
 
         /// <summary>Mirror: MoveTo gives up after eight seconds and reports reached = false.</summary>
         public const double MoveToTimeoutSeconds = 8d;
 
-        /// <summary>How close, in studs, counts as having arrived.</summary>
+        /// <summary>
+        /// How close, in studs on the ground plane, the character has to come to a MoveTo target.
+        /// </summary>
         /// <remarks>
-        /// OURS — the mirror does not publish the arrival radius. Two studs is roughly a character's
-        /// own width, which is what "reached the point" means for something that has a body.
+        /// Mirror <c>Humanoid:MoveTo</c>: the walk ends when the character "arrives at its
+        /// destination, assuming a ~1 stud threshold". WHY measured on the XZ plane (OURS, the
+        /// mirror does not say which distance): a target on a step, on a platform or on the ground
+        /// under a tall rig sits above or below the root's centre, and a 3D radius was never met
+        /// there, so the walk ran into its eight-second timeout and reported false while the
+        /// character stood on the point.
         /// </remarks>
-        public const double ArrivalRadiusStuds = 2d;
+        public const double ArrivalRadiusStuds = 1d;
 
         /// <summary>
         /// Smallest change in running speed, in studs per second, that <see cref="Running"/> reports
@@ -271,6 +303,7 @@ namespace CoreAI.Mods.Rbx.Instances
         private double _jumpPower = DefaultJumpPower;
         private double _jumpHeight = DefaultJumpHeight;
         private bool _useJumpPower = true;
+        private string _displayName = "";
         private bool _died;
         private RbxHumanoidState _state = RbxHumanoidState.Running;
         private RbxVector3? _walkTarget;
@@ -282,7 +315,10 @@ namespace CoreAI.Mods.Rbx.Instances
         {
         }
 
-        /// <summary>Mirror <c>Humanoid.Died</c>, fired once when Health reaches zero.</summary>
+        /// <summary>
+        /// Mirror <c>Humanoid.Died</c>, fired once when Health reaches zero, and only for a
+        /// Humanoid inside the Workspace.
+        /// </summary>
         public RbxScriptSignal Died => GetOrCreateSignal("Died");
 
         /// <summary>Mirror <c>Humanoid.HealthChanged(health)</c>.</summary>
@@ -304,26 +340,54 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxScriptSignal StateChanged => GetOrCreateSignal("StateChanged");
 
         /// <summary>Mirror <c>Humanoid.DisplayName</c>: the name shown above the character.</summary>
-        public string DisplayName { get; set; } = "";
+        public string DisplayName
+        {
+            get => _displayName;
+            set
+            {
+                if (string.Equals(_displayName, value, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _displayName = value;
+                NotifyPropertyChanged(nameof(DisplayName));
+            }
+        }
 
         /// <summary>The motor currently moving this character.</summary>
         public IRbxCharacterMotor Motor => _motor;
 
-        /// <summary>Mirror <c>Humanoid.Health</c>, clamped to [0, MaxHealth].</summary>
+        /// <summary>
+        /// Mirror <c>Humanoid.Health</c>, clamped to [0, MaxHealth]; either infinity clamps, NaN is
+        /// refused.
+        /// </summary>
         public double Health
         {
             get => _health;
             set => SetHealth(value);
         }
 
-        /// <summary>Mirror <c>Humanoid.MaxHealth</c>. Lowering it clamps Health with it.</summary>
+        /// <summary>
+        /// Mirror <c>Humanoid.MaxHealth</c>. Lowering it clamps Health with it; <c>math.huge</c>
+        /// stores <see cref="double.MaxValue"/> (see the class remarks).
+        /// </summary>
         public double MaxHealth
         {
             get => _maxHealth;
             set
             {
-                RequireFinite(value, "Humanoid.MaxHealth");
-                _maxHealth = value < 0d ? 0d : value;
+                RequireNotNaN(value, "Humanoid.MaxHealth");
+                double next = value < 0d ? 0d
+                    : double.IsPositiveInfinity(value) ? double.MaxValue
+                    : value;
+                if (next == _maxHealth)
+                {
+                    return;
+                }
+
+                _maxHealth = next;
+                NotifyPropertyChanged(nameof(MaxHealth));
                 if (_health > _maxHealth)
                 {
                     SetHealth(_maxHealth);
@@ -338,19 +402,34 @@ namespace CoreAI.Mods.Rbx.Instances
             set
             {
                 RequireFinite(value, "Humanoid.WalkSpeed");
+                double previous = _walkSpeed;
                 _walkSpeed = value < 0d ? 0d : value;
                 _motor.SetWalkSpeed(_walkSpeed);
+                if (_walkSpeed != previous)
+                {
+                    NotifyPropertyChanged(nameof(WalkSpeed));
+                }
             }
         }
 
-        /// <summary>Mirror <c>Humanoid.JumpPower</c>: the upward force used when UseJumpPower.</summary>
+        /// <summary>
+        /// Mirror <c>Humanoid.JumpPower</c>: the upward force used when UseJumpPower, clamped to
+        /// [0, <see cref="MaxJumpPower"/>].
+        /// </summary>
         public double JumpPower
         {
             get => _jumpPower;
             set
             {
                 RequireFinite(value, "Humanoid.JumpPower");
-                _jumpPower = value < 0d ? 0d : value;
+                double next = value < 0d ? 0d : value > MaxJumpPower ? MaxJumpPower : value;
+                if (next == _jumpPower)
+                {
+                    return;
+                }
+
+                _jumpPower = next;
+                NotifyPropertyChanged(nameof(JumpPower));
             }
         }
 
@@ -361,7 +440,14 @@ namespace CoreAI.Mods.Rbx.Instances
             set
             {
                 RequireFinite(value, "Humanoid.JumpHeight");
-                _jumpHeight = value < 0d ? 0d : value;
+                double next = value < 0d ? 0d : value;
+                if (next == _jumpHeight)
+                {
+                    return;
+                }
+
+                _jumpHeight = next;
+                NotifyPropertyChanged(nameof(JumpHeight));
             }
         }
 
@@ -369,7 +455,16 @@ namespace CoreAI.Mods.Rbx.Instances
         public bool UseJumpPower
         {
             get => _useJumpPower;
-            set => _useJumpPower = value;
+            set
+            {
+                if (_useJumpPower == value)
+                {
+                    return;
+                }
+
+                _useJumpPower = value;
+                NotifyPropertyChanged(nameof(UseJumpPower));
+            }
         }
 
         /// <summary>Mirror <c>Humanoid.MoveDirection</c>: read-only, from the motor.</summary>
@@ -378,7 +473,10 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Mirror <c>Humanoid.RootPart</c>: the character's driving part, or null.</summary>
         public RbxInstance RootPart { get; private set; }
 
-        /// <summary>True once Health has reached zero; a dead Humanoid stays dead.</summary>
+        /// <summary>
+        /// True once the Humanoid died: Health reached zero inside the Workspace. A dead Humanoid
+        /// stays dead.
+        /// </summary>
         public bool IsDead => _died;
 
         /// <summary>Attaches the motor and the scheduler that drives MoveTo and state changes.</summary>
@@ -421,10 +519,13 @@ namespace CoreAI.Mods.Rbx.Instances
             _walkTarget = null;
         }
 
-        /// <summary>Mirror <c>Humanoid:TakeDamage(amount)</c>. A negative amount heals.</summary>
+        /// <summary>
+        /// Mirror <c>Humanoid:TakeDamage(amount)</c>. A negative amount heals; either infinity
+        /// clamps, so <c>TakeDamage(math.huge)</c> kills.
+        /// </summary>
         public void TakeDamage(double amount)
         {
-            RequireFinite(amount, "Humanoid:TakeDamage amount");
+            RequireNotNaN(amount, "Humanoid:TakeDamage amount");
             SetHealth(_health - amount);
         }
 
@@ -487,6 +588,14 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
+            // WHY on the Heartbeat: a Humanoid whose Health reached 0 outside the Workspace did not
+            // die (see SetHealth), and this is the first simulated step after it entered it.
+            if (_health <= 0d && IsInWorkspace())
+            {
+                Die();
+                return;
+            }
+
             UpdateGroundedState();
             if (!_walkTarget.HasValue)
             {
@@ -495,7 +604,9 @@ namespace CoreAI.Mods.Rbx.Instances
 
             _walkElapsed += deltaSeconds;
             RbxVector3 delta = _walkTarget.Value - _motor.Position;
-            if (delta.Magnitude <= ArrivalRadiusStuds)
+            double planarX = delta.X;
+            double planarZ = delta.Z;
+            if (Math.Sqrt(planarX * planarX + planarZ * planarZ) <= ArrivalRadiusStuds)
             {
                 FinishWalk(reached: true);
                 return;
@@ -660,27 +771,39 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private void SetHealth(double value)
         {
-            RequireFinite(value, "Humanoid.Health");
+            RequireNotNaN(value, "Humanoid.Health");
             if (_died)
             {
-                // The mirror: "if the humanoid is dead, this property is continually set to 0".
-                // Healing a corpse back to life is a resurrection the mirror does not describe.
+                // WHY: the mirror says "if the humanoid is dead, this property is continually set
+                // to 0"; healing a corpse back to life is a resurrection the mirror does not describe.
                 return;
             }
 
             double clamped = value < 0d ? 0d : value > _maxHealth ? _maxHealth : value;
-            if (Math.Abs(clamped - _health) < double.Epsilon)
+            if (Math.Abs(clamped - _health) >= double.Epsilon)
+            {
+                _health = clamped;
+                NotifyPropertyChanged(nameof(Health));
+                HealthChanged.Fire(_health);
+            }
+
+            // WHY an equal write of 0 still reaches this check: a Humanoid that hit 0 outside the
+            // Workspace and was moved in before any Heartbeat ran is alive at 0 until something
+            // looks, and a script writing 0 again is looking.
+            if (_health > 0d || !IsInWorkspace())
             {
                 return;
             }
 
-            _health = clamped;
-            HealthChanged.Fire(_health);
-            if (_health > 0d)
-            {
-                return;
-            }
+            Die();
+        }
 
+        /// <summary>
+        /// Enters the Dead state and fires <see cref="Died"/>, once; only reached for a Humanoid
+        /// inside the Workspace whose Health is 0.
+        /// </summary>
+        private void Die()
+        {
             _died = true;
             _walkTarget = null;
             // WHY the state changes before Died fires: Advance refuses a dead Humanoid, so this is
@@ -692,6 +815,35 @@ namespace CoreAI.Mods.Rbx.Instances
             // followed by a stale Running(0) telling an animation script to blend back to idle.
             EnterState(RbxHumanoidState.Dead);
             Died.Fire();
+        }
+
+        /// <summary>True when this Humanoid is a descendant of the Workspace.</summary>
+        /// <remarks>
+        /// WHY by class and not through the registry's world root: a world restore links parents
+        /// and applies Humanoid state before the root is attached, and a Humanoid restored dead
+        /// under the Workspace must come back dead, not die a second time on its first Heartbeat.
+        /// </remarks>
+        private bool IsInWorkspace()
+        {
+            for (RbxInstance ancestor = Parent; ancestor != null; ancestor = ancestor.Parent)
+            {
+                if (string.Equals(ancestor.ClassName, "Workspace", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void RequireNotNaN(double value, string what)
+        {
+            if (double.IsNaN(value))
+            {
+                throw RbxError.BadArgument(
+                    what + " must be a number, got NaN",
+                    "check the arithmetic that produced the value for a 0/0 division");
+            }
         }
 
         private static void RequireFinite(double value, string what)

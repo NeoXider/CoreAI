@@ -23,6 +23,12 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         internal RbxPlayer(ClassDescriptor descriptor)
             : base(descriptor)
         {
+            // WHY: a Roblox Player is created with Archivable false, so player:Clone() returns nil
+            // (Instance.yaml Clone: "if the instance itself has Archivable set to false, this
+            // method will return nil") and no Player is saved with the place. Player.yaml states
+            // no default, so this one is the engine's observed one. A clone would otherwise be a
+            // second Player with no identity, owned by the actor that cloned it.
+            Archivable = false;
         }
 
         public long UserId { get; private set; }
@@ -31,7 +37,8 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
 
         /// <summary>
         /// Mirror <c>Player.DisplayName</c> (writable; mirror tags carry no ReadOnly). Defaults to
-        /// the username — the mirror states no fallback, so this default is OURS.
+        /// the username — the mirror states no fallback, so this default is OURS. A change fires
+        /// <c>Changed("DisplayName")</c> and its property signal.
         /// </summary>
         public string DisplayName
         {
@@ -44,14 +51,16 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 }
 
                 _displayName = value;
-                AdvanceMemberRevision(DisplayNameMember);
+                OnMemberChanged(DisplayNameMember);
             }
         }
 
         /// <summary>
         /// Mirror <c>Player.Character</c>: the Model driven for this player, or nil until a
-        /// character is loaded. Assigning it directly does NOT fire the signals — only
-        /// <c>LoadCharacterAsync</c> does, exactly as in Roblox.
+        /// character is loaded. Assigning it directly does NOT fire CharacterAdded or
+        /// CharacterRemoving — only <c>LoadCharacterAsync</c> does, exactly as in Roblox — but
+        /// every change fires <c>Changed("Character")</c> and its property signal, as any
+        /// property change does.
         /// </summary>
         public RbxInstance Character
         {
@@ -64,7 +73,7 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 }
 
                 _character = value;
-                AdvanceMemberRevision(CharacterMember);
+                OnMemberChanged(CharacterMember);
             }
         }
 
@@ -93,14 +102,18 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             }
         }
 
-        private void AdvanceMemberRevision(string member)
+        private void OnMemberChanged(string member)
         {
             // WHY a tombstone reports nothing: the character factory clears Character while a
-            // player is torn down, and a destroyed instance has no record left to advance.
-            if (!IsDestroyed)
+            // player is torn down, and a destroyed instance has no record left to advance and no
+            // listener left to tell.
+            if (IsDestroyed)
             {
-                Registry?.AdvanceRevision(Id, member);
+                return;
             }
+
+            Registry?.AdvanceRevision(Id, member);
+            NotifyPropertyChanged(member);
         }
 
         /// <summary>
@@ -205,6 +218,7 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         private readonly Dictionary<string, RbxPlayer> _byActor =
             new(StringComparer.Ordinal);
         private readonly List<RbxPlayer> _players = new();
+        private readonly HashSet<InstanceRegistry> _watchedRegistries = new();
         private long _nextUserId = 1;
 
         internal RbxPlayers(ClassDescriptor descriptor)
@@ -219,12 +233,9 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         public RbxScriptSignal PlayerRemoving { get; }
 
         /// <summary>
-        /// Identity backend behind <c>Player.Name</c>/<c>Player.DisplayName</c>. Defaults to the
-        /// synthetic profile; a host assigns a real provider (ideally before any actor joins —
-        /// the profile is read once per join in <see cref="EnsureActor"/>).
-        /// </summary>
-        /// <summary>
-        /// Where an admitted actor's durable identity comes from; null keeps the session counter.
+        /// Where an admitted actor's durable identity comes from. Null keeps the session counter
+        /// for a solo (loopback) world, a client world and a local actor, and refuses an actor a
+        /// server transport admitted (see <see cref="EnsureActor"/>).
         /// </summary>
         /// <remarks>
         /// WHY it is consulted first: a UserId decided at admission is the same on every join, and
@@ -232,6 +243,11 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// </remarks>
         public IRbxActorIdentitySource IdentitySource { get; set; }
 
+        /// <summary>
+        /// Identity backend behind <c>Player.Name</c>/<c>Player.DisplayName</c>. Defaults to the
+        /// synthetic profile; a host assigns a real provider (ideally before any actor joins —
+        /// the profile is read once per join in <see cref="EnsureActor"/>).
+        /// </summary>
         public IRbxPlayerProfileProvider ProfileProvider { get; set; } =
             SyntheticPlayerProfileProvider.Instance;
 
@@ -299,7 +315,11 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             set;
         }
 
-        /// <summary>Returns the real Player registered for an actor, creating it once if needed.</summary>
+        /// <summary>
+        /// Returns the real Player registered for an actor, creating it once if needed. Refuses,
+        /// with <see cref="RbxErrorCode.NotAuthority"/>, an actor a server transport admitted
+        /// while no <see cref="IdentitySource"/> is set.
+        /// </summary>
         public RbxPlayer EnsureActor(InstanceRegistry registry, string actorId)
         {
             if (registry == null)
@@ -312,6 +332,9 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             {
                 return existing;
             }
+
+            RequireIdentityForTransportAdmission(actor);
+            WatchUnregistrations(registry);
 
             // WHY: Player identities are runtime-created authorization infrastructure, not authored
             // world content, while actor ownership prevents a foreign client from rewriting identity.
@@ -519,21 +542,46 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             return _byActor.TryGetValue(actor, out RbxPlayer player) ? player : null;
         }
 
+        /// <summary>
+        /// Mirror <c>Players:GetPlayers</c>: every connected Player that is alive and still a
+        /// child of this service ("only returns Player objects found under Players").
+        /// </summary>
         public IReadOnlyList<RbxPlayer> GetPlayers()
         {
-            return _players.ToArray();
+            int count = 0;
+            for (int index = 0; index < _players.Count; index++)
+            {
+                if (IsListed(_players[index]))
+                {
+                    count++;
+                }
+            }
+
+            RbxPlayer[] listed = new RbxPlayer[count];
+            int next = 0;
+            for (int index = 0; index < _players.Count && next < count; index++)
+            {
+                RbxPlayer player = _players[index];
+                if (IsListed(player))
+                {
+                    listed[next++] = player;
+                }
+            }
+
+            return listed;
         }
 
         /// <summary>
         /// Mirror <c>Players:GetPlayerByUserId</c>: the connected Player with this UserId, or nil
-        /// when no connected player has it (a disconnected player is no longer findable).
+        /// when no connected player has it (a disconnected player is no longer findable). Searches
+        /// what <see cref="GetPlayers"/> lists, as the mirror searches "each Player in Players".
         /// </summary>
         public RbxPlayer GetPlayerByUserId(long userId)
         {
             for (int index = 0; index < _players.Count; index++)
             {
                 RbxPlayer player = _players[index];
-                if (player.UserId == userId)
+                if (player.UserId == userId && IsListed(player))
                 {
                     return player;
                 }
@@ -565,7 +613,7 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             for (int index = 0; index < _players.Count; index++)
             {
                 RbxPlayer player = _players[index];
-                if (ReferenceEquals(player.Character, character))
+                if (ReferenceEquals(player.Character, character) && IsListed(player))
                 {
                     return player;
                 }
@@ -688,6 +736,157 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             RbxCharacterFactory.Unload(player);
             player.Destroy();
             return true;
+        }
+
+        /// <summary>
+        /// Whether <paramref name="player"/> counts as present for the lookups: alive and still a
+        /// child of this service.
+        /// </summary>
+        /// <remarks>
+        /// WHY the collections alone are not the answer (M8-12): a Player they still hold can have
+        /// been moved out of Players by host code, and the mirror's lookups only see Players under
+        /// the service. A destroyed one is released by <see cref="OnInstanceUnregistered"/>; the
+        /// liveness check is the guard for a lookup made while that teardown is still running.
+        /// </remarks>
+        private bool IsListed(RbxPlayer player)
+        {
+            return !player.IsDestroyed && ReferenceEquals(player.Parent, this);
+        }
+
+        /// <summary>
+        /// Refuses an actor a server transport admitted when no <see cref="IdentitySource"/> can
+        /// give it a durable identity (MP-12).
+        /// </summary>
+        /// <remarks>
+        /// WHY refused and not given the counter: the counter restarts at 1 with every world, so
+        /// after a restart or a world load a different person receives the UserId a saved record
+        /// was keyed by, and nothing reports it. A join the host cannot identify is refused loudly
+        /// instead, and the transport drops that connection.
+        /// WHY "admitted by a transport" means registered on the bridge before its Player exists:
+        /// a transport registers the actor it admitted before it asks the world for a Player (the
+        /// Mirror session host does, and the world-load guard relies on it), while a mod context
+        /// for a local actor is registered only after its Player exists. Such a local actor keeps
+        /// the counter here, exactly as it does behind an identity source that does not know it.
+        /// WHY only a server topology: a solo world has no transport at all, and a client world
+        /// admits nobody; the server decided this process's identity, and the client's own Player
+        /// is a local stand-in for it.
+        /// </remarks>
+        private void RequireIdentityForTransportAdmission(string actor)
+        {
+            INetworkBridge bridge = NetworkBridge;
+            if (IdentitySource != null || bridge == null)
+            {
+                return;
+            }
+
+            RbxNetworkTopology topology = bridge.Topology;
+            if ((topology != RbxNetworkTopology.Host
+                 && topology != RbxNetworkTopology.DedicatedServer)
+                || !IsRegisteredOnBridge(bridge, actor))
+            {
+                return;
+            }
+
+            throw new RbxError(
+                RbxErrorCode.NotAuthority,
+                "actor '" + actor + "' was admitted by the " + topology + " network transport, but "
+                + "Players has no IdentitySource to give it a durable UserId, so the join is refused "
+                + "rather than given a session-counter UserId that another account can receive "
+                + "after a restart",
+                "set Players.IdentitySource to the transport's session host before players are "
+                + "admitted (CoreAiMirrorNetworkBridgeProvider.AttachWorld does this for Mirror)");
+        }
+
+        private static bool IsRegisteredOnBridge(INetworkBridge bridge, string actor)
+        {
+            IReadOnlyList<string> registered = bridge.ActorIds;
+            if (registered == null)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < registered.Count; index++)
+            {
+                if (string.Equals(registered[index], actor, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void WatchUnregistrations(InstanceRegistry registry)
+        {
+            if (_watchedRegistries.Add(registry))
+            {
+                registry.Unregistered += OnInstanceUnregistered;
+            }
+        }
+
+        /// <summary>
+        /// Runs the leave teardown of <see cref="RemoveActor(string, RbxEnumItem)"/> for a Player
+        /// that was unregistered while this service still served it (destroyed from C#, or with an
+        /// ancestor): the actor's slot is released, <see cref="PlayerRemoving"/> fires with a nil
+        /// reason, and the character goes with the player.
+        /// </summary>
+        /// <remarks>
+        /// WHY (M8-12): every other exit (RemoveActor, KickPlayer, ReleaseReplicated) takes the
+        /// Player out of the collections before it is destroyed, so this finds nothing for them and
+        /// the teardown runs once. A Player destroyed any other way used to stay listed as a
+        /// destroyed ghost: a loop over GetPlayers raised INSTANCE_DESTROYED, PlayerRemoving never
+        /// fired, the character stood in the world, and the actor never got a live Player again
+        /// because EnsureActor kept returning the dead one.
+        /// WHY nothing fires while the service itself is destroyed: that is the world being torn
+        /// down, and its Workspace goes with it.
+        /// WHY a failure is reported and not thrown: this runs inside another caller's Destroy
+        /// walk, and an exception here would abort that walk with the rest of its subtree still
+        /// registered.
+        /// </remarks>
+        private void OnInstanceUnregistered(InstanceRecord record)
+        {
+            if (!(record?.Instance is RbxPlayer player)
+                || player.NetworkActorId == null
+                || !_byActor.TryGetValue(player.NetworkActorId, out RbxPlayer served)
+                || !ReferenceEquals(served, player))
+            {
+                return;
+            }
+
+            _byActor.Remove(player.NetworkActorId);
+            _players.Remove(player);
+            if (IsDestroyed)
+            {
+                return;
+            }
+
+            try
+            {
+                try
+                {
+                    PlayerRemoving.FireForDestruction(player, player, null);
+                }
+                finally
+                {
+                    RbxCharacterFactory.Unload(player);
+                }
+            }
+            catch (Exception exception)
+            {
+                LogFailedLeaveTeardown(player, exception);
+            }
+        }
+
+        private static void LogFailedLeaveTeardown(RbxPlayer player, Exception exception)
+        {
+            // WHY the registry seam carries this: same reasoning as LogSkippedAutoLoad — the
+            // service is engine-free and holds no logger.
+            Action<string> diagnostics = player.Registry?.Diagnostics;
+            if (diagnostics != null)
+            {
+                diagnostics("[CoreAI.RbxApi] The leave teardown for '" + player.Name
+                    + "', whose Player was destroyed directly, failed part-way: " + exception);
+            }
         }
 
         private static void LogSkippedAutoLoad(InstanceRegistry registry, RbxPlayer player)

@@ -478,6 +478,212 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void M8_12_APlayerDestroyedFromCSharp_LeavesOnce_TakesItsCharacter_AndTheActorCanRejoin()
+        {
+            // WHY (M8-12, world half): host code destroying a Player bypassed RemoveActor. The
+            // destroyed Player stayed in GetPlayers (every loop over it raised INSTANCE_DESTROYED),
+            // PlayerRemoving never fired, the character stood in the world, and EnsureActor kept
+            // handing the actor its dead Player for the rest of the session.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("destroyed-a");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            harness.Bindings.Scheduler.Advance(0d);
+            RbxInstance character = player.Character;
+            Assert.IsNotNull(character, "sanity: the joiner has a character to lose");
+            long userId = player.UserId;
+            List<object[]> removing = new();
+            harness.Bindings.Players.PlayerRemoving.Connect(
+                (Action<object[]>)(arguments => removing.Add(arguments)));
+
+            player.Destroy();
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual(1, removing.Count, "PlayerRemoving fires for a Player destroyed directly");
+            Assert.AreSame(player, removing[0][0]);
+            Assert.IsEmpty(harness.Bindings.Players.GetPlayers(), "no destroyed ghost is listed");
+            Assert.IsNull(harness.Bindings.Players.GetPlayerByUserId(userId));
+            Assert.IsFalse(harness.Bindings.Players.TryGetByActorId(actor.ActorId, out _),
+                "the actor's slot is released");
+            Assert.IsTrue(character.IsDestroyed, "the character goes with its player");
+
+            harness.Bindings.DisconnectActor(actor);
+            harness.Bindings.Scheduler.Advance(0d);
+            Assert.AreEqual(1, removing.Count, "a later disconnect does not announce the leave twice");
+
+            RbxPlayer rejoined = harness.Bindings.ConnectActor(actor);
+            Assert.AreNotSame(player, rejoined);
+            Assert.IsFalse(rejoined.IsDestroyed);
+            CollectionAssert.AreEqual(new[] { rejoined }, harness.Bindings.Players.GetPlayers());
+        }
+
+        [Test]
+        public void M8_12_TheLookups_ListOnlyPlayersStillUnderPlayers()
+        {
+            // WHY: Players.yaml GetPlayers "only returns Player objects found under Players", and
+            // GetPlayerByUserId and GetPlayerFromCharacter search the same set.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxPlayer moved = harness.Bindings.ConnectActor(harness.Actor("moved-a"));
+            RbxPlayer staying = harness.Bindings.ConnectActor(harness.Actor("staying-a"));
+            harness.Bindings.Scheduler.Advance(0d);
+            RbxInstance movedCharacter = moved.Character;
+            Assert.IsNotNull(movedCharacter, "sanity: the moved player has a character");
+            RbxPlayers players = harness.Bindings.Players;
+
+            moved.Parent = null;
+
+            CollectionAssert.AreEqual(new[] { staying }, players.GetPlayers());
+            Assert.IsNull(players.GetPlayerByUserId(moved.UserId));
+            Assert.IsNull(players.GetPlayerFromCharacter(movedCharacter));
+            Assert.AreSame(staying, players.GetPlayerByUserId(staying.UserId),
+                "the twin: a Player under Players is still found");
+
+            moved.Parent = players;
+
+            Assert.AreEqual(2, players.GetPlayers().Count, "back under Players, it is listed again");
+            Assert.AreSame(moved, players.GetPlayerFromCharacter(movedCharacter));
+        }
+
+        [Test]
+        public void R6_11_PlayerCharacterAndDisplayName_FireTheirPropertyChangedSignals()
+        {
+            // WHY (M1-03): Player.Character and Player.DisplayName changed without firing Changed or
+            // GetPropertyChangedSignal, so player:GetPropertyChangedSignal("Character") never ran.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("notify-a");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            harness.Stack.Runtime.LoadMod(actor, "notify-mod", @"
+                local me = game:GetService('Players'):GetPlayers()[1]
+                local function count(key)
+                    store_set(key, tostring((tonumber(store_get(key)) or 0) + 1))
+                end
+                me:GetPropertyChangedSignal('Character'):Connect(function() count('character') end)
+                me:GetPropertyChangedSignal('DisplayName'):Connect(function()
+                    count('display')
+                    store_set('display_value', me.DisplayName)
+                end)
+                me.DisplayName = 'Renamed'
+                me.DisplayName = 'Renamed'",
+                persistToStore: false);
+            harness.Bindings.Scheduler.Advance(0d);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.IsNotNull(player.Character, "sanity: the deferred join spawn landed");
+            Assert.AreEqual("1", harness.Store.Get("notify-mod", "character"),
+                "log: " + string.Join(" || ", harness.LogLines));
+            Assert.AreEqual("1", harness.Store.Get("notify-mod", "display"),
+                "one real change; the equal second write is not a change");
+            Assert.AreEqual("Renamed", harness.Store.Get("notify-mod", "display_value"));
+        }
+
+        [Test]
+        public void PlayerClone_ReturnsNil_BecauseAPlayerIsNotArchivable()
+        {
+            // WHY: Roblox creates a Player with Archivable false, so player:Clone() returns nil
+            // (Instance.yaml Clone). Here it returned a second Player with no identity, owned by the
+            // actor that cloned it.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("clone-a");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            harness.Stack.Runtime.LoadMod(actor, "clone-mod", @"
+                local me = game:GetService('Players'):GetPlayers()[1]
+                store_set('archivable', tostring(me.Archivable))
+                store_set('clone_is_nil', tostring(me:Clone() == nil))
+                local stats = Instance.new('Folder')
+                stats.Name = 'leaderstats'
+                stats.Parent = me
+                store_set('stats_clone', tostring(stats:Clone() ~= nil))",
+                persistToStore: false);
+
+            Assert.AreEqual("false", harness.Store.Get("clone-mod", "archivable"),
+                "log: " + string.Join(" || ", harness.LogLines));
+            Assert.AreEqual("true", harness.Store.Get("clone-mod", "clone_is_nil"));
+            Assert.AreEqual("true", harness.Store.Get("clone-mod", "stats_clone"),
+                "the twin: what a script parents under its Player still clones");
+            Assert.IsFalse(player.Archivable);
+            Assert.IsNull(player.Clone());
+        }
+
+        [Test]
+        public void MP12_AnActorATransportAdmitted_OnAHostWorldWithoutAnIdentitySource_IsRefused()
+        {
+            // WHY (MP-12): with no IdentitySource, a player a real transport admitted got the session
+            // counter's UserId (1, 2, 3 per world), so after a restart or a world load another
+            // person received the UserId a saved record was keyed by. The join is refused instead.
+            TransportBridge bridge = new(RbxNetworkTopology.Host);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            ActorContext actor = harness.Actor("remote-a");
+            int instanceCount = harness.Registry.GetLiveInstances().Count;
+            bridge.RegisterActor(actor.ActorId);
+
+            RbxError error = Assert.Throws<RbxError>(() => harness.Bindings.ConnectActor(actor));
+
+            Assert.AreEqual(RbxErrorCode.NotAuthority, error.Code);
+            StringAssert.Contains("remote-a", error.RawMessage);
+            StringAssert.Contains("IdentitySource", error.RawMessage);
+            Assert.IsEmpty(harness.Bindings.Players.GetPlayers());
+            Assert.IsFalse(harness.Bindings.Players.TryGetByActorId(actor.ActorId, out _));
+            Assert.AreEqual(instanceCount, harness.Registry.GetLiveInstances().Count,
+                "nothing is created for a refused join");
+        }
+
+        [Test]
+        public void MP12_TheSameAdmission_WithAnIdentitySource_JoinsWithTheAdmittedIdentity()
+        {
+            TransportBridge bridge = new(RbxNetworkTopology.Host);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            harness.Bindings.Players.IdentitySource =
+                new FixedIdentitySource("remote-a", 90210L, "alice", "Alice A.");
+            ActorContext actor = harness.Actor("remote-a");
+            bridge.RegisterActor(actor.ActorId);
+
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            Assert.AreEqual(90210L, player.UserId);
+            Assert.AreEqual("alice", player.Name);
+            Assert.AreEqual("Alice A.", player.DisplayName);
+            Assert.AreSame(player, harness.Bindings.Players.GetPlayerByUserId(90210L));
+        }
+
+        [Test]
+        public void MP12_ALocalActorTheTransportNeverAdmitted_StillJoinsAHostWorld()
+        {
+            // WHY: a mod context for a local actor on the host process is registered on the bridge
+            // only after its Player exists; it is not a transport admission. Refusing it would fail
+            // every non-host mod a Host world runs, and every world load that restores one, until an
+            // identity source happened to be wired.
+            TransportBridge bridge = new(RbxNetworkTopology.Host);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            ActorContext actor = harness.Actor("local-a");
+
+            harness.Stack.Runtime.LoadMod(actor, "local-mod",
+                "store_set('uid', tostring(game:GetService('Players').LocalPlayer.UserId))",
+                persistToStore: false);
+
+            Assert.AreEqual("1", harness.Store.Get("local-mod", "uid"),
+                "log: " + string.Join(" || ", harness.LogLines));
+            CollectionAssert.Contains(bridge.ActorIds, actor.ActorId);
+        }
+
+        [TestCase(RbxNetworkTopology.Solo)]
+        [TestCase(RbxNetworkTopology.Client)]
+        public void MP12_ARegisteredActor_OnAWorldThatAdmitsNobody_KeepsTheSessionCounter(
+            RbxNetworkTopology topology)
+        {
+            // WHY: a solo world has no transport, so single player needs no wiring; a client world
+            // admits nobody, and its own Player stands in for the identity the server decided.
+            TransportBridge bridge = new(topology);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            ActorContext actor = harness.Actor("counted-a");
+            bridge.RegisterActor(actor.ActorId);
+
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            Assert.AreEqual(1L, player.UserId);
+        }
+
+        [Test]
         public void OwnPlayer_StillAcceptsChildren_LeaderstatsPattern()
         {
             // WHY: the twin of the Player lock — only the Player's own Parent and lifetime are
@@ -1454,6 +1660,95 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
         }
 
+        /// <summary>An identity source that knows exactly one admitted actor.</summary>
+        private sealed class FixedIdentitySource : IRbxActorIdentitySource
+        {
+            private readonly string _actorId;
+            private readonly long _userId;
+            private readonly string _username;
+            private readonly string _displayName;
+
+            public FixedIdentitySource(string actorId, long userId, string username,
+                string displayName)
+            {
+                _actorId = actorId;
+                _userId = userId;
+                _username = username;
+                _displayName = displayName;
+            }
+
+            public bool TryGetIdentity(string actorId, out long userId, out string username,
+                out string displayName)
+            {
+                bool known = string.Equals(actorId, _actorId, StringComparison.Ordinal);
+                userId = known ? _userId : 0L;
+                username = known ? _username : null;
+                displayName = known ? _displayName : null;
+                return known;
+            }
+        }
+
+        /// <summary>
+        /// A transport of the given topology whose registered actors stand for its admissions: a
+        /// test registers an actor first, as a transport does before it asks the world for a Player.
+        /// </summary>
+        private sealed class TransportBridge : INetworkBridge
+        {
+            private readonly List<string> _actorIds = new();
+
+            public TransportBridge(RbxNetworkTopology topology)
+            {
+                Topology = topology;
+            }
+
+            public RbxNetworkTopology Topology { get; }
+
+            public IReadOnlyList<string> ActorIds => _actorIds;
+
+            public int MaxPayloadBytes => 65536;
+
+            public double ServerClockOffsetSeconds => 0d;
+
+            public event Action<RbxNetworkPeerDisconnected> PeerDisconnected
+            {
+                add { }
+                remove { }
+            }
+
+            public event Action<RbxNetworkEventMessage> EventReceived
+            {
+                add { }
+                remove { }
+            }
+
+            public event Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> RequestReceived
+            {
+                add { }
+                remove { }
+            }
+
+            public void RegisterActor(string actorId)
+            {
+                if (!_actorIds.Contains(actorId))
+                {
+                    _actorIds.Add(actorId);
+                }
+            }
+
+            public void UnregisterActor(string actorId)
+            {
+                _actorIds.Remove(actorId);
+            }
+
+            public void SendEvent(RbxNetworkEventMessage message)
+            {
+            }
+
+            public void SendRequest(RbxNetworkRequestMessage message, Action<RbxNetworkResponse> response)
+            {
+            }
+        }
+
         /// <summary>
         /// Test double for the Finding-B parent-assignment-failure gate: delegates to a plain
         /// <see cref="InMemoryInstanceBackingBinder"/> but throws out of the second
@@ -1511,7 +1806,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             // the plain in-memory binder, and only the Finding-B parent-assignment-failure test
             // needs one that can refuse mid-materialization — a default keeps this call site
             // unchanged everywhere else.
-            public ProductionHarness(IInstanceBackingBinder binder = null)
+            public ProductionHarness(IInstanceBackingBinder binder = null,
+                INetworkBridge networkBridge = null)
             {
                 LogLines = new List<string>();
                 Binder = new InMemoryInstanceBackingBinder();
@@ -1520,7 +1816,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     worldAclVersion: InstanceRegistry.CurrentWorldAclVersion,
                     worldId: "players-world");
                 RbxDataModel game = DataModelBootstrap.CreateGame(Registry);
-                Bindings = new LuaCsRbxApiBindings(Registry, game, log: LogLines.Add);
+                Bindings = new LuaCsRbxApiBindings(Registry, game, log: LogLines.Add,
+                    networkBridge: networkBridge);
                 Store = new MemoryStore();
                 Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
                 {
