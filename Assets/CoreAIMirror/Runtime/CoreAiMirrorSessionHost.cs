@@ -68,9 +68,12 @@ namespace CoreAI.Net.Mirror
         /// twice; another actor is refused and the session the connection holds is left as it was —
         /// a connection must never switch to a second identity, or mint a second Player, by asking
         /// again. WHY the older session of the same actor is dropped before the new binding: the
-        /// bridge closes the older connection while binding, and on kcp2k that drop is reported
-        /// before the call returns; by then this host must no longer hold the older session, or the
-        /// report would tear down the Player the new session is carrying over.
+        /// bridge releases the older connection while binding and the transport reports its drop
+        /// later — a frame later, once the older client has been told why — and whenever that
+        /// report comes this host must no longer hold the older session, or it would tear down the
+        /// Player the new session is carrying over. WHY the binding waits for the client's
+        /// readiness: this runs one round trip before the client has read its admission, so the
+        /// bridge holds server remotes for the connection until the client says it can route them.
         /// </remarks>
         public bool Admit(int connectionId, ActorAdmissionResult admission, string sessionId)
         {
@@ -94,7 +97,8 @@ namespace CoreAI.Net.Mirror
             _identitiesByActor[context.ActorId] = admission;
             _bridge.BindConnection(connectionId,
                 new RbxNetworkPeer(context.ActorId, sessionId ?? context.SessionId,
-                    connectionId.ToString(CultureInfo.InvariantCulture)));
+                    connectionId.ToString(CultureInfo.InvariantCulture)),
+                awaitClientReady: true);
             _bridge.RegisterActor(context.ActorId);
 
             bool connected;

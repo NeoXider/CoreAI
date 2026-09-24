@@ -243,6 +243,49 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void Update_MakesTheDropAKickOwes_OnTheFirstLaterFrame_AndDisablingMakesItAtOnce()
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                double now = 0d;
+                _provider.ClockSeconds = () => now;
+                MirrorNetworkBridge bridge = (MirrorNetworkBridge)_provider.Bridge;
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(7);
+                OfflineMirror.AdmitServerConnection(8);
+                bridge.BindConnection(7, new RbxNetworkPeer("actor-a", "session-a", "7"));
+                bridge.BindConnection(8, new RbxNetworkPeer("actor-b", "session-b", "8"));
+                InvokeUpdate(_provider);
+
+                bridge.DisconnectActor("actor-a");
+                InvokeUpdate(_provider);
+
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "the kick's own frame must not drop: its notice is flushed only at that frame's end");
+
+                now = 0.016d;
+                InvokeUpdate(_provider);
+
+                CollectionAssert.AreEqual(new[] { 7 }, mirror.ServerDisconnectRequests,
+                    "the provider's frame pump makes the drop the kick owes");
+
+                bridge.DisconnectActor("actor-b");
+                MethodInfo onDisable = typeof(CoreAiMirrorNetworkBridgeProvider).GetMethod(
+                    "OnDisable", Private, null, Type.EmptyTypes, null);
+                Assert.IsNotNull(onDisable, "the provider must flush what it owes when it stops updating");
+                onDisable.Invoke(_provider, null);
+
+                CollectionAssert.AreEqual(new[] { 7, 8 }, mirror.ServerDisconnectRequests,
+                    "a disabled provider pumps nothing, so it drops what the bridge owes at once");
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
         public void AttachWorld_WiresTheSessionHostAsTheWorldsIdentitySource()
         {
             LuaCsRbxApiBindings world = CreateWorld(_provider.Bridge);

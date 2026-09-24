@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Authority;
+using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using NUnit.Framework;
 using UnityEngine;
@@ -18,11 +19,13 @@ namespace CoreAI.Net.Mirror.Tests
         private List<string> _connected;
         private List<string> _disconnected;
         private CoreAiMirrorSessionHost _host;
+        private double _now;
 
         [SetUp]
         public void CreateHost()
         {
-            _bridge = new MirrorNetworkBridge(isServer: true, clockSeconds: () => 0d);
+            _now = 0d;
+            _bridge = new MirrorNetworkBridge(isServer: true, clockSeconds: () => _now);
             _connected = new List<string>();
             _disconnected = new List<string>();
             _host = new CoreAiMirrorSessionHost(
@@ -249,6 +252,10 @@ namespace CoreAI.Net.Mirror.Tests
                 Assert.IsTrue(_host.Admit(1, Admit("actor-a", 1L, "a", "A"), "session-1"));
                 Assert.IsTrue(_host.Admit(2, Admit("actor-a", 2L, "a", "A"), "session-2"));
 
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "the older connection is dropped a frame later, once its client has been told why");
+                _now = 0.016d;
+                _bridge.Pump();
                 CollectionAssert.AreEqual(new[] { 1 }, mirror.ServerDisconnectRequests,
                     "the older connection is closed at the transport: the newest session wins");
                 Assert.AreEqual(1, _host.LiveSessionCount);
@@ -275,6 +282,38 @@ namespace CoreAI.Net.Mirror.Tests
                 Assert.AreEqual(0, _host.LiveSessionCount, "no session entry may leak");
                 CollectionAssert.IsEmpty(_bridge.ActorIds);
                 Assert.IsFalse(_host.TryGetIdentity("actor-a", out _, out _, out _));
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void Admission_BindsTheConnectionAsJoining_SoTheWorldsFirstRemotesWaitForTheClientsReadiness()
+        {
+            // WHY: the host admits one round trip before the client has read its admission, and a
+            // PlayerAdded handler fires at the new player in that window.
+            OfflineMirror mirror = new();
+            try
+            {
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(3);
+                Assert.IsTrue(_host.Admit(3, Admit("actor-a", 1L, "a", "A"), "session-a"));
+
+                _bridge.SendEvent(new RbxNetworkEventMessage(new InstanceId(5UL),
+                    RbxNetworkDirection.ServerToClient, RbxNetworkReliability.ReliableOrdered, null,
+                    "actor-a", new byte[] { 1 }));
+                mirror.FlushServer();
+
+                CollectionAssert.IsEmpty(mirror.ServerSendTargetsOf<CoreAiRemoteEventMessage>(),
+                    "held until the client says it can route it");
+                Assert.AreEqual(1, _bridge.PacketsHeldUntilReady);
+
+                OfflineMirror.DeliverToServer(3, new CoreAiClientReadyMessage());
+                mirror.FlushServer();
+
+                CollectionAssert.AreEqual(new[] { 3 }, mirror.ServerSendTargetsOf<CoreAiRemoteEventMessage>());
             }
             finally
             {

@@ -23,6 +23,12 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
     {
         public const int DefaultMaxClientRequestsPerSecond = 500;
 
+        /// <summary>
+        /// Roblox's ceiling for an <c>UnreliableRemoteEvent</c> payload, refused here as the online
+        /// transport refuses it.
+        /// </summary>
+        public const int UnreliablePayloadCeilingBytes = 1000;
+
         private readonly RbxNetworkRateLimiter _rateLimiter;
         private readonly Func<double> _clockSeconds;
         private readonly HashSet<string> _actors = new(StringComparer.Ordinal);
@@ -65,7 +71,9 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         public int RateWindowCount => _rateLimiter.TrackedActorCount;
 
         /// <summary>
-        /// The codec's own ceiling: 64 KiB. The loopback has no MTU, so this is the only bound.
+        /// The codec's own ceiling: 64 KiB, the bound of every reliable remote and RemoteFunction.
+        /// The loopback has no MTU; an <c>UnreliableRemoteEvent</c> is held to Roblox's 1000 bytes by
+        /// <see cref="MaxPayloadBytesFor"/>, as online.
         /// </summary>
         /// <remarks>
         /// WHY a bound at all in solo: a payload that only fails once a real transport is attached
@@ -73,6 +81,22 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// failure would first be seen.
         /// </remarks>
         public int MaxPayloadBytes => 65536;
+
+        /// <summary>
+        /// The largest <c>RemoteEvent</c> payload one delivery class carries: Roblox's 1000 bytes for
+        /// an unreliable one, <see cref="MaxPayloadBytes"/> for a reliable one.
+        /// </summary>
+        /// <remarks>
+        /// WHY the loopback, which has no datagram, holds unreliable remotes to 1000 bytes: the online
+        /// transport refuses a larger one where it is fired, and a script that fires 2 KB unreliably
+        /// in solo would otherwise work there and fail the moment a real transport is attached.
+        /// </remarks>
+        public int MaxPayloadBytesFor(RbxNetworkReliability reliability)
+        {
+            return reliability == RbxNetworkReliability.UnreliableUnordered
+                ? UnreliablePayloadCeilingBytes
+                : MaxPayloadBytes;
+        }
 
         /// <summary>Always zero: the loopback IS the server, so there is nothing to correct for.</summary>
         public double ServerClockOffsetSeconds => 0d;
@@ -135,6 +159,13 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             RequireActorId(actorId);
         }
 
+        /// <inheritdoc />
+        /// <remarks>
+        /// A payload over <see cref="MaxPayloadBytesFor"/> is refused with
+        /// <see cref="RbxErrorCode.PayloadTooLarge"/> before anything else — route, budget, delivery
+        /// — exactly where and how the online transport refuses it, so an oversize unreliable fire
+        /// is an error in solo too rather than a delivery, and never costs budget.
+        /// </remarks>
         public void SendEvent(RbxNetworkEventMessage message)
         {
             if (message == null)
@@ -142,6 +173,12 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 throw new ArgumentNullException(nameof(message));
             }
 
+            bool unreliable = message.Reliability == RbxNetworkReliability.UnreliableUnordered;
+            RequirePayloadFits(message.Payload, MaxPayloadBytesFor(message.Reliability),
+                unreliable ? "an UnreliableRemoteEvent" : "a reliable RemoteEvent",
+                unreliable
+                    ? "fire a reliable RemoteEvent for data this large, or split it"
+                    : "split the payload, or send a reference the receiver can resolve");
             ValidateRoute(message.Direction, message.SenderActorId,
                 message.RecipientActorId);
             RbxNetworkRateGroup rateGroup = message.Reliability
@@ -182,6 +219,8 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 throw new ArgumentNullException(nameof(response));
             }
 
+            RequirePayloadFits(message.Payload, MaxPayloadBytes, "a RemoteFunction",
+                "split the payload, or send a reference the receiver can resolve");
             ValidateRoute(message.Direction, message.SenderActorId,
                 message.RecipientActorId);
             AdmitClientRequest(message.Direction, message.SenderActorId,
@@ -286,6 +325,21 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 "actor '" + actor + "' cannot " + operation
                 + " because the actor is not registered with the loopback bridge",
                 "register the actor context before using remotes");
+        }
+
+        private static void RequirePayloadFits(byte[] payload, int ceiling, string what, string fix)
+        {
+            int length = payload?.Length ?? 0;
+            if (length <= ceiling)
+            {
+                return;
+            }
+
+            throw new RbxError(
+                RbxErrorCode.PayloadTooLarge,
+                "network payload of " + length + " bytes exceeds the transport limit of "
+                + ceiling + " bytes for " + what,
+                fix);
         }
 
         private static string RequireActorId(string actorId)

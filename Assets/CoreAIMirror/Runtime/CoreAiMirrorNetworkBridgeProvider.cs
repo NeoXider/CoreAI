@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Binding;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using Mirror;
 using UnityEngine;
@@ -24,9 +25,11 @@ namespace CoreAI.Net.Mirror
     /// hand it to <c>CoreAiModsLifetimeScope</c>'s network bridge provider field, and the world's
     /// remotes travel over the wire instead of the in-process loopback. Builds the
     /// <see cref="MirrorNetworkBridge"/> and, on a server, the <see cref="CoreAiMirrorSessionHost"/>
-    /// that turns admitted connections into players; every frame it pumps request timeouts, drops
-    /// the connections admission could not turn into players, keeps its disconnect hook in Mirror's
-    /// disconnect event, and keeps the attached world's identity source wired.
+    /// that turns admitted connections into players; every frame it pumps the bridge (request
+    /// timeouts, the drops a kick or a replaced session owes, readiness deadlines, clock anchors and
+    /// a client's readiness acknowledgement), drops the connections admission could not turn into
+    /// players, keeps its disconnect hook in Mirror's disconnect event, and keeps the attached
+    /// world's identity source wired.
     /// </summary>
     /// <remarks>
     /// WHY the side is declared in the scene rather than read from Mirror when the bridge is built:
@@ -88,8 +91,17 @@ namespace CoreAI.Net.Mirror
         private bool _roleConflict;
         private bool _released;
 
-        /// <summary>Test seam: the clock the bridge times requests by; null means Mirror's own.</summary>
+        /// <summary>
+        /// Test seam: the frame clock the bridge times requests, readiness deadlines, owed drops and
+        /// clock anchors by; null means Mirror's own.
+        /// </summary>
         internal Func<double> ClockSeconds { get; set; }
+
+        /// <summary>
+        /// Test seam: the wall clock the bridge measures server time against; null means the system
+        /// clock.
+        /// </summary>
+        internal IRbxClockSource WallClock { get; set; }
 
         /// <summary>Which side this process is. Settable only until the bridge exists.</summary>
         public CoreAiMirrorRole Role
@@ -254,7 +266,8 @@ namespace CoreAI.Net.Mirror
             }
 
             _bridgeIsServer = isServer;
-            _bridge = new MirrorNetworkBridge(isServer, authenticator, clockSeconds: ClockSeconds);
+            _bridge = new MirrorNetworkBridge(isServer, authenticator, clockSeconds: ClockSeconds,
+                wallClock: WallClock);
             if (!isServer)
             {
                 if (authenticator != null)
@@ -321,20 +334,26 @@ namespace CoreAI.Net.Mirror
                 WireIdentitySource();
             }
 
-            _bridge.PumpTimeouts();
+            _bridge.Pump();
         }
 
         /// <summary>
-        /// Drops what admission still owes before the component stops updating.
+        /// Drops what admission, a kick or a replaced session still owes before the component stops
+        /// updating.
         /// </summary>
         /// <remarks>
         /// WHY here as well as in Update: a disabled component runs no Update, and a connection
         /// owed a drop must not stay authenticated to Mirror as nobody for as long as the provider
-        /// is off — however long that is.
+        /// is off — however long that is. A kick's notice queued in this same frame may be lost to
+        /// that drop; the connection is closed either way.
         /// </remarks>
         private void OnDisable()
         {
             FlushPendingDrops();
+            if (_bridge != null && !_bridge.IsDisposed)
+            {
+                _bridge.PerformOwedDropsNow();
+            }
         }
 
         private void OnDestroy()

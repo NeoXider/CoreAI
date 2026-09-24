@@ -37,15 +37,17 @@ namespace CoreAI.Net.Mirror.Tests
         private InstanceRegistry _registry;
         private LuaCsRbxApiBindings _bindings;
         private List<string> _worldLog;
+        private double _now;
 
         [SetUp]
         public void CreateServerWorld()
         {
             _mirror = new OfflineMirror();
+            _now = 0d;
             _go = new GameObject("CoreAI_MirrorKick");
             _authenticator = _go.AddComponent<CoreAiMirrorAuthenticator>();
             _authenticator.Configure(new TokenProvider(Credential), WorldId);
-            _server = new MirrorNetworkBridge(isServer: true, _authenticator, clockSeconds: () => 0d);
+            _server = new MirrorNetworkBridge(isServer: true, _authenticator, clockSeconds: () => _now);
             _worldLog = new List<string>();
             _registry = new InstanceRegistry(
                 worldAclVersion: InstanceRegistry.CurrentWorldAclVersion, worldId: WorldId);
@@ -86,7 +88,14 @@ namespace CoreAI.Net.Mirror.Tests
 
             Assert.IsTrue(_bindings.Players.KickPlayer(player, creatorKick));
             _bindings.Scheduler.Advance(0d);
+            _mirror.FlushServer();
 
+            CollectionAssert.AreEqual(new[] { Connection },
+                _mirror.ServerSendTargetsOf<CoreAiDisconnectNoticeMessage>(),
+                "the kicked client is told why before its connection ends");
+            CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests,
+                "the drop waits for a later frame, or Mirror would discard the notice with it");
+            NextFrame();
             CollectionAssert.AreEqual(new[] { Connection }, _mirror.ServerDisconnectRequests,
                 "a kick must end the kicked client's connection at the transport");
             Assert.AreEqual(0, _sessionHost.LiveSessionCount, "the session host must not keep the kicked session");
@@ -135,6 +144,7 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.Throws<InvalidOperationException>(
                 () => _bindings.Players.KickPlayer(player, creatorKick),
                 "the world's throw is the kicker's to see; the bridge must not swallow it");
+            NextFrame();
 
             // WHY this is the assertion that fails without the bridge's finally: the session host
             // releases its own binding in a finally of its own, but the transport is asked only by
@@ -224,9 +234,15 @@ namespace CoreAI.Net.Mirror.Tests
 
             RbxPlayer rejoined = Admit(Connection + 1);
             _bindings.Scheduler.Advance(0d);
+            _mirror.FlushServer();
 
             Assert.AreSame(player, rejoined, "the durable actor keeps its Player across the reconnect");
             Assert.AreEqual(0, added, "nobody joined: PlayerAdded does not fire again");
+            CollectionAssert.AreEqual(new[] { Connection },
+                _mirror.ServerSendTargetsOf<CoreAiDisconnectNoticeMessage>(),
+                "the older client is told its session was replaced");
+            CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests, "the drop waits for a later frame");
+            NextFrame();
             CollectionAssert.AreEqual(new[] { Connection }, _mirror.ServerDisconnectRequests,
                 "the older connection is closed: the newest session wins");
 
@@ -247,6 +263,16 @@ namespace CoreAI.Net.Mirror.Tests
             CollectionAssert.IsEmpty(_bindings.Players.GetPlayers());
             Assert.AreEqual(0, _sessionHost.LiveSessionCount);
             CollectionAssert.IsEmpty(_server.ActorIds);
+        }
+
+        /// <summary>
+        /// The next frame's pump: the bridge's clock reads later, so a drop owed since the last
+        /// frame is made.
+        /// </summary>
+        private void NextFrame()
+        {
+            _now += 0.016d;
+            _server.Pump();
         }
 
         /// <summary>Admits one connection through the authenticator and the session host, returning its Player.</summary>

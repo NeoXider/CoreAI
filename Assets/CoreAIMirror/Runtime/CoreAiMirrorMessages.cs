@@ -105,4 +105,78 @@ namespace CoreAI.Net.Mirror
         /// <summary>The human-readable error message when not.</summary>
         public string ErrorMessage;
     }
+
+    /// <summary>
+    /// A joining client's word that it can hear the server: its bridge exists and has bound the actor
+    /// the admission response named. Sent once per connection, client to server.
+    /// </summary>
+    /// <remarks>
+    /// WHY an acknowledgement at all: the server admits a connection one round trip before the
+    /// client has processed the answer, and anything the server puts on the wire in that window
+    /// reaches a client that cannot route it yet — or, when the client's bridge is built after its
+    /// admission, one whose Mirror has no handler for it and disconnects itself. Until this arrives
+    /// the server holds reliable remotes for the connection and drops unreliable ones, counted.
+    /// WHY it carries nothing: who the client is was decided at admission and lives in the server's
+    /// connection map; a field here would be a claim the server must ignore.
+    /// <para>
+    /// Wire compatibility of the three messages below: they are additive, and mixed versions fail
+    /// loudly instead of half-working. A server that predates them has no handler for this one, so
+    /// its Mirror disconnects a newer client right after admission, with an error in the server log.
+    /// A client that predates them never sends it, so a newer server holds that client's reliable
+    /// remotes and drops it at the readiness deadline with a log line naming the cause; the clock
+    /// anchor goes only to acknowledged connections, so such a client is never sent a message it
+    /// cannot read before that. Server and client therefore run the same CoreAI version, as the
+    /// admission response already requires.
+    /// </para>
+    /// </remarks>
+    public struct CoreAiClientReadyMessage : NetworkMessage
+    {
+    }
+
+    /// <summary>
+    /// The server's wall clock at the moment of sending, so a client can tell the server's time from
+    /// its own. Sent to a connection when it acknowledges readiness, then to every acknowledged
+    /// connection at an interval.
+    /// </summary>
+    /// <remarks>
+    /// WHY Unix time and not Mirror's clocks: Mirror's <c>NetworkTime</c> counts seconds since each
+    /// process started, and its client offset compares two such uptimes — which says nothing about
+    /// the wall clock <c>workspace:GetServerTimeNow()</c> reports. The client carries this anchor
+    /// forward on its own monotonic clock, so neither machine's uptime nor the client's wall clock
+    /// enters the result.
+    /// </remarks>
+    public struct CoreAiServerClockMessage : NetworkMessage
+    {
+        /// <summary>The server's Unix time, in seconds with a fraction, when the message was sent.</summary>
+        public double ServerUnixSeconds;
+    }
+
+    /// <summary>Why the server is about to close a client's connection.</summary>
+    public enum CoreAiDisconnectNoticeKind : byte
+    {
+        /// <summary>A script or the host kicked the player.</summary>
+        Kicked = 1,
+
+        /// <summary>The same player was admitted again on a newer connection, which replaced this one.</summary>
+        Superseded = 2
+    }
+
+    /// <summary>
+    /// The reason the server closes a client's connection, sent to that client before the drop.
+    /// </summary>
+    /// <remarks>
+    /// WHY a message and not the transport's disconnect: a transport drop carries no reason, so a
+    /// kicked player cannot tell a kick from a server that vanished, and Roblox shows the kick
+    /// message to the player it kicked. WHY the drop waits a frame for it: Mirror discards what a
+    /// connection has not flushed yet when that connection is dropped, and kcp2k reports the drop
+    /// before the call returns, so a notice sent in the same frame as the drop never leaves.
+    /// </remarks>
+    public struct CoreAiDisconnectNoticeMessage : NetworkMessage
+    {
+        /// <summary>Why the connection closes, as <see cref="CoreAiDisconnectNoticeKind"/>.</summary>
+        public byte Kind;
+
+        /// <summary>The text shown to the player; the kick message a script gave, when it gave one.</summary>
+        public string Message;
+    }
 }

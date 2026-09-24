@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using Mirror;
 using NUnit.Framework;
@@ -11,6 +12,64 @@ using UnityEngine.TestTools;
 
 namespace CoreAI.Net.Mirror.Tests
 {
+    /// <summary>
+    /// A wall clock a fixture sets by hand: a Unix time and a process uptime that move only when
+    /// told, so a clock rule can be proven with any skew between two machines and no sleep.
+    /// </summary>
+    internal sealed class FakeWallClock : IRbxClockSource
+    {
+        public FakeWallClock(double unixSeconds, double processSeconds)
+        {
+            UnixTimeSecondsFractional = unixSeconds;
+            ProcessTimeSeconds = processSeconds;
+        }
+
+        public double GameTimeSeconds => 0d;
+
+        public long UnixTimeSeconds => (long)Math.Floor(UnixTimeSecondsFractional);
+
+        public double ProcessTimeSeconds { get; set; }
+
+        public double UnixTimeSecondsFractional { get; set; }
+
+        /// <summary>Moves both readings by the same real interval, as a running machine does.</summary>
+        public void Advance(double seconds)
+        {
+            UnixTimeSecondsFractional += seconds;
+            ProcessTimeSeconds += seconds;
+        }
+    }
+
+    /// <summary>
+    /// Every message of one type either side hands Mirror's send path, with its channel, until
+    /// disposed: the witness for control messages whose content matters, not only their target.
+    /// </summary>
+    internal sealed class SentMessages<T> : IDisposable where T : struct, NetworkMessage
+    {
+        public SentMessages()
+        {
+            NetworkDiagnostics.OutMessageEvent += Record;
+        }
+
+        public List<T> Messages { get; } = new();
+
+        public List<int> ChannelIds { get; } = new();
+
+        public void Dispose()
+        {
+            NetworkDiagnostics.OutMessageEvent -= Record;
+        }
+
+        private void Record(NetworkDiagnostics.MessageInfo info)
+        {
+            if (info.message is T message)
+            {
+                Messages.Add(message);
+                ChannelIds.Add(info.channel);
+            }
+        }
+    }
+
     /// <summary>
     /// Runs a real Mirror server or client in edit mode without a socket: a transport that goes
     /// nowhere, Mirror's own Listen, Connect and Shutdown, and inbound packets pushed through the

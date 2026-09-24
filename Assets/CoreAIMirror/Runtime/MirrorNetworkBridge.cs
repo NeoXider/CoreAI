@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using Mirror;
@@ -23,9 +24,28 @@ namespace CoreAI.Net.Mirror
     /// <item><description>
     /// <b>One connection per actor, newest wins.</b> Binding an actor that already holds a
     /// connection closes the older one: its binding, open requests and admission record are
-    /// released and the transport is told to drop it, the way Roblox ends the older session of a
-    /// player who joins again. Every teardown is keyed by the connection, so the late report of
-    /// that older drop finds nothing and cannot tear down the session that replaced it.
+    /// released at once, the older client is told why, and the transport drops it on the first
+    /// <see cref="Pump"/> of a later frame, the way Roblox ends the older session of a player who
+    /// joins again. Every teardown is keyed by the connection, so the late report of that older
+    /// drop finds nothing and cannot tear down the session that replaced it.
+    /// </description></item>
+    /// <item><description>
+    /// <b>A reason before every server-side close.</b> A kick and a superseded session send the
+    /// client a <see cref="CoreAiDisconnectNoticeMessage"/>, and the transport drop waits for a
+    /// later frame so Mirror flushes the notice first; the session is torn down and unbound at
+    /// once. A kick on a client is the client's own player leaving: the client disconnects.
+    /// </description></item>
+    /// <item><description>
+    /// <b>Readiness.</b> A connection admitted through the session host is joining until its client
+    /// sends <see cref="CoreAiClientReadyMessage"/>: reliable server remotes addressed to it are held
+    /// in order (bounded) and sent when the acknowledgement arrives, unreliable ones are dropped
+    /// and counted, and a connection that never acknowledges is dropped at
+    /// <see cref="ReadinessTimeoutSeconds"/>. What the client sends is heard at once.
+    /// </description></item>
+    /// <item><description>
+    /// <b>Server clock.</b> An acknowledged connection is sent the server's Unix time, then again
+    /// every <see cref="ClockAnchorIntervalSeconds"/>; a client derives
+    /// <see cref="ServerClockOffsetSeconds"/> from those anchors alone.
     /// </description></item>
     /// <item><description>
     /// <b>Correlation.</b> A response completes a request only when the connection AND the
@@ -91,8 +111,102 @@ namespace CoreAI.Net.Mirror
             public double DeadlineSeconds;
         }
 
+        /// <summary>A reliable envelope held for a connection that has not acknowledged readiness.</summary>
+        private sealed class HeldSend
+        {
+            public bool IsRequest;
+            public CoreAiRemoteEventMessage Event;
+            public CoreAiRemoteRequestMessage Request;
+            public byte[] Payload;
+        }
+
+        /// <summary>A bound connection whose client has not acknowledged readiness yet.</summary>
+        private sealed class JoiningConnection
+        {
+            public double BoundAt;
+            public readonly List<HeldSend> Held = new();
+            public long HeldBytes;
+            public bool OverflowLogged;
+        }
+
+        /// <summary>A transport drop owed to a connection whose notice must be flushed first.</summary>
+        private readonly struct OwedDrop
+        {
+            public OwedDrop(NetworkConnectionToClient connection, double requestedAt)
+            {
+                Connection = connection;
+                RequestedAt = requestedAt;
+            }
+
+            public NetworkConnectionToClient Connection { get; }
+
+            public double RequestedAt { get; }
+        }
+
         /// <summary>The mirror-documented timeout for a RemoteFunction invocation.</summary>
         public const double RequestTimeoutSeconds = 30d;
+
+        /// <summary>
+        /// Seconds a connection admitted through the session host has, from its binding, to
+        /// acknowledge readiness before it is dropped.
+        /// </summary>
+        /// <remarks>
+        /// WHY a deadline: a client older than the readiness handshake never acknowledges, and
+        /// without one it would stay a Player that receives nothing, for ever, in silence. Ten
+        /// seconds matches the admission deadline; a current client acknowledges one round trip
+        /// after its admission.
+        /// </remarks>
+        public const double ReadinessTimeoutSeconds = 10d;
+
+        /// <summary>
+        /// Reliable envelopes held at most for one joining connection; the next is dropped and counted.
+        /// </summary>
+        public const int MaxHeldMessagesPerJoiningConnection = 256;
+
+        /// <summary>
+        /// Payload bytes held at most for one joining connection; an envelope past it is dropped and
+        /// counted.
+        /// </summary>
+        public const int MaxHeldBytesPerJoiningConnection = 262144;
+
+        /// <summary>
+        /// Seconds a client waits before acknowledging readiness again on a connection whose server
+        /// has not answered with a clock anchor yet.
+        /// </summary>
+        /// <remarks>
+        /// WHY it repeats: a server that admitted the connection before its world attached had no
+        /// binding to record the first acknowledgement against, and binds it later; one message
+        /// per second until the answer costs nothing and spares that client the readiness deadline.
+        /// </remarks>
+        public const double ReadyAcknowledgementRetrySeconds = 1d;
+
+        /// <summary>Seconds between the clock anchors a server sends every acknowledged connection.</summary>
+        public const double ClockAnchorIntervalSeconds = 5d;
+
+        /// <summary>
+        /// A clock anchor that disagrees with a client's estimate by more than this many seconds
+        /// replaces the estimate outright instead of being blended in: the server's clock stepped,
+        /// or the client joined another server.
+        /// </summary>
+        public const double ClockStepThresholdSeconds = 1d;
+
+        /// <summary>
+        /// What a kicked client is told when the kick gave no message of its own.
+        /// </summary>
+        public const string DefaultKickMessage = "You were kicked from this experience.";
+
+        /// <summary>What the client of a superseded connection is told.</summary>
+        public const string SupersededNoticeMessage =
+            "This session was replaced by a newer connection for the same player.";
+
+        /// <summary>The UTF-8 bytes of notice text sent at most; a longer kick message is cut.</summary>
+        public const int MaxNoticeMessageBytes = 1024;
+
+        /// <summary>
+        /// How much of the gap between an anchor and the current estimate one anchor closes, below
+        /// <see cref="ClockStepThresholdSeconds"/>.
+        /// </summary>
+        private const double ClockSmoothing = 0.25d;
 
         /// <summary>
         /// The codec's own ceiling: the bound of every reliable remote and RemoteFunction payload,
@@ -136,13 +250,23 @@ namespace CoreAI.Net.Mirror
         private readonly Dictionary<uint, PendingRequest> _pending = new();
         private readonly List<string> _actorOrder = new();
         private readonly Queue<RbxNetworkEventMessage> _localEvents = new();
+        private readonly Dictionary<int, JoiningConnection> _joining = new();
+        private readonly HashSet<int> _acknowledged = new();
+        private readonly List<OwedDrop> _owedDrops = new();
         private readonly RbxNetworkRateLimiter _rateLimiter;
         private readonly Func<double> _clockSeconds;
+        private readonly IRbxClockSource _wallClock;
         private readonly CoreAiMirrorAuthenticator _authenticator;
         private readonly Action<string> _log;
         private readonly bool _isServer;
         private string _admittedActorId;
+        private NetworkConnectionToServer _readyAcknowledgedOn;
+        private NetworkConnectionToServer _anchoredOn;
         private uint _nextCorrelationId = 1u;
+        private double _nextReadyAcknowledgementAt;
+        private double _nextClockAnchorAt;
+        private double _serverUnixAtMonotonicZero;
+        private bool _clockAnchored;
         private bool _disposed;
         private bool _deliveringLocally;
         private bool _unadmittedDropLogged;
@@ -154,14 +278,30 @@ namespace CoreAI.Net.Mirror
         /// Creates the bridge for one Mirror side, started or not, and registers its handlers there;
         /// see <see cref="AttachHandlers"/> for what a stop and start of that side needs.
         /// </summary>
+        /// <param name="isServer">Which Mirror side this bridge serves; fixed for its lifetime.</param>
+        /// <param name="authenticator">The admission authenticator whose records a released connection forgets.</param>
+        /// <param name="maxClientRequestsPerSecond">The per-actor budget of client-to-server traffic.</param>
+        /// <param name="clockSeconds">
+        /// The frame clock request timeouts, readiness deadlines, owed drops and the anchor interval
+        /// run on; null means Mirror's <c>NetworkTime.localTime</c>, which is fixed within a frame.
+        /// </param>
+        /// <param name="log">Where the bridge's one-time operator lines go; null means a Unity warning.</param>
+        /// <param name="wallClock">
+        /// The clock server time is measured against: its Unix time is what a server's anchors carry
+        /// and what a client's <see cref="ServerClockOffsetSeconds"/> is relative to, and its process
+        /// time carries a client's estimate between anchors. Null means the system clock — the one a
+        /// world composed without its own <see cref="IRbxClockSource"/> reads; a world that reads
+        /// another clock composes its bridge with that same clock.
+        /// </param>
         public MirrorNetworkBridge(bool isServer, CoreAiMirrorAuthenticator authenticator = null,
             int maxClientRequestsPerSecond = RbxNetworkRateLimiter.DefaultMaxClientRequestsPerSecond,
-            Func<double> clockSeconds = null, Action<string> log = null)
+            Func<double> clockSeconds = null, Action<string> log = null, IRbxClockSource wallClock = null)
         {
             _isServer = isServer;
             _authenticator = authenticator;
             _log = log ?? Debug.LogWarning;
             _clockSeconds = clockSeconds ?? (() => NetworkTime.localTime);
+            _wallClock = wallClock ?? new RbxSystemClockSource();
             _rateLimiter = new RbxNetworkRateLimiter(maxClientRequestsPerSecond, _clockSeconds);
             AttachHandlers();
         }
@@ -180,9 +320,10 @@ namespace CoreAI.Net.Mirror
         public int UnadmittedPacketsDropped { get; private set; }
 
         /// <summary>
-        /// Packets from an admitted peer dropped because the envelope was malformed: a remote id
+        /// Packets dropped because the envelope was malformed: from an admitted peer, a remote id
         /// that is not a server-assigned instance id, a reliability byte outside the enum, or a
-        /// server-bound envelope claiming another direction. Never delivered, never thrown.
+        /// server-bound envelope claiming another direction; from a server, a clock anchor that is
+        /// not a positive finite time. Never delivered, never thrown.
         /// </summary>
         public int MalformedPacketsDropped { get; private set; }
 
@@ -249,6 +390,58 @@ namespace CoreAI.Net.Mirror
         /// <summary>Payload bytes handed to the transport.</summary>
         public long BytesSent { get; private set; }
 
+        /// <summary>Readiness acknowledgements a server accepted, one per acknowledged connection.</summary>
+        public int ReadyAcknowledgements { get; private set; }
+
+        /// <summary>
+        /// Reliable envelopes a server held for a connection that had not acknowledged readiness,
+        /// whether they were later sent or not.
+        /// </summary>
+        public int PacketsHeldUntilReady { get; private set; }
+
+        /// <summary>
+        /// Envelopes a server never sent because their connection had not acknowledged readiness: an
+        /// unreliable remote, a held one past <see cref="MaxHeldMessagesPerJoiningConnection"/> or
+        /// <see cref="MaxHeldBytesPerJoiningConnection"/>, and the held ones of a connection that left
+        /// before acknowledging.
+        /// </summary>
+        public int NotReadyPacketsDropped { get; private set; }
+
+        /// <summary>Connections a server dropped for not acknowledging readiness in time.</summary>
+        public int ReadinessTimeouts { get; private set; }
+
+        /// <summary>Clock anchors a server handed the transport.</summary>
+        public int ClockAnchorsSent { get; private set; }
+
+        /// <summary>Clock anchors a client accepted.</summary>
+        public int ClockAnchorsReceived { get; private set; }
+
+        /// <summary>Kick and supersede notices a server handed the transport.</summary>
+        public int DisconnectNoticesSent { get; private set; }
+
+        /// <summary>Times a client disconnected itself because its own player was kicked.</summary>
+        public int SelfKicks { get; private set; }
+
+        /// <summary>
+        /// On a client, the last reason a server gave for closing this client's connection; null
+        /// until one arrives. Kept after the disconnect, so the host can show it, and cleared by the
+        /// next admission.
+        /// </summary>
+        public CoreAiDisconnectNoticeMessage? LastDisconnectNotice { get; private set; }
+
+        /// <summary>
+        /// Whether <see cref="ServerClockOffsetSeconds"/> measures the server's clock: always on a
+        /// server, and on a client from the first clock anchor on. Before that a client's offset is
+        /// zero because nothing is known, not because the clocks agree.
+        /// </summary>
+        public bool IsServerClockSynchronized => _isServer || _clockAnchored;
+
+        /// <summary>
+        /// Test seam: the round trip in seconds a client's anchor is corrected by half of; null means
+        /// Mirror's measured <c>NetworkTime.rtt</c>.
+        /// </summary>
+        internal Func<double> RoundTripSeconds { get; set; }
+
         /// <inheritdoc />
         /// <remarks>
         /// The ceiling of every reliable remote: a reliable <c>RemoteEvent</c> and both
@@ -274,7 +467,40 @@ namespace CoreAI.Net.Mirror
             Math.Min(CodecPayloadCeilingBytes, LargestFittingPayload(Channels.Reliable, RequestEnvelopeBytes));
 
         /// <inheritdoc />
-        public double ServerClockOffsetSeconds => _isServer ? 0d : NetworkTime.offset;
+        /// <remarks>
+        /// The contract: the wall clock's Unix time plus this value is the server's Unix time now,
+        /// where the wall clock is the one this bridge was built with (the system clock by
+        /// default). Zero on a server. On a client, zero until the first
+        /// <see cref="CoreAiServerClockMessage"/> arrives — <see cref="IsServerClockSynchronized"/>
+        /// says which — and from then on
+        /// <c>anchor + (process time now − process time at the anchor) − wall clock now</c>, the
+        /// anchor being the server's Unix time corrected by half the measured round trip. The value
+        /// moves: at the first anchor it steps from zero to the whole skew between the two wall
+        /// clocks, which can be hours; the first anchor of every later connection replaces the
+        /// estimate, as does one farther than <see cref="ClockStepThresholdSeconds"/> from it, and
+        /// a nearer one is blended in; and between anchors it follows the client's own wall clock,
+        /// so a client whose clock is corrected mid-session still reads the server's time. A
+        /// consumer that keeps the derived clock monotonic must treat the first synchronization as
+        /// a re-base, not as time going backwards.
+        /// WHY not Mirror's <c>NetworkTime.offset</c>: it is this process's uptime minus the
+        /// server's interpolated uptime — no wall clock at all, and the opposite sign — so a client
+        /// of a server that had run for a day read the server's time a day off, and a clamp on the
+        /// result froze for as long. WHY not Mirror's predicted time either: before the first ping
+        /// returns it is the client's own uptime, the same error again.
+        /// </remarks>
+        public double ServerClockOffsetSeconds
+        {
+            get
+            {
+                if (_isServer || !_clockAnchored)
+                {
+                    return 0d;
+                }
+
+                return _serverUnixAtMonotonicZero + _wallClock.ProcessTimeSeconds
+                       - _wallClock.UnixTimeSecondsFractional;
+            }
+        }
 
         /// <inheritdoc />
         public event Action<RbxNetworkEventMessage> EventReceived;
@@ -284,6 +510,13 @@ namespace CoreAI.Net.Mirror
 
         /// <inheritdoc />
         public event Action<RbxNetworkPeerDisconnected> PeerDisconnected;
+
+        /// <summary>
+        /// On a client, raised when the server says why it is about to close this connection — a
+        /// kick, with the kick's message, or a newer session of the same player. The drop follows;
+        /// a host that shows the player why subscribes here or reads <see cref="LastDisconnectNotice"/>.
+        /// </summary>
+        public event Action<CoreAiDisconnectNoticeMessage> DisconnectNoticeReceived;
 
         /// <summary>
         /// The largest <c>RemoteEvent</c> payload one delivery class carries on this transport.
@@ -305,18 +538,34 @@ namespace CoreAI.Net.Mirror
         }
 
         /// <summary>
+        /// Binds an admitted connection to its actor as a peer that already listens: server remotes
+        /// reach it at once. Called by a composition that knows its client is ready, never by this
+        /// bridge on a first packet; the session host binds through the overload that waits for the
+        /// client's readiness.
+        /// </summary>
+        public void BindConnection(int connectionId, RbxNetworkPeer peer)
+        {
+            BindConnection(connectionId, peer, awaitClientReady: false);
+        }
+
+        /// <summary>
         /// Binds an admitted connection to its actor. Called by the composition after admission,
-        /// never by this bridge on a first packet.
+        /// never by this bridge on a first packet. With <paramref name="awaitClientReady"/> the
+        /// connection is joining until its client sends <see cref="CoreAiClientReadyMessage"/>.
         /// </summary>
         /// <remarks>
         /// WHY an actor that already holds another connection loses it: that is a player who joined
         /// again before the transport noticed the old link was gone — kcp2k keeps a dead peer for
         /// its whole timeout — and Roblox ends the older session. Keeping both would let the old
         /// connection's late drop tear down the player the new one is using. The older connection is
-        /// released here and dropped at the transport; the reason goes to the host's log and to the
-        /// older connection's open requests.
+        /// released here, told why, and dropped at the transport on a later frame's
+        /// <see cref="Pump"/>; the reason also goes to the host's log and to the older connection's
+        /// open requests. WHY a joining connection is not sent remotes yet: the admission response
+        /// reaches the client one round trip after this binding, and until the client has processed
+        /// it — and built its bridge, which a composition may do later — a remote finds nothing
+        /// that can route it, or no handler at all, which makes Mirror disconnect the client.
         /// </remarks>
-        public void BindConnection(int connectionId, RbxNetworkPeer peer)
+        public void BindConnection(int connectionId, RbxNetworkPeer peer, bool awaitClientReady)
         {
             if (string.IsNullOrEmpty(peer.ActorId))
             {
@@ -343,6 +592,11 @@ namespace CoreAI.Net.Mirror
 
             _peersByConnection[connectionId] = peer;
             _connectionsByActor[peer.ActorId] = connectionId;
+            if (awaitClientReady && !_acknowledged.Contains(connectionId)
+                                 && !_joining.ContainsKey(connectionId))
+            {
+                _joining[connectionId] = new JoiningConnection { BoundAt = _clockSeconds() };
+            }
         }
 
         /// <summary>
@@ -355,7 +609,11 @@ namespace CoreAI.Net.Mirror
         /// field the server-side handler has to ignore — one refactor away from being trusted. The
         /// admitted actor is a property of this connection with a lifetime (admission to
         /// disconnect), which is exactly what the server's own connection map records for the
-        /// other side; this is its mirror image for the one connection a client has.
+        /// other side; this is its mirror image for the one connection a client has. WHY the
+        /// readiness acknowledgement leaves from here: this is the first moment this client can
+        /// route a server remote, and the server holds them until it hears so; a binding made while
+        /// the client is not connected yet is acknowledged by the first <see cref="Pump"/> that
+        /// finds it connected.
         /// </remarks>
         public void BindAdmittedActor(string actorId)
         {
@@ -376,6 +634,8 @@ namespace CoreAI.Net.Mirror
             _admittedActorId = actorId.Trim();
             _unadmittedDropLogged = false;
             _unheardActorLogged = false;
+            LastDisconnectNotice = null;
+            AcknowledgeReadinessIfDue();
         }
 
         /// <summary>
@@ -385,10 +645,14 @@ namespace CoreAI.Net.Mirror
         /// <remarks>
         /// WHY the requests fail here: they left on the connection that is gone, and no answer can
         /// come back on another one — waiting out the timeout would be thirty seconds of a lie.
+        /// WHY the clock estimate is kept: it is carried on this machine's monotonic clock and stays
+        /// the best one there is until the next connection's first anchor replaces it; dropping it
+        /// would step every derived clock back by the whole skew at each disconnect.
         /// </remarks>
         public void ForgetAdmittedActor()
         {
             _admittedActorId = null;
+            _readyAcknowledgedOn = null;
             if (!_isServer)
             {
                 FailAllPending(NotConnectedReason, containCompletionFailures: false);
@@ -408,7 +672,8 @@ namespace CoreAI.Net.Mirror
 
         /// <inheritdoc />
         /// <remarks>
-        /// An actor holds at most one connection here (see <see cref="BindConnection"/>), so the
+        /// An actor holds at most one connection here (see
+        /// <see cref="BindConnection(int, RbxNetworkPeer, bool)"/>), so the
         /// connection released is the one this actor holds now, never an older or a newer one.
         /// </remarks>
         public void UnregisterActor(string actorId)
@@ -458,6 +723,32 @@ namespace CoreAI.Net.Mirror
 
         /// <inheritdoc />
         /// <remarks>
+        /// On a server this is <see cref="DisconnectActor(string, string)"/> with
+        /// <see cref="DefaultKickMessage"/>. On a client it is the client's own player being kicked
+        /// — a LocalScript's <c>Players.LocalPlayer:Kick()</c> — and the client disconnects from the
+        /// server, as Roblox does; a client has no authority over anyone else's connection, so any
+        /// other actor is nothing here.
+        /// </remarks>
+        public void DisconnectActor(string actorId)
+        {
+            if (!_isServer)
+            {
+                DisconnectSelf(actorId);
+                return;
+            }
+
+            DisconnectActor(actorId, DefaultKickMessage);
+        }
+
+        /// <summary>
+        /// Kicks one admitted actor from the server side: the client is told
+        /// <paramref name="message"/> first, the session is torn down as
+        /// <see cref="RbxNetworkDisconnectReason.ServerClosed"/> and unbound at once, and the
+        /// transport drops the connection on a later frame's <see cref="Pump"/>. Nothing happens for
+        /// an actor that holds no connection here. On a client this is the self-kick of
+        /// <see cref="DisconnectActor(string)"/>, and the message is not sent anywhere.
+        /// </summary>
+        /// <remarks>
         /// WHY the teardown runs here, before the transport is asked: kcp2k reports the drop
         /// before ServerDisconnect returns and another transport reports it later, so a teardown
         /// left to that report would run as TransportLost, or on a binding this bridge had by then
@@ -465,20 +756,34 @@ namespace CoreAI.Net.Mirror
         /// finds no binding and does nothing. WHY the binding is released even when nobody listened
         /// for the peer: a kicked connection that still resolved to its actor would deliver that
         /// client's next packet as the player the world just removed. WHY the release and the
-        /// drop are in a finally: the teardown behind that report is the world's, and mod code
+        /// owed drop are in a finally: the teardown behind that report is the world's, and mod code
         /// runs inside it; a throw out of there must not leave the socket open on a connection
         /// that is authenticated to Mirror and bound to nobody. The throw itself stays the
-        /// caller's to report — a kick that failed halfway is not made to look whole. A client
-        /// bridge holds no peers, so on a client this is nothing.
+        /// caller's to report — a kick that failed halfway is not made to look whole. WHY the drop
+        /// is owed rather than made: Mirror discards a connection's unflushed messages when it is
+        /// dropped, and flushes only at the end of the frame, so the notice leaves only if the drop
+        /// waits for a later frame; until then the connection is bound to nobody and every packet
+        /// from it is dropped as unadmitted. WHY the notice goes even to a joining connection: a
+        /// kick at join — a ban check in <c>PlayerAdded</c> — is the common case, and a current
+        /// client hears the notice after its admission response on the same ordered channel.
         /// </remarks>
-        public void DisconnectActor(string actorId)
+        public void DisconnectActor(string actorId, string message)
         {
+            if (!_isServer)
+            {
+                DisconnectSelf(actorId);
+                return;
+            }
+
             if (string.IsNullOrEmpty(actorId)
                 || !_connectionsByActor.TryGetValue(actorId, out int connectionId))
             {
                 return;
             }
 
+            NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient conn);
+            SendNotice(conn, CoreAiDisconnectNoticeKind.Kicked,
+                string.IsNullOrWhiteSpace(message) ? DefaultKickMessage : message);
             try
             {
                 NotifyDisconnected(connectionId, RbxNetworkDisconnectReason.ServerClosed);
@@ -492,12 +797,48 @@ namespace CoreAI.Net.Mirror
                     _rateLimiter.Forget(actorId);
                 }
 
-                if (NetworkServer.connections.TryGetValue(connectionId,
-                        out NetworkConnectionToClient conn))
-                {
-                    conn.Disconnect();
-                }
+                OweDrop(conn);
             }
+        }
+
+        /// <summary>
+        /// Fails every expired request, and on a server performs the drops owed from an earlier
+        /// frame, drops joining connections past <see cref="ReadinessTimeoutSeconds"/> and sends the
+        /// interval's clock anchors; on a client it acknowledges readiness if a binding still owes
+        /// that. Call once per frame; the scene provider does.
+        /// </summary>
+        public void Pump()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            PumpTimeouts();
+            if (!_isServer)
+            {
+                AcknowledgeReadinessIfDue();
+                return;
+            }
+
+            double now = _clockSeconds();
+            PerformOwedDrops(now, all: false);
+            DropConnectionsPastTheReadinessDeadline(now);
+            SendDueClockAnchors(now);
+        }
+
+        /// <summary>
+        /// Performs every transport drop a kick or a supersede still owes, now, without waiting for a
+        /// later frame: for a composition that stops pumping, such as a disabled provider.
+        /// </summary>
+        /// <remarks>
+        /// WHY it exists: an owed drop is a socket still open on a connection bound to nobody, and it
+        /// must not stay open for as long as nothing pumps. A notice queued in this same frame may be
+        /// lost by the drop; the connection is closed either way.
+        /// </remarks>
+        public void PerformOwedDropsNow()
+        {
+            PerformOwedDrops(0d, all: true);
         }
 
         /// <inheritdoc />
@@ -652,6 +993,17 @@ namespace CoreAI.Net.Mirror
             if (routed
                 && NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient conn))
             {
+                if (_joining.TryGetValue(connectionId, out JoiningConnection joining))
+                {
+                    Hold(connectionId, joining, new HeldSend
+                    {
+                        IsRequest = true,
+                        Request = wire,
+                        Payload = message.Payload
+                    });
+                    return;
+                }
+
                 conn.Send(wire);
                 Count(message.Payload);
                 return;
@@ -662,7 +1014,8 @@ namespace CoreAI.Net.Mirror
 
         /// <summary>
         /// Fails every request whose deadline has passed, and on a client every request at all once
-        /// it is no longer connected. Call once per frame.
+        /// it is no longer connected. <see cref="Pump"/> runs this with the rest of a frame's work;
+        /// a composition calls that once per frame.
         /// </summary>
         public void PumpTimeouts()
         {
@@ -743,6 +1096,7 @@ namespace CoreAI.Net.Mirror
                 NetworkServer.ReplaceHandler<CoreAiRemoteEventMessage>(OnServerEvent);
                 NetworkServer.ReplaceHandler<CoreAiRemoteRequestMessage>(OnServerRequest);
                 NetworkServer.ReplaceHandler<CoreAiRemoteResponseMessage>(OnServerResponse);
+                NetworkServer.ReplaceHandler<CoreAiClientReadyMessage>(OnServerClientReady);
                 return;
             }
 
@@ -751,6 +1105,10 @@ namespace CoreAI.Net.Mirror
             NetworkClient.ReplaceHandler<CoreAiRemoteRequestMessage>(OnClientRequest,
                 requireAuthentication: false);
             NetworkClient.ReplaceHandler<CoreAiRemoteResponseMessage>(OnClientResponse,
+                requireAuthentication: false);
+            NetworkClient.ReplaceHandler<CoreAiServerClockMessage>(OnClientClockAnchor,
+                requireAuthentication: false);
+            NetworkClient.ReplaceHandler<CoreAiDisconnectNoticeMessage>(OnClientDisconnectNotice,
                 requireAuthentication: false);
         }
 
@@ -769,14 +1127,19 @@ namespace CoreAI.Net.Mirror
 
             _disposed = true;
             UnregisterHandlers();
+            PerformOwedDrops(0d, all: true);
             _peersByConnection.Clear();
             _connectionsByActor.Clear();
             _actorOrder.Clear();
             _localEvents.Clear();
+            _joining.Clear();
+            _acknowledged.Clear();
             _admittedActorId = null;
+            _readyAcknowledgedOn = null;
             EventReceived = null;
             RequestReceived = null;
             PeerDisconnected = null;
+            DisconnectNoticeReceived = null;
             FailAllPending(DisposedReason, containCompletionFailures: true);
         }
 
@@ -787,12 +1150,15 @@ namespace CoreAI.Net.Mirror
                 NetworkServer.UnregisterHandler<CoreAiRemoteEventMessage>();
                 NetworkServer.UnregisterHandler<CoreAiRemoteRequestMessage>();
                 NetworkServer.UnregisterHandler<CoreAiRemoteResponseMessage>();
+                NetworkServer.UnregisterHandler<CoreAiClientReadyMessage>();
                 return;
             }
 
             NetworkClient.UnregisterHandler<CoreAiRemoteEventMessage>();
             NetworkClient.UnregisterHandler<CoreAiRemoteRequestMessage>();
             NetworkClient.UnregisterHandler<CoreAiRemoteResponseMessage>();
+            NetworkClient.UnregisterHandler<CoreAiServerClockMessage>();
+            NetworkClient.UnregisterHandler<CoreAiDisconnectNoticeMessage>();
         }
 
         private void OnServerEvent(NetworkConnectionToClient conn, CoreAiRemoteEventMessage wire)
@@ -984,6 +1350,128 @@ namespace CoreAI.Net.Mirror
         private void OnClientResponse(CoreAiRemoteResponseMessage wire)
         {
             CompleteResponse(fromConnection: false, connectionId: 0, wire);
+        }
+
+        private void OnServerClientReady(NetworkConnectionToClient conn, CoreAiClientReadyMessage _)
+        {
+            if (conn == null)
+            {
+                UnadmittedPacketsDropped++;
+                return;
+            }
+
+            ReceiveClientReady(conn.connectionId);
+        }
+
+        /// <summary>
+        /// The server's receive path for one readiness acknowledgement, keyed by connection: the
+        /// connection gets the server's clock, then everything held for it, in order.
+        /// </summary>
+        /// <remarks>
+        /// WHY the anchor goes first: a held remote may carry a server timestamp its handler compares
+        /// with <c>GetServerTimeNow</c>, and the client should know the server's clock by then. WHY a
+        /// repeat is ignored: the client repeats until it hears the anchor, and one connection is
+        /// acknowledged once. WHY an acknowledgement from a connection with no binding is dropped: a
+        /// connection admitted before the world attached is bound later, and its client repeats.
+        /// </remarks>
+        internal void ReceiveClientReady(int connectionId)
+        {
+            if (!_peersByConnection.ContainsKey(connectionId))
+            {
+                UnadmittedPacketsDropped++;
+                return;
+            }
+
+            if (!_acknowledged.Add(connectionId))
+            {
+                return;
+            }
+
+            ReadyAcknowledgements++;
+            if (_acknowledged.Count == 1)
+            {
+                _nextClockAnchorAt = _clockSeconds() + ClockAnchorIntervalSeconds;
+            }
+
+            NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient conn);
+            SendClockAnchor(conn, Channels.Reliable);
+            if (_joining.TryGetValue(connectionId, out JoiningConnection joining))
+            {
+                _joining.Remove(connectionId);
+                SendHeld(conn, joining);
+            }
+        }
+
+        /// <summary>
+        /// A client's receive path for one clock anchor: the server's Unix time now is estimated as
+        /// the anchor plus half the round trip, and carried forward on this machine's monotonic clock.
+        /// </summary>
+        /// <remarks>
+        /// WHY the first anchor of each connection replaces the estimate outright: it may be another
+        /// server's clock. WHY a later one within <see cref="ClockStepThresholdSeconds"/> is blended
+        /// in: each anchor is late by its own trip, a reliable one by its retransmits too, and a
+        /// quarter of the gap per anchor keeps one slow sample from jerking every derived clock. WHY
+        /// one farther off replaces it: that is the server's clock stepping, not network jitter.
+        /// WHY an anchor that is not a positive finite time is dropped: it would poison every clock
+        /// derived from it, and a throw here would make Mirror disconnect the client.
+        /// </remarks>
+        private void OnClientClockAnchor(CoreAiServerClockMessage wire)
+        {
+            double serverUnix = wire.ServerUnixSeconds;
+            if (double.IsNaN(serverUnix) || double.IsInfinity(serverUnix) || serverUnix <= 0d)
+            {
+                DropMalformed();
+                return;
+            }
+
+            double roundTrip = RoundTripSeconds?.Invoke() ?? NetworkTime.rtt;
+            if (double.IsNaN(roundTrip) || double.IsInfinity(roundTrip) || roundTrip < 0d)
+            {
+                roundTrip = 0d;
+            }
+
+            double sample = serverUnix + roundTrip * 0.5d - _wallClock.ProcessTimeSeconds;
+            NetworkConnectionToServer connection = NetworkClient.connection;
+            bool replace = !_clockAnchored
+                           || !ReferenceEquals(_anchoredOn, connection)
+                           || Math.Abs(sample - _serverUnixAtMonotonicZero) > ClockStepThresholdSeconds;
+            _serverUnixAtMonotonicZero = replace
+                ? sample
+                : _serverUnixAtMonotonicZero + (sample - _serverUnixAtMonotonicZero) * ClockSmoothing;
+            _clockAnchored = true;
+            _anchoredOn = connection;
+            ClockAnchorsReceived++;
+        }
+
+        /// <summary>
+        /// A client's receive path for the server's reason for closing this connection: kept,
+        /// logged, and raised to the host; the drop itself is the server's.
+        /// </summary>
+        /// <remarks>
+        /// WHY the client does not disconnect itself here: the server drops the connection a frame
+        /// later anyway, and a client that left first would turn the server's kick into a transport
+        /// loss in the server's own log. WHY a kind this version does not know is still kept: the
+        /// text is what the player is shown, and a newer server may have a newer reason.
+        /// </remarks>
+        private void OnClientDisconnectNotice(CoreAiDisconnectNoticeMessage wire)
+        {
+            wire.Message ??= "";
+            LastDisconnectNotice = wire;
+            string kind = Enum.IsDefined(typeof(CoreAiDisconnectNoticeKind), wire.Kind)
+                ? ((CoreAiDisconnectNoticeKind)wire.Kind).ToString()
+                : "reason " + wire.Kind;
+            _log("[CoreAI.Mirror] the server is closing this connection (" + kind + "): "
+                 + wire.Message);
+            try
+            {
+                DisconnectNoticeReceived?.Invoke(wire);
+            }
+            catch (Exception exception)
+            {
+                // WHY contained: this runs inside Mirror's handler, where a throw disconnects the
+                // client before the server's drop and loses the ordering the notice exists for.
+                _log("[CoreAI.Mirror] a disconnect notice listener threw: " + exception.Message);
+            }
         }
 
         private void CompleteResponse(bool fromConnection, int connectionId,
@@ -1246,17 +1734,369 @@ namespace CoreAI.Net.Mirror
             }
         }
 
+        /// <summary>
+        /// Hands one server event to one connection's transport, or holds or drops it while that
+        /// connection is joining.
+        /// </summary>
+        /// <remarks>
+        /// WHY an unreliable one is dropped rather than held: it is allowed to be lost, and a 20-60 Hz
+        /// update replayed after the join would be stale state delivered as news.
+        /// </remarks>
         private void SendEventOnWire(int connectionId, CoreAiRemoteEventMessage wire, byte[] payload,
             int channel)
         {
-            if (NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient conn))
+            if (!NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient conn))
             {
-                conn.Send(wire, channel);
-                Count(payload);
+                UnroutablePacketsDropped++;
                 return;
             }
 
-            UnroutablePacketsDropped++;
+            if (_joining.TryGetValue(connectionId, out JoiningConnection joining))
+            {
+                if (channel == Channels.Unreliable)
+                {
+                    NotReadyPacketsDropped++;
+                    return;
+                }
+
+                Hold(connectionId, joining, new HeldSend { Event = wire, Payload = payload });
+                return;
+            }
+
+            conn.Send(wire, channel);
+            Count(payload);
+        }
+
+        /// <summary>
+        /// Holds one reliable envelope for a joining connection, within its bounds; past them the
+        /// envelope is dropped and counted, and a held RemoteFunction call fails now.
+        /// </summary>
+        /// <remarks>
+        /// WHY bounded: the client may never acknowledge, and a server firing at it every frame
+        /// would otherwise grow this queue until the deadline. WHY a call over the bound fails at
+        /// once: its caller would otherwise wait the whole timeout for a request that never left.
+        /// </remarks>
+        private void Hold(int connectionId, JoiningConnection joining, HeldSend held)
+        {
+            int bytes = held.Payload?.Length ?? 0;
+            if (joining.Held.Count >= MaxHeldMessagesPerJoiningConnection
+                || joining.HeldBytes + bytes > MaxHeldBytesPerJoiningConnection)
+            {
+                NotReadyPacketsDropped++;
+                if (!joining.OverflowLogged)
+                {
+                    joining.OverflowLogged = true;
+                    _log("[CoreAI.Mirror] connection " + connectionId + " has not acknowledged "
+                         + "readiness and already holds " + joining.Held.Count + " remotes ("
+                         + joining.HeldBytes + " bytes); this remote and any that follow past the "
+                         + "bound are dropped and counted");
+                }
+
+                if (held.IsRequest)
+                {
+                    FailPending(held.Request.CorrelationId,
+                        "the client had not finished joining and too many remotes were already "
+                        + "waiting for it");
+                }
+
+                return;
+            }
+
+            joining.Held.Add(held);
+            joining.HeldBytes += bytes;
+            PacketsHeldUntilReady++;
+        }
+
+        /// <summary>Sends what was held for a connection that just acknowledged readiness, in order.</summary>
+        private void SendHeld(NetworkConnectionToClient conn, JoiningConnection joining)
+        {
+            for (int index = 0; index < joining.Held.Count; index++)
+            {
+                HeldSend held = joining.Held[index];
+                if (held.IsRequest && !_pending.ContainsKey(held.Request.CorrelationId))
+                {
+                    // WHY skipped: the call already failed or timed out, so nothing waits for its answer.
+                    NotReadyPacketsDropped++;
+                    continue;
+                }
+
+                if (conn == null)
+                {
+                    NotReadyPacketsDropped++;
+                    continue;
+                }
+
+                if (held.IsRequest)
+                {
+                    conn.Send(held.Request);
+                }
+                else
+                {
+                    conn.Send(held.Event, Channels.Reliable);
+                }
+
+                Count(held.Payload);
+            }
+
+            joining.Held.Clear();
+            joining.HeldBytes = 0;
+        }
+
+        /// <summary>
+        /// Hands one clock anchor to a connection: the wall clock's Unix time now.
+        /// </summary>
+        private void SendClockAnchor(NetworkConnectionToClient conn, int channel)
+        {
+            if (conn == null)
+            {
+                return;
+            }
+
+            conn.Send(new CoreAiServerClockMessage
+            {
+                ServerUnixSeconds = _wallClock.UnixTimeSecondsFractional
+            }, channel);
+            ClockAnchorsSent++;
+        }
+
+        /// <summary>
+        /// Sends every acknowledged connection an anchor once the interval has passed.
+        /// </summary>
+        /// <remarks>
+        /// WHY the periodic ones are unreliable: a lost one is replaced by the next, and a reliable
+        /// one that waited for a retransmit would arrive stale — late by exactly the error it exists
+        /// to correct. The first anchor, the one that makes the client's clock valid, is reliable.
+        /// </remarks>
+        private void SendDueClockAnchors(double now)
+        {
+            if (_acknowledged.Count == 0 || now < _nextClockAnchorAt)
+            {
+                return;
+            }
+
+            _nextClockAnchorAt = now + ClockAnchorIntervalSeconds;
+            foreach (int connectionId in _acknowledged)
+            {
+                if (NetworkServer.connections.TryGetValue(connectionId,
+                        out NetworkConnectionToClient conn))
+                {
+                    SendClockAnchor(conn, Channels.Unreliable);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Drops every joining connection whose client has not acknowledged readiness within
+        /// <see cref="ReadinessTimeoutSeconds"/>, tearing its session down as
+        /// <see cref="RbxNetworkDisconnectReason.ServerClosed"/>.
+        /// </summary>
+        /// <remarks>
+        /// WHY no notice: a client that never acknowledged has shown no handler for one — an older
+        /// client would disconnect itself on the unknown message, which is noise, not a reason.
+        /// WHY the drop is made at once: there is nothing queued for it that must leave first.
+        /// </remarks>
+        private void DropConnectionsPastTheReadinessDeadline(double now)
+        {
+            if (_joining.Count == 0)
+            {
+                return;
+            }
+
+            List<int> expired = null;
+            foreach (KeyValuePair<int, JoiningConnection> pair in _joining)
+            {
+                if (now - pair.Value.BoundAt >= ReadinessTimeoutSeconds)
+                {
+                    expired ??= new List<int>();
+                    expired.Add(pair.Key);
+                }
+            }
+
+            for (int index = 0; expired != null && index < expired.Count; index++)
+            {
+                int connectionId = expired[index];
+                if (!_joining.ContainsKey(connectionId)
+                    || !_peersByConnection.TryGetValue(connectionId, out RbxNetworkPeer peer))
+                {
+                    continue;
+                }
+
+                ReadinessTimeouts++;
+                _log("[CoreAI.Mirror] connection " + connectionId + " (actor '" + peer.ActorId
+                     + "') was admitted but did not acknowledge readiness within "
+                     + ReadinessTimeoutSeconds.ToString("0") + " seconds: a client older than the "
+                     + "readiness handshake, or one whose CoreAI Mirror bridge was never built; it "
+                     + "is dropped");
+                NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient conn);
+                try
+                {
+                    NotifyDisconnected(connectionId, RbxNetworkDisconnectReason.ServerClosed);
+                }
+                catch (Exception exception)
+                {
+                    // WHY contained: this runs from the frame pump, and a world teardown that threw
+                    // must not stop the other expired connections from being dropped.
+                    _log("[CoreAI.Mirror] the teardown of connection " + connectionId
+                         + " threw while it was dropped for readiness: " + exception.Message);
+                }
+                finally
+                {
+                    ReleaseConnection(connectionId, PeerDisconnectedReason);
+                    if (conn != null
+                        && NetworkServer.connections.TryGetValue(connectionId,
+                            out NetworkConnectionToClient live)
+                        && ReferenceEquals(live, conn))
+                    {
+                        conn.Disconnect();
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Hands a connection's client the reason it is about to be dropped. Nothing for a
+        /// connection Mirror no longer holds.
+        /// </summary>
+        private void SendNotice(NetworkConnectionToClient conn, CoreAiDisconnectNoticeKind kind,
+            string message)
+        {
+            if (conn == null)
+            {
+                return;
+            }
+
+            conn.Send(new CoreAiDisconnectNoticeMessage
+            {
+                Kind = (byte)kind,
+                Message = Truncate(message, MaxNoticeMessageBytes)
+            });
+            DisconnectNoticesSent++;
+        }
+
+        /// <summary>
+        /// Records a transport drop a notice must precede: performed by the first
+        /// <see cref="Pump"/> whose clock reads later than now.
+        /// </summary>
+        /// <remarks>
+        /// WHY "later than now" and not "the next pump": the default clock is Mirror's frame time,
+        /// fixed for a whole frame, so a later reading is a later frame — after the late update that
+        /// flushed the notice — wherever in the frame the kick came from, even before this frame's
+        /// own pump.
+        /// </remarks>
+        private void OweDrop(NetworkConnectionToClient conn)
+        {
+            if (conn == null)
+            {
+                return;
+            }
+
+            for (int index = 0; index < _owedDrops.Count; index++)
+            {
+                if (ReferenceEquals(_owedDrops[index].Connection, conn))
+                {
+                    return;
+                }
+            }
+
+            _owedDrops.Add(new OwedDrop(conn, _clockSeconds()));
+        }
+
+        /// <summary>
+        /// Drops each owed connection that is due — or every one, with <paramref name="all"/> — and
+        /// only while Mirror still holds that same connection under its id.
+        /// </summary>
+        /// <remarks>
+        /// WHY the reference is compared and not only the id: kcp2k reuses connection ids, so a
+        /// connection that left on its own meanwhile may have a stranger on its id by now. WHY a
+        /// snapshot of the due ones: on kcp2k the drop is reported inside the call, and what that
+        /// report runs may owe another drop.
+        /// </remarks>
+        private void PerformOwedDrops(double now, bool all)
+        {
+            if (_owedDrops.Count == 0)
+            {
+                return;
+            }
+
+            List<NetworkConnectionToClient> due = null;
+            for (int index = _owedDrops.Count - 1; index >= 0; index--)
+            {
+                OwedDrop owed = _owedDrops[index];
+                if (all || now > owed.RequestedAt)
+                {
+                    due ??= new List<NetworkConnectionToClient>();
+                    due.Add(owed.Connection);
+                    _owedDrops.RemoveAt(index);
+                }
+            }
+
+            for (int index = due == null ? -1 : due.Count - 1; index >= 0; index--)
+            {
+                NetworkConnectionToClient conn = due[index];
+                if (NetworkServer.connections.TryGetValue(conn.connectionId,
+                        out NetworkConnectionToClient live)
+                    && ReferenceEquals(live, conn))
+                {
+                    conn.Disconnect();
+                }
+            }
+        }
+
+        /// <summary>
+        /// A client's own player was kicked: the client disconnects, and forgets its admission.
+        /// </summary>
+        /// <remarks>
+        /// WHY only the admitted actor: that is the one player this client is; a client that could
+        /// end anyone else's connection would be a server.
+        /// </remarks>
+        private void DisconnectSelf(string actorId)
+        {
+            if (string.IsNullOrWhiteSpace(actorId) || _admittedActorId == null
+                || !string.Equals(actorId.Trim(), _admittedActorId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            SelfKicks++;
+            NetworkClient.Disconnect();
+            ForgetAdmittedActor();
+        }
+
+        /// <summary>
+        /// Tells the server this client can hear it, once per connection and again every
+        /// <see cref="ReadyAcknowledgementRetrySeconds"/> until the server's first clock anchor on
+        /// that connection answers.
+        /// </summary>
+        private void AcknowledgeReadinessIfDue()
+        {
+            if (_isServer || _disposed || _admittedActorId == null || !NetworkClient.isConnected)
+            {
+                return;
+            }
+
+            NetworkConnectionToServer connection = NetworkClient.connection;
+            if (connection == null || ReferenceEquals(_anchoredOn, connection))
+            {
+                return;
+            }
+
+            double now = _clockSeconds();
+            if (ReferenceEquals(_readyAcknowledgedOn, connection) && now < _nextReadyAcknowledgementAt)
+            {
+                return;
+            }
+
+            NetworkClient.Send(new CoreAiClientReadyMessage());
+            _readyAcknowledgedOn = connection;
+            _nextReadyAcknowledgementAt = now + ReadyAcknowledgementRetrySeconds;
+        }
+
+        private void FailPending(uint correlationId, string reason)
+        {
+            if (_pending.Remove(correlationId, out PendingRequest request))
+            {
+                request.Complete?.Invoke(RbxNetworkResponse.Failure(reason));
+            }
         }
 
         /// <summary>
@@ -1317,19 +2157,23 @@ namespace CoreAI.Net.Mirror
 
         /// <summary>
         /// Closes the older connection of an actor bound again on a newer one: released here, its
-        /// open requests failed with the reason, and dropped at the transport.
+        /// open requests failed with the reason, its client told why, and dropped at the transport
+        /// on a later frame's <see cref="Pump"/>.
         /// </summary>
         private void Supersede(int older, int newer, string actorId)
         {
             SupersededConnections++;
             _log("[CoreAI.Mirror] actor '" + actorId + "' was admitted again on connection " + newer
                  + "; its older connection " + older + " is closed: " + SupersededReason);
-            ReleaseBinding(older, SupersededReason);
-            if (_isServer
-                && NetworkServer.connections.TryGetValue(older, out NetworkConnectionToClient stale))
+            NetworkConnectionToClient stale = null;
+            if (_isServer)
             {
-                stale.Disconnect();
+                NetworkServer.connections.TryGetValue(older, out stale);
             }
+
+            SendNotice(stale, CoreAiDisconnectNoticeKind.Superseded, SupersededNoticeMessage);
+            ReleaseBinding(older, SupersededReason);
+            OweDrop(stale);
         }
 
         /// <summary>
@@ -1353,7 +2197,8 @@ namespace CoreAI.Net.Mirror
 
         /// <summary>
         /// Unbinds one connection and nothing else: the actor keeps its registration, and another
-        /// connection the actor holds is untouched.
+        /// connection the actor holds is untouched. What was held for the connection while it was
+        /// joining is discarded and counted.
         /// </summary>
         private void ReleaseBinding(int connectionId, string reason)
         {
@@ -1367,6 +2212,13 @@ namespace CoreAI.Net.Mirror
                 }
             }
 
+            if (_joining.TryGetValue(connectionId, out JoiningConnection joining))
+            {
+                _joining.Remove(connectionId);
+                NotReadyPacketsDropped += joining.Held.Count;
+            }
+
+            _acknowledged.Remove(connectionId);
             _authenticator?.Forget(connectionId);
             FailPendingFor(connectionId, reason);
         }
@@ -1556,8 +2408,8 @@ namespace CoreAI.Net.Mirror
             }
 
             _malformedDropLogged = true;
-            _log("[CoreAI.Mirror] a remote envelope with an invalid remote id, reliability or "
-                 + "direction arrived; it and any that follow are dropped and counted");
+            _log("[CoreAI.Mirror] an envelope with an invalid remote id, reliability, direction "
+                 + "or clock anchor arrived; it and any that follow are dropped and counted");
         }
 
         private void Count(byte[] payload)

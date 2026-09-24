@@ -148,6 +148,65 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
         }
 
         [Test]
+        public void AnUnreliablePayloadOverRobloxs1000Bytes_IsRefusedInSoloAsOnline_AndCostsNoBudget()
+        {
+            // WHY a budget of one: the refusal must come before the rate budget is charged, or the
+            // one fire a second the budget allows would be spent on a packet that never left.
+            INetworkBridge bridge = CreateBridge(maxClientRequestsPerSecond: 1);
+            List<RbxNetworkEventMessage> received = new();
+            bridge.EventReceived += received.Add;
+
+            RbxError error = Assert.Throws<RbxError>(() => bridge.SendEvent(
+                Event(new byte[1001], RbxNetworkReliability.UnreliableUnordered)));
+
+            Assert.AreEqual(RbxErrorCode.PayloadTooLarge, error.Code);
+            StringAssert.Contains("network payload of 1001 bytes exceeds the transport limit of "
+                                  + "1000 bytes for an UnreliableRemoteEvent", error.RawMessage);
+            Assert.IsEmpty(received, "a refused fire reaches nobody");
+
+            Assert.DoesNotThrow(() => bridge.SendEvent(
+                    Event(new byte[1000], RbxNetworkReliability.UnreliableUnordered)),
+                "1000 bytes is Roblox's ceiling itself, and the refusal above spent none of the budget");
+            Assert.AreEqual(1, received.Count);
+            Assert.AreEqual(1000, received[0].Payload.Length);
+        }
+
+        [Test]
+        public void Negative_OnlyTheUnreliableClassIsHeldTo1000Bytes_AndALossyLoopbackStillRefusesRatherThanDrops()
+        {
+            INetworkBridge bridge = CreateBridge();
+            List<RbxNetworkEventMessage> received = new();
+            bridge.EventReceived += received.Add;
+
+            bridge.SendEvent(Event(new byte[2000], RbxNetworkReliability.ReliableOrdered));
+
+            Assert.AreEqual(1, received.Count, "a reliable remote carries up to the codec's 64 KiB");
+            Assert.AreEqual(2000, received[0].Payload.Length);
+
+            INetworkBridge dropping = CreateBridge(
+                unreliableBehavior: RbxNullNetworkUnreliableBehavior.DropAll);
+            RbxError error = Assert.Throws<RbxError>(() => dropping.SendEvent(
+                    Event(new byte[1001], RbxNetworkReliability.UnreliableUnordered)),
+                "an oversize fire is an error even where unreliable delivery drops everything: "
+                + "online it is refused before any loss could happen");
+            Assert.AreEqual(RbxErrorCode.PayloadTooLarge, error.Code);
+        }
+
+        [Test]
+        public void MaxPayloadBytesFor_IsRobloxs1000ForUnreliable_AndTheCodecCeilingOtherwise()
+        {
+            NullNetworkBridge bridge = new();
+
+            Assert.AreEqual(1000,
+                bridge.MaxPayloadBytesFor(RbxNetworkReliability.UnreliableUnordered));
+            Assert.AreEqual(NullNetworkBridge.UnreliablePayloadCeilingBytes,
+                bridge.MaxPayloadBytesFor(RbxNetworkReliability.UnreliableUnordered));
+            Assert.AreEqual(65536, bridge.MaxPayloadBytesFor(RbxNetworkReliability.ReliableOrdered));
+            Assert.AreEqual(bridge.MaxPayloadBytes,
+                bridge.MaxPayloadBytesFor(RbxNetworkReliability.ReliableOrdered));
+        }
+
+        [Test]
         public void DefaultRateAdmission_IsFiveHundredRequestsPerSecond()
         {
             NullNetworkBridge bridge = new();

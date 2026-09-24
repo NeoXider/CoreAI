@@ -392,6 +392,243 @@ namespace CoreAI.Net.Mirror.Tests
             }
         }
 
+        [Test]
+        public void ServerClockOffset_IsZeroUntilTheFirstAnchor_ThenTheServersTime_WhateverEitherUptimeOrTheClientsWallClock()
+        {
+            // WHY these numbers: the audit's probe — a server up a day, a client up five minutes
+            // whose wall clock is an hour fast. Mirror's own offset compared the two uptimes and
+            // read the server's time almost 23 hours off.
+            const double serverUnix = 1790000000d;
+            FakeWallClock clientWall = new(serverUnix + 3600d, 300d);
+            RebuildClient(clientWall);
+            _client.RoundTripSeconds = () => 0.1d;
+
+            Assert.AreEqual(0d, _client.ServerClockOffsetSeconds, "nothing is known before an anchor");
+            Assert.IsFalse(_client.IsServerClockSynchronized,
+                "and the zero says so: it is not a claim that the clocks agree");
+
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix });
+
+            Assert.IsTrue(_client.IsServerClockSynchronized);
+            Assert.AreEqual(1, _client.ClockAnchorsReceived);
+            Assert.AreEqual(serverUnix + 0.05d, ServerNow(clientWall), 1e-4,
+                "the server's time is the anchor plus half the round trip");
+            Assert.Less(Math.Abs(ServerNow(clientWall) - serverUnix), 0.2d);
+
+            clientWall.Advance(10d);
+
+            Assert.AreEqual(serverUnix + 10.05d, ServerNow(clientWall), 1e-4,
+                "between anchors the estimate runs on the client's monotonic clock");
+
+            clientWall.UnixTimeSecondsFractional -= 3600d;
+
+            Assert.AreEqual(serverUnix + 10.05d, ServerNow(clientWall), 1e-4,
+                "a client whose wall clock is corrected mid-session still reads the server's time");
+        }
+
+        [Test]
+        public void AClockStepOverTheThreshold_IsTakenAtOnce_ASmallCorrectionIsBlended_AndAnotherConnectionsFirstAnchorReplaces()
+        {
+            const double serverUnix = 1790000000d;
+            FakeWallClock clientWall = new(serverUnix, 300d);
+            RebuildClient(clientWall);
+            _client.RoundTripSeconds = () => 0d;
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix });
+
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix + 0.4d });
+
+            Assert.AreEqual(serverUnix + 0.1d, ServerNow(clientWall), 1e-4,
+                "a sample within the threshold moves the estimate a quarter of the way: one late "
+                + "anchor must not jerk every clock derived from it");
+
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix + 5d });
+
+            Assert.AreEqual(serverUnix + 5d, ServerNow(clientWall), 1e-4,
+                "past the threshold the server's clock stepped, and the step is taken whole");
+
+            OfflineMirror.StopClient();
+            OfflineMirror.StartClient();
+            _client.AttachHandlers();
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix + 5.3d });
+
+            Assert.AreEqual(serverUnix + 5.3d, ServerNow(clientWall), 1e-4,
+                "a new connection may be another server: its first anchor replaces the estimate");
+            Assert.AreEqual(4, _client.ClockAnchorsReceived);
+        }
+
+        [Test]
+        public void Negative_AnAnchorThatIsNotAPositiveFiniteTime_IsDroppedAndCounted_AndTheClockKept()
+        {
+            const double serverUnix = 1790000000d;
+            FakeWallClock clientWall = new(serverUnix, 300d);
+            RebuildClient(clientWall);
+            _client.RoundTripSeconds = () => 0d;
+
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = double.NaN });
+            Assert.IsFalse(_client.IsServerClockSynchronized, "a NaN anchor makes no clock valid");
+
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix + 60d });
+            foreach (double bad in new[] { double.NaN, double.PositiveInfinity, 0d, -5d })
+            {
+                OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = bad });
+            }
+
+            Assert.AreEqual(5, _client.MalformedPacketsDropped);
+            Assert.AreEqual(1, _client.ClockAnchorsReceived);
+            Assert.AreEqual(serverUnix + 60d, ServerNow(clientWall), 1e-4,
+                "the estimate the one good anchor gave is untouched");
+            Assert.AreEqual(1, _said.Count, "one line for the operator, not one per packet");
+        }
+
+        [Test]
+        public void BindingTheAdmittedActor_AcknowledgesReadiness_AndAgainEachSecondUntilTheServerAnswers_ThenNever()
+        {
+            double now = 0d;
+            _client.Dispose();
+            _client = new MirrorNetworkBridge(isServer: false, clockSeconds: () => now, log: _said.Add);
+            Transport.active.OnClientConnected?.Invoke();
+            using SentMessages<CoreAiClientReadyMessage> acks = new();
+
+            _client.BindAdmittedActor(Admitted);
+            _client.Pump();
+
+            Assert.AreEqual(1, acks.Messages.Count,
+                "the binding is the first moment this client can route a server remote");
+
+            now = MirrorNetworkBridge.ReadyAcknowledgementRetrySeconds - 0.01d;
+            _client.Pump();
+            Assert.AreEqual(1, acks.Messages.Count, "not before the retry interval");
+
+            now = MirrorNetworkBridge.ReadyAcknowledgementRetrySeconds;
+            _client.Pump();
+            Assert.AreEqual(2, acks.Messages.Count,
+                "a server that admitted this connection before its world attached bound it later, "
+                + "and hears the repeat");
+
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = 1790000000d });
+            now = 100d;
+            _client.Pump();
+
+            Assert.AreEqual(2, acks.Messages.Count, "the server's anchor is the answer; nothing repeats after it");
+            CollectionAssert.IsEmpty(_said);
+        }
+
+        [Test]
+        public void Negative_ABindingWhileNotConnected_AcknowledgesNothing_UntilAPumpFindsItConnected()
+        {
+            using SentMessages<CoreAiClientReadyMessage> acks = new();
+            Assert.IsFalse(NetworkClient.isConnected);
+
+            _client.BindAdmittedActor(Admitted);
+            _client.Pump();
+
+            Assert.IsEmpty(acks.Messages, "Mirror cannot send before it is connected, and must not be asked to");
+
+            Transport.active.OnClientConnected?.Invoke();
+            _client.Pump();
+
+            Assert.AreEqual(1, acks.Messages.Count);
+        }
+
+        [Test]
+        public void ASelfKick_DisconnectsTheClient_FailsItsOpenRequests_AndForgetsTheAdmission()
+        {
+            Transport.active.OnClientConnected?.Invoke();
+            _client.BindAdmittedActor(Admitted);
+            List<RbxNetworkResponse> completed = new();
+            _client.SendRequest(ClientRequest(), completed.Add);
+
+            _client.DisconnectActor(Admitted);
+
+            Assert.IsFalse(NetworkClient.isConnected,
+                "a LocalScript's Player:Kick() on its own player disconnects the client, as on Roblox");
+            Assert.IsFalse(NetworkClient.active);
+            Assert.AreEqual(1, _client.SelfKicks);
+            Assert.IsNull(_client.AdmittedActorId);
+            Assert.AreEqual(1, completed.Count, "the call that left on the kicked connection fails now");
+            Assert.IsFalse(completed[0].Succeeded);
+
+            _client.DisconnectActor(Admitted);
+
+            Assert.AreEqual(1, _client.SelfKicks, "a second kick finds nobody");
+        }
+
+        [Test]
+        public void Negative_AClientKickingAnyoneButItsOwnPlayer_DisconnectsNothing()
+        {
+            Transport.active.OnClientConnected?.Invoke();
+            _client.BindAdmittedActor(Admitted);
+
+            _client.DisconnectActor("someone-else");
+            _client.DisconnectActor("");
+            _client.DisconnectActor(null);
+            _client.DisconnectActor("someone-else", "a client has no say over this");
+
+            Assert.IsTrue(NetworkClient.isConnected, "a client has no authority over anyone else's connection");
+            Assert.AreEqual(0, _client.SelfKicks);
+            Assert.AreEqual(Admitted, _client.AdmittedActorId);
+        }
+
+        [Test]
+        public void ADisconnectNotice_IsKeptSaidAndRaised_OutlivesTheDisconnect_AndTheNextAdmissionClearsIt()
+        {
+            _client.BindAdmittedActor(Admitted);
+            List<CoreAiDisconnectNoticeMessage> raised = new();
+            _client.DisconnectNoticeReceived += raised.Add;
+
+            OfflineMirror.DeliverToClient(new CoreAiDisconnectNoticeMessage
+            {
+                Kind = (byte)CoreAiDisconnectNoticeKind.Kicked,
+                Message = "banned for griefing"
+            });
+
+            Assert.IsTrue(_client.LastDisconnectNotice.HasValue);
+            Assert.AreEqual((byte)CoreAiDisconnectNoticeKind.Kicked, _client.LastDisconnectNotice.Value.Kind);
+            Assert.AreEqual("banned for griefing", _client.LastDisconnectNotice.Value.Message);
+            Assert.AreEqual(1, raised.Count);
+            Assert.AreEqual(1, _said.Count);
+            StringAssert.Contains("Kicked", _said[0]);
+            StringAssert.Contains("banned for griefing", _said[0]);
+
+            _client.ForgetAdmittedActor();
+            Assert.IsTrue(_client.LastDisconnectNotice.HasValue, "the host reads it after the drop");
+
+            _client.BindAdmittedActor(Admitted);
+            Assert.IsFalse(_client.LastDisconnectNotice.HasValue, "a new admission starts with no reason");
+        }
+
+        [Test]
+        public void Negative_ANoticeListenerThatThrows_DoesNotEscapeMirrorsHandler_AndAnUnknownKindIsStillKept()
+        {
+            _client.DisconnectNoticeReceived += _ => throw new InvalidOperationException("the host's dialog blew up");
+
+            Assert.DoesNotThrow(() => OfflineMirror.DeliverToClient(new CoreAiDisconnectNoticeMessage
+            {
+                Kind = 9,
+                Message = "a reason from a newer server"
+            }));
+
+            Assert.AreEqual((byte)9, _client.LastDisconnectNotice.Value.Kind,
+                "the text is what the player is shown, whatever the kind");
+            Assert.AreEqual(2, _said.Count);
+            StringAssert.Contains("reason 9", _said[0]);
+            StringAssert.Contains("the host's dialog blew up", _said[1]);
+        }
+
+        /// <summary>Replaces the fixture's client bridge with one that reads the given wall clock.</summary>
+        private void RebuildClient(FakeWallClock wallClock)
+        {
+            _client.Dispose();
+            _client = new MirrorNetworkBridge(isServer: false, clockSeconds: () => 0d, log: _said.Add,
+                wallClock: wallClock);
+        }
+
+        /// <summary>What <c>GetServerTimeNow</c> computes on this client: its wall clock plus the offset.</summary>
+        private double ServerNow(FakeWallClock clientWall)
+        {
+            return clientWall.UnixTimeSecondsFractional + _client.ServerClockOffsetSeconds;
+        }
+
         private static CoreAiRemoteRequestMessage Request(ulong remoteId)
         {
             return new CoreAiRemoteRequestMessage

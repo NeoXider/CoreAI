@@ -2,16 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
-using System.Text.RegularExpressions;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using Mirror;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.TestTools;
 
 namespace CoreAI.Net.Mirror.Tests
 {
@@ -40,6 +39,7 @@ namespace CoreAI.Net.Mirror.Tests
     {
         private const string Credential = "open-sesame";
         private const string WorldId = "world-a";
+        private const double ServerUnix = 1790000000d;
         private const BindingFlags Private = BindingFlags.NonPublic | BindingFlags.Instance;
 
         /// <summary>
@@ -65,6 +65,9 @@ namespace CoreAI.Net.Mirror.Tests
         private List<string> _serverActors;
         private List<CoreAiAdmissionResponseMessage> _responsesHandedToMirror;
         private int _clientAccepts;
+        private double _now;
+        private FakeWallClock _serverWall;
+        private FakeWallClock _clientWall;
 
         [SetUp]
         public void CreateBothSides()
@@ -74,6 +77,11 @@ namespace CoreAI.Net.Mirror.Tests
             // one instance, so an accept a sibling test heard would be carried into the refused
             // client's "never" and counted against it.
             _clientAccepts = 0;
+            _now = 0d;
+            // WHY these clocks: a server up a day and a client up five minutes whose wall clock is an
+            // hour fast — the case in which Mirror's own offset read the server's time a day off.
+            _serverWall = new FakeWallClock(ServerUnix, 86400d);
+            _clientWall = new FakeWallClock(ServerUnix + 3600d, 300d);
             NetworkDiagnostics.OutMessageEvent += RecordAdmissionResponse;
             _mirror = new OfflineMirror(loopback: true);
             _go = new GameObject("CoreAI_ClientRemotesEndToEnd");
@@ -82,11 +90,14 @@ namespace CoreAI.Net.Mirror.Tests
             _provider = _go.AddComponent<CoreAiMirrorNetworkBridgeProvider>();
             _provider.Role = CoreAiMirrorRole.Client;
             _provider.ClockSeconds = () => 0d;
+            _provider.WallClock = _clientWall;
             SetField(_provider, "authenticator", _authenticator);
             _client = (MirrorNetworkBridge)_provider.Bridge;
+            _client.RoundTripSeconds = () => 0d;
 
             _serverActors = new List<string>();
-            _server = new MirrorNetworkBridge(isServer: true, _authenticator, clockSeconds: () => 0d);
+            _server = new MirrorNetworkBridge(isServer: true, _authenticator, clockSeconds: () => _now,
+                wallClock: _serverWall);
             _sessionHost = new CoreAiMirrorSessionHost(
                 _server,
                 context =>
@@ -200,20 +211,26 @@ namespace CoreAI.Net.Mirror.Tests
             // WHY the server fires from its accept listener: that is the same frame the admission
             // response is queued in, and a game broadcasting an UnreliableRemoteEvent at 20-60 Hz
             // does exactly that. kcp2k sends the unreliable datagram at once and the reliable
-            // response on its next tick, so the remote reaches the client first.
+            // response on its next tick, so the remote would reach the client first. The server
+            // now holds nothing unreliable for a client that has not acknowledged readiness: the
+            // early remote is dropped and counted where it is fired, and never overtakes anything.
+            // The client's own rule for a remote that does arrive early — from a server that puts
+            // one on the wire anyway — is MirrorClientRemoteRulesEditModeTests' to prove.
             RbxRemoteEvent remote = (RbxRemoteEvent)_registry.Create("UnreliableRemoteEvent");
             _authenticator.OnServerAuthenticated.AddListener(
                 _ => _server.SendEvent(FireAllClients(remote, "[\"early\"]")));
             _mirror.UnreliableOvertakesReliable = true;
-            LogAssert.Expect(LogType.Warning, new Regex("before this client's admission"));
 
             string admitted = Join(Credential);
 
             Assert.IsTrue(NetworkClient.isConnected,
                 "the early remote must not make Mirror disconnect the client it was sent to");
             Assert.AreEqual(1, _clientAccepts, "the admission response still arrived and was heard");
-            Assert.AreEqual(1, _client.UnadmittedPacketsDropped,
-                "the early remote is the bridge's to drop and count, before the actor is bound");
+            Assert.AreEqual(1, _server.NotReadyPacketsDropped,
+                "the early remote is the server's to drop and count, before the client said it is ready");
+            Assert.AreEqual(0, _client.UnadmittedPacketsDropped,
+                "so nothing reached the client before its admission was bound");
+            Assert.AreEqual(1, _server.ReadyAcknowledgements);
             Assert.AreEqual(admitted, _client.AdmittedActorId);
 
             List<object[]> received = new();
@@ -248,6 +265,135 @@ namespace CoreAI.Net.Mirror.Tests
             CollectionAssert.AreEqual(new[] { admitted }, _server.ActorIds);
         }
 
+        [Test]
+        public void AReliableRemoteFiredAtAdmission_IsHeldForTheJoiningClient_AndReachesItsOnClientEventOnceReady()
+        {
+            // WHY: the Roblox idiom — PlayerAdded:Connect(function(p) remote:FireClient(p, state) end)
+            // — fires in the very call that admits the connection. The readiness hold must deliver
+            // it, in order, the moment the client can route it; losing it would be the regression.
+            RbxRemoteEvent remote = (RbxRemoteEvent)_registry.Create("RemoteEvent");
+            List<object[]> received = new();
+            ListenOn(remote, "remote-1", received);
+            _authenticator.OnServerAuthenticated.AddListener(
+                _ => _server.SendEvent(FireClient(remote, _serverActors[0], "[\"welcome\"]")));
+
+            string admitted = Join(Credential);
+            _bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("remote-1", admitted, "the fixture's provider names its first actor so");
+            Assert.AreEqual(1, _server.PacketsHeldUntilReady, "held while the client had not said it is ready");
+            Assert.AreEqual(1, received.Count, "and delivered once it had");
+            CollectionAssert.AreEqual(new object[] { "welcome" }, received[0]);
+            Assert.AreEqual(0, _client.UnadmittedPacketsDropped);
+            CollectionAssert.IsEmpty(WorldLogBesidesTheHeadlessNotice());
+        }
+
+        [Test]
+        public void AJoiningClient_ReadsTheServersClock_FromTheAnchorItsReadinessBrings_WhateverItsOwnWallClock()
+        {
+            Assert.AreEqual(0d, _client.ServerClockOffsetSeconds, "nothing is known before the join");
+            _now = 86400d;
+
+            Join(Credential);
+
+            Assert.IsTrue(_client.IsServerClockSynchronized);
+            Assert.AreEqual(1, _server.ClockAnchorsSent);
+            Assert.AreEqual(1, _client.ClockAnchorsReceived);
+            double serverNow = _clientWall.UnixTimeSecondsFractional + _client.ServerClockOffsetSeconds;
+            Assert.Less(Math.Abs(serverNow - ServerUnix), 0.2d,
+                "the client reads the server's wall clock, not its own an hour fast, and neither "
+                + "machine's uptime enters it");
+
+            _serverWall.Advance(30d);
+            _clientWall.Advance(30d);
+
+            serverNow = _clientWall.UnixTimeSecondsFractional + _client.ServerClockOffsetSeconds;
+            Assert.Less(Math.Abs(serverNow - (ServerUnix + 30d)), 0.2d,
+                "and keeps reading it between anchors");
+        }
+
+        [Test]
+        public void AServerKick_ReachesTheKickedClientAsANotice_BeforeTheTransportDropsIt()
+        {
+            string admitted = Join(Credential);
+            List<bool> connectedWhenTold = new();
+            _client.DisconnectNoticeReceived += _ => connectedWhenTold.Add(NetworkClient.isConnected);
+
+            _server.DisconnectActor(admitted, "banned for griefing");
+            _mirror.PumpLoopback();
+
+            CollectionAssert.AreEqual(new[] { true }, connectedWhenTold,
+                "the reason arrives while the client is still connected");
+            Assert.IsTrue(_client.LastDisconnectNotice.HasValue);
+            Assert.AreEqual((byte)CoreAiDisconnectNoticeKind.Kicked, _client.LastDisconnectNotice.Value.Kind);
+            Assert.AreEqual("banned for griefing", _client.LastDisconnectNotice.Value.Message);
+            CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests, "the drop waits for a later frame");
+            Assert.AreEqual(0, _sessionHost.LiveSessionCount, "while the session is already over");
+
+            _now = 1d;
+            _server.Pump();
+            _mirror.PumpLoopback();
+
+            CollectionAssert.AreEqual(new[] { OfflineMirror.LoopbackConnectionId },
+                _mirror.ServerDisconnectRequests);
+            Assert.IsFalse(NetworkClient.isConnected, "and then the transport drops it");
+            Assert.AreEqual("banned for griefing", _client.LastDisconnectNotice.Value.Message,
+                "the reason outlives the disconnect, for the host to show");
+        }
+
+        [Test]
+        public void Negative_TheWitness_ADropInTheKicksOwnFrame_WouldLoseTheNotice()
+        {
+            // WHY: the owed drop exists because Mirror discards a dropped connection's unflushed
+            // messages; this proves the harness models that loss, so the test above is not passing
+            // on a harness that would deliver the notice anyway.
+            string admitted = Join(Credential);
+
+            _server.DisconnectActor(admitted, "banned");
+            _server.PerformOwedDropsNow();
+            _mirror.PumpLoopback();
+
+            Assert.AreEqual(1, _server.DisconnectNoticesSent, "the notice was handed to Mirror");
+            Assert.IsFalse(_client.LastDisconnectNotice.HasValue, "and never left: the drop discarded it");
+            Assert.IsFalse(NetworkClient.isConnected);
+        }
+
+        [Test]
+        public void AClientsOwnKick_DisconnectsTheClient_AndTheServerEndsTheSession()
+        {
+            string admitted = Join(Credential);
+            NetworkServer.OnDisconnectedEvent = conn =>
+                _server.NotifyDisconnected(conn.connectionId, RbxNetworkDisconnectReason.TransportLost);
+            RbxPlayer self = _bindings.ConnectActor(ActorFor(admitted));
+            RbxEnumItem creatorKick = _bindings.Enums.Get("PlayerExitReason")["CreatorKick"];
+
+            Assert.IsTrue(_bindings.Players.KickPlayer(self, creatorKick));
+
+            Assert.IsFalse(NetworkClient.isConnected,
+                "a LocalScript's Player:Kick() on its own player disconnects the client, as on Roblox");
+            Assert.AreEqual(1, _client.SelfKicks);
+            Assert.IsNull(_client.AdmittedActorId);
+
+            _mirror.PumpLoopback();
+
+            Assert.AreEqual(0, _sessionHost.LiveSessionCount, "the server hears the drop and ends the session");
+            CollectionAssert.IsEmpty(_server.ActorIds);
+        }
+
+        [Test]
+        public void Negative_AClientKickingALocalPlayerThatIsNotItsOwn_StaysConnected()
+        {
+            Join(Credential);
+            RbxPlayer other = _bindings.ConnectActor(ActorFor("local-guest"));
+            RbxEnumItem creatorKick = _bindings.Enums.Get("PlayerExitReason")["CreatorKick"];
+
+            Assert.IsTrue(_bindings.Players.KickPlayer(other, creatorKick));
+
+            Assert.IsTrue(NetworkClient.isConnected, "only this client's own player ends its connection");
+            Assert.AreEqual(0, _client.SelfKicks);
+            Assert.AreEqual(1, _sessionHost.LiveSessionCount);
+        }
+
         /// <summary>Runs the whole admission exchange and returns the actor the server admitted, or null.</summary>
         private string Join(string credential)
         {
@@ -276,10 +422,7 @@ namespace CoreAI.Net.Mirror.Tests
         private void ListenOn(RbxRemoteEvent remote, string actorId, List<object[]> received)
         {
             Assert.IsNotNull(actorId, "admission must have succeeded before a client can listen");
-            ActorContext actor = new LocalActorIdentityProvider(
-                    actorId, "session-" + actorId, WorldId, ActorGrantSet.None, AgentMemoryScope.Empty)
-                .GetActorContext(BuiltInAgentRoleIds.Programmer);
-            _bindings.ConnectActor(actor);
+            _bindings.ConnectActor(ActorFor(actorId));
             remote.AttachScheduler(_bindings.Scheduler);
             remote.GetOnClientEvent(actorId).Connect((Action<object[]>)received.Add);
         }
@@ -332,6 +475,14 @@ namespace CoreAI.Net.Mirror.Tests
         {
             return new RbxNetworkEventMessage(remote.Id, RbxNetworkDirection.ServerToAllClients,
                 remote.Reliability, null, null, Encoding.UTF8.GetBytes(envelope));
+        }
+
+        /// <summary>The trusted context a client composition's identity provider issues for an actor.</summary>
+        private static ActorContext ActorFor(string actorId)
+        {
+            return new LocalActorIdentityProvider(
+                    actorId, "session-" + actorId, WorldId, ActorGrantSet.None, AgentMemoryScope.Empty)
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
         }
 
         private static void SetField(object target, string name, object value)

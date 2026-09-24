@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using Mirror;
@@ -525,8 +526,26 @@ namespace CoreAI.Net.Mirror.Tests
                 List<RbxNetworkPeerDisconnected> disconnects = new();
                 _bridge.EventReceived += delivered.Add;
                 _bridge.PeerDisconnected += disconnects.Add;
+                using SentMessages<CoreAiDisconnectNoticeMessage> notices = new();
 
                 _bridge.BindConnection(2, new RbxNetworkPeer("actor-a", "session-2", "2"));
+                mirror.FlushServer();
+
+                CollectionAssert.AreEqual(new[] { 1 },
+                    mirror.ServerSendTargetsOf<CoreAiDisconnectNoticeMessage>(),
+                    "the older client is told why, and only it");
+                Assert.AreEqual(1, notices.Messages.Count);
+                Assert.AreEqual((byte)CoreAiDisconnectNoticeKind.Superseded, notices.Messages[0].Kind);
+                Assert.AreEqual(MirrorNetworkBridge.SupersededNoticeMessage, notices.Messages[0].Message);
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "the drop waits for a later frame: Mirror discards a dropped connection's "
+                    + "unflushed messages, and the notice is one");
+                _bridge.Pump();
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "a pump in the same frame is still that frame");
+
+                _now = 0.016d;
+                _bridge.Pump();
 
                 CollectionAssert.AreEqual(new[] { 1 }, mirror.ServerDisconnectRequests,
                     "the older connection of an actor bound again is dropped at the transport");
@@ -546,6 +565,135 @@ namespace CoreAI.Net.Mirror.Tests
                 Assert.AreEqual(8UL, delivered[0].RemoteId.Value);
                 Assert.AreEqual("actor-a", delivered[0].SenderActorId);
                 Assert.AreEqual(1, _bridge.UnadmittedPacketsDropped);
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void AKick_TellsTheClientWhyFirst_UnbindsAtOnce_AndTheTransportDropsItOnALaterFrame()
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(11);
+                _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+                _bridge.RegisterActor("actor-a");
+                List<RbxNetworkPeerDisconnected> disconnects = new();
+                _bridge.PeerDisconnected += disconnects.Add;
+                using SentMessages<CoreAiDisconnectNoticeMessage> notices = new();
+                string longMessage = "banned: " + new string('x', 3000);
+
+                _bridge.DisconnectActor("actor-a", longMessage);
+
+                Assert.AreEqual(1, notices.Messages.Count, "the kicked client is told why");
+                Assert.AreEqual((byte)CoreAiDisconnectNoticeKind.Kicked, notices.Messages[0].Kind);
+                StringAssert.StartsWith("banned: xxx", notices.Messages[0].Message);
+                Assert.LessOrEqual(Encoding.UTF8.GetByteCount(notices.Messages[0].Message),
+                    MirrorNetworkBridge.MaxNoticeMessageBytes, "a long kick message is cut, never refused");
+                Assert.AreEqual(1, _bridge.DisconnectNoticesSent);
+                Assert.AreEqual(1, disconnects.Count, "the session is torn down at once");
+                Assert.AreEqual(RbxNetworkDisconnectReason.ServerClosed, disconnects[0].Reason);
+                CollectionAssert.IsEmpty(_bridge.ActorIds);
+                _bridge.ReceiveServerEvent(11, ClientWire(7UL));
+                Assert.AreEqual(1, _bridge.UnadmittedPacketsDropped,
+                    "until the drop, the kicked connection is nobody");
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "the drop is owed, not made, in the kick's own frame");
+
+                _now = 0.016d;
+                _bridge.Pump();
+                _bridge.Pump();
+
+                CollectionAssert.AreEqual(new[] { 11 }, mirror.ServerDisconnectRequests,
+                    "the next frame drops it, once");
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void AKickWithoutAMessage_TellsTheClientTheDefault_AndAnActorWithNoConnectionIsNothing()
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(11);
+                _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+                using SentMessages<CoreAiDisconnectNoticeMessage> notices = new();
+
+                _bridge.DisconnectActor("actor-nobody");
+                _bridge.DisconnectActor("actor-nobody", "never sent");
+                Assert.IsEmpty(notices.Messages, "an actor with no connection here gets no notice");
+
+                ((INetworkBridge)_bridge).DisconnectActor("actor-a");
+
+                Assert.AreEqual(1, notices.Messages.Count);
+                Assert.AreEqual(MirrorNetworkBridge.DefaultKickMessage, notices.Messages[0].Message,
+                    "the interface's kick carries no message, so the client is told the default");
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void Negative_ABridgeThatStopsPumping_StillDropsWhatItOwes_WhenAskedOrDisposed()
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(11);
+                OfflineMirror.AdmitServerConnection(12);
+                _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+                _bridge.BindConnection(12, new RbxNetworkPeer("actor-b", "session-b", "conn-12"));
+
+                _bridge.DisconnectActor("actor-a");
+                _bridge.PerformOwedDropsNow();
+
+                CollectionAssert.AreEqual(new[] { 11 }, mirror.ServerDisconnectRequests,
+                    "asked to, the bridge drops what it owes without waiting for a frame");
+
+                _bridge.DisconnectActor("actor-b");
+                _bridge.Dispose();
+
+                CollectionAssert.AreEqual(new[] { 11, 12 }, mirror.ServerDisconnectRequests,
+                    "a disposed bridge must not leave a kicked socket open on a connection bound to nobody");
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void Negative_AnOwedDrop_NeverReachesAStrangerOnTheReusedId()
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(11);
+                _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+                _bridge.DisconnectActor("actor-a");
+                // WHY the same id: the kicked peer left on its own before the drop was made, and
+                // kcp2k gave its endpoint's id to the next connection.
+                NetworkServer.RemoveConnection(11);
+                OfflineMirror.AdmitServerConnection(11);
+
+                _now = 0.016d;
+                _bridge.Pump();
+
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "the drop was owed to the kicked connection, not to whoever holds its id now");
             }
             finally
             {
