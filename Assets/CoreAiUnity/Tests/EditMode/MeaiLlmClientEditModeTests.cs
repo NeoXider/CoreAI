@@ -2726,6 +2726,59 @@ namespace CoreAI.Tests.EditMode
         {
             Assert.IsNull(MeaiLlmClient.GetHybridUnemittedSuffix("ok    ", 2));
         }
+
+        [Test]
+        public void FailedToolRetryDetail_LongPlainText_ClippedWithCount_AndLogged()
+        {
+            using FailedToolLogCapture log = new();
+
+            string detail = MeaiLlmClient.ClipFailedToolDetail(
+                "flaky_tool", new string('f', 300));
+
+            Assert.AreEqual(new string('f', 240) + "…[+60 chars]", detail);
+            StringAssert.Contains("Failed tool 'flaky_tool' detail clipped in the retry instruction: 300 chars total -> 240 kept, 60 dropped.",
+                log.Lines.Single(l => l.Contains("flaky_tool")));
+        }
+
+        /// <summary>
+        /// A JSON <c>error</c> went to the model whole before 7.46.0; the release about cuts must not add one.
+        /// </summary>
+        [Test]
+        public void FailedToolRetryDetail_LongJsonError_GoesWhole_AndIsNotLogged()
+        {
+            using FailedToolLogCapture log = new();
+            string error = new string('j', 600);
+
+            string detail = MeaiLlmClient.ClipFailedToolDetail(
+                "json_tool", "{\"error\":\"" + error + "\"}");
+
+            Assert.AreEqual(error, detail);
+            Assert.IsFalse(log.Lines.Any(l => l.Contains("json_tool")));
+            Assert.AreEqual(error, AiOrchestrator.ExtractToolTraceMessage("{\"message\":\"" + error + "\"}"));
+        }
+
+        /// <summary>Captures CoreAI log lines for one test and restores the previous log.</summary>
+        private sealed class FailedToolLogCapture : CoreAI.Logging.ILog, IDisposable
+        {
+            private readonly CoreAI.Logging.ILog _previous = CoreAI.Logging.Log.Instance;
+
+            public FailedToolLogCapture()
+            {
+                CoreAI.Logging.Log.Instance = this;
+            }
+
+            public List<string> Lines { get; } = new();
+
+            public void Debug(string message, string tag = null) => Lines.Add(message);
+            public void Info(string message, string tag = null) => Lines.Add(message);
+            public void Warn(string message, string tag = null) => Lines.Add(message);
+            public void Error(string message, string tag = null) => Lines.Add(message);
+
+            public void Dispose()
+            {
+                CoreAI.Logging.Log.Instance = _previous;
+            }
+        }
     }
 #endif
 }

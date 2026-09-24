@@ -3674,7 +3674,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 Path.Combine(manual, "notes.tmp"),
                 Path.Combine(manual, "slot.world.tmp"),
                 Path.Combine(manual, "slot.world." + Guid32.Substring(1) + ".tmp"),
-                Path.Combine(manual, "slot.world." + Guid32.ToUpperInvariant() + ".tmp"),
+                // WHY another entry name: on a case-insensitive file system (Windows, macOS) "slot.world.<GUID>.tmp"
+                // is the same file as the swept lowercase one, so the kept copy would be overwritten and swept.
+                Path.Combine(manual, "other.world." + Guid32.ToUpperInvariant() + ".tmp"),
                 Path.Combine(manual, "slot.json." + Guid32 + ".tmp"),
                 Path.Combine(auto, ".world." + Guid32 + ".tmp"),
                 Path.Combine(root, "stray.world." + Guid32 + ".tmp")

@@ -93,11 +93,11 @@ namespace CoreAI.Sandbox.LuaCs
         /// Most LEVELS of calls from library functions back into Lua that may be open at once along one chain of
         /// nested runs on the native stack (Luau's <c>LUAI_MAXCCALLS</c>, scaled to native frame size). A call
         /// whose frames take up to about 4 KB of native stack opens <see cref="LightCallLevels"/>: a function run
-        /// by <c>pcall</c> or <c>xpcall</c> (whose message handler runs inside the same call) and a
-        /// <c>string.gsub</c> replacement function. One that takes up to about 8 KB opens
-        /// <see cref="HeavyCallLevels"/>: a <c>__tostring</c> run by <c>tostring</c>, <c>print</c>, <c>warn</c> or
-        /// <c>string.format</c>, a <c>table.sort</c> comparator, a <c>__pairs</c>/<c>__ipairs</c> metamethod, a
-        /// <c>string.gsub</c> <c>__index</c>, a coroutine run by <c>coroutine.resume</c>, a scheduler thread that
+        /// by <c>pcall</c> or <c>xpcall</c> (whose message handler runs inside the same call). One that takes up to
+        /// about 8 KB opens <see cref="HeavyCallLevels"/>: a <c>string.gsub</c> replacement function, a
+        /// <c>__tostring</c> run by <c>tostring</c>, <c>print</c>, <c>warn</c> or <c>string.format</c>, a
+        /// <c>table.sort</c> comparator, a <c>__pairs</c>/<c>__ipairs</c> metamethod, a <c>string.gsub</c>
+        /// <c>__index</c>, a coroutine run by <c>coroutine.resume</c>, a scheduler thread that
         /// <c>task.spawn</c> runs at once, and a guarded call that starts inside a run (re-entering the state, or a
         /// <c>mods_call</c> export on another). A thread run inside a run continues the count of the thread that run
         /// executes on. The call that would pass the limit raises
@@ -108,7 +108,8 @@ namespace CoreAI.Sandbox.LuaCs
         /// WHY 128 levels of about 4 KB (audit B3-01 and the Hub-crash investigation): each of these calls is a
         /// nested VM run on the .NET stack. Measured on CoreCLR x64 at the limit, unoptimised (tier-0) code, by
         /// NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap: 3,408 B a level for pcall, 3,376 for xpcall, 3,872
-        /// for a gsub replacement function (5,776 while gsub was an async method chain, audit C3-02), and per two
+        /// for a gsub replacement function (5,776 while gsub was an async method chain, audit C3-02; 4,288 on Windows
+        /// x64, over the 4 KB of one level, so a gsub replacement function opens two levels since 7.47.0), and per two
         /// levels 3,232 for tostring through <c>__tostring</c>, 6,432 for <c>string.format</c>, 2,736-3,904 for
         /// table.sort, 3,440 for <c>__pairs</c>, 5,168 for coroutine.resume and 7,600 for a <c>task.spawn</c> that runs
         /// its thread at once. The only other bound is <c>RuntimeHelpers.TryEnsureSufficientExecutionStack</c> inside
@@ -138,8 +139,8 @@ namespace CoreAI.Sandbox.LuaCs
         public const int MaxCCallDepth = 128;
 
         /// <summary>
-        /// Levels a call back into Lua opens when its native frames take up to about 4 KB: <c>pcall</c>,
-        /// <c>xpcall</c> and a <c>string.gsub</c> replacement function (see <see cref="MaxCCallDepth"/>).
+        /// Levels a call back into Lua opens when its native frames take up to about 4 KB: <c>pcall</c> and
+        /// <c>xpcall</c> (see <see cref="MaxCCallDepth"/>).
         /// </summary>
         public const int LightCallLevels = 1;
 
@@ -152,7 +153,11 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>
         /// Levels a <c>string.gsub</c> replacement function opens (see <see cref="MaxCCallDepth"/>).
         /// </summary>
-        private const int GSubCallbackLevels = LightCallLevels;
+        /// <remarks>
+        /// WHY heavy: a level measured 3,872 B on Linux CoreCLR but 4,288 B on Windows x64, and at a weight of one
+        /// the 128-level chain took 531 KB there, past the 512 KB envelope the weights exist to keep.
+        /// </remarks>
+        private const int GSubCallbackLevels = HeavyCallLevels;
 
         /// <summary>Start of the error raised past <see cref="MaxCCallDepth"/>; Luau's text for the same limit.</summary>
         public const string CStackOverflowMessage = "C stack overflow";

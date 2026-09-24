@@ -1412,7 +1412,7 @@ namespace CoreAI.Tests.EditMode
             "local o = setmetatable({}, {})\n" +
             "getmetatable(o).__tostring = function(x) enter() print(x) depth = depth - 1 return 'x' end\n" +
             "record(pcall(print, o))")]
-        [TestCase("string.gsub", 128,
+        [TestCase("string.gsub", 64,
             "local function g() enter() local r = (string.gsub('a', 'a', g)) depth = depth - 1 return r end\n" +
             "record(pcall(g))")]
         [TestCase("string.gsub", 63,
@@ -1446,13 +1446,12 @@ namespace CoreAI.Tests.EditMode
             // library stops the nesting at MaxCCallDepth with Luau's error, which pcall catches like any other.
             // A resume continues its resumer's count, and a function that recurses before its first library call
             // reaches one Lua level more than the count. The pcall around each shape is one of the counted calls
-            // (audit B3-01), and every call but a gsub callback opens two levels (see MaxCCallDepth), so a shape
-            // reaches (128 - 1) / 2 = 63 Lua levels and a gsub callback 128.
+            // (audit B3-01), and every one of these calls opens two levels (see MaxCCallDepth), so a shape
+            // reaches (128 - 1) / 2 = 63 Lua levels.
             // WHY the reference run: the unwind left at the cap is intrinsic to Lua-CSharp (about N squared) and
             // its wall time depends on the host, so the capped run is timed against the same shape failing on its
-            // own at 40 levels on the same host. Capped, the ratio is about (63/40)^2 = 2.5, and the 128 levels of a
-            // gsub callback still unwind in milliseconds, well inside the bound's 250 ms; uncapped at 1,000 it was
-            // about (1000/40)^2 = 625.
+            // own at 40 levels on the same host. Capped, the ratio is about (63/40)^2 = 2.5, well inside the bound;
+            // uncapped at 1,000 it was about (1000/40)^2 = 625.
             string referenceChunk = CStackPrelude(40) + shape;
             string cappedChunk = CStackPrelude(1000) + shape + "\nrecord(maxDepth)";
             List<string> reference = new();
@@ -2580,7 +2579,7 @@ namespace CoreAI.Tests.EditMode
                 "local function f(n) probe(n) local ok, e = xpcall(f, function(m) return m end, n + 1)\n" +
                 "  if not ok then error(e, 0) end end\n" +
                 "pcall(f, 1)"),
-            ("string.gsub replacement function", LuaCsSecureEnvironment.LightCallLevels,
+            ("string.gsub replacement function", LuaCsSecureEnvironment.HeavyCallLevels,
                 "local function g(n) probe(n) string.gsub('a', 'a', function() g(n + 1) end) end\n" +
                 "pcall(g, 1)"),
             ("string.gsub __index", LuaCsSecureEnvironment.HeavyCallLevels,

@@ -329,36 +329,6 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(4, log.Lines.Count(l => l.Contains("[MutationStatePromptFormatter]")));
         }
 
-        [Test]
-        public void FailedToolRetryDetail_LongPlainText_ClippedWithCount_AndLogged()
-        {
-            using ContractLogCapture log = new();
-
-            string detail = CoreAI.Infrastructure.Llm.MeaiLlmClient.ClipFailedToolDetail(
-                "flaky_tool", new string('f', 300));
-
-            Assert.AreEqual(new string('f', 240) + "…[+60 chars]", detail);
-            StringAssert.Contains("Failed tool 'flaky_tool' detail clipped in the retry instruction: 300 chars total -> 240 kept, 60 dropped.",
-                log.Lines.Single(l => l.Contains("flaky_tool")));
-        }
-
-        /// <summary>
-        /// A JSON <c>error</c> went to the model whole before 7.46.0; the release about cuts must not add one.
-        /// </summary>
-        [Test]
-        public void FailedToolRetryDetail_LongJsonError_GoesWhole_AndIsNotLogged()
-        {
-            using ContractLogCapture log = new();
-            string error = new string('j', 600);
-
-            string detail = CoreAI.Infrastructure.Llm.MeaiLlmClient.ClipFailedToolDetail(
-                "json_tool", "{\"error\":\"" + error + "\"}");
-
-            Assert.AreEqual(error, detail);
-            Assert.IsFalse(log.Lines.Any(l => l.Contains("json_tool")));
-            Assert.AreEqual(error, AiOrchestrator.ExtractToolTraceMessage("{\"message\":\"" + error + "\"}"));
-        }
-
         private sealed class DescribedTool : ILlmTool
         {
             public DescribedTool(string name, string description)
