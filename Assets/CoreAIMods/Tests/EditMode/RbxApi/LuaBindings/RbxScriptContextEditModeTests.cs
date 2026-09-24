@@ -489,5 +489,97 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 "cut at " + stopwatch.ElapsedMilliseconds + " ms is too slow to have used a bound derived " +
                 "from the tightened live setting instead of the old fixed 1,000 ms constant");
         }
+
+        [Test]
+        [Timeout(60000)]
+        public void PatternMatching_CatastrophicFindInAHeartbeatHandler_FaultsWithBudgetExceeded()
+        {
+            // WHY: the per-resume guard runs only BETWEEN VM instructions, and a library call is one
+            // instruction. The native find ran this call for seconds (about n^4.6 backtracking) before the
+            // guard could look at the clock again, so no budget bounded it. The budgeted matcher refuses it
+            // by its own step count, and the refusal must reach the scheduler as a budget kill naming the
+            // call, not as a Lua bug of the mod and not as a generic timeout noticed afterwards.
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+            List<(string ModId, RbxError Error)> faults = new();
+            roblox.Scheduler.ThreadFaulted += (modId, error) => faults.Add((modId, error));
+            stack.Runtime.LoadMod("matcher", @"
+                local rs = game:GetService('RunService')
+                rs.Heartbeat:Connect(function(dt)
+                    local found = string.rep('a', 120):find('.-.-.-.-b')
+                    store_set('after', tostring(found))
+                end)");
+
+            PumpHeartbeat(roblox, 0.1d);
+
+            Assert.AreEqual(1, faults.Count, "the handler must fault exactly once");
+            Assert.AreEqual("matcher", faults[0].ModId);
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, faults[0].Error.Code,
+                "a refused pattern call must classify as a budget kill — error was: " + faults[0].Error.Message);
+            StringAssert.Contains(LuaCsSecureEnvironment.PatternStepBudgetTripMarker, faults[0].Error.Message);
+            StringAssert.Contains("string.find", faults[0].Error.Message,
+                "the error must name the library call that exceeded the budget");
+            Assert.AreEqual("", store.Get("matcher", "after"),
+                "the handler must not continue past the refused call");
+        }
+
+        [Test]
+        public void StringFormat_YieldInsideToStringOnATaskThread_RaisesTheCallBoundaryError()
+        {
+            // WHY (M2-19): string.format used to wait on its call synchronously, so a __tostring that called
+            // task.wait produced "Operation is not valid due to the current state of the object." after the
+            // yield had already been reported to the resumer. Luau refuses this yield; so does the sandbox,
+            // with a message that names the boundary, and the thread keeps running normally afterwards.
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+            stack.Runtime.LoadMod("m", @"
+                task.spawn(function()
+                    local obj = setmetatable({}, {__tostring = function()
+                        task.wait(0)
+                        return 'X'
+                    end})
+                    local ok, err = pcall(string.format, '%s', obj)
+                    store_set('ok', tostring(ok))
+                    store_set('err', tostring(err))
+                    store_set('status', coroutine.status(coroutine.running()))
+                end)");
+
+            Assert.AreEqual("false", store.Get("m", "ok"), "the yield inside __tostring must be refused");
+            string message = store.Get("m", "err");
+            StringAssert.Contains(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage, message);
+            StringAssert.Contains("string.format", message, "the error must name the boundary");
+            StringAssert.DoesNotContain("Operation is not valid", message);
+            Assert.AreEqual("running", store.Get("m", "status"),
+                "the thread must still be the running coroutine after the refused yield");
+        }
+
+        [Test]
+        public void StringGsub_YieldInsideAReplacementFunctionOnATaskThread_RaisesTheCallBoundaryError()
+        {
+            // WHY: same boundary as string.format. Luau's gsub calls its replacement function with lua_call,
+            // which cannot yield, and the budgeted gsub keeps that rule instead of suspending a thread in
+            // the middle of a half-built result.
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+            stack.Runtime.LoadMod("m", @"
+                task.spawn(function()
+                    local ok, err = pcall(string.gsub, 'abc', 'b', function(c)
+                        task.wait(0)
+                        return 'X'
+                    end)
+                    store_set('ok', tostring(ok))
+                    store_set('err', tostring(err))
+                    store_set('after', (string.gsub('abc', 'b', function(c) return 'Y' end)))
+                end)");
+
+            Assert.AreEqual("false", store.Get("m", "ok"), "the yield inside the replacement must be refused");
+            StringAssert.Contains(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage, store.Get("m", "err"));
+            StringAssert.Contains("string.gsub", store.Get("m", "err"));
+            Assert.AreEqual("aYc", store.Get("m", "after"),
+                "a non-yielding replacement function on the same thread must keep working");
+        }
     }
 }
