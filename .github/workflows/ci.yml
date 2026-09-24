@@ -54,8 +54,8 @@ jobs:
         run: |
           count=$(grep -o 'outcome="Passed"' artifacts/portable-lua/portable-lua.trx | wc -l)
           echo "Passed Lua-tier test cases: $count"
-          if [ "$count" -lt 1000 ]; then
-            echo "::error::The portable Lua-tier suite ran fewer than 1000 passing cases."
+          if [ "$count" -lt 1400 ]; then
+            echo "::error::The portable Lua-tier suite ran fewer than 1400 passing cases."
             exit 1
           fi
       - name: Upload test results
