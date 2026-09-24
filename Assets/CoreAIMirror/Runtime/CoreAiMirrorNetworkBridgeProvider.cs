@@ -527,7 +527,10 @@ namespace CoreAI.Net.Mirror
                 admitted = false;
             }
 
-            if (!admitted && !_pendingDrops.Contains(conn))
+            // WHY the host's own local client is never dropped: the session host refused it as a
+            // world player because host mode is unsupported, and dropping it would take the host's
+            // local player off Mirror altogether (A4-10).
+            if (!admitted && !(conn is LocalConnectionToClient) && !_pendingDrops.Contains(conn))
             {
                 _pendingDrops.Enqueue(conn);
             }

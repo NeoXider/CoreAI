@@ -234,12 +234,30 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        /// <summary>
+        /// Senders whose unresolved-value reports are throttled apart; past it the rest share one
+        /// throttle, so a stream of distinct sender ids cannot grow the tables without bound.
+        /// </summary>
+        internal const int MaxThrottledSenders = 256;
+
+        /// <summary>Characters of a sender-supplied name a log line quotes at most.</summary>
+        internal const int MaxLoggedNameChars = 64;
+
+        private const string SharedSenderKey = "\0shared";
+        private const string TrustedSenderKey = "\0server";
+
         private readonly InstanceRegistry _registry;
         private readonly RbxEnumRegistry _enums;
         private readonly Action<string> _log;
         private readonly IReplicationFilter _clientVisibilityRule;
+        private readonly Dictionary<string, long> _hiddenReferencePayloadsBySender =
+            new(StringComparer.Ordinal);
+        private readonly Dictionary<string, long> _unresolvedEnumPayloadsBySender =
+            new(StringComparer.Ordinal);
         private long _hiddenClientInstanceReferences;
         private long _hiddenClientReferencePayloads;
+        private long _unresolvedEnumItems;
+        private long _unresolvedEnumItemPayloads;
 
         /// <summary>
         /// Creates the codec over the receiving world. <paramref name="clientVisibility"/> is the
@@ -265,6 +283,31 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Client payloads that carried at least one such reference.</summary>
         internal long HiddenClientReferencePayloads => _hiddenClientReferencePayloads;
+
+        /// <summary>EnumItems in decoded payloads, from any sender, that decoded as nil because this
+        /// world has no such item.</summary>
+        internal long UnresolvedEnumItems => _unresolvedEnumItems;
+
+        /// <summary>Decoded payloads that carried at least one such EnumItem.</summary>
+        internal long UnresolvedEnumItemPayloads => _unresolvedEnumItemPayloads;
+
+        /// <summary>Senders whose unresolved-value reports are currently throttled apart.</summary>
+        internal int ThrottledSenderCount =>
+            Math.Max(_hiddenReferencePayloadsBySender.Count, _unresolvedEnumPayloadsBySender.Count);
+
+        /// <summary>
+        /// Forgets one sender's report throttles, when its actor leaves; the totals are kept.
+        /// </summary>
+        internal void ForgetSender(string senderActorId)
+        {
+            if (string.IsNullOrEmpty(senderActorId))
+            {
+                return;
+            }
+
+            _hiddenReferencePayloadsBySender.Remove(senderActorId);
+            _unresolvedEnumPayloadsBySender.Remove(senderActorId);
+        }
 
         /// <summary>Frozen byte cap for remote payloads; payloads larger than this are refused with PAYLOAD_TOO_LARGE before materializing the whole string.</summary>
         public const int MaxPayloadBytes = 65536;
@@ -761,14 +804,43 @@ namespace CoreAI.Ai.LuaCs
             return null;
         }
 
+        /// <summary>Counts, and reports at a bounded rate, the values a payload named that decoded as nil.</summary>
+        /// <remarks>
+        /// WHY powers of two, per sender: the payloads are the sender's to repeat at will, so one
+        /// line per payload would let a client write the server's log at its own packet rate. Logging
+        /// a sender's 1st, 2nd, 4th, 8th... such payload keeps its first report immediate, needs no
+        /// clock, and bounds a flood of N payloads to about log2(N) lines; the counters keep the exact
+        /// totals. WHY per sender (A4-12): with one counter across senders, a flooding client pushed
+        /// the next report far out, and a second client's first unresolved value went unsaid. WHY the
+        /// names are cut: an enum and item name are the sender's text, and a 60 KB name was copied
+        /// into every line (A4-02).
+        /// </remarks>
         private void ReportUnresolvedValues(TraversalState state)
         {
             int enumItems = state.UnresolvedEnumItems;
             if (enumItems > 0)
             {
-                _log?.Invoke("Remote payload enum item Enum." + state.FirstUnresolvedEnumName + "."
-                             + state.FirstUnresolvedEnumItemName + " is not registered; decoded as nil"
-                             + CountSuffix(enumItems, "enum items") + ".");
+                _unresolvedEnumItems += enumItems;
+                _unresolvedEnumItemPayloads++;
+                string sender = state.FromClient ? state.ClientSenderActorId : null;
+                long seen = CountSenderPayload(_unresolvedEnumPayloadsBySender, sender,
+                    out bool enumShared);
+                string item = "Enum." + CapName(state.FirstUnresolvedEnumName) + "."
+                              + CapName(state.FirstUnresolvedEnumItemName);
+                if (IsPowerOfTwo(seen) && sender == null)
+                {
+                    _log?.Invoke("Remote payload enum item " + item
+                                 + " is not registered; decoded as nil"
+                                 + CountSuffix(enumItems, "enum items") + ".");
+                }
+                else if (IsPowerOfTwo(seen))
+                {
+                    _log?.Invoke("Remote payload from actor '" + CapName(sender) + "' named enum item "
+                                 + item + ", which is not registered; decoded as nil"
+                                 + CountSuffix(enumItems, "enum items")
+                                 + ". Payloads " + CountedFrom(enumShared)
+                                 + " decoded this way so far: " + seen + ".");
+                }
             }
 
             int count = state.UnresolvedInstances;
@@ -787,19 +859,59 @@ namespace CoreAI.Ai.LuaCs
 
             _hiddenClientInstanceReferences += count;
             _hiddenClientReferencePayloads++;
-            // WHY powers of two: the payloads are the sender's to repeat at will, so one line per
-            // payload would let a client write the server's log at its own packet rate. Logging the
-            // 1st, 2nd, 4th, 8th... occurrence keeps the first report immediate, needs no clock, and
-            // bounds a flood of N payloads to about log2(N) lines; the counters keep the exact totals.
-            if ((_hiddenClientReferencePayloads & (_hiddenClientReferencePayloads - 1)) == 0)
+            long payloads = CountSenderPayload(_hiddenReferencePayloadsBySender, state.ClientSenderActorId,
+                out bool referenceShared);
+            if (IsPowerOfTwo(payloads))
             {
-                _log?.Invoke("Remote payload from actor '" + state.ClientSenderActorId
+                _log?.Invoke("Remote payload from actor '" + CapName(state.ClientSenderActorId)
                              + "' named InstanceId " + state.FirstUnresolvedInstanceId
                              + ", which the sender cannot see; decoded as nil"
                              + CountSuffix(count, "Instance references")
-                             + ". Client payloads decoded this way so far: "
-                             + _hiddenClientReferencePayloads + ".");
+                             + ". Payloads " + CountedFrom(referenceShared)
+                             + " decoded this way so far: " + payloads + ".");
             }
+        }
+
+        /// <summary>
+        /// Counts one more reported payload of a sender and returns that sender's running count;
+        /// a sender past <see cref="MaxThrottledSenders"/> shares one count with the rest, which
+        /// <paramref name="shared"/> says.
+        /// </summary>
+        private static long CountSenderPayload(Dictionary<string, long> bySender, string sender,
+            out bool shared)
+        {
+            string key = sender ?? TrustedSenderKey;
+            shared = false;
+            if (!bySender.TryGetValue(key, out long count) && bySender.Count >= MaxThrottledSenders)
+            {
+                key = SharedSenderKey;
+                shared = true;
+                bySender.TryGetValue(key, out count);
+            }
+
+            count++;
+            bySender[key] = count;
+            return count;
+        }
+
+        private static string CountedFrom(bool shared)
+        {
+            return shared
+                ? "from senders past the first " + MaxThrottledSenders + " tracked"
+                : "from this actor";
+        }
+
+        private static bool IsPowerOfTwo(long value)
+        {
+            return value > 0 && (value & (value - 1)) == 0;
+        }
+
+        private static string CapName(string name)
+        {
+            string text = name ?? "";
+            return text.Length <= MaxLoggedNameChars
+                ? text
+                : text.Substring(0, MaxLoggedNameChars) + "...";
         }
 
         private static string CountSuffix(int count, string what)

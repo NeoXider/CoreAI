@@ -10,6 +10,7 @@ using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using NUnit.Framework;
@@ -279,6 +280,234 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual("", store.Get("broken", "task_leak"));
             Assert.AreEqual("", store.Get("broken", "connection_leak"));
             Assert.IsFalse(bindings.RunService.Heartbeat.HasConnections);
+        }
+
+        [Test]
+        public void Lua_A2_03_AFailedFirstLoadThatSetOnServerInvoke_LeavesNoCallbackBehind()
+        {
+            // WHY: a first load that failed in its main chunk tracked no scheduler thread, and the
+            // rollback returned before removing that generation's RemoteFunction callbacks, so a mod
+            // that never loaded kept answering clients as the host (A2-03).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("a2-03-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+
+            System.Exception error = Assert.Catch<System.Exception>(() =>
+                stack.Runtime.LoadMod(host, "zombie", @"
+                    local remote = Instance.new('RemoteFunction')
+                    remote.Name = 'Leaky'
+                    remote.Parent = workspace
+                    remote.OnServerInvoke = function(player)
+                        store_set('ran', 'yes')
+                        return 'served by a mod that never loaded'
+                    end
+                    error('load fails here')", LuaCapabilities.All, persistToStore: false));
+            StringAssert.Contains("load fails here", error.ToString());
+            Assert.IsFalse(stack.Runtime.IsLoaded("zombie"));
+            RbxInstance remote = WorkspaceChild(bindings, "Leaky");
+            Assert.IsNotNull(remote, "the failed chunk's instances stay in the world, as on Roblox");
+
+            RbxNetworkResponse answer = InvokeServer(bindings, remote, client.ActorId);
+
+            Assert.AreEqual("", store.Get("zombie", "ran"), "code of a mod whose load failed ran afterwards");
+            Assert.IsNotNull(answer, "the caller is answered at once, not left to its timeout");
+            Assert.IsFalse(answer.Succeeded);
+            StringAssert.Contains("OnServerInvoke is not set", answer.Error);
+        }
+
+        [Test]
+        public void Lua_A2_03_Negative_ALoadThatSucceeds_KeepsServingItsCallback()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("a2-03-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "served", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Served'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player)
+                    store_set('ran', 'yes')
+                    return 'answer'
+                end", LuaCapabilities.All, persistToStore: false);
+
+            RbxNetworkResponse answer = InvokeServer(bindings, WorkspaceChild(bindings, "Served"),
+                client.ActorId);
+
+            Assert.AreEqual("yes", store.Get("served", "ran"));
+            Assert.IsTrue(answer != null && answer.Succeeded, answer?.Error);
+        }
+
+        [Test]
+        public void Lua_A2_07_AnOnServerInvokeCutByItsBudget_AnswersTheCallerWithAFixedCleanLine()
+        {
+            // WHY: the caller was answered with Lua-CSharp's own cancellation text, "The operation
+            // was cancelled during execution on Lua.", which names the engine and not the reason.
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("a2-07-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "spin", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Spin'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player) while true do end end",
+                LuaCapabilities.All, persistToStore: false);
+
+            RbxNetworkResponse answer = InvokeServer(bindings, WorkspaceChild(bindings, "Spin"),
+                client.ActorId);
+
+            Assert.IsNotNull(answer);
+            Assert.IsFalse(answer.Succeeded);
+            Assert.AreEqual("the RemoteFunction callback was stopped: it exceeded its execution budget",
+                answer.Error);
+            StringAssert.DoesNotContain("Lua.", answer.Error);
+        }
+
+        [Test]
+        public void Lua_A4_01_ARemoteFlood_ThroughAHandlerThatSchedulesWork_ChargesTheSender_NeverTheHost()
+        {
+            // WHY: the sender was charged for the handler thread only; the task.delay inside it was
+            // charged to the handler's owner, so one client firing well under any rate limit filled
+            // the host's whole thread quota, broke the host's own task.spawn and got the host's
+            // gameplay mod quarantined (A4-01).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext flooder = new LocalActorIdentityProvider("a4-01-flooder")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            int budget = LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender;
+            stack.Runtime.LoadMod(host, "server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'Cooldown'
+                remote.Parent = workspace
+                local handled = 0
+                remote.OnServerEvent:Connect(function(player)
+                    handled = handled + 1
+                    store_set('handled', tostring(handled))
+                    task.delay(60, function() end)
+                end)", LuaCapabilities.All, persistToStore: false);
+            stack.Runtime.LoadMod(flooder, "flooder", @"
+                local remote = workspace:FindFirstChild('Cooldown')
+                for index = 1, 300 do remote:FireServer(index) end",
+                LuaCapabilities.All, persistToStore: false);
+            PumpFrames(bindings, stack, host, 3);
+
+            stack.Runtime.LoadMod(host, "host-work", @"
+                local ok, err = pcall(function() task.spawn(function() store_set('ran', 'yes') end) end)
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))", LuaCapabilities.All, persistToStore: false);
+            for (int frame = 0; frame < 10; frame++)
+            {
+                stack.Runtime.LoadMod(flooder, "flooder-" + frame,
+                    "workspace:FindFirstChild('Cooldown'):FireServer(1)",
+                    LuaCapabilities.All, persistToStore: false);
+                PumpFrames(bindings, stack, host, 1);
+            }
+
+            Assert.AreEqual("true", store.Get("host-work", "ok"), store.Get("host-work", "err"));
+            Assert.AreEqual("yes", store.Get("host-work", "ran"),
+                "the host's own thread quota is untouched by what the client's calls scheduled");
+            Assert.AreEqual("310", store.Get("server", "handled"),
+                "every fire under the rate limit still reaches the handler");
+            // WHY one below the budget: each handler holds a slot of its own while it runs, so the
+            // handler that finds budget - 1 delayed threads in flight is refused its task.delay.
+            Assert.AreEqual(budget - 1, bindings.Scheduler.CountInducedThreads(flooder.ActorId),
+                "the delayed threads are the sender's, held to the sender's budget");
+            Assert.IsFalse(IsQuarantined(stack, host, "server"),
+                "one client's flood must not quarantine the host's gameplay mod");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors(host, "server"),
+                "a task.delay refused for the sender's budget is not the handler owner's fault");
+            Assert.AreEqual(310L - (budget - 1), bindings.RemoteHandlerRefusalCount,
+                "every refused start is counted against the sender");
+        }
+
+        [Test]
+        public void Lua_A4_01_Negative_TheHostsOwnHandlerWork_IsStillChargedToTheHost()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            stack.Runtime.LoadMod(host, "server", @"
+                local folder = Instance.new('Folder')
+                folder.Parent = workspace
+                folder:GetPropertyChangedSignal('Name'):Connect(function()
+                    task.delay(60, function() end)
+                end)
+                for index = 1, 40 do folder.Name = 'renamed-' .. index end",
+                LuaCapabilities.All, persistToStore: false);
+
+            PumpFrames(bindings, stack, host, 1);
+
+            Assert.AreEqual(40, bindings.Scheduler.LiveThreadCount,
+                "a handler no remote call started schedules on its owner's quota, beyond any sender budget");
+            Assert.AreEqual(0L, bindings.RemoteHandlerRefusalCount);
+        }
+
+        private static RbxInstance WorkspaceChild(LuaCsRbxApiBindings bindings, string name)
+        {
+            return bindings.Game.FindFirstChildOfClass("Workspace").FindFirstChild(name);
+        }
+
+        /// <summary>
+        /// The in-process half of <c>RemoteFunction:InvokeServer</c> from a client actor, answered
+        /// through the scheduler's drain the way a frame answers it.
+        /// </summary>
+        private static RbxNetworkResponse InvokeServer(LuaCsRbxApiBindings bindings, RbxInstance remote,
+            string clientActorId)
+        {
+            RbxNetworkResponse answer = null;
+            bindings.NetworkBridge.SendRequest(
+                new RbxNetworkRequestMessage(remote.Id, RbxNetworkDirection.ClientToServer,
+                    clientActorId, null, System.Text.Encoding.UTF8.GetBytes("[]")),
+                response => answer = response);
+            for (int frame = 0; frame < 4; frame++)
+            {
+                bindings.Scheduler.Advance(0d);
+            }
+
+            return answer;
+        }
+
+        private static void PumpFrames(LuaCsRbxApiBindings bindings, LuaCsModStack stack,
+            ActorContext host, int frames)
+        {
+            for (int frame = 0; frame < frames; frame++)
+            {
+                bindings.Scheduler.Advance(0.016d);
+                stack.Runtime.Tick(host, 0.016d);
+            }
+        }
+
+        private static bool IsQuarantined(LuaCsModStack stack, ActorContext caller, string modId)
+        {
+            foreach (LuaModInfo info in stack.Runtime.ListMods(caller))
+            {
+                if (info.Id == modId)
+                {
+                    return info.Quarantined;
+                }
+            }
+
+            Assert.Fail("mod '" + modId + "' is not loaded");
+            return false;
         }
 
         [Test]

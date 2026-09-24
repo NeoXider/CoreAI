@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using Mirror;
+using UnityEngine;
 
 namespace CoreAI.Net.Mirror
 {
@@ -22,6 +24,16 @@ namespace CoreAI.Net.Mirror
     /// older connection is closed without a teardown, the way Roblox ends the older session. Every
     /// teardown is keyed by the connection, so the older connection's late drop reaches nothing.
     /// </para>
+    /// <para>
+    /// A session the world ends itself — a host's own <c>DisconnectActor</c>, outside a kick or a
+    /// transport drop — is forgotten here when the bridge releases its connection: the world has
+    /// already torn the actor down, and the bridge ends the connection (A4-09).
+    /// </para>
+    /// <para>
+    /// Mirror host mode is not supported: the host's own local client connection is refused as a
+    /// world player, loudly, and left to Mirror (A4-10). Its player is a host-local actor, served in
+    /// process.
+    /// </para>
     /// </remarks>
     public sealed class CoreAiMirrorSessionHost : IRbxActorIdentitySource, IDisposable
     {
@@ -31,19 +43,27 @@ namespace CoreAI.Net.Mirror
         private readonly MirrorNetworkBridge _bridge;
         private readonly Func<ActorContext, bool> _connectActor;
         private readonly Func<ActorContext, bool> _disconnectActor;
+        private readonly Action<string> _log;
         private bool _disposed;
 
         /// <summary>
         /// Wires the session host to a bridge and the world's connect/disconnect entry points.
         /// </summary>
+        /// <param name="bridge">The server bridge whose connections this host turns into players.</param>
+        /// <param name="connectActor">The world's entry point that creates a player.</param>
+        /// <param name="disconnectActor">The world's entry point that removes one.</param>
+        /// <param name="log">Where a refused host-mode connection is said; null means a Unity error.</param>
         public CoreAiMirrorSessionHost(MirrorNetworkBridge bridge,
-            Func<ActorContext, bool> connectActor, Func<ActorContext, bool> disconnectActor)
+            Func<ActorContext, bool> connectActor, Func<ActorContext, bool> disconnectActor,
+            Action<string> log = null)
         {
             _bridge = bridge ?? throw new ArgumentNullException(nameof(bridge));
             _connectActor = connectActor ?? throw new ArgumentNullException(nameof(connectActor));
             _disconnectActor = disconnectActor
                                ?? throw new ArgumentNullException(nameof(disconnectActor));
+            _log = log ?? Debug.LogError;
             _bridge.PeerDisconnected += OnPeerDisconnected;
+            _bridge.BindingReleased += OnBindingReleased;
         }
 
         /// <summary>How many connections currently hold a live actor.</summary>
@@ -57,6 +77,12 @@ namespace CoreAI.Net.Mirror
 
         /// <summary>Whether one connection currently holds a live actor.</summary>
         public bool HasLiveSession(int connectionId) => _actorsByConnection.ContainsKey(connectionId);
+
+        /// <summary>
+        /// Admissions refused because the connection is Mirror's host-mode local client, which this
+        /// host never turns into a world player.
+        /// </summary>
+        public int HostModeConnectionsRefused { get; private set; }
 
         /// <summary>
         /// Admits one connection into the world. Returns false when the decision was a refusal, in
@@ -79,6 +105,23 @@ namespace CoreAI.Net.Mirror
         {
             if (admission == null || !admission.Admitted)
             {
+                return false;
+            }
+
+            if (IsHostModeLocalConnection(connectionId))
+            {
+                // WHY refused, loudly, and left connected: the host's own client has no CoreAI client
+                // bridge beside a server one, so it never acknowledges readiness — admitted, it was a
+                // Player for ten seconds and was then dropped from its own host with a line blaming
+                // an old client (A4-10). Dropping it instead would take the host's local player off
+                // Mirror altogether; refused, it keeps Mirror's own features and CoreAI serves the
+                // host's player in process.
+                HostModeConnectionsRefused++;
+                _log("[CoreAI.Mirror] host mode is not supported: connection " + connectionId
+                     + " is this host's own local Mirror client, which the CoreAI Mirror bridge "
+                     + "cannot serve as a remote player; it is not admitted to the world and stays "
+                     + "connected to Mirror. Run the host's player as a host-local actor "
+                     + "(LuaCsRbxApiBindings.ConnectActor), which is served in process");
                 return false;
             }
 
@@ -165,6 +208,7 @@ namespace CoreAI.Net.Mirror
 
             _disposed = true;
             _bridge.PeerDisconnected -= OnPeerDisconnected;
+            _bridge.BindingReleased -= OnBindingReleased;
             _actorsByConnection.Clear();
             _identitiesByActor.Clear();
         }
@@ -192,6 +236,35 @@ namespace CoreAI.Net.Mirror
             Release(connectionId, context);
         }
 
+        /// <summary>
+        /// Forgets the session a released connection held when nothing here released it: its world
+        /// ended the actor itself, and the bridge is ending the connection.
+        /// </summary>
+        /// <remarks>
+        /// WHY no world call: the world is the one that released it, mid-teardown; calling it again
+        /// would tear the same actor down twice. WHY the identity goes only with the actor's last
+        /// session: a newer session of the same actor still uses it.
+        /// </remarks>
+        private void OnBindingReleased(int connectionId)
+        {
+            if (!_actorsByConnection.TryGetValue(connectionId, out ActorContext context))
+            {
+                return;
+            }
+
+            _actorsByConnection.Remove(connectionId);
+            if (!TryFindSession(context.ActorId, out _))
+            {
+                _identitiesByActor.Remove(context.ActorId);
+            }
+        }
+
+        private static bool IsHostModeLocalConnection(int connectionId)
+        {
+            return NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient conn)
+                   && conn is LocalConnectionToClient;
+        }
+
         private bool TryFindSession(string actorId, out int connectionId)
         {
             foreach (KeyValuePair<int, ActorContext> pair in _actorsByConnection)
@@ -216,14 +289,27 @@ namespace CoreAI.Net.Mirror
             // the handler looking at an actor the bridge no longer knows. WHY finally: that handler
             // is mod code, and if it throws the connection id — which kcp2k reuses — must still stop
             // resolving to the actor that left. WHY by actor here: the host holds one session per
-            // actor, so the actor's binding on the bridge is this connection's.
+            // actor, so the actor's binding on the bridge is this connection's. WHY marked as a
+            // teardown: whoever called this — a transport drop, a kick, a refused admission — ends
+            // the connection its own way, and the world's unregister must not end it a second time.
+            bool marked = _bridge.BeginTeardown(connectionId);
             try
             {
                 _disconnectActor(context);
             }
             finally
             {
-                _bridge.UnregisterActor(context.ActorId);
+                try
+                {
+                    _bridge.UnregisterActor(context.ActorId);
+                }
+                finally
+                {
+                    if (marked)
+                    {
+                        _bridge.EndTeardown(connectionId);
+                    }
+                }
             }
         }
     }

@@ -37,11 +37,20 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Handler threads one remote sender may keep alive at once on this machine (MP-10): the
         /// OnServerInvoke callbacks and OnServerEvent handlers its calls started that are still
-        /// suspended. They are charged to the sender, never to the handler's owner, so a flooding client
-        /// exhausts only this budget; a call over it is refused (RemoteFunction) or dropped and counted
-        /// (RemoteEvent) without faulting the handler's mod.
+        /// suspended, and every thread those handlers start with <c>task.spawn</c>, <c>task.defer</c>
+        /// or <c>task.delay</c> (A4-01). They are charged to the sender, never to the handler's owner,
+        /// so a flooding client exhausts only this budget; a call over it is refused (RemoteFunction),
+        /// dropped and counted (RemoteEvent), or answered BUDGET_EXCEEDED inside the handler (a
+        /// <c>task.*</c> start), without faulting the handler's mod.
         /// </summary>
         internal const int MaxRemoteHandlerThreadsPerSender = 32;
+
+        /// <summary>
+        /// What the caller of a RemoteFunction is answered when the callback serving it was stopped
+        /// by its execution budget (A2-07).
+        /// </summary>
+        internal const string RemoteFunctionCallbackBudgetCutMessage =
+            "the RemoteFunction callback was stopped: it exceeded its execution budget";
 
         private sealed class ExecutingScriptBacking
         {
@@ -319,6 +328,7 @@ namespace CoreAI.Ai.LuaCs
         private double _lastServerTimeProcessSeconds;
         private bool _serverTimeBased;
         private readonly INetworkBridge _networkBridge;
+        private readonly RbxServerClockReader _serverClockReader;
         private readonly RbxPlayers _players;
         private readonly LuaCsRbxNetworkCodec _networkCodec;
         private readonly RbxScriptSignal _networkRequestSignal;
@@ -583,10 +593,17 @@ namespace CoreAI.Ai.LuaCs
                 (Action<object[]>)DeliverNetworkRequest);
             _networkBridge.EventReceived += DeliverNetworkEvent;
             _networkBridge.RequestReceived += QueueNetworkRequest;
+            _serverClockReader = ReadServerTime;
+            if (_networkBridge.Topology != RbxNetworkTopology.Client)
+            {
+                _networkBridge.AttachServerClock(_serverClockReader);
+            }
+
             _registry.Unregistered += OnInstanceUnregistered;
 
             _scheduler.PhaseReached += PumpSchedulerPhase;
             _scheduler.ThreadRetired += OnSchedulerThreadRetired;
+            _scheduler.InducedThreadRefused += OnInducedThreadRefused;
 
             // WHY: a restored world registers its Humanoids before these bindings exist, so the
             // Registered wiring above never sees them. A headless host attaches no motor factory to
@@ -1102,13 +1119,26 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Server-synced epoch seconds behind <c>workspace:GetServerTimeNow()</c>. Where this process
         /// is the server clock — no bridge, or a Solo, Host or DedicatedServer one — it is the local
-        /// clock, held at its last reading while the clock steps back. On a Client, from the bridge's
-        /// first synchronization on it never decreases: an estimate that moves ahead is taken at once,
-        /// one that moves behind is slewed onto at <see cref="ServerTimeSlewRate"/> of real time.
-        /// Before that first synchronization it is the local clock, unsmoothed.
+        /// clock, held at its last reading while the clock steps back; that same reading, hold
+        /// included, is what the bridge sends clients (<see cref="INetworkBridge.AttachServerClock"/>).
+        /// On a Client, from the bridge's first synchronization on it never decreases: an estimate
+        /// that moves ahead is taken at once, one that moves behind is slewed onto at
+        /// <see cref="ServerTimeSlewRate"/> of real time, and while the bridge says the server's own
+        /// clock is held (<see cref="INetworkBridge.IsServerClockHeld"/>) it holds too. Before that
+        /// first synchronization it is the local clock, unsmoothed.
         /// </summary>
         internal double GetServerTimeNow()
         {
+            return ReadServerTime(out _);
+        }
+
+        /// <summary>
+        /// <see cref="GetServerTimeNow"/>, and how far the value is held ahead of this world's own
+        /// clock: zero while the clock runs, and always zero on a client.
+        /// </summary>
+        private double ReadServerTime(out double heldAheadSeconds)
+        {
+            heldAheadSeconds = 0d;
             // WHY the bridge's offset is added: on a client the local clock is its own machine's,
             // and a player whose system time is an hour off would otherwise disagree with the server
             // about when everything happened. The offset is zero on a server and on the loopback.
@@ -1124,6 +1154,7 @@ namespace CoreAI.Ai.LuaCs
                     // the game) read a time that drifted away from that clock by real time.
                     if (estimate < _lastServerTimeNow)
                     {
+                        heldAheadSeconds = _lastServerTimeNow - estimate;
                         return _lastServerTimeNow;
                     }
 
@@ -1133,6 +1164,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             bool synchronized = _networkBridge.IsServerClockSynchronized;
+            bool serverHeld = synchronized && _networkBridge.IsServerClockHeld;
             double processSeconds = _clockSource.ProcessTimeSeconds;
             lock (_serverTimeGate)
             {
@@ -1163,6 +1195,19 @@ namespace CoreAI.Ai.LuaCs
                 else
                 {
                     elapsed = 0d;
+                }
+
+                if (serverHeld)
+                {
+                    // WHY held and not slewed: the server's own clock stands still, and a slew keeps
+                    // moving — at half speed it ran half the hold ahead of the server (A4-08). The
+                    // real time of the hold is consumed here, so nothing is made up for afterwards.
+                    if (IsFinite(estimate) && estimate > _lastServerTimeNow)
+                    {
+                        _lastServerTimeNow = estimate;
+                    }
+
+                    return _lastServerTimeNow;
                 }
 
                 double freeRunning = _lastServerTimeNow + elapsed;
@@ -1216,28 +1261,42 @@ namespace CoreAI.Ai.LuaCs
                     throw ExpectedArgument("os.time", "a date table or nil", date, 1);
                 }
 
-                return UnixSecondsFromDateTable(fields);
+                double? seconds = UnixSecondsFromDateTable(fields);
+                if (!seconds.HasValue)
+                {
+                    return LuaValue.Nil;
+                }
+
+                return seconds.Value;
             });
             os["clock"] = Fn("os.clock", _ => _clockSource.ProcessTimeSeconds);
             return new LuaValue(os);
         }
 
         /// <summary>
-        /// <c>os.time(t)</c>: the Unix seconds of the date the table describes. <c>year</c>,
-        /// <c>month</c> and <c>day</c> are required; <c>hour</c> defaults to 12 and <c>min</c> and
-        /// <c>sec</c> to 0; a field outside its range carries into the next one (month 13 is January of
-        /// the next year) and <c>isdst</c> is ignored.
+        /// The largest magnitude a date field may have: about a million years' worth of seconds.
+        /// </summary>
+        private const double MaxDateFieldMagnitude = 1e6 * 366d * 86400d;
+
+        /// <summary>
+        /// <c>os.time(t)</c>: the Unix seconds of the date the table describes, or null (Lua nil)
+        /// for a moment before 1970-01-01 00:00:00 UTC, as Luau answers. <c>year</c>, <c>month</c>
+        /// and <c>day</c> are required; <c>hour</c> defaults to 12 and <c>min</c> and <c>sec</c> to
+        /// 0; a field that is not a number (nor a string that reads as one) counts as missing, as in
+        /// Luau; a field outside its range carries into the next one (month 13 is January of the next
+        /// year) and <c>isdst</c> is ignored.
         /// </summary>
         /// <remarks>
         /// WHY the table is read as UTC: Luau replaced Lua 5.1's local-time <c>mktime</c> with a UTC
         /// conversion ("we prefer UTC for consistency"), and every other CoreAI clock is UTC —
-        /// <c>os.time()</c> reads <see cref="IRbxClockSource.UnixTimeSeconds"/> — so
-        /// <c>os.time(os.date("!*t", t)) == t</c> holds and a server and a client in different time
-        /// zones compute the same timestamp. That is also why <c>isdst</c> changes nothing.
+        /// <c>os.time()</c> reads <see cref="IRbxClockSource.UnixTimeSeconds"/> — so a server and a
+        /// client in different time zones compute the same timestamp. That is also why <c>isdst</c>
+        /// changes nothing. The sandbox has no <c>os.date</c> (see <see cref="BuildOsTable"/>), so
+        /// there is no round trip through it to promise. WHY nil before the epoch: Luau's
+        /// <c>os_timegm</c> fails a date before 1970 — by its day, or by the time of day on 1970-01-01
+        /// — and a script written for Roblox tests the result for nil, not for a negative number.
         /// </remarks>
-        private const double MaxDateFieldMagnitude = 1e6 * 366d * 86400d;
-
-        private static double UnixSecondsFromDateTable(LuaTable fields)
+        private static double? UnixSecondsFromDateTable(LuaTable fields)
         {
             long year = ReadDateField(fields, "year", null);
             long month = ReadDateField(fields, "month", null);
@@ -1250,13 +1309,22 @@ namespace CoreAI.Ai.LuaCs
             year += FloorDivide(monthIndex, 12);
             monthIndex -= FloorDivide(monthIndex, 12) * 12;
             long days = DaysFromCivil(year, monthIndex + 1, 1) + (day - 1);
-            return days * 86400d + hour * 3600d + minute * 60d + second;
+            double seconds = days * 86400d + hour * 3600d + minute * 60d + second;
+            if (days < 0 || seconds < 0d)
+            {
+                return null;
+            }
+
+            return seconds;
         }
 
         private static long ReadDateField(LuaTable fields, string name, long? fallback)
         {
             LuaValue value = fields[name];
-            if (value.Type == LuaValueType.Nil)
+            // WHY a value that is not a number counts as missing: Luau reads each field with
+            // lua_isnumber and takes anything else as absent, so {hour = true} is noon, and only a
+            // required field that is absent this way is an error.
+            if (value.Type == LuaValueType.Nil || !TryCoerceNumber(value, out double number))
             {
                 if (fallback.HasValue)
                 {
@@ -1264,15 +1332,11 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 throw RbxError.BadArgument(
-                    "os.time: field '" + name + "' missing in date table",
+                    "os.time: field '" + name + "' missing in date table"
+                    + (value.Type == LuaValueType.Nil
+                        ? ""
+                        : " (got " + Describe(value) + ", which is not a number)"),
                     "pass year, month and day, e.g. os.time({year = 2024, month = 1, day = 1, hour = 0})");
-            }
-
-            if (!TryCoerceNumber(value, out double number))
-            {
-                throw RbxError.BadArgument(
-                    "os.time: field '" + name + "' must be a number, got " + Describe(value),
-                    "pass whole numbers, e.g. os.time({year = 2024, month = 1, day = 1, hour = 0})");
             }
 
             // WHY bounded by about a million years' worth of seconds: every field then stays exact
@@ -1310,6 +1374,9 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Transport-neutral bridge used by the production Lua remote surface.</summary>
         public INetworkBridge NetworkBridge => _networkBridge;
+
+        /// <summary>The remote payload codec, whose counters tests read.</summary>
+        internal LuaCsRbxNetworkCodec NetworkCodec => _networkCodec;
 
         /// <summary>Players service populated from trusted network actor contexts.</summary>
         public RbxPlayers Players => _players;
@@ -1469,6 +1536,7 @@ namespace CoreAI.Ai.LuaCs
 
             _remoteRefusalLoggedSenders.Remove(actorId);
             ForgetNetworkWarningsFrom(actorId);
+            _networkCodec.ForgetSender(actorId);
             if (ownerModIds.Count > 0)
             {
                 RaiseActorModsDisconnected(actorId, ownerModIds);
@@ -1526,6 +1594,7 @@ namespace CoreAI.Ai.LuaCs
             _disposed = true;
             _networkBridge.EventReceived -= DeliverNetworkEvent;
             _networkBridge.RequestReceived -= QueueNetworkRequest;
+            _networkBridge.DetachServerClock(_serverClockReader);
             _registry.Unregistered -= OnInstanceUnregistered;
             _registry.Registered -= OnInstanceRegisteredForCharacter;
             _registry.SceneMembershipChanged -= OnCharacterSceneMembershipChanged;
@@ -1564,6 +1633,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _scheduler.ThreadRetired -= OnSchedulerThreadRetired;
+            _scheduler.InducedThreadRefused -= OnInducedThreadRefused;
             _serverRemoteCallbacks.Clear();
             _clientRemoteCallbacks.Clear();
             _remoteFunctionWaitGenerations.Clear();
@@ -1605,6 +1675,15 @@ namespace CoreAI.Ai.LuaCs
                     || candidateGeneration != candidate.PreviousGeneration))
             {
                 CancelScheduledGeneration(ownerModId, candidateGeneration);
+            }
+
+            if (!candidate.HadPreviousGeneration)
+            {
+                // WHY only for a failed first load: then every tween and RemoteFunction wait the mod id
+                // owns is the failed candidate's. A failed reload's candidate cannot be told apart from
+                // the live generation here, and cancelling by mod id would stop the live one's too.
+                _tweenService?.CancelAndReleaseOwnedBy(ownerModId);
+                RemoveRemoteFunctionWaitsOwnedBy(ownerModId, null);
             }
 
             if (candidate.HadPreviousGeneration)
@@ -1829,10 +1908,17 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Remote-induced handler starts refused because their sender's budget was full (MP-10):
-        /// dropped OnServerEvent invocations plus refused OnServerInvoke calls.
+        /// Remote-induced thread starts refused because their sender's budget was full (MP-10):
+        /// dropped OnServerEvent invocations, refused OnServerInvoke calls, and <c>task.spawn</c>,
+        /// <c>task.defer</c> or <c>task.delay</c> calls those handlers made (A4-01).
         /// </summary>
         internal long RemoteHandlerRefusalCount { get; private set; }
+
+        private void OnInducedThreadRefused(string senderActorId, RbxError refusal)
+        {
+            NoteRemoteHandlerRefusal(senderActorId,
+                "a thread a remote call's handler tried to start was refused", refusal);
+        }
 
         private void NoteRemoteHandlerRefusal(string senderActorId, string outcome, RbxError refusal)
         {
@@ -2020,8 +2106,15 @@ namespace CoreAI.Ai.LuaCs
             UnknownRemote,
             ReliabilityMismatch,
             UnknownDirection,
-            DeliveryFailed
+            DeliveryFailed,
+            MalformedPayload
         }
+
+        /// <summary>
+        /// Characters of a failure's own text a network warning line carries at most; the text can
+        /// quote the sender's payload, and one line must not become a copy of it.
+        /// </summary>
+        private const int MaxNetworkWarningFailureChars = 200;
 
         private sealed class NetworkWarningWindow
         {
@@ -2031,8 +2124,8 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// Inbound network events dropped with a warning — a null message, an unknown or destroyed
-        /// remote, a reliability that does not match the remote, an unknown direction, a failed
-        /// delivery — whether or not the warning was logged.
+        /// remote, a reliability that does not match the remote, an unknown direction, a client
+        /// payload that does not decode, a failed delivery — whether or not the warning was logged.
         /// </summary>
         internal long RejectedNetworkEventCount { get; private set; }
 
@@ -2107,9 +2200,22 @@ namespace CoreAI.Ai.LuaCs
                            + (remote != null ? remote.GetFullName() : "the RemoteEvent") + ".";
                 case NetworkWarningKind.UnknownDirection:
                     return "Network event from " + sender + " has an unknown delivery direction.";
+                case NetworkWarningKind.MalformedPayload:
+                    return "Network event from " + sender + " to "
+                           + (remote != null ? remote.GetFullName() : "a RemoteEvent")
+                           + " carried a malformed payload and was dropped: "
+                           + CapFailureText(failure);
                 default:
-                    return "Network event delivery failed: " + failure;
+                    return "Network event delivery failed: " + CapFailureText(failure);
             }
+        }
+
+        private static string CapFailureText(string failure)
+        {
+            string text = failure ?? "";
+            return text.Length <= MaxNetworkWarningFailureChars
+                ? text
+                : text.Substring(0, MaxNetworkWarningFailureChars) + "...";
         }
 
         private void ForgetNetworkWarningsFrom(string actorId)
@@ -2166,9 +2272,29 @@ namespace CoreAI.Ai.LuaCs
                     return;
                 }
 
-                object[] arguments = message.Direction == RbxNetworkDirection.ClientToServer
-                    ? _networkCodec.DecodeClientArguments(message.Payload, admittedSender)
-                    : _networkCodec.DecodeArguments(message.Payload);
+                object[] arguments;
+                if (message.Direction == RbxNetworkDirection.ClientToServer)
+                {
+                    try
+                    {
+                        arguments = _networkCodec.DecodeClientArguments(message.Payload, admittedSender);
+                    }
+                    catch (RbxError malformed)
+                    {
+                        // WHY dropped here and not rethrown: a client's payload is the client's to
+                        // forge, and on a transport this runs inside the transport's message handler,
+                        // where a throw drops the connection with an error in the server log. The
+                        // request path already answers such a payload with a failure (A4-06).
+                        WarnNetworkEvent(admittedSender, NetworkWarningKind.MalformedPayload,
+                            remote, malformed.RawMessage);
+                        return;
+                    }
+                }
+                else
+                {
+                    arguments = _networkCodec.DecodeArguments(message.Payload);
+                }
+
                 remote.AttachScheduler(_scheduler);
                 switch (message.Direction)
                 {
@@ -2377,6 +2503,16 @@ namespace CoreAI.Ai.LuaCs
                     LuaValue[] results = await ctx.State.CallAsync(
                         registration.Callback, callbackArguments.AsSpan(), ct);
                     responder.Complete(_networkCodec.EncodeArguments(results));
+                }
+                catch (OperationCanceledException)
+                {
+                    // WHY a fixed line: the budget cut surfaces as the engine's own cancellation
+                    // text, which names Lua-CSharp and not the reason, and it went to the caller —
+                    // on a server, a remote client (A2-07).
+                    if (!responder.IsCompleted)
+                    {
+                        responder.Fail(RemoteFunctionCallbackBudgetCutMessage);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -3369,20 +3505,12 @@ namespace CoreAI.Ai.LuaCs
         {
             return Fn("camera_set_cframe", ctx =>
             {
-                RbxInstance camera = _workspace.FindFirstChildOfClass("Camera");
+                RbxInstance camera = RequireWorldCamera("camera_set_cframe");
                 context.RequireWorldEditForWrite(camera, "CFrame");
                 RbxCFrame cframe = ReadCFrame(ctx, 0, "camera_set_cframe");
                 // WHY the shared write path: it fires Camera.Changed("CFrame") like the property write
                 // does, and a handler watching the camera must not miss moves made through this global.
-                if (camera != null)
-                {
-                    LuaCsRbxInstanceBindings.SetCameraCFrame(_cameraRig, camera, in cframe);
-                }
-                else
-                {
-                    _cameraRig.SetCFrame(cframe);
-                }
-
+                LuaCsRbxInstanceBindings.SetCameraCFrame(_cameraRig, camera, in cframe);
                 context.RecordMutation(camera);
                 return LuaValue.Nil;
             });
@@ -3392,7 +3520,7 @@ namespace CoreAI.Ai.LuaCs
         {
             return Fn("camera_follow", ctx =>
             {
-                RbxInstance camera = _workspace.FindFirstChildOfClass("Camera");
+                RbxInstance camera = RequireWorldCamera("camera_follow");
                 context.RequireWorldEditForWrite(camera, "CameraSubject");
                 LuaValue target = Arg(ctx, 0);
                 RbxInstance subject = null;
@@ -3414,13 +3542,35 @@ namespace CoreAI.Ai.LuaCs
                 context.RecordMutation(camera);
                 // WHY notified here as the Camera.CameraSubject write does: the subject lives on these
                 // bindings, not on the Camera instance, so no setter of the instance can fire Changed.
-                if (camera != null && !ReferenceEquals(previousSubject, CameraSubject))
+                if (!ReferenceEquals(previousSubject, CameraSubject))
                 {
                     camera.NotifyPropertyChanged("CameraSubject");
                 }
 
                 return LuaValue.Nil;
             });
+        }
+
+        /// <summary>
+        /// The world's Camera, which a camera_* global writes through; refused before anything moves
+        /// when the world has none.
+        /// </summary>
+        /// <remarks>
+        /// WHY refused up front: without a Camera the rig was moved first and the mutation record of a
+        /// null instance threw afterwards, so the script saw an internal error for a write that had
+        /// half happened (A3-10). A script can destroy the world's Camera; nothing recreates it.
+        /// </remarks>
+        private RbxInstance RequireWorldCamera(string global)
+        {
+            RbxInstance camera = _workspace.FindFirstChildOfClass("Camera");
+            if (camera != null)
+            {
+                return camera;
+            }
+
+            throw RbxError.BadArgument(
+                global + " found no Camera in workspace; nothing was moved",
+                "keep the world's Camera (workspace.CurrentCamera) instead of destroying it");
         }
 
         // ---- Instance.new -------------------------------------------------------------------
@@ -4323,6 +4473,10 @@ namespace CoreAI.Ai.LuaCs
                 || !generations.TryGetValue(
                     generation, out HashSet<IRbxScriptThread> threads))
             {
+                // WHY the callbacks go even with no thread to cancel: a main chunk that failed before
+                // it yielded is never tracked (RunModChunk rethrows first), yet it may already have
+                // assigned OnServerInvoke — and a mod that never loaded kept answering clients (A2-03).
+                RemoveRemoteFunctionCallbacksOwnedBy(ownerModId, generation, true);
                 return 0;
             }
 

@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Text;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
@@ -258,6 +260,80 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
         }
 
         [Test]
+        public void A4_08_ServerTimeNow_OnAClient_HoldsWhileTheServersClockIsHeld_AndRunsOnAfter()
+        {
+            // WHY: the server holds its GetServerTimeNow while its wall clock catches up after a
+            // backward step, and a client's slew kept moving at half speed through the whole hold —
+            // half the step apart from the server by its end (A4-08, A3-04).
+            FakeClockSource clock = new()
+            {
+                UnixTimeSecondsFractional = 1700000000d,
+                ProcessTimeSeconds = 100d
+            };
+            FakeBridge bridge = new(RbxNetworkTopology.Client) { ServerClockOffsetSeconds = 0d };
+            LuaCsRbxApiBindings bindings = new(networkBridge: bridge, clockSource: clock);
+            double held = bindings.GetServerTimeNow();
+
+            bridge.IsServerClockHeld = true;
+            for (int second = 1; second <= 10; second++)
+            {
+                clock.UnixTimeSecondsFractional += 1d;
+                clock.ProcessTimeSeconds += 1d;
+                bridge.ServerClockOffsetSeconds = held - clock.UnixTimeSecondsFractional;
+                Assert.AreEqual(held, bindings.GetServerTimeNow(),
+                    "second " + second + " of the hold: the server's clock stands still, so does the client's");
+            }
+
+            bridge.IsServerClockHeld = false;
+            clock.UnixTimeSecondsFractional += 1d;
+            clock.ProcessTimeSeconds += 1d;
+            bridge.ServerClockOffsetSeconds = held + 1d - clock.UnixTimeSecondsFractional;
+
+            Assert.AreEqual(held + 1d, bindings.GetServerTimeNow(),
+                "when the hold ends the clock runs on with the server; the held time is not made up");
+        }
+
+        [Test]
+        public void A4_08_ServerTimeNow_WhereThisProcessIsTheServerClock_IsTheClockItsBridgeSends_HoldIncluded()
+        {
+            FakeClockSource clock = new()
+            {
+                UnixTimeSecondsFractional = 1700000000d,
+                ProcessTimeSeconds = 5d
+            };
+            FakeBridge bridge = new(RbxNetworkTopology.Host);
+            LuaCsRbxApiBindings bindings = new(networkBridge: bridge, clockSource: clock);
+            Assert.IsNotNull(bridge.AttachedServerClock, "a server world hands its bridge its clock");
+
+            double running = bridge.AttachedServerClock(out double heldWhileRunning);
+            clock.UnixTimeSecondsFractional = 1699999990d;
+            double stepped = bridge.AttachedServerClock(out double heldAfterTheStep);
+            double scriptsRead = bindings.GetServerTimeNow();
+
+            Assert.AreEqual(1700000000d, running);
+            Assert.AreEqual(0d, heldWhileRunning);
+            Assert.AreEqual(1700000000d, stepped,
+                "after a backward step the bridge sends the held reading the server's scripts read");
+            Assert.AreEqual(10d, heldAfterTheStep, "and how far that is held ahead of the wall clock");
+            Assert.AreEqual(stepped, scriptsRead);
+
+            bindings.Dispose();
+
+            Assert.IsNull(bridge.AttachedServerClock, "a disposed world takes its clock back");
+        }
+
+        [Test]
+        public void A4_08_Negative_AClientWorld_HandsItsBridgeNoServerClock()
+        {
+            FakeBridge bridge = new(RbxNetworkTopology.Client);
+            LuaCsRbxApiBindings bindings = new(networkBridge: bridge,
+                clockSource: new FakeClockSource { UnixTimeSecondsFractional = 1700000000d });
+
+            Assert.IsNull(bridge.AttachedServerClock, "a client's world is not the server clock");
+            bindings.Dispose();
+        }
+
+        [Test]
         public void StagedNetworkBridge_QueuesAKickWithItsMessage_AndHandsTheTransportThatMessage()
         {
             // WHY: without its own message overload the staged bridge took the interface default,
@@ -445,6 +521,24 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
 
             public bool IsServerClockSynchronized { get; set; } = true;
 
+            public bool IsServerClockHeld { get; set; }
+
+            /// <summary>The clock a server world handed over, until it took it back.</summary>
+            public RbxServerClockReader AttachedServerClock { get; private set; }
+
+            public void AttachServerClock(RbxServerClockReader serverClock)
+            {
+                AttachedServerClock = serverClock;
+            }
+
+            public void DetachServerClock(RbxServerClockReader serverClock)
+            {
+                if (AttachedServerClock == serverClock)
+                {
+                    AttachedServerClock = null;
+                }
+            }
+
             /// <summary>Every kick asked for without a message, in order.</summary>
             public List<string> KicksWithoutMessage { get; } = new();
 
@@ -485,6 +579,266 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
             public void DisconnectActor(string actorId, string message)
             {
                 KicksWithMessage.Add(new KeyValuePair<string, string>(actorId, message));
+            }
+
+            public void SendEvent(RbxNetworkEventMessage message)
+            {
+            }
+
+            public void SendRequest(RbxNetworkRequestMessage message,
+                Action<RbxNetworkResponse> response)
+            {
+            }
+        }
+    }
+    /// <summary>
+    /// What a server does with a client's event payload it cannot use: an EnumItem it has no such
+    /// item for, an Instance the sender cannot see, a payload that does not decode. Each is dropped
+    /// or read as nil, counted, and said at a rate the sender cannot drive.
+    /// </summary>
+    /// <remarks>
+    /// WHY through the bridge's receive event: that is where a transport delivers, inside its own
+    /// message handler, and what reaches the handler — a throw, or a log line per packet — is what a
+    /// hostile client controls.
+    /// </remarks>
+    [TestFixture]
+    public sealed class RbxNetworkReceiveHardeningEditModeTests
+    {
+        private const string Sender = "remote-1";
+
+        [Test]
+        public void A4_02_AFloodOfUnknownEnumItems_IsSaidAtPowersOfTwo_InShortLines()
+        {
+            // WHY: every packet naming an EnumItem this world lacks wrote one log line carrying the
+            // client's own enum name, 60 KB of it, at the client's packet rate (A4-02).
+            ReceivingWorld world = new();
+            byte[] payload = Encoding.UTF8.GetBytes("[{\"$rbx\":\"EnumItem\",\"enum\":\""
+                                                    + new string('E', 60000) + "\",\"name\":\"x\"}]");
+
+            for (int packet = 0; packet < 1000; packet++)
+            {
+                world.Raise(Sender, payload);
+            }
+
+            Assert.LessOrEqual(world.Log.Count, 11, "a flood of 1000 packets is said about log2(1000) times");
+            Assert.Greater(world.Log.Count, 0, "the first one is said at once");
+            foreach (string line in world.Log)
+            {
+                Assert.Less(line.Length, 300, "the sender's name is cut, not copied into the log: " + line);
+            }
+
+            StringAssert.Contains("'" + Sender + "'", world.Log[0]);
+            Assert.AreEqual(1000, world.Handled, "each event still reaches the handler, the item as nil");
+        }
+
+        [Test]
+        public void A4_02_EveryUnknownEnumItem_IsCounted_WhetherOrNotItIsSaid()
+        {
+            ReceivingWorld world = new();
+            byte[] payload = Encoding.UTF8.GetBytes("[{\"$rbx\":\"EnumItem\",\"enum\":\"Bogus\",\"name\":\"A\"},"
+                                                    + "{\"$rbx\":\"EnumItem\",\"enum\":\"Bogus\",\"name\":\"B\"}]");
+
+            for (int packet = 0; packet < 5; packet++)
+            {
+                world.Raise(Sender, payload);
+            }
+
+            Assert.AreEqual(10L, world.Bindings.NetworkCodec.UnresolvedEnumItems);
+            Assert.AreEqual(5L, world.Bindings.NetworkCodec.UnresolvedEnumItemPayloads);
+            Assert.AreEqual(3, world.Log.Count, "payloads 1, 2 and 4 are said");
+            StringAssert.EndsWith("so far: 4.", world.Log[2]);
+        }
+
+        [Test]
+        public void A4_12_ASecondSendersFirstHiddenReference_IsSaid_WhileTheFirstSenderFloods()
+        {
+            // WHY: one counter across every sender decided when a line was due, so a flooding client
+            // pushed the next line far out and a second client's first report went unsaid (A4-12).
+            ReceivingWorld world = new();
+            world.Bindings.ConnectActor(Actor("remote-2"));
+            byte[] hidden = Encoding.UTF8.GetBytes("[{\"$rbx\":\"Instance\",\"id\":\"987654321\"}]");
+
+            for (int packet = 0; packet < 4; packet++)
+            {
+                world.Raise(Sender, hidden);
+            }
+
+            int floodLines = world.Log.Count;
+            world.Raise("remote-2", hidden);
+
+            Assert.AreEqual(3, floodLines, "the flooder's payloads 1, 2 and 4 are said");
+            Assert.AreEqual(4, world.Log.Count, "the second sender's first payload is said too");
+            StringAssert.Contains("'remote-2'", world.Log[3]);
+        }
+
+        [Test]
+        public void A4_12_ThePerSenderCounts_StayBounded()
+        {
+            ReceivingWorld world = new();
+            byte[] hidden = Encoding.UTF8.GetBytes("[{\"$rbx\":\"Instance\",\"id\":\"987654321\"}]");
+            for (int sender = 0; sender < LuaCsRbxNetworkCodec.MaxThrottledSenders + 50; sender++)
+            {
+                world.Bindings.NetworkCodec.DecodeClientArguments(hidden, "sender-" + sender);
+            }
+
+            Assert.LessOrEqual(world.Bindings.NetworkCodec.ThrottledSenderCount,
+                LuaCsRbxNetworkCodec.MaxThrottledSenders + 1,
+                "a stream of new sender ids shares one count past the bound instead of growing the table");
+            Assert.AreEqual(LuaCsRbxNetworkCodec.MaxThrottledSenders + 50L,
+                world.Bindings.NetworkCodec.HiddenClientReferencePayloads, "and every payload is counted");
+        }
+
+        [Test]
+        public void A4_12_ASenderThatLeftAndCameBack_IsCountedAfresh()
+        {
+            ReceivingWorld world = new();
+            byte[] hidden = Encoding.UTF8.GetBytes("[{\"$rbx\":\"Instance\",\"id\":\"987654321\"}]");
+            for (int packet = 0; packet < 4; packet++)
+            {
+                world.Raise(Sender, hidden);
+            }
+
+            int before = world.Log.Count;
+            world.Bindings.DisconnectActor(Actor(Sender));
+            world.Bindings.ConnectActor(Actor(Sender));
+            world.Log.Clear();
+            world.Raise(Sender, hidden);
+
+            Assert.AreEqual(3, before, "payloads 1, 2 and 4 are said");
+            Assert.AreEqual(1, world.Log.Count,
+                "the returning sender's first payload is said again, however many came before it left");
+        }
+
+        [Test]
+        public void A4_06_AMalformedClientPayload_IsDroppedAndCounted_NeverThrownIntoTheTransport()
+        {
+            // WHY: the decode error was rethrown out of the bridge's receive event, which on Mirror is
+            // the transport's own message handler: an error in the server log and the client dropped
+            // for one bad packet, where the request path answered the same payload with a failure (A4-06).
+            ReceivingWorld world = new();
+            long rejectedBefore = world.Bindings.RejectedNetworkEventCount;
+
+            Assert.DoesNotThrow(() => world.Raise(Sender, Encoding.UTF8.GetBytes(
+                "[{\"$rbx\":\"" + new string('T', 60000) + "\"}]")));
+            Assert.DoesNotThrow(() => world.Raise(Sender, Encoding.UTF8.GetBytes("not json")));
+
+            Assert.AreEqual(0, world.Handled, "nothing reaches the handler");
+            Assert.AreEqual(2L, world.Bindings.RejectedNetworkEventCount - rejectedBefore);
+            Assert.AreEqual(1, world.Log.Count, "said once per sender and window, not once per packet");
+            StringAssert.Contains("malformed payload", world.Log[0]);
+            StringAssert.Contains("'" + Sender + "'", world.Log[0]);
+            Assert.Less(world.Log[0].Length, 600, "a line quoting the payload is cut: " + world.Log[0]);
+        }
+
+        [Test]
+        public void A4_06_Negative_ASenderTheBridgeNeverAdmitted_IsStillRefusedLoudly()
+        {
+            ReceivingWorld world = new();
+
+            RbxError error = Assert.Throws<RbxError>(() => world.Raise("never-admitted",
+                Encoding.UTF8.GetBytes("[]")));
+
+            Assert.AreEqual(RbxErrorCode.NotAuthority, error.Code,
+                "an unadmitted in-process sender is a wiring error its caller hears about, as before");
+            Assert.AreEqual(0, world.Handled);
+        }
+
+        private static ActorContext Actor(string actorId)
+        {
+            return new LocalActorIdentityProvider(actorId).GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
+        /// <summary>
+        /// A server world with one RemoteEvent whose OnServerEvent counts its calls, fed by a bridge
+        /// the test raises client events on.
+        /// </summary>
+        private sealed class ReceivingWorld
+        {
+            private readonly RbxRemoteEvent _remote;
+
+            public ReceivingWorld()
+            {
+                Registry = new InstanceRegistry();
+                RbxDataModel game = DataModelBootstrap.CreateGame(Registry);
+                Bridge = new RaisingBridge();
+                Bindings = new LuaCsRbxApiBindings(Registry, game, networkBridge: Bridge, log: Log.Add);
+                Bindings.ConnectActor(Actor(Sender));
+                _remote = (RbxRemoteEvent)Registry.Create("RemoteEvent");
+                _remote.Parent = game.GetService("ReplicatedStorage");
+                _remote.AttachScheduler(Bindings.Scheduler);
+                _remote.OnServerEvent.Connect((Action<object[]>)(_ => Handled++));
+                Log.Clear();
+            }
+
+            public InstanceRegistry Registry { get; }
+
+            public RaisingBridge Bridge { get; }
+
+            public LuaCsRbxApiBindings Bindings { get; }
+
+            public List<string> Log { get; } = new();
+
+            public int Handled { get; private set; }
+
+            public void Raise(string sender, byte[] payload)
+            {
+                Bridge.Raise(new RbxNetworkEventMessage(_remote.Id, RbxNetworkDirection.ClientToServer,
+                    RbxNetworkReliability.ReliableOrdered, sender, null, payload));
+                Bindings.Scheduler.Advance(0d);
+            }
+        }
+
+        private sealed class RaisingBridge : INetworkBridge
+        {
+            private readonly List<string> _actors = new();
+            private Action<RbxNetworkEventMessage> _events;
+
+            /// <remarks>
+            /// WHY Solo: the receive path is the same on every topology, and Solo needs no identity
+            /// source to admit the sender, which is not what these tests are about.
+            /// </remarks>
+            public RbxNetworkTopology Topology => RbxNetworkTopology.Solo;
+
+            public IReadOnlyList<string> ActorIds => _actors;
+
+            public int MaxPayloadBytes => 65536;
+
+            public double ServerClockOffsetSeconds => 0d;
+
+            public event Action<RbxNetworkEventMessage> EventReceived
+            {
+                add => _events += value;
+                remove => _events -= value;
+            }
+
+            public event Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> RequestReceived
+            {
+                add { }
+                remove { }
+            }
+
+            public event Action<RbxNetworkPeerDisconnected> PeerDisconnected
+            {
+                add { }
+                remove { }
+            }
+
+            public void Raise(RbxNetworkEventMessage message)
+            {
+                _events?.Invoke(message);
+            }
+
+            public void RegisterActor(string actorId)
+            {
+                if (!_actors.Contains(actorId))
+                {
+                    _actors.Add(actorId);
+                }
+            }
+
+            public void UnregisterActor(string actorId)
+            {
+                _actors.Remove(actorId);
             }
 
             public void SendEvent(RbxNetworkEventMessage message)

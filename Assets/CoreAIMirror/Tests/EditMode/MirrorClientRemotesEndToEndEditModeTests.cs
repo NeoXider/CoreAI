@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
@@ -12,6 +13,7 @@ using CoreAI.Mods.Rbx.Instances.Networking;
 using Mirror;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace CoreAI.Net.Mirror.Tests
 {
@@ -246,6 +248,52 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void A4_04_AClientThatFiresBeforeItsAdmission_DropsTheFire_AndIsStillAdmitted()
+        {
+            // WHY: the client's transport is connected before its admission is answered, and an
+            // UnreliableRemoteEvent fired in that window left before the reliable admission request
+            // queued with it; the server's handler requires Mirror authentication, so Mirror
+            // disconnected the joining client for its own early remote (A4-04).
+            _mirror.UnreliableOvertakesReliable = true;
+            RbxRemoteEvent remote = (RbxRemoteEvent)_registry.Create("UnreliableRemoteEvent");
+            List<RbxNetworkEventMessage> heardOnTheServer = new();
+            _server.EventReceived += heardOnTheServer.Add;
+
+            string admitted = JoinFiringFirst(Credential, () => _client.SendEvent(
+                new RbxNetworkEventMessage(remote.Id, RbxNetworkDirection.ClientToServer,
+                    RbxNetworkReliability.UnreliableUnordered, "remote-1", null,
+                    Encoding.UTF8.GetBytes("[\"early\"]"))));
+
+            Assert.IsTrue(NetworkClient.isConnected,
+                "the early fire must not make Mirror disconnect the client that fired it");
+            Assert.AreEqual(1, _clientAccepts, "the admission still arrived and was heard");
+            Assert.AreEqual("remote-1", admitted);
+            Assert.AreEqual(1, _client.UnadmittedSendsDropped, "the fire is the client's to drop and count");
+            Assert.AreEqual(0, _client.PacketsSent, "nothing unadmitted is counted as sent");
+            Assert.IsEmpty(heardOnTheServer);
+            CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests);
+        }
+
+        [Test]
+        public void A4_04_Negative_TheWitness_AnUnreliableRemoteThatOvertakesTheAdmissionRequest_IsFatalToTheJoin()
+        {
+            // WHY: proves the harness carries the client's unreliable datagram ahead of its admission
+            // request into the server's real Mirror, which disconnects an unauthenticated sender —
+            // so the test above passes because the client held its fire, not because the harness
+            // would have delivered it harmlessly.
+            _mirror.UnreliableOvertakesReliable = true;
+            CoreAiRemoteEventMessage early = OfflineMirror.Event(5UL);
+            early.Reliability = (byte)RbxNetworkReliability.UnreliableUnordered;
+            LogAssert.Expect(LogType.Warning, new Regex("required authentication"));
+
+            string admitted = JoinFiringFirst(Credential, () => NetworkClient.Send(early, Channels.Unreliable));
+
+            Assert.IsNull(admitted, "the joining connection was dropped before its admission request was read");
+            Assert.AreEqual(0, _clientAccepts);
+            Assert.IsFalse(NetworkClient.isConnected);
+        }
+
+        [Test]
         public void Negative_AnAdmittedClientThatAsksAgain_GetsNoSecondPlayer_AndIsNotDisconnected()
         {
             string admitted = Join(Credential);
@@ -311,6 +359,67 @@ namespace CoreAI.Net.Mirror.Tests
             serverNow = _clientWall.UnixTimeSecondsFractional + _client.ServerClockOffsetSeconds;
             Assert.Less(Math.Abs(serverNow - (ServerUnix + 30d)), 0.2d,
                 "and keeps reading it between anchors");
+        }
+
+        [Test]
+        public void A4_08_AfterTheServersWallClockStepsBack_ServerAndClientTime_AgreeWithinASecondThroughout()
+        {
+            // WHY: the anchors carried the server's raw wall clock while the server's own
+            // GetServerTimeNow held its last reading after a backward step, and the client slewed on
+            // at half speed — half the step apart by the end of the hold (A4-08, A3-04). WHY one
+            // world per side over the real exchange: agreement is between what two scripts read.
+            LuaCsRbxApiBindings serverWorld = new(new InstanceRegistry(), null, networkBridge: _server,
+                clockSource: _serverWall, log: _ => { });
+            LuaCsRbxApiBindings clientWorld = new(new InstanceRegistry(), null, networkBridge: _client,
+                clockSource: _clientWall, log: _ => { });
+            try
+            {
+                Join(Credential);
+                const double stepBack = 600d;
+                double worst = 0d;
+                double heldAt = 0d;
+                double atMidHold = 0d;
+                for (int second = 1; second <= 700; second++)
+                {
+                    _serverWall.Advance(1d);
+                    _clientWall.Advance(1d);
+                    _now += 1d;
+                    if (second == 30)
+                    {
+                        _serverWall.UnixTimeSecondsFractional -= stepBack;
+                    }
+
+                    _server.Pump();
+                    _mirror.PumpLoopback();
+                    double server = ServerTimeNow(serverWorld);
+                    double client = ServerTimeNow(clientWorld);
+                    worst = Math.Max(worst, Math.Abs(server - client));
+                    Assert.Less(Math.Abs(server - client), 1d,
+                        "second " + second + ": the server's scripts read " + server.ToString("F3")
+                        + " and the client's read " + client.ToString("F3"));
+                    if (second == 30)
+                    {
+                        heldAt = server;
+                    }
+
+                    if (second == 300)
+                    {
+                        atMidHold = server;
+                    }
+                }
+
+                Assert.AreEqual(ServerUnix + 29d, heldAt, "the server holds its last reading at the step");
+                Assert.AreEqual(heldAt, atMidHold, "and still holds it half-way through");
+                Assert.AreEqual(_serverWall.UnixTimeSecondsFractional, ServerTimeNow(serverWorld),
+                    "once the wall clock caught up the server runs on it again");
+                Assert.Greater(_server.ClockStepAnchorsSent, 0, "the hold was sent the moment it began");
+                Assert.IsFalse(_client.IsServerClockHeld);
+            }
+            finally
+            {
+                serverWorld.Dispose();
+                clientWorld.Dispose();
+            }
         }
 
         [Test]
@@ -444,12 +553,23 @@ namespace CoreAI.Net.Mirror.Tests
         /// <summary>Runs the whole admission exchange and returns the actor the server admitted, or null.</summary>
         private string Join(string credential)
         {
+            return JoinFiringFirst(credential, null);
+        }
+
+        /// <summary>
+        /// <see cref="Join"/>, with <paramref name="fire"/> run on the client right after it asks for
+        /// admission and before either side hears anything: the window a client script's early
+        /// remote falls in.
+        /// </summary>
+        private string JoinFiringFirst(string credential, Action fire)
+        {
             _authenticator.ConfigureClientCredential(() => Encoding.UTF8.GetBytes(credential));
             OfflineMirror.StartServer();
             _authenticator.OnStartServer();
             _mirror.ConnectLoopback();
             _authenticator.OnStartClient();
             _authenticator.OnClientAuthenticate();
+            fire?.Invoke();
             _mirror.PumpLoopback();
             return _serverActors.Count == 1 ? _serverActors[0] : null;
         }
@@ -530,6 +650,18 @@ namespace CoreAI.Net.Mirror.Tests
             return new LocalActorIdentityProvider(
                     actorId, "session-" + actorId, WorldId, ActorGrantSet.None, AgentMemoryScope.Empty)
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
+        /// <summary>
+        /// What <c>workspace:GetServerTimeNow()</c> returns in a world, read without a script so a
+        /// long run of seconds stays cheap.
+        /// </summary>
+        private static double ServerTimeNow(LuaCsRbxApiBindings world)
+        {
+            MethodInfo read = typeof(LuaCsRbxApiBindings).GetMethod("GetServerTimeNow", Private, null,
+                Type.EmptyTypes, null);
+            Assert.IsNotNull(read, "the world's GetServerTimeNow backs workspace:GetServerTimeNow()");
+            return (double)read.Invoke(world, null);
         }
 
         private static void SetField(object target, string name, object value)

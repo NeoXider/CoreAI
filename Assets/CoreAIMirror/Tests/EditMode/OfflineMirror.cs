@@ -144,9 +144,11 @@ namespace CoreAI.Net.Mirror.Tests
         public IReadOnlyList<int> ServerDisconnectRequests => _transport.ServerDisconnectLog;
 
         /// <summary>
-        /// When set, each pump hands the client every queued unreliable batch before the reliable
+        /// When set, each pump hands each side every queued unreliable batch before the reliable
         /// ones queued with it — kcp2k sends an unreliable datagram at once, while reliable data
-        /// waits for the next outgoing tick, so the unreliable one arrives first.
+        /// waits for the next outgoing tick, so the unreliable one arrives first. Both directions:
+        /// a client's unreliable remote overtakes its own admission request the same way, and the
+        /// server's real Mirror then applies its authentication rule to it.
         /// </summary>
         public bool UnreliableOvertakesReliable
         {
@@ -510,24 +512,50 @@ namespace CoreAI.Net.Mirror.Tests
             /// <summary>The server-bound half of <see cref="DrainToClient"/>.</summary>
             public void DrainToServer()
             {
+                if (UnreliableFirst)
+                {
+                    Queue<Packet> held = new();
+                    while (ToServer.Count > 0)
+                    {
+                        Packet packet = ToServer.Dequeue();
+                        if (!packet.IsDisconnect && packet.Channel == Channels.Unreliable)
+                        {
+                            HandToServer(packet);
+                        }
+                        else
+                        {
+                            held.Enqueue(packet);
+                        }
+                    }
+
+                    while (held.Count > 0)
+                    {
+                        HandToServer(held.Dequeue());
+                    }
+                }
+
                 while (ToServer.Count > 0)
                 {
-                    Packet packet = ToServer.Dequeue();
-                    if (_serverPeerClosed)
-                    {
-                        continue;
-                    }
-
-                    if (packet.IsDisconnect)
-                    {
-                        _serverPeerClosed = true;
-                        OnServerDisconnected?.Invoke(LoopbackConnectionId);
-                        continue;
-                    }
-
-                    OnServerDataReceived?.Invoke(LoopbackConnectionId,
-                        new ArraySegment<byte>(packet.Bytes), packet.Channel);
+                    HandToServer(ToServer.Dequeue());
                 }
+            }
+
+            private void HandToServer(Packet packet)
+            {
+                if (_serverPeerClosed)
+                {
+                    return;
+                }
+
+                if (packet.IsDisconnect)
+                {
+                    _serverPeerClosed = true;
+                    OnServerDisconnected?.Invoke(LoopbackConnectionId);
+                    return;
+                }
+
+                OnServerDataReceived?.Invoke(LoopbackConnectionId,
+                    new ArraySegment<byte>(packet.Bytes), packet.Channel);
             }
 
             public override bool Available() => true;

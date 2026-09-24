@@ -427,6 +427,58 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_A3_06_OsTimeTable_BeforeTheEpoch_IsNil_AsInLuau()
+        {
+            // WHY: Luau's os_timegm fails a date before 1970 and os.time returns nil; a negative
+            // number reached scripts that test the result for nil (A3-06).
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(), store);
+
+            stack.Runtime.LoadMod("m", @"
+                store_set('dayBefore', tostring(os.time({year = 1969, month = 12, day = 31, hour = 0})))
+                store_set('secondBefore', tostring(os.time({year = 1970, month = 1, day = 1, hour = 0, sec = -1})))
+                store_set('dayBeforeLateInTheDay', tostring(os.time({year = 1969, month = 12, day = 31, hour = 48})))
+                store_set('epoch', string.format('%d', os.time({year = 1970, month = 1, day = 1, hour = 0})))");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+            Assert.AreEqual("nil", store.Get("m", "dayBefore"));
+            Assert.AreEqual("nil", store.Get("m", "secondBefore"),
+                "a time of day before midnight on 1970-01-01 is before the epoch too");
+            Assert.AreEqual("nil", store.Get("m", "dayBeforeLateInTheDay"),
+                "Luau fails a day before 1970 whatever hour carries it past midnight");
+            Assert.AreEqual("0", store.Get("m", "epoch"));
+        }
+
+        [Test]
+        public void Lua_A3_06_OsTimeTable_AnOptionalFieldThatIsNotANumber_CountsAsMissing()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(), store);
+
+            stack.Runtime.LoadMod("m", @"
+                store_set('hour', string.format('%d', os.time({year = 2024, month = 1, day = 1, hour = true})))
+                store_set('min', string.format('%d', os.time({year = 2024, month = 1, day = 1, hour = 0, min = {}})))
+                local ok, err = pcall(os.time, {year = 2024, month = true, day = 1})
+                store_set('requiredOk', tostring(ok))
+                store_set('requiredErr', tostring(err))");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+            Assert.AreEqual("1704110400", store.Get("m", "hour"), "hour = true reads as the default noon");
+            Assert.AreEqual("1704067200", store.Get("m", "min"), "min = {} reads as the default zero");
+            Assert.AreEqual("false", store.Get("m", "requiredOk"),
+                "a required field that is not a number is missing, and missing is an error");
+            StringAssert.Contains("field 'month' missing in date table", store.Get("m", "requiredErr"));
+        }
+
+        [Test]
+        public void Lua_A3_06_TheOsTableHasNoDate_SoNoDocumentPromisesARoundTripThroughIt()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            stack.Runtime.LoadMod("m", "assert(os.date == nil, 'os.date is not part of the sandbox os table')");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
         public void Lua_CustomClockSource_FullyReplacesDefault()
         {
             FakeClockSource fake = new()
@@ -444,6 +496,91 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 assert(tick() == 1711111111.75)
                 assert(workspace:GetServerTimeNow() == 1711111111.75)");
             Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+    }
+    /// <summary>
+    /// The camera_* convenience globals in a world whose Camera is gone.
+    /// </summary>
+    /// <remarks>
+    /// WHY in this file: it runs in the portable Lua-tier suite, and the camera fixture proper builds
+    /// a scene camera and runs in the editor only.
+    /// </remarks>
+    [TestFixture]
+    public sealed class RbxCameraGlobalsWithoutACameraEditModeTests
+    {
+        private SynchronizationContext _savedContext;
+
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _savedContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_savedContext);
+        }
+
+        [Test]
+        public void Lua_A3_10_CameraGlobals_WithNoCamera_RefuseBeforeMovingAnything()
+        {
+            // WHY: with the world's Camera destroyed, camera_set_cframe moved the rig first and then
+            // failed recording the mutation of a null instance, so the script saw an internal error
+            // for a write that had half happened (A3-10).
+            LuaCsRbxApiBindings bindings = new();
+            ScriptStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings
+            });
+            RbxCFrame before = bindings.CameraRig.GetCFrame();
+            bindings.Game.FindFirstChildOfClass("Workspace").FindFirstChildOfClass("Camera").Destroy();
+
+            stack.Runtime.LoadMod("m", @"
+                local ok, err = pcall(camera_set_cframe, CFrame.new(10, 20, 30))
+                store_set('setOk', tostring(ok))
+                store_set('setErr', tostring(err))
+                local okFollow, errFollow = pcall(camera_follow, nil)
+                store_set('followOk', tostring(okFollow))
+                store_set('followErr', tostring(errFollow))");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+            Assert.AreEqual("false", store.Get("m", "setOk"));
+            StringAssert.Contains("BAD_ARGUMENT", store.Get("m", "setErr"));
+            StringAssert.Contains("no Camera", store.Get("m", "setErr"));
+            Assert.AreEqual(before, bindings.CameraRig.GetCFrame(), "a refused write moves nothing");
+            Assert.AreEqual("false", store.Get("m", "followOk"));
+            StringAssert.Contains("no Camera", store.Get("m", "followErr"));
+        }
+
+        private sealed class ScriptStore : ILuaModStore
+        {
+            private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+            public string Get(string modId, string key)
+            {
+                return _values.TryGetValue(modId + "\n" + key, out string value) ? value : "";
+            }
+
+            public void Set(string modId, string key, string value)
+            {
+                if (value == null)
+                {
+                    _values.Remove(modId + "\n" + key);
+                    return;
+                }
+
+                _values[modId + "\n" + key] = value;
+            }
+
+            public void Clear(string modId)
+            {
+            }
         }
     }
 }

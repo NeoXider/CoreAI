@@ -163,9 +163,22 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             /// <summary>
             /// Actor whose induced-thread budget this record is charged to instead of its owner's actor
-            /// quota (MP-10: a handler started by another actor's remote call); null for every other thread.
+            /// quota (MP-10: a handler started by another actor's remote call, and every thread that
+            /// handler starts in turn); null for every other thread.
             /// </summary>
             public string QuotaActorId { get; set; }
+
+            /// <summary>
+            /// Live threads <see cref="QuotaActorId"/>'s budget allows; the threads this one starts are
+            /// held to the same number. Zero when the record is charged to its owner.
+            /// </summary>
+            public int QuotaLimit { get; set; }
+
+            /// <summary>
+            /// The message of the last induced-budget refusal raised inside this thread, so the thread's
+            /// death by that refusal is told apart from a fault of its owner's code; null when none.
+            /// </summary>
+            public string InducedRefusalMessage { get; set; }
 
             /// <summary>Re-arms a record for a new thread and owner; every per-thread field restarts.</summary>
             public void Reset(IRbxScriptThread thread, string ownerModId)
@@ -180,6 +193,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 TimedSequence = 0;
                 DeferredSequence = 0;
                 QuotaActorId = null;
+                QuotaLimit = 0;
+                InducedRefusalMessage = null;
                 // WHY: SignalWaitGeneration keeps counting across tenants on purpose. A timeout entry is
                 // matched by (record, generation); a monotonic counter can never re-produce a value an
                 // earlier tenant used, so a stale entry can never resume a later tenant.
@@ -198,6 +213,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 TimedSequence = 0;
                 DeferredSequence = 0;
                 QuotaActorId = null;
+                QuotaLimit = 0;
+                InducedRefusalMessage = null;
             }
         }
 
@@ -550,6 +567,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private string _currentInvocationQuotaActorId;
         private string _enqueueQuotaActorId;
         private string _runningOwnerModId;
+        private ThreadRecord _runningRecord;
+        private Action<string, RbxError> _inducedThreadRefused;
         private RbxInstance _currentSignalTombstone;
         private Exception _heldFault;
         private PipelineStage? _currentStage;
@@ -675,6 +694,23 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                    && _inducedThreadsByQuotaActor.TryGetValue(quotaActorId.Trim(), out int count)
                 ? count
                 : 0;
+        }
+
+        /// <summary>
+        /// <c>task.spawn</c>, <c>task.defer</c> and <c>task.delay</c> calls refused because the thread
+        /// making them is charged to another actor whose induced-thread budget was full (A4-01).
+        /// </summary>
+        internal long InducedThreadRefusals { get; private set; }
+
+        /// <summary>
+        /// Raised with the charged actor and the refusal each time <see cref="InducedThreadRefusals"/>
+        /// grows, before the refusal is raised to the calling script. A subscriber that throws is
+        /// reported through <see cref="HostFaulted"/>.
+        /// </summary>
+        internal event Action<string, RbxError> InducedThreadRefused
+        {
+            add => _inducedThreadRefused += value;
+            remove => _inducedThreadRefused -= value;
         }
 
         /// <summary>
@@ -816,7 +852,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         /// Creates and immediately resumes a thread to its first yield or completion. A live thread
         /// this scheduler already owns (a task handle) is resumed now with <paramref name="args"/>
         /// instead (M2-14): a parked thread continues, and a deferred or delayed one runs now and loses
-        /// its pending slot. See <see cref="TakeForReschedule"/> for the refused cases.
+        /// its pending slot. See <see cref="TakeForReschedule"/> for the refused cases. A new thread
+        /// started by a thread charged to another actor is charged to that actor too (see
+        /// <see cref="CreateScheduledRecord"/>).
         /// </summary>
         public IRbxScriptThread Spawn(string ownerModId, object callable, object[] args)
         {
@@ -827,7 +865,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 return existing;
             }
 
-            ThreadRecord record = CreateRecord(ownerModId, callable);
+            ThreadRecord record = CreateScheduledRecord(ownerModId, callable, "task.spawn");
             IRbxScriptThread thread = record.Thread;
             ResumeThread(record, CopyArguments(args));
             TryReleaseRecord(record);
@@ -859,7 +897,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         /// Starts a signal callback on behalf of another actor (MP-10): the thread still runs as
         /// <paramref name="ownerModId"/>'s code, but it is charged to <paramref name="quotaActorId"/>'s
         /// induced-thread budget, which allows <paramref name="maxLiveThreads"/> such threads at once,
-        /// instead of the owner's actor quota. A remote caller can therefore exhaust only its own budget,
+        /// instead of the owner's actor quota, and so is every thread it starts in turn (see
+        /// <see cref="CreateScheduledRecord"/>). A remote caller can therefore exhaust only its own budget,
         /// never the host's. Over that budget (or at <see cref="EmergencyMaxThreads"/>) nothing starts,
         /// null is returned with <paramref name="refusal"/> set, and nothing is reported to the owner:
         /// the owner did nothing wrong, so the caller answers the remote side instead. A null or blank
@@ -900,7 +939,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             ThreadRecord record;
             try
             {
-                record = CreateRecord(ownerModId, callable, quotaActor);
+                record = CreateRecord(ownerModId, callable, quotaActor, limit);
             }
             catch (RbxError error)
             {
@@ -913,6 +952,79 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             ResumeThread(record, CopyArguments(args));
             TryReleaseRecord(record);
             return thread;
+        }
+
+        /// <summary>
+        /// Creates the record of a new <c>task.spawn</c>, <c>task.defer</c> or <c>task.delay</c>
+        /// thread. Started from a thread charged to another actor's induced-thread budget, the new
+        /// thread is charged to that same actor and held to the same limit; over that limit nothing is
+        /// created and <see cref="RbxErrorCode.BudgetExceeded"/> is raised to the calling script.
+        /// </summary>
+        /// <remarks>
+        /// WHY inherited: a handler a remote client's call started runs that client's request, and
+        /// what it schedules is still that request. Charged to the handler's owner instead, one client
+        /// firing at a handler that calls <c>task.delay(60, f)</c> filled the host's whole thread quota
+        /// and got the host's gameplay mod quarantined (A4-01). WHY the refusal is remembered on the
+        /// running record: when it ends the thread, the thread died of the sender's budget, not of a
+        /// fault in its owner's code, and <see cref="ResumeThread"/> must not charge it to the owner.
+        /// </remarks>
+        private ThreadRecord CreateScheduledRecord(string ownerModId, object callable, string operation)
+        {
+            ThreadRecord running = _runningRecord;
+            string quotaActor = running?.QuotaActorId;
+            if (quotaActor == null)
+            {
+                return CreateRecord(ownerModId, callable);
+            }
+
+            int limit = Math.Max(1, running.QuotaLimit);
+            if (CountInducedThreads(quotaActor) >= limit)
+            {
+                RbxError refusal = new(
+                    RbxErrorCode.BudgetExceeded,
+                    "actor '" + quotaActor + "' already has " + limit
+                    + " threads in flight that its remote calls started; " + operation
+                    + " in mod '" + ownerModId + "' did not start another one",
+                    "wait for earlier remote calls to finish before sending more");
+                running.InducedRefusalMessage = refusal.RawMessage;
+                InducedThreadRefusals++;
+                RaiseInducedThreadRefused(quotaActor, refusal);
+                throw refusal;
+            }
+
+            return CreateRecord(ownerModId, callable, quotaActor, limit);
+        }
+
+        private void RaiseInducedThreadRefused(string quotaActorId, RbxError refusal)
+        {
+            Action<string, RbxError> handlers = _inducedThreadRefused;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            try
+            {
+                handlers(quotaActorId, refusal);
+            }
+            catch (Exception exception)
+            {
+                ReportHostFault("InducedThreadRefused subscriber", exception);
+            }
+        }
+
+        /// <summary>
+        /// True when <paramref name="error"/> is the induced-budget refusal raised inside the record's
+        /// own thread: the thread died of its sender's budget, which is not its owner's fault.
+        /// </summary>
+        private static bool DiedOfInducedRefusal(ThreadRecord record, RbxError error)
+        {
+            return record.QuotaActorId != null
+                   && record.InducedRefusalMessage != null
+                   && error != null
+                   && error.Code == RbxErrorCode.BudgetExceeded
+                   && string.Equals(error.RawMessage, record.InducedRefusalMessage,
+                       StringComparison.Ordinal);
         }
 
         /// <summary>
@@ -1058,13 +1170,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         /// Creates a thread for the next deferred resumption point. A live thread this scheduler already
         /// owns (a task handle) moves to the back of the deferred queue instead, with
         /// <paramref name="args"/> as its resume values (M2-14); the running thread may defer itself
-        /// and then yield.
+        /// and then yield. A new thread is charged as <see cref="Spawn"/> charges one.
         /// </summary>
         public IRbxScriptThread Defer(string ownerModId, object callable, object[] args)
         {
             ThreadRecord record = callable is IRbxScriptThread existing
                 ? TakeForReschedule(ownerModId, existing, "task.defer", true)
-                : CreateRecord(ownerModId, callable);
+                : CreateScheduledRecord(ownerModId, callable, "task.defer");
             record.State = ThreadScheduleState.Deferred;
             record.DeferredArguments = CopyArguments(args);
             EnqueueDeferred(record);
@@ -1075,14 +1187,15 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         /// Creates a thread for the next eligible delayed slot. A duration of positive infinity
         /// (<c>task.delay(math.huge, f)</c>) parks the thread: it never resumes, stays cancellable, and
         /// is killed with its owner (M2-17). A live thread this scheduler already owns (a task handle)
-        /// is re-armed for the new duration with <paramref name="args"/> instead (M2-14).
+        /// is re-armed for the new duration with <paramref name="args"/> instead (M2-14). A new thread
+        /// is charged as <see cref="Spawn"/> charges one.
         /// </summary>
         public IRbxScriptThread Delay(string ownerModId, double seconds, object callable, object[] args)
         {
             double duration = ValidateAndNormalizeDuration(seconds, "Delay");
             ThreadRecord record = callable is IRbxScriptThread existing
                 ? TakeForReschedule(ownerModId, existing, "task.delay", true)
-                : CreateRecord(ownerModId, callable);
+                : CreateScheduledRecord(ownerModId, callable, "task.delay");
             record.State = ThreadScheduleState.Delayed;
             if (double.IsPositiveInfinity(duration))
             {
@@ -2139,9 +2252,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 RbxScriptSignal.EnterTombstoneScope(record.ReadableTombstone);
             string previousRunningOwner = _runningOwnerModId;
             _runningOwnerModId = record.OwnerModId;
-            // WHY cleared for the resume: the quota actor belongs to the one handler an invocation
-            // starts. Whatever that handler's code spawns in turn is its owner's own work and is
-            // charged the ordinary way.
+            ThreadRecord previousRunningRecord = _runningRecord;
+            _runningRecord = record;
+            // WHY cleared for the resume: the invocation's quota actor marks the one handler the
+            // invocation starts. The threads that handler's code starts in turn inherit the charge
+            // through the running record instead (see CreateScheduledRecord).
             string previousQuotaActor = _currentInvocationQuotaActorId;
             _currentInvocationQuotaActorId = null;
             RbxScriptThreadResumeResult result;
@@ -2157,6 +2272,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             finally
             {
                 _currentInvocationQuotaActorId = previousQuotaActor;
+                _runningRecord = previousRunningRecord;
                 _runningOwnerModId = previousRunningOwner;
                 RbxScriptSignal.ExitTombstoneScope(previousTombstone);
             }
@@ -2166,6 +2282,15 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 RbxError error = result.Error ?? RbxError.BadArgument(
                     "thread adapter returned a failed resume without an RbxError",
                     "return RbxScriptThreadResumeResult.Failure with a structured error");
+                if (DiedOfInducedRefusal(record, error))
+                {
+                    // WHY killed and not faulted: the refusal was counted and reported against the
+                    // sender where it was raised; reporting it to the owner too made one client's
+                    // flood quarantine the host's handler mod (A4-01).
+                    KillRecord(record);
+                    return;
+                }
+
                 HandleFault(record, error);
                 return;
             }
@@ -2183,6 +2308,12 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     : null;
                 if (terminalFault != null)
                 {
+                    if (DiedOfInducedRefusal(record, terminalFault))
+                    {
+                        KillRecord(record);
+                        return;
+                    }
+
                     HandleFault(record, terminalFault);
                     return;
                 }
@@ -2483,7 +2614,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         }
 
         private ThreadRecord CreateRecord(string ownerModId, object callable,
-            string quotaActorId = null)
+            string quotaActorId = null, int quotaLimit = 0)
         {
             ValidateOwnerModId(ownerModId);
             if (callable == null)
@@ -2561,6 +2692,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             if (quotaActorId != null)
             {
                 record.QuotaActorId = quotaActorId;
+                record.QuotaLimit = quotaLimit;
                 _inducedThreadsByQuotaActor.TryGetValue(quotaActorId, out int induced);
                 _inducedThreadsByQuotaActor[quotaActorId] = induced + 1;
             }

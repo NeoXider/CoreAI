@@ -203,6 +203,14 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         public RbxNetworkDisconnectReason Reason { get; }
     }
 
+    /// <summary>
+    /// Reads the server clock a world tells the time by: the value <c>workspace:GetServerTimeNow()</c>
+    /// returns there now, and how many seconds that value is held ahead of the world's own clock —
+    /// zero while the clock runs, positive while it holds its last reading after the world's clock
+    /// stepped back.
+    /// </summary>
+    public delegate double RbxServerClockReader(out double heldAheadSeconds);
+
     public interface INetworkBridge
     {
         RbxNetworkTopology Topology { get; }
@@ -305,5 +313,44 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// around one forward it.
         /// </remarks>
         bool IsServerClockSynchronized => true;
+
+        /// <summary>
+        /// Whether the server's clock is standing still right now: its wall clock stepped back and
+        /// its <c>GetServerTimeNow</c> holds its last reading until the wall clock catches up. Only a
+        /// client's transport can answer true, and <see cref="ServerClockOffsetSeconds"/> then already
+        /// reproduces the hold.
+        /// </summary>
+        /// <remarks>
+        /// WHY a consumer needs it: a client clock that is kept monotonic slews onto an estimate that
+        /// moved behind it — and an estimate that stands still looks exactly like one that moved
+        /// behind, so the client ran on at half speed while the server's clock stood, and the two
+        /// disagreed by half the step for as long as the hold lasted (A4-08). A consumer that reads
+        /// true holds as the server holds. WHY a default body: a server and the loopback are the
+        /// clock, and never report their own hold as a remote one.
+        /// </remarks>
+        bool IsServerClockHeld => false;
+
+        /// <summary>
+        /// Hands a server-side bridge the clock its world's <c>GetServerTimeNow</c> reads, so the
+        /// server time a transport sends clients is the one the server's own scripts read, held
+        /// exactly as they see it held. A bridge that sends no server time ignores it.
+        /// </summary>
+        /// <remarks>
+        /// WHY the world hands it over: the world keeps its clock monotonic, and a transport that sent
+        /// its raw wall clock told clients about a backward step the server's scripts never saw
+        /// (A4-08, A3-04). WHY a default body: the loopback is the server clock itself, and a transport
+        /// written before this member keeps sending what it sent.
+        /// </remarks>
+        void AttachServerClock(RbxServerClockReader serverClock)
+        {
+        }
+
+        /// <summary>
+        /// Takes back a clock <see cref="AttachServerClock"/> handed over, when its world is disposed;
+        /// a clock attached since by another world is left in place.
+        /// </summary>
+        void DetachServerClock(RbxServerClockReader serverClock)
+        {
+        }
     }
 }

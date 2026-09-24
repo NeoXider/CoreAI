@@ -124,6 +124,62 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void A4_09_AHostsOwnDisconnectActor_EndsTheConnection_AndTheSessionHostForgetsIt()
+        {
+            // WHY: a host tearing a remote player down through the world, not through a kick, only
+            // unbound the connection: no notice, no drop, and the session host kept the session and
+            // the identity for as long as the client stayed connected to nobody (A4-09).
+            RbxPlayer player = Admit(Connection);
+            string actorId = player.NetworkActorId;
+            List<object[]> removing = new();
+            _bindings.Players.PlayerRemoving.Connect((Action<object[]>)removing.Add);
+
+            Assert.IsTrue(_bindings.DisconnectActor(ActorFor(actorId)));
+            _bindings.Scheduler.Advance(0d);
+            _mirror.FlushServer();
+
+            CollectionAssert.AreEqual(new[] { Connection },
+                _mirror.ServerSendTargetsOf<CoreAiDisconnectNoticeMessage>(),
+                "the client is told its session ended before the connection goes");
+            CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests, "the drop waits for a later frame");
+            Assert.AreEqual(0, _sessionHost.LiveSessionCount, "the session host must not keep the session");
+            Assert.IsFalse(_sessionHost.HasLiveSession(Connection));
+            Assert.IsFalse(_sessionHost.TryGetIdentity(actorId, out _, out _, out _),
+                "nor the identity of a player the world removed");
+            Assert.AreEqual(1, _server.WorldReleasedConnections);
+
+            NextFrame();
+
+            CollectionAssert.AreEqual(new[] { Connection }, _mirror.ServerDisconnectRequests,
+                "the connection ends at the transport, as a kicked one does");
+            Assert.AreEqual(1, removing.Count, "PlayerRemoving fired once, for the world's own disconnect");
+            OfflineMirror.DeliverToServer(Connection, ClientEvent((RbxRemoteEvent)_registry.Create("RemoteEvent")));
+            _server.NotifyDisconnected(Connection, RbxNetworkDisconnectReason.TransportLost);
+            _bindings.Scheduler.Advance(0d);
+            Assert.AreEqual(1, removing.Count, "nothing is torn down twice");
+            CollectionAssert.IsEmpty(_bindings.Players.GetPlayers());
+        }
+
+        [Test]
+        public void A4_09_Negative_ATransportDrop_TearsTheSessionDown_WithoutANoticeOrASecondDrop()
+        {
+            RbxPlayer player = Admit(Connection);
+
+            _server.NotifyDisconnected(Connection, RbxNetworkDisconnectReason.TransportLost);
+            _bindings.Scheduler.Advance(0d);
+            _mirror.FlushServer();
+            NextFrame();
+
+            CollectionAssert.IsEmpty(_mirror.ServerSendTargetsOf<CoreAiDisconnectNoticeMessage>(),
+                "a connection that is already gone is told nothing by the world's own teardown");
+            CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests,
+                "the transport reported the drop; the bridge owes none of its own");
+            Assert.AreEqual(0, _server.WorldReleasedConnections);
+            Assert.AreEqual(0, _sessionHost.LiveSessionCount);
+            Assert.IsTrue(player.IsDestroyed);
+        }
+
+        [Test]
         public void Kick_WithAMessage_TellsTheKickedClientThatText_AndALongOneWholeUpToTheCeiling()
         {
             // WHY: the world's kick dropped the script's message, so every kicked client was told the
@@ -317,6 +373,14 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.IsTrue(_bindings.Players.TryGetByActorId(admission.Context.ActorId, out RbxPlayer player),
                 "the world must have created the admitted player");
             return player;
+        }
+
+        /// <summary>The trusted context the host's own code holds for an actor.</summary>
+        private static ActorContext ActorFor(string actorId)
+        {
+            return new LocalActorIdentityProvider(
+                    actorId, "session-" + actorId, WorldId, ActorGrantSet.None, AgentMemoryScope.Empty)
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
         }
 
         /// <summary>The envelope <c>RemoteEvent:FireServer()</c> puts on the wire, with no arguments.</summary>

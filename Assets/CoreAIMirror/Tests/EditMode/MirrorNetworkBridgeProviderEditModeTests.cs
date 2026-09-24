@@ -224,11 +224,16 @@ namespace CoreAI.Net.Mirror.Tests
             double now = 0d;
             _provider.ClockSeconds = () => now;
             INetworkBridge bridge = _provider.Bridge;
+            // WHY a bound peer whose connection Mirror does not hold: a request to a player with no
+            // binding fails at once (A4-07), so only a bound one is left for the pump to time out.
+            ((MirrorNetworkBridge)bridge).BindConnection(55,
+                new RbxNetworkPeer("actor-silent", "session-silent", "55"));
             List<RbxNetworkResponse> completed = new();
             bridge.SendRequest(
                 new RbxNetworkRequestMessage(new InstanceId(3UL),
-                    RbxNetworkDirection.ServerToClient, null, "actor-nobody", Array.Empty<byte>()),
+                    RbxNetworkDirection.ServerToClient, null, "actor-silent", Array.Empty<byte>()),
                 completed.Add);
+            Assert.IsEmpty(completed, "a bound player is asked and awaited");
 
             now = MirrorNetworkBridge.RequestTimeoutSeconds - 0.5d;
             InvokeUpdate(_provider);

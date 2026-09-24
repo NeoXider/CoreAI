@@ -36,7 +36,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
 
             public bool CompleteOnResume { get; }
 
-            public RbxError Failure { get; }
+            /// <summary>
+            /// The error the resume reports; settable so a plan's own <see cref="OnResume"/> can fail
+            /// with what the scheduler raised inside it, the way an uncaught Lua error ends a thread.
+            /// </summary>
+            public RbxError Failure { get; set; }
 
             /// <summary>Error the fake adapter reports after a "successful" resume that ended the thread.</summary>
             public RbxError TerminalFault { get; }
@@ -1985,6 +1989,181 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
                 new[] { "client-a", "in-thread:none", "none", "in-thread:none" }, seen,
                 "the sender reaches the invocation it fired, never the code that invocation runs");
             Assert.IsNull(scheduler.CurrentSignalQuotaActorId);
+        }
+
+        [Test]
+        public void A4_01_ThreadsAHandlerChargedToASenderStarts_AreChargedToThatSender_NotTheOwner()
+        {
+            // WHY: a handler a remote call started was charged to the sender, but the task.delay it
+            // made was charged to the handler's owner, so one client firing at a handler that
+            // schedules work filled the host's whole thread quota (A4-01).
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureActorQuota(2, ownerModId => "host");
+            List<string> faults = new();
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) => faults.Add(ownerModId);
+            List<string> outcomes = new();
+            FakeThreadPlan handler = new((FakeScriptThread thread, object[] args) =>
+            {
+                for (int index = 0; index < 3; index++)
+                {
+                    try
+                    {
+                        scheduler.Delay("host-mod", 60d, new FakeThreadPlan(), Array.Empty<object>());
+                        outcomes.Add("started");
+                    }
+                    catch (RbxError error)
+                    {
+                        outcomes.Add(RbxError.ToWireName(error.Code) + ":" + error.RawMessage);
+                    }
+                }
+            }, completeOnResume: false);
+
+            IRbxScriptThread started = scheduler.SpawnSignal("host-mod", handler, Array.Empty<object>(),
+                "client-a", 3, out RbxError refusal);
+
+            Assert.IsNotNull(started);
+            Assert.IsNull(refusal);
+            Assert.AreEqual(3, outcomes.Count);
+            Assert.AreEqual("started", outcomes[0]);
+            Assert.AreEqual("started", outcomes[1]);
+            StringAssert.StartsWith("BUDGET_EXCEEDED:", outcomes[2],
+                "the third thread would be the sender's fourth in flight");
+            StringAssert.Contains("client-a", outcomes[2]);
+            StringAssert.Contains("task.delay", outcomes[2]);
+            Assert.AreEqual(3, scheduler.CountInducedThreads("client-a"),
+                "the handler and the two delayed threads it started are all the sender's");
+            Assert.IsEmpty(faults, "a refusal the handler caught is nobody's fault");
+            Assert.DoesNotThrow(() => scheduler.Spawn("host-mod",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>()));
+            Assert.DoesNotThrow(() => scheduler.Spawn("host-mod",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>()),
+                "the owner's own quota of two is untouched by what the sender's handler scheduled");
+
+            Assert.AreEqual(5, scheduler.KillOwnedBy("host-mod"));
+            Assert.AreEqual(0, scheduler.CountInducedThreads("client-a"),
+                "every inherited charge is released with its thread");
+        }
+
+        [Test]
+        public void A4_01_SpawnAndDeferInsideAChargedHandler_InheritTheCharge_AndSoDoesTheirOwnWork()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureActorQuota(8, ownerModId => "host");
+            FakeThreadPlan grandchild = new(completeOnResume: false);
+            FakeThreadPlan child = new((FakeScriptThread thread, object[] args) =>
+                scheduler.Spawn("host-mod", grandchild, Array.Empty<object>()), completeOnResume: false);
+            FakeThreadPlan handler = new((FakeScriptThread thread, object[] args) =>
+            {
+                scheduler.Spawn("host-mod", child, Array.Empty<object>());
+                scheduler.Defer("host-mod", new FakeThreadPlan(completeOnResume: false),
+                    Array.Empty<object>());
+            }, completeOnResume: false);
+
+            scheduler.SpawnSignal("host-mod", handler, Array.Empty<object>(), "client-a", 32,
+                out RbxError _);
+            scheduler.Advance(0d);
+
+            Assert.AreEqual(4, scheduler.CountInducedThreads("client-a"),
+                "the handler, its spawned child, that child's own spawn and the deferred thread");
+            Assert.AreEqual(4, scheduler.LiveThreadCount);
+            scheduler.Spawn("host-mod", new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            Assert.AreEqual(4, scheduler.CountInducedThreads("client-a"),
+                "a thread the host starts itself stays the host's");
+        }
+
+        [Test]
+        public void A4_01_AHandlerThatDiesOfItsSendersRefusal_IsNotItsOwnersFault()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            List<string> faults = new();
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) => faults.Add(ownerModId);
+            FakeThreadPlan scheduling = new((FakeScriptThread thread, object[] args) =>
+                scheduler.Delay("host-mod", 60d, new FakeThreadPlan(), Array.Empty<object>()));
+            scheduler.SpawnSignal("host-mod", scheduling, Array.Empty<object>(), "client-a", 2,
+                out RbxError _);
+            Assert.AreEqual(1, scheduler.CountInducedThreads("client-a"),
+                "the first handler finished; the thread it delayed is still in flight on its sender");
+            RbxError caught = null;
+            FakeThreadPlan dying = null;
+            dying = new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+            {
+                try
+                {
+                    scheduler.Spawn("host-mod", new FakeThreadPlan(), Array.Empty<object>());
+                }
+                catch (RbxError error)
+                {
+                    caught = error;
+                    dying.Failure = error;
+                }
+            }, completeOnResume: false);
+
+            IRbxScriptThread handler = scheduler.SpawnSignal("host-mod", dying, Array.Empty<object>(),
+                "client-a", 2, out RbxError _);
+
+            Assert.IsNotNull(caught, "the second handler and the delayed thread fill the budget of two");
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, caught.Code);
+            Assert.IsTrue(handler.IsDead, "the refusal went uncaught and ended the handler");
+            Assert.IsEmpty(faults,
+                "a handler that died because its sender's budget was full did nothing wrong");
+            Assert.AreEqual(1, scheduler.CountInducedThreads("client-a"),
+                "the dead handler released its charge; only the delayed thread is still in flight");
+        }
+
+        [Test]
+        public void A4_01_Negative_AChargedHandlerThatFailsForItsOwnReason_IsStillItsOwnersFault()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            List<RbxError> faults = new();
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) => faults.Add(error);
+            FakeThreadPlan broken = new(completeOnResume: false,
+                failure: RbxError.BadArgument("attempt to index nil", "check the value first"));
+            FakeThreadPlan forgedExcuse = new(completeOnResume: false,
+                failure: new RbxError(RbxErrorCode.BudgetExceeded,
+                    "actor 'client-a' already has 1 threads in flight that its remote calls started; "
+                    + "task.spawn in mod 'host-mod' did not start another one",
+                    "wait for earlier remote calls to finish before sending more"));
+
+            scheduler.SpawnSignal("host-mod", broken, Array.Empty<object>(), "client-a", 4,
+                out RbxError _);
+            scheduler.SpawnSignal("host-mod", forgedExcuse, Array.Empty<object>(), "client-a", 4,
+                out RbxError _);
+
+            Assert.AreEqual(2, faults.Count,
+                "only a refusal the scheduler raised inside the thread excuses its death; an error "
+                + "that merely reads like one is the owner's own");
+            Assert.AreEqual(RbxErrorCode.BadArgument, faults[0].Code);
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, faults[1].Code);
+            Assert.AreEqual(0, scheduler.CountInducedThreads("client-a"));
+        }
+
+        [Test]
+        public void A4_01_ARefusedInheritedStart_IsCountedAndRaisedWithItsSender()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            List<string> refusedSenders = new();
+            scheduler.InducedThreadRefused += (string sender, RbxError refusal) =>
+                refusedSenders.Add(sender + ":" + RbxError.ToWireName(refusal.Code));
+            FakeThreadPlan handler = new((FakeScriptThread thread, object[] args) =>
+            {
+                for (int index = 0; index < 3; index++)
+                {
+                    try
+                    {
+                        scheduler.Defer("host-mod", new FakeThreadPlan(), Array.Empty<object>());
+                    }
+                    catch (RbxError)
+                    {
+                    }
+                }
+            }, completeOnResume: false);
+
+            scheduler.SpawnSignal("host-mod", handler, Array.Empty<object>(), "client-a", 2,
+                out RbxError _);
+
+            Assert.AreEqual(2L, scheduler.InducedThreadRefusals);
+            CollectionAssert.AreEqual(new[] { "client-a:BUDGET_EXCEEDED", "client-a:BUDGET_EXCEEDED" },
+                refusedSenders);
         }
 
         [Test]

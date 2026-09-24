@@ -180,6 +180,7 @@ namespace CoreAI.Net.Mirror.Tests
             _client.Dispose();
             _client = new MirrorNetworkBridge(isServer: false, maxClientRequestsPerSecond: 2,
                 clockSeconds: () => 0d, log: _said.Add);
+            _client.BindAdmittedActor(Admitted);
             Assert.IsFalse(NetworkClient.isConnected);
             List<RbxNetworkResponse> completed = new();
 
@@ -212,8 +213,45 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void A4_04_AConnectedClientNotAdmittedYet_DropsItsSends_CountedUnchargedAndSaidOnce()
+        {
+            // WHY: the transport connects before the admission is answered, and a remote handed to
+            // Mirror in that window reached the server on an unauthenticated connection — Mirror
+            // disconnects the joining client for it (A4-04).
+            _client.Dispose();
+            _client = new MirrorNetworkBridge(isServer: false, maxClientRequestsPerSecond: 2,
+                clockSeconds: () => 0d, log: _said.Add);
+            Transport.active.OnClientConnected?.Invoke();
+            Assert.IsTrue(NetworkClient.isConnected);
+            List<RbxNetworkResponse> completed = new();
+
+            for (int fire = 0; fire < 3; fire++)
+            {
+                Assert.DoesNotThrow(() => _client.SendEvent(ClientEvent()),
+                    "an unadmitted fire is a drop, never a budget error");
+            }
+
+            _client.SendRequest(ClientRequest(), completed.Add);
+
+            Assert.AreEqual(4, _client.UnadmittedSendsDropped);
+            Assert.AreEqual(0, _client.PacketsSent, "nothing is handed to Mirror before the admission");
+            Assert.AreEqual(1, completed.Count, "an InvokeServer before admission fails now");
+            Assert.IsFalse(completed[0].Succeeded);
+            StringAssert.Contains("not been admitted", completed[0].Error);
+            Assert.AreEqual(1, _said.Count, "one line for the stretch, not one per fire");
+
+            _client.BindAdmittedActor(Admitted);
+            _client.SendEvent(ClientEvent());
+            _client.SendEvent(ClientEvent());
+
+            Assert.AreEqual(2, _client.PacketsSent, "admitted, the budget applies whole from its first fire");
+            Assert.AreEqual(4, _client.UnadmittedSendsDropped);
+        }
+
+        [Test]
         public void AConnectedClient_HandsItsSendsToTheTransport_AndTheUnsentLineIsArmedAgainByADrop()
         {
+            _client.BindAdmittedActor(Admitted);
             _client.SendEvent(ClientEvent());
             Assert.AreEqual(1, _said.Count);
             Transport.active.OnClientConnected?.Invoke();
@@ -314,6 +352,7 @@ namespace CoreAI.Net.Mirror.Tests
         public void AnOpenInvokeServer_FailsAtOnce_WhenTheConnectionDrops()
         {
             Transport.active.OnClientConnected?.Invoke();
+            _client.BindAdmittedActor(Admitted);
             List<RbxNetworkResponse> completed = new();
             _client.SendRequest(ClientRequest(), completed.Add);
             Assert.IsEmpty(completed, "connected, the request is on its way");
@@ -347,6 +386,7 @@ namespace CoreAI.Net.Mirror.Tests
         public void Dispose_FailsTheOpenRequests_InsteadOfDroppingThem()
         {
             Transport.active.OnClientConnected?.Invoke();
+            _client.BindAdmittedActor(Admitted);
             List<RbxNetworkResponse> completed = new();
             _client.SendRequest(ClientRequest(), completed.Add);
 
@@ -454,6 +494,101 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.AreEqual(serverUnix + 5.3d, ServerNow(clientWall), 1e-4,
                 "a new connection may be another server: its first anchor replaces the estimate");
             Assert.AreEqual(4, _client.ClockAnchorsReceived);
+        }
+
+        [Test]
+        public void A4_13_ASingleAnchorFarBehind_IsSetAside_AndTakenOnlyWhenTheNextAgreesWithIt()
+        {
+            // WHY: one periodic anchor held up in the network for more than the threshold looked like
+            // the server's clock stepping back, and replaced the estimate: every clock on the client
+            // ran seconds behind until the next anchor (A4-13).
+            const double serverUnix = 1790000000d;
+            FakeWallClock clientWall = new(serverUnix, 300d);
+            RebuildClient(clientWall);
+            _client.RoundTripSeconds = () => 0d;
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix });
+            clientWall.Advance(5d);
+
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix + 3d });
+
+            Assert.AreEqual(serverUnix + 5d, ServerNow(clientWall), 1e-4,
+                "one anchor two seconds behind is a late packet until another says the same");
+            Assert.AreEqual(1, _client.ClockAnchorsSetAside);
+            Assert.AreEqual(1, _client.ClockAnchorsReceived, "a set-aside anchor is not taken");
+
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix + 3d });
+
+            Assert.AreEqual(serverUnix + 3d, ServerNow(clientWall), 1e-4,
+                "the second in a row that far behind is the server's clock, and it is taken whole");
+            Assert.AreEqual(2, _client.ClockAnchorsReceived);
+        }
+
+        [Test]
+        public void A4_13_Negative_AnAnchorThatAgreesAfterAnOutlier_IsBlended_AndTheOutlierForgotten()
+        {
+            const double serverUnix = 1790000000d;
+            FakeWallClock clientWall = new(serverUnix, 300d);
+            RebuildClient(clientWall);
+            _client.RoundTripSeconds = () => 0d;
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix });
+
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix - 2d });
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix + 0.4d });
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix - 2d });
+
+            Assert.AreEqual(serverUnix + 0.1d, ServerNow(clientWall), 1e-4,
+                "the agreeing anchor is blended as usual, and the next outlier needs a second of its own");
+            Assert.AreEqual(2, _client.ClockAnchorsSetAside);
+        }
+
+        [Test]
+        public void A4_08_AHeldAnchor_HoldsTheClientsServerTime_UntilItsRunningClockCatchesUp()
+        {
+            const double serverUnix = 1790000000d;
+            FakeWallClock clientWall = new(serverUnix + 3600d, 300d);
+            RebuildClient(clientWall);
+            _client.RoundTripSeconds = () => 0d;
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix });
+
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage
+            {
+                ServerUnixSeconds = serverUnix,
+                HeldAheadOfWallSeconds = 10d
+            });
+
+            Assert.IsTrue(_client.IsServerClockHeld);
+            Assert.AreEqual(serverUnix, ServerNow(clientWall), 1e-4, "held at the server's reading");
+            clientWall.Advance(9d);
+            Assert.AreEqual(serverUnix, ServerNow(clientWall), 1e-4, "still held nine seconds on");
+            Assert.IsTrue(_client.IsServerClockHeld);
+            clientWall.Advance(2d);
+            Assert.IsFalse(_client.IsServerClockHeld, "the hold ends where the running clock catches up");
+            Assert.AreEqual(serverUnix + 1d, ServerNow(clientWall), 1e-4,
+                "and from there the server's time runs again");
+        }
+
+        [Test]
+        public void A4_08_Negative_AHoldThatIsNegativeOrNotFinite_IsDroppedAsMalformed()
+        {
+            const double serverUnix = 1790000000d;
+            FakeWallClock clientWall = new(serverUnix, 300d);
+            RebuildClient(clientWall);
+            _client.RoundTripSeconds = () => 0d;
+            OfflineMirror.DeliverToClient(new CoreAiServerClockMessage { ServerUnixSeconds = serverUnix });
+
+            foreach (double bad in new[] { -1d, double.NaN, double.PositiveInfinity })
+            {
+                OfflineMirror.DeliverToClient(new CoreAiServerClockMessage
+                {
+                    ServerUnixSeconds = serverUnix + 100d,
+                    HeldAheadOfWallSeconds = bad
+                });
+            }
+
+            Assert.AreEqual(3, _client.MalformedPacketsDropped);
+            Assert.AreEqual(1, _client.ClockAnchorsReceived);
+            Assert.IsFalse(_client.IsServerClockHeld);
+            Assert.AreEqual(serverUnix, ServerNow(clientWall), 1e-4);
         }
 
         [Test]

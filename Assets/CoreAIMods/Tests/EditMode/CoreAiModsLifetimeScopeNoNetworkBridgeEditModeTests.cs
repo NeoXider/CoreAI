@@ -736,6 +736,53 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Lua_MP_10_A4_01_AFloodThroughAHandlerThatSchedulesWork_ChargesTheSender_NeverTheHost()
+        {
+            // WHY: the sender was charged for the handler thread only; the task.delay inside it was
+            // charged to the handler's owner, so one client firing well under any rate limit filled
+            // the host's thread quota, broke the host's own task.spawn and got the host's gameplay mod
+            // quarantined (A4-01). The Linux-run twin is in RbxTaskSchedulerLuaBindingsEditModeTests.
+            using ProductionNetworkHarness harness = new();
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext flooder = Actor("a4-01-flood-actor");
+            int budget = LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender;
+
+            harness.Runtime.LoadMod(serverActor, "a4-01-server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'Cooldown'
+                remote.Parent = workspace
+                local handled = 0
+                remote.OnServerEvent:Connect(function(player)
+                    handled = handled + 1
+                    store_set('handled', tostring(handled))
+                    task.delay(60, function() end)
+                end)", persistToStore: false);
+            harness.Runtime.LoadMod(flooder, "a4-01-flooder", @"
+                local remote = workspace:FindFirstChild('Cooldown')
+                for index = 1, 300 do remote:FireServer(index) end", persistToStore: false);
+            harness.PumpFrames(3);
+
+            harness.Runtime.LoadMod(serverActor, "a4-01-host-work",
+                "task.spawn(function() store_set('ran', 'yes') end)", persistToStore: false);
+
+            Assert.AreEqual("yes", harness.Store.Get("a4-01-host-work", "ran"),
+                "the host's own thread quota is untouched by what the client's calls scheduled");
+            Assert.AreEqual("300", harness.Store.Get("a4-01-server", "handled"));
+            Assert.AreEqual(budget - 1, harness.Bindings.Scheduler.CountInducedThreads(flooder.ActorId),
+                "the delayed threads are the sender's; each handler holds one slot while it runs");
+            Assert.IsEmpty(harness.Runtime.GetRecentHandlerErrors(serverActor, "a4-01-server"),
+                "a task.delay refused for the sender's budget is not the handler owner's fault");
+            foreach (LuaModInfo info in harness.Runtime.ListMods(serverActor))
+            {
+                if (info.Id == "a4-01-server")
+                {
+                    Assert.IsFalse(info.Quarantined, "one client's flood must not quarantine the host's mod");
+                }
+            }
+        }
+
+        [Test]
         public void Lua_NetworkProductionPath_ForeignActorCannotMutatePlayerIdentity()
         {
             using ProductionNetworkHarness harness = new();

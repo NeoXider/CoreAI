@@ -384,10 +384,48 @@ namespace CoreAI.Net.Mirror.Tests
 
             _bridge.ReceiveServerResponse(-1, Answer(1u));
 
-            Assert.IsEmpty(completed, "a request that reached no connection is completed by none");
+            Assert.AreEqual(1, completed.Count,
+                "a request that reached no connection fails once, at once, and no response completes it");
+            Assert.IsFalse(completed[0].Succeeded);
+            StringAssert.Contains("not connected", completed[0].Error,
+                "the failure is the bridge's own, not an answer from a connection");
             Assert.AreEqual(1, _bridge.OrphanResponsesDropped);
             Assert.AreEqual(1, _bridge.UnroutablePacketsDropped,
                 "a request addressed to nobody never left, and that is counted");
+        }
+
+        [Test]
+        public void A4_07_InvokeClientToAPlayerWithNoConnection_FailsAtOnce_AndLeavesNothingPending()
+        {
+            // WHY: the request was recorded as pending with no connection to answer it, so the
+            // server script waited the whole thirty seconds for a player who had left (A4-07).
+            List<RbxNetworkResponse> completed = new();
+
+            _bridge.SendRequest(new RbxNetworkRequestMessage(new InstanceId(9UL),
+                RbxNetworkDirection.ServerToClient, null, "left-the-game", new byte[] { 1 }), completed.Add);
+
+            Assert.AreEqual(1, completed.Count, "answered at once, not at the timeout");
+            Assert.IsFalse(completed[0].Succeeded);
+            StringAssert.Contains("the player is not connected", completed[0].Error);
+            Assert.AreEqual(1, _bridge.UnroutablePacketsDropped);
+            _now = MirrorNetworkBridge.RequestTimeoutSeconds + 1d;
+            _bridge.PumpTimeouts();
+            Assert.AreEqual(1, completed.Count, "nothing was left pending to fail a second time");
+            Assert.AreEqual(0, _bridge.TimedOutRequests);
+        }
+
+        [Test]
+        public void A4_07_Negative_InvokeClientToABoundPlayer_StillWaitsForItsAnswer()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            List<RbxNetworkResponse> completed = new();
+
+            _bridge.SendRequest(ServerRequest(), completed.Add);
+
+            Assert.IsEmpty(completed, "a player the bridge holds a connection for is asked, and awaited");
+            _bridge.ReceiveServerResponse(11, Answer(1u));
+            Assert.AreEqual(1, completed.Count);
+            Assert.IsTrue(completed[0].Succeeded);
         }
 
         [Test]

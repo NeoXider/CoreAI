@@ -154,9 +154,12 @@ namespace CoreAI.Net.Mirror.Tests
                 "KNOWN LIMITATION, not a contract: a server bridge installs server handlers only, and "
                 + "the provider refuses a client bridge while the server is active, so a Mirror HOST - "
                 + "server and local client in one process, the most common Mirror topology - has no "
-                + "client-side remotes at all. This test pins today's behaviour so a change is noticed; "
-                + "it does NOT say the behaviour is right. When host mode is fixed this test must be "
-                + "rewritten, not kept green. Tracked in TODO.md under the MVP2.5 transport gaps.");
+                + "client-side remotes at all. The host's own local client connection is refused as a "
+                + "world player, loudly, and left on Mirror (A4-10; "
+                + "MirrorProviderAdmissionFailureEditModeTests proves it); the host's player is a "
+                + "host-local actor served in process. This test pins today's behaviour so a change is "
+                + "noticed; it does NOT say the behaviour is right. When host mode is fixed this test "
+                + "must be rewritten, not kept green. Tracked in TODO.md under the MVP2.5 transport gaps.");
         }
 
         [Test]
@@ -191,10 +194,15 @@ namespace CoreAI.Net.Mirror.Tests
             StartServerAndAdmit(bridge);
             OfflineMirror.StopServer();
             Frame();
+            // WHY a bound peer whose connection Mirror does not hold: a request to a player with no
+            // binding fails at once (A4-07), and one on a connection Mirror holds is failed by the
+            // stop that reports it lost; only this one is left for the conflict frame's pump.
+            bridge.BindConnection(55, new RbxNetworkPeer("actor-silent", "session-silent", "55"));
             bridge.SendRequest(
                 new RbxNetworkRequestMessage(new InstanceId(3UL),
-                    RbxNetworkDirection.ServerToClient, null, "actor-nobody", Array.Empty<byte>()),
+                    RbxNetworkDirection.ServerToClient, null, "actor-silent", Array.Empty<byte>()),
                 completed.Add);
+            Assert.IsEmpty(completed, "the request must still be open when the conflict begins");
             OfflineMirror.StartClient();
             LogAssert.Expect(LogType.Error, new Regex("running as a client"));
             Frame();

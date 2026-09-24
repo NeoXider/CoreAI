@@ -116,6 +116,55 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void A4_10_HostMode_TheHostsOwnLocalClient_IsRefusedAsAPlayerLoudly_AndLeftOnMirror()
+        {
+            // WHY: in Mirror host mode the host's own client connection was admitted as a remote
+            // player, never acknowledged readiness — no CoreAI client bridge sits beside a server
+            // one — and was dropped from its own host ten seconds later with a line blaming an old
+            // client (A4-10).
+            double now = 0d;
+            _provider.ClockSeconds = () => now;
+            List<string> connected = new();
+            _provider.AttachWorld(context =>
+            {
+                connected.Add(context.ActorId);
+                return true;
+            }, _ => true);
+            MirrorNetworkBridge bridge = (MirrorNetworkBridge)_provider.Bridge;
+            OfflineMirror.StartServer();
+            _authenticator.OnStartServer();
+            LocalConnectionToClient local = new() { isAuthenticated = true };
+            NetworkServer.AddConnection(local);
+            try
+            {
+                Assert.IsTrue(_authenticator.Decide(local.connectionId, "localhost",
+                    Encoding.UTF8.GetBytes(Credential)).Admitted);
+                LogAssert.Expect(LogType.Error, new Regex("host mode is not supported"));
+
+                _authenticator.OnServerAuthenticated.Invoke(local);
+                InvokeUpdate(_provider);
+                now = MirrorNetworkBridge.ReadinessTimeoutSeconds + 1d;
+                InvokeUpdate(_provider);
+
+                CollectionAssert.IsEmpty(connected, "the host's own client is no world player");
+                Assert.AreEqual(1, _provider.SessionHost.HostModeConnectionsRefused);
+                Assert.AreEqual(0, _provider.SessionHost.LiveSessionCount);
+                CollectionAssert.IsEmpty(bridge.ActorIds);
+                Assert.AreEqual(0, bridge.ReadinessTimeouts, "nothing waits for a readiness it cannot send");
+                Assert.IsTrue(NetworkServer.connections.TryGetValue(local.connectionId,
+                        out NetworkConnectionToClient still) && ReferenceEquals(still, local),
+                    "the host's local client is left to Mirror, not dropped");
+                CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests);
+            }
+            finally
+            {
+                // WHY removed by hand: Mirror's shutdown disconnects every connection, and a local one
+                // with no local client behind it has nothing to disconnect.
+                NetworkServer.RemoveConnection(local.connectionId);
+            }
+        }
+
+        [Test]
         public void AConnectionThatLeftBeforeTheDrop_IsNotTouched_NorIsAStrangerNowOnItsId()
         {
             _provider.AttachWorld(_ => false, _ => true);

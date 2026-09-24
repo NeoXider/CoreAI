@@ -120,13 +120,17 @@ namespace CoreAI.Net.Mirror
     /// connection map; a field here would be a claim the server must ignore.
     /// <para>
     /// Wire compatibility of the three messages below: they are additive, and mixed versions fail
-    /// loudly instead of half-working. A server that predates them has no handler for this one, so
-    /// its Mirror disconnects a newer client right after admission, with an error in the server log.
-    /// A client that predates them never sends it, so a newer server holds that client's reliable
-    /// remotes and drops it at the readiness deadline with a log line naming the cause; the clock
-    /// anchor goes only to acknowledged connections, so such a client is never sent a message it
-    /// cannot read before that. Server and client therefore run the same CoreAI version, as the
-    /// admission response already requires.
+    /// loudly instead of half-working — provided Mirror's <c>exceptionsDisconnect</c> is on, its
+    /// default. A server that predates them has no handler for this one, so its Mirror disconnects a
+    /// newer client right after admission, with an error in the server log. A client that predates
+    /// them never sends it, so a newer server holds that client's reliable remotes and drops it at
+    /// the readiness deadline with a log line naming the cause; the clock anchor goes only to
+    /// acknowledged connections, so such a client is never sent a message it cannot read before
+    /// that. A field added to a message is not caught this way: a reader that meets fewer bytes than
+    /// it expects throws inside Mirror's handler, which disconnects only with
+    /// <c>exceptionsDisconnect</c> on and otherwise logs and keeps the connection, one message
+    /// lost. Server and client therefore run the same CoreAI version, as the admission response
+    /// already requires; nothing on the wire negotiates it.
     /// </para>
     /// </remarks>
     public struct CoreAiClientReadyMessage : NetworkMessage
@@ -134,21 +138,33 @@ namespace CoreAI.Net.Mirror
     }
 
     /// <summary>
-    /// The server's wall clock at the moment of sending, so a client can tell the server's time from
-    /// its own. Sent to a connection when it acknowledges readiness, then to every acknowledged
-    /// connection at an interval.
+    /// The server's time at the moment of sending, so a client can tell the server's time from its
+    /// own. Sent to a connection when it acknowledges readiness, to every acknowledged connection at
+    /// an interval, and at once when the server's clock leaves the course its clients extrapolate.
     /// </summary>
     /// <remarks>
     /// WHY Unix time and not Mirror's clocks: Mirror's <c>NetworkTime</c> counts seconds since each
     /// process started, and its client offset compares two such uptimes — which says nothing about
     /// the wall clock <c>workspace:GetServerTimeNow()</c> reports. The client carries this anchor
     /// forward on its own monotonic clock, so neither machine's uptime nor the client's wall clock
-    /// enters the result.
+    /// enters the result. WHY the hold travels too: after the server's wall clock steps back, the
+    /// server's <c>GetServerTimeNow</c> holds its last reading until the wall clock catches up, and a
+    /// client that knows only the time extrapolates past a server that stands still.
     /// </remarks>
     public struct CoreAiServerClockMessage : NetworkMessage
     {
-        /// <summary>The server's Unix time, in seconds with a fraction, when the message was sent.</summary>
+        /// <summary>
+        /// The server's Unix time, in seconds with a fraction, when the message was sent: what the
+        /// server's own <c>GetServerTimeNow</c> read then.
+        /// </summary>
         public double ServerUnixSeconds;
+
+        /// <summary>
+        /// How many seconds <see cref="ServerUnixSeconds"/> is held ahead of the server's running
+        /// clock; zero while the server's clock runs. The running clock catches up with the held
+        /// value this many seconds later, and the hold ends there.
+        /// </summary>
+        public double HeldAheadOfWallSeconds;
     }
 
     /// <summary>Why the server is about to close a client's connection.</summary>
