@@ -133,8 +133,10 @@ namespace CoreAI.Mods.WorldPackages
 
     /// <summary>
     /// Durable record of the world that opens on the next start: a create-once copy of a package the
-    /// player confirmed, or a marker that asks for the default world. Only trusted host code writes it
-    /// (a player confirmation or the Hub reset); no AI tool reaches it.
+    /// player confirmed (kept current by the session after each gated change to that world), or a
+    /// marker that asks for the default world. Only trusted host code writes it (a player
+    /// confirmation, the session's refresh of the confirmed world, or the Hub reset); no AI tool can
+    /// choose what it names.
     /// </summary>
     public interface IRbxWorldStartupStore
     {
@@ -352,6 +354,13 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         public const int DefaultAutoBackupCapacity = 10;
+
+        /// <summary>Default number of manual slots one store keeps; a further create-once save is refused.</summary>
+        public const int DefaultMaximumManualSlots = 64;
+
+        /// <summary>Default total bytes of all manual slots together; a save that would pass it is refused.</summary>
+        public const long DefaultMaximumManualSlotBytes = 256L * 1024L * 1024L;
+
         public const int MaximumWebGlSafePackageBytes = 4 * 1024 * 1024;
         public const int MaximumWebGlSafeInstances = 4096;
         public const int MaximumWebGlSafeCollectionItems = 32768;
@@ -363,6 +372,8 @@ namespace CoreAI.Mods.WorldPackages
         private const string StartupMetadataExtension = ".json";
         private const int StartupSequenceDigits = 10;
         private const int MaximumStartupMetadataBytes = 64 * 1024;
+        private const string TemporaryExtension = ".tmp";
+        private const int TemporaryGuidLength = 32;
 
         private static readonly string[] StartupEntryExtensions =
         {
@@ -375,6 +386,8 @@ namespace CoreAI.Mods.WorldPackages
         private readonly string _autoDirectory;
         private readonly string _startupDirectory;
         private readonly int _autoBackupCapacity;
+        private readonly int _maximumManualSlots;
+        private readonly long _maximumManualSlotBytes;
         private readonly Func<CancellationToken, UniTask<bool>> _persistenceSyncAsync;
         private readonly Func<DateTime> _utcNow;
         private readonly IRbxWorldPackageFileSystem _fileSystem;
@@ -385,13 +398,19 @@ namespace CoreAI.Mods.WorldPackages
         /// selected in one composition never opens in another with a different Lua tier. Empty keeps the
         /// shared <c>Startup</c> directory. Manual slots and autosaves are not namespaced.
         /// </param>
+        /// <param name="maximumManualSlots">How many manual slots may exist; a further save is refused.</param>
+        /// <param name="maximumManualSlotBytes">
+        /// Total bytes all manual slots may take together; a save that would pass it is refused.
+        /// </param>
         public FileRbxWorldPackageStore(
             string rootDirectory = null,
             int autoBackupCapacity = DefaultAutoBackupCapacity,
             Func<CancellationToken, UniTask<bool>> persistenceSyncAsync = null,
             Func<DateTime> utcNow = null,
             IRbxWorldPackageFileSystem fileSystem = null,
-            string startupNamespace = null)
+            string startupNamespace = null,
+            int maximumManualSlots = DefaultMaximumManualSlots,
+            long maximumManualSlotBytes = DefaultMaximumManualSlotBytes)
         {
             if (autoBackupCapacity <= 0)
             {
@@ -399,6 +418,22 @@ namespace CoreAI.Mods.WorldPackages
                     nameof(autoBackupCapacity),
                     autoBackupCapacity,
                     "Auto backup capacity must be positive.");
+            }
+
+            if (maximumManualSlots <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maximumManualSlots),
+                    maximumManualSlots,
+                    "The manual slot limit must be positive.");
+            }
+
+            if (maximumManualSlotBytes <= 0L)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maximumManualSlotBytes),
+                    maximumManualSlotBytes,
+                    "The manual slot byte limit must be positive.");
             }
 
             string resolvedRoot = string.IsNullOrWhiteSpace(rootDirectory)
@@ -413,9 +448,12 @@ namespace CoreAI.Mods.WorldPackages
                 Path.Combine(resolvedRoot, "Startup"),
                 startupNamespace);
             _autoBackupCapacity = autoBackupCapacity;
+            _maximumManualSlots = maximumManualSlots;
+            _maximumManualSlotBytes = maximumManualSlotBytes;
             _persistenceSyncAsync = persistenceSyncAsync ?? RequestPersistenceCompletionAsync;
             _utcNow = utcNow ?? (() => DateTime.UtcNow);
             _fileSystem = fileSystem ?? new SystemRbxWorldPackageFileSystem();
+            SweepCrashLeftTemporaryFiles();
         }
 
         /// <summary>
@@ -672,12 +710,177 @@ namespace CoreAI.Mods.WorldPackages
                         "Manual slot '" + safeSlot + "' already exists and cannot be overwritten.");
                 }
 
-                return await WriteCreateOnceAsync(path, payload, false, cancellationToken);
+                // WHY bounded: manual slots are create-once and no tool can delete one, so without a
+                // cap a model could fill the disk (on WebGL the origin's whole storage quota) with
+                // saves, after which every pre-mutation autosave fails and the world stops changing.
+                int slotCount;
+                long slotBytes;
+                try
+                {
+                    MeasureManualSlots(out slotCount, out slotBytes);
+                }
+                catch (Exception ex)
+                {
+                    return new RbxWorldPackageWriteResult(
+                        false,
+                        path,
+                        "Manual slot '" + safeSlot + "' was not written: the existing manual slots could "
+                        + "not be counted (" + ex.Message + ").");
+                }
+
+                if (slotCount >= _maximumManualSlots)
+                {
+                    return new RbxWorldPackageWriteResult(
+                        false,
+                        path,
+                        "Manual slot '" + safeSlot + "' was not written: this store already keeps "
+                        + slotCount.ToString(CultureInfo.InvariantCulture) + " manual slots, the limit is "
+                        + _maximumManualSlots.ToString(CultureInfo.InvariantCulture) + ". "
+                        + DescribeManualSlotRecovery());
+                }
+
+                byte[] bytes;
+                try
+                {
+                    bytes = await EncodeForStoreAsync(payload, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    return new RbxWorldPackageWriteResult(false, path, ex.Message);
+                }
+
+                if (slotBytes + bytes.LongLength > _maximumManualSlotBytes)
+                {
+                    return new RbxWorldPackageWriteResult(
+                        false,
+                        path,
+                        "Manual slot '" + safeSlot + "' was not written: it needs "
+                        + bytes.LongLength.ToString(CultureInfo.InvariantCulture) + " bytes and the "
+                        + "existing manual slots already use "
+                        + slotBytes.ToString(CultureInfo.InvariantCulture) + " of the "
+                        + _maximumManualSlotBytes.ToString(CultureInfo.InvariantCulture)
+                        + " bytes this store allows. " + DescribeManualSlotRecovery());
+                }
+
+                return await WriteCreateOnceAsync(path, payload, false, cancellationToken, bytes);
             }
             finally
             {
                 _mutationGate.Release();
             }
+        }
+
+        private static string DescribeManualSlotRecovery()
+        {
+            return "Nothing was written. Manual slots are create-once and no tool can delete them; "
+                   + "autosaves keep working. Load an existing slot with load_world instead, or ask the "
+                   + "player to remove old manual saves.";
+        }
+
+        private void MeasureManualSlots(out int count, out long bytes)
+        {
+            count = 0;
+            bytes = 0L;
+            if (!_fileSystem.DirectoryExists(_manualDirectory))
+            {
+                return;
+            }
+
+            foreach (string path in _fileSystem.GetFiles(_manualDirectory, Extension))
+            {
+                if (!path.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                count++;
+                bytes += _fileSystem.GetFileLength(path);
+            }
+        }
+
+        /// <summary>
+        /// Deletes the <c>&lt;entry&gt;.&lt;guid&gt;.tmp</c> files a crash between a temporary write and
+        /// its install left in the manual, autosave and startup directories. Only names of exactly that
+        /// shape are touched. Never throws: a file that cannot be removed now is retried at the next open.
+        /// </summary>
+        /// <remarks>
+        /// WHY at open: a temporary file is never read, so the only harm is the space it holds, and a
+        /// crash-left one is otherwise never removed. A store instance over the same root that is
+        /// mid-write in another composition loses that one write (it reports the failure); the store
+        /// is a singleton per composition, so that needs two live compositions on one save root.
+        /// </remarks>
+        private void SweepCrashLeftTemporaryFiles()
+        {
+            SweepCrashLeftTemporaryFiles(_manualDirectory, false);
+            SweepCrashLeftTemporaryFiles(_autoDirectory, false);
+            SweepCrashLeftTemporaryFiles(_startupDirectory, true);
+        }
+
+        private void SweepCrashLeftTemporaryFiles(string directory, bool startupEntries)
+        {
+            try
+            {
+                if (!_fileSystem.DirectoryExists(directory))
+                {
+                    return;
+                }
+
+                foreach (string path in _fileSystem.GetFiles(directory, TemporaryExtension))
+                {
+                    if (IsCrashLeftTemporaryName(Path.GetFileName(path), startupEntries))
+                    {
+                        TryDeleteFile(path);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        /// <summary>
+        /// True for exactly <c>&lt;name&gt;&lt;ext&gt;.&lt;32 lowercase hex&gt;.tmp</c>, where ext is
+        /// <c>.world</c>, or in the startup directory also <c>.default</c> or <c>.json</c>.
+        /// </summary>
+        internal static bool IsCrashLeftTemporaryName(string fileName, bool startupEntries)
+        {
+            if (string.IsNullOrEmpty(fileName)
+                || !fileName.EndsWith(TemporaryExtension, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            int guidEnd = fileName.Length - TemporaryExtension.Length;
+            int guidStart = guidEnd - TemporaryGuidLength;
+            if (guidStart < 2 || fileName[guidStart - 1] != '.')
+            {
+                return false;
+            }
+
+            for (int index = guidStart; index < guidEnd; index++)
+            {
+                char character = fileName[index];
+                if (!((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f')))
+                {
+                    return false;
+                }
+            }
+
+            string entryName = fileName.Substring(0, guidStart - 1);
+            if (HasEntryExtension(entryName, Extension))
+            {
+                return true;
+            }
+
+            return startupEntries
+                   && (HasEntryExtension(entryName, StartupDefaultExtension)
+                       || HasEntryExtension(entryName, StartupMetadataExtension));
+        }
+
+        private static bool HasEntryExtension(string entryName, string extension)
+        {
+            return entryName.Length > extension.Length
+                   && entryName.EndsWith(extension, StringComparison.Ordinal);
         }
 
         public async UniTask<RbxWorldPackageWriteResult> CreateAutoAsync(
@@ -1006,8 +1209,12 @@ namespace CoreAI.Mods.WorldPackages
             return bytes;
         }
 
-#if UNITY_WEBGL && !UNITY_EDITOR
-        private static void ValidateWebGlWorkBudget(RbxWorldPackagePayload payload)
+        /// <summary>
+        /// Refuses a payload whose JSON/ZIP encoding would exceed the bounded work the WebGL player can
+        /// do without releasing the frame. Called only on the WebGL player; compiled everywhere so the
+        /// budget itself is testable in the editor.
+        /// </summary>
+        internal static void ValidateWebGlWorkBudget(RbxWorldPackagePayload payload)
         {
             if (payload?.Tree?.Instances == null || payload.Mods == null)
             {
@@ -1022,8 +1229,31 @@ namespace CoreAI.Mods.WorldPackages
                     + MaximumWebGlSafeInstances + ".");
             }
 
-            long textCharacters = 0L;
-            int collectionItems = payload.Mods.Count;
+            MeasureWebGlWork(payload, out int collectionItems, out long textCharacters);
+            if (collectionItems > MaximumWebGlSafeCollectionItems
+                || textCharacters > MaximumWebGlSafeTextCharacters)
+            {
+                throw new RbxWorldPackageException(
+                    "WebGL world-package write exceeds the bounded non-blocking JSON/ZIP work budget: "
+                    + textCharacters.ToString(CultureInfo.InvariantCulture) + " text characters (limit "
+                    + MaximumWebGlSafeTextCharacters.ToString(CultureInfo.InvariantCulture) + ") and "
+                    + collectionItems.ToString(CultureInfo.InvariantCulture) + " collection items (limit "
+                    + MaximumWebGlSafeCollectionItems.ToString(CultureInfo.InvariantCulture) + ").");
+            }
+        }
+
+        /// <summary>
+        /// Counts the collection items and the characters of every string the package encoding writes
+        /// for <paramref name="payload"/>: names, ledger metadata, value payloads, Humanoid state,
+        /// attributes, tags, mod sources and manifests, and Part material names.
+        /// </summary>
+        internal static void MeasureWebGlWork(
+            RbxWorldPackagePayload payload,
+            out int collectionItems,
+            out long textCharacters)
+        {
+            textCharacters = 0L;
+            collectionItems = payload.Mods.Count;
             AddTextLength(ref textCharacters, payload.Settings?.WorldId);
             AddTextLength(ref textCharacters, payload.Settings?.SignalBehavior);
             foreach (InstanceSnapshot node in payload.Tree.Instances)
@@ -1043,6 +1273,16 @@ namespace CoreAI.Mods.WorldPackages
                 AddTextLength(ref textCharacters, node.MaterialVariant?.RoughnessMap);
                 AddTextLength(ref textCharacters, node.MaterialVariant?.MetalnessMap);
                 AddTextLength(ref textCharacters, node.MaterialVariant?.StudsPerTile);
+                // WHY the value and Humanoid strings: a StringValue holds up to 200,000 characters and
+                // every scalar and datatype value (Vector3, CFrame) is encoded into this string, so
+                // leaving them out let eleven StringValues pass a two-million-character budget.
+                AddTextLength(ref textCharacters, node.Value?.StringValue);
+                AddTextLength(ref textCharacters, node.Humanoid?.Health);
+                AddTextLength(ref textCharacters, node.Humanoid?.MaxHealth);
+                AddTextLength(ref textCharacters, node.Humanoid?.WalkSpeed);
+                AddTextLength(ref textCharacters, node.Humanoid?.JumpPower);
+                AddTextLength(ref textCharacters, node.Humanoid?.JumpHeight);
+                AddTextLength(ref textCharacters, node.Humanoid?.DisplayName);
                 if (node.Attributes != null)
                 {
                     foreach (AttributeSnapshot attribute in node.Attributes)
@@ -1082,17 +1322,15 @@ namespace CoreAI.Mods.WorldPackages
                 }
             }
 
+            if (payload.Parts == null)
+            {
+                return;
+            }
+
             foreach (KeyValuePair<InstanceId, PartProperties> part in payload.Parts)
             {
                 AddTextLength(ref textCharacters, part.Value.Material.Name);
                 AddTextLength(ref textCharacters, part.Value.MaterialVariant);
-            }
-
-            if (collectionItems > MaximumWebGlSafeCollectionItems
-                || textCharacters > MaximumWebGlSafeTextCharacters)
-            {
-                throw new RbxWorldPackageException(
-                    "WebGL world-package write exceeds the bounded non-blocking JSON/ZIP work budget.");
             }
         }
 
@@ -1103,7 +1341,6 @@ namespace CoreAI.Mods.WorldPackages
                 total += value.Length;
             }
         }
-#endif
 
         private static UniTask<bool> RequestPersistenceCompletionAsync(
             CancellationToken cancellationToken)
@@ -1571,11 +1808,22 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>The <c>status</c> <c>save_world</c> reports when the live world could not be captured.</summary>
         public const string CaptureFailedStatus = "capture_failed";
 
+        /// <summary>The <c>status</c> a load tool reports when the world session was already shut down.</summary>
+        public const string SessionUnavailableStatus = "session_unavailable";
+
         /// <summary>The tool-result text for a refused argument: the parameter, the rule, and that nothing ran.</summary>
         public static string DescribeInvalidArgument(string parameter, string ruleError)
         {
             return "Parameter '" + parameter + "' is invalid: " + ruleError
                    + " The tool was NOT executed. Retry with a valid '" + parameter + "'.";
+        }
+
+        /// <summary>The tool-result text for a load requested from a world session that was shut down.</summary>
+        public static string DescribeSessionUnavailable(string subject)
+        {
+            return subject + " cannot be requested: the world session was shut down (the game is closing "
+                   + "or restarting its session). No request was queued. The tool was NOT executed. "
+                   + "Retry once the game has restarted its world session.";
         }
 
         private static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
@@ -1630,19 +1878,52 @@ namespace CoreAI.Mods.WorldPackages
             return true;
         }
 
-        /// <summary>Accepts exactly one <c>.world</c> file name with no directory part.</summary>
+        /// <summary>
+        /// Accepts exactly one <c>.world</c> file name with no directory part and no character a file
+        /// name cannot hold on any supported player.
+        /// </summary>
+        /// <remarks>
+        /// WHY explicit character checks and no <see cref="Path"/> call: on Mono,
+        /// <c>Path.GetFileName</c> throws <see cref="ArgumentException"/> for a name holding '"', '&lt;',
+        /// '&gt;', '|' or a control character (Windows players) or '\0' (every player), and that throw
+        /// escaped the tool as an exception instead of an ordinary refusal.
+        /// </remarks>
         public static bool TryValidateAutoFileName(string fileName, out string error)
         {
             error = null;
             if (string.IsNullOrWhiteSpace(fileName)
-                || !string.Equals(fileName, Path.GetFileName(fileName), StringComparison.Ordinal)
-                || !fileName.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
+                || !fileName.EndsWith(Extension, StringComparison.OrdinalIgnoreCase)
+                || ContainsForbiddenFileNameCharacter(fileName))
             {
                 error = "Auto package name must be one .world file name without a path.";
                 return false;
             }
 
             return true;
+        }
+
+        private static bool ContainsForbiddenFileNameCharacter(string fileName)
+        {
+            for (int index = 0; index < fileName.Length; index++)
+            {
+                char character = fileName[index];
+                if (character < ' '
+                    || character == '\u007F'
+                    || character == '/'
+                    || character == '\\'
+                    || character == ':'
+                    || character == '"'
+                    || character == '<'
+                    || character == '>'
+                    || character == '|'
+                    || character == '?'
+                    || character == '*')
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

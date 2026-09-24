@@ -612,7 +612,8 @@ namespace CoreAI.Ai.Hub
                 () => Decide(requestId, true));
             confirmButton.name = "coreai-world-load-confirm-" + requestId;
             confirmButton.tooltip = _startupSelection != null
-                ? "Replace the live world with this saved world. It will also reopen on the next start."
+                ? "Replace the live world with this saved world. It will also reopen on the next start, "
+                  + "together with the changes the AI makes to it afterwards."
                 : "Replace the live world with this saved world.";
             actions.Add(confirmButton);
 

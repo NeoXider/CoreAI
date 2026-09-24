@@ -94,6 +94,19 @@ namespace CoreAI.Infrastructure.Lua
                 LuaModManifest toWrite = CloneManifest(manifest ?? new LuaModManifest());
                 toWrite.Id = modId;
                 string modDirectory = GetModDirectory(_dir, modId, _useCaseSafeFolderNames);
+                // WHY refused here, where a source is created: an unloaded mod keeps its source, so a
+                // 257th stored id makes every capture of this world throw, which blocks every gated
+                // mutation and every save until a mod is forgotten, and persists across restarts.
+                if (!File.Exists(Path.Combine(modDirectory, ManifestFileName))
+                    && CountStoredMods() >= RbxWorldPackageSerializer.MaximumMods)
+                {
+                    _log?.Error(
+                        "[FileLuaModSourceStore] Save refused for " + modId + ": the store already holds "
+                        + RbxWorldPackageSerializer.MaximumMods + " mod sources, the most one world "
+                        + "package can hold. Forget a mod that is no longer needed first.");
+                    return;
+                }
+
                 Directory.CreateDirectory(modDirectory);
                 AtomicWriteAllText(
                     Path.Combine(modDirectory, ManifestFileName),
@@ -276,6 +289,13 @@ namespace CoreAI.Infrastructure.Lua
                 throw new ArgumentNullException(nameof(mods));
             }
 
+            if (mods.Count > RbxWorldPackageSerializer.MaximumMods)
+            {
+                throw new RbxWorldPackageFormatLimitException(
+                    "The replacement source set holds " + mods.Count + " mods; a world package holds at most "
+                    + RbxWorldPackageSerializer.MaximumMods + ".");
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
             string sessionDirectory = Path.Combine(
                 _dir, WorldSessionsDirectoryName, Guid.NewGuid().ToString("N"));
@@ -430,6 +450,27 @@ namespace CoreAI.Infrastructure.Lua
         private void ExitRoot()
         {
             Monitor.Exit(_rootState.Gate);
+        }
+
+        /// <summary>Stored mod ids: the store root's folders that hold a manifest.</summary>
+        private int CountStoredMods()
+        {
+            if (!Directory.Exists(_dir))
+            {
+                return 0;
+            }
+
+            int count = 0;
+            string[] directories = Directory.GetDirectories(_dir);
+            for (int index = 0; index < directories.Length; index++)
+            {
+                if (File.Exists(Path.Combine(directories[index], ManifestFileName)))
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         private void ClearAsyncMutationPending()

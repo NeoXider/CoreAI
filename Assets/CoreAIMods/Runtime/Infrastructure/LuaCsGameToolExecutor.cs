@@ -46,6 +46,13 @@ namespace CoreAI.Mods.WorldPackages
             _packageStore = packageStore ?? throw new ArgumentNullException(nameof(packageStore));
         }
 
+        /// <summary>
+        /// Runs after every mutation that returned, while the gate is still held, with the mutation's
+        /// trigger. The world session sets it to keep the durable startup selection in step with the
+        /// live world. It must not throw; a throw is contained so it never replaces the mutation result.
+        /// </summary>
+        internal Func<string, CancellationToken, UniTask> AfterMutationAsync { get; set; }
+
         /// <inheritdoc />
         public async Task<TResult> ExecuteAsync<TResult>(
             string trigger,
@@ -66,32 +73,77 @@ namespace CoreAI.Mods.WorldPackages
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                RbxWorldPackagePayload payload = await _captureCurrentAsync(cancellationToken);
-                if (payload == null)
+                RbxWorldPackagePayload payload;
+                bool backupImpossible = false;
+                try
                 {
-                    throw new InvalidOperationException(
-                        "Confirmed pre-mutation backup capture returned no world payload.");
+                    payload = await _captureCurrentAsync(cancellationToken);
+                }
+                catch (RbxWorldPackageFormatLimitException) when (RemovesContentOnly(trigger))
+                {
+                    // WHY: a world past a format limit cannot be captured, so no backup of it can exist.
+                    // An action that only removes content is the one way back under the limit;
+                    // refusing it too would leave the world unable to change or save forever.
+                    payload = null;
+                    backupImpossible = true;
                 }
 
-                RbxWorldPackageWriteResult backup = await _packageStore.CreateAutoAsync(
-                    trigger,
-                    payload,
-                    cancellationToken);
-                if (backup == null || !backup.Success)
+                if (!backupImpossible)
                 {
-                    string reason = backup == null || string.IsNullOrWhiteSpace(backup.Error)
-                        ? "the package store did not confirm durability"
-                        : backup.Error;
-                    throw new InvalidOperationException(
-                        "Confirmed pre-mutation backup '" + trigger + "' failed: " + reason);
+                    if (payload == null)
+                    {
+                        throw new InvalidOperationException(
+                            "Confirmed pre-mutation backup capture returned no world payload.");
+                    }
+
+                    RbxWorldPackageWriteResult backup = await _packageStore.CreateAutoAsync(
+                        trigger,
+                        payload,
+                        cancellationToken);
+                    if (backup == null || !backup.Success)
+                    {
+                        string reason = backup == null || string.IsNullOrWhiteSpace(backup.Error)
+                            ? "the package store did not confirm durability"
+                            : backup.Error;
+                        throw new InvalidOperationException(
+                            "Confirmed pre-mutation backup '" + trigger + "' failed: " + reason);
+                    }
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
-                return await mutationAsync(cancellationToken);
+                TResult result = await mutationAsync(cancellationToken);
+                await NotifyAfterMutationAsync(trigger);
+                return result;
             }
             finally
             {
                 _singleFlight.Release();
+            }
+        }
+
+        /// <summary>True for the triggers of actions that only remove content: forget and unload.</summary>
+        private static bool RemovesContentOnly(string trigger)
+        {
+            return string.Equals(trigger, LuaModsLlmTool.ForgetBackupTrigger, StringComparison.Ordinal)
+                   || string.Equals(trigger, LuaModsLlmTool.UnloadBackupTrigger, StringComparison.Ordinal);
+        }
+
+        private async UniTask NotifyAfterMutationAsync(string trigger)
+        {
+            Func<string, CancellationToken, UniTask> afterMutation = AfterMutationAsync;
+            if (afterMutation == null)
+            {
+                return;
+            }
+
+            // WHY uncancelled and contained: the mutation already ran, so its result must reach the
+            // caller whatever the follow-up does.
+            try
+            {
+                await afterMutation(trigger, CancellationToken.None);
+            }
+            catch (Exception)
+            {
             }
         }
     }
@@ -171,6 +223,9 @@ namespace CoreAI.Ai.LuaCs
         /// seam. Production composition supplies it; a null resolver keeps the ACL-world refusal.
         /// </summary>
         public Func<ActorContext> LocalActorResolver { get; set; }
+
+        /// <summary>The shared pre-mutation backup gate this executor runs through; null when none.</summary>
+        internal IConfirmedWorldMutationGate WorldMutationGate => _worldMutationGate;
 
         /// <summary>
         /// Host frame port for the one-shot chunk path. When set, a chunk that runs longer than a few
@@ -719,9 +774,10 @@ namespace CoreAI.Mods.WorldPackages
             CoreAI.Authority.ActorContext actor = _identityProvider.GetActorContext(_roleId);
             RbxWorldLoadRequest request;
             // WHY: only failures raised while the package is being read are converted. They happen before
-            // WHY: any request is queued, so "not executed" is true, and a rotated-away name or a corrupt,
-            // WHY: oversized or unreadable file is an outcome the model can correct. Thrown, it crossed the
-            // WHY: tool invocation boundary and was traced as possibly executed. Cancellation propagates.
+            // WHY: any request is queued, so "not executed" is true, and a rotated-away name, a corrupt,
+            // WHY: oversized or unreadable file, or a session that was already shut down is an outcome the
+            // WHY: model can report or correct. Thrown, it crossed the tool invocation boundary and was
+            // WHY: traced as possibly executed. Cancellation propagates.
             try
             {
                 request = await _service.RequestAutoLoadAsync(actor, name, cancellationToken);
@@ -736,6 +792,13 @@ namespace CoreAI.Mods.WorldPackages
                     ex.Status,
                     "Autosave '" + name + "' cannot be loaded into this session: " + ex.Message
                     + " The tool was NOT executed.");
+            }
+            catch (ObjectDisposedException)
+            {
+                return RefuseUnloadable(
+                    name,
+                    RbxWorldPackageNames.SessionUnavailableStatus,
+                    RbxWorldPackageNames.DescribeSessionUnavailable("Autosave '" + name + "'"));
             }
             catch (System.IO.FileNotFoundException)
             {

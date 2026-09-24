@@ -450,5 +450,81 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(restartedSources.TryLoad("new-source", out _, out _));
             Assert.AreEqual("old-source", selectedOldPackage.Mods[0].Manifest.Id);
         }
+
+        /// <summary>
+        /// A1-01: a source beyond the world-package mod limit is never created. The store used to write
+        /// a 257th distinct id, after which every capture of the world threw, so no autosave, save or
+        /// gated mutation could run until a mod was forgotten; the store kept it across restarts.
+        /// </summary>
+        [Test]
+        public void Save_DistinctIdBeyondTheWorldPackageModLimit_IsRefused_ExistingIdsStillUpdate()
+        {
+            for (int index = 0; index < RbxWorldPackageSerializer.MaximumMods; index++)
+            {
+                string id = "mod" + index.ToString("D3");
+                _store.Save(id, "return " + index, Manifest(id, active: false));
+            }
+
+            Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, _store.List().Count, "precondition: the store is full");
+
+            _store.Save("one-too-many", "return 'refused'", Manifest("one-too-many"));
+
+            Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, _store.List().Count);
+            Assert.IsFalse(_store.TryLoad("one-too-many", out _, out _), "the 257th distinct source must not be created");
+            Assert.IsFalse(Directory.Exists(Path.Combine(_root, "one-too-many")));
+
+            _store.Save("mod000", "return 'updated'", Manifest("mod000"));
+            Assert.IsTrue(_store.TryLoad("mod000", out string updated, out LuaModManifest manifest));
+            Assert.AreEqual("return 'updated'", updated, "an id the store already holds is updated, never refused");
+            Assert.IsTrue(manifest.Active);
+
+            _store.Delete("mod001");
+            _store.Save("one-too-many", "return 'accepted'", Manifest("one-too-many"));
+            Assert.IsTrue(_store.TryLoad("one-too-many", out string accepted, out _), "forgetting one mod makes room");
+            Assert.AreEqual("return 'accepted'", accepted);
+            Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, _store.List().Count);
+
+            RbxWorldPackagePayload captured = CaptureWith(_store);
+            Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, captured.Mods.Count, "the full store stays capturable");
+        }
+
+        /// <summary>A1-01 twin: an exact world source set larger than one package can hold is refused before any byte is written.</summary>
+        [Test]
+        public void ExactReplacement_SourceSetBeyondTheWorldPackageModLimit_IsRefusedBeforeWriting()
+        {
+            RbxWorldModSource[] mods = new RbxWorldModSource[RbxWorldPackageSerializer.MaximumMods + 1];
+            for (int index = 0; index < mods.Length; index++)
+            {
+                string id = "mod" + index.ToString("D3");
+                mods[index] = new RbxWorldModSource(Manifest(id), "return " + index);
+            }
+
+            FileLuaModSourceStore preparing = new(_root, persistenceSyncAsync: _ => UniTask.FromResult(true));
+
+            RbxWorldPackageFormatLimitException refused = Assert.Throws<RbxWorldPackageFormatLimitException>(
+                () => preparing.PrepareExactReplacementAsync(mods).GetAwaiter().GetResult());
+
+            StringAssert.Contains(RbxWorldPackageSerializer.MaximumMods.ToString(), refused.Message);
+            Assert.IsFalse(Directory.Exists(Path.Combine(_root, ".world-sessions")), "nothing was written");
+        }
+
+        private static RbxWorldPackagePayload CaptureWith(ILuaModSourceStore sources)
+        {
+            InstanceRegistry registry = new(worldId: "limit-world");
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            try
+            {
+                return RbxWorldPackageSerializer.Capture(new RbxWorldPackageCaptureContext(
+                    registry,
+                    game,
+                    null,
+                    new RbxWorldSettings { WorldId = "limit-world" },
+                    modSourceStore: sources));
+            }
+            finally
+            {
+                game.Destroy();
+            }
+        }
     }
 }

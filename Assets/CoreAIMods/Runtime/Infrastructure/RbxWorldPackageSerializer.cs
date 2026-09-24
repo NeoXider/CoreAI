@@ -622,6 +622,15 @@ namespace CoreAI.Mods.WorldPackages
 
             IReadOnlyList<LuaModManifest> listed = sourceStore.List()
                 ?? throw new RbxWorldPackageException("The mod source store returned a nil manifest list.");
+            if (listed.Count > MaximumMods)
+            {
+                throw new RbxWorldPackageFormatLimitException(
+                    "The live world stores " + listed.Count + " mod sources; world package format version "
+                    + CurrentFormatVersion + " holds at most " + MaximumMods + ". Forget mods that are no "
+                    + "longer needed (manage_mods action 'forget'; 'unload' keeps a mod's source) so the "
+                    + "world can be captured again.");
+            }
+
             List<LuaModManifest> manifests = new(listed);
             manifests.Sort((left, right) => string.CompareOrdinal(left?.Id, right?.Id));
             List<RbxWorldModSource> mods = new(manifests.Count);

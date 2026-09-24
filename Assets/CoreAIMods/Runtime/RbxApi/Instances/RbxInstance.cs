@@ -136,7 +136,17 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        /// <summary>Honored by Clone (R6.5) and, later, world-file save (R6.6).</summary>
+        /// <summary>
+        /// Honored by Clone (R6.5). A world package keeps a non-archivable instance and stores this
+        /// flag with it, unlike a Roblox place save, which leaves it out.
+        /// </summary>
+        /// <remarks>
+        /// WHY packages keep them: a package is the exact snapshot behind every safety autosave and
+        /// confirmed load, so dropping an instance a script marked non-archivable (a Model's
+        /// PrimaryPart, say) would make restoring a backup lose live content. The non-archivable
+        /// instances the runtime creates itself, a Player and its character, are runtime
+        /// infrastructure and never enter a package.
+        /// </remarks>
         public bool Archivable
         {
             get

@@ -820,6 +820,46 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             return new LocalActorIdentityProvider("world-tool-actor");
         }
 
+        /// <summary>Quiet settings for the manage_mods tool the startup tests drive.</summary>
+        private sealed class StartupToolSettings : ICoreAISettings
+        {
+            public int MaxLuaRepairRetries => 0;
+
+            public bool EnableMeaiDebugLogging => false;
+
+            public float LlmRequestTimeoutSeconds => 30f;
+
+            public int MaxLlmRequestRetries => 0;
+
+            public bool EnableHttpDebugLogging => false;
+
+            public bool LogTokenUsage => false;
+
+            public bool LogLlmLatency => false;
+
+            public bool LogLlmConnectionErrors => false;
+
+            public int ContextWindowTokens => 4096;
+
+            public string UniversalSystemPromptPrefix => "";
+
+            public float Temperature => 0f;
+
+            public int MaxToolCallRetries => 0;
+
+            public bool LogToolCalls => false;
+
+            public bool LogToolCallArguments => false;
+
+            public bool LogToolCallResults => false;
+
+            public bool LogMeaiToolCallingSteps => false;
+
+            public bool AllowDuplicateToolCalls => false;
+
+            public bool EnableStreaming => false;
+        }
+
         /// <summary>
         /// The store validates the slot by THROWING, from inside the tool body; the tool used to pass a
         /// blank or malformed slot straight through, so the model got an exception crossing the invocation
@@ -878,6 +918,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [TestCase("nested/save.world")]
         [TestCase("save.txt")]
         [TestCase("save")]
+        [TestCase("\"a.world\"")]
+        [TestCase("a|b.world")]
+        [TestCase("a\tb.world")]
+        [TestCase("a\0b.world")]
         public async Task LoadAutoSave_InvalidName_IsRefusedAsResult_WithoutCallingService(string name)
         {
             RecordingRuntimeService service = new();
@@ -1576,6 +1620,33 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             CollectionAssert.IsEmpty(fileStore.ListManualSlots());
         }
 
+        /// <summary>
+        /// A1-10 through the real tool and controller: a save past the manual-slot limit is an ordinary
+        /// failed result the model can read, and nothing is written.
+        /// </summary>
+        [Test]
+        public async Task SaveWorldTool_ManualSlotLimitReached_IsAnOrdinaryFailedResultAndWritesNothing()
+        {
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore fileStore = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => AutosaveClockUtc,
+                maximumManualSlots: 1);
+            RbxWorldRuntimeSessionController controller =
+                CreateController(CreateHeadlessHost(), fileStore, new DelegateModSourceStore());
+            SaveWorldLlmTool tool = new(controller, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            JObject first = JObject.Parse(await tool.ExecuteAsync("first-slot"));
+            JObject second = JObject.Parse(await tool.ExecuteAsync("second-slot"));
+
+            Assert.IsTrue((bool)first["success"], first.ToString());
+            Assert.IsFalse((bool)second["success"], second.ToString());
+            StringAssert.Contains("the limit is 1", (string)second["error"]);
+            StringAssert.Contains("Nothing was written.", (string)second["error"]);
+            CollectionAssert.AreEqual(new[] { "first-slot" }, fileStore.ListManualSlots());
+        }
+
         [Test]
         public void SaveWorldTool_ServiceCancellation_PropagatesInsteadOfBecomingAResult()
         {
@@ -2121,6 +2192,175 @@ end)";
                     keptId,
                     second.Controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild(KeptPartName).Id.Value);
             });
+        }
+
+        /// <summary>
+        /// A1-03: after a confirmed load the startup entry stayed the package from request time, while
+        /// the AI's later changes lived only in the session (its mod sources in a session version no
+        /// start ever read and a later cleanup deleted), so a restart reopened the world without them
+        /// although the Hub said it would reopen. Every gated change now records the world as it is as a
+        /// new create-once startup entry.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_GatedAiChangesAfterAConfirmedLoad_ReopenAfterRestart()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                ulong keptId;
+                using (StartupProcess first = new(disk, "world-a", withMutationGate: true))
+                {
+                    keptId = first.AuthorKeptPart().Id.Value;
+                    await ConfirmStartupLoadAsync(first, "chosen");
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000001.json", "0000000001.world" },
+                        FileNames(disk.StartupDirectory),
+                        "the confirmed load itself records the selection once");
+
+                    LuaModsLlmTool manageMods = new(
+                        first.Controller.Runtime,
+                        new StartupToolSettings(),
+                        CoreAI.Logging.NullLog.Instance,
+                        StartupCapabilities,
+                        true,
+                        ToolIdentity(),
+                        BuiltInAgentRoleIds.Programmer,
+                        first.Gate);
+                    JObject castle = JObject.Parse(await manageMods.ExecuteAsync(
+                        "load",
+                        "castle",
+                        "local castle = Instance.new('Folder') castle.Name = 'CastleStart' castle.Parent = workspace"));
+                    LuaTool.LuaResult marker = await first.Controller.Executor.ExecuteAsync(
+                        "local marker = Instance.new('Folder') marker.Name = 'AfterLoadMarker' "
+                        + "marker.Parent = workspace return true",
+                        CancellationToken.None);
+
+                    Assert.IsTrue(castle.Value<bool>("success"), castle.ToString());
+                    Assert.IsTrue(marker.Success, marker.Error);
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000003.json", "0000000003.world" },
+                        FileNames(disk.StartupDirectory),
+                        "each gated change recorded the live world, and the older entries were pruned");
+                    RbxWorldStartupSelection info = await first.Controller.ReadStartupSelectionAsync();
+                    Assert.AreEqual(RbxWorldStartupSelectionKind.Package, info.Kind);
+                    Assert.AreEqual("world-a", info.WorldId);
+                    Assert.AreEqual("manual", info.SourceKind);
+                    Assert.AreEqual("chosen", info.SourceName);
+                    CollectionAssert.IsEmpty(first.Diagnostics);
+                }
+
+                using StartupProcess second = new(disk, "default-world");
+                RbxWorldStartupRestoreResult restored = await second.Controller.RestoreStartupSelectionAsync();
+
+                Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+                Assert.AreEqual(2, restored.ActiveModsStarted, "the packaged active mod and the castle the AI added");
+                InstanceRegistry live = second.Controller.CurrentRbxApi.Registry;
+                Assert.AreEqual(keptId, live.WorldRoot.FindFirstChild(KeptPartName).Id.Value);
+                Assert.AreEqual(1, CountNamed(live, "AfterLoadMarker"), "the execute_lua change reopened");
+                Assert.AreEqual(1, CountNamed(live, "CastleStart"), "the mod the AI added after the load started again");
+                CollectionAssert.AreEqual(
+                    new[] { "castle", StartupActiveModId, StartupDormantModId },
+                    ModIds(second.Controller.SourceStore.List()));
+            });
+        }
+
+        /// <summary>
+        /// A1-03, a refresh that is not durably confirmed (or a crash before it) leaves the previous
+        /// entry, a whole world from one capture, and is reported: the next start opens the world as it
+        /// was before that change, never a mix.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_UnconfirmedRefresh_KeepsThePreviousEntryAndReportsIt()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                using (StartupProcess first = new(disk, "world-a", withMutationGate: true))
+                {
+                    first.AuthorKeptPart();
+                    await ConfirmStartupLoadAsync(first, "chosen");
+                    disk.PackageDurability.Enqueue(true);
+                    disk.PackageDurability.Enqueue(false);
+
+                    LuaTool.LuaResult marker = await first.Controller.Executor.ExecuteAsync(
+                        "local marker = Instance.new('Folder') marker.Name = 'UnrecordedMarker' "
+                        + "marker.Parent = workspace return true",
+                        CancellationToken.None);
+
+                    Assert.IsTrue(marker.Success, marker.Error);
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000001.json", "0000000001.world" },
+                        FileNames(disk.StartupDirectory),
+                        "the unconfirmed entry was removed and the previous one kept");
+                    Assert.AreEqual(1, first.Diagnostics.Count, string.Join(" | ", first.Diagnostics));
+                    StringAssert.Contains("was not recorded for the next start", first.Diagnostics[0]);
+                }
+
+                using StartupProcess second = new(disk, "default-world");
+                RbxWorldStartupRestoreResult restored = await second.Controller.RestoreStartupSelectionAsync();
+
+                Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+                InstanceRegistry live = second.Controller.CurrentRbxApi.Registry;
+                Assert.IsNotNull(live.WorldRoot.FindFirstChild(KeptPartName));
+                Assert.AreEqual(0, CountNamed(live, "UnrecordedMarker"));
+            });
+        }
+
+        /// <summary>
+        /// A1-03 twin: only the startup world is kept current. After the player chose the default world,
+        /// or after a raw host load that never becomes the startup world, gated changes write no
+        /// startup entry.
+        /// </summary>
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator StartupSelection_ChangesToANonStartupWorld_NeverSelectIt()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                StartupDisk disk = NewStartupDisk();
+                SeedStartupMods(disk);
+                using (StartupProcess first = new(disk, "world-a", withMutationGate: true))
+                {
+                    first.AuthorKeptPart();
+                    await ConfirmStartupLoadAsync(first, "chosen");
+                    RbxWorldPackageWriteResult cleared = await first.Controller.ClearStartupSelectionAsync();
+                    Assert.IsTrue(cleared.Success, cleared.Error);
+
+                    LuaTool.LuaResult afterClear = await first.Controller.Executor.ExecuteAsync(
+                        "local marker = Instance.new('Folder') marker.Name = 'AfterClear' marker.Parent = workspace",
+                        CancellationToken.None);
+                    RbxWorldLoadResult raw = await first.Controller.LoadConfirmedAsync(first.Controller.CaptureCurrent());
+                    LuaTool.LuaResult afterRaw = await first.Controller.Executor.ExecuteAsync(
+                        "local marker = Instance.new('Folder') marker.Name = 'AfterRaw' marker.Parent = workspace",
+                        CancellationToken.None);
+
+                    Assert.IsTrue(afterClear.Success, afterClear.Error);
+                    Assert.IsTrue(raw.Success, raw.Error);
+                    Assert.IsTrue(afterRaw.Success, afterRaw.Error);
+                    CollectionAssert.AreEqual(
+                        new[] { "0000000002.default" },
+                        FileNames(disk.StartupDirectory),
+                        "the player's choice of the default world stands");
+                    CollectionAssert.IsEmpty(first.Diagnostics);
+                }
+
+                using StartupProcess second = new(disk, "default-world");
+                RbxWorldStartupRestoreResult restored = await second.Controller.RestoreStartupSelectionAsync();
+
+                Assert.AreEqual(RbxWorldStartupRestoreOutcome.NotSelected, restored.Outcome, restored.Error);
+            });
+        }
+
+        /// <summary>Saves the live world to <paramref name="slot"/> and confirms loading it, which records it for the next start.</summary>
+        private static async UniTask ConfirmStartupLoadAsync(StartupProcess process, string slot)
+        {
+            RbxWorldPackageWriteResult saved = await process.Controller.SaveManualAsync(process.Player, slot);
+            Assert.IsTrue(saved.Success, saved.Error);
+            RbxWorldLoadRequest request = await process.Controller.RequestManualLoadAsync(process.Player, slot);
+            RbxWorldLoadResult confirmed = await process.Controller.ConfirmManualLoadAsync(request.RequestId, true);
+            Assert.IsTrue(confirmed.Success, confirmed.Error);
+            Assert.IsTrue(confirmed.StartupSelectionPersisted, confirmed.StartupSelectionError);
         }
 
         [UnityEngine.TestTools.UnityTest]
@@ -2936,7 +3176,8 @@ end)";
             LuaCsRbxApiBindings rbxApi,
             ILuaModSourceStore sourceStore,
             ILuaModStore modStore,
-            ILuaScriptVersionStore versionStore)
+            ILuaScriptVersionStore versionStore,
+            IConfirmedWorldMutationGate mutationGate = null)
         {
             return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
@@ -2947,6 +3188,7 @@ end)";
                 Capabilities = StartupCapabilities,
                 OneOffCapabilities = StartupCapabilities,
                 RbxApi = rbxApi,
+                WorldMutationGate = mutationGate,
                 RegisterWorldEditBuildBindings = false
             });
         }
@@ -3030,7 +3272,8 @@ end)";
                 INetworkBridge networkBridge = null,
                 int? worldAclVersion = null,
                 IRbxWorldPackageFileSystem packageFileSystem = null,
-                bool sourcesDurable = true)
+                bool sourcesDurable = true,
+                bool withMutationGate = false)
             {
                 Registry = new InstanceRegistry(worldAclVersion: worldAclVersion, worldId: worldId);
                 Game = DataModelBootstrap.CreateGame(Registry);
@@ -3045,7 +3288,14 @@ end)";
                 SourceStore = new FileLuaModSourceStore(
                     disk.ModsRoot,
                     persistenceSyncAsync: cancellationToken => UniTask.FromResult(sourcesDurable));
-                LuaCsModStack initialStack = CreateStartupStack(RbxApi, SourceStore, ModData, null);
+                // WHY optional: the installer composes every session stack over one shared gate whose
+                // capture is this controller; the tests that pin the gate-free load path keep it off.
+                Gate = withMutationGate
+                    ? new ConfirmedWorldMutationGate(
+                        cancellationToken => UniTask.FromResult(Controller.CaptureCurrent()),
+                        PackageStore)
+                    : null;
+                LuaCsModStack initialStack = CreateStartupStack(RbxApi, SourceStore, ModData, null, Gate);
                 WireStartupTeardown(initialStack, RbxApi);
                 Controller = new RbxWorldRuntimeSessionController(
                     new HeadlessRbxWorldSessionHost(
@@ -3064,7 +3314,8 @@ end)";
                         partSink: candidate.PartSink,
                         cameraRig: candidate.CameraRig,
                         networkBridge: stagedNetwork),
-                    CreateStartupStack,
+                    (rbxApi, sourceStore, modStore, versionStore) =>
+                        CreateStartupStack(rbxApi, sourceStore, modStore, versionStore, Gate),
                     WireStartupTeardown,
                     networkBridge,
                     StartupCapabilities,
@@ -3074,6 +3325,9 @@ end)";
                     message => Diagnostics.Add(message));
                 Controller.ConfigurePendingLoadClockForTests(() => Clock, TimeSpan.FromMinutes(2d));
             }
+
+            /// <summary>The shared pre-mutation gate every session stack runs through; null when composed without one.</summary>
+            public ConfirmedWorldMutationGate Gate { get; }
 
             public InstanceRegistry Registry { get; }
 

@@ -2502,6 +2502,633 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             AssertDiagnostics(saved, expected);
         }
 
+        // ==================== R1 audit A1: format limits, load serialization, request-time refusals ====================
+
+        private const LuaCapabilities SessionCapabilities =
+            LuaCapabilities.Read | LuaCapabilities.WorldEdit | LuaCapabilities.LogicOverride;
+
+        private const string ValidAutoName = "20260902T120000000Z-0000-execute_lua.world";
+
+        /// <summary>
+        /// A1-01: an unloaded mod keeps its source, so 256 load/unload cycles fill the world-package mod
+        /// limit. The 257th distinct mod used to load and persist; from then on every capture threw, so
+        /// every gated mutation and every save was refused, across restarts. It is now refused before it
+        /// runs, with the way out named, and the world stays capturable.
+        /// </summary>
+        [Test]
+        public async Task ModSourceLimit_DistinctModBeyondTheFormatLimit_IsRefusedWithTheWayOut_AndTheWorldStaysCapturable()
+        {
+            MemorySourceStore sources = new();
+            ScriptedWorldPackageStore packages = new();
+            using GatedHeadlessSession session = new(packages, sources);
+            LocalActorIdentityProvider identity = new("limit-host");
+            ActorContext host = identity.GetActorContext(BuiltInAgentRoleIds.Programmer);
+            for (int index = 0; index < RbxWorldPackageSerializer.MaximumMods; index++)
+            {
+                string id = "mod" + index.ToString("D3", CultureInfo.InvariantCulture);
+                session.Controller.Runtime.LoadMod(host, id, "local value = " + index, SessionCapabilities);
+                Assert.IsTrue(session.Controller.Runtime.UnloadMod(host, id));
+            }
+
+            Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, sources.List().Count,
+                "precondition: every unloaded mod kept its source");
+
+            RbxWorldPackageFormatLimitException refused = Assert.Throws<RbxWorldPackageFormatLimitException>(
+                () => session.Controller.Runtime.LoadMod(host, "one-too-many", "local value = 1", SessionCapabilities));
+            StringAssert.Contains("'forget'", refused.Message);
+            Assert.IsFalse(session.Controller.Runtime.IsLoaded(host, "one-too-many"));
+
+            LuaModsLlmTool tool = new(
+                session.Controller.Runtime,
+                new TestCoreAiSettings(),
+                NullLog.Instance,
+                SessionCapabilities,
+                true,
+                identity,
+                BuiltInAgentRoleIds.Programmer,
+                session.Gate);
+            JObject refusedByTool = JObject.Parse(await tool.ExecuteAsync("load", "one-too-many", "local value = 1"));
+
+            Assert.IsFalse(refusedByTool.Value<bool>("success"), refusedByTool.ToString());
+            StringAssert.Contains("'forget'", refusedByTool.Value<string>("message"));
+            Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, sources.List().Count);
+            Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, session.Controller.CaptureCurrent().Mods.Count,
+                "the world stays capturable, so saves and gated mutations keep working");
+
+            session.Controller.Runtime.LoadMod(host, "mod000", "local value = 'again'", SessionCapabilities);
+            Assert.IsTrue(session.Controller.Runtime.IsLoaded(host, "mod000"),
+                "a mod whose source is already stored is never refused");
+
+            JObject forgotten = JObject.Parse(await tool.ExecuteAsync("forget", "mod001"));
+            JObject accepted = JObject.Parse(await tool.ExecuteAsync("load", "one-too-many", "local value = 1"));
+
+            Assert.IsTrue(forgotten.Value<bool>("success"), forgotten.ToString());
+            Assert.IsTrue(accepted.Value<bool>("success"), accepted.ToString());
+            Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, sources.List().Count);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    LuaModsLlmTool.LoadBackupTrigger,
+                    LuaModsLlmTool.ForgetBackupTrigger,
+                    LuaModsLlmTool.LoadBackupTrigger
+                },
+                packages.AutoTriggers);
+        }
+
+        /// <summary>
+        /// A1-01: a world already past the mod limit (saved before the limit was enforced) cannot be
+        /// captured, and the gate used to refuse every mutation, including the forget that is the only
+        /// way back under the limit. Forget and unload now run without their impossible backup; every
+        /// other mutation stays refused until the world fits again.
+        /// </summary>
+        [Test]
+        public async Task ConfirmedBackup_WorldPastTheModLimit_RunsForgetAndUnloadWithoutBackup_AndRefusesOtherMutations()
+        {
+            MemorySourceStore sources = new();
+            for (int index = 0; index <= RbxWorldPackageSerializer.MaximumMods; index++)
+            {
+                string id = "stored-" + index.ToString("D3", CultureInfo.InvariantCulture);
+                sources.Save(id, "local value = " + index, new LuaModManifest
+                {
+                    Id = id,
+                    Name = id,
+                    OwnerActorId = "limit-actor",
+                    Capabilities = LuaCapabilities.Read.ToString(),
+                    Active = false
+                });
+            }
+
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            List<RbxWorldPackagePayload> backups = new();
+            DelegateWorldPackageStore store = new((trigger, captured, cancellationToken) =>
+            {
+                backups.Add(captured);
+                return UniTask.FromResult(new RbxWorldPackageWriteResult(true, trigger + ".world", ""));
+            });
+            ConfirmedWorldMutationGate gate = new(
+                cancellationToken => UniTask.FromResult(RbxWorldPackageSerializer.Capture(
+                    new RbxWorldPackageCaptureContext(
+                        registry,
+                        game,
+                        new InMemoryPartPropertySink(),
+                        NewSettings(),
+                        null,
+                        sources,
+                        CapturedAtUtc))),
+                store);
+            LuaCsModRuntime runtime = new(sourceStore: sources, versionStore: new MemoryLuaScriptVersionStore());
+            LocalActorIdentityProvider identity = new("limit-actor");
+            ActorContext actor = identity.GetActorContext(BuiltInAgentRoleIds.Programmer);
+            runtime.LoadMod(actor, "stored-000", "local value = 0", LuaCapabilities.All, persistToStore: false);
+            LuaModsLlmTool tool = CreateWorldGatedModsTool(runtime, identity, new TestCoreAiSettings(), gate);
+
+            JObject load = JObject.Parse(await tool.ExecuteAsync("load", "new-mod", "local value = 2"));
+            JObject unload = JObject.Parse(await tool.ExecuteAsync("unload", "stored-000"));
+            JObject forget = JObject.Parse(await tool.ExecuteAsync("forget", "stored-001"));
+
+            Assert.IsFalse(load.Value<bool>("success"), load.ToString());
+            StringAssert.Contains("'forget'", load.Value<string>("message"));
+            Assert.IsFalse(runtime.IsLoaded(actor, "new-mod"));
+            Assert.IsTrue(unload.Value<bool>("success"), unload.ToString());
+            Assert.IsFalse(runtime.IsLoaded(actor, "stored-000"));
+            Assert.IsTrue(forget.Value<bool>("success"), forget.ToString());
+            Assert.IsFalse(sources.TryLoad("stored-001", out _, out _));
+            CollectionAssert.IsEmpty(store.AutoTriggers, "a world past the limit cannot be captured, so no backup exists");
+
+            JObject afterForget = JObject.Parse(await tool.ExecuteAsync("load", "new-mod", "local value = 2"));
+
+            Assert.IsTrue(afterForget.Value<bool>("success"), afterForget.ToString());
+            CollectionAssert.AreEqual(new[] { LuaModsLlmTool.LoadBackupTrigger }, store.AutoTriggers,
+                "back under the limit, every mutation is backed up again");
+            Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, backups[0].Mods.Count);
+        }
+
+        /// <summary>
+        /// A1-04: the live-network rule was checked once, before the multi-frame safety autosave and
+        /// staging, so a client that joined meanwhile had its world replaced under it. It is checked
+        /// again right before publication, and the refused load rolls back like any staging failure.
+        /// </summary>
+        [Test]
+        public async Task WorldLoad_ClientJoiningDuringTheSafetyAutosave_IsRefusedBeforePublish_AndRollsBack()
+        {
+            ScriptedWorldPackageStore packages = new() { HoldNextWrite = true };
+            RecordingTransactionalSourceStore sources = new();
+            JoinableNetworkBridge bridge = new();
+            using GatedHeadlessSession session = new(packages, sources, bridge);
+            InstanceRegistry live = session.Controller.CurrentRbxApi.Registry;
+
+            UniTask<RbxWorldLoadResult> loading = session.Controller.LoadConfirmedAsync(
+                CreateMinimalPayload(CapturedAtUtc));
+            CollectionAssert.AreEqual(new[] { "load_world-pre" }, packages.AutoTriggers,
+                "precondition: the safety autosave is still in flight");
+            bridge.RegisterActor("remote-client");
+            packages.ReleaseHeldWrite(true);
+            RbxWorldLoadResult refused = await loading;
+
+            Assert.IsFalse(refused.Success, "a client joined before publication");
+            Assert.AreEqual(RbxWorldLoadRefusedException.NetworkSessionsActiveStatus, refused.Status);
+            StringAssert.Contains("MVP11 session handoff", refused.Error);
+            Assert.AreSame(live, session.Controller.CurrentRbxApi.Registry, "the live world was not replaced");
+            Assert.IsFalse(live.IsDetached);
+            Assert.AreEqual(1, sources.Prepared);
+            Assert.AreEqual(1, sources.RolledBack, "the staged source version was rolled back");
+            Assert.AreEqual(0, sources.Completed);
+
+            bridge.UnregisterActor("remote-client");
+            RbxWorldLoadResult loaded = await session.Controller.LoadConfirmedAsync(CreateMinimalPayload(CapturedAtUtc));
+
+            Assert.IsTrue(loaded.Success, loaded.Error);
+            Assert.AreEqual("", loaded.Status);
+            Assert.AreNotSame(live, session.Controller.CurrentRbxApi.Registry);
+            Assert.AreEqual(1, sources.Completed);
+        }
+
+        /// <summary>
+        /// A1-07: the load captured its safety autosave outside the shared gate, so an execute_lua that
+        /// was waiting for its own autosave changed the outgoing world after that capture: the change
+        /// was in neither the safety autosave nor the loaded world. The load now waits for the gate.
+        /// </summary>
+        [Test]
+        public async Task WorldLoad_SafetyAutosaveWaitsForTheSharedGate_SoAnExecuteLuaInFlightIsInTheBackup()
+        {
+            ScriptedWorldPackageStore packages = new() { HoldNextWrite = true };
+            using GatedHeadlessSession session = new(packages, new RecordingTransactionalSourceStore());
+
+            Task<LuaTool.LuaResult> executing = session.Controller.Executor.ExecuteAsync(
+                "local work = Instance.new('Folder') work.Name = 'AiWork' work.Parent = workspace return true",
+                CancellationToken.None);
+            CollectionAssert.AreEqual(new[] { LuaCsGameToolExecutor.ExecuteLuaBackupTrigger }, packages.AutoTriggers,
+                "precondition: execute_lua holds the gate while its autosave is in flight");
+            UniTask<RbxWorldLoadResult> loading = session.Controller.LoadConfirmedAsync(
+                CreateMinimalPayload(CapturedAtUtc));
+            CollectionAssert.AreEqual(new[] { LuaCsGameToolExecutor.ExecuteLuaBackupTrigger }, packages.AutoTriggers,
+                "the load must not capture the world while a gated mutation is in flight");
+
+            packages.ReleaseHeldWrite(true);
+            LuaTool.LuaResult executed = await executing;
+            RbxWorldLoadResult loaded = await loading;
+
+            Assert.IsTrue(executed.Success, executed.Error);
+            Assert.IsTrue(loaded.Success, loaded.Error);
+            CollectionAssert.AreEqual(
+                new[] { LuaCsGameToolExecutor.ExecuteLuaBackupTrigger, "load_world-pre" },
+                packages.AutoTriggers);
+            Assert.IsNull(FindNodeOrNull(packages.AutoPayloads[0], "AiWork"));
+            Assert.IsNotNull(FindNodeOrNull(packages.AutoPayloads[1], "AiWork"),
+                "the safety autosave holds the change execute_lua made before the load");
+            Assert.IsNull(session.Controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("AiWork"));
+        }
+
+        /// <summary>
+        /// A1-14: an execute_lua that waited behind a confirmed load ran against the outgoing world and
+        /// failed with WORLD_DETACHED, whose text blames a destroyed scene host and says to reload the
+        /// mods. It now says what happened: a world load replaced the world, nothing reached it.
+        /// </summary>
+        [Test]
+        public async Task ExecuteLua_WhoseWorldAConfirmedLoadReplacedWhileItWaited_ReportsTheLoad()
+        {
+            ScriptedWorldPackageStore packages = new() { HoldNextWrite = true };
+            using GatedHeadlessSession session = new(packages, new RecordingTransactionalSourceStore());
+
+            UniTask<RbxWorldLoadResult> loading = session.Controller.LoadConfirmedAsync(
+                CreateMinimalPayload(CapturedAtUtc));
+            Task<LuaTool.LuaResult> executing = session.Controller.Executor.ExecuteAsync(
+                "local work = Instance.new('Folder') work.Name = 'LateWork' work.Parent = workspace return true",
+                CancellationToken.None);
+            CollectionAssert.AreEqual(new[] { "load_world-pre" }, packages.AutoTriggers,
+                "precondition: execute_lua waits behind the load");
+
+            packages.ReleaseHeldWrite(true);
+            RbxWorldLoadResult loaded = await loading;
+            LuaTool.LuaResult executed = await executing;
+
+            Assert.IsTrue(loaded.Success, loaded.Error);
+            Assert.IsFalse(executed.Success, executed.Output);
+            StringAssert.Contains("a confirmed world load replaced the live world", executed.Error);
+            StringAssert.DoesNotContain("RbxWorldHost", executed.Error);
+            StringAssert.DoesNotContain("reload the mods so", executed.Error);
+            Assert.IsNull(session.Controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("LateWork"));
+
+            LuaTool.LuaResult ordinaryFailure = await session.Controller.Executor.ExecuteAsync(
+                "error('plain failure')",
+                CancellationToken.None);
+
+            Assert.IsFalse(ordinaryFailure.Success);
+            StringAssert.Contains("plain failure", ordinaryFailure.Error,
+                "a chunk whose world was not replaced keeps its own error");
+        }
+
+        /// <summary>
+        /// A1-08: a package the confirmed load would refuse (an active Full-capability mod, or a session
+        /// whose source store cannot replace a source set) used to be queued, so the player was asked to
+        /// confirm a load that could only fail. It is refused at request time as invalid_package.
+        /// </summary>
+        [Test]
+        public async Task WorldLoadRequest_PackageTheConfirmationWouldRefuse_IsRefusedBeforeThePlayerIsAsked()
+        {
+            RbxWorldPackagePayload fullModPackage = WithMods(
+                CreateMinimalPayload(CapturedAtUtc),
+                new RbxWorldModSource(
+                    new LuaModManifest
+                    {
+                        Id = "full-mod",
+                        Name = "full-mod",
+                        Capabilities = LuaCapabilities.Full.ToString(),
+                        Active = true
+                    },
+                    "return 1"));
+            ScriptedWorldPackageStore packages = new() { ManualPayload = fullModPackage, AutoPayload = fullModPackage };
+            using GatedHeadlessSession session = new(packages, new RecordingTransactionalSourceStore());
+            LocalActorIdentityProvider identity = new("request-actor");
+            int asked = 0;
+            session.Controller.ManualLoadConfirmationRequested += _ => asked++;
+
+            RbxWorldLoadRefusedException manual = await CatchLoadRefusal(() =>
+                session.Controller.RequestManualLoadAsync(
+                    identity.GetActorContext(BuiltInAgentRoleIds.Programmer), "full-slot"));
+            JObject manualTool = JObject.Parse(await new LoadWorldLlmTool(
+                session.Controller, identity, BuiltInAgentRoleIds.Programmer).ExecuteAsync("full-slot"));
+            JObject autoTool = JObject.Parse(await new LoadAutoSaveLlmTool(
+                session.Controller, identity, BuiltInAgentRoleIds.Programmer).ExecuteAsync(ValidAutoName));
+
+            Assert.AreEqual(RbxWorldLoadRefusedException.IncompatiblePackageStatus, manual.Status);
+            StringAssert.Contains("Active Full-capability mod 'full-mod'", manual.Message);
+            Assert.AreEqual("invalid_package", (string)manualTool["status"], manualTool.ToString());
+            Assert.AreEqual("invalid_package", (string)autoTool["status"], autoTool.ToString());
+            StringAssert.Contains("full-mod", (string)autoTool["error"]);
+
+            ScriptedWorldPackageStore plainPackages = new()
+            {
+                ManualPayload = CreateMinimalPayload(CapturedAtUtc)
+            };
+            using GatedHeadlessSession nonTransactional = new(plainPackages, new MemorySourceStore());
+            nonTransactional.Controller.ManualLoadConfirmationRequested += _ => asked++;
+            RbxWorldLoadRefusedException storeRefusal = await CatchLoadRefusal(() =>
+                nonTransactional.Controller.RequestManualLoadAsync(
+                    identity.GetActorContext(BuiltInAgentRoleIds.Programmer), "plain-slot"));
+            JObject storeTool = JObject.Parse(await new LoadWorldLlmTool(
+                nonTransactional.Controller, identity, BuiltInAgentRoleIds.Programmer).ExecuteAsync("plain-slot"));
+
+            Assert.AreEqual(RbxWorldLoadRefusedException.IncompatiblePackageStatus, storeRefusal.Status);
+            StringAssert.Contains("cannot atomically replace a world source set", storeRefusal.Message);
+            Assert.AreEqual("invalid_package", (string)storeTool["status"], storeTool.ToString());
+            Assert.AreEqual(0, plainPackages.LoadCalls, "the session rule is checked before the slot is read");
+            Assert.AreEqual(0, session.Controller.GetPendingManualLoads().Count);
+            Assert.AreEqual(0, nonTransactional.Controller.GetPendingManualLoads().Count);
+            Assert.AreEqual(0, asked, "the player is never asked to confirm a load that would be refused");
+
+            ScriptedWorldPackageStore loadablePackages = new()
+            {
+                ManualPayload = CreateMinimalPayload(CapturedAtUtc)
+            };
+            using GatedHeadlessSession loadable = new(loadablePackages, new RecordingTransactionalSourceStore());
+            loadable.Controller.ManualLoadConfirmationRequested += _ => asked++;
+            RbxWorldLoadRequest request = await loadable.Controller.RequestManualLoadAsync(
+                identity.GetActorContext(BuiltInAgentRoleIds.Programmer), "loadable-slot");
+
+            Assert.IsTrue(request.PlayerConfirmationRequired);
+            Assert.AreEqual(1, asked, "a loadable package is still offered to the player");
+        }
+
+        /// <summary>
+        /// A1-11: a load tool called on a session that was already shut down let
+        /// ObjectDisposedException cross the tool boundary; it is now an ordinary session_unavailable
+        /// result and nothing is read.
+        /// </summary>
+        [Test]
+        public async Task WorldLoadTools_SessionAlreadyShutDown_ReturnSessionUnavailable()
+        {
+            ScriptedWorldPackageStore packages = new()
+            {
+                ManualPayload = CreateMinimalPayload(CapturedAtUtc),
+                AutoPayload = CreateMinimalPayload(CapturedAtUtc)
+            };
+            GatedHeadlessSession session = new(packages, new RecordingTransactionalSourceStore());
+            LocalActorIdentityProvider identity = new("disposed-actor");
+            session.Dispose();
+
+            JObject manual = JObject.Parse(await new LoadWorldLlmTool(
+                session.Controller, identity, BuiltInAgentRoleIds.Programmer).ExecuteAsync("kept-slot"));
+            JObject auto = JObject.Parse(await new LoadAutoSaveLlmTool(
+                session.Controller, identity, BuiltInAgentRoleIds.Programmer).ExecuteAsync(ValidAutoName));
+
+            foreach (JObject json in new[] { manual, auto })
+            {
+                Assert.IsFalse((bool)json["success"], json.ToString());
+                Assert.AreEqual("session_unavailable", (string)json["status"]);
+                Assert.IsFalse((bool)json["player_confirmation_required"]);
+                Assert.AreEqual("", (string)json["request_id"]);
+                StringAssert.Contains("The tool was NOT executed.", (string)json["error"]);
+            }
+
+            Assert.AreEqual("kept-slot", (string)manual["slot"]);
+            Assert.AreEqual(ValidAutoName, (string)auto["slot"]);
+            Assert.AreEqual(0, packages.LoadCalls, "nothing is read for a session that is gone");
+        }
+
+        /// <summary>
+        /// A1-05: the name check called Path.GetFileName, which throws on Mono for '"', '&lt;', '&gt;',
+        /// '|' and control characters (Windows) and '\0' (every player), and accepted them where it did
+        /// not throw. Every such name is now refused by explicit character checks, never by a throw.
+        /// </summary>
+        [TestCase("\"a.world\"")]
+        [TestCase("\"a\".world")]
+        [TestCase("a|b.world")]
+        [TestCase("a<b>.world")]
+        [TestCase("a\tb.world")]
+        [TestCase("a\0b.world")]
+        [TestCase("a:b.world")]
+        [TestCase("a*b.world")]
+        [TestCase("a?b.world")]
+        [TestCase("a\\b.world")]
+        [TestCase("nested/b.world")]
+        public void PackageNames_AutoFileNameWithACharacterNoPlayerAccepts_IsRefusedWithoutThrowing(string name)
+        {
+            bool accepted = true;
+            string error = null;
+
+            Assert.DoesNotThrow(() => accepted = RbxWorldPackageNames.TryValidateAutoFileName(name, out error));
+
+            Assert.IsFalse(accepted);
+            Assert.AreEqual("Auto package name must be one .world file name without a path.", error);
+            Assert.IsTrue(RbxWorldPackageNames.TryValidateAutoFileName(ValidAutoName, out error), error);
+        }
+
+        /// <summary>
+        /// A1-06: the WebGL work budget left out value strings (a StringValue holds 200,000 characters,
+        /// and every Vector3 and CFrame value is encoded into the same string) and Humanoid state, so a
+        /// world far past two million characters passed it. Both now count, exactly at the boundary.
+        /// </summary>
+        [Test]
+        public void WebGlWorkBudget_CountsValueStringsAndHumanoidState_ExactlyAtTheBoundary()
+        {
+            FileRbxWorldPackageStore.MeasureWebGlWork(BudgetPayload("", ""), out _, out long baseline);
+            int room = checked((int)(FileRbxWorldPackageStore.MaximumWebGlSafeTextCharacters - baseline));
+
+            FileRbxWorldPackageStore.MeasureWebGlWork(
+                BudgetPayload(new string('v', 7), new string('d', 5)), out _, out long counted);
+            Assert.AreEqual(baseline + 12L, counted, "every value and DisplayName character counts");
+
+            Assert.DoesNotThrow(() => FileRbxWorldPackageStore.ValidateWebGlWorkBudget(
+                BudgetPayload(new string('v', room), "")));
+            RbxWorldPackageException valueOver = Assert.Throws<RbxWorldPackageException>(() =>
+                FileRbxWorldPackageStore.ValidateWebGlWorkBudget(BudgetPayload(new string('v', room + 1), "")));
+            StringAssert.Contains("work budget", valueOver.Message);
+            Assert.DoesNotThrow(() => FileRbxWorldPackageStore.ValidateWebGlWorkBudget(
+                BudgetPayload("", new string('d', room))));
+            Assert.Throws<RbxWorldPackageException>(() =>
+                FileRbxWorldPackageStore.ValidateWebGlWorkBudget(BudgetPayload("", new string('d', room + 1))));
+        }
+
+        /// <summary>A1-06, the world the audit built: eleven full StringValues are refused, ten still fit.</summary>
+        [Test]
+        public void WebGlWorkBudget_ElevenFullStringValues_AreRefused_TenFit()
+        {
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            for (int index = 0; index < 10; index++)
+            {
+                RbxStringValue value = (RbxStringValue)registry.Create("StringValue");
+                value.Value = new string('x', RbxStringValue.MaxLength);
+                value.Parent = registry.WorldRoot;
+            }
+
+            RbxWorldPackageCaptureContext context = new(
+                registry, game, new InMemoryPartPropertySink(), NewSettings(), capturedAtUtc: CapturedAtUtc);
+            Assert.DoesNotThrow(() => FileRbxWorldPackageStore.ValidateWebGlWorkBudget(
+                RbxWorldPackageSerializer.Capture(context)));
+
+            RbxStringValue eleventh = (RbxStringValue)registry.Create("StringValue");
+            eleventh.Value = new string('x', RbxStringValue.MaxLength);
+            eleventh.Parent = registry.WorldRoot;
+            RbxWorldPackagePayload payload = RbxWorldPackageSerializer.Capture(context);
+
+            RbxWorldPackageException refused = Assert.Throws<RbxWorldPackageException>(() =>
+                FileRbxWorldPackageStore.ValidateWebGlWorkBudget(payload));
+            StringAssert.Contains("text characters", refused.Message);
+        }
+
+        /// <summary>
+        /// A1-10: manual slots were unbounded and create-once, so a model could fill the disk with
+        /// saves until every autosave failed. The count and the total bytes are capped, and a save past
+        /// either is an ordinary failed result that writes nothing; one that exactly reaches the byte
+        /// cap is still written.
+        /// </summary>
+        [Test]
+        public async Task FileStore_ManualSlotCountAndByteCaps_RefuseAsResultsAndWriteNothing()
+        {
+            string root = NewTemporaryDirectory();
+            RbxWorldPackagePayload payload = CreateMinimalPayload(CapturedAtUtc);
+            FileRbxWorldPackageStore countCapped = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => CapturedAtUtc,
+                maximumManualSlots: 2);
+
+            RbxWorldPackageWriteResult first = await countCapped.CreateManualAsync("first", payload);
+            RbxWorldPackageWriteResult second = await countCapped.CreateManualAsync("second", payload);
+            RbxWorldPackageWriteResult third = await countCapped.CreateManualAsync("third", payload);
+
+            Assert.IsTrue(first.Success, first.Error);
+            Assert.IsTrue(second.Success, second.Error);
+            Assert.IsFalse(third.Success);
+            StringAssert.Contains("already keeps 2 manual slots, the limit is 2", third.Error);
+            StringAssert.Contains("Nothing was written.", third.Error);
+            CollectionAssert.AreEqual(new[] { "first", "second" }, countCapped.ListManualSlots());
+            Assert.IsFalse(File.Exists(Path.Combine(root, "Manual", "third.world")));
+
+            long packageBytes = new FileInfo(second.Path).Length;
+            Assert.AreEqual(new FileInfo(first.Path).Length, packageBytes, "precondition: equal payloads encode equally");
+            FileRbxWorldPackageStore byteCapped = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => CapturedAtUtc,
+                maximumManualSlotBytes: 3L * packageBytes - 1L);
+            RbxWorldPackageWriteResult overBytes = await byteCapped.CreateManualAsync("third", payload);
+
+            Assert.IsFalse(overBytes.Success);
+            StringAssert.Contains("bytes this store allows", overBytes.Error);
+            Assert.IsFalse(File.Exists(Path.Combine(root, "Manual", "third.world")));
+
+            FileRbxWorldPackageStore exactBytes = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => CapturedAtUtc,
+                maximumManualSlotBytes: 3L * packageBytes);
+            RbxWorldPackageWriteResult atLimit = await exactBytes.CreateManualAsync("third", payload);
+
+            Assert.IsTrue(atLimit.Success, atLimit.Error);
+            Assert.AreEqual(64, FileRbxWorldPackageStore.DefaultMaximumManualSlots);
+        }
+
+        /// <summary>
+        /// A1-13: a crash between a temporary write and its install left <c>&lt;entry&gt;.&lt;guid&gt;.tmp</c>
+        /// files that nothing ever removed. Opening the store sweeps exactly that shape in its manual,
+        /// autosave and startup directories and leaves every other file alone.
+        /// </summary>
+        [Test]
+        public void FileStore_Open_SweepsOnlyCrashLeftTemporaryFiles()
+        {
+            const string Guid32 = "0123456789abcdef0123456789abcdef";
+            string root = NewTemporaryDirectory();
+            string startup = new FileRbxWorldPackageStore(root, startupNamespace: "sweep-ns").StartupDirectoryForTests;
+            string manual = Path.Combine(root, "Manual");
+            string auto = Path.Combine(root, "Auto");
+            Directory.CreateDirectory(manual);
+            Directory.CreateDirectory(auto);
+            Directory.CreateDirectory(startup);
+            string[] swept =
+            {
+                Path.Combine(manual, "slot.world." + Guid32 + ".tmp"),
+                Path.Combine(auto, ValidAutoName + "." + Guid32 + ".tmp"),
+                Path.Combine(startup, "0000000002.world." + Guid32 + ".tmp"),
+                Path.Combine(startup, "0000000002.json." + Guid32 + ".tmp"),
+                Path.Combine(startup, "0000000003.default." + Guid32 + ".tmp")
+            };
+            string[] kept =
+            {
+                Path.Combine(manual, "slot.world"),
+                Path.Combine(manual, "notes.tmp"),
+                Path.Combine(manual, "slot.world.tmp"),
+                Path.Combine(manual, "slot.world." + Guid32.Substring(1) + ".tmp"),
+                Path.Combine(manual, "slot.world." + Guid32.ToUpperInvariant() + ".tmp"),
+                Path.Combine(manual, "slot.json." + Guid32 + ".tmp"),
+                Path.Combine(auto, ".world." + Guid32 + ".tmp"),
+                Path.Combine(root, "stray.world." + Guid32 + ".tmp")
+            };
+            foreach (string path in swept)
+            {
+                File.WriteAllText(path, "partial");
+            }
+
+            foreach (string path in kept)
+            {
+                File.WriteAllText(path, "kept");
+            }
+
+            FileRbxWorldPackageStore reopened = new(root, startupNamespace: "sweep-ns");
+
+            foreach (string path in swept)
+            {
+                Assert.IsFalse(File.Exists(path), "a crash-left temporary file must be swept: " + path);
+            }
+
+            foreach (string path in kept)
+            {
+                Assert.IsTrue(File.Exists(path), "only the exact temporary shape is swept: " + path);
+            }
+
+            CollectionAssert.AreEqual(new[] { "slot" }, reopened.ListManualSlots());
+        }
+
+        private static RbxWorldPackagePayload WithMods(RbxWorldPackagePayload source, params RbxWorldModSource[] mods)
+        {
+            return new RbxWorldPackagePayload(
+                source.CapturedAtUtc,
+                source.Settings,
+                source.Tree,
+                source.Parts,
+                source.CameraCFrame,
+                mods);
+        }
+
+        /// <summary>A structurally minimal payload holding one value string and one Humanoid DisplayName.</summary>
+        private static RbxWorldPackagePayload BudgetPayload(string valueString, string displayName)
+        {
+            InstanceTreeSnapshot tree = new();
+            tree.Instances.Add(new InstanceSnapshot { Id = 1UL, ClassName = "DataModel", Name = "Game" });
+            tree.Instances.Add(new InstanceSnapshot
+            {
+                Id = 2UL,
+                ParentId = 1UL,
+                ClassName = "StringValue",
+                Name = "Value",
+                Value = new ValueSnapshot { StringValue = valueString }
+            });
+            tree.Instances.Add(new InstanceSnapshot
+            {
+                Id = 3UL,
+                ParentId = 1UL,
+                ClassName = "Humanoid",
+                Name = "Humanoid",
+                Humanoid = new HumanoidSnapshot
+                {
+                    Health = "100",
+                    MaxHealth = "100",
+                    WalkSpeed = "16",
+                    JumpPower = "50",
+                    JumpHeight = "7.2",
+                    DisplayName = displayName
+                }
+            });
+            return new RbxWorldPackagePayload(
+                CapturedAtUtc,
+                NewSettings(),
+                tree,
+                new Dictionary<InstanceId, PartProperties>(),
+                null,
+                Array.Empty<RbxWorldModSource>());
+        }
+
+        private static async Task<RbxWorldLoadRefusedException> CatchLoadRefusal(
+            Func<UniTask<RbxWorldLoadRequest>> request)
+        {
+            try
+            {
+                await request();
+            }
+            catch (RbxWorldLoadRefusedException refused)
+            {
+                return refused;
+            }
+
+            Assert.Fail("The world-load request was expected to be refused.");
+            return null;
+        }
+
         private RuntimeWorld BuildAuthoredWorld()
         {
             RuntimeWorld world = new(WorldId);
@@ -3911,6 +4538,321 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     UpdateAvailable = source.UpdateAvailable,
                     Entry = source.Entry
                 };
+            }
+        }
+
+        /// <summary>
+        /// The production session controller over the headless host, every session stack sharing one
+        /// <see cref="ConfirmedWorldMutationGate"/> over the controller's own capture, as the installer
+        /// composes them.
+        /// </summary>
+        private sealed class GatedHeadlessSession : IDisposable
+        {
+            public GatedHeadlessSession(
+                IRbxWorldPackageStore packageStore,
+                ILuaModSourceStore sourceStore,
+                INetworkBridge networkBridge = null)
+            {
+                InstanceRegistry registry = new(worldId: WorldId);
+                RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+                HeadlessRbxWorldSessionHost host = new(
+                    registry,
+                    game,
+                    NewSettings(),
+                    new InMemoryPartPropertySink(),
+                    new InMemoryCameraRig());
+                LuaCsRbxApiBindings rbxApi = new(
+                    host.Registry,
+                    host.Game,
+                    partSink: host.PartSink,
+                    cameraRig: host.CameraRig,
+                    networkBridge: networkBridge);
+                Gate = new ConfirmedWorldMutationGate(
+                    cancellationToken => UniTask.FromResult(Controller.CaptureCurrent()),
+                    packageStore);
+                Controller = new RbxWorldRuntimeSessionController(
+                    host,
+                    packageStore,
+                    sourceStore,
+                    CreateStack(rbxApi, sourceStore, new Mvp1AcceptanceMemoryStore(), null),
+                    rbxApi,
+                    (candidate, stagedNetwork) => new LuaCsRbxApiBindings(
+                        candidate.Registry,
+                        candidate.Game,
+                        partSink: candidate.PartSink,
+                        cameraRig: candidate.CameraRig,
+                        networkBridge: stagedNetwork),
+                    CreateStack,
+                    (stack, stagedApi) => { },
+                    networkBridge,
+                    SessionCapabilities,
+                    false,
+                    new Mvp1AcceptanceMemoryStore(),
+                    null,
+                    message => Diagnostics.Add(message));
+            }
+
+            public ConfirmedWorldMutationGate Gate { get; }
+
+            public RbxWorldRuntimeSessionController Controller { get; }
+
+            public List<string> Diagnostics { get; } = new();
+
+            public void Dispose()
+            {
+                Controller.Dispose();
+            }
+
+            private LuaCsModStack CreateStack(
+                LuaCsRbxApiBindings rbxApi,
+                ILuaModSourceStore sourceStore,
+                ILuaModStore modStore,
+                ILuaScriptVersionStore versionStore)
+            {
+                return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+                {
+                    Logger = new Mvp1AcceptanceNullLogger(),
+                    LuaScriptVersions = versionStore,
+                    ModStore = modStore,
+                    ModSourceStore = sourceStore,
+                    Capabilities = SessionCapabilities,
+                    OneOffCapabilities = SessionCapabilities,
+                    RbxApi = rbxApi,
+                    WorldMutationGate = Gate,
+                    RegisterWorldEditBuildBindings = false
+                });
+            }
+        }
+
+        /// <summary>A package store whose next autosave can be held open; it records every autosave request.</summary>
+        private sealed class ScriptedWorldPackageStore : IRbxWorldPackageStore
+        {
+            private UniTaskCompletionSource<RbxWorldPackageWriteResult> _heldWrite;
+
+            /// <summary>When set, the next autosave stays pending until <see cref="ReleaseHeldWrite"/>.</summary>
+            public bool HoldNextWrite { get; set; }
+
+            public List<string> AutoTriggers { get; } = new();
+
+            public List<RbxWorldPackagePayload> AutoPayloads { get; } = new();
+
+            public RbxWorldPackagePayload ManualPayload { get; set; }
+
+            public RbxWorldPackagePayload AutoPayload { get; set; }
+
+            public int LoadCalls { get; private set; }
+
+            public void ReleaseHeldWrite(bool success)
+            {
+                UniTaskCompletionSource<RbxWorldPackageWriteResult> held = _heldWrite
+                    ?? throw new InvalidOperationException("No autosave is held.");
+                _heldWrite = null;
+                held.TrySetResult(new RbxWorldPackageWriteResult(
+                    success,
+                    "held.world",
+                    success ? "" : "Injected durability refusal."));
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> CreateAutoAsync(
+                string trigger,
+                RbxWorldPackagePayload payload,
+                CancellationToken cancellationToken = default)
+            {
+                AutoTriggers.Add(trigger);
+                AutoPayloads.Add(payload);
+                if (!HoldNextWrite)
+                {
+                    return UniTask.FromResult(new RbxWorldPackageWriteResult(true, trigger + ".world", ""));
+                }
+
+                HoldNextWrite = false;
+                _heldWrite = new UniTaskCompletionSource<RbxWorldPackageWriteResult>();
+                return _heldWrite.Task;
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> CreateManualAsync(
+                string slot,
+                RbxWorldPackagePayload payload,
+                CancellationToken cancellationToken = default)
+            {
+                return UniTask.FromResult(new RbxWorldPackageWriteResult(
+                    false,
+                    "",
+                    "Manual slots are outside this test seam."));
+            }
+
+            public UniTask<RbxWorldPackagePayload> LoadManualAsync(
+                string slot,
+                CancellationToken cancellationToken = default)
+            {
+                LoadCalls++;
+                if (ManualPayload == null)
+                {
+                    throw new FileNotFoundException("No manual payload is scripted.", slot);
+                }
+
+                return UniTask.FromResult(ManualPayload);
+            }
+
+            public UniTask<RbxWorldPackagePayload> LoadAutoAsync(
+                string fileName,
+                CancellationToken cancellationToken = default)
+            {
+                LoadCalls++;
+                if (AutoPayload == null)
+                {
+                    throw new FileNotFoundException("No autosave payload is scripted.", fileName);
+                }
+
+                return UniTask.FromResult(AutoPayload);
+            }
+
+            public IReadOnlyList<string> ListManualSlots()
+            {
+                return Array.Empty<string>();
+            }
+
+            public IReadOnlyList<string> ListAutoFiles()
+            {
+                return Array.Empty<string>();
+            }
+
+            public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
+            {
+                return Array.Empty<RbxAutoSaveInfo>();
+            }
+        }
+
+        /// <summary>A transactional source store that counts each stage of its exact replacements.</summary>
+        private sealed class RecordingTransactionalSourceStore : ILuaModSourceStore, IRbxWorldModSourceStore
+        {
+            private readonly MemorySourceStore _sources = new();
+
+            public int Prepared { get; private set; }
+
+            public int Completed { get; private set; }
+
+            public int RolledBack { get; private set; }
+
+            public void Save(string id, string source, LuaModManifest manifest)
+            {
+                _sources.Save(id, source, manifest);
+            }
+
+            public bool TryLoad(string id, out string source, out LuaModManifest manifest)
+            {
+                return _sources.TryLoad(id, out source, out manifest);
+            }
+
+            public IReadOnlyList<LuaModManifest> List()
+            {
+                return _sources.List();
+            }
+
+            public void SetActive(string id, bool active)
+            {
+                _sources.SetActive(id, active);
+            }
+
+            public void Delete(string id)
+            {
+                _sources.Delete(id);
+            }
+
+            public UniTask<IRbxWorldModSourceReplacement> PrepareExactReplacementAsync(
+                IReadOnlyList<RbxWorldModSource> mods,
+                CancellationToken cancellationToken = default)
+            {
+                Prepared++;
+                MemorySourceStore staged = new();
+                staged.ReplaceWith(mods);
+                return UniTask.FromResult<IRbxWorldModSourceReplacement>(new Replacement(this, staged));
+            }
+
+            private sealed class Replacement : IRbxWorldModSourceReplacement
+            {
+                private readonly RecordingTransactionalSourceStore _owner;
+
+                public Replacement(RecordingTransactionalSourceStore owner, ILuaModSourceStore staged)
+                {
+                    _owner = owner;
+                    SourceStore = staged;
+                }
+
+                public ILuaModSourceStore SourceStore { get; }
+
+                public void Activate()
+                {
+                }
+
+                public UniTask CompleteAsync(CancellationToken cancellationToken = default)
+                {
+                    _owner.Completed++;
+                    return UniTask.CompletedTask;
+                }
+
+                public UniTask RollbackAsync(CancellationToken cancellationToken = default)
+                {
+                    _owner.RolledBack++;
+                    return UniTask.CompletedTask;
+                }
+
+                public void Dispose()
+                {
+                }
+            }
+        }
+
+        /// <summary>A host transport whose registered actors stand for live remote sessions.</summary>
+        private sealed class JoinableNetworkBridge : INetworkBridge
+        {
+            private readonly List<string> _actorIds = new();
+
+            public RbxNetworkTopology Topology => RbxNetworkTopology.Host;
+
+            public IReadOnlyList<string> ActorIds => _actorIds;
+
+            public int MaxPayloadBytes => 65536;
+
+            public double ServerClockOffsetSeconds => 0d;
+
+            public event Action<RbxNetworkPeerDisconnected> PeerDisconnected
+            {
+                add { }
+                remove { }
+            }
+
+            public event Action<RbxNetworkEventMessage> EventReceived
+            {
+                add { }
+                remove { }
+            }
+
+            public event Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> RequestReceived
+            {
+                add { }
+                remove { }
+            }
+
+            public void RegisterActor(string actorId)
+            {
+                if (!_actorIds.Contains(actorId))
+                {
+                    _actorIds.Add(actorId);
+                }
+            }
+
+            public void UnregisterActor(string actorId)
+            {
+                _actorIds.Remove(actorId);
+            }
+
+            public void SendEvent(RbxNetworkEventMessage message)
+            {
+            }
+
+            public void SendRequest(RbxNetworkRequestMessage message, Action<RbxNetworkResponse> response)
+            {
             }
         }
 
