@@ -2740,6 +2740,43 @@ namespace CoreAI.Tests.EditMode
                 "The override failure charges the owning mod's error streak.");
         }
 
+        [Test]
+        public void LuaCs_LogicSlots_InvocationScope_BracketsEachFormulaCall_AndClosesAfterTheFailOpenReset()
+        {
+            // WHY: the runtime counts a formula as running mod code between the two calls, so the bracket
+            // must open only when a formula actually runs and close on every exit, a failure included,
+            // after the failure has been charged to the mod that is still loaded.
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(store);
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("dmg");
+            slots.DeclareSlot("broken");
+            slots.DeclareSlot("vanilla");
+            stack.Runtime.LoadMod("m", @"
+                logic_define('dmg', function(x) return x * 2 end)
+                logic_define('broken', function() error('formula broke') end)");
+            List<string> events = new();
+            slots.SetInvocationScope(() => events.Add("start"), () => events.Add("finish"));
+            slots.OverrideFailed += (modId, slot, error) => events.Add("failed:" + slot);
+
+            Assert.IsTrue(slots.TryInvokeNumber("dmg", out double value, 21));
+            Assert.AreEqual(42d, value);
+            CollectionAssert.AreEqual(new[] { "start", "finish" }, events);
+
+            events.Clear();
+            Assert.IsFalse(slots.TryInvokeNumber("vanilla", out _, 1));
+            CollectionAssert.IsEmpty(events, "no formula ran, so no bracket opened");
+
+            Assert.IsFalse(slots.TryInvokeNumber("broken", out _, 1));
+            CollectionAssert.AreEqual(new[] { "start", "failed:broken", "finish" }, events,
+                "the bracket closes after the fail-open reset has reported the failure");
+
+            events.Clear();
+            slots.SetInvocationScope(null, null);
+            Assert.IsTrue(slots.TryInvokeNumber("dmg", out _, 1));
+            CollectionAssert.IsEmpty(events, "a detached scope is never called");
+        }
+
         /// <summary>Collects the runtime's error lines so host-fault reporting can be counted.</summary>
         private sealed class RecordingLog : CoreAI.Logging.ILog
         {

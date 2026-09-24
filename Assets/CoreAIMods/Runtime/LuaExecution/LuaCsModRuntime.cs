@@ -309,6 +309,8 @@ namespace CoreAI.Ai.LuaCs
         private readonly object _hostFaultGate = new();
         private readonly HashSet<string> _loggedHostFaults = new(StringComparer.Ordinal);
         private readonly Queue<KeyValuePair<string, string[]>> _pendingActorModReleases = new();
+        private readonly Dictionary<string, string> _actorDisconnectedDuringBuild =
+            new(StringComparer.Ordinal);
         private bool _releasingActorMods;
         private int _guardedCallDepth;
 
@@ -562,6 +564,7 @@ namespace CoreAI.Ai.LuaCs
                 // into the handler-error channel makes it visible to diagnostics/auto-repair instead of
                 // the old silent revert-to-vanilla.
                 _logicSlots.OverrideFailed += OnLogicSlotOverrideFailed;
+                _logicSlots.SetInvocationScope(EnterLogicSlotFormula, ExitLogicSlotFormula);
             }
 
             // WHY: The factory is the composition root that wires the engine; the default here only keeps
@@ -1433,10 +1436,23 @@ namespace CoreAI.Ai.LuaCs
                     PopTransactionScope();
                 }
 
+                // WHY: a chunk that disconnected its own actor and still reached its end would load a
+                // mod for an actor that is gone, only for the queued release to unload it again.
+                if (TryTakeActorDisconnectedDuringBuild(modId, out string departedActorId))
+                {
+                    throw ActorDisconnectedDuringLoad(modId, departedActorId, null);
+                }
+
                 return mod;
             }
             catch (Exception ex)
             {
+                // WHY: the disconnect kills every thread of the actor's mods, this load's main chunk
+                // among them, and the VM reports that as a bare cancellation that names neither the
+                // mod nor the reason it stopped.
+                Exception failure = TryTakeActorDisconnectedDuringBuild(modId, out string disconnectedActorId)
+                    ? ActorDisconnectedDuringLoad(modId, disconnectedActorId, ex)
+                    : ex;
                 if (rbxLoadCandidate != null)
                 {
                     try
@@ -1452,12 +1468,50 @@ namespace CoreAI.Ai.LuaCs
                 // WHY: A failed load/parse never reaches the tick-time error channel, yet it is the
                 // self-repair loop's most important signal — record it before rethrowing so get_mod_logs
                 // can show WHY the mod never came up.
-                AppendLog(modId, LuaLogLevel.RuntimeError, $"load failed: {SingleLineErrorMessage(ex)}");
-                throw;
+                AppendLog(modId, LuaLogLevel.RuntimeError, $"load failed: {SingleLineErrorMessage(failure)}");
+                if (ReferenceEquals(failure, ex))
+                {
+                    throw;
+                }
+
+                throw failure;
             }
             finally
             {
                 ExitModBuild(modId);
+            }
+        }
+
+        /// <summary>
+        /// The error a load or reload fails with when the actor it runs as disconnected while its main
+        /// chunk ran: the disconnect stops the chunk, and a mod whose actor is gone cannot load.
+        /// </summary>
+        private static InvalidOperationException ActorDisconnectedDuringLoad(
+            string modId, string actorId, Exception inner)
+        {
+            return new InvalidOperationException(
+                $"mod '{modId}' did not load: its actor '{actorId}' disconnected while its main chunk ran, " +
+                "which stopped the chunk; load the mod again once the actor has reconnected.",
+                inner);
+        }
+
+        /// <summary>
+        /// Takes the record that the actor a build of <paramref name="modId"/> runs as disconnected
+        /// while the build was in progress (<see cref="OnActorModsDisconnected"/>).
+        /// </summary>
+        private bool TryTakeActorDisconnectedDuringBuild(string modId, out string actorId)
+        {
+            lock (_gate)
+            {
+                if (_actorDisconnectedDuringBuild.Count == 0
+                    || !_actorDisconnectedDuringBuild.TryGetValue(modId, out actorId))
+                {
+                    actorId = null;
+                    return false;
+                }
+
+                _actorDisconnectedDuringBuild.Remove(modId);
+                return true;
             }
         }
 
@@ -1484,6 +1538,7 @@ namespace CoreAI.Ai.LuaCs
                 if (depth <= 1)
                 {
                     _buildDepthByModId.Remove(modId);
+                    _actorDisconnectedDuringBuild.Remove(modId);
                 }
                 else
                 {
@@ -2005,8 +2060,36 @@ namespace CoreAI.Ai.LuaCs
                 $"mod quarantined after {mod.ErrorCount} consecutive handler errors; " +
                 "dispatch suspended until reload.");
 
+            // WHY the actor record is put back after the teardown: the teardown releases the mod's
+            // scheduled work through the same kill an unload uses, and that kill also drops the
+            // bindings' record of the actor the mod was loaded for. A quarantined mod stays loaded and
+            // keeps its slot of that actor's and the world's mod quota, so without the record the
+            // actor's disconnect neither listed nor unloaded it, and it stayed loaded for good (M2-24).
+            // WHY not have the runtime add its quarantined mods to each disconnect instead: the bindings
+            // raise a disconnect only with the mods they hold a record for, so an actor whose one mod
+            // was quarantined raised nothing the runtime could act on.
+            LuaCsRbxApiBindings.ModActorRecord actorRecord = _rbxApi?.CaptureModActorRecord(mod.Id);
             TeardownModEffects(mod.Id, LuaModTeardownReason.Quarantine);
+            if (actorRecord != null && IsLiveQuarantined(mod))
+            {
+                _rbxApi.RestoreModActorRecord(actorRecord);
+            }
+
             RaiseModQuarantined(mod.Id, mod.ErrorCount);
+        }
+
+        /// <summary>
+        /// True while <paramref name="mod"/> is still the loaded instance of its id and quarantined: a
+        /// teardown listener may have unloaded or replaced it in the meantime.
+        /// </summary>
+        private bool IsLiveQuarantined(Mod mod)
+        {
+            lock (_gate)
+            {
+                return mod.Quarantined
+                       && _mods.TryGetValue(mod.Id, out Mod live)
+                       && ReferenceEquals(live, mod);
+            }
         }
 
         /// <summary>
@@ -2088,6 +2171,7 @@ namespace CoreAI.Ai.LuaCs
             if (_logicSlots != null)
             {
                 _logicSlots.OverrideFailed -= OnLogicSlotOverrideFailed;
+                _logicSlots.SetInvocationScope(null, null);
             }
 
             ModEventEmitted = null;
@@ -2140,6 +2224,21 @@ namespace CoreAI.Ai.LuaCs
                     return;
                 }
 
+                // WHY: a mod whose build is in progress is listed because its load already recorded its
+                // actor; its chunk was just killed with the actor's other threads, and the build turns
+                // this record into the reason it failed instead of a bare cancellation.
+                if (_buildDepthByModId.Count != 0)
+                {
+                    for (int index = 0; index < released.Length; index++)
+                    {
+                        string modId = Normalize(released[index]);
+                        if (_buildDepthByModId.ContainsKey(modId))
+                        {
+                            _actorDisconnectedDuringBuild[modId] = actorId;
+                        }
+                    }
+                }
+
                 _pendingActorModReleases.Enqueue(new KeyValuePair<string, string[]>(actorId, released));
             }
 
@@ -2148,18 +2247,18 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// Unloads every queued mod of a disconnected actor, unless mod code is running or a release is
-        /// already in progress. Runs when the disconnect arrives, after each guarded hook/timer call,
-        /// and at the start of <see cref="Tick"/>, which picks up a disconnect reached from a scheduler
-        /// thread.
+        /// already in progress. Runs when the disconnect arrives, after each guarded hook/timer call and
+        /// each logic-slot formula, and at the start of <see cref="Tick"/>, which picks up a disconnect
+        /// reached from a scheduler thread.
         /// </summary>
         /// <remarks>
         /// WHY not while mod code runs: a mod's script can disconnect an actor itself (Player:Kick ends
         /// the connection, and the bridge reports the drop synchronously), possibly its own, from a
-        /// hook or from an export another mod's thread called. The unload's teardown forgets which
-        /// actor the mod was loaded for, so the rest of that code would resolve to the host fallback
-        /// instead of being refused NOT_AUTHORITY, and a thread it scheduled on its way out would later
-        /// run as the host. Waiting until the code has returned keeps it refused until the teardown
-        /// kills what is left.
+        /// hook, a logic-slot formula, or an export another mod's thread called. The unload's teardown
+        /// forgets which actor the mod was loaded for, so the rest of that code would resolve to the
+        /// host fallback instead of being refused NOT_AUTHORITY, and a thread it scheduled on its way
+        /// out would later run as the host. Waiting until the code has returned keeps it refused until
+        /// the teardown kills what is left.
         /// WHY one release at a time: an unload's teardown (instance sweeps, host listeners) can
         /// disconnect another actor, and unloading that actor's mods in the middle of the first
         /// teardown would take a second mod down halfway through the first; the loop below releases
@@ -2194,12 +2293,28 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// True while a guarded hook/timer call of this runtime, or a scheduler thread (a main chunk,
-        /// a <c>task.*</c> thread, a signal handler), is executing.
+        /// True while a guarded hook/timer call of this runtime, a formula of its logic slots, or a
+        /// scheduler thread (a main chunk, a <c>task.*</c> thread, a signal handler) is executing.
         /// </summary>
         private bool IsModCodeRunning()
         {
             return _guardedCallDepth > 0 || _rbxApi?.SchedulerThreadFactory.CurrentThread != null;
+        }
+
+        /// <summary>A formula of this runtime's logic slots starts running (<see cref="IsModCodeRunning"/>).</summary>
+        private void EnterLogicSlotFormula()
+        {
+            _guardedCallDepth++;
+        }
+
+        /// <summary>
+        /// A formula of this runtime's logic slots returned or failed; the mods of an actor it
+        /// disconnected are released once no mod code runs any more.
+        /// </summary>
+        private void ExitLogicSlotFormula()
+        {
+            _guardedCallDepth--;
+            ReleaseDisconnectedActorMods();
         }
 
         private bool TryDequeueActorModRelease(out KeyValuePair<string, string[]> release)

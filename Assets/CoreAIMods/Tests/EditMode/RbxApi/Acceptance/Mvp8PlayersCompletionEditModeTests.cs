@@ -537,6 +537,34 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void Negative_Kick_WithANumberMessage_IsRefusedLikeEveryOtherStringArgument()
+        {
+            // WHY pinned: Roblox turns a number into a string for a string parameter, but no string
+            // parameter of this surface does (FindFirstChild(5), SetAttribute(5, v), AddTag(p, 5) and
+            // Part.Name = 5 are all BAD_ARGUMENT). Kick follows that one rule instead of being the
+            // only method that accepts a number where a string is expected.
+            NoticeTransportBridge bridge = new(RbxNetworkTopology.Host);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            ActorContext actor = harness.Actor("kick-number");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            harness.Stack.Runtime.LoadMod(actor, "kick-number-mod", @"
+                local me = game:GetService('Players'):GetPlayerByUserId(" + player.UserId + @")
+                local ok, err = pcall(function() return me:Kick(42) end)
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))",
+                persistToStore: false);
+
+            Assert.AreEqual("false", harness.Store.Get("kick-number-mod", "ok"),
+                "log: " + string.Join(" || ", harness.LogLines));
+            StringAssert.Contains("Player:Kick expects a string at argument 1",
+                harness.Store.Get("kick-number-mod", "err"));
+            CollectionAssert.IsEmpty(bridge.Kicks);
+            CollectionAssert.IsEmpty(bridge.EndedConnections);
+            Assert.IsFalse(player.IsDestroyed);
+        }
+
+        [Test]
         public void Negative_LuaDestroyOrReparentOfOwnPlayer_IsRefusedWithAKickHint()
         {
             // WHY (M8-12): a Player is Owned by its actor, so the ACL let a client mod destroy or

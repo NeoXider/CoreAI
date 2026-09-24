@@ -77,16 +77,14 @@ namespace CoreAI.Ai.LuaCs
         {
             public ModLoadCandidate(string ownerModId, bool hadPreviousGeneration,
                 int previousGeneration, HashSet<RbxScriptConnection> existingConnections,
-                bool hadExecutingScriptBacking, bool hadActorLedgerEntry,
-                string previousLoadedActorId)
+                bool hadExecutingScriptBacking, ModActorRecord previousActorRecord)
             {
                 OwnerModId = ownerModId;
                 HadPreviousGeneration = hadPreviousGeneration;
                 PreviousGeneration = previousGeneration;
                 ExistingConnections = existingConnections;
                 HadExecutingScriptBacking = hadExecutingScriptBacking;
-                HadActorLedgerEntry = hadActorLedgerEntry;
-                PreviousLoadedActorId = previousLoadedActorId;
+                PreviousActorRecord = previousActorRecord;
             }
 
             public string OwnerModId { get; }
@@ -99,19 +97,54 @@ namespace CoreAI.Ai.LuaCs
 
             public bool HadExecutingScriptBacking { get; }
 
-            /// <summary>Whether <see cref="ActorLedger"/> held an entry for the mod before this load.</summary>
+            /// <summary>
+            /// What these bindings remembered of the actor the mod ran as before this load, put back
+            /// if the load fails.
+            /// </summary>
+            public ModActorRecord PreviousActorRecord { get; }
+        }
+
+        /// <summary>
+        /// What these bindings remember of the actor a mod's current load runs as: the actor context
+        /// <see cref="DisconnectActor"/> lists the mod under, and the mod's <see cref="ActorLedger"/>
+        /// entry. <see cref="CaptureModActorRecord"/> takes it before a step that drops or overwrites
+        /// both, and <see cref="RestoreModActorRecord"/> puts it back when the mod stays loaded as it
+        /// was: a failed load or reload, and a quarantine.
+        /// </summary>
+        internal sealed class ModActorRecord
+        {
+            public ModActorRecord(string ownerModId, bool hadActorContext,
+                ActorContext actorContext, bool hadActorLedgerEntry, string loadedActorId)
+            {
+                OwnerModId = ownerModId;
+                HadActorContext = hadActorContext;
+                ActorContext = actorContext;
+                HadActorLedgerEntry = hadActorLedgerEntry;
+                LoadedActorId = loadedActorId;
+            }
+
+            public string OwnerModId { get; }
+
+            /// <summary>Whether <see cref="DisconnectActor"/> would have listed the mod under an actor.</summary>
+            public bool HadActorContext { get; }
+
+            /// <summary>The actor context the mod was listed under; default when there was none.</summary>
+            public ActorContext ActorContext { get; }
+
+            /// <summary>Whether <see cref="ActorLedger"/> held an entry for the mod.</summary>
             public bool HadActorLedgerEntry { get; }
 
-            /// <summary>The actor that entry recorded (null for the host), restored if the load fails.</summary>
-            public string PreviousLoadedActorId { get; }
+            /// <summary>The actor that entry recorded; null for the host or when there was no entry.</summary>
+            public string LoadedActorId { get; }
         }
 
         /// <summary>
         /// Which actor each loaded mod was loaded for, plus the actor context its resumes run under,
         /// built once per attributed actor instead of once per resume. One per bindings, so one per
-        /// world; an entry lives from the mod's load until it unloads or is quarantined
-        /// (<see cref="KillAllScheduledOwnedBy"/>), and a load that fails leaves none behind
-        /// (<see cref="RollbackModLoadCandidate"/>).
+        /// world; an entry lives from the mod's load until it unloads
+        /// (<see cref="KillAllScheduledOwnedBy"/>; a quarantine, which keeps the mod loaded, puts the
+        /// entry back through <see cref="RestoreModActorRecord"/>), and a load that fails leaves none
+        /// behind (<see cref="RollbackModLoadCandidate"/>).
         /// </summary>
         /// <remarks>
         /// WHY cached: every scheduler resume, legacy hook and cross-mod call resolves its actor,
@@ -211,7 +244,7 @@ namespace CoreAI.Ai.LuaCs
                 }
             }
 
-            /// <summary>Drops the mod's entry: it unloaded, was quarantined, or its load failed.</summary>
+            /// <summary>Drops the mod's entry: it unloaded, or its load failed.</summary>
             public void Forget(string ownerModId)
             {
                 if (string.IsNullOrWhiteSpace(ownerModId))
@@ -1446,10 +1479,10 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// Raised by <see cref="DisconnectActor"/> after it has released an actor, with the actor id and
-        /// every mod that was loaded for it. Those mods stay loaded here: their threads are killed,
-        /// their connections dropped and their actor attribution released, so each later dispatch of
-        /// theirs is refused with NOT_AUTHORITY; the mod runtime subscribes to unload or quarantine
-        /// them so they stop dispatching at all (M2-24).
+        /// every mod that was loaded for it, quarantined ones included. Those mods stay loaded here:
+        /// their threads are killed, their connections dropped and their actor attribution released,
+        /// so each later dispatch of theirs is refused with NOT_AUTHORITY; the mod runtime subscribes
+        /// to unload them so they stop dispatching at all (M2-24).
         /// </summary>
         /// <remarks>
         /// WHY an event and not an unload here: loading and unloading belong to the mod runtime, which
@@ -1553,11 +1586,9 @@ namespace CoreAI.Ai.LuaCs
             HashSet<RbxScriptConnection> existingConnections =
                 new(_connections.GetOwnedBy(owner));
             bool hadExecutingScriptBacking = TryGetExecutingScriptBacking(owner, out _);
-            bool hadActorLedgerEntry = _actorLedger.TryGetLoad(
-                owner, out string previousLoadedActorId);
             return new ModLoadCandidate(owner, hadPreviousGeneration,
                 previousGeneration, existingConnections, hadExecutingScriptBacking,
-                hadActorLedgerEntry, previousLoadedActorId);
+                CaptureModActorRecord(owner));
         }
 
         internal void RollbackModLoadCandidate(ModLoadCandidate candidate)
@@ -1606,12 +1637,55 @@ namespace CoreAI.Ai.LuaCs
                 createdBacking.Container.Destroy();
             }
 
-            // WHY: the failed load's context already recorded its actor. A load that never
-            // happened must neither leave an entry for a mod that is not loaded (the ledger would
-            // grow with every failed id) nor overwrite the entry of the mod a failed reload keeps.
-            if (candidate.HadActorLedgerEntry)
+            // WHY: the failed load's context already recorded its actor, both where DisconnectActor
+            // looks up an actor's mods and in the ledger. A load that never happened must neither
+            // leave a record for a mod that is not loaded (the actor's disconnect would list an id
+            // that never loaded, and the ledger would grow with every failed id) nor overwrite the
+            // record of the mod a failed reload keeps.
+            RestoreModActorRecord(candidate.PreviousActorRecord);
+        }
+
+        /// <summary>
+        /// Captures what these bindings remember of the actor <paramref name="ownerModId"/>'s current
+        /// load runs as, for <see cref="RestoreModActorRecord"/>.
+        /// </summary>
+        internal ModActorRecord CaptureModActorRecord(string ownerModId)
+        {
+            string owner = string.IsNullOrWhiteSpace(ownerModId)
+                ? throw new ArgumentException("Owner mod id is required.", nameof(ownerModId))
+                : ownerModId;
+            bool hadActorContext = _actorContextsByOwnerModId.TryGetValue(
+                owner, out ActorContext actorContext);
+            bool hadActorLedgerEntry = _actorLedger.TryGetLoad(owner, out string loadedActorId);
+            return new ModActorRecord(owner, hadActorContext, actorContext,
+                hadActorLedgerEntry, loadedActorId);
+        }
+
+        /// <summary>
+        /// Puts back a record <see cref="CaptureModActorRecord"/> took: the mod is listed under the
+        /// same actor context and its ledger entry names the same actor again, or neither exists when
+        /// neither did.
+        /// </summary>
+        internal void RestoreModActorRecord(ModActorRecord record)
+        {
+            if (record == null)
             {
-                _actorLedger.RecordLoad(ownerModId, candidate.PreviousLoadedActorId);
+                throw new ArgumentNullException(nameof(record));
+            }
+
+            string ownerModId = record.OwnerModId;
+            if (record.HadActorContext)
+            {
+                _actorContextsByOwnerModId[ownerModId] = record.ActorContext;
+            }
+            else
+            {
+                _actorContextsByOwnerModId.Remove(ownerModId);
+            }
+
+            if (record.HadActorLedgerEntry)
+            {
+                _actorLedger.RecordLoad(ownerModId, record.LoadedActorId);
             }
             else
             {
@@ -4138,7 +4212,8 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Kills every scheduler thread owned by a mod on unload or quarantine, and destroys the tweens
         /// its scripts created (playing ones stop where they are; nothing fires into the departing mod).
-        /// The mod's <see cref="ActorLedger"/> entry goes with it.
+        /// The record of the actor the mod runs as goes with it; a quarantine, which keeps the mod
+        /// loaded, puts that record back (<see cref="RestoreModActorRecord"/>).
         /// </summary>
         public int KillAllScheduledOwnedBy(string ownerModId)
         {

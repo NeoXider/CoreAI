@@ -58,6 +58,8 @@ namespace CoreAI.Ai.LuaCs
         private readonly Func<IScriptState, IScriptState> _stateResolver;
         private readonly Func<LuaCsLogicSlots> _activeProvider;
         private event Action<string, string, string> _overrideFailed;
+        private Action _invocationStarting;
+        private Action _invocationFinished;
 
         /// <summary>Description of the most recent override failure, or empty.</summary>
         public string LastError
@@ -244,6 +246,27 @@ namespace CoreAI.Ai.LuaCs
 
             registry.Register("logic_reset", new Action<string>(Reset));
             registry.Register("logic_list", new Func<List<object>>(ListSlots));
+        }
+
+        /// <summary>
+        /// Lets the mod runtime that owns this surface count a running formula as mod code:
+        /// <paramref name="starting"/> runs before every override call this instance makes and
+        /// <paramref name="finished"/> once that call has returned or failed, after the fail-open
+        /// reset. Null for both detaches.
+        /// </summary>
+        /// <remarks>
+        /// WHY: host code calls a slot directly, outside any hook or scheduler thread, so without this
+        /// bracket the runtime saw no mod code running while a formula ran. A formula that kicked its
+        /// own player then had its mod unloaded under its feet, and the rest of the formula resolved
+        /// its actor as the host.
+        /// </remarks>
+        internal void SetInvocationScope(Action starting, Action finished)
+        {
+            lock (_gate)
+            {
+                _invocationStarting = starting;
+                _invocationFinished = finished;
+            }
         }
 
         private bool Define(string name, object fn, IScriptState state, string ownerModId)
@@ -442,35 +465,67 @@ namespace CoreAI.Ai.LuaCs
             result = null;
             string slot = Normalize(name);
             OverrideEntry entry;
+            Action starting;
+            Action finished;
             lock (_gate)
             {
                 if (!_overrides.TryGetValue(slot, out entry))
                 {
                     return false;
                 }
+
+                starting = _invocationStarting;
+                finished = _invocationFinished;
+            }
+
+            RaiseInvocationScope(starting, slot);
+            try
+            {
+                try
+                {
+                    object[] results = _guard.Invoke(entry.State, entry.Fn, CancellationToken.None,
+                        args ?? Array.Empty<object>());
+                    result = results.Length > 0 ? results[0] : null;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    // WHY: Fail open: a broken override must not break the game loop on every call. The
+                    // reset is attributed, not silent: OverrideFailed carries the defining mod's id so the
+                    // runtime can record it in the same diagnostics channel as handler errors.
+                    Reset(slot);
+                    string owner = entry.OwnerModId ?? "";
+                    LastError = $"slot '{slot}': {ex}";
+                    _log?.Error(
+                        $"[LuaCsLogicSlots] Override for '{slot}'" +
+                        $"{(owner.Length > 0 ? $" (mod '{owner}')" : "")} failed and was reset: {ex}");
+                    RaiseOverrideFailed(owner, slot, ex.Message ?? ex.GetType().Name);
+                    result = null;
+                    return false;
+                }
+            }
+            finally
+            {
+                RaiseInvocationScope(finished, slot);
+            }
+        }
+
+        // WHY contained: the bracket runs around a fail-open call, so a throwing callback must not turn
+        // a formula into a game-loop failure.
+        private void RaiseInvocationScope(Action callback, string slot)
+        {
+            if (callback == null)
+            {
+                return;
             }
 
             try
             {
-                object[] results = _guard.Invoke(entry.State, entry.Fn, CancellationToken.None,
-                    args ?? Array.Empty<object>());
-                result = results.Length > 0 ? results[0] : null;
-                return true;
+                callback();
             }
             catch (Exception ex)
             {
-                // WHY: Fail open: a broken override must not break the game loop on every call. The
-                // reset is attributed, not silent: OverrideFailed carries the defining mod's id so the
-                // runtime can record it in the same diagnostics channel as handler errors.
-                Reset(slot);
-                string owner = entry.OwnerModId ?? "";
-                LastError = $"slot '{slot}': {ex}";
-                _log?.Error(
-                    $"[LuaCsLogicSlots] Override for '{slot}'" +
-                    $"{(owner.Length > 0 ? $" (mod '{owner}')" : "")} failed and was reset: {ex}");
-                RaiseOverrideFailed(owner, slot, ex.Message ?? ex.GetType().Name);
-                result = null;
-                return false;
+                _log?.Error($"[LuaCsLogicSlots] Invocation scope callback for '{slot}' threw: {ex}");
             }
         }
 
