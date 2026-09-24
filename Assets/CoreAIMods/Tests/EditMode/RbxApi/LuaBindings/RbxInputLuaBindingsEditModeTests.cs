@@ -242,7 +242,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             Assert.AreEqual("Enum.UserInputType.MouseButton1", store.Get("m", "type"));
             Assert.AreEqual("10, 20, 0", store.Get("m", "pos"));
-            Assert.AreEqual("Enum.KeyCode.Unknown", store.Get("m", "kc"));
+            Assert.AreEqual("Enum.KeyCode.None", store.Get("m", "kc"));
         }
 
         [Test]

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
@@ -118,7 +119,9 @@ namespace CoreAI.Ai.LuaCs
         {
             LuaTable t = new();
             t["new"] = Fn("Vector3.new", ctx => Wrap(new RbxVector3(
-                ReadFloatOr(ctx, 0, 0f), ReadFloatOr(ctx, 1, 0f), ReadFloatOr(ctx, 2, 0f))));
+                ReadFloatOr(ctx, 0, 0f, "Vector3.new", 1),
+                ReadFloatOr(ctx, 1, 0f, "Vector3.new", 2),
+                ReadFloatOr(ctx, 2, 0f, "Vector3.new", 3))));
             t["zero"] = Wrap(RbxVector3.Zero);
             t["one"] = Wrap(RbxVector3.One);
             t["xAxis"] = Wrap(RbxVector3.XAxis);
@@ -135,7 +138,8 @@ namespace CoreAI.Ai.LuaCs
         {
             LuaTable t = new();
             t["new"] = Fn("Vector2.new", ctx => Wrap(new RbxVector2(
-                ReadFloatOr(ctx, 0, 0f), ReadFloatOr(ctx, 1, 0f))));
+                ReadFloatOr(ctx, 0, 0f, "Vector2.new", 1),
+                ReadFloatOr(ctx, 1, 0f, "Vector2.new", 2))));
             t["zero"] = Wrap(RbxVector2.Zero);
             t["one"] = Wrap(RbxVector2.One);
             t["xAxis"] = Wrap(RbxVector2.XAxis);
@@ -187,6 +191,10 @@ namespace CoreAI.Ai.LuaCs
                 ReadVector3(ctx, 1, "CFrame.fromMatrix"),
                 ReadVector3(ctx, 2, "CFrame.fromMatrix"),
                 OptionalVector3(ctx, 3))));
+            t["fromRotationBetweenVectors"] = Fn("CFrame.fromRotationBetweenVectors", ctx => Wrap(
+                RbxCFrame.FromRotationBetweenVectors(
+                    ReadVector3(ctx, 0, "CFrame.fromRotationBetweenVectors", 1),
+                    ReadVector3(ctx, 1, "CFrame.fromRotationBetweenVectors", 2))));
             return new LuaValue(t);
         }
 
@@ -194,15 +202,23 @@ namespace CoreAI.Ai.LuaCs
         {
             LuaTable t = new();
             t["new"] = Fn("Color3.new", ctx => Wrap(new RbxColor3(
-                ReadFloatOr(ctx, 0, 0f), ReadFloatOr(ctx, 1, 0f), ReadFloatOr(ctx, 2, 0f))));
+                ReadFloatOr(ctx, 0, 0f, "Color3.new", 1),
+                ReadFloatOr(ctx, 1, 0f, "Color3.new", 2),
+                ReadFloatOr(ctx, 2, 0f, "Color3.new", 3))));
             t["fromRGB"] = Fn("Color3.fromRGB", ctx => Wrap(RbxColor3.FromRGB(
-                ReadFloatOr(ctx, 0, 0f), ReadFloatOr(ctx, 1, 0f), ReadFloatOr(ctx, 2, 0f))));
+                ReadFloatOr(ctx, 0, 0f, "Color3.fromRGB", 1),
+                ReadFloatOr(ctx, 1, 0f, "Color3.fromRGB", 2),
+                ReadFloatOr(ctx, 2, 0f, "Color3.fromRGB", 3))));
             t["fromHSV"] = Fn("Color3.fromHSV", ctx => Wrap(RbxColor3.FromHSV(
                 ReadFloat(ctx, 0, "Color3.fromHSV"),
                 ReadFloat(ctx, 1, "Color3.fromHSV"),
                 ReadFloat(ctx, 2, "Color3.fromHSV"))));
             t["fromHex"] = Fn("Color3.fromHex",
                 ctx => Wrap(RbxColor3.FromHex(ReadString(ctx, 0, "Color3.fromHex"))));
+            // WHY: deprecated in the mirror ("functionally equivalent to Color3:ToHSV()") but still
+            // callable in Roblox, so corpus scripts that use the static form keep working.
+            t["toHSV"] = new LuaValue(FnMulti("Color3.toHSV", ctx =>
+                HsvValues(ReadColor3(ctx, 0, "Color3.toHSV", 1))));
             return new LuaValue(t);
         }
 
@@ -210,7 +226,7 @@ namespace CoreAI.Ai.LuaCs
         {
             LuaTable t = new();
             t["new"] = Fn("UDim.new", ctx => Wrap(new RbxUDim(
-                ReadFloatOr(ctx, 0, 0f), (int)ReadFloatOr(ctx, 1, 0f))));
+                ReadFloatOr(ctx, 0, 0f, "UDim.new", 1), ReadOffset(ctx, 1, "UDim.new", 2))));
             return new LuaValue(t);
         }
 
@@ -225,13 +241,14 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 return Wrap(new RbxUDim2(
-                    ReadFloatOr(ctx, 0, 0f), (int)ReadFloatOr(ctx, 1, 0f),
-                    ReadFloatOr(ctx, 2, 0f), (int)ReadFloatOr(ctx, 3, 0f)));
+                    ReadFloatOr(ctx, 0, 0f, "UDim2.new", 1), ReadOffset(ctx, 1, "UDim2.new", 2),
+                    ReadFloatOr(ctx, 2, 0f, "UDim2.new", 3), ReadOffset(ctx, 3, "UDim2.new", 4)));
             });
             t["fromScale"] = Fn("UDim2.fromScale", ctx => Wrap(RbxUDim2.FromScale(
-                ReadFloatOr(ctx, 0, 0f), ReadFloatOr(ctx, 1, 0f))));
+                ReadFloatOr(ctx, 0, 0f, "UDim2.fromScale", 1),
+                ReadFloatOr(ctx, 1, 0f, "UDim2.fromScale", 2))));
             t["fromOffset"] = Fn("UDim2.fromOffset", ctx => Wrap(RbxUDim2.FromOffset(
-                (int)ReadFloatOr(ctx, 0, 0f), (int)ReadFloatOr(ctx, 1, 0f))));
+                ReadOffset(ctx, 0, "UDim2.fromOffset", 1), ReadOffset(ctx, 1, "UDim2.fromOffset", 2))));
             return new LuaValue(t);
         }
 
@@ -239,7 +256,7 @@ namespace CoreAI.Ai.LuaCs
         {
             LuaTable t = new();
             t["new"] = Fn("Random.new", ctx => Arg(ctx, 0).Type == LuaValueType.Number
-                ? Wrap(new RbxRandom(ReadDouble(ctx, 0, "Random.new")))
+                ? Wrap(new RbxRandom(ClampRandomSeed(ReadDouble(ctx, 0, "Random.new"))))
                 : Wrap(new RbxRandom()));
             return new LuaValue(t);
         }
@@ -539,23 +556,25 @@ namespace CoreAI.Ai.LuaCs
             Dictionary<string, LuaValue> methods = new(StringComparer.Ordinal)
             {
                 ["Dot"] = new LuaValue(Fn("Vector3.Dot", ctx =>
-                    Self3(ctx).Dot(ReadVector3(ctx, 1, "Vector3:Dot")))),
+                    Self3(ctx).Dot(ReadVector3(ctx, 1, "Vector3:Dot", 1)))),
                 ["Cross"] = new LuaValue(Fn("Vector3.Cross", ctx =>
-                    Wrap(Self3(ctx).Cross(ReadVector3(ctx, 1, "Vector3:Cross"))))),
+                    Wrap(Self3(ctx).Cross(ReadVector3(ctx, 1, "Vector3:Cross", 1))))),
                 ["Lerp"] = new LuaValue(Fn("Vector3.Lerp", ctx => Wrap(Self3(ctx).Lerp(
-                    ReadVector3(ctx, 1, "Vector3:Lerp"), ReadFloat(ctx, 2, "Vector3:Lerp"))))),
+                    ReadVector3(ctx, 1, "Vector3:Lerp", 1), ReadFloat(ctx, 2, "Vector3:Lerp", 2))))),
                 ["Angle"] = new LuaValue(Fn("Vector3.Angle", ctx => Self3(ctx).Angle(
-                    ReadVector3(ctx, 1, "Vector3:Angle"), OptionalVector3(ctx, 2)))),
+                    ReadVector3(ctx, 1, "Vector3:Angle", 1),
+                    OptionalVector3(ctx, 2, "Vector3:Angle", 2)))),
                 ["FuzzyEq"] = new LuaValue(Fn("Vector3.FuzzyEq", ctx => Self3(ctx).FuzzyEq(
-                    ReadVector3(ctx, 1, "Vector3:FuzzyEq"), ReadFloatOr(ctx, 2, 1e-5f)))),
+                    ReadVector3(ctx, 1, "Vector3:FuzzyEq", 1),
+                    ReadFloatOr(ctx, 2, 1e-5f, "Vector3:FuzzyEq", 2)))),
                 ["Abs"] = new LuaValue(Fn("Vector3.Abs", ctx => Wrap(Self3(ctx).Abs()))),
                 ["Ceil"] = new LuaValue(Fn("Vector3.Ceil", ctx => Wrap(Self3(ctx).Ceil()))),
                 ["Floor"] = new LuaValue(Fn("Vector3.Floor", ctx => Wrap(Self3(ctx).Floor()))),
                 ["Sign"] = new LuaValue(Fn("Vector3.Sign", ctx => Wrap(Self3(ctx).Sign()))),
                 ["Max"] = new LuaValue(Fn("Vector3.Max", ctx =>
-                    Wrap(Self3(ctx).Max(ReadVector3(ctx, 1, "Vector3:Max"))))),
+                    Wrap(Self3(ctx).Max(ReadVector3(ctx, 1, "Vector3:Max", 1))))),
                 ["Min"] = new LuaValue(Fn("Vector3.Min", ctx =>
-                    Wrap(Self3(ctx).Min(ReadVector3(ctx, 1, "Vector3:Min")))))
+                    Wrap(Self3(ctx).Min(ReadVector3(ctx, 1, "Vector3:Min", 1)))))
             };
 
             LuaTable meta = new();
@@ -624,21 +643,25 @@ namespace CoreAI.Ai.LuaCs
             Dictionary<string, LuaValue> methods = new(StringComparer.Ordinal)
             {
                 ["Dot"] = new LuaValue(Fn("Vector2.Dot", ctx =>
-                    Self2(ctx).Dot(ReadVector2(ctx, 1, "Vector2:Dot")))),
+                    Self2(ctx).Dot(ReadVector2(ctx, 1, "Vector2:Dot", 1)))),
                 ["Cross"] = new LuaValue(Fn("Vector2.Cross", ctx =>
-                    Self2(ctx).Cross(ReadVector2(ctx, 1, "Vector2:Cross")))),
+                    Self2(ctx).Cross(ReadVector2(ctx, 1, "Vector2:Cross", 1)))),
                 ["Lerp"] = new LuaValue(Fn("Vector2.Lerp", ctx => Wrap(Self2(ctx).Lerp(
-                    ReadVector2(ctx, 1, "Vector2:Lerp"), ReadFloat(ctx, 2, "Vector2:Lerp"))))),
+                    ReadVector2(ctx, 1, "Vector2:Lerp", 1), ReadFloat(ctx, 2, "Vector2:Lerp", 2))))),
+                ["Angle"] = new LuaValue(Fn("Vector2.Angle", ctx => Self2(ctx).Angle(
+                    ReadVector2(ctx, 1, "Vector2:Angle", 1),
+                    ReadOptionalBoolean(ctx, 2, "Vector2:Angle", 2)))),
                 ["FuzzyEq"] = new LuaValue(Fn("Vector2.FuzzyEq", ctx => Self2(ctx).FuzzyEq(
-                    ReadVector2(ctx, 1, "Vector2:FuzzyEq"), ReadFloatOr(ctx, 2, 1e-5f)))),
+                    ReadVector2(ctx, 1, "Vector2:FuzzyEq", 1),
+                    ReadFloatOr(ctx, 2, 1e-5f, "Vector2:FuzzyEq", 2)))),
                 ["Abs"] = new LuaValue(Fn("Vector2.Abs", ctx => Wrap(Self2(ctx).Abs()))),
                 ["Ceil"] = new LuaValue(Fn("Vector2.Ceil", ctx => Wrap(Self2(ctx).Ceil()))),
                 ["Floor"] = new LuaValue(Fn("Vector2.Floor", ctx => Wrap(Self2(ctx).Floor()))),
                 ["Sign"] = new LuaValue(Fn("Vector2.Sign", ctx => Wrap(Self2(ctx).Sign()))),
                 ["Max"] = new LuaValue(Fn("Vector2.Max", ctx =>
-                    Wrap(Self2(ctx).Max(ReadVector2(ctx, 1, "Vector2:Max"))))),
+                    Wrap(Self2(ctx).Max(ReadVector2(ctx, 1, "Vector2:Max", 1))))),
                 ["Min"] = new LuaValue(Fn("Vector2.Min", ctx =>
-                    Wrap(Self2(ctx).Min(ReadVector2(ctx, 1, "Vector2:Min")))))
+                    Wrap(Self2(ctx).Min(ReadVector2(ctx, 1, "Vector2:Min", 1)))))
             };
 
             LuaTable meta = new();
@@ -701,15 +724,19 @@ namespace CoreAI.Ai.LuaCs
 
         private static RbxVector2 ReadVector2(LuaFunctionExecutionContext ctx, int index, string what)
         {
+            return ReadVector2(ctx, index, what, index + 1);
+        }
+
+        private static RbxVector2 ReadVector2(LuaFunctionExecutionContext ctx, int index, string what,
+            int argumentNumber)
+        {
             LuaValue value = Arg(ctx, index);
             if (TryUnbox(value, out RbxVector2 vector))
             {
                 return vector;
             }
 
-            throw RbxError.BadArgument(
-                what + " expects a Vector2 at argument " + (index + 1),
-                "pass a Vector2, got " + Describe(value) + " at argument " + (index + 1));
+            throw ExpectedArgument(what, "a Vector2", value, argumentNumber);
         }
 
         // ---- CFrame -------------------------------------------------------------------------
@@ -720,34 +747,49 @@ namespace CoreAI.Ai.LuaCs
             {
                 ["Inverse"] = new LuaValue(Fn("CFrame.Inverse", ctx => Wrap(SelfCf(ctx).Inverse()))),
                 ["ToWorldSpace"] = new LuaValue(Fn("CFrame.ToWorldSpace", ctx => Wrap(
-                    SelfCf(ctx).ToWorldSpace(ReadCFrame(ctx, 1, "CFrame:ToWorldSpace"))))),
+                    SelfCf(ctx).ToWorldSpace(ReadCFrame(ctx, 1, "CFrame:ToWorldSpace", 1))))),
                 ["ToObjectSpace"] = new LuaValue(Fn("CFrame.ToObjectSpace", ctx => Wrap(
-                    SelfCf(ctx).ToObjectSpace(ReadCFrame(ctx, 1, "CFrame:ToObjectSpace"))))),
+                    SelfCf(ctx).ToObjectSpace(ReadCFrame(ctx, 1, "CFrame:ToObjectSpace", 1))))),
                 ["PointToWorldSpace"] = new LuaValue(Fn("CFrame.PointToWorldSpace", ctx => Wrap(
-                    SelfCf(ctx).PointToWorldSpace(ReadVector3(ctx, 1, "CFrame:PointToWorldSpace"))))),
+                    SelfCf(ctx).PointToWorldSpace(
+                        ReadVector3(ctx, 1, "CFrame:PointToWorldSpace", 1))))),
                 ["PointToObjectSpace"] = new LuaValue(Fn("CFrame.PointToObjectSpace", ctx => Wrap(
-                    SelfCf(ctx).PointToObjectSpace(ReadVector3(ctx, 1, "CFrame:PointToObjectSpace"))))),
+                    SelfCf(ctx).PointToObjectSpace(
+                        ReadVector3(ctx, 1, "CFrame:PointToObjectSpace", 1))))),
                 ["VectorToWorldSpace"] = new LuaValue(Fn("CFrame.VectorToWorldSpace", ctx => Wrap(
-                    SelfCf(ctx).VectorToWorldSpace(ReadVector3(ctx, 1, "CFrame:VectorToWorldSpace"))))),
+                    SelfCf(ctx).VectorToWorldSpace(
+                        ReadVector3(ctx, 1, "CFrame:VectorToWorldSpace", 1))))),
                 ["VectorToObjectSpace"] = new LuaValue(Fn("CFrame.VectorToObjectSpace", ctx => Wrap(
-                    SelfCf(ctx).VectorToObjectSpace(ReadVector3(ctx, 1, "CFrame:VectorToObjectSpace"))))),
+                    SelfCf(ctx).VectorToObjectSpace(
+                        ReadVector3(ctx, 1, "CFrame:VectorToObjectSpace", 1))))),
                 ["Lerp"] = new LuaValue(Fn("CFrame.Lerp", ctx => Wrap(SelfCf(ctx).Lerp(
-                    ReadCFrame(ctx, 1, "CFrame:Lerp"), ReadFloat(ctx, 2, "CFrame:Lerp"))))),
+                    ReadCFrame(ctx, 1, "CFrame:Lerp", 1), ReadFloat(ctx, 2, "CFrame:Lerp", 2))))),
                 ["Orthonormalize"] = new LuaValue(Fn("CFrame.Orthonormalize",
                     ctx => Wrap(SelfCf(ctx).Orthonormalize()))),
                 ["FuzzyEq"] = new LuaValue(Fn("CFrame.FuzzyEq", ctx => SelfCf(ctx).FuzzyEq(
-                    ReadCFrame(ctx, 1, "CFrame:FuzzyEq"), ReadFloatOr(ctx, 2, 1e-5f)))),
-                ["GetComponents"] = new LuaValue(FnMulti("CFrame.GetComponents", ctx =>
+                    ReadCFrame(ctx, 1, "CFrame:FuzzyEq", 1),
+                    ReadFloatOr(ctx, 2, 1e-5f, "CFrame:FuzzyEq", 2)))),
+                ["GetComponents"] = new LuaValue(FnMulti("CFrame.GetComponents",
+                    ctx => ComponentValues(SelfCf(ctx)))),
+                // WHY: the mirror keeps the lowercase spelling as "Equivalent to GetComponents()".
+                ["components"] = new LuaValue(FnMulti("CFrame.components",
+                    ctx => ComponentValues(SelfCf(ctx)))),
+                ["ToEulerAnglesXYZ"] = new LuaValue(FnMulti("CFrame.ToEulerAnglesXYZ",
+                    ctx => AngleValues(SelfCf(ctx).ToEulerAnglesXYZ()))),
+                ["ToEulerAnglesYXZ"] = new LuaValue(FnMulti("CFrame.ToEulerAnglesYXZ",
+                    ctx => AngleValues(SelfCf(ctx).ToEulerAnglesYXZ()))),
+                ["ToOrientation"] = new LuaValue(FnMulti("CFrame.ToOrientation",
+                    ctx => AngleValues(SelfCf(ctx).ToOrientation()))),
+                ["ToEulerAngles"] = new LuaValue(FnMulti("CFrame.ToEulerAngles",
+                    ctx => AngleValues(SelfCf(ctx).ToEulerAngles(
+                        ReadRotationOrder(ctx, 1, "CFrame:ToEulerAngles", 1))))),
+                ["ToAxisAngle"] = new LuaValue(FnMulti("CFrame.ToAxisAngle", ctx =>
                 {
-                    float[] components = SelfCf(ctx).GetComponents();
-                    LuaValue[] values = new LuaValue[components.Length];
-                    for (int i = 0; i < components.Length; i++)
-                    {
-                        values[i] = components[i];
-                    }
-
-                    return values;
-                }))
+                    (RbxVector3 axis, float angle) = SelfCf(ctx).ToAxisAngle();
+                    return new LuaValue[] { Wrap(axis), angle };
+                })),
+                ["AngleBetween"] = new LuaValue(Fn("CFrame.AngleBetween", ctx =>
+                    SelfCf(ctx).AngleBetween(ReadCFrame(ctx, 1, "CFrame:AngleBetween", 1))))
             };
 
             LuaTable meta = new();
@@ -810,6 +852,23 @@ namespace CoreAI.Ai.LuaCs
             return ReadCFrame(ctx, 0, "CFrame method");
         }
 
+        private static LuaValue[] ComponentValues(RbxCFrame cframe)
+        {
+            float[] components = cframe.GetComponents();
+            LuaValue[] values = new LuaValue[components.Length];
+            for (int i = 0; i < components.Length; i++)
+            {
+                values[i] = components[i];
+            }
+
+            return values;
+        }
+
+        private static LuaValue[] AngleValues((float rx, float ry, float rz) angles)
+        {
+            return new LuaValue[] { angles.rx, angles.ry, angles.rz };
+        }
+
         private static LuaValue CFrameNew(LuaFunctionExecutionContext ctx)
         {
             int count = ctx.ArgumentCount;
@@ -865,12 +924,8 @@ namespace CoreAI.Ai.LuaCs
             Dictionary<string, LuaValue> methods = new(StringComparer.Ordinal)
             {
                 ["Lerp"] = new LuaValue(Fn("Color3.Lerp", ctx => Wrap(SelfColor(ctx).Lerp(
-                    ReadColor3(ctx, 1, "Color3:Lerp"), ReadFloat(ctx, 2, "Color3:Lerp"))))),
-                ["ToHSV"] = new LuaValue(FnMulti("Color3.ToHSV", ctx =>
-                {
-                    (float h, float s, float v) = SelfColor(ctx).ToHSV();
-                    return new LuaValue[] { h, s, v };
-                })),
+                    ReadColor3(ctx, 1, "Color3:Lerp", 1), ReadFloat(ctx, 2, "Color3:Lerp", 2))))),
+                ["ToHSV"] = new LuaValue(FnMulti("Color3.ToHSV", ctx => HsvValues(SelfColor(ctx)))),
                 ["ToHex"] = new LuaValue(Fn("Color3.ToHex", ctx => SelfColor(ctx).ToHex()))
             };
 
@@ -906,15 +961,25 @@ namespace CoreAI.Ai.LuaCs
 
         private static RbxColor3 ReadColor3(LuaFunctionExecutionContext ctx, int index, string what)
         {
+            return ReadColor3(ctx, index, what, index + 1);
+        }
+
+        private static RbxColor3 ReadColor3(LuaFunctionExecutionContext ctx, int index, string what,
+            int argumentNumber)
+        {
             LuaValue value = Arg(ctx, index);
             if (TryUnbox(value, out RbxColor3 color))
             {
                 return color;
             }
 
-            throw RbxError.BadArgument(
-                what + " expects a Color3 at argument " + (index + 1),
-                "pass a Color3, got " + Describe(value) + " at argument " + (index + 1));
+            throw ExpectedArgument(what, "a Color3", value, argumentNumber);
+        }
+
+        private static LuaValue[] HsvValues(RbxColor3 color)
+        {
+            (float h, float s, float v) = color.ToHSV();
+            return new LuaValue[] { h, s, v };
         }
 
         // ---- UDim / UDim2 -------------------------------------------------------------------
@@ -966,7 +1031,7 @@ namespace CoreAI.Ai.LuaCs
             {
                 ["Lerp"] = new LuaValue(Fn("UDim2.Lerp", ctx => Wrap(
                     ReadUDim2(ctx, 0, "UDim2:Lerp").Lerp(
-                        ReadUDim2(ctx, 1, "UDim2:Lerp"), ReadFloat(ctx, 2, "UDim2:Lerp")))))
+                        ReadUDim2(ctx, 1, "UDim2:Lerp", 1), ReadFloat(ctx, 2, "UDim2:Lerp", 2)))))
             };
 
             LuaTable meta = new();
@@ -1002,15 +1067,57 @@ namespace CoreAI.Ai.LuaCs
 
         private static RbxUDim2 ReadUDim2(LuaFunctionExecutionContext ctx, int index, string what)
         {
+            return ReadUDim2(ctx, index, what, index + 1);
+        }
+
+        private static RbxUDim2 ReadUDim2(LuaFunctionExecutionContext ctx, int index, string what,
+            int argumentNumber)
+        {
             LuaValue value = Arg(ctx, index);
             if (TryUnbox(value, out RbxUDim2 udim2))
             {
                 return udim2;
             }
 
-            throw RbxError.BadArgument(
-                what + " expects a UDim2 at argument " + (index + 1),
-                "pass a UDim2, got " + Describe(value) + " at argument " + (index + 1));
+            throw ExpectedArgument(what, "a UDim2", value, argumentNumber);
+        }
+
+        /// <summary>
+        /// Reads a UDim offset (optional, default 0). Roblox stores offsets as 32-bit integers; a
+        /// fractional offset truncates toward zero, and a non-finite or out-of-range one is a
+        /// BAD_ARGUMENT instead of a platform-dependent cast.
+        /// </summary>
+        /// <remarks>
+        /// WHY not a bare (int) cast: casting NaN or 1e10 to int is unspecified in C#, and x64
+        /// yields int.MinValue while ARM64 saturates, so one script produced different layouts on
+        /// desktop and on mobile.
+        /// </remarks>
+        private static int ReadOffset(LuaFunctionExecutionContext ctx, int index, string what,
+            int argumentNumber)
+        {
+            LuaValue value = Arg(ctx, index);
+            if (value.Type == LuaValueType.Nil)
+            {
+                return 0;
+            }
+
+            if (!TryCoerceNumber(value, out double number))
+            {
+                throw ExpectedArgument(what, "a number", value, argumentNumber);
+            }
+
+            double truncated = Math.Truncate(number);
+            if (double.IsNaN(number) || truncated < int.MinValue || truncated > int.MaxValue)
+            {
+                throw RbxError.BadArgument(
+                    what + " expects a finite offset in the 32-bit integer range at argument "
+                         + argumentNumber,
+                    "pass a whole pixel offset between " + int.MinValue + " and " + int.MaxValue
+                    + ", got " + number.ToString(CultureInfo.InvariantCulture)
+                    + " at argument " + argumentNumber);
+            }
+
+            return (int)truncated;
         }
 
         // ---- Random -------------------------------------------------------------------------
@@ -1024,14 +1131,14 @@ namespace CoreAI.Ai.LuaCs
                     RbxRandom self = SelfRandom(ctx);
                     return ctx.ArgumentCount >= 3
                         ? self.NextNumber(
-                            ReadDouble(ctx, 1, "Random:NextNumber"),
-                            ReadDouble(ctx, 2, "Random:NextNumber"))
+                            ReadDouble(ctx, 1, "Random:NextNumber", 1),
+                            ReadDouble(ctx, 2, "Random:NextNumber", 2))
                         : self.NextNumber();
                 })),
                 ["NextInteger"] = new LuaValue(Fn("Random.NextInteger", ctx =>
                     (double)SelfRandom(ctx).NextInteger(
-                        (long)ReadDouble(ctx, 1, "Random:NextInteger"),
-                        (long)ReadDouble(ctx, 2, "Random:NextInteger")))),
+                        ReadWholeNumber(ctx, 1, "Random:NextInteger", 1),
+                        ReadWholeNumber(ctx, 2, "Random:NextInteger", 2)))),
                 ["NextUnitVector"] = new LuaValue(Fn("Random.NextUnitVector",
                     ctx => Wrap(SelfRandom(ctx).NextUnitVector()))),
                 ["Clone"] = new LuaValue(Fn("Random.Clone", ctx => Wrap(SelfRandom(ctx).Clone()))),
@@ -1070,6 +1177,40 @@ namespace CoreAI.Ai.LuaCs
             meta[Metamethods.NewIndex] = Fn("Random.__newindex", _ => throw ReadOnlyMember("Random"));
             meta[Metamethods.ToString] = Fn("Random.__tostring", _ => "Random");
             return Lock(meta);
+        }
+
+        /// <summary>Luau's exact-integer range: every whole number in it is a distinct double.</summary>
+        private const double MaxSafeInteger = 9007199254740991d;
+
+        /// <summary>
+        /// Reads a Random bound: truncated toward zero (the mirror's Random:NextInteger rule), and a
+        /// non-finite value or one outside the exact-integer range is a BAD_ARGUMENT instead of an
+        /// unspecified double-to-long cast.
+        /// </summary>
+        private static long ReadWholeNumber(LuaFunctionExecutionContext ctx, int index, string what,
+            int argumentNumber)
+        {
+            double number = ReadDouble(ctx, index, what, argumentNumber);
+            double truncated = Math.Truncate(number);
+            if (double.IsNaN(number) || truncated < -MaxSafeInteger || truncated > MaxSafeInteger)
+            {
+                throw RbxError.BadArgument(
+                    what + " expects a finite whole number within +/-" + MaxSafeInteger.ToString("R",
+                        CultureInfo.InvariantCulture) + " at argument " + argumentNumber,
+                    "pass an integer bound, got " + number.ToString(CultureInfo.InvariantCulture)
+                    + " at argument " + argumentNumber);
+            }
+
+            return (long)truncated;
+        }
+
+        /// <summary>
+        /// Random.new(seed): the mirror says a seed outside [-9007199254740991, 9007199254740991]
+        /// is clamped to 0; NaN is treated the same, since no whole number can be read from it.
+        /// </summary>
+        private static double ClampRandomSeed(double seed)
+        {
+            return double.IsNaN(seed) || seed < -MaxSafeInteger || seed > MaxSafeInteger ? 0d : seed;
         }
 
         private static RbxRandom SelfRandom(LuaFunctionExecutionContext ctx)
@@ -1111,6 +1252,40 @@ namespace CoreAI.Ai.LuaCs
             return Lock(meta);
         }
 
+        private static readonly LuaValue EnumGetEnumItemsFn = new(Fn("Enum.GetEnumItems", ctx =>
+        {
+            RbxEnum target = ReadEnumType(ctx, 0, "Enum:GetEnumItems");
+            LuaTable list = new();
+            int index = 1;
+            foreach (RbxEnumItem item in target.GetEnumItems())
+            {
+                list[index++] = Wrap(item);
+            }
+
+            return new LuaValue(list);
+        }));
+
+        private static readonly LuaValue EnumFromNameFn = new(Fn("Enum.FromName", ctx =>
+        {
+            RbxEnum target = ReadEnumType(ctx, 0, "Enum:FromName");
+            string name = ReadString(ctx, 1, "Enum:FromName", 1);
+            return target.TryGetItem(name, out RbxEnumItem item) ? Wrap(item) : LuaValue.Nil;
+        }));
+
+        private static readonly LuaValue EnumFromValueFn = new(Fn("Enum.FromValue", ctx =>
+        {
+            RbxEnum target = ReadEnumType(ctx, 0, "Enum:FromValue");
+            double value = ReadDouble(ctx, 1, "Enum:FromValue", 1);
+            // WHY: every item value is an int, so a fractional or out-of-range number names no item
+            // and answers nil, exactly like an unused whole value.
+            if (value != Math.Floor(value) || value < int.MinValue || value > int.MaxValue)
+            {
+                return LuaValue.Nil;
+            }
+
+            return target.TryGetItemByValue((int)value, out RbxEnumItem item) ? Wrap(item) : LuaValue.Nil;
+        }));
+
         private static LuaTable BuildEnumTypeMeta()
         {
             LuaTable meta = new();
@@ -1118,23 +1293,13 @@ namespace CoreAI.Ai.LuaCs
             {
                 RbxEnum self = ReadEnumType(ctx, 0, "Enum member access");
                 string key = ReadString(ctx, 1, "Enum member access");
-                if (key == "GetEnumItems")
+                switch (key)
                 {
-                    return new LuaValue(Fn("Enum.GetEnumItems", inner =>
-                    {
-                        RbxEnum target = ReadEnumType(inner, 0, "Enum:GetEnumItems");
-                        LuaTable list = new();
-                        int index = 1;
-                        foreach (RbxEnumItem item in target.GetEnumItems())
-                        {
-                            list[index++] = Wrap(item);
-                        }
-
-                        return new LuaValue(list);
-                    }));
+                    case "GetEnumItems": return EnumGetEnumItemsFn;
+                    case "FromName": return EnumFromNameFn;
+                    case "FromValue": return EnumFromValueFn;
+                    default: return Wrap(self[key]);
                 }
-
-                return Wrap(self[key]);
             });
             meta[Metamethods.NewIndex] = Fn("Enum.__newindex", _ => throw ReadOnlyMember("Enum"));
             meta[Metamethods.Eq] = Fn("Enum.__eq", ctx =>
@@ -1175,6 +1340,12 @@ namespace CoreAI.Ai.LuaCs
 
         private static RbxRotationOrder ReadRotationOrder(LuaFunctionExecutionContext ctx, int index)
         {
+            return ReadRotationOrder(ctx, index, "CFrame.fromEulerAngles", index + 1);
+        }
+
+        private static RbxRotationOrder ReadRotationOrder(LuaFunctionExecutionContext ctx, int index,
+            string what, int argumentNumber)
+        {
             LuaValue value = Arg(ctx, index);
             if (value.Type == LuaValueType.Nil)
             {
@@ -1188,15 +1359,44 @@ namespace CoreAI.Ai.LuaCs
             }
 
             throw RbxError.BadArgument(
-                "CFrame.fromEulerAngles expects an Enum.RotationOrder at argument " + (index + 1),
-                "pass Enum.RotationOrder.XYZ (or another order) at argument " + (index + 1));
+                what + " expects an Enum.RotationOrder at argument " + argumentNumber,
+                "pass Enum.RotationOrder.XYZ (or another order) at argument " + argumentNumber);
         }
 
         private static readonly LuaValue SignalConnectFn =
-            new(Fn("RBXScriptSignal.Connect", inner => ConnectSignal(inner, false)));
+            new(Fn("RBXScriptSignal.Connect", inner => ConnectSignal(inner, false, "Connect")));
 
         private static readonly LuaValue SignalOnceFn =
-            new(Fn("RBXScriptSignal.Once", inner => ConnectSignal(inner, true)));
+            new(Fn("RBXScriptSignal.Once", inner => ConnectSignal(inner, true, "Once")));
+
+        // WHY: DEV-5. CoreAI mods run single-threaded, so a desynchronized phase does not exist and
+        // ConnectParallel is Connect. Refusing it would fail working Parallel Luau code, which is the
+        // same reasoning that makes task.synchronize/desynchronize no-ops.
+        private static readonly LuaValue SignalConnectParallelFn =
+            new(Fn("RBXScriptSignal.ConnectParallel",
+                inner => ConnectSignal(inner, false, "ConnectParallel")));
+
+        /// <summary>Mod contexts already told that ConnectParallel runs serially (once per mod load).</summary>
+        private static readonly ConditionalWeakTable<LuaCsRbxModContext, object> ParallelConnectNoted =
+            new();
+
+        private static readonly object ParallelConnectNoteMarker = new();
+
+        /// <summary>Reference identity for tables, so a payload copy maps each source table once.</summary>
+        private sealed class TableIdentityComparer : IEqualityComparer<LuaTable>
+        {
+            public static readonly TableIdentityComparer Instance = new();
+
+            public bool Equals(LuaTable left, LuaTable right)
+            {
+                return ReferenceEquals(left, right);
+            }
+
+            public int GetHashCode(LuaTable value)
+            {
+                return RuntimeHelpers.GetHashCode(value);
+            }
+        }
 
         private static readonly LuaValue ConnectionDisconnectFn =
             new(Fn("RBXScriptConnection.Disconnect", inner =>
@@ -1215,8 +1415,16 @@ namespace CoreAI.Ai.LuaCs
                 switch (key)
                 {
                     case "Connect": return SignalConnectFn;
+                    case "ConnectParallel": return SignalConnectParallelFn;
                     case "Once": return SignalOnceFn;
-                    case "Wait": return ReadSignalWaitBridge(ctx);
+                    case "Wait":
+                        LuaCsRbxModContext owner = ReadSignalOwner(ctx);
+                        if (owner != null)
+                        {
+                            RequirePersistentSignalOwner(self, "Wait", owner);
+                        }
+
+                        return ReadSignalWaitBridge(ctx);
                     default:
                         throw NotAMember(key, "RBXScriptSignal");
                 }
@@ -1228,10 +1436,9 @@ namespace CoreAI.Ai.LuaCs
             return Lock(meta);
         }
 
-        private static LuaValue ConnectSignal(LuaFunctionExecutionContext ctx, bool once)
+        private static LuaValue ConnectSignal(LuaFunctionExecutionContext ctx, bool once, string member)
         {
             RbxScriptSignal signal = ReadSignal(ctx, 0);
-            string member = once ? "Once" : "Connect";
             LuaValue handlerValue = Arg(ctx, 1);
             if (handlerValue.Type != LuaValueType.Function)
             {
@@ -1240,18 +1447,19 @@ namespace CoreAI.Ai.LuaCs
                     "pass a handler function, got " + Describe(handlerValue) + " at argument 1");
             }
 
-            LuaCsRbxModContext signalOwner = null;
-            if (Arg(ctx, 0).TryRead(out LuaCsRbxValueBox signalBox))
-            {
-                signalOwner = signalBox.SignalOwner;
-            }
-
+            LuaCsRbxModContext signalOwner = ReadSignalOwner(ctx);
             if (signalOwner == null)
             {
                 throw new RbxError(
                     RbxErrorCode.ContextViolation,
                     signal.SignalName + ":" + member + " requires an owning mod context",
                     "read the signal from an Instance proxy owned by the running mod");
+            }
+
+            RequirePersistentSignalOwner(signal, member, signalOwner);
+            if (member == "ConnectParallel")
+            {
+                NoteParallelConnect(signalOwner);
             }
 
             LuaState handlerState = signalOwner.Bindings.ResolveSchedulerOwnerState(ctx.State);
@@ -1269,6 +1477,48 @@ namespace CoreAI.Ai.LuaCs
             return Wrap(connection);
         }
 
+        private static LuaCsRbxModContext ReadSignalOwner(LuaFunctionExecutionContext ctx)
+        {
+            return Arg(ctx, 0).TryRead(out LuaCsRbxValueBox signalBox) ? signalBox.SignalOwner : null;
+        }
+
+        /// <summary>
+        /// Refuses a connection or wait from the ownerless one-off surface (execute_lua) with the
+        /// same CONTEXT_VIOLATION task.* raises there.
+        /// </summary>
+        /// <remarks>
+        /// WHY refuse instead of connecting: an ownerless connection has no mod to track it under, so
+        /// nothing ever disconnects it, and every later fire spawns its handler through the task
+        /// scheduler, which demands an owning mod id and throws. That throw escaped the frame on every
+        /// fire, for every mod, until the world was reloaded — with no mod to unload or quarantine.
+        /// </remarks>
+        private static void RequirePersistentSignalOwner(RbxScriptSignal signal, string member,
+            LuaCsRbxModContext owner)
+        {
+            if (!string.IsNullOrWhiteSpace(owner.OwnerModId))
+            {
+                return;
+            }
+
+            throw new RbxError(
+                RbxErrorCode.ContextViolation,
+                signal.SignalName + ":" + member + " requires a persistent owning mod id",
+                "run signal:" + member + " from a loaded mod instead of the ownerless one-off executor");
+        }
+
+        private static void NoteParallelConnect(LuaCsRbxModContext owner)
+        {
+            if (ParallelConnectNoted.TryGetValue(owner, out object _))
+            {
+                return;
+            }
+
+            ParallelConnectNoted.Add(owner, ParallelConnectNoteMarker);
+            owner.Bindings?.LogSink?.Invoke(
+                "[RbxApi] RBXScriptSignal:ConnectParallel runs its handler like Connect: CoreAI mods " +
+                "run single-threaded, so there is no desynchronized phase (DEV-5). (Logged once per mod.)");
+        }
+
         private static Action<object[]> BuildSignalHandler(
             LuaCsRbxModContext context, object callable)
         {
@@ -1284,12 +1534,24 @@ namespace CoreAI.Ai.LuaCs
             };
         }
 
+        /// <summary>
+        /// Converts one fired signal argument into the receiving handler's Lua value. Called once
+        /// per receiving handler, so every table a handler receives is its own copy.
+        /// </summary>
+        /// <remarks>
+        /// WHY copy: one fire reaches every connected handler — several mods, and on a multi-actor
+        /// host several actors — with the same argument array. A shared table let one receiver
+        /// rewrite a field or install a metatable whose closure then ran on another actor's thread
+        /// and budget. R5.10 (Roblox's bindable rule) says tables passed as arguments are copied and
+        /// lose their metatable; remote payloads are decoded per machine in Roblox, so a per-handler
+        /// copy is what each receiver would see there too.
+        /// </remarks>
         internal static LuaValue MarshalSignalArg(LuaCsRbxModContext context, object arg)
         {
             switch (arg)
             {
                 case null: return LuaValue.Nil;
-                case LuaValue value: return value;
+                case LuaValue value: return CopySignalValue(context, value);
                 case bool b: return b;
                 case double d: return d;
                 case float f: return f;
@@ -1306,7 +1568,140 @@ namespace CoreAI.Ai.LuaCs
                 case RbxEnumItem item: return Wrap(item);
                 case RbxVector3 v3: return Wrap(v3);
                 case RbxVector2 v2: return Wrap(v2);
+                case RbxUDim udim: return Wrap(udim);
+                case RbxUDim2 udim2: return Wrap(udim2);
+                case LuaCsRbxNetworkTable table: return BuildSignalTable(context, table, 0);
                 default: return LuaValue.Nil;
+            }
+        }
+
+        /// <summary>
+        /// A decoded remote payload table rebuilt as a fresh Lua table for one receiver, with
+        /// Instance references wrapped for the receiving context.
+        /// </summary>
+        private static LuaValue BuildSignalTable(LuaCsRbxModContext context,
+            LuaCsRbxNetworkTable portable, int depth)
+        {
+            RequireSignalTableDepth(depth);
+            LuaTable table = new();
+            if (portable.IsArray)
+            {
+                for (int index = 0; index < portable.ArrayValues.Count; index++)
+                {
+                    table[index + 1] = MarshalNetworkValue(context, portable.ArrayValues[index], depth);
+                }
+            }
+            else
+            {
+                for (int index = 0; index < portable.DictionaryValues.Count; index++)
+                {
+                    KeyValuePair<string, object> pair = portable.DictionaryValues[index];
+                    table[pair.Key] = MarshalNetworkValue(context, pair.Value, depth);
+                }
+            }
+
+            return new LuaValue(table);
+        }
+
+        private static LuaValue MarshalNetworkValue(LuaCsRbxModContext context, object value, int depth)
+        {
+            return value is LuaCsRbxNetworkTable nested
+                ? BuildSignalTable(context, nested, depth + 1)
+                : MarshalSignalArg(context, value);
+        }
+
+        private static LuaValue CopySignalValue(LuaCsRbxModContext context, LuaValue value)
+        {
+            if (value.Type != LuaValueType.Table)
+            {
+                return RebindSignalValue(context, value);
+            }
+
+            Dictionary<LuaTable, LuaTable> copies = new(TableIdentityComparer.Instance);
+            return new LuaValue(CopySignalTable(context, value.Read<LuaTable>(), copies, 0));
+        }
+
+        /// <summary>
+        /// Deep-copies a table argument: no metatable, shared or cyclic subtables mapped to one copy
+        /// each (so a cycle terminates and stays a cycle), nesting capped like the network codec.
+        /// Functions and coroutines inside the table are dropped: calling one would run the firing
+        /// mod's code on the receiver's thread and budget.
+        /// </summary>
+        private static LuaTable CopySignalTable(LuaCsRbxModContext context, LuaTable source,
+            Dictionary<LuaTable, LuaTable> copies, int depth)
+        {
+            if (copies.TryGetValue(source, out LuaTable existing))
+            {
+                return existing;
+            }
+
+            RequireSignalTableDepth(depth);
+            LuaTable copy = new();
+            copies.Add(source, copy);
+            foreach (KeyValuePair<LuaValue, LuaValue> pair in source)
+            {
+                LuaValue key = CopyNestedSignalValue(context, pair.Key, copies, depth);
+                if (key.Type == LuaValueType.Nil)
+                {
+                    continue;
+                }
+
+                copy[key] = CopyNestedSignalValue(context, pair.Value, copies, depth);
+            }
+
+            return copy;
+        }
+
+        private static LuaValue CopyNestedSignalValue(LuaCsRbxModContext context, LuaValue value,
+            Dictionary<LuaTable, LuaTable> copies, int depth)
+        {
+            switch (value.Type)
+            {
+                case LuaValueType.Table:
+                    return new LuaValue(CopySignalTable(context, value.Read<LuaTable>(), copies, depth + 1));
+                case LuaValueType.Function:
+                case LuaValueType.Thread:
+                    return LuaValue.Nil;
+                default:
+                    return RebindSignalValue(context, value);
+            }
+        }
+
+        /// <summary>
+        /// Re-wraps reference-carrying userdata for the receiving context: an Instance proxy or a
+        /// signal box built for another mod would otherwise act with that mod's capabilities and
+        /// connection ownership.
+        /// </summary>
+        private static LuaValue RebindSignalValue(LuaCsRbxModContext context, LuaValue value)
+        {
+            if (context == null)
+            {
+                return value;
+            }
+
+            if (TryGetInstance(value, out LuaCsRbxInstanceProxy proxy))
+            {
+                return ReferenceEquals(proxy.Context, context) ? value : context.WrapInstance(proxy.Instance);
+            }
+
+            if (value.TryRead(out LuaCsRbxValueBox box) && box.SignalOwner != null
+                                                       && !ReferenceEquals(box.SignalOwner, context)
+                                                       && box.Value is RbxScriptSignal signal)
+            {
+                return Wrap(signal, context);
+            }
+
+            return value;
+        }
+
+        private static void RequireSignalTableDepth(int depth)
+        {
+            if (depth >= LuaCsRbxNetworkCodec.MaxNestingDepth)
+            {
+                throw RbxError.BadArgument(
+                    "signal argument table nesting exceeds CoreAI's "
+                    + LuaCsRbxNetworkCodec.MaxNestingDepth + " level limit",
+                    "fire shallower tables; remote payloads are capped at the same depth");
             }
         }
 
@@ -1450,6 +1845,38 @@ namespace CoreAI.Ai.LuaCs
                 : throw RbxError.BadArgument(
                     "expected a Vector3 at argument " + (index + 1),
                     "pass a Vector3, got " + Describe(value) + " at argument " + (index + 1));
+        }
+
+        private static RbxVector3? OptionalVector3(LuaFunctionExecutionContext ctx, int index,
+            string what, int argumentNumber)
+        {
+            LuaValue value = Arg(ctx, index);
+            if (value.Type == LuaValueType.Nil)
+            {
+                return null;
+            }
+
+            return TryUnbox(value, out RbxVector3 vector)
+                ? vector
+                : throw ExpectedArgument(what, "a Vector3", value, argumentNumber);
+        }
+
+        /// <summary>Optional boolean argument: nil is false; a non-boolean is a BAD_ARGUMENT.</summary>
+        private static bool ReadOptionalBoolean(LuaFunctionExecutionContext ctx, int index,
+            string what, int argumentNumber)
+        {
+            LuaValue value = Arg(ctx, index);
+            if (value.Type == LuaValueType.Nil)
+            {
+                return false;
+            }
+
+            if (value.Type != LuaValueType.Boolean)
+            {
+                throw ExpectedArgument(what, "a boolean", value, argumentNumber);
+            }
+
+            return value.Read<bool>();
         }
     }
 }

@@ -183,6 +183,77 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         }
 
         [Test]
+        public void EnumRegistry_KeyCodeMatchesMirror_NoneIsValueZero()
+        {
+            RbxEnum keyCode = RbxEnumRegistry.CreateWithBuiltins().Get("KeyCode");
+            IReadOnlyList<RbxEnumItem> items = keyCode.GetEnumItems();
+
+            Assert.AreEqual(283, items.Count, "the mirror's KeyCode.yaml lists 283 items");
+            Assert.AreEqual("None", items[0].Name, "value 0 is named None in the mirror");
+            Assert.AreEqual(0, items[0].Value);
+            Assert.IsTrue(keyCode.TryGetItemByValue(0, out RbxEnumItem byValue));
+            Assert.AreSame(items[0], byValue);
+
+            HashSet<string> names = new();
+            HashSet<int> values = new();
+            foreach (RbxEnumItem item in items)
+            {
+                Assert.IsTrue(names.Add(item.Name), "duplicate KeyCode name " + item.Name);
+                Assert.IsTrue(values.Add(item.Value), "duplicate KeyCode value " + item.Value);
+            }
+
+            Assert.IsFalse(names.Contains("Unknown"), "GetEnumItems lists only the mirror's names");
+
+            // WHY this list: these are the mirror items CoreAI was missing (gamepad thumbstick
+            // directions, the Input Action System mouse/touch/trackpad codes and the extra gamepad
+            // buttons), with the values KeyCode.yaml assigns them.
+            (string Name, int Value)[] added =
+            {
+                ("Thumbstick1Up", 1018), ("Thumbstick1Down", 1019), ("Thumbstick1Left", 1020),
+                ("Thumbstick1Right", 1021), ("Thumbstick2Up", 1022), ("Thumbstick2Down", 1023),
+                ("Thumbstick2Left", 1024), ("Thumbstick2Right", 1025), ("MouseLeftButton", 1026),
+                ("MouseRightButton", 1027), ("MouseMiddleButton", 1028), ("MouseBackButton", 1029),
+                ("MouseNoButton", 1030), ("MouseX", 1031), ("MouseY", 1032), ("MousePosition", 1033),
+                ("TouchPosition", 1034), ("MouseWheel", 1035), ("TrackpadPan", 1040),
+                ("TrackpadPinch", 1045), ("MouseDelta", 1048), ("TouchDelta", 1049),
+                ("TouchPinch", 1050), ("ButtonCenter", 1051), ("ButtonBack", 1052),
+                ("ButtonUp", 1053), ("ButtonDown", 1054), ("ButtonLeft", 1055), ("ButtonRight", 1056)
+            };
+            foreach ((string name, int value) in added)
+            {
+                Assert.IsTrue(keyCode.TryGetItem(name, out RbxEnumItem item), "missing KeyCode." + name);
+                Assert.AreEqual(value, item.Value, "KeyCode." + name);
+            }
+        }
+
+        [Test]
+        public void EnumRegistry_KeyCodeUnknown_IsAnAliasOfNone()
+        {
+            RbxEnum keyCode = RbxEnumRegistry.CreateWithBuiltins().Get("KeyCode");
+
+            Assert.AreSame(keyCode["None"], keyCode["Unknown"],
+                "the legacy name must hand back the same interned item so == and rawequal hold");
+            Assert.IsTrue(keyCode.TryGetItem("Unknown", out RbxEnumItem alias));
+            Assert.AreSame(keyCode["None"], alias);
+            Assert.AreEqual("None", alias.Name);
+            Assert.AreEqual("Enum.KeyCode.None", alias.ToString());
+        }
+
+        [Test]
+        public void Enum_AddAlias_RefusesCollisionsAndMissingTargets()
+        {
+            RbxEnum axis = new("Axis", ("X", 0), ("Y", 1), ("Z", 2));
+            axis.AddAlias("Horizontal", "X");
+
+            Assert.AreSame(axis["X"], axis["Horizontal"]);
+            Assert.AreEqual(3, axis.GetEnumItems().Count, "an alias is not an extra item");
+            Assert.Throws<System.ArgumentException>(() => axis.AddAlias("Y", "X"));
+            Assert.Throws<System.ArgumentException>(() => axis.AddAlias("Horizontal", "Y"));
+            Assert.Throws<System.ArgumentException>(() => axis.AddAlias("Depth", "W"));
+            Assert.IsFalse(axis.TryGetItem(null, out RbxEnumItem _));
+        }
+
+        [Test]
         public void Enum_GetEnumItems_DeclarationOrder()
         {
             RbxEnumRegistry registry = RbxEnumRegistry.CreateWithBuiltins();

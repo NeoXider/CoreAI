@@ -408,6 +408,60 @@ namespace CoreAI.Mods.Rbx.Datatypes
             return ToEulerAnglesYXZ();
         }
 
+        /// <summary>
+        /// ToEulerAngles(order = XYZ): angles (rx, ry, rz) such that
+        /// <see cref="FromEulerAngles"/> with the same order reconstructs the rotation.
+        /// </summary>
+        /// <remarks>
+        /// WHY one formula per order: for R = A(a) * B(b) * C(c) with axis indices (i, j, k) and
+        /// parity s (+1 for the cyclic orders XYZ/YZX/ZXY, -1 otherwise), the middle angle is
+        /// b = asin(s * R[i][k]), then a = atan2(-s * R[j][k], R[k][k]) and
+        /// c = atan2(-s * R[i][j], R[i][i]). XYZ and YXZ are the two instances already pinned by
+        /// <see cref="ToEulerAnglesXYZ"/> and <see cref="ToEulerAnglesYXZ"/>.
+        /// </remarks>
+        public (float rx, float ry, float rz) ToEulerAngles(RbxRotationOrder order = RbxRotationOrder.XYZ)
+        {
+            switch (order)
+            {
+                case RbxRotationOrder.XYZ:
+                    return ToEulerAnglesXYZ();
+                case RbxRotationOrder.XZY:
+                {
+                    float rz = MathF.Asin(Math.Clamp(-_r01, -1f, 1f));
+                    float rx = MathF.Atan2(_r21, _r11);
+                    float ry = MathF.Atan2(_r02, _r00);
+                    return (rx, ry, rz);
+                }
+                case RbxRotationOrder.YZX:
+                {
+                    float rz = MathF.Asin(Math.Clamp(_r10, -1f, 1f));
+                    float ry = MathF.Atan2(-_r20, _r00);
+                    float rx = MathF.Atan2(-_r12, _r11);
+                    return (rx, ry, rz);
+                }
+                case RbxRotationOrder.YXZ:
+                    return ToEulerAnglesYXZ();
+                case RbxRotationOrder.ZXY:
+                {
+                    float rx = MathF.Asin(Math.Clamp(_r21, -1f, 1f));
+                    float rz = MathF.Atan2(-_r01, _r11);
+                    float ry = MathF.Atan2(-_r20, _r22);
+                    return (rx, ry, rz);
+                }
+                case RbxRotationOrder.ZYX:
+                {
+                    float ry = MathF.Asin(Math.Clamp(-_r20, -1f, 1f));
+                    float rz = MathF.Atan2(_r10, _r00);
+                    float rx = MathF.Atan2(_r21, _r22);
+                    return (rx, ry, rz);
+                }
+                default:
+                    throw RbxApiStubException.BadArgument(
+                        $"Unknown RotationOrder '{order}'.",
+                        "pass one of Enum.RotationOrder.XYZ/XZY/YZX/YXZ/ZXY/ZYX");
+            }
+        }
+
         /// <summary>Rotation as (unit axis, angle in radians); identity yields (xAxis, 0).</summary>
         public (RbxVector3 axis, float angle) ToAxisAngle()
         {

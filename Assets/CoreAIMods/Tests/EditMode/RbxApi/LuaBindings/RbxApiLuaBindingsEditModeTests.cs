@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using CoreAI.Ai;
@@ -17,6 +18,7 @@ using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
 using CoreAI.Unity.Logging;
+using Lua;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
@@ -959,6 +961,74 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_NetworkProductionPath_RemoteEventTablePayload_IsCopiedPerReceiver()
+        {
+            using ProductionNetworkHarness harness = new();
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext firstClient = Actor("payload-copy-actor-a");
+            ActorContext secondClient = Actor("payload-copy-actor-b");
+            harness.Runtime.LoadMod(serverActor, "payload-copy-server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'PayloadCopyRemote'
+                remote.Parent = workspace", persistToStore: false);
+
+            // WHY two handlers per mod and two client actors: one FireAllClients reaches every
+            // actor's OnClientEvent, and every connection of each, with the same decoded argument
+            // array. Each handler overwrites a field, a nested field and the metatable of what it
+            // received, so any sharing shows up as the other handler's writes.
+            const string receiver = @"
+                local remote = workspace:FindFirstChild('PayloadCopyRemote')
+                local seen = {}
+                local function record(tag)
+                    return function(payload)
+                        local entry = { payload = payload }
+                        if type(payload) == 'table' then
+                            entry.score = payload.score
+                            entry.nested = payload.nested and payload.nested.value
+                            entry.metatableAbsent = getmetatable(payload) == nil
+                            payload.score = 999
+                            payload.nested.value = 'overwritten by ' .. tag
+                            setmetatable(payload, { __index = function() return 'leaked from ' .. tag end })
+                        end
+                        table.insert(seen, entry)
+                        if #seen == 2 then
+                            local first, second = seen[1], seen[2]
+                            store_set('scores', tostring(first.score) .. ',' .. tostring(second.score))
+                            store_set('nested', tostring(first.nested) .. ',' .. tostring(second.nested))
+                            store_set('metatables', tostring(first.metatableAbsent) .. ','
+                                .. tostring(second.metatableAbsent))
+                            store_set('distinct', tostring(type(first.payload) == 'table'
+                                and not rawequal(first.payload, second.payload)))
+                        end
+                    end
+                end
+                remote.OnClientEvent:Connect(record('a'))
+                remote.OnClientEvent:Connect(record('b'))";
+            harness.Runtime.LoadMod(firstClient, "payload-copy-client-a", receiver, persistToStore: false);
+            harness.Runtime.LoadMod(secondClient, "payload-copy-client-b", receiver, persistToStore: false);
+
+            harness.Runtime.LoadMod(serverActor, "payload-copy-sender", @"
+                workspace:FindFirstChild('PayloadCopyRemote'):FireAllClients({
+                    score = 1,
+                    nested = { value = 'original' }
+                })", persistToStore: false);
+            harness.PumpFrames(2);
+
+            foreach (string modId in new[] { "payload-copy-client-a", "payload-copy-client-b" })
+            {
+                Assert.AreEqual("1,1", harness.Store.Get(modId, "scores"),
+                    modId + ": each handler must read the value the server sent, not another receiver's write");
+                Assert.AreEqual("original,original", harness.Store.Get(modId, "nested"),
+                    modId + ": nested tables are copied too");
+                Assert.AreEqual("true,true", harness.Store.Get(modId, "metatables"),
+                    modId + ": a metatable installed by one receiver must not reach another");
+                Assert.AreEqual("true", harness.Store.Get(modId, "distinct"),
+                    modId + ": two connections must not receive the same table object");
+            }
+        }
+
+        [Test]
         public void Lua_NetworkProductionPath_RemoteFunctionYieldsAndPropagatesReturnsAndErrors()
         {
             using ProductionNetworkHarness harness = new();
@@ -1459,6 +1529,350 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 assert(d:NextNumber() == clone:NextNumber())
                 assert(Random.new(1):NextUnitVector():FuzzyEq(Random.new(1):NextUnitVector()))");
             Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        /// <summary>Lua helper that stores every value it is given as one comma-joined string.</summary>
+        private const string PutNumbersLua = @"
+                local function put(key, ...)
+                    local count = select('#', ...)
+                    local values = { ... }
+                    local parts = {}
+                    for index = 1, count do
+                        parts[index] = tostring(values[index])
+                    end
+                    store_set(key, table.concat(parts, ','))
+                end
+";
+
+        private static double[] StoredNumbers(MemoryStore store, string modId, string key)
+        {
+            string text = store.Get(modId, key);
+            Assert.IsNotEmpty(text, "mod " + modId + " stored nothing under '" + key + "'");
+            string[] parts = text.Split(',');
+            double[] values = new double[parts.Length];
+            for (int index = 0; index < parts.Length; index++)
+            {
+                values[index] = double.Parse(parts[index], NumberStyles.Float, CultureInfo.InvariantCulture);
+            }
+
+            return values;
+        }
+
+        private static void AssertNumbers(double[] expected, double[] actual, string what)
+        {
+            Assert.AreEqual(expected.Length, actual.Length, what + ": value count");
+            for (int index = 0; index < expected.Length; index++)
+            {
+                Assert.AreEqual(expected[index], actual[index], 1e-5, what + " value " + (index + 1));
+            }
+        }
+
+        [Test]
+        public void Lua_CFrame_ToOrientation_ToEulerAngles_ToAxisAngle_AngleBetween_AreReachable()
+        {
+            const string modId = "cframe-members";
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(), store);
+
+            stack.Runtime.LoadMod(modId, PutNumbersLua + @"
+                put('orientation', CFrame.Angles(0.3, 0.4, 0):ToOrientation())
+                put('xyz', CFrame.fromOrientation(0.3, 0.4, 0):ToEulerAnglesXYZ())
+                put('yxz', CFrame.fromOrientation(0.3, 0.4, 0):ToEulerAnglesYXZ())
+                put('zyx', CFrame.Angles(0.3, 0.4, 0):ToEulerAngles(Enum.RotationOrder.ZYX))
+                put('default', CFrame.Angles(0.1, 0.2, 0.3):ToEulerAngles())
+                local _, yaw = CFrame.lookAt(Vector3.zero, Vector3.new(-5, 0, 0)):ToOrientation()
+                put('yaw', yaw)
+                local axis, angle = CFrame.fromAxisAngle(Vector3.new(0, 0, 2), 0.5):ToAxisAngle()
+                put('axisAngle', axis.X, axis.Y, axis.Z, angle)
+                put('between', CFrame.Angles(0, 0.25, 0):AngleBetween(
+                    CFrame.Angles(0, 1, 0) + Vector3.new(5, 0, 0)))
+                local carried = CFrame.fromRotationBetweenVectors(Vector3.new(0, 1, 0), Vector3.new(1, 0, 0))
+                    * Vector3.new(0, 1, 0)
+                put('carried', carried.X, carried.Y, carried.Z)
+                local cf = CFrame.new(1, 2, 3) * CFrame.Angles(0, 0.5, 0)
+                put('components', cf:components())
+                put('getComponents', cf:GetComponents())");
+
+            const double a = 0.3;
+            const double b = 0.4;
+            // WHY these closed forms: CFrame.Angles(a, b, 0) = Rx(a) * Ry(b)
+            // = [[cb, 0, sb], [sa sb, ca, -sa cb], [-ca sb, sa, ca cb]] and ToOrientation reads YXZ
+            // (rx = asin(-R12), ry = atan2(R02, R22), rz = atan2(R10, R11)); fromOrientation(a, b, 0)
+            // = Ry(b) * Rx(a) = [[cb, sb sa, sb ca], [0, ca, -sa], [-sb, cb sa, cb ca]] read in XYZ
+            // (ry = asin(R02), rx = atan2(-R12, R22), rz = atan2(-R01, R00)); the same Rx(a) * Ry(b)
+            // read in ZYX gives ry = asin(-R20), rz = atan2(R10, R00), rx = atan2(R21, R22).
+            AssertNumbers(new[]
+            {
+                Math.Asin(Math.Sin(a) * Math.Cos(b)),
+                Math.Atan2(Math.Sin(b), Math.Cos(a) * Math.Cos(b)),
+                Math.Atan2(Math.Sin(a) * Math.Sin(b), Math.Cos(a))
+            }, StoredNumbers(store, modId, "orientation"), "Angles(0.3, 0.4, 0):ToOrientation()");
+            AssertNumbers(new[]
+            {
+                Math.Atan2(Math.Sin(a), Math.Cos(b) * Math.Cos(a)),
+                Math.Asin(Math.Sin(b) * Math.Cos(a)),
+                Math.Atan2(-Math.Sin(b) * Math.Sin(a), Math.Cos(b))
+            }, StoredNumbers(store, modId, "xyz"), "fromOrientation(0.3, 0.4, 0):ToEulerAnglesXYZ()");
+            AssertNumbers(new[] { a, b, 0d }, StoredNumbers(store, modId, "yxz"),
+                "fromOrientation(0.3, 0.4, 0):ToEulerAnglesYXZ()");
+            AssertNumbers(new[]
+            {
+                Math.Atan2(Math.Sin(a), Math.Cos(a) * Math.Cos(b)),
+                Math.Asin(Math.Cos(a) * Math.Sin(b)),
+                Math.Atan2(Math.Sin(a) * Math.Sin(b), Math.Cos(b))
+            }, StoredNumbers(store, modId, "zyx"), "Angles(0.3, 0.4, 0):ToEulerAngles(ZYX)");
+            AssertNumbers(new[] { 0.1, 0.2, 0.3 }, StoredNumbers(store, modId, "default"),
+                "ToEulerAngles() defaults to XYZ, the order CFrame.Angles builds");
+            AssertNumbers(new[] { Math.PI / 2d }, StoredNumbers(store, modId, "yaw"),
+                "positive yaw turns left (D1), so looking down -X is yaw +90 degrees");
+            AssertNumbers(new[] { 0d, 0d, 1d, 0.5 }, StoredNumbers(store, modId, "axisAngle"),
+                "ToAxisAngle returns the unit axis and the angle");
+            AssertNumbers(new[] { 0.75 }, StoredNumbers(store, modId, "between"),
+                "AngleBetween compares orientation only");
+            AssertNumbers(new[] { 1d, 0d, 0d }, StoredNumbers(store, modId, "carried"),
+                "the mirror's own fromRotationBetweenVectors example");
+            double[] components = StoredNumbers(store, modId, "components");
+            Assert.AreEqual(12, components.Length);
+            Assert.AreEqual(StoredNumbers(store, modId, "getComponents"), components,
+                "components is the mirror's alias of GetComponents");
+        }
+
+        [Test]
+        public void Lua_Vector2Angle_Color3ToHSV_EnumFromNameFromValue_AreReachable()
+        {
+            const string modId = "misc-members";
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(), store);
+
+            stack.Runtime.LoadMod(modId, PutNumbersLua + @"
+                put('angles', Vector2.new(1, 0):Angle(Vector2.new(0, 1)),
+                    Vector2.new(0, 1):Angle(Vector2.new(1, 0), true),
+                    Vector2.new(0, 1):Angle(Vector2.new(1, 0)),
+                    Vector2.new(1, 0):Angle(Vector2.new(-1, 1)))
+                put('hsv', Color3.toHSV(Color3.fromRGB(0, 255, 0)))
+                put('hsvBlue', Color3.toHSV(Color3.fromRGB(0, 0, 255)))
+                assert(Enum.Material:FromName('Wood') == Enum.Material.Wood)
+                assert(Enum.Material:FromName('NoSuchMaterial') == nil)
+                assert(Enum.KeyCode:FromValue(97) == Enum.KeyCode.A)
+                assert(Enum.KeyCode:FromValue(99999) == nil)
+                assert(Enum.KeyCode:FromValue(97.5) == nil)
+                assert(Enum.KeyCode:FromValue(0) == Enum.KeyCode.None)
+                assert(rawequal(Enum.KeyCode.Unknown, Enum.KeyCode.None))
+                store_set('unknownAlias', tostring(Enum.KeyCode.Unknown))
+                local ok, err = pcall(function() return Enum.Material:FromName(5) end)
+                store_set('fromNameError', tostring(ok) .. '|' .. tostring(err))");
+
+            AssertNumbers(new[] { Math.PI / 2d, -Math.PI / 2d, Math.PI / 2d, 3d * Math.PI / 4d },
+                StoredNumbers(store, modId, "angles"),
+                "Vector2:Angle is unsigned by default and negative clockwise when signed");
+            AssertNumbers(new[] { 1d / 3d, 1d, 1d }, StoredNumbers(store, modId, "hsv"),
+                "the mirror's Color3 example: green is 0.3333333 1 1");
+            AssertNumbers(new[] { 2d / 3d, 1d, 1d }, StoredNumbers(store, modId, "hsvBlue"),
+                "Color3.toHSV(blue)");
+            Assert.AreEqual("Enum.KeyCode.None", store.Get(modId, "unknownAlias"));
+            string fromNameError = store.Get(modId, "fromNameError");
+            StringAssert.StartsWith("false|", fromNameError);
+            StringAssert.Contains("Enum:FromName expects a string at argument 1", fromNameError);
+        }
+
+        [Test]
+        public void Lua_SignalConnectParallel_RunsLikeConnect_AndNotesDev5OncePerMod()
+        {
+            const string modId = "parallel-connect";
+            List<string> log = new();
+            LuaCsRbxApiBindings roblox = new(log: log.Add);
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+
+            stack.Runtime.LoadMod(modId, @"
+                local count = 0
+                workspace.ChildAdded:ConnectParallel(function(child)
+                    count = count + 1
+                    store_set('fired', child.Name .. ':' .. count)
+                end)
+                local second = workspace.ChildAdded:ConnectParallel(function() end)
+                store_set('connected', tostring(second.Connected))
+                local marker = Instance.new('Folder')
+                marker.Name = 'ParallelChild'
+                marker.Parent = workspace");
+            roblox.Scheduler.Advance(0d);
+
+            Assert.AreEqual("ParallelChild:1", store.Get(modId, "fired"),
+                "DEV-5: ConnectParallel must run the handler exactly like Connect");
+            Assert.AreEqual("true", store.Get(modId, "connected"));
+            Assert.AreEqual(2, roblox.Connections.GetOwnedBy(modId).Count,
+                "parallel connections are tracked for teardown like any other");
+            int notes = 0;
+            foreach (string line in log)
+            {
+                if (line.Contains("ConnectParallel"))
+                {
+                    notes++;
+                }
+            }
+
+            Assert.AreEqual(1, notes, "the DEV-5 note is logged once per mod, not once per call");
+        }
+
+        [Test]
+        public void Lua_BadArgument_MethodPositionsExcludeSelf()
+        {
+            const string modId = "argument-positions";
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(), store);
+
+            stack.Runtime.LoadMod(modId, @"
+                local function capture(key, call)
+                    local ok, err = pcall(call)
+                    store_set(key, tostring(ok) .. '|' .. tostring(err))
+                end
+                capture('dot', function() return Vector3.new(1, 2, 3):Dot('x') end)
+                capture('lerp', function() return Vector3.new():Lerp(Vector3.new(), 'a') end)
+                capture('toWorld', function() return CFrame.new():ToWorldSpace(5) end)
+                capture('colorLerp', function() return Color3.new():Lerp(Color3.new(), {}) end)
+                capture('v2dot', function() return Vector2.new():Dot(5) end)
+                capture('nextInteger', function() return Random.new(1):NextInteger(1, 'x') end)
+                capture('lookAt', function() return CFrame.lookAt(Vector3.new(), 5) end)");
+
+            (string Key, string Expected)[] cases =
+            {
+                ("dot", "Vector3:Dot expects a Vector3 at argument 1"),
+                ("lerp", "Vector3:Lerp expects a number at argument 2"),
+                ("toWorld", "CFrame:ToWorldSpace expects a CFrame at argument 1"),
+                ("colorLerp", "Color3:Lerp expects a number at argument 2"),
+                ("v2dot", "Vector2:Dot expects a Vector2 at argument 1"),
+                ("nextInteger", "Random:NextInteger expects a number at argument 2"),
+                ("lookAt", "CFrame.lookAt expects a Vector3 at argument 2")
+            };
+            foreach ((string key, string expected) in cases)
+            {
+                string failure = store.Get(modId, key);
+                StringAssert.StartsWith("false|", failure, key);
+                StringAssert.Contains(expected, failure,
+                    key + ": Roblox numbers method arguments without self; static functions count from 1");
+            }
+
+            StringAssert.DoesNotContain("at argument 2", store.Get(modId, "dot"),
+                "the old reader counted self and blamed argument 2 for v:Dot('x')");
+        }
+
+        [Test]
+        public void PropertyAssignmentError_NamesThePropertyInsteadOfAPosition()
+        {
+            LuaValue number = 5d;
+            RbxError error = LuaCsRbxLua.PropertyAssignmentError("Part", "Name", "a string", number);
+
+            Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
+            Assert.AreEqual("Part.Name expects a string, got number", error.RawMessage);
+            Assert.AreEqual("assign a string to Part.Name", error.Fix);
+            StringAssert.DoesNotContain("argument", error.Message,
+                "a property write has no argument list to point into");
+
+            LuaValue falseText = "false";
+            RbxError anchored = Assert.Throws<RbxError>(
+                () => LuaCsRbxLua.ReadAssignedBoolean(falseText, "Part", "Anchored"));
+            Assert.AreEqual("Part.Anchored expects a boolean, got string", anchored.RawMessage);
+            Assert.IsTrue(LuaCsRbxLua.ReadAssignedBoolean(true, "Part", "Anchored"));
+            Assert.AreEqual("Crate", LuaCsRbxLua.ReadAssignedString("Crate", "Part", "Name"));
+            LuaValue numericText = "7";
+            Assert.AreEqual(7d, LuaCsRbxLua.ReadAssignedNumber(numericText, "Part", "Transparency"));
+            Assert.Throws<RbxError>(() => LuaCsRbxLua.ReadAssignedString(number, "Part", "Name"));
+        }
+
+        [Test]
+        public void Lua_DatatypeConstructor_NonNumberArgument_RaisesBadArgument_AndNumericStringsCoerce()
+        {
+            const string modId = "constructor-coercion";
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(), store);
+
+            Exception ex = LoadFails(stack, "constructor-mistake", @"
+                local pos = Vector3.new(1, 2, 3)
+                local copy = Vector3.new(pos.X, pos.Y, pos)");
+            StringAssert.Contains("BAD_ARGUMENT", FullText(ex));
+            StringAssert.Contains("Vector3.new expects a number at argument 3", FullText(ex),
+                "a Vector3 passed where Z belongs used to become a silent 0");
+            StringAssert.Contains("got Vector3", FullText(ex));
+
+            stack.Runtime.LoadMod(modId, @"
+                local v = Vector3.new('5', ' 2 ', nil)
+                store_set('vector', tostring(v))
+                store_set('color', tostring(Color3.new('0.5', 0, 1).R))
+                local ok, err = pcall(function() return Color3.fromRGB(255, true, 0) end)
+                store_set('boolean', tostring(ok) .. '|' .. tostring(err))");
+
+            Assert.AreEqual("5, 2, 0", store.Get(modId, "vector"),
+                "numeric strings coerce like tonumber and nil keeps the default, as in Luau");
+            Assert.AreEqual("0.5", store.Get(modId, "color"));
+            string boolean = store.Get(modId, "boolean");
+            StringAssert.StartsWith("false|", boolean);
+            StringAssert.Contains("Color3.fromRGB expects a number at argument 2", boolean);
+        }
+
+        [Test]
+        public void Lua_DatatypeBadArgument_CarriesModAndLinePrefix()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+
+            Exception method = LoadFails(stack, "datatype-context", @"
+                local v = Vector3.new(1, 2, 3)
+                local d = v:Dot('x')");
+            StringAssert.Contains("[mod:datatype-context script:main.lua line:3]", FullText(method),
+                "datatype errors must carry the same prefix instance errors carry");
+            StringAssert.Contains("Vector3:Dot expects a Vector3 at argument 1", FullText(method));
+
+            Exception stub = LoadFails(stack, "enum-context", @"
+                local first = 1
+                local wood = Enum.Material.Wod");
+            StringAssert.Contains("[mod:enum-context script:main.lua line:3]", FullText(stub),
+                "datatype-layer stub exceptions take the prefix too");
+            StringAssert.Contains("BAD_ARGUMENT: 'Wod' is not a valid member of Enum.Material.",
+                FullText(stub));
+
+            Exception multi = LoadFails(stack, "multi-context", @"
+                local cf = CFrame.new()
+                local rx, ry, rz = cf:ToEulerAngles('XYZ')");
+            StringAssert.Contains("[mod:multi-context script:main.lua line:3]", FullText(multi),
+                "multi-return host functions take the prefix as well");
+        }
+
+        [Test]
+        public void Lua_UDimOffsetAndRandomBounds_OutOfRange_RaiseBadArgument()
+        {
+            const string modId = "integer-conversions";
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(), store);
+
+            stack.Runtime.LoadMod(modId, @"
+                local function capture(key, call)
+                    local ok, err = pcall(call)
+                    store_set(key, tostring(ok) .. '|' .. tostring(err))
+                end
+                capture('fromOffset', function() return UDim2.fromOffset(1e10, 0) end)
+                capture('nanOffset', function() return UDim.new(0, 0 / 0) end)
+                capture('nextInteger', function() return Random.new(1):NextInteger(0, 1e300) end)
+                store_set('truncated', tostring(UDim.new(0, 10.9).Offset) .. ','
+                    .. tostring(UDim.new(0, -10.9).Offset) .. ','
+                    .. tostring(UDim2.fromOffset(2147483647, -2147483648).Y.Offset))
+                store_set('bound', tostring(Random.new(7):NextInteger(2.9, 2.9)))");
+
+            string fromOffset = store.Get(modId, "fromOffset");
+            StringAssert.StartsWith("false|", fromOffset,
+                "casting 1e10 to int is platform-dependent (int.MinValue on x64, saturated on ARM64)");
+            StringAssert.Contains("UDim2.fromOffset expects a finite offset in the 32-bit integer range at argument 1",
+                fromOffset);
+            string nanOffset = store.Get(modId, "nanOffset");
+            StringAssert.StartsWith("false|", nanOffset);
+            StringAssert.Contains("UDim.new expects a finite offset in the 32-bit integer range at argument 2",
+                nanOffset);
+            string nextInteger = store.Get(modId, "nextInteger");
+            StringAssert.StartsWith("false|", nextInteger);
+            StringAssert.Contains("Random:NextInteger expects a finite whole number", nextInteger);
+            StringAssert.Contains("at argument 2", nextInteger);
+            Assert.AreEqual("10,-10,-2147483648", store.Get(modId, "truncated"),
+                "in-range offsets still truncate toward zero");
+            Assert.AreEqual("2", store.Get(modId, "bound"),
+                "the mirror truncates NextInteger bounds toward zero");
         }
 
         // ---- Instance surface ---------------------------------------------------------------

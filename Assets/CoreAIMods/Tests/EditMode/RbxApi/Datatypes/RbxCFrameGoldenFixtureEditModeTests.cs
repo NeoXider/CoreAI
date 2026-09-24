@@ -200,6 +200,77 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         }
 
         [Test]
+        public void ToEulerAngles_EveryRotationOrder_InvertsFromEulerAngles()
+        {
+            foreach (RbxRotationOrder order in (RbxRotationOrder[])Enum.GetValues(typeof(RbxRotationOrder)))
+            {
+                RbxCFrame cf = RbxCFrame.FromEulerAngles(0.3f, -0.5f, 0.7f, order);
+                (float rx, float ry, float rz) = cf.ToEulerAngles(order);
+                Assert.AreEqual(0.3f, rx, Epsilon, $"{order} rx");
+                Assert.AreEqual(-0.5f, ry, Epsilon, $"{order} ry");
+                Assert.AreEqual(0.7f, rz, Epsilon, $"{order} rz");
+                Assert.IsTrue(RbxCFrame.FromEulerAngles(rx, ry, rz, order).FuzzyEq(cf, 1e-5f),
+                    $"{order} angles must rebuild the same rotation");
+            }
+        }
+
+        [Test]
+        public void ToEulerAngles_DefaultOrderIsXYZ()
+        {
+            RbxCFrame cf = RbxCFrame.Angles(0.1f, 0.2f, 0.3f);
+            Assert.AreEqual(cf.ToEulerAnglesXYZ(), cf.ToEulerAngles());
+            Assert.AreEqual(cf.ToEulerAnglesYXZ(), cf.ToEulerAngles(RbxRotationOrder.YXZ));
+        }
+
+        [Test]
+        public void ToEulerAngles_HandComputedCrossOrderGoldens()
+        {
+            // WHY closed forms and not a round trip: reading a rotation back in a DIFFERENT order is
+            // what distinguishes a correct decomposition from one that merely echoes its own input.
+            // With a = 0.3, b = 0.4 and s/c for sin/cos:
+            // CFrame.Angles(a, b, 0) = Rx(a) * Ry(b) = [[cb, 0, sb], [sa sb, ca, -sa cb], [-ca sb, sa, ca cb]]
+            // read in YXZ: rx = asin(-R12), ry = atan2(R02, R22), rz = atan2(R10, R11).
+            const double a = 0.3;
+            const double b = 0.4;
+            (float ox, float oy, float oz) = RbxCFrame.Angles((float)a, (float)b, 0f).ToOrientation();
+            Assert.AreEqual(Math.Asin(Math.Sin(a) * Math.Cos(b)), ox, 1e-6, "YXZ rx = asin(sa cb)");
+            Assert.AreEqual(Math.Atan2(Math.Sin(b), Math.Cos(a) * Math.Cos(b)), oy, 1e-6,
+                "YXZ ry = atan2(sb, ca cb)");
+            Assert.AreEqual(Math.Atan2(Math.Sin(a) * Math.Sin(b), Math.Cos(a)), oz, 1e-6,
+                "YXZ rz = atan2(sa sb, ca)");
+            Assert.AreEqual(0.27567045, ox, 1e-6);
+            Assert.AreEqual(0.41664919, oy, 1e-6);
+            Assert.AreEqual(0.11988357, oz, 1e-6);
+
+            // The same Rx(a) * Ry(b) read in ZYX: ry = asin(-R20), rz = atan2(R10, R00), rx = atan2(R21, R22).
+            (float zx, float zy, float zz) =
+                RbxCFrame.Angles((float)a, (float)b, 0f).ToEulerAngles(RbxRotationOrder.ZYX);
+            Assert.AreEqual(Math.Atan2(Math.Sin(a), Math.Cos(a) * Math.Cos(b)), zx, 1e-6, "ZYX rx = atan2(sa, ca cb)");
+            Assert.AreEqual(Math.Asin(Math.Cos(a) * Math.Sin(b)), zy, 1e-6, "ZYX ry = asin(ca sb)");
+            Assert.AreEqual(Math.Atan2(Math.Sin(a) * Math.Sin(b), Math.Cos(b)), zz, 1e-6, "ZYX rz = atan2(sa sb, cb)");
+
+            // CFrame.fromOrientation(a, b, 0) = Ry(b) * Rx(a) = [[cb, sb sa, sb ca], [0, ca, -sa], [-sb, cb sa, cb ca]]
+            // read in XYZ: ry = asin(R02), rx = atan2(-R12, R22), rz = atan2(-R01, R00).
+            (float xx, float xy, float xz) =
+                RbxCFrame.FromOrientation((float)a, (float)b, 0f).ToEulerAnglesXYZ();
+            Assert.AreEqual(Math.Atan2(Math.Sin(a), Math.Cos(b) * Math.Cos(a)), xx, 1e-6, "XYZ rx = atan2(sa, cb ca)");
+            Assert.AreEqual(Math.Asin(Math.Sin(b) * Math.Cos(a)), xy, 1e-6, "XYZ ry = asin(sb ca)");
+            Assert.AreEqual(Math.Atan2(-Math.Sin(b) * Math.Sin(a), Math.Cos(b)), xz, 1e-6, "XYZ rz = atan2(-sb sa, cb)");
+        }
+
+        [Test]
+        public void ToOrientation_YawOfALookAt_IsTheCameraYaw()
+        {
+            // WHY: `local _, yaw = cf:ToOrientation()` is the standard character/camera yaw idiom.
+            // Positive yaw turns left (D1), so looking down -X is yaw +90 degrees.
+            (float pitch, float yaw, float roll) =
+                RbxCFrame.LookAt(RbxVector3.Zero, new RbxVector3(-5f, 0f, 0f)).ToOrientation();
+            Assert.AreEqual(0f, pitch, 1e-5f);
+            Assert.AreEqual(HalfPi, yaw, 1e-5f);
+            Assert.AreEqual(0f, roll, 1e-5f);
+        }
+
+        [Test]
         public void ToAxisAngle_RecoverAxisAndAngle()
         {
             (RbxVector3 axis, float angle) = RbxCFrame.FromAxisAngle(RbxVector3.YAxis, 1.1f).ToAxisAngle();

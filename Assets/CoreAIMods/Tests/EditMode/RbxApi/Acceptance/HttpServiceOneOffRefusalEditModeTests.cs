@@ -18,6 +18,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
     /// signal-wait bridge, so a refused <c>HttpService:GetAsync</c> surfaced the bridge error instead of
     /// the host's refusal. Synchronous refusals (policy, safety, rate) must reach every execution
     /// context as the configured refusal message; the async transport path still needs a mod thread.
+    /// The same ownerless surface must refuse signal connections loudly (M2-03).
     /// </summary>
     [TestFixture]
     public sealed class HttpServiceOneOffRefusalEditModeTests
@@ -69,6 +70,72 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
         }
 
+        [Test]
+        public async Task OneOffExecuteLua_SignalConnections_AreRefusedAndLaterFramesKeepRunningMods()
+        {
+            using Harness harness = new();
+            ActorContext actor = harness.Actor("connect-probe-actor");
+            RbxInstance target = harness.Registry.Create(
+                "Folder", accessScope: InstanceAccessScope.SharedWritable);
+            target.Name = "OneOffTarget";
+            target.Parent = harness.Registry.WorldRoot;
+            const string code = @"
+                local function refusal(call)
+                    local ok, err = pcall(call)
+                    return tostring(ok) .. '|' .. tostring(err)
+                end
+                local results = {
+                    refusal(function() return workspace.ChildAdded:Connect(function() end) end),
+                    refusal(function() return workspace.ChildAdded:Once(function() end) end),
+                    refusal(function() return workspace.ChildAdded:ConnectParallel(function() end) end),
+                    refusal(function() return workspace.ChildAdded:Wait() end)
+                }
+                local target = workspace:FindFirstChild('OneOffTarget')
+                target:SetAttribute('TouchedByOneOff', true)
+                target.Name = 'OneOffRenamed'
+                return table.concat(results, '||')";
+
+            LuaTool.LuaResult result = await harness.Stack.ToolExecutor.ExecuteAsync(
+                code, actor, CancellationToken.None);
+
+            Assert.IsTrue(result.Success, result.Error);
+            string[] refusals = result.Output.Split(new[] { "||" }, StringSplitOptions.None);
+            Assert.AreEqual(4, refusals.Length, result.Output);
+            string[] members = { "Connect", "Once", "ConnectParallel", "Wait" };
+            for (int index = 0; index < refusals.Length; index++)
+            {
+                string refusal = refusals[index];
+                StringAssert.StartsWith("false|", refusal,
+                    members[index] + " on the ownerless surface must fail loudly: " + refusal);
+                StringAssert.Contains("CONTEXT_VIOLATION", refusal, members[index]);
+                StringAssert.Contains(members[index] + " requires a persistent owning mod id", refusal);
+                StringAssert.Contains("ownerless one-off executor", refusal,
+                    "the refusal must use the wording task.* uses on the same surface");
+            }
+
+            Assert.AreEqual(true, target.GetAttribute("TouchedByOneOff"),
+                "the one-off surface still calls methods");
+            Assert.AreEqual("OneOffRenamed", target.Name, "the one-off surface still writes properties");
+
+            // WHY the mod half: before the refusal, the one-off's untracked connection threw
+            // CONTEXT_VIOLATION out of the scheduler frame on every later ChildAdded, so no mod's
+            // handler ran again until the world was reloaded. The name filter ignores the one-off
+            // actor's auto-loaded character, which joins Workspace on the same Advance.
+            harness.Stack.Runtime.LoadMod("connect-probe-mod", @"
+                workspace.ChildAdded:Connect(function(child)
+                    if child.Name == 'ModMarker' then
+                        store_set('added', child.Name)
+                    end
+                end)
+                local marker = Instance.new('Folder')
+                marker.Name = 'ModMarker'
+                marker.Parent = workspace");
+
+            Assert.DoesNotThrow(() => harness.Bindings.Scheduler.Advance(0d));
+            Assert.AreEqual("ModMarker", harness.Store.Get("connect-probe-mod", "added"),
+                "a loaded mod keeps connecting and firing after the one-off was refused");
+        }
+
         private sealed class Harness : IDisposable
         {
             public Harness()
@@ -79,10 +146,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 RbxDataModel game = DataModelBootstrap.CreateGame(Registry);
                 Bindings = new LuaCsRbxApiBindings(
                     Registry, game, networkBridge: new NullNetworkBridge());
+                Store = new MemoryStore();
                 Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
                 {
                     Logger = new SilentGameLogger(),
-                    ModStore = new MemoryStore(),
+                    ModStore = Store,
                     Capabilities = Capabilities,
                     OneOffCapabilities = Capabilities,
                     RbxApi = Bindings
@@ -90,6 +158,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
 
             public InstanceRegistry Registry { get; }
+
+            public MemoryStore Store { get; }
 
             public LuaCsRbxApiBindings Bindings { get; }
 

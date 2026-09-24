@@ -37,6 +37,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         private readonly List<RbxEnumItem> _items = new();
         private readonly Dictionary<string, RbxEnumItem> _byName = new(StringComparer.Ordinal);
         private readonly Dictionary<int, RbxEnumItem> _byValue = new();
+        private readonly Dictionary<string, RbxEnumItem> _aliases = new(StringComparer.Ordinal);
 
         public string Name { get; }
 
@@ -68,9 +69,44 @@ namespace CoreAI.Mods.Rbx.Datatypes
             return _items;
         }
 
+        /// <summary>By-name lookup; a registered alias resolves to its canonical interned item.</summary>
         public bool TryGetItem(string itemName, out RbxEnumItem item)
         {
-            return _byName.TryGetValue(itemName, out item);
+            if (itemName == null)
+            {
+                item = null;
+                return false;
+            }
+
+            return _byName.TryGetValue(itemName, out item) || _aliases.TryGetValue(itemName, out item);
+        }
+
+        /// <summary>
+        /// Registers a legacy spelling that resolves to an existing item. The alias returns the SAME
+        /// interned item (so <c>==</c> and <c>rawequal</c> hold) and is not listed by
+        /// <see cref="GetEnumItems"/>, whose names stay the canonical Roblox ones.
+        /// </summary>
+        public RbxEnum AddAlias(string alias, string itemName)
+        {
+            if (alias == null)
+            {
+                throw new ArgumentNullException(nameof(alias));
+            }
+
+            if (_byName.ContainsKey(alias) || _aliases.ContainsKey(alias))
+            {
+                throw new ArgumentException(
+                    $"Enum.{Name} already has an item or alias named '{alias}'.", nameof(alias));
+            }
+
+            if (itemName == null || !_byName.TryGetValue(itemName, out RbxEnumItem item))
+            {
+                throw new ArgumentException(
+                    $"Enum.{Name} has no item named '{itemName}' to alias.", nameof(itemName));
+            }
+
+            _aliases.Add(alias, item);
+            return this;
         }
 
         /// <summary>By-value lookup (input events resolve Enum.KeyCode items from raw values).</summary>
@@ -84,7 +120,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         {
             get
             {
-                if (_byName.TryGetValue(itemName, out RbxEnumItem item))
+                if (TryGetItem(itemName, out RbxEnumItem item))
                 {
                     return item;
                 }
@@ -190,11 +226,18 @@ namespace CoreAI.Mods.Rbx.Datatypes
         /// <summary>Enum.KeyCode with the full Roblox item set (names AND values 1:1, gamepad
         /// buttons at 1000+); letters/digits/World keys are generated from their contiguous
         /// Roblox value ranges.</summary>
+        /// <remarks>
+        /// WHY value 0 is <c>None</c> with <c>Unknown</c> as an alias: the mirror's KeyCode.yaml names
+        /// value 0 <c>None</c>, and mouse/touch InputObjects carry it, so
+        /// <c>input.KeyCode == Enum.KeyCode.None</c> must resolve. CoreAI shipped the name
+        /// <c>Unknown</c> first; the alias keeps scripts written against it working and hands them the
+        /// same interned item.
+        /// </remarks>
         private static RbxEnum CreateKeyCode()
         {
             List<(string name, int value)> items = new()
             {
-                ("Unknown", 0), ("Backspace", 8), ("Tab", 9), ("Clear", 12), ("Return", 13),
+                ("None", 0), ("Backspace", 8), ("Tab", 9), ("Clear", 12), ("Return", 13),
                 ("Pause", 19), ("Escape", 27), ("Space", 32), ("QuotedDouble", 34), ("Hash", 35),
                 ("Dollar", 36), ("Percent", 37), ("Ampersand", 38), ("Quote", 39),
                 ("LeftParenthesis", 40), ("RightParenthesis", 41), ("Asterisk", 42), ("Plus", 43),
@@ -265,9 +308,19 @@ namespace CoreAI.Mods.Rbx.Datatypes
                 ("ButtonR1", 1004), ("ButtonL1", 1005), ("ButtonR2", 1006), ("ButtonL2", 1007),
                 ("ButtonR3", 1008), ("ButtonL3", 1009), ("ButtonStart", 1010),
                 ("ButtonSelect", 1011), ("DPadLeft", 1012), ("DPadRight", 1013), ("DPadUp", 1014),
-                ("DPadDown", 1015), ("Thumbstick1", 1016), ("Thumbstick2", 1017)
+                ("DPadDown", 1015), ("Thumbstick1", 1016), ("Thumbstick2", 1017),
+                ("Thumbstick1Up", 1018), ("Thumbstick1Down", 1019), ("Thumbstick1Left", 1020),
+                ("Thumbstick1Right", 1021), ("Thumbstick2Up", 1022), ("Thumbstick2Down", 1023),
+                ("Thumbstick2Left", 1024), ("Thumbstick2Right", 1025),
+                ("MouseLeftButton", 1026), ("MouseRightButton", 1027), ("MouseMiddleButton", 1028),
+                ("MouseBackButton", 1029), ("MouseNoButton", 1030), ("MouseX", 1031),
+                ("MouseY", 1032), ("MousePosition", 1033), ("TouchPosition", 1034),
+                ("MouseWheel", 1035), ("TrackpadPan", 1040), ("TrackpadPinch", 1045),
+                ("MouseDelta", 1048), ("TouchDelta", 1049), ("TouchPinch", 1050),
+                ("ButtonCenter", 1051), ("ButtonBack", 1052), ("ButtonUp", 1053),
+                ("ButtonDown", 1054), ("ButtonLeft", 1055), ("ButtonRight", 1056)
             });
-            return new RbxEnum("KeyCode", items);
+            return new RbxEnum("KeyCode", items).AddAlias("Unknown", "None");
         }
 
         public void Register(RbxEnum rbxEnum)
