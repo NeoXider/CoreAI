@@ -1,0 +1,28 @@
+<Project>
+  <!--
+    WHY one shared property file for the Lua-tier runtime projects: every one of them must compile the
+    way Unity compiles its asmdef (C# 9, nullable off, .NET Standard 2.1 surface, project-wide
+    scripting defines COREAI_LLM and COREAI_LUA from ProjectSettings), so a newer language feature or
+    a non-Standard API fails here as it would in the editor. UNITY_EDITOR is deliberately NOT defined:
+    no linked runtime file branches on it, and defining it would advertise an editor that is not there.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <IsPackable>false</IsPackable>
+    <DefineConstants>$(DefineConstants);COREAI_LLM;COREAI_LUA</DefineConstants>
+    <!--
+      WHY these warnings are silenced: they are the Unity-side noise (missing XML docs, obsolete Unity
+      members kept for compatibility, unused serialized fields) that Unity also reports only as
+      warnings. Errors are never suppressed.
+    -->
+    <NoWarn>$(NoWarn);CS1591;CS0618;CS0414;CS0169;CS0649;CS0162;CS0168;CS0219;CS8632;CS0067</NoWarn>
+    <PortableRoot>$(MSBuildThisFileDirectory)..</PortableRoot>
+    <RepoRoot>$(MSBuildThisFileDirectory)../../..</RepoRoot>
+  </PropertyGroup>
+</Project>

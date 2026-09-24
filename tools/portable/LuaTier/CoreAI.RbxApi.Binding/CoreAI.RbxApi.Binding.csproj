@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    WHY a partial CoreAI.RbxApi.Binding: the asmdef mixes engine-free seams (the part property sink,
+    camera rig and click-pick interfaces with their in-memory implementations) with the GameObject
+    binder, physics port, input and camera adapters. The Lua bindings only need the seams, and the
+    EditMode fixtures drive them through the in-memory implementations, so those files are compiled
+    unmodified under the real assembly name. Three more files compile against the shim's refusing
+    GameObject/Rigidbody/Physics surfaces because compiled code or linked fixtures name them:
+    IRbxCharacterMotorProvider (a GameObject parameter), WorldQuerySceneWalker (used by the
+    coreai_world_find binding) and UnityRbxCharacterMotor (constructed by the Humanoid and Players
+    acceptance fixtures); any call into them refuses. The GameObject binder, RbxWorldHost, the physics
+    port and the Unity input, camera and click adapters are not compiled.
+  -->
+  <Import Project="../LuaTier.props" />
+  <PropertyGroup>
+    <AssemblyName>CoreAI.RbxApi.Binding</AssemblyName>
+    <RootNamespace>CoreAI.Mods.Rbx.Binding</RootNamespace>
+    <SourceRoot>$(RepoRoot)/Assets/CoreAIMods/Runtime/RbxApi/Binding</SourceRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(SourceRoot)/IClickPickSource.cs" Link="Binding/IClickPickSource.cs" />
+    <Compile Include="$(SourceRoot)/IPartPropertySink.cs" Link="Binding/IPartPropertySink.cs" />
+    <Compile Include="$(SourceRoot)/IRbxCameraRig.cs" Link="Binding/IRbxCameraRig.cs" />
+    <Compile Include="$(SourceRoot)/InMemoryCameraRig.cs" Link="Binding/InMemoryCameraRig.cs" />
+    <Compile Include="$(SourceRoot)/InMemoryClickPickSource.cs" Link="Binding/InMemoryClickPickSource.cs" />
+    <Compile Include="$(SourceRoot)/InMemoryPartPropertySink.cs" Link="Binding/InMemoryPartPropertySink.cs" />
+    <Compile Include="$(SourceRoot)/PartProperties.cs" Link="Binding/PartProperties.cs" />
+    <Compile Include="$(SourceRoot)/RbxPartShape.cs" Link="Binding/RbxPartShape.cs" />
+    <Compile Include="$(SourceRoot)/IRbxCharacterMotorProvider.cs" Link="Binding/IRbxCharacterMotorProvider.cs" />
+    <Compile Include="$(SourceRoot)/WorldQuerySceneWalker.cs" Link="Binding/WorldQuerySceneWalker.cs" />
+    <Compile Include="$(SourceRoot)/UnityRbxCharacterMotor.cs" Link="Binding/UnityRbxCharacterMotor.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(PortableRoot)/CoreAI.Core.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.RbxApi.Instances/CoreAI.RbxApi.Instances.csproj" />
+    <ProjectReference Include="../CoreAI.RbxApi.Unity/CoreAI.RbxApi.Unity.csproj" />
+    <ProjectReference Include="../UnityEngine/UnityEngine.csproj" />
+  </ItemGroup>
+</Project>

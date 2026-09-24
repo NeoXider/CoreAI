@@ -30,6 +30,41 @@ jobs:
           name: portable-core-test-results
           path: artifacts/portable-tests
 
+  # Lua-tier EditMode fixtures (mod runtime, Lua bindings, MVP acceptance) run on Linux against a
+  # UnityEngine shim that refuses every engine-only member; a refusal reports Inconclusive, never a
+  # pass. See tools/portable/LuaTests/README.md for what runs and what is excluded.
+  portable-lua:
+    name: Portable Lua-tier tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Run Lua-tier regression tests
+        run: >-
+          dotnet test tools/portable/LuaTests/CoreAI.Portable.LuaTests.csproj -c Release
+          --artifacts-path artifacts/portable-lua-build
+          --results-directory artifacts/portable-lua
+          --logger "trx;LogFileName=portable-lua.trx"
+      # WHY: an Inconclusive result does not fail dotnet test, so a broken link list or a shim that
+      # refuses too much could otherwise go green having run almost nothing.
+      - name: Enforce that the Lua-tier suite actually ran
+        if: always()
+        run: |
+          count=$(grep -o 'outcome="Passed"' artifacts/portable-lua/portable-lua.trx | wc -l)
+          echo "Passed Lua-tier test cases: $count"
+          if [ "$count" -lt 1000 ]; then
+            echo "::error::The portable Lua-tier suite ran fewer than 1000 passing cases."
+            exit 1
+          fi
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-lua-test-results
+          path: artifacts/portable-lua
+
   # F-22 package isolation (fork-safe, no Unity license): prove every shipped package.json is a
   # self-consistent UPM graph - all seven packages versioned in lockstep and every internal
   # com.neoxider.* dependency pin matches the pinned package's actual version. Catches a half-done

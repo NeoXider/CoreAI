@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    WHY a partial CoreAI.RbxApi.Unity: the asmdef holds RbxSpace (the Roblox-to-Unity axis and scale
+    policy, which only needs the UnityEngine.Vector3/Quaternion value types) next to the material and
+    texture providers (Material, Shader, Texture2D, Resources). The Lua tier needs RbxSpace, for
+    RbxWorldSettings.DefaultMetersPerStud and the world-query conversions, so only RbxSpace.cs and the
+    assembly's InternalsVisibleTo file are compiled, unmodified, under the real assembly name.
+  -->
+  <Import Project="../LuaTier.props" />
+  <PropertyGroup>
+    <AssemblyName>CoreAI.RbxApi.Unity</AssemblyName>
+    <RootNamespace>CoreAI.Mods.Rbx.Spatial</RootNamespace>
+    <SourceRoot>$(RepoRoot)/Assets/CoreAIMods/Runtime/RbxApi/Unity</SourceRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(SourceRoot)/AssemblyInfo.cs" Link="Unity/AssemblyInfo.cs" />
+    <Compile Include="$(SourceRoot)/RbxSpace.cs" Link="Unity/RbxSpace.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(PortableRoot)/CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj" />
+    <ProjectReference Include="../UnityEngine/UnityEngine.csproj" />
+  </ItemGroup>
+</Project>

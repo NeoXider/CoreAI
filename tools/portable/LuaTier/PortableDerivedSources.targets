@@ -1,0 +1,131 @@
+<Project>
+  <!--
+    Derived-source step shared by the Lua-tier runtime and test projects. A PortableSlice item names a
+    file under Assets/ and ONE of two operations, applied to a copy in obj/ (the original is never
+    touched): BlankType blanks exactly one top-level type (with its doc comment), ReplaceText replaces
+    an exact call expression ReplaceCount times. Line numbers are preserved and a #line directive maps
+    diagnostics to the original file. Each project explains, next to its PortableSlice items, why that
+    file needs it. Any anchor that does not match exactly fails the build.
+  -->
+  <UsingTask TaskName="PortableDeriveSource" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <SourceFile ParameterType="System.String" Required="true" />
+      <BlankType ParameterType="System.String" />
+      <ReplaceText ParameterType="System.String" />
+      <ReplaceWith ParameterType="System.String" />
+      <ReplaceCount ParameterType="System.Int32" />
+      <OutputFile ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Collections.Generic" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        const string Indent = "    ";
+        string[] lines = File.ReadAllLines(SourceFile);
+        if (!string.IsNullOrEmpty(BlankType))
+        {
+            int start = -1;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                if (line == Indent + BlankType || line.StartsWith(Indent + BlankType + " ", StringComparison.Ordinal) ||
+                    line.StartsWith(Indent + BlankType + ":", StringComparison.Ordinal))
+                {
+                    if (start >= 0)
+                    {
+                        Log.LogError("'" + BlankType + "' occurs more than once in " + SourceFile);
+                        return false;
+                    }
+
+                    start = i;
+                }
+            }
+
+            if (start < 0 || start + 1 >= lines.Length || lines[start + 1] != Indent + "{")
+            {
+                Log.LogError("'" + BlankType + "' followed by an opening brace at four-space indent was not found in " + SourceFile);
+                return false;
+            }
+
+            int end = -1;
+            for (int i = start + 2; i < lines.Length; i++)
+            {
+                if (lines[i] == Indent + "}")
+                {
+                    end = i;
+                    break;
+                }
+            }
+
+            if (end < 0)
+            {
+                Log.LogError("The closing brace of '" + BlankType + "' was not found in " + SourceFile);
+                return false;
+            }
+
+            int first = start;
+            while (first > 0 && (lines[first - 1].StartsWith(Indent + "///", StringComparison.Ordinal) ||
+                                 lines[first - 1].StartsWith(Indent + "[", StringComparison.Ordinal)))
+            {
+                first--;
+            }
+
+            for (int i = first; i <= end; i++)
+            {
+                lines[i] = "";
+            }
+
+            Log.LogMessage(MessageImportance.Low, "Blanked lines " + (first + 1) + "-" + (end + 1) + " of " + SourceFile);
+        }
+
+        if (!string.IsNullOrEmpty(ReplaceText))
+        {
+            int found = 0;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                int at = lines[i].IndexOf(ReplaceText, StringComparison.Ordinal);
+                while (at >= 0)
+                {
+                    found++;
+                    at = lines[i].IndexOf(ReplaceText, at + ReplaceText.Length, StringComparison.Ordinal);
+                }
+
+                lines[i] = lines[i].Replace(ReplaceText, ReplaceWith ?? "");
+            }
+
+            if (found != ReplaceCount)
+            {
+                Log.LogError("'" + ReplaceText + "' occurs " + found + " times in " + SourceFile + ", expected " + ReplaceCount);
+                return false;
+            }
+        }
+
+        List<string> output = new List<string>(lines.Length + 1);
+        output.Add("#line 1 \"" + Path.GetFullPath(SourceFile).Replace("\\", "/") + "\"");
+        output.AddRange(lines);
+        Directory.CreateDirectory(Path.GetDirectoryName(OutputFile));
+        File.WriteAllLines(OutputFile, output);
+        return true;
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="PortableDeriveSources" BeforeTargets="BeforeCompile;CoreCompile"
+          Inputs="@(PortableSlice);$(MSBuildThisFileFullPath)"
+          Outputs="@(PortableSlice->'$(IntermediateOutputPath)portable-derived/%(OutputName)')">
+    <PortableDeriveSource SourceFile="%(PortableSlice.FullPath)"
+                          BlankType="%(PortableSlice.BlankType)"
+                          ReplaceText="%(PortableSlice.ReplaceText)"
+                          ReplaceWith="%(PortableSlice.ReplaceWith)"
+                          ReplaceCount="%(PortableSlice.ReplaceCount)"
+                          OutputFile="$(IntermediateOutputPath)portable-derived/%(PortableSlice.OutputName)" />
+  </Target>
+
+  <Target Name="PortableAddDerivedSources" BeforeTargets="BeforeCompile;CoreCompile" DependsOnTargets="PortableDeriveSources">
+    <ItemGroup>
+      <Compile Include="@(PortableSlice->'$(IntermediateOutputPath)portable-derived/%(OutputName)')" />
+    </ItemGroup>
+  </Target>
+</Project>

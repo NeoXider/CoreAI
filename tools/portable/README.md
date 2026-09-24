@@ -47,6 +47,8 @@ Each project keeps the Unity assembly name and references only what the asmdef r
 
 The test project lists its sources file by file rather than by glob, so a new engine-free fixture must be added to `Tests/CoreAI.Portable.Tests.csproj` explicitly or it never runs in this leg.
 
+The Lua tier (the Lua-CSharp VM, the Lua bindings, the mod runtime, the scheduler adapters and the scene-free acceptance fixtures) has a separate suite, [`LuaTests`](LuaTests/README.md). It needs a small UnityEngine shim and is not part of the `portable-core` job; its README explains what the shim does and does not stand in for.
+
 ## Referencing it from an app
 
 When working from source, prefer a `ProjectReference`:

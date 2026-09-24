@@ -1,0 +1,93 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    WHY this project: it compiles the Lua tier of Assets/CoreAIMods/Runtime (the CoreAI.Mods asmdef)
+    unmodified, under the real assembly name, against the real Lua-CSharp plugin
+    (Assets/CoreAIMods/Plugins/Lua.dll), so the Lua bindings, the mod runtime and the scheduler
+    adapters that ship in the game are the code the portable Lua suite runs.
+    WHY globs with explicit excludes: a new engine-free runtime file is compiled (and its fixtures
+    can run) without anyone remembering this project; a new file that needs the engine breaks this
+    build loudly and has to be added to an exclude list below with its reason in
+    ../../LuaTests/README.md, instead of silently dropping out of the gate.
+    WHY WorldBindings and the classic gameplay bindings are compiled although they name scene types:
+    LuaCsModRuntimeFactory always constructs them, so the production stack cannot exist without
+    them. They compile against the shim's refusing surfaces; a Lua call that reaches the engine
+    through them throws PortableEngineUnavailableException and the test is reported Inconclusive.
+    Left out: Composition/ and Presentation/ (VContainer), Diagnostics/G10/ (VContainer and the
+    CoreAI.Source LLM stack), HubIntegration/ (own asmdef, Hub package), RbxApi/ (own asmdefs),
+    LuauDownlevel/ (own asmdef), and the three MonoBehaviour/player-loop files excluded below that
+    nothing compiled here needs.
+  -->
+  <Import Project="../LuaTier.props" />
+  <PropertyGroup>
+    <AssemblyName>CoreAI.Mods</AssemblyName>
+    <RootNamespace>CoreAI</RootNamespace>
+    <ModsRoot>$(RepoRoot)/Assets/CoreAIMods/Runtime</ModsRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(ModsRoot)/AssemblyInfo.cs" Link="Mods/AssemblyInfo.cs" />
+    <Compile Include="$(ModsRoot)/Scripting/**/*.cs"
+             Exclude="$(ModsRoot)/Scripting/PlayerLoopScriptFrameYielder.cs;
+                      $(ModsRoot)/Scripting/LuaCs/LuaCsCoroutineRunner.cs"
+             LinkBase="Mods/Scripting" />
+    <Compile Include="$(ModsRoot)/LuaExecution/**/*.cs" LinkBase="Mods/LuaExecution" />
+    <Compile Include="$(ModsRoot)/LuaAssets/**/*.cs" LinkBase="Mods/LuaAssets" />
+    <Compile Include="$(ModsRoot)/Logging/**/*.cs" LinkBase="Mods/Logging" />
+    <Compile Include="$(ModsRoot)/Infrastructure/**/*.cs"
+             Exclude="$(ModsRoot)/Infrastructure/RbxWorldPackageContracts.cs;
+                      $(ModsRoot)/Infrastructure/FileRbxWorldPackageStore.cs;
+                      $(ModsRoot)/Infrastructure/WorldRestoreGate.cs"
+             LinkBase="Mods/Infrastructure" />
+    <Compile Include="$(ModsRoot)/WorldBindings/**/*.cs" LinkBase="Mods/WorldBindings" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(PortableRoot)/CoreAI.Core.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.LuauDownlevel/CoreAI.LuauDownlevel.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.RbxApi.Instances/CoreAI.RbxApi.Instances.csproj" />
+    <ProjectReference Include="../CoreAI.RbxApi.Binding/CoreAI.RbxApi.Binding.csproj" />
+    <ProjectReference Include="../CoreAI.Source/CoreAI.Source.csproj" />
+    <ProjectReference Include="../CoreAI.RbxApi.Unity/CoreAI.RbxApi.Unity.csproj" />
+    <ProjectReference Include="../UnityEngine/UnityEngine.csproj" />
+    <Reference Include="Lua">
+      <HintPath>$(RepoRoot)/Assets/CoreAIMods/Plugins/Lua.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <PackageReference Include="UniTask" Version="2.5.10" />
+    <!-- WHY: Lua.dll is built against Microsoft.Bcl.TimeProvider; Assets/packages.config pins 8.0.0. -->
+    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="PortablePlayerLoopRefusal.cs" />
+  </ItemGroup>
+  <!--
+    WHY two files are compiled from derived copies (the originals under Assets/ are never touched):
+    1. RbxWorldPackageContracts.cs holds the world-package contracts, the engine-free session
+       controller and headless session host the mod stack is built from, AND
+       RbxWorldSessionHostAdapter, the adapter around the scene MonoBehaviour RbxWorldHost (GameObject
+       binder, camera, transforms). Without the file the factory cannot be compiled, and with the
+       adapter it needs the whole GameObject binder, so that one top-level class is blanked out.
+    2. FileRbxWorldPackageStore.cs awaits UniTask.Yield(PlayerLoopTiming.Update, token). That overload
+       exists only in the Unity build of UniTask (it parks the continuation on the engine's player
+       loop); the .NET build of the same library has no PlayerLoopTiming. The file is required by the
+       runtime, the one-off executor and the session controller, so exactly those call expressions are
+       replaced by a call that throws PortableEngineUnavailableException (see
+       PortablePlayerLoopRefusal.cs). Nothing emulates a frame: a test that reaches one fails loudly.
+    Blanked or replaced text keeps every line in place and a #line directive maps diagnostics to the
+    real file. Each operation fails the build unless its anchor matches exactly the expected number of
+    times, so drift in the source is loud instead of silently compiling more or less than intended.
+  -->
+  <ItemGroup>
+    <PortableSlice Include="$(ModsRoot)/Infrastructure/RbxWorldPackageContracts.cs"
+                   BlankType="public sealed class RbxWorldSessionHostAdapter"
+                   OutputName="RbxWorldPackageContracts.cs"
+                   Link="Mods/Infrastructure/RbxWorldPackageContracts.cs" />
+    <PortableSlice Include="$(ModsRoot)/Infrastructure/FileRbxWorldPackageStore.cs"
+                   ReplaceText="UniTask.Yield(PlayerLoopTiming.Update, cancellationToken)"
+                   ReplaceWith="global::CoreAI.Portable.PortablePlayerLoopRefusal.Yield(cancellationToken)"
+                   ReplaceCount="5"
+                   OutputName="FileRbxWorldPackageStore.cs"
+                   Link="Mods/Infrastructure/FileRbxWorldPackageStore.cs" />
+  </ItemGroup>
+
+  <Import Project="../PortableDerivedSources.targets" />
+</Project>

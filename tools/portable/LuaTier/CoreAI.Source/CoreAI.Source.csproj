@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    WHY a partial CoreAI.Source: the CoreAI.Mods asmdef references CoreAI.Source (the CoreAiUnity host
+    runtime), and the Lua tier really uses a small slice of it: the game logger contract and its
+    console sink, persistent-path constants, the WebGL persistence answer, the world and component
+    command envelopes (plain [Serializable] data over Vector3) and executor interfaces, and the
+    prefab-registry interface (whose file also holds a ScriptableObject that compiles against the
+    shim's refusing surface). Only those files are compiled, unmodified, under the real assembly
+    name, so CoreAI.Source's own InternalsVisibleTo grants (CoreAI.Mods, CoreAI.Mods.Tests) and
+    CoreAI.Core's grant to CoreAI.Source behave as in the editor. Everything VContainer, MessagePipe,
+    scene or UI based stays out.
+    The one non-Assets file is CoreServicesInstaller.Portable.cs; see the WHY in that file.
+  -->
+  <Import Project="../LuaTier.props" />
+  <PropertyGroup>
+    <AssemblyName>CoreAI.Source</AssemblyName>
+    <RootNamespace>CoreAI</RootNamespace>
+    <SourceRoot>$(RepoRoot)/Assets/CoreAiUnity/Runtime/Source</SourceRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(SourceRoot)/AssemblyInfo.cs" Link="Source/AssemblyInfo.cs" />
+    <Compile Include="$(SourceRoot)/Infrastructure/CoreAiPersistentPaths.cs" Link="Source/Infrastructure/CoreAiPersistentPaths.cs" />
+    <Compile Include="$(SourceRoot)/Infrastructure/CoreAiWebGlPersistence.cs" Link="Source/Infrastructure/CoreAiWebGlPersistence.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/UnityLog.cs" Link="Source/Features/Logging/UnityLog.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/IGameLogger.cs" Link="Source/Features/Logging/Infrastructure/IGameLogger.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/IGameLogSink.cs" Link="Source/Features/Logging/Infrastructure/IGameLogSink.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/NullGameLogger.cs" Link="Source/Features/Logging/Infrastructure/NullGameLogger.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/FilteringGameLogger.cs" Link="Source/Features/Logging/Infrastructure/FilteringGameLogger.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/UnityGameLogSink.cs" Link="Source/Features/Logging/Infrastructure/UnityGameLogSink.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/GameLoggerUnscopedFallback.cs" Link="Source/Features/Logging/Infrastructure/GameLoggerUnscopedFallback.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/IWorldStateManager.cs" Link="Source/Features/World/IWorldStateManager.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/Infrastructure/ICoreAiWorldCommandExecutor.cs" Link="Source/Features/World/Infrastructure/ICoreAiWorldCommandExecutor.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/Infrastructure/ICoreAiComponentCommandExecutor.cs" Link="Source/Features/World/Infrastructure/ICoreAiComponentCommandExecutor.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/Infrastructure/CoreAiWorldCommandEnvelope.cs" Link="Source/Features/World/Infrastructure/CoreAiWorldCommandEnvelope.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/Infrastructure/CoreAiComponentCommandEnvelope.cs" Link="Source/Features/World/Infrastructure/CoreAiComponentCommandEnvelope.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/Infrastructure/CoreAiPrefabRegistryAsset.cs" Link="Source/Features/World/Infrastructure/CoreAiPrefabRegistryAsset.cs" />
+    <Compile Include="CoreServicesInstaller.Portable.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(PortableRoot)/CoreAI.Core.csproj" />
+    <ProjectReference Include="../UnityEngine/UnityEngine.csproj" />
+    <PackageReference Include="UniTask" Version="2.5.10" />
+  </ItemGroup>
+</Project>

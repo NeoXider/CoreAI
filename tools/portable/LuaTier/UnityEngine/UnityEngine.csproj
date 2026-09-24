@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    WHY a UnityEngine shim at all: the Lua-tier runtime files touch a handful of engine APIs that are
+    plain managed logic (Debug.Log*, Mathf, Time, Application paths, a few inspector attributes).
+    Everything that needs a real engine (GameObject, physics, rendering, PlayerLoop, UnityWebRequest,
+    JsonUtility) is deliberately absent, so a runtime or test file that needs it fails to compile and
+    is excluded instead of being faked. See ../../LuaTests/README.md for each member's fidelity limits.
+    WHY the assembly is called UnityEngine: the linked sources say `using UnityEngine;` and
+    `UnityEngine.Object`; any other name would need edits under Assets/.
+  -->
+  <Import Project="../LuaTier.props" />
+  <PropertyGroup>
+    <AssemblyName>UnityEngine</AssemblyName>
+    <RootNamespace>UnityEngine</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="*.cs" />
+  </ItemGroup>
+</Project>
