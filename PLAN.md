@@ -58,9 +58,10 @@ MVP4 (RBXL import/export) starts only after MVP3 is closed, verified in Unity an
       WebGL instance ceiling (2e9ed931), InstanceBindings pass 2 (f1b8bbb5).
 - [x] W3 complete: Mirror clock anchor, readiness handshake, kick/supersede notices (d6096dc6); ApiBindings pass 1:
       task handles, coroutine.create waits, per-sender remote handler budget, ThreadRetired cleanup (20fdd97a).
-- [ ] W4 in progress: FILLER (M8-10, M1-23 attr, M1-29/M8-23, M1-36), CORE-C (registry admission hook, Humanoid
-      clone state, RootPart write ends MoveTo, characters non-archivable, BoundProperties drift guard), AB-2
-      (typeof/warn + stub tables, ClickDetector, GetServerTimeNow slew, os.time(table), coroutine resume args).
-- [ ] DOCS-1 in progress (docs/TODO/CHANGELOG for everything landed up to f1b8bbb5); DOCS-2 after W4.
+- [x] W4 landed: FILLER (c6392287), CORE-C registry admission + Humanoid clone + RootPart ends MoveTo (6be0c46f),
+      AB-2 typeof/warn/stubs, ClickDetector, GetServerTimeNow slew, os.time(table) (5fdfbf17).
+- [x] DOCS-1 landed (984c053f): docs/TODO/CHANGELOG for everything up to f1b8bbb5; MVP3 "code complete, Unity gate pending".
+- [ ] W5C in progress: runtime wiring (M2-24 unload on disconnect, warn -> mod log, tween RootPart ends MoveTo, stale
+      comments) and Lua kick message + ModActorLedger move + tag doc comments. Then DOCS-2, then 3 audit rounds.
 - [ ] Portable Lua-tier EditMode runner (tools/portable/LuaTests) in progress, so Lua binding tests really run on Linux.
 
