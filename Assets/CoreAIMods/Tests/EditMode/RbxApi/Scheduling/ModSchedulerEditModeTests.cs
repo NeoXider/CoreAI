@@ -24,11 +24,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
         private sealed class FakeThreadPlan
         {
             public FakeThreadPlan(Action<FakeScriptThread, object[]> onResume = null,
-                bool completeOnResume = true, RbxError failure = null)
+                bool completeOnResume = true, RbxError failure = null, RbxError terminalFault = null)
             {
                 OnResume = onResume;
                 CompleteOnResume = completeOnResume;
                 Failure = failure;
+                TerminalFault = terminalFault;
             }
 
             public Action<FakeScriptThread, object[]> OnResume { get; }
@@ -36,9 +37,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             public bool CompleteOnResume { get; }
 
             public RbxError Failure { get; }
+
+            /// <summary>Error the fake adapter reports after a "successful" resume that ended the thread.</summary>
+            public RbxError TerminalFault { get; }
         }
 
-        private sealed class FakeScriptThread : IRbxScriptThread
+        private sealed class FakeScriptThread : IRbxScriptThread, IRbxScriptThreadTerminalFault
         {
             private readonly FakeThreadPlan _plan;
 
@@ -60,6 +64,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             public int KillCount { get; private set; }
 
             public List<object[]> ResumeArguments { get; } = new();
+
+            public RbxError TerminalFault => IsDead ? _plan.TerminalFault : null;
 
             public RbxScriptThreadResumeResult Resume(params object[] args)
             {
@@ -130,6 +136,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             RbxScriptSignal signal = new("QuotaIsolation");
             signal.BindScheduler(scheduler);
             int laterInvocations = 0;
+            List<SchedulerPhase> phases = new();
+            scheduler.PhaseReached += (SchedulerPhase phase, double delta) => phases.Add(phase);
             signal.Connect((Action<object[]>)(_ => scheduler.SpawnSignal(
                 "saturated-actor", new FakeThreadPlan(), Array.Empty<object>())));
             signal.Connect((Action<object[]>)(_ => laterInvocations++));
@@ -140,6 +148,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             Assert.AreEqual(RbxErrorCode.ThreadCap, error.Code);
             Assert.AreEqual(1, laterInvocations,
                 "one actor's admission refusal must not discard another queued signal invocation");
+            CollectionAssert.AreEqual(AllPhases, phases,
+                "a fault nobody observes is rethrown only after the whole frame has run");
         }
 
         [Test]
@@ -341,25 +351,89 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
         }
 
         [Test]
-        public void R4_8_TaskCancelDeadThreadRaisesBadArgument()
+        public void R4_8_M2_13_TaskCancelDeadThreadIsANoOp()
         {
             ModScheduler scheduler = CreateScheduler(out FakeTimeSource timeSource,
                 out FakeThreadFactory factory);
             FakeScriptThread thread = (FakeScriptThread)scheduler.Spawn("mod-a",
                 new FakeThreadPlan(), Array.Empty<object>());
+            Assert.IsTrue(thread.IsDead, "the spawned thread ran to completion");
 
-            RbxError error = Assert.Throws<RbxError>(() => scheduler.Cancel(thread));
+            // WHY a no-op and not BAD_ARGUMENT: the mirror (reference/engine/libraries/task.yaml,
+            // task.cancel) names only the currently executing thread and a thread that resumed
+            // another coroutine as uncancellable, and task.cancel closes the thread like
+            // coroutine.close, which accepts a dead coroutine. `task.cancel(self._t)` in a Destroy
+            // method must not abort the teardown just because the task already ran.
+            Assert.DoesNotThrow(() => scheduler.Cancel(thread));
+            Assert.DoesNotThrow(() => scheduler.Cancel(thread),
+                "cancelling the same finished thread twice is still a no-op");
 
-            Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
-            // WHY: pinned to CoreAI's exact text, not Luau's. The Roblox docs mirror
-            // (reference/engine/libraries/task.yaml, task.cancel) only promises "an error will be
-            // generated" for an uncancellable thread and gives no wording; Lua's own analogous
-            // error for coroutine.resume on a finished coroutine is "cannot resume dead coroutine"
-            // (ldo.c). CoreAI's message matches neither verbatim — that divergence is a reportable
-            // finding, not something to paper over here.
-            Assert.AreEqual("task.cancel cannot cancel a dead thread", error.RawMessage);
+            Assert.AreEqual(0, thread.KillCount, "a finished thread is never killed again");
+            Assert.AreEqual(0, scheduler.LiveThreadCount);
             Assert.AreEqual(1, factory.Created.Count);
             Assert.AreEqual(0d, timeSource.CurrentTime);
+        }
+
+        [Test]
+        public void R4_8_M2_13_TaskCancelOfFinishedDelayIsANoOpAndLeavesOtherWorkAlone()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            FakeScriptThread ran = (FakeScriptThread)scheduler.Delay("mod-a", 0d,
+                new FakeThreadPlan(), Array.Empty<object>());
+            FakeScriptThread pending = (FakeScriptThread)scheduler.Delay("mod-a", 1d,
+                new FakeThreadPlan(), Array.Empty<object>());
+            scheduler.Advance(0.016d);
+            Assert.IsTrue(ran.IsDead);
+
+            Assert.DoesNotThrow(() => scheduler.Cancel(ran));
+            scheduler.Advance(1d);
+
+            Assert.AreEqual(1, pending.ResumeCount,
+                "cancelling a finished task must not touch another pending task");
+            Assert.AreEqual(0, scheduler.LiveThreadCount);
+        }
+
+        [Test]
+        public void R4_8_M2_13_NegativeTwin_TaskCancelOfTheRunningThreadStillRaises()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            RbxError observed = null;
+            FakeThreadPlan selfCancelling = new((FakeScriptThread thread, object[] args) =>
+            {
+                try
+                {
+                    scheduler.Cancel(thread);
+                }
+                catch (RbxError error)
+                {
+                    observed = error;
+                }
+            });
+
+            scheduler.Spawn("mod-a", selfCancelling, Array.Empty<object>());
+
+            Assert.IsNotNull(observed);
+            Assert.AreEqual(RbxErrorCode.BadArgument, observed.Code);
+            Assert.AreEqual("task.cancel cannot cancel the currently running thread",
+                observed.RawMessage);
+        }
+
+        [Test]
+        public void R4_8_M2_13_CancelOfAThreadKilledOutsideTheSchedulerDropsItsRecordSilently()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            List<string> faults = new();
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) => faults.Add(ownerModId);
+            FakeScriptThread waiting = (FakeScriptThread)scheduler.Spawn("mod-a",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            scheduler.ScheduleWait(waiting, 0d);
+            waiting.Kill();
+
+            Assert.DoesNotThrow(() => scheduler.Cancel(waiting));
+            scheduler.Advance(0.016d);
+
+            Assert.AreEqual(0, scheduler.LiveThreadCount);
+            Assert.IsEmpty(faults, "an explicit cancel is not a fault, even of a thread that died elsewhere");
         }
 
         [Test]
@@ -594,18 +668,22 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             FakeScriptThread sibling = (FakeScriptThread)scheduler.Defer("mod-b",
                 new FakeThreadPlan(), Array.Empty<object>());
 
+            // WHY the throw survives with no subscriber: a fault nobody observes must stay loud, but it
+            // is rethrown only after the frame, so the other mod's sibling runs in the SAME frame
+            // instead of being orphaned until the next one (M2-02).
             RbxError thrown = Assert.Throws<RbxError>(() => scheduler.Advance(0.016d));
 
             Assert.AreEqual(RbxErrorCode.BudgetExceeded, thrown.Code);
             Assert.AreEqual(1, faulting.ResumeCount);
             Assert.AreEqual(1, faulting.KillCount);
-            Assert.AreEqual(0, sibling.ResumeCount);
-            Assert.IsFalse(sibling.IsDead);
+            Assert.AreEqual(1, sibling.ResumeCount,
+                "the different-mod sibling resumes in the frame where the fault happened");
+            Assert.IsTrue(sibling.IsDead);
 
             scheduler.Advance(0.016d);
 
-            Assert.AreEqual(1, sibling.ResumeCount);
-            Assert.IsTrue(sibling.IsDead);
+            Assert.AreEqual(1, sibling.ResumeCount, "the sibling is never resumed twice");
+            Assert.AreEqual(1, faulting.ResumeCount, "the faulted thread is never resumed again");
             Assert.AreEqual(2, factory.Created.Count);
             Assert.AreEqual(0.032d, timeSource.CurrentTime, 0.000001d);
         }
@@ -628,13 +706,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             Assert.AreEqual(RbxErrorCode.BudgetExceeded, thrown.Code);
             Assert.AreEqual(1, faulting.ResumeCount);
             Assert.AreEqual(1, faulting.KillCount);
-            Assert.AreEqual(0, sibling.ResumeCount);
-            Assert.IsFalse(sibling.IsDead);
+            Assert.AreEqual(1, sibling.ResumeCount,
+                "the different-mod sibling resumes in the same delayed slot as the fault");
+            Assert.IsTrue(sibling.IsDead);
 
             scheduler.Advance(0.016d);
 
-            Assert.AreEqual(1, sibling.ResumeCount);
-            Assert.IsTrue(sibling.IsDead);
+            Assert.AreEqual(1, sibling.ResumeCount, "the sibling is never resumed twice");
+            Assert.AreEqual(1, faulting.ResumeCount, "the faulted thread is never resumed again");
             Assert.AreEqual(2, factory.Created.Count);
             Assert.AreEqual(0.032d, timeSource.CurrentTime, 0.000001d);
         }
@@ -741,13 +820,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
 
             Assert.AreEqual(RbxErrorCode.BudgetExceeded, thrown.Code);
             Assert.AreEqual(1, faulting.KillCount);
-            Assert.AreEqual(1, sibling.ResumeCount);
-            Assert.AreEqual(1, scheduler.CompletionWaitCount);
+            Assert.AreEqual(2, sibling.ResumeCount,
+                "the succeeded completion of the other mod is promoted in the same frame");
+            Assert.AreEqual("value", sibling.ResumeArguments[1][0]);
+            Assert.AreEqual(0, scheduler.CompletionWaitCount);
 
             scheduler.Advance(0.016d);
 
-            Assert.AreEqual(2, sibling.ResumeCount);
-            Assert.AreEqual("value", sibling.ResumeArguments[1][0]);
+            Assert.AreEqual(2, sibling.ResumeCount, "the sibling is never resumed twice");
             Assert.AreEqual(0, scheduler.CompletionWaitCount);
             Assert.AreEqual(2, factory.Created.Count);
             Assert.AreEqual(0.032d, timeSource.CurrentTime, 0.000001d);
@@ -970,6 +1050,707 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             Assert.AreEqual(0, scheduler.CompletionWaitCount);
             Assert.AreEqual(2, factory.Created.Count);
             Assert.AreEqual(0.016d, timeSource.CurrentTime, 0.000001d);
+        }
+
+        private static readonly SchedulerPhase[] AllPhases =
+        {
+            SchedulerPhase.PreAnimation,
+            SchedulerPhase.PreSimulation,
+            SchedulerPhase.PostSimulation,
+            SchedulerPhase.Heartbeat,
+            SchedulerPhase.InputProcessing,
+            SchedulerPhase.PreRender
+        };
+
+        [Test]
+        public void M2_02_FaultingModEveryFrame_HealthyModKeepsEveryPhaseAndEachFaultIsAttributedOnce()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            ModConnectionRegistry registry = new();
+            List<string> faults = new();
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) =>
+                faults.Add(ownerModId + ":" + error.Code);
+            RbxScriptSignal stepped = new("RunService.Stepped");
+            RbxScriptSignal changed = new("Part.Changed");
+            RbxScriptSignal heartbeat = new("RunService.Heartbeat");
+
+            // WHY three triggers in one mod: each of them used to abort the whole frame on its own (a
+            // handler that throws out of its invocation, a self-sustaining Changed cascade, and a
+            // waiting thread finished outside the scheduler), and each must cost only mod-a.
+            ConnectOwned(registry, scheduler, stepped, "mod-a",
+                _ => throw new RbxError(RbxErrorCode.ContextViolation,
+                    "mod-a handler exploded", "fix the handler"));
+            ConnectThreadHandler(registry, scheduler, changed, "mod-a",
+                new FakeThreadPlan((FakeScriptThread thread, object[] args) => changed.Fire("Color")));
+            int heartbeats = 0;
+            ConnectThreadHandler(registry, scheduler, heartbeat, "mod-b",
+                new FakeThreadPlan((FakeScriptThread thread, object[] args) => heartbeats++));
+            int waits = 0;
+            scheduler.Spawn("mod-b", new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+            {
+                waits++;
+                scheduler.ScheduleWait(thread);
+            }, false), Array.Empty<object>());
+            waits = 0;
+            List<SchedulerPhase> phases = new();
+            scheduler.PhaseReached += (SchedulerPhase phase, double delta) =>
+            {
+                phases.Add(phase);
+                if (phase == SchedulerPhase.PreAnimation)
+                {
+                    FakeScriptThread doomed = (FakeScriptThread)scheduler.Spawn("mod-a",
+                        new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+                    scheduler.ScheduleWait(doomed, 0d);
+                    doomed.Kill();
+                }
+                else if (phase == SchedulerPhase.PreSimulation)
+                {
+                    stepped.Fire(scheduler.CurrentTime, delta);
+                    changed.Fire("Color");
+                }
+                else if (phase == SchedulerPhase.Heartbeat)
+                {
+                    heartbeat.Fire(delta);
+                }
+            };
+
+            const int frames = 5;
+            for (int frame = 0; frame < frames; frame++)
+            {
+                Assert.DoesNotThrow(() => scheduler.Advance(1d / 60d),
+                    "one mod's fault must never abort the frame for every other mod");
+            }
+
+            Assert.AreEqual(frames, heartbeats, "mod-b's Heartbeat handler ran every frame");
+            Assert.AreEqual(frames, waits, "mod-b's task.wait loop resumed every frame");
+            Assert.AreEqual(frames * AllPhases.Length, phases.Count, "every phase of every frame ran");
+            Assert.AreEqual(frames * 3, faults.Count,
+                "each trigger is reported exactly once per frame: " + string.Join(", ", faults));
+            Assert.AreEqual(frames, faults.FindAll(fault => fault == "mod-a:SignalCascade").Count);
+            Assert.AreEqual(frames, faults.FindAll(fault => fault == "mod-a:ContextViolation").Count);
+            Assert.AreEqual(frames, faults.FindAll(fault => fault == "mod-a:BadArgument").Count,
+                "the dead-thread resume is a mod-a fault, not a frame abort");
+            Assert.AreEqual(1, scheduler.LiveThreadCount, "only mod-b's waiting loop is still alive");
+        }
+
+        [Test]
+        public void M2_02_CascadeIsAttributedToTheFiringMod_NotToAModThatOnlyListens()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            ModConnectionRegistry registry = new();
+            List<string> faults = new();
+            RbxError cascade = null;
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) =>
+            {
+                faults.Add(ownerModId);
+                cascade = error;
+            };
+            RbxScriptSignal changed = new("Part.Changed");
+            ConnectThreadHandler(registry, scheduler, changed, "mod-loop",
+                new FakeThreadPlan((FakeScriptThread thread, object[] args) => changed.Fire("Color")));
+            int listenerRuns = 0;
+            ConnectThreadHandler(registry, scheduler, changed, "mod-listener",
+                new FakeThreadPlan((FakeScriptThread thread, object[] args) => listenerRuns++));
+            changed.Fire("Color");
+
+            Assert.DoesNotThrow(() => scheduler.Advance(0d));
+
+            CollectionAssert.AreEqual(new[] { "mod-loop" }, faults,
+                "only the mod whose handler keeps re-firing is faulted; a listener is a victim");
+            Assert.AreEqual(RbxErrorCode.SignalCascade, cascade.Code);
+            StringAssert.Contains("Part.Changed -> Part.Changed", cascade.RawMessage);
+            Assert.AreEqual(ModScheduler.MaxSignalGenerations, listenerRuns,
+                "the listener received every generation up to the cap");
+        }
+
+        [Test]
+        public void M2_02_OwnerlessHandlerFault_GoesToHostFaultedAndSiblingsStillRun()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            ModConnectionRegistry registry = new();
+            List<string> hostFaults = new();
+            List<string> modFaults = new();
+            scheduler.HostFaulted += (string source, Exception exception) =>
+                hostFaults.Add(source + ": " + exception.Message);
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) => modFaults.Add(ownerModId);
+            RbxScriptSignal signal = new("Workspace.ChildAdded");
+            signal.BindScheduler(scheduler);
+            signal.Connect((Action<object[]>)(_ =>
+                throw new InvalidOperationException("ownerless handler exploded")));
+            int siblingRuns = 0;
+            ConnectOwned(registry, scheduler, signal, "mod-b", _ => siblingRuns++);
+            signal.Fire();
+
+            Assert.DoesNotThrow(() => scheduler.Advance(0d));
+
+            Assert.AreEqual(1, hostFaults.Count);
+            StringAssert.Contains("Workspace.ChildAdded handler", hostFaults[0]);
+            StringAssert.Contains("ownerless handler exploded", hostFaults[0]);
+            Assert.IsEmpty(modFaults, "a connection no mod owns never faults a mod");
+            Assert.AreEqual(1, siblingRuns);
+        }
+
+        [Test]
+        public void M2_02_ThrowingThreadResume_IsAThreadFaultOfItsOwner()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            List<RbxError> faults = new();
+            List<string> owners = new();
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) =>
+            {
+                owners.Add(ownerModId);
+                faults.Add(error);
+            };
+            FakeScriptThread broken = (FakeScriptThread)scheduler.Delay("mod-a", 0d,
+                new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+                    throw new InvalidOperationException("adapter blew up")), Array.Empty<object>());
+            FakeScriptThread healthy = (FakeScriptThread)scheduler.Delay("mod-b", 0d,
+                new FakeThreadPlan(), Array.Empty<object>());
+
+            Assert.DoesNotThrow(() => scheduler.Advance(0.016d));
+
+            CollectionAssert.AreEqual(new[] { "mod-a" }, owners);
+            StringAssert.Contains("InvalidOperationException", faults[0].RawMessage);
+            StringAssert.Contains("adapter blew up", faults[0].RawMessage);
+            Assert.AreEqual(1, broken.KillCount);
+            Assert.AreEqual(1, healthy.ResumeCount, "the next thread of the same slot still ran");
+            Assert.AreEqual(0, scheduler.LiveThreadCount);
+        }
+
+        [Test]
+        public void M2_02_ThrowingHostCallback_IsReportedAndTheRestOfTheSlotRunsThisFrame()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            List<string> hostFaults = new();
+            scheduler.HostFaulted += (string source, Exception exception) => hostFaults.Add(source);
+            bool laterCallbackRan = false;
+            scheduler.ScheduleHostCallback(0d, () => throw new InvalidOperationException("debris failed"));
+            scheduler.ScheduleHostCallback(0d, () => laterCallbackRan = true);
+            FakeScriptThread delayed = (FakeScriptThread)scheduler.Delay("mod-b", 0d,
+                new FakeThreadPlan(), Array.Empty<object>());
+
+            Assert.DoesNotThrow(() => scheduler.Advance(0.016d));
+
+            CollectionAssert.AreEqual(new[] { "host callback" }, hostFaults);
+            Assert.IsTrue(laterCallbackRan, "a later host callback of the same slot runs this frame");
+            Assert.AreEqual(1, delayed.ResumeCount, "the delayed thread of the same slot runs this frame");
+
+            scheduler.Advance(0.016d);
+            Assert.AreEqual(1, hostFaults.Count, "a throwing host callback is dropped after one attempt");
+        }
+
+        [Test]
+        public void M2_02_ThrowingThreadFaultedSubscriber_DoesNotHideTheFaultFromTheNextSubscriber()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            List<string> hostFaults = new();
+            List<string> observed = new();
+            scheduler.HostFaulted += (string source, Exception exception) => hostFaults.Add(source);
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) =>
+                throw new InvalidOperationException("first subscriber is broken");
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) => observed.Add(ownerModId);
+            scheduler.Delay("mod-a", 0d, new FakeThreadPlan(failure: new RbxError(
+                RbxErrorCode.BudgetExceeded, "mod-a ran away", "yield sooner")), Array.Empty<object>());
+
+            Assert.DoesNotThrow(() => scheduler.Advance(0.016d));
+
+            CollectionAssert.AreEqual(new[] { "mod-a" }, observed);
+            CollectionAssert.AreEqual(new[] { "ThreadFaulted subscriber" }, hostFaults);
+        }
+
+        [Test]
+        public void M8_02_ThrowingPhaseSubscriber_DoesNotStarveLaterSubscribersOrPhases()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            List<string> hostFaults = new();
+            scheduler.HostFaulted += (string source, Exception exception) =>
+                hostFaults.Add(source + ": " + exception.Message);
+            scheduler.PhaseReached += (SchedulerPhase phase, double delta) =>
+            {
+                if (phase == SchedulerPhase.Heartbeat)
+                {
+                    throw new InvalidOperationException("tween pump exploded");
+                }
+            };
+            List<SchedulerPhase> laterSubscriber = new();
+            scheduler.PhaseReached += (SchedulerPhase phase, double delta) => laterSubscriber.Add(phase);
+            int delayedRuns = 0;
+            scheduler.Spawn("mod-a", new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+            {
+                delayedRuns++;
+                scheduler.ScheduleWait(thread);
+            }, false), Array.Empty<object>());
+            delayedRuns = 0;
+
+            const int frames = 3;
+            for (int frame = 0; frame < frames; frame++)
+            {
+                Assert.DoesNotThrow(() => scheduler.Advance(0.016d));
+            }
+
+            Assert.AreEqual(frames * AllPhases.Length, laterSubscriber.Count,
+                "the subscriber after the throwing one sees every phase of every frame");
+            Assert.AreEqual(frames, delayedRuns);
+            Assert.AreEqual(frames, hostFaults.Count);
+            StringAssert.Contains("PhaseReached(Heartbeat) subscriber", hostFaults[0]);
+            StringAssert.Contains("tween pump exploded", hostFaults[0]);
+        }
+
+        [Test]
+        public void M8_02_NegativeTwin_UnobservedPhaseSubscriberFault_IsRethrownOnlyAfterTheFrame()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.PhaseReached += (SchedulerPhase phase, double delta) =>
+            {
+                if (phase == SchedulerPhase.Heartbeat && scheduler.FrameIndex == 1)
+                {
+                    throw new InvalidOperationException("nobody observes this");
+                }
+            };
+            List<SchedulerPhase> laterSubscriber = new();
+            scheduler.PhaseReached += (SchedulerPhase phase, double delta) => laterSubscriber.Add(phase);
+
+            InvalidOperationException thrown = Assert.Throws<InvalidOperationException>(
+                () => scheduler.Advance(0.016d));
+
+            Assert.AreEqual("nobody observes this", thrown.Message);
+            CollectionAssert.AreEqual(AllPhases, laterSubscriber,
+                "the unobserved fault is still loud, but only after InputProcessing and PreRender ran");
+            Assert.DoesNotThrow(() => scheduler.Advance(0d),
+                "the held fault belongs to one frame and is not rethrown by the next");
+        }
+
+        [Test]
+        public void M2_11_DeferFromAPreRenderHandlerRunsInTheSameFrame()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            ModConnectionRegistry registry = new();
+            RbxScriptSignal preRender = new("RunService.PreRender");
+            List<string> order = new();
+            ConnectThreadHandler(registry, scheduler, preRender, "mod-a",
+                new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+                {
+                    order.Add("handler-frame-" + scheduler.FrameIndex);
+                    scheduler.Defer("mod-a", new FakeThreadPlan((FakeScriptThread deferred,
+                        object[] deferredArgs) => order.Add("deferred-frame-" + scheduler.FrameIndex)),
+                        Array.Empty<object>());
+                }));
+            scheduler.PhaseReached += (SchedulerPhase phase, double delta) =>
+            {
+                if (phase == SchedulerPhase.PreRender && scheduler.FrameIndex == 1)
+                {
+                    preRender.Fire(delta);
+                }
+            };
+
+            scheduler.Advance(1d / 60d);
+
+            CollectionAssert.AreEqual(new[] { "handler-frame-1", "deferred-frame-1" }, order,
+                "task.defer resumes at the end of the current resumption point, not in the next frame");
+        }
+
+        [Test]
+        public void M2_11_DeferFromAPostSimulationHandlerRunsBeforeTheDelayedThreads()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            ModConnectionRegistry registry = new();
+            RbxScriptSignal postSimulation = new("RunService.PostSimulation");
+            List<string> order = new();
+            ConnectThreadHandler(registry, scheduler, postSimulation, "mod-a",
+                new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+                {
+                    order.Add("handler");
+                    scheduler.Defer("mod-a", new FakeThreadPlan((FakeScriptThread deferred,
+                        object[] deferredArgs) => order.Add("deferred")), Array.Empty<object>());
+                }));
+            scheduler.Delay("mod-b", 0d, new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+                order.Add("delayed")), Array.Empty<object>());
+            scheduler.PhaseReached += (SchedulerPhase phase, double delta) =>
+            {
+                if (phase == SchedulerPhase.PostSimulation)
+                {
+                    postSimulation.Fire(delta);
+                }
+            };
+
+            scheduler.Advance(1d / 60d);
+
+            CollectionAssert.AreEqual(new[] { "handler", "deferred", "delayed" }, order);
+        }
+
+        [Test]
+        public void M2_11_NegativeTwin_SelfDeferringThreadIsBoundedPerResumptionPoint()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            int runs = 0;
+            FakeThreadPlan again = null;
+            again = new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+            {
+                runs++;
+                scheduler.Defer("mod-a", again, Array.Empty<object>());
+            });
+            scheduler.Defer("mod-a", again, Array.Empty<object>());
+
+            Assert.DoesNotThrow(() => scheduler.Advance(0.016d));
+
+            // WHY eight: frame entry plus one after each of the six phases and the delayed slot (R4.2).
+            Assert.AreEqual(8 * ModScheduler.MaxDrainRoundsPerResumptionPoint, runs,
+                "every resumption point of the frame drains a bounded number of rounds");
+            Assert.AreEqual(1, scheduler.LiveThreadCount, "the leftover deferral waits for the next point");
+        }
+
+        [Test]
+        public void M2_12_FanOut_DefaultBudgetFaultsTheOwnerOnceAndOtherModsStillRun()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            ModConnectionRegistry registry = new();
+            List<string> faults = new();
+            RbxError budgetFault = null;
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) =>
+            {
+                faults.Add(ownerModId + ":" + error.Code);
+                budgetFault = error;
+            };
+            RbxScriptSignal bindable = new("BindableEvent.Event");
+            long invocations = 0;
+            for (int index = 0; index < 4; index++)
+            {
+                ConnectThreadHandler(registry, scheduler, bindable, "mod-fan",
+                    new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+                    {
+                        invocations++;
+                        bindable.Fire();
+                    }));
+            }
+
+            RbxScriptSignal heartbeat = new("RunService.Heartbeat");
+            int heartbeats = 0;
+            ConnectThreadHandler(registry, scheduler, heartbeat, "mod-b",
+                new FakeThreadPlan((FakeScriptThread thread, object[] args) => heartbeats++));
+            scheduler.PhaseReached += (SchedulerPhase phase, double delta) =>
+            {
+                if (phase == SchedulerPhase.Heartbeat)
+                {
+                    heartbeat.Fire(delta);
+                }
+            };
+            bindable.Fire();
+
+            Assert.DoesNotThrow(() => scheduler.Advance(1d / 60d));
+
+            // WHY this bound: four connections that each re-fire once reach 4^10 (about 1.4 million)
+            // invocations inside the ten-generation depth cap; width needs its own budget.
+            Assert.LessOrEqual(invocations, ModScheduler.DefaultMaxSignalInvocationsPerOwner);
+            Assert.Greater(invocations, 1000L, "the fan-out ran until the budget, not only one level");
+            CollectionAssert.AreEqual(new[] { "mod-fan:BudgetExceeded" }, faults,
+                "the owner is faulted exactly once for the whole overflow");
+            StringAssert.Contains(ModScheduler.DefaultMaxSignalInvocationsPerOwner.ToString(),
+                budgetFault.RawMessage);
+            Assert.AreEqual(1, heartbeats, "another mod's Heartbeat still ran in the same frame");
+        }
+
+        [Test]
+        public void M2_12_ConfiguredBudget_DropsOnlyTheOverBudgetOwnerAndResetsEveryResumptionPoint()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureSignalBudget(10, 1000);
+            ModConnectionRegistry registry = new();
+            List<string> faults = new();
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) =>
+                faults.Add(ownerModId + ":" + error.Code);
+            RbxScriptSignal noisy = new("Noisy.Event");
+            RbxScriptSignal quiet = new("Quiet.Event");
+            int noisyRuns = 0;
+            int quietRuns = 0;
+            ConnectOwned(registry, scheduler, noisy, "mod-noisy", _ => noisyRuns++);
+            ConnectOwned(registry, scheduler, quiet, "mod-quiet", _ => quietRuns++);
+            for (int index = 0; index < 25; index++)
+            {
+                noisy.Fire(index);
+            }
+
+            for (int index = 0; index < 5; index++)
+            {
+                quiet.Fire(index);
+            }
+
+            scheduler.Advance(0d);
+
+            Assert.AreEqual(10, noisyRuns, "only the budgeted invocations of the noisy owner ran");
+            Assert.AreEqual(5, quietRuns, "another owner's invocations are never dropped");
+            CollectionAssert.AreEqual(new[] { "mod-noisy:BudgetExceeded" }, faults);
+
+            for (int index = 0; index < 5; index++)
+            {
+                noisy.Fire(index);
+            }
+
+            scheduler.Advance(0d);
+
+            Assert.AreEqual(15, noisyRuns, "the budget window restarts at every resumption point");
+            Assert.AreEqual(1, faults.Count);
+        }
+
+        [Test]
+        public void M2_12_OwnerlessFanOut_SharesOneHostBudgetAndIsReportedAsAHostFault()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureSignalBudget(500, 100000);
+            List<string> hostFaults = new();
+            List<string> modFaults = new();
+            scheduler.HostFaulted += (string source, Exception exception) =>
+                hostFaults.Add(source + ": " + exception.Message);
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) => modFaults.Add(ownerModId);
+            RbxScriptSignal bindable = new("BindableEvent.Event");
+            bindable.BindScheduler(scheduler);
+            long invocations = 0;
+            for (int index = 0; index < 4; index++)
+            {
+                bindable.Connect((Action<object[]>)(_ =>
+                {
+                    invocations++;
+                    bindable.Fire();
+                }));
+            }
+
+            bindable.Fire();
+
+            Assert.DoesNotThrow(() => scheduler.Advance(0d));
+
+            Assert.AreEqual(500L, invocations, "connections no mod owns share one fan-out budget");
+            Assert.AreEqual(1, hostFaults.Count);
+            StringAssert.Contains("connections owned by no mod exceeded 500", hostFaults[0]);
+            Assert.IsEmpty(modFaults);
+        }
+
+        [Test]
+        public void M2_12_QueueCeiling_DropsOverflowAndFaultsTheListenerOnce()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureSignalBudget(1000, 8);
+            ModConnectionRegistry registry = new();
+            List<string> faults = new();
+            RbxError overflow = null;
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) =>
+            {
+                faults.Add(ownerModId);
+                overflow = error;
+            };
+            RbxScriptSignal signal = new("Busy.Event");
+            int runs = 0;
+            ConnectOwned(registry, scheduler, signal, "mod-a", _ => runs++);
+            for (int index = 0; index < 12; index++)
+            {
+                signal.Fire(index);
+            }
+
+            Assert.DoesNotThrow(() => scheduler.Advance(0d));
+
+            Assert.AreEqual(8, runs);
+            CollectionAssert.AreEqual(new[] { "mod-a" }, faults);
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, overflow.Code);
+            StringAssert.Contains("signal queue is full", overflow.RawMessage);
+        }
+
+        [Test]
+        public void M2_17_InfiniteWaitParksTheThreadUntilItIsCancelled()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            FakeScriptThread sleeper = (FakeScriptThread)scheduler.Spawn("mod-a",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+
+            Assert.DoesNotThrow(() => scheduler.ScheduleWait(sleeper, double.PositiveInfinity));
+            scheduler.Advance(1e9d);
+            scheduler.Advance(1e9d);
+
+            Assert.AreEqual(1, sleeper.ResumeCount, "task.wait(math.huge) never resumes on its own");
+            Assert.AreEqual(1, scheduler.LiveThreadCount);
+            Assert.AreEqual(0, scheduler.TimedEntryCount, "a parked thread holds no heap entry");
+
+            scheduler.Cancel(sleeper);
+
+            Assert.AreEqual(1, sleeper.KillCount);
+            Assert.AreEqual(0, scheduler.LiveThreadCount);
+        }
+
+        [Test]
+        public void M2_17_InfiniteDelayAndSignalTimeoutParkAndDieWithTheirOwner()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            FakeScriptThread parkedDelay = (FakeScriptThread)scheduler.Delay("mod-a",
+                double.PositiveInfinity, new FakeThreadPlan(), Array.Empty<object>());
+            FakeScriptThread signalWaiter = (FakeScriptThread)scheduler.Spawn("mod-a",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            scheduler.ScheduleSignalWait(signalWaiter, double.PositiveInfinity,
+                () => new object[] { "timed out" });
+            bool hostCallbackRan = false;
+            scheduler.ScheduleHostCallback(double.PositiveInfinity, () => hostCallbackRan = true);
+
+            scheduler.Advance(1e9d);
+
+            Assert.AreEqual(0, parkedDelay.ResumeCount);
+            Assert.AreEqual(1, signalWaiter.ResumeCount, "an infinite signal timeout never fires");
+            Assert.IsFalse(hostCallbackRan);
+            Assert.AreEqual(0, scheduler.TimedEntryCount);
+
+            scheduler.ResumeSignalWait(signalWaiter, new object[] { "fired" });
+            Assert.AreEqual("fired", signalWaiter.ResumeArguments[1][0],
+                "the signal itself still resumes a waiter with an infinite timeout");
+
+            Assert.AreEqual(2, scheduler.KillOwnedBy("mod-a"));
+            Assert.AreEqual(0, scheduler.LiveThreadCount);
+        }
+
+        [Test]
+        public void M2_17_NegativeTwin_NaNIsRefusedAndNegativeInfinityMeansNow()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            RbxError delayError = Assert.Throws<RbxError>(() => scheduler.Delay("mod-a", double.NaN,
+                new FakeThreadPlan(), Array.Empty<object>()));
+            Assert.AreEqual(RbxErrorCode.BadArgument, delayError.Code);
+            StringAssert.Contains("NaN", delayError.RawMessage);
+            FakeScriptThread caller = (FakeScriptThread)scheduler.Spawn("mod-a",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            Assert.Throws<RbxError>(() => scheduler.ScheduleWait(caller, double.NaN));
+
+            scheduler.ScheduleWait(caller, double.NegativeInfinity);
+            scheduler.Advance(0d);
+
+            Assert.AreEqual(2, caller.ResumeCount, "a negative duration resumes at the next slot");
+        }
+
+        [Test]
+        public void M2_01_ThreadEndedInsideASuccessfulResumeWithATerminalFault_IsReported()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            List<string> faults = new();
+            List<string> successes = new();
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) =>
+                faults.Add(ownerModId + ":" + error.Code);
+            scheduler.ThreadResumeSucceeded += (string ownerModId, bool completed) =>
+                successes.Add(ownerModId);
+            RbxError lifetimeCap = new(RbxErrorCode.BudgetExceeded,
+                "thread exceeded its lifetime step cap", "yield more often");
+            FakeScriptThread capped = (FakeScriptThread)scheduler.Delay("mod-a", 0d,
+                new FakeThreadPlan(terminalFault: lifetimeCap), Array.Empty<object>());
+            FakeScriptThread normal = (FakeScriptThread)scheduler.Delay("mod-b", 0d,
+                new FakeThreadPlan(), Array.Empty<object>());
+
+            Assert.DoesNotThrow(() => scheduler.Advance(0.016d));
+
+            CollectionAssert.AreEqual(new[] { "mod-a:BudgetExceeded" }, faults,
+                "a thread the adapter ended inside a successful resume is not dropped silently");
+            CollectionAssert.AreEqual(new[] { "mod-b" }, successes,
+                "a normal completion is a success, the capped thread is not");
+            Assert.IsTrue(capped.IsDead);
+            Assert.IsTrue(normal.IsDead);
+            Assert.AreEqual(0, scheduler.LiveThreadCount);
+        }
+
+        [Test]
+        public void ThreadResumeSucceeded_IsOwnerScopedAndSkipsFaults()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            List<string> successes = new();
+            List<string> hostFaults = new();
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) => { };
+            scheduler.HostFaulted += (string source, Exception exception) => hostFaults.Add(source);
+            scheduler.ThreadResumeSucceeded += (string ownerModId, bool completed) =>
+                throw new InvalidOperationException("broken success subscriber");
+            scheduler.ThreadResumeSucceeded += (string ownerModId, bool completed) =>
+                successes.Add(ownerModId + ":" + (completed ? "completed" : "yielded"));
+
+            FakeScriptThread yielder = (FakeScriptThread)scheduler.Spawn("mod-a",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            scheduler.Spawn("mod-b", new FakeThreadPlan(), Array.Empty<object>());
+            scheduler.Spawn("mod-c", new FakeThreadPlan(failure: new RbxError(
+                RbxErrorCode.BudgetExceeded, "mod-c failed", "yield sooner")), Array.Empty<object>());
+            scheduler.ScheduleWait(yielder, 0d);
+            scheduler.Advance(0.016d);
+
+            CollectionAssert.AreEqual(new[] { "mod-a:yielded", "mod-b:completed", "mod-a:yielded" },
+                successes, "one event per fault-free resume, never for the faulted mod-c");
+            Assert.AreEqual(3, hostFaults.Count,
+                "a throwing success subscriber is contained and reported on every call");
+            Assert.AreEqual("ThreadResumeSucceeded subscriber", hostFaults[0]);
+        }
+
+        [Test]
+        public void M2_26_KillOwnedByThousandsOfDelayedThreads_ScansQueuedWorkLinearly()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureActorQuota(ModScheduler.EmergencyMaxThreads, ownerModId => ownerModId);
+            const int perMod = ModScheduler.EmergencyMaxThreads / 2;
+            List<FakeScriptThread> killed = new();
+            List<FakeScriptThread> survivors = new();
+            for (int index = 0; index < perMod; index++)
+            {
+                killed.Add((FakeScriptThread)scheduler.Delay("mod-a", 10d, new FakeThreadPlan(),
+                    Array.Empty<object>()));
+                survivors.Add((FakeScriptThread)scheduler.Delay("mod-b", 10d, new FakeThreadPlan(),
+                    Array.Empty<object>()));
+            }
+
+            Assert.AreEqual(perMod, scheduler.KillOwnedBy("mod-a"));
+
+            // WHY a work counter: the old KillOwnedBy rescanned every heap and the deferred queue once
+            // per killed thread, perMod * 2 * perMod entry visits (about 8.4 million here).
+            Assert.LessOrEqual(scheduler.QueuedWorkScanCount, 4L * ModScheduler.EmergencyMaxThreads);
+            Assert.LessOrEqual(scheduler.TimedEntryCount, 2 * perMod + 128,
+                "stale entries never outnumber live ones by more than the compaction slack");
+
+            scheduler.Advance(10d);
+
+            Assert.IsTrue(killed.TrueForAll(thread => thread.ResumeCount == 0),
+                "a lazily removed entry never resumes its killed thread");
+            Assert.IsTrue(survivors.TrueForAll(thread => thread.ResumeCount == 1));
+            Assert.AreEqual(0, scheduler.LiveThreadCount);
+            Assert.AreEqual(0, scheduler.TimedEntryCount);
+        }
+
+        [Test]
+        public void M2_26_CancelChurnAndSignalFirstWaits_KeepTheHeapsBounded()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            for (int index = 0; index < 10000; index++)
+            {
+                IRbxScriptThread delayed = scheduler.Delay("mod-a", 3600d, new FakeThreadPlan(),
+                    Array.Empty<object>());
+                scheduler.Cancel(delayed);
+            }
+
+            Assert.LessOrEqual(scheduler.TimedEntryCount, 65,
+                "cancelled long delays are compacted instead of piling up for an hour");
+            Assert.LessOrEqual(scheduler.QueuedWorkScanCount, 2L * 10000);
+
+            FakeScriptThread waiter = (FakeScriptThread)scheduler.Spawn("mod-a",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            for (int index = 0; index < 1000; index++)
+            {
+                scheduler.ScheduleSignalWait(waiter, 3600d, () => new object[] { "timed out" });
+                scheduler.ResumeSignalWait(waiter, new object[] { index });
+            }
+
+            Assert.AreEqual(1001, waiter.ResumeCount);
+            Assert.LessOrEqual(scheduler.TimedEntryCount, 65,
+                "timeouts of signal waits the signal already resumed are compacted too");
+        }
+
+        private static RbxScriptConnection ConnectOwned(ModConnectionRegistry registry,
+            ModScheduler scheduler, RbxScriptSignal signal, string ownerModId, Action<object[]> handler)
+        {
+            signal.BindScheduler(scheduler);
+            RbxScriptConnection connection = signal.Connect(handler);
+            registry.Track(ownerModId, 1, connection);
+            return connection;
+        }
+
+        /// <summary>Production-shaped handler: every invocation runs as a scheduler-owned thread.</summary>
+        private static RbxScriptConnection ConnectThreadHandler(ModConnectionRegistry registry,
+            ModScheduler scheduler, RbxScriptSignal signal, string ownerModId, FakeThreadPlan plan)
+        {
+            return ConnectOwned(registry, scheduler, signal, ownerModId,
+                args => scheduler.SpawnSignal(ownerModId, plan, args));
         }
 
         private static FakeScriptThread CreateCompletionCaller(ModScheduler scheduler, string name,

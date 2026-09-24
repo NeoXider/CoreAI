@@ -143,6 +143,69 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_M2_11_TaskDeferFromPreRenderRunsInTheSameFrame()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+
+            // WHY: the mirror's task.defer "defers it until the end of the current resume point within
+            // the current frame". A PreRender handler's deferral used to run at the NEXT frame's entry,
+            // so camera or effect code that defers rendered one frame late.
+            stack.Runtime.LoadMod("m", @"
+                local rs = game:GetService('RunService')
+                local frame = 0
+                rs.PreRender:Connect(function()
+                    frame = frame + 1
+                    local handlerFrame = frame
+                    task.defer(function()
+                        store_set('deferred_' .. handlerFrame, 'ran')
+                    end)
+                end)");
+
+            roblox.Scheduler.Advance(0.016d);
+
+            Assert.AreEqual("ran", store.Get("m", "deferred_1"),
+                "the deferral of frame 1's PreRender handler runs before frame 1 ends");
+        }
+
+        [Test]
+        public void Lua_M2_11_TaskDeferFromPostSimulationRunsBeforeTheDelayedThreads()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local rs = game:GetService('RunService')
+                local order = ''
+                local function note(tag)
+                    order = order .. tag
+                    store_set('order', order)
+                end
+                local fired = false
+                rs.PostSimulation:Connect(function()
+                    if fired then
+                        return
+                    end
+                    fired = true
+                    note('P')
+                    task.defer(function()
+                        note('D')
+                    end)
+                end)
+                task.delay(0, function()
+                    note('W')
+                end)");
+
+            roblox.Scheduler.Advance(0.016d);
+
+            Assert.AreEqual("PDW", store.Get("m", "order"),
+                "a PostSimulation handler's deferral belongs to PostSimulation's resumption point, "
+                + "which comes before the delayed threads (R4.2)");
+        }
+
+        [Test]
         public void Negative_ADedicatedServer_NeverRunsTheRenderPhase()
         {
             LuaCsRbxApiBindings roblox = new();

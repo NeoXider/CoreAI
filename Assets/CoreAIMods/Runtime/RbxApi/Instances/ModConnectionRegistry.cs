@@ -38,8 +38,38 @@ namespace CoreAI.Mods.Rbx.Instances
             public RbxScriptConnection Connection { get; }
         }
 
-        private readonly Dictionary<string, List<Entry>> _byMod = new(StringComparer.Ordinal);
+        /// <summary>
+        /// One mod's ledger. Dead entries are pruned when the list reaches <see cref="PruneAt"/>, which
+        /// then doubles past the surviving count, so pruning costs amortized O(1) per Track instead of
+        /// a full scan on every connect (M1-36, M2-26).
+        /// </summary>
+        private sealed class ModLedger
+        {
+            public ModLedger(List<Entry> entries)
+            {
+                Entries = entries;
+            }
+
+            public List<Entry> Entries { get; }
+
+            public int PruneAt { get; set; } = MinPruneThreshold;
+        }
+
+        private const int MinPruneThreshold = 16;
+
+        private readonly Dictionary<string, ModLedger> _byMod = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _currentGeneration = new(StringComparer.Ordinal);
+
+        /// <summary>Ledger entries visited by dead-entry pruning (M1-36 regression counter).</summary>
+        internal long PruneVisitCount { get; private set; }
+
+        /// <summary>Entries currently held for a mod, dead ones not yet pruned included.</summary>
+        internal int TrackedEntryCount(string modId)
+        {
+            return modId != null && _byMod.TryGetValue(modId, out ModLedger ledger)
+                ? ledger.Entries.Count
+                : 0;
+        }
 
         /// <summary>
         /// Advances a mod's generation counter and returns the new value. Called once per load/reload
@@ -61,9 +91,11 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>
-        /// Records a connection against its owning mod + generation. No-op when <paramref name="modId"/>
-        /// is null/empty (one-off / editor execution has nothing to tear down). Prunes already-dead
-        /// entries of the mod on the way in so <c>:Once</c> auto-disconnects and manual
+        /// Records a connection against its owning mod + generation and stamps
+        /// <see cref="RbxScriptConnection.OwnerModId"/>, which the scheduler uses to attribute handler
+        /// failures and signal overload to the mod. No-op when <paramref name="modId"/> is null/empty
+        /// (one-off / editor execution has nothing to tear down). Already-dead entries of the mod are
+        /// pruned whenever the ledger doubles, so <c>:Once</c> auto-disconnects and manual
         /// <c>conn:Disconnect()</c> calls cannot accumulate unbounded between teardowns.
         /// </summary>
         public void Track(string modId, int generation, RbxScriptConnection connection)
@@ -73,13 +105,20 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
-            if (!_byMod.TryGetValue(modId, out List<Entry> list))
+            connection.OwnerModId ??= modId;
+            if (!_byMod.TryGetValue(modId, out ModLedger ledger))
             {
-                list = new List<Entry>();
-                _byMod[modId] = list;
+                ledger = new ModLedger(new List<Entry>());
+                _byMod[modId] = ledger;
             }
 
-            PruneDead(list);
+            List<Entry> list = ledger.Entries;
+            if (list.Count >= ledger.PruneAt)
+            {
+                PruneDead(list);
+                ledger.PruneAt = Math.Max(MinPruneThreshold, list.Count * 2);
+            }
+
             list.Add(new Entry(generation, connection));
         }
 
@@ -87,9 +126,9 @@ namespace CoreAI.Mods.Rbx.Instances
         public IReadOnlyList<RbxScriptConnection> GetOwnedBy(string modId)
         {
             List<RbxScriptConnection> result = new();
-            if (modId != null && _byMod.TryGetValue(modId, out List<Entry> list))
+            if (modId != null && _byMod.TryGetValue(modId, out ModLedger ledger))
             {
-                foreach (Entry entry in list)
+                foreach (Entry entry in ledger.Entries)
                 {
                     if (entry.Connection != null && entry.Connection.Connected)
                     {
@@ -114,10 +153,12 @@ namespace CoreAI.Mods.Rbx.Instances
         /// </summary>
         public int DisconnectOwnedBy(string modId, bool keepCurrentGeneration = false)
         {
-            if (modId == null || !_byMod.TryGetValue(modId, out List<Entry> list))
+            if (modId == null || !_byMod.TryGetValue(modId, out ModLedger ledger))
             {
                 return 0;
             }
+
+            List<Entry> list = ledger.Entries;
 
             int liveGeneration = keepCurrentGeneration
                                  && _currentGeneration.TryGetValue(modId, out int current)
@@ -149,7 +190,10 @@ namespace CoreAI.Mods.Rbx.Instances
 
             if (survivors != null && survivors.Count > 0)
             {
-                _byMod[modId] = survivors;
+                _byMod[modId] = new ModLedger(survivors)
+                {
+                    PruneAt = Math.Max(MinPruneThreshold, survivors.Count * 2)
+                };
             }
             else
             {
@@ -159,16 +203,21 @@ namespace CoreAI.Mods.Rbx.Instances
             return count;
         }
 
-        private static void PruneDead(List<Entry> list)
+        private void PruneDead(List<Entry> list)
         {
-            for (int i = list.Count - 1; i >= 0; i--)
+            int writeIndex = 0;
+            for (int readIndex = 0; readIndex < list.Count; readIndex++)
             {
-                RbxScriptConnection connection = list[i].Connection;
-                if (connection == null || !connection.Connected)
+                Entry entry = list[readIndex];
+                if (entry.Connection != null && entry.Connection.Connected)
                 {
-                    list.RemoveAt(i);
+                    list[writeIndex] = entry;
+                    writeIndex++;
                 }
             }
+
+            PruneVisitCount += list.Count;
+            list.RemoveRange(writeIndex, list.Count - writeIndex);
         }
     }
 }

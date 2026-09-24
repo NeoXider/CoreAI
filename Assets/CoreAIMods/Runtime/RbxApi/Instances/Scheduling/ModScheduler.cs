@@ -20,9 +20,35 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
     }
 
     /// <summary>
+    /// Optional capability of an <see cref="IRbxScriptThread"/> whose adapter can end a thread during a
+    /// resume that still reports success (for example a lifetime cap that kills the thread after the
+    /// slice completed). When such a thread is dead after a successful resume and
+    /// <see cref="TerminalFault"/> is not null, <see cref="ModScheduler"/> reports that error through
+    /// <see cref="ModScheduler.ThreadFaulted"/> instead of dropping the thread silently.
+    /// </summary>
+    public interface IRbxScriptThreadTerminalFault
+    {
+        /// <summary>
+        /// The structured error that ended the thread inside a resume reported as successful, or null
+        /// when the thread completed normally or its failure is surfaced through another channel.
+        /// </summary>
+        RbxError TerminalFault { get; }
+    }
+
+    /// <summary>
     /// Deterministic, engine-free scheduler for immediate, deferred, waiting, delayed, and
     /// host-completion-backed script threads. One <see cref="Advance"/> call executes one complete
     /// logical frame in the canonical R4.2 order.
+    /// <para>
+    /// Fault containment: a failure inside one callback of the frame (a thread that faults, a thread
+    /// resumed after it died outside the scheduler, a signal handler that throws, a signal cascade or
+    /// fan-out over budget, a throwing <see cref="PhaseReached"/> subscriber or host callback) is
+    /// contained where it happens. Only the offending thread, invocation or chain is dropped; every
+    /// later phase, thread and mod still runs in the same frame. A failure owned by a mod is reported
+    /// through <see cref="ThreadFaulted"/>, anything else through <see cref="HostFaulted"/>. A failure
+    /// nobody observes (no subscriber on its event) is rethrown by <see cref="Advance"/> once the frame
+    /// has completed, so it can never disappear silently.
+    /// </para>
     /// </summary>
     public sealed class ModScheduler
     {
@@ -30,14 +56,36 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         public const int EmergencyMaxThreads = 4096;
         public const int MaxSignalGenerations = 10;
 
+        /// <summary>
+        /// Default number of signal handler invocations one owning mod may queue within one resumption
+        /// point before the rest are dropped and the mod is faulted (M2-12: the generation cap limits a
+        /// cascade's depth, this limits its width).
+        /// </summary>
+        public const int DefaultMaxSignalInvocationsPerOwner = 16384;
+
+        /// <summary>Default ceiling on signal invocations waiting in the queue across all owners.</summary>
+        public const int DefaultMaxQueuedSignalInvocations = 65536;
+
+        /// <summary>
+        /// Upper bound on {deferred threads, signal handlers} drain rounds at one resumption point.
+        /// Work a handler defers runs in the same resumption point (R4.8); work left after the last round
+        /// runs at the next resumption point, exactly as it did before rounds existed.
+        /// </summary>
+        public const int MaxDrainRoundsPerResumptionPoint = 10;
+
+        private const int MinStaleTimedEntriesBeforeCompaction = 64;
+
+        // WHY a NUL character: mod ids are author-visible names and can never contain one, so the
+        // shared budget of connections no mod owns can never be confused with a real mod's budget.
+        private const string HostSignalChargeKey = "\0host";
+
         private enum PipelineStage
         {
-            DrainDeferred,
+            ResumptionPoint,
             PreAnimation,
             PreSimulation,
             PostSimulation,
             ResumeDelayed,
-            DrainSignals,
             Heartbeat,
             InputProcessing,
             PreRender
@@ -96,6 +144,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             public long SignalWaitGeneration { get; set; }
 
+            /// <summary>
+            /// True while exactly one live wait, delay or signal-timeout heap entry targets this record.
+            /// Cleared when that entry is popped or becomes stale, so stale heap entries can be counted
+            /// and compacted lazily instead of scanning every heap on each cancel (M2-26).
+            /// </summary>
+            public bool HasTimedEntry { get; set; }
+
             /// <summary>Re-arms a record for a new thread and owner; every per-thread field restarts.</summary>
             public void Reset(IRbxScriptThread thread, string ownerModId)
             {
@@ -105,6 +160,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 DeferredArguments = null;
                 CompletionWait = null;
                 ReadableTombstone = null;
+                HasTimedEntry = false;
                 // WHY: SignalWaitGeneration keeps counting across tenants on purpose. A timeout entry is
                 // matched by (record, generation); a monotonic counter can never re-produce a value an
                 // earlier tenant used, so a stale entry can never resume a later tenant.
@@ -119,7 +175,21 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 DeferredArguments = null;
                 CompletionWait = null;
                 ReadableTombstone = null;
+                HasTimedEntry = false;
             }
+        }
+
+        private readonly struct PendingSignalFault
+        {
+            public PendingSignalFault(string ownerModId, RbxError error)
+            {
+                OwnerModId = ownerModId;
+                Error = error;
+            }
+
+            public string OwnerModId { get; }
+
+            public RbxError Error { get; }
         }
 
         private sealed class SignalInvocation
@@ -348,29 +418,31 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private static readonly object[] EmptyArguments = Array.Empty<object>();
         private static readonly PipelineStage[] Pipeline =
         {
-            PipelineStage.DrainDeferred,
-            PipelineStage.DrainSignals,
+            PipelineStage.ResumptionPoint,
             PipelineStage.PreAnimation,
-            PipelineStage.DrainDeferred,
-            PipelineStage.DrainSignals,
+            PipelineStage.ResumptionPoint,
             PipelineStage.PreSimulation,
-            PipelineStage.DrainDeferred,
-            PipelineStage.DrainSignals,
+            PipelineStage.ResumptionPoint,
             PipelineStage.PostSimulation,
-            PipelineStage.DrainDeferred,
-            PipelineStage.DrainSignals,
+            PipelineStage.ResumptionPoint,
             PipelineStage.ResumeDelayed,
-            PipelineStage.DrainDeferred,
-            PipelineStage.DrainSignals,
+            PipelineStage.ResumptionPoint,
             PipelineStage.Heartbeat,
-            PipelineStage.DrainDeferred,
-            PipelineStage.DrainSignals,
+            PipelineStage.ResumptionPoint,
             PipelineStage.InputProcessing,
-            PipelineStage.DrainDeferred,
-            PipelineStage.DrainSignals,
+            PipelineStage.ResumptionPoint,
             PipelineStage.PreRender,
-            PipelineStage.DrainDeferred,
-            PipelineStage.DrainSignals
+            PipelineStage.ResumptionPoint
+        };
+
+        private static readonly string[] PhaseSubscriberSources =
+        {
+            "PhaseReached(PreAnimation) subscriber",
+            "PhaseReached(PreSimulation) subscriber",
+            "PhaseReached(PostSimulation) subscriber",
+            "PhaseReached(Heartbeat) subscriber",
+            "PhaseReached(InputProcessing) subscriber",
+            "PhaseReached(PreRender) subscriber"
         };
 
         /// <summary>Idle records kept for reuse; anything beyond this is left to the GC as before.</summary>
@@ -395,7 +467,26 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private readonly MinHeap<DelayEntry> _delayHeap;
         private readonly MinHeap<SignalWaitTimeoutEntry> _signalWaitTimeoutHeap;
         private readonly MinHeap<HostCallbackEntry> _hostHeap;
+        private readonly Predicate<WaitEntry> _isStaleWait;
+        private readonly Predicate<DelayEntry> _isStaleDelay;
+        private readonly Predicate<SignalWaitTimeoutEntry> _isStaleSignalTimeout;
+        private readonly Dictionary<string, int> _signalChargeByOwner = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _signalOverloadReportedOwners = new(StringComparer.Ordinal);
+        private readonly List<PendingSignalFault> _pendingSignalFaults = new();
+        private readonly object _subscriberGate = new();
         private Func<string, string> _actorIdResolver;
+        private Action<SchedulerPhase, double> _phaseReached;
+        private Action<SchedulerPhase, double>[] _phaseReachedSubscribers =
+            Array.Empty<Action<SchedulerPhase, double>>();
+        private Action<string, RbxError> _threadFaulted;
+        private Action<string, RbxError>[] _threadFaultedSubscribers =
+            Array.Empty<Action<string, RbxError>>();
+        private Action<string, bool> _threadResumeSucceeded;
+        private Action<string, bool>[] _threadResumeSucceededSubscribers =
+            Array.Empty<Action<string, bool>>();
+        private Action<string, Exception> _hostFaulted;
+        private Action<string, Exception>[] _hostFaultedSubscribers =
+            Array.Empty<Action<string, Exception>>();
 
         private long _frameIndex;
         private long _sequence;
@@ -403,14 +494,28 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private bool _delayedBatchStarted;
         private bool _promotingCompletions;
         private bool _drainingSignals;
+        private bool _flushingSignalFaults;
+        private bool _signalOverloadReportedForHost;
         private int _currentSignalGeneration;
+        private int _staleTimedEntries;
         private string[] _currentSignalChain;
-        private string[] _signalCascadeChain;
+        private string _currentInvocationOwnerModId;
+        private string _runningOwnerModId;
         private RbxInstance _currentSignalTombstone;
+        private Exception _heldFault;
         private PipelineStage? _currentStage;
 
         /// <summary>Configured per-actor live-thread quota.</summary>
         public int MaxThreadsPerActor { get; private set; } = DefaultMaxThreadsPerActor;
+
+        /// <summary>
+        /// Signal handler invocations one owning mod may queue within one resumption point; see
+        /// <see cref="ConfigureSignalBudget"/>.
+        /// </summary>
+        public int MaxSignalInvocationsPerOwner { get; private set; } = DefaultMaxSignalInvocationsPerOwner;
+
+        /// <summary>Ceiling on queued signal invocations across all owners; see <see cref="ConfigureSignalBudget"/>.</summary>
+        public int MaxQueuedSignalInvocations { get; private set; } = DefaultMaxQueuedSignalInvocations;
 
         public ModScheduler(IRbxScriptThreadFactory threadFactory, IRbxTimeSource timeSource)
         {
@@ -441,6 +546,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             _hostHeap = new MinHeap<HostCallbackEntry>(
                 (HostCallbackEntry left, HostCallbackEntry right) =>
                     CompareTimedEntries(left, right));
+            _isStaleWait = entry => !IsLiveInState(entry.Record, ThreadScheduleState.Waiting);
+            _isStaleDelay = entry => !IsLiveInState(entry.Record, ThreadScheduleState.Delayed);
+            _isStaleSignalTimeout = entry =>
+                !IsLiveInState(entry.Record, ThreadScheduleState.WaitingForSignal)
+                || entry.Record.SignalWaitGeneration != entry.Generation;
         }
 
         /// <summary>Configures actor attribution and the per-actor live-thread quota.</summary>
@@ -448,6 +558,21 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         {
             MaxThreadsPerActor = Math.Max(1, maxThreadsPerActor);
             _actorIdResolver = actorIdResolver;
+        }
+
+        /// <summary>
+        /// Configures the signal fan-out budget (M2-12). <paramref name="maxInvocationsPerOwner"/> caps
+        /// the handler invocations queued for connections of one owning mod within one resumption point
+        /// (connections no mod owns share one such budget); <paramref name="maxQueuedInvocations"/> caps
+        /// the whole queue. An invocation over either limit is dropped and its owner receives one
+        /// <see cref="RbxErrorCode.BudgetExceeded"/> fault per resumption point through
+        /// <see cref="ThreadFaulted"/> (<see cref="HostFaulted"/> for connections no mod owns). Both
+        /// values are clamped to at least one.
+        /// </summary>
+        public void ConfigureSignalBudget(int maxInvocationsPerOwner, int maxQueuedInvocations)
+        {
+            MaxSignalInvocationsPerOwner = Math.Max(1, maxInvocationsPerOwner);
+            MaxQueuedSignalInvocations = Math.Max(1, maxQueuedInvocations);
         }
 
         /// <summary>Current logical frame number; the first <see cref="Advance"/> enters frame one.</summary>
@@ -477,14 +602,120 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         /// <summary>Idle records waiting for reuse; never counted as live threads.</summary>
         internal int PooledRecordCount => _recordPool.Count;
 
-        /// <summary>Raised at each observable phase boundary in canonical pipeline order.</summary>
-        public event Action<SchedulerPhase, double> PhaseReached;
+        /// <summary>Wait, delay and signal-timeout entries held by the heaps, stale ones included.</summary>
+        internal int TimedEntryCount =>
+            _waitHeap.Count + _delayHeap.Count + _signalWaitTimeoutHeap.Count;
+
+        /// <summary>Heap entries visited while removing cancelled or killed work (M2-26 regression counter).</summary>
+        internal long QueuedWorkScanCount { get; private set; }
 
         /// <summary>
-        /// Raised after a failed thread has been killed and unregistered. If no subscriber exists,
-        /// the structured error is thrown so the fault cannot disappear silently.
+        /// Raised at each observable phase boundary in canonical pipeline order. Each subscriber is
+        /// contained on its own: one that throws is reported through <see cref="HostFaulted"/> and the
+        /// remaining subscribers and phases still run.
         /// </summary>
-        public event Action<string, RbxError> ThreadFaulted;
+        public event Action<SchedulerPhase, double> PhaseReached
+        {
+            add
+            {
+                lock (_subscriberGate)
+                {
+                    _phaseReached += value;
+                    _phaseReachedSubscribers = ToSubscriberArray(_phaseReached);
+                }
+            }
+            remove
+            {
+                lock (_subscriberGate)
+                {
+                    _phaseReached -= value;
+                    _phaseReachedSubscribers = ToSubscriberArray(_phaseReached);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Raised for every contained failure attributed to a mod (ownerModId, error): a thread that
+        /// faulted (killed and unregistered first), a thread resumed after it died outside the scheduler,
+        /// a signal handler of a connection the mod owns that threw, and a signal cascade or fan-out
+        /// budget overflow the mod caused. Each subscriber is contained on its own. If no subscriber
+        /// exists the error is thrown: immediately outside <see cref="Advance"/>, and once the frame has
+        /// completed inside it, so the fault cannot disappear silently.
+        /// </summary>
+        public event Action<string, RbxError> ThreadFaulted
+        {
+            add
+            {
+                lock (_subscriberGate)
+                {
+                    _threadFaulted += value;
+                    _threadFaultedSubscribers = ToSubscriberArray(_threadFaulted);
+                }
+            }
+            remove
+            {
+                lock (_subscriberGate)
+                {
+                    _threadFaulted -= value;
+                    _threadFaultedSubscribers = ToSubscriberArray(_threadFaulted);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Raised after every resume of a scheduler thread that yielded or completed without a fault,
+        /// with the owning mod id and whether the thread completed. Owner-scoped success signal for
+        /// per-mod consecutive-fault streaks (a mod runtime resets its quarantine streak here). Raised on
+        /// the hot path, once per successful resume, so subscribers must be cheap; each subscriber is
+        /// contained on its own and a throwing one is reported through <see cref="HostFaulted"/>.
+        /// </summary>
+        public event Action<string, bool> ThreadResumeSucceeded
+        {
+            add
+            {
+                lock (_subscriberGate)
+                {
+                    _threadResumeSucceeded += value;
+                    _threadResumeSucceededSubscribers = ToSubscriberArray(_threadResumeSucceeded);
+                }
+            }
+            remove
+            {
+                lock (_subscriberGate)
+                {
+                    _threadResumeSucceeded -= value;
+                    _threadResumeSucceededSubscribers = ToSubscriberArray(_threadResumeSucceeded);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Raised for every contained failure that belongs to no mod (source, exception): a throwing
+        /// <see cref="PhaseReached"/> subscriber, a throwing <see cref="ScheduleHostCallback"/> callback,
+        /// a throwing handler of a connection no mod owns, signal overload caused by host code, and a
+        /// subscriber of this scheduler's other events that threw. If no subscriber exists the exception
+        /// is thrown: immediately outside <see cref="Advance"/>, and once the frame has completed inside
+        /// it (only the first unobserved failure of a frame is rethrown).
+        /// </summary>
+        public event Action<string, Exception> HostFaulted
+        {
+            add
+            {
+                lock (_subscriberGate)
+                {
+                    _hostFaulted += value;
+                    _hostFaultedSubscribers = ToSubscriberArray(_hostFaulted);
+                }
+            }
+            remove
+            {
+                lock (_subscriberGate)
+                {
+                    _hostFaulted -= value;
+                    _hostFaultedSubscribers = ToSubscriberArray(_hostFaulted);
+                }
+            }
+        }
 
         /// <summary>Creates and immediately resumes a thread to its first yield or completion.</summary>
         public IRbxScriptThread Spawn(string ownerModId, object callable, object[] args)
@@ -550,15 +781,25 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             return record.Thread;
         }
 
-        /// <summary>Creates a thread for the next eligible delayed slot.</summary>
+        /// <summary>
+        /// Creates a thread for the next eligible delayed slot. A duration of positive infinity
+        /// (<c>task.delay(math.huge, f)</c>) parks the thread: it never resumes, stays cancellable, and
+        /// is killed with its owner (M2-17).
+        /// </summary>
         public IRbxScriptThread Delay(string ownerModId, double seconds, object callable, object[] args)
         {
             double duration = ValidateAndNormalizeDuration(seconds, "Delay");
             ThreadRecord record = CreateRecord(ownerModId, callable);
             record.State = ThreadScheduleState.Delayed;
+            if (double.IsPositiveInfinity(duration))
+            {
+                return record.Thread;
+            }
+
             DelayEntry entry = new(record, CopyArguments(args), CurrentTime + duration,
                 GetEarliestTimerFrame(), NextSequence());
             _delayHeap.Add(entry);
+            record.HasTimedEntry = true;
             return record.Thread;
         }
 
@@ -568,8 +809,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         /// Ownerless by design: the entry carries no mod id, is never counted against
         /// <see cref="MaxThreadsPerActor"/>, and <see cref="KillOwnedBy"/> never touches it, so a
         /// scheduled host timer (Debris destruction) survives the scheduling mod's unload (S5.1).
-        /// A callback that throws is dropped after its single attempt and the error propagates out
-        /// of <see cref="Advance"/>; later entries are re-queued untouched.
+        /// A callback that throws is dropped after its single attempt and reported through
+        /// <see cref="HostFaulted"/>; later entries of the same slot still run in the same frame.
+        /// A duration of positive infinity never fires, so nothing is scheduled.
         /// </summary>
         public void ScheduleHostCallback(double seconds, Action callback)
         {
@@ -581,6 +823,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             double duration = ValidateAndNormalizeDuration(seconds, "ScheduleHostCallback");
+            if (double.IsPositiveInfinity(duration))
+            {
+                return;
+            }
+
             HostCallbackEntry entry = new(callback, CurrentTime + duration,
                 GetEarliestTimerFrame(), NextSequence());
             _hostHeap.Add(entry);
@@ -588,7 +835,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
         /// <summary>
         /// Schedules an existing caller to resume on the first eligible future delayed slot with its
-        /// actual scaled elapsed time as the sole argument.
+        /// actual scaled elapsed time as the sole argument. A duration of positive infinity
+        /// (<c>task.wait(math.huge)</c>) parks the caller until it is cancelled or its owner is torn
+        /// down (M2-17).
         /// </summary>
         public void ScheduleWait(IRbxScriptThread caller, double seconds = 0d)
         {
@@ -596,9 +845,15 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             ThreadRecord record = GetSchedulableRecord(caller, "ScheduleWait", true);
             double scheduledAt = CurrentTime;
             record.State = ThreadScheduleState.Waiting;
+            if (double.IsPositiveInfinity(duration))
+            {
+                return;
+            }
+
             WaitEntry entry = new(record, scheduledAt, scheduledAt + duration,
                 GetEarliestTimerFrame(), NextSequence());
             _waitHeap.Add(entry);
+            record.HasTimedEntry = true;
         }
 
         /// <summary>Marks a running scheduler thread as yielded until its signal's first delivery.</summary>
@@ -624,10 +879,16 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             ThreadRecord record = GetSchedulableRecord(caller, "signal:Wait", true);
             record.SignalWaitGeneration++;
             record.State = ThreadScheduleState.WaitingForSignal;
+            if (double.IsPositiveInfinity(duration))
+            {
+                return;
+            }
+
             SignalWaitTimeoutEntry entry = new(record, record.SignalWaitGeneration,
                 timeoutResumeArguments, CurrentTime + duration, GetEarliestTimerFrame(),
                 NextSequence());
             _signalWaitTimeoutHeap.Add(entry);
+            record.HasTimedEntry = true;
         }
 
         /// <summary>Resumes one signal waiter with the arguments captured at fire time.</summary>
@@ -639,11 +900,17 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 return;
             }
 
+            AbandonTimedEntry(record);
             record.ReadableTombstone = _currentSignalTombstone;
             ResumeThread(record, CopyArguments(arguments));
         }
 
-        /// <summary>Queues one connection invocation for the deferred signal drain.</summary>
+        /// <summary>
+        /// Queues one connection invocation for the deferred signal drain. An invocation past the
+        /// generation cap (cascade depth), the queue ceiling, or its owner's per-resumption-point budget
+        /// (fan-out width) is dropped, and the responsible owner is faulted once per resumption point at
+        /// the next safe point of the drain instead of throwing out of the frame (M2-02, M2-12).
+        /// </summary>
         internal void EnqueueSignalInvocation(RbxScriptConnection connection, object[] arguments,
             RbxInstance readableTombstone)
         {
@@ -655,14 +922,61 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             int generation = _drainingSignals ? _currentSignalGeneration + 1 : 1;
-            string[] chain = BuildSignalChain(connection.SignalName);
             if (generation > MaxSignalGenerations)
             {
-                _signalCascadeChain ??= chain;
                 connection.DropQueuedInvocation();
+                // WHY the firing owner and not the listener: every listener of a looping signal gets
+                // its generation-11 invocation dropped, but only the code that fired at generation 10
+                // keeps the loop alive. Faulting a mod that merely listens would quarantine a victim.
+                string firingOwner = _runningOwnerModId ?? _currentInvocationOwnerModId
+                                     ?? connection.OwnerModId;
+                if (ShouldReportSignalOverload(firingOwner))
+                {
+                    NoteSignalOverload(firingOwner, new RbxError(
+                        RbxErrorCode.SignalCascade,
+                        "signal cascade exceeded " + MaxSignalGenerations + " generations: "
+                        + string.Join(" -> ", BuildSignalChain(connection.SignalName)),
+                        "break the signal cycle or defer the next mutation to a later frame"));
+                }
+
                 return;
             }
 
+            string listenerOwner = connection.OwnerModId;
+            if (_signalQueue.Count >= MaxQueuedSignalInvocations)
+            {
+                connection.DropQueuedInvocation();
+                if (ShouldReportSignalOverload(listenerOwner))
+                {
+                    NoteSignalOverload(listenerOwner, new RbxError(
+                        RbxErrorCode.BudgetExceeded,
+                        "signal queue is full (" + MaxQueuedSignalInvocations
+                        + " queued invocations); dropped " + connection.SignalName + " invocations",
+                        "fire fewer signals per frame or connect fewer handlers to busy signals"));
+                }
+
+                return;
+            }
+
+            bool hostOwned = string.IsNullOrWhiteSpace(listenerOwner);
+            if (!TryChargeSignalInvocation(hostOwned ? HostSignalChargeKey : listenerOwner))
+            {
+                connection.DropQueuedInvocation();
+                if (ShouldReportSignalOverload(listenerOwner))
+                {
+                    NoteSignalOverload(listenerOwner, new RbxError(
+                        RbxErrorCode.BudgetExceeded,
+                        (hostOwned ? "connections owned by no mod" : "mod '" + listenerOwner + "'")
+                        + " exceeded " + MaxSignalInvocationsPerOwner
+                        + " signal handler invocations in one resumption point; dropped "
+                        + connection.SignalName + " invocations",
+                        "stop handlers from re-firing signals they listen to, or spread the work over frames"));
+                }
+
+                return;
+            }
+
+            string[] chain = BuildSignalChain(connection.SignalName);
             _signalQueue.Enqueue(new SignalInvocation(
                 connection, CopyArguments(arguments), readableTombstone, generation, chain));
         }
@@ -737,7 +1051,12 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
         }
 
-        /// <summary>Cancels one live scheduler-owned thread and removes all pending work.</summary>
+        /// <summary>
+        /// Cancels one live scheduler-owned thread and removes all pending work. Cancelling a thread
+        /// that already finished is a no-op (M2-13): Roblox's task.cancel closes the thread, and closing
+        /// a dead coroutine is not an error, so the <c>task.cancel(self._t)</c> cleanup idiom works after
+        /// the task ran. Only the currently running thread cannot be cancelled.
+        /// </summary>
         public void Cancel(IRbxScriptThread thread)
         {
             if (thread == null)
@@ -749,9 +1068,15 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             if (thread.IsDead || thread.Status == RbxScriptThreadStatus.Dead)
             {
-                throw RbxError.BadArgument(
-                    "task.cancel cannot cancel a dead thread",
-                    "retain and cancel the thread before it completes");
+                // WHY the record is still dropped: a thread finished outside the scheduler (a native
+                // coroutine.close) keeps its record until something resumes it; cancelling it is the
+                // author's request to forget it, so its queued work goes without a fault report.
+                if (_records.TryGetValue(thread, out ThreadRecord deadRecord))
+                {
+                    KillRecord(deadRecord);
+                }
+
+                return;
             }
 
             if (!_records.TryGetValue(thread, out ThreadRecord record))
@@ -793,7 +1118,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             return owned.Count;
         }
 
-        /// <summary>Advances scaled time and executes one complete logical frame.</summary>
+        /// <summary>
+        /// Advances scaled time and executes one complete logical frame. Per-callback failures are
+        /// contained and reported (see the type summary); the first failure of the frame that no
+        /// subscriber observed is rethrown after every phase of the frame has run.
+        /// </summary>
         public void Advance(double deltaSeconds)
         {
             ValidateDelta(deltaSeconds);
@@ -805,6 +1134,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             _advancing = true;
+            _heldFault = null;
+            Exception unobservedFault = null;
             try
             {
                 double previousTime = CurrentTime;
@@ -835,6 +1166,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 _currentStage = null;
                 _delayedBatchStarted = false;
                 _advancing = false;
+                unobservedFault = _heldFault;
+                _heldFault = null;
+            }
+
+            if (unobservedFault != null)
+            {
+                ExceptionDispatchInfo.Capture(unobservedFault).Throw();
             }
         }
 
@@ -842,8 +1180,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         {
             switch (stage)
             {
-                case PipelineStage.DrainDeferred:
-                    DrainDeferred();
+                case PipelineStage.ResumptionPoint:
+                    RunResumptionPoint();
                     return;
                 case PipelineStage.PreAnimation:
                     ReachPhase(SchedulerPhase.PreAnimation, deltaSeconds);
@@ -856,9 +1194,6 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     return;
                 case PipelineStage.ResumeDelayed:
                     ResumeDelayedThreads();
-                    return;
-                case PipelineStage.DrainSignals:
-                    DrainSignals();
                     return;
                 case PipelineStage.Heartbeat:
                     ReachPhase(SchedulerPhase.Heartbeat, deltaSeconds);
@@ -876,8 +1211,48 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
         private void ReachPhase(SchedulerPhase phase, double deltaSeconds)
         {
-            Action<SchedulerPhase, double> handler = PhaseReached;
-            handler?.Invoke(phase, deltaSeconds);
+            Action<SchedulerPhase, double>[] subscribers = _phaseReachedSubscribers;
+            for (int index = 0; index < subscribers.Length; index++)
+            {
+                try
+                {
+                    subscribers[index](phase, deltaSeconds);
+                }
+                catch (Exception exception)
+                {
+                    ReportHostFault(PhaseSubscriberSources[(int)phase], exception);
+                }
+            }
+        }
+
+        /// <summary>
+        /// One resumption point (R4.8, R5.4): deferred threads, then queued signal handlers, repeated
+        /// while either queue still holds work, up to <see cref="MaxDrainRoundsPerResumptionPoint"/>
+        /// rounds. A <c>task.defer</c> made inside a handler therefore runs before the pipeline moves
+        /// on (M2-11): a PreRender handler's deferral in the same frame, a PostSimulation handler's
+        /// before the delayed threads.
+        /// </summary>
+        private void RunResumptionPoint()
+        {
+            try
+            {
+                for (int round = 0; round < MaxDrainRoundsPerResumptionPoint; round++)
+                {
+                    DrainDeferred();
+                    DrainSignals();
+                    if (_deferredQueue.Count == 0 && _signalQueue.Count == 0)
+                    {
+                        break;
+                    }
+                }
+            }
+            finally
+            {
+                FlushPendingSignalFaults();
+                _signalChargeByOwner.Clear();
+                _signalOverloadReportedOwners.Clear();
+                _signalOverloadReportedForHost = false;
+            }
         }
 
         private void DrainDeferred()
@@ -950,8 +1325,6 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             _drainingSignals = true;
-            _signalCascadeChain = null;
-            Exception firstFailure = null;
             try
             {
                 while (_signalQueue.Count > 0)
@@ -970,30 +1343,19 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                         SignalInvocation invocation = _signalDrainBuffer[index];
                         _currentSignalChain = invocation.Chain;
                         _currentSignalTombstone = invocation.ReadableTombstone;
+                        _currentInvocationOwnerModId = invocation.Connection.OwnerModId;
                         try
                         {
                             invocation.Connection.InvokePending(invocation.Arguments);
                         }
-                        catch (Exception ex)
+                        catch (Exception exception)
                         {
-                            firstFailure = firstFailure ?? ex;
+                            ReportSignalHandlerFailure(invocation.Connection, exception);
                         }
                     }
 
-                    if (_signalCascadeChain != null)
-                    {
-                        _signalQueue.Clear();
-                        throw new RbxError(
-                            RbxErrorCode.SignalCascade,
-                            "signal cascade exceeded " + MaxSignalGenerations
-                            + " generations: " + string.Join(" -> ", _signalCascadeChain),
-                            "break the signal cycle or defer the next mutation to a later frame");
-                    }
-                }
-
-                if (firstFailure != null)
-                {
-                    ExceptionDispatchInfo.Capture(firstFailure).Throw();
+                    _currentInvocationOwnerModId = null;
+                    FlushPendingSignalFaults();
                 }
             }
             finally
@@ -1002,8 +1364,82 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 _currentSignalGeneration = 0;
                 _currentSignalChain = null;
                 _currentSignalTombstone = null;
-                _signalCascadeChain = null;
+                _currentInvocationOwnerModId = null;
                 _drainingSignals = false;
+            }
+        }
+
+        private void ReportSignalHandlerFailure(RbxScriptConnection connection, Exception exception)
+        {
+            string ownerModId = connection.OwnerModId;
+            if (string.IsNullOrWhiteSpace(ownerModId))
+            {
+                ReportHostFault(connection.SignalName + " handler", exception);
+                return;
+            }
+
+            ReportThreadFault(ownerModId, ToRbxError(exception, connection.SignalName + " handler"));
+        }
+
+        private bool TryChargeSignalInvocation(string ownerModId)
+        {
+            _signalChargeByOwner.TryGetValue(ownerModId, out int charged);
+            charged++;
+            _signalChargeByOwner[ownerModId] = charged;
+            return charged <= MaxSignalInvocationsPerOwner;
+        }
+
+        private bool ShouldReportSignalOverload(string ownerModId)
+        {
+            if (string.IsNullOrWhiteSpace(ownerModId))
+            {
+                if (_signalOverloadReportedForHost)
+                {
+                    return false;
+                }
+
+                _signalOverloadReportedForHost = true;
+                return true;
+            }
+
+            return _signalOverloadReportedOwners.Add(ownerModId);
+        }
+
+        private void NoteSignalOverload(string ownerModId, RbxError error)
+        {
+            // WHY queued instead of reported here: this runs inside a mod's own Fire call, in the middle
+            // of that mod's resume. A subscriber that quarantines the mod would kill the very thread that
+            // is still executing; the report waits for the drain's next safe point instead.
+            _pendingSignalFaults.Add(new PendingSignalFault(ownerModId, error));
+        }
+
+        private void FlushPendingSignalFaults()
+        {
+            if (_pendingSignalFaults.Count == 0 || _flushingSignalFaults)
+            {
+                return;
+            }
+
+            _flushingSignalFaults = true;
+            try
+            {
+                for (int index = 0; index < _pendingSignalFaults.Count; index++)
+                {
+                    PendingSignalFault fault = _pendingSignalFaults[index];
+                    if (string.IsNullOrWhiteSpace(fault.OwnerModId))
+                    {
+                        ReportHostFault("signal dispatch", fault.Error);
+                    }
+                    else
+                    {
+                        ReportThreadFault(fault.OwnerModId, fault.Error);
+                    }
+                }
+            }
+            finally
+            {
+                _pendingSignalFaults.Clear();
+                _flushingSignalFaults = false;
             }
         }
 
@@ -1175,6 +1611,12 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 {
                     _delayedBatchBuffer.Add(_hostHeap.Pop());
                 }
+
+                ThreadRecord poppedRecord = earliest.Record;
+                if (poppedRecord != null && IsLiveTimedEntry(earliest))
+                {
+                    poppedRecord.HasTimedEntry = false;
+                }
             }
 
             int nextIndex = 0;
@@ -1186,7 +1628,15 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     HostCallbackEntry hostCallback = entry as HostCallbackEntry;
                     if (hostCallback != null)
                     {
-                        hostCallback.Callback();
+                        try
+                        {
+                            hostCallback.Callback();
+                        }
+                        catch (Exception exception)
+                        {
+                            ReportHostFault("host callback", exception);
+                        }
+
                         continue;
                     }
 
@@ -1221,8 +1671,19 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                         && signalTimeout.Record.SignalWaitGeneration == signalTimeout.Generation
                         && _records.ContainsKey(signalTimeout.Record.Thread))
                     {
-                        ResumeThread(signalTimeout.Record,
-                            CopyArguments(signalTimeout.ResumeArguments()));
+                        object[] timeoutArguments;
+                        try
+                        {
+                            timeoutArguments = CopyArguments(signalTimeout.ResumeArguments());
+                        }
+                        catch (Exception exception)
+                        {
+                            HandleFault(signalTimeout.Record,
+                                ToRbxError(exception, "signal:Wait timeout"));
+                            continue;
+                        }
+
+                        ResumeThread(signalTimeout.Record, timeoutArguments);
                     }
                 }
             }
@@ -1256,6 +1717,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                         && _records.ContainsKey(wait.Record.Thread))
                     {
                         _waitHeap.Add(wait);
+                        wait.Record.HasTimedEntry = true;
                     }
 
                     continue;
@@ -1268,6 +1730,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                         && _records.ContainsKey(delay.Record.Thread))
                     {
                         _delayHeap.Add(delay);
+                        delay.Record.HasTimedEntry = true;
                     }
 
                     continue;
@@ -1280,6 +1743,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     && _records.ContainsKey(signalTimeout.Record.Thread))
                 {
                     _signalWaitTimeoutHeap.Add(signalTimeout);
+                    signalTimeout.Record.HasTimedEntry = true;
                 }
             }
         }
@@ -1352,22 +1816,34 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             if (record.Thread.IsDead || record.Thread.Status == RbxScriptThreadStatus.Dead)
             {
-                _records.Remove(record.Thread);
-                throw RbxError.BadArgument(
+                // WHY a fault and not a throw: the thread was finished outside the scheduler (a native
+                // coroutine.resume or coroutine.close of a task thread). Throwing here aborted the rest
+                // of the frame for every mod, and any mod could repeat it every frame on purpose.
+                HandleFault(record, RbxError.BadArgument(
                     "scheduler attempted to resume a dead thread owned by mod " + record.OwnerModId,
-                    "do not finish or kill a thread outside its owning scheduler");
+                    "do not finish or kill a thread outside its owning scheduler; "
+                    + "never coroutine.resume or coroutine.close a task thread"));
+                return;
             }
 
             record.State = ThreadScheduleState.Running;
             RbxInstance previousTombstone =
                 RbxScriptSignal.EnterTombstoneScope(record.ReadableTombstone);
+            string previousRunningOwner = _runningOwnerModId;
+            _runningOwnerModId = record.OwnerModId;
             RbxScriptThreadResumeResult result;
             try
             {
                 result = record.Thread.Resume(arguments ?? EmptyArguments);
             }
+            catch (Exception exception)
+            {
+                result = RbxScriptThreadResumeResult.Failure(
+                    ToRbxError(exception, "scheduler thread resume"));
+            }
             finally
             {
+                _runningOwnerModId = previousRunningOwner;
                 RbxScriptSignal.ExitTombstoneScope(previousTombstone);
             }
 
@@ -1380,15 +1856,49 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 return;
             }
 
-            if (record.Thread.IsDead || record.Thread.Status == RbxScriptThreadStatus.Dead)
+            if (record.State == ThreadScheduleState.Canceled)
             {
                 _records.Remove(record.Thread);
+                return;
+            }
+
+            if (record.Thread.IsDead || record.Thread.Status == RbxScriptThreadStatus.Dead)
+            {
+                RbxError terminalFault = record.Thread is IRbxScriptThreadTerminalFault faultSource
+                    ? faultSource.TerminalFault
+                    : null;
+                if (terminalFault != null)
+                {
+                    HandleFault(record, terminalFault);
+                    return;
+                }
+
+                _records.Remove(record.Thread);
+                RaiseThreadResumeSucceeded(record.OwnerModId, true);
                 return;
             }
 
             if (record.State == ThreadScheduleState.Running)
             {
                 record.State = ThreadScheduleState.Idle;
+            }
+
+            RaiseThreadResumeSucceeded(record.OwnerModId, false);
+        }
+
+        private void RaiseThreadResumeSucceeded(string ownerModId, bool completed)
+        {
+            Action<string, bool>[] subscribers = _threadResumeSucceededSubscribers;
+            for (int index = 0; index < subscribers.Length; index++)
+            {
+                try
+                {
+                    subscribers[index](ownerModId, completed);
+                }
+                catch (Exception exception)
+                {
+                    ReportHostFault("ThreadResumeSucceeded subscriber", exception);
+                }
             }
         }
 
@@ -1413,13 +1923,98 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
         private void ReportThreadFault(string ownerModId, RbxError error)
         {
-            Action<string, RbxError> handler = ThreadFaulted;
-            if (handler == null)
+            Action<string, RbxError>[] subscribers = _threadFaultedSubscribers;
+            if (subscribers.Length == 0)
             {
-                throw error;
+                HoldOrThrow(error);
+                return;
             }
 
-            handler(ownerModId, error);
+            for (int index = 0; index < subscribers.Length; index++)
+            {
+                try
+                {
+                    subscribers[index](ownerModId, error);
+                }
+                catch (Exception exception)
+                {
+                    ReportHostFault("ThreadFaulted subscriber", exception);
+                }
+            }
+        }
+
+        private void ReportHostFault(string source, Exception exception)
+        {
+            Action<string, Exception>[] subscribers = _hostFaultedSubscribers;
+            if (subscribers.Length == 0)
+            {
+                HoldOrThrow(exception);
+                return;
+            }
+
+            Exception subscriberFailure = null;
+            for (int index = 0; index < subscribers.Length; index++)
+            {
+                try
+                {
+                    subscribers[index](source, exception);
+                }
+                catch (Exception failure)
+                {
+                    subscriberFailure ??= failure;
+                }
+            }
+
+            if (subscriberFailure != null)
+            {
+                HoldOrThrow(subscriberFailure);
+            }
+        }
+
+        /// <summary>
+        /// Surfaces a failure nobody subscribed to observe. Outside <see cref="Advance"/> it is thrown
+        /// to the caller as before; inside a frame the first one is held and rethrown once every phase
+        /// has run, so one unobserved failure can no longer cut the frame short for every other mod.
+        /// </summary>
+        private void HoldOrThrow(Exception exception)
+        {
+            if (!_advancing)
+            {
+                ExceptionDispatchInfo.Capture(exception).Throw();
+                return;
+            }
+
+            _heldFault ??= exception;
+        }
+
+        private static RbxError ToRbxError(Exception exception, string source)
+        {
+            if (exception is RbxError error)
+            {
+                return error;
+            }
+
+            return RbxError.BadArgument(
+                source + " failed: " + exception.GetType().Name + ": " + exception.Message,
+                "fix the failing code; the scheduler dropped only this callback and kept the frame running");
+        }
+
+        private static TDelegate[] ToSubscriberArray<TDelegate>(TDelegate combined)
+            where TDelegate : Delegate
+        {
+            if (combined == null)
+            {
+                return Array.Empty<TDelegate>();
+            }
+
+            Delegate[] invocationList = combined.GetInvocationList();
+            TDelegate[] subscribers = new TDelegate[invocationList.Length];
+            for (int index = 0; index < invocationList.Length; index++)
+            {
+                subscribers[index] = (TDelegate)invocationList[index];
+            }
+
+            return subscribers;
         }
 
         private void KillRecord(ThreadRecord record)
@@ -1440,14 +2035,14 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             _records.Remove(record.Thread);
         }
 
+        /// <summary>
+        /// Detaches a record from its queued work before it is killed. The deferred queue and the timed
+        /// heaps are cleaned lazily (M2-26): each of their consumers already skips an entry whose record
+        /// is no longer live in the state that entry expects, so a cancel costs O(1) instead of a scan of
+        /// every heap and queue. Stale heap entries are counted and compacted in amortized O(1).
+        /// </summary>
         private void RemoveQueuedWork(ThreadRecord record)
         {
-            int touchedCount = _waitHeap.RemoveWhere(
-                entry => ReferenceEquals(entry.Record, record));
-            touchedCount += _delayHeap.RemoveWhere(
-                entry => ReferenceEquals(entry.Record, record));
-            touchedCount += _signalWaitTimeoutHeap.RemoveWhere(
-                entry => ReferenceEquals(entry.Record, record));
             lock (_completionGate)
             {
                 CompletionWaitEntry completionWait = record.CompletionWait;
@@ -1457,21 +2052,59 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 }
             }
 
-            int deferredCount = _deferredQueue.Count;
-            touchedCount += deferredCount;
-            for (int index = 0; index < deferredCount; index++)
+            record.DeferredArguments = null;
+            AbandonTimedEntry(record);
+        }
+
+        private void AbandonTimedEntry(ThreadRecord record)
+        {
+            if (!record.HasTimedEntry)
             {
-                ThreadRecord candidate = _deferredQueue.Dequeue();
-                if (!ReferenceEquals(candidate, record))
-                {
-                    _deferredQueue.Enqueue(candidate);
-                }
+                return;
             }
 
-            record.DeferredArguments = null;
+            record.HasTimedEntry = false;
+            _staleTimedEntries++;
+            if (_staleTimedEntries <= MinStaleTimedEntriesBeforeCompaction
+                || _staleTimedEntries * 2 <= TimedEntryCount)
+            {
+                return;
+            }
+
+            // WHY the state checks are re-applied here instead of trusting the counter: an entry can
+            // go stale in ways the counter never sees (a killed record's entry already popped into a
+            // batch), so compaction removes exactly the entries no consumer would resume.
+            int touchedCount = _waitHeap.RemoveWhere(_isStaleWait);
+            touchedCount += _delayHeap.RemoveWhere(_isStaleDelay);
+            touchedCount += _signalWaitTimeoutHeap.RemoveWhere(_isStaleSignalTimeout);
+            _staleTimedEntries = 0;
+            QueuedWorkScanCount += touchedCount;
             if (_promotingCompletions)
             {
                 CompletionPromotionTouchCount += touchedCount;
+            }
+        }
+
+        private bool IsLiveInState(ThreadRecord record, ThreadScheduleState state)
+        {
+            return record.State == state
+                   && record.Thread != null
+                   && _records.TryGetValue(record.Thread, out ThreadRecord live)
+                   && ReferenceEquals(live, record);
+        }
+
+        private bool IsLiveTimedEntry(TimedEntry entry)
+        {
+            switch (entry)
+            {
+                case WaitEntry wait:
+                    return !_isStaleWait(wait);
+                case DelayEntry delay:
+                    return !_isStaleDelay(delay);
+                case SignalWaitTimeoutEntry signalTimeout:
+                    return !_isStaleSignalTimeout(signalTimeout);
+                default:
+                    return false;
             }
         }
 
@@ -1633,13 +2266,18 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             return args == null || args.Length == 0 ? EmptyArguments : (object[])args.Clone();
         }
 
+        /// <summary>
+        /// Normalizes a scaled duration: negative values (negative infinity included) mean zero and
+        /// positive infinity is returned as is, which the callers treat as "never" (M2-17). Only NaN is
+        /// refused, because it names no point in time at all.
+        /// </summary>
         private static double ValidateAndNormalizeDuration(double seconds, string operation)
         {
-            if (double.IsNaN(seconds) || double.IsInfinity(seconds))
+            if (double.IsNaN(seconds))
             {
                 throw RbxError.BadArgument(
-                    operation + " duration must be finite",
-                    "pass a finite duration in scaled seconds");
+                    operation + " duration must be a number, not NaN",
+                    "pass a duration in scaled seconds; math.huge waits until the thread is cancelled");
             }
 
             return seconds < 0d ? 0d : seconds;

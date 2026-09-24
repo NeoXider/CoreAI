@@ -166,6 +166,45 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
         }
 
         [Test]
+        public void PooledSignalHandlers_EachReportTheirOwnSuccessfulCompletion()
+        {
+            ModScheduler scheduler = CreateScheduler(out _);
+            List<string> successes = new();
+            scheduler.ThreadResumeSucceeded += (ownerModId, completed) =>
+                successes.Add(ownerModId + ":" + completed);
+
+            for (int fire = 0; fire < 10; fire++)
+            {
+                scheduler.SpawnSignal(fire % 2 == 0 ? "mod-a" : "mod-b", new FakeThreadPlan(),
+                    Array.Empty<object>());
+            }
+
+            Assert.AreEqual(1, scheduler.PooledRecordCount, "the handlers still share one pooled record");
+            Assert.AreEqual(10, successes.Count, "every clean handler run is one success event");
+            for (int fire = 0; fire < 10; fire++)
+            {
+                Assert.AreEqual((fire % 2 == 0 ? "mod-a" : "mod-b") + ":True", successes[fire],
+                    "a reused record reports the owner of its current tenant, never a previous one");
+            }
+        }
+
+        [Test]
+        public void FaultedSignalHandler_ReportsNoSuccessAndIsNotPooled()
+        {
+            ModScheduler scheduler = CreateScheduler(out _);
+            int successes = 0;
+            scheduler.ThreadResumeSucceeded += (ownerModId, completed) => successes++;
+            scheduler.ThreadFaulted += (ownerModId, error) => { };
+
+            scheduler.SpawnSignal("mod-a", new FakeThreadPlan(failure: new RbxError(
+                RbxErrorCode.BudgetExceeded, "handler blew its budget", "yield sooner")),
+                Array.Empty<object>());
+
+            Assert.AreEqual(0, successes);
+            Assert.AreEqual(0, scheduler.PooledRecordCount);
+        }
+
+        [Test]
         public void ReusedRecord_StartsCleanForItsNextTenant()
         {
             ModScheduler scheduler = CreateScheduler(out FakeThreadFactory factory);

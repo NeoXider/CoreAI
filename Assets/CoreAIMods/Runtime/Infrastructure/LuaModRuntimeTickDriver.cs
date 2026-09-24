@@ -134,7 +134,12 @@ namespace CoreAI.Infrastructure.Lua
             gravity?.Invoke();
         }
 
-        /// <summary>Advances one scaled host frame in scheduler, signal, then runtime order.</summary>
+        /// <summary>
+        /// Advances one scaled host frame in scheduler, signal, then runtime order. The scheduler frame
+        /// and the runtime tick are contained separately: a failure that escapes
+        /// <c>ModScheduler.Advance</c> is logged and the runtime's timers and events still tick this
+        /// frame, and a failing tick is logged without stopping the next frame.
+        /// </summary>
         public void PumpFrame(float deltaSeconds)
         {
             if (_sessionController != null)
@@ -145,8 +150,28 @@ namespace CoreAI.Infrastructure.Lua
 
             // WHY nothing but Advance: the scheduler walks the phase pipeline and the Rbx bindings fire
             // each phase's signals from PhaseReached. Adding a second pump here fires them twice.
-            _scheduler?.Advance(deltaSeconds);
-            _runtime?.Tick(_actorContext, deltaSeconds);
+            try
+            {
+                _scheduler?.Advance(deltaSeconds);
+            }
+            catch (System.Exception exception)
+            {
+                // WHY caught here: Advance contains every per-callback failure itself and rethrows
+                // only one nobody subscribed to observe, after the frame ran. Letting it escape would
+                // still skip every mod's hooks_every timers and queued events below, every frame.
+                Debug.LogError("[LuaModRuntimeTickDriver] ModScheduler.Advance failed; the runtime "
+                               + "tick still runs this frame. " + exception);
+            }
+
+            try
+            {
+                _runtime?.Tick(_actorContext, deltaSeconds);
+            }
+            catch (System.Exception exception)
+            {
+                Debug.LogError("[LuaModRuntimeTickDriver] ILuaModRuntime.Tick failed; the next frame "
+                               + "still advances. " + exception);
+            }
         }
     }
 }

@@ -1,16 +1,19 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Infrastructure.Lua;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 {
@@ -577,23 +580,77 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_R4_8_TaskCancel_KillsPendingThreadAndDeadCancelErrors()
+        public void Lua_R4_8_M2_13_TaskCancel_KillsPendingThreadAndDeadCancelIsANoOp()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            // WHY a no-op: task.cancel closes the thread like coroutine.close, which accepts a dead
+            // coroutine; the mirror's task.yaml names only the running thread (and one that resumed
+            // another coroutine) as uncancellable. `task.cancel(self._t)` in a Destroy method must not
+            // abort the teardown because the task already ran.
+            stack.Runtime.LoadMod("m", @"
+                local pending = task.delay(0, function()
+                    store_set('ran', 'yes')
+                end)
+                task.cancel(pending)
+                local ok = pcall(task.cancel, pending)
+                store_set('cancelled_twice_ok', tostring(ok))
+                local finished = task.spawn(function() end)
+                local finishedOk = pcall(task.cancel, finished)
+                store_set('finished_cancel_ok', tostring(finishedOk))
+                local selfHandle
+                selfHandle = task.defer(function()
+                    local runningOk, runningErr = pcall(task.cancel, selfHandle)
+                    store_set('running_cancel_errors', tostring(not runningOk
+                        and string.find(tostring(runningErr), 'currently running', 1, true) ~= nil))
+                end)");
+
+            bindings.Scheduler.Advance(0d);
+            Assert.AreEqual("", store.Get("m", "ran"));
+            Assert.AreEqual("true", store.Get("m", "cancelled_twice_ok"));
+            Assert.AreEqual("true", store.Get("m", "finished_cancel_ok"));
+            Assert.AreEqual("true", store.Get("m", "running_cancel_errors"),
+                "cancelling the currently running thread must still raise");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("m"));
+        }
+
+        [Test]
+        public void Lua_M2_17_InfiniteWaitAndDelayParkUntilCancelled()
         {
             LuaCsRbxApiBindings bindings = new();
             MemoryStore store = new();
             LuaCsModStack stack = BuildStack(bindings, store);
 
             stack.Runtime.LoadMod("m", @"
-                local pending = task.delay(0, function()
-                    store_set('ran', 'yes')
+                local parkedDelay = task.delay(math.huge, function()
+                    store_set('delay_ran', 'yes')
                 end)
-                task.cancel(pending)
-                local ok, err = pcall(task.cancel, pending)
-                store_set('dead_cancel_errors', tostring(not ok and string.find(err, 'BAD_ARGUMENT') ~= nil))");
+                local sleeper = task.spawn(function()
+                    task.wait(math.huge)
+                    store_set('sleeper_woke', 'yes')
+                end)
+                task.delay(1, function()
+                    task.cancel(parkedDelay)
+                    task.cancel(sleeper)
+                    store_set('cancelled', 'yes')
+                end)
+                store_set('scheduled', 'yes')");
 
-            bindings.Scheduler.Advance(0d);
-            Assert.AreEqual("", store.Get("m", "ran"));
-            Assert.AreEqual("true", store.Get("m", "dead_cancel_errors"));
+            Assert.AreEqual("yes", store.Get("m", "scheduled"),
+                "task.delay(math.huge) and task.wait(math.huge) are accepted, not refused as non-finite");
+            bindings.Scheduler.Advance(0.5d);
+            int liveBeforeCancel = bindings.Scheduler.LiveThreadCount;
+            bindings.Scheduler.Advance(0.5d);
+
+            Assert.AreEqual("yes", store.Get("m", "cancelled"));
+            Assert.AreEqual(liveBeforeCancel - 3, bindings.Scheduler.LiveThreadCount,
+                "both parked threads and the canceller are gone");
+            bindings.Scheduler.Advance(1e6d);
+            Assert.AreEqual("", store.Get("m", "delay_ran"));
+            Assert.AreEqual("", store.Get("m", "sleeper_woke"));
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("m"));
         }
 
         [Test]
@@ -1014,10 +1071,153 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 end)
                 Instance.new('Folder', workspace)");
 
-            RbxError error = Assert.Throws<RbxError>(() => bindings.Scheduler.Advance(0d));
-            Assert.AreEqual(RbxErrorCode.SignalCascade, error.Code);
+            // WHY no throw: the cascade is reported to its mod and only its own chain is dropped; a
+            // throw here used to abort the rest of the frame for every loaded mod (M2-02).
+            Assert.DoesNotThrow(() => bindings.Scheduler.Advance(0d));
             Assert.AreEqual("10", store.Get("m", "count"));
-            StringAssert.Contains("Workspace.ChildAdded -> Workspace.ChildAdded", error.RawMessage);
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("m");
+            Assert.AreEqual(1, errors.Count,
+                "one cascade is one fault: " + string.Join(" || ", errors.Select(error => error.Error)));
+            StringAssert.Contains("SIGNAL_CASCADE", errors[0].Error);
+            StringAssert.Contains("Workspace.ChildAdded -> Workspace.ChildAdded", errors[0].Error);
+        }
+
+        [Test]
+        public void Lua_M2_02_CascadingModEveryFrame_OtherModKeepsHeartbeatAndTaskWait()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            stack.Runtime.LoadMod("cascading", @"
+                local RunService = game:GetService('RunService')
+                workspace.ChildAdded:Connect(function(child)
+                    if child.Name == 'Loop' then
+                        local folder = Instance.new('Folder')
+                        folder.Name = 'Loop'
+                        folder.Parent = workspace
+                    end
+                end)
+                RunService.Stepped:Connect(function()
+                    local seed = Instance.new('Folder')
+                    seed.Name = 'Loop'
+                    seed.Parent = workspace
+                end)");
+            stack.Runtime.LoadMod("healthy", @"
+                local RunService = game:GetService('RunService')
+                local beats = 0
+                RunService.Heartbeat:Connect(function()
+                    beats = beats + 1
+                    store_set('heartbeats', tostring(beats))
+                end)
+                task.spawn(function()
+                    local waits = 0
+                    while true do
+                        task.wait()
+                        waits = waits + 1
+                        store_set('waits', tostring(waits))
+                    end
+                end)");
+
+            const int frames = 5;
+            for (int frame = 0; frame < frames; frame++)
+            {
+                Assert.DoesNotThrow(() => bindings.Scheduler.Advance(1d / 60d),
+                    "a cascading mod must not abort the frame for every other mod");
+            }
+
+            Assert.AreEqual(frames.ToString(CultureInfo.InvariantCulture),
+                store.Get("healthy", "heartbeats"), "the healthy mod's Heartbeat ran every frame");
+            Assert.AreEqual(frames.ToString(CultureInfo.InvariantCulture),
+                store.Get("healthy", "waits"), "the healthy mod's task.wait loop resumed every frame");
+            IReadOnlyList<LuaModHandlerError> errors =
+                stack.Runtime.GetRecentHandlerErrors("cascading");
+            Assert.AreEqual(frames, errors.Count,
+                "exactly one attributed fault per cascading frame: "
+                + string.Join(" || ", errors.Select(error => error.Error)));
+            Assert.IsTrue(errors.All(error => error.Error.Contains("SIGNAL_CASCADE")));
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("healthy"));
+        }
+
+        [Test]
+        public void Lua_M2_02_NativeResumeOfATaskThread_FaultsOnlyItsModWhenTheWaitExpires()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            List<string> faults = new();
+            bindings.Scheduler.ThreadFaulted += (string modId, RbxError error) =>
+                faults.Add(modId + ":" + error.Code);
+
+            stack.Runtime.LoadMod("healthy", @"
+                local beats = 0
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    beats = beats + 1
+                    store_set('beats', tostring(beats))
+                end)");
+            // WHY this shape: a native coroutine.resume finishes the task thread outside the scheduler
+            // while its task.wait is still queued; when the wait expires the scheduler finds it dead.
+            stack.Runtime.LoadMod("resumer", @"
+                local co
+                task.spawn(function()
+                    co = coroutine.running()
+                    task.wait(0.5)
+                end)
+                coroutine.resume(co)
+                store_set('status', coroutine.status(co))");
+
+            Assert.AreEqual("dead", store.Get("resumer", "status"));
+            Assert.DoesNotThrow(() => bindings.Scheduler.Advance(0.5d),
+                "resuming a thread that died elsewhere is that mod's fault, not a frame abort");
+
+            Assert.AreEqual("1", store.Get("healthy", "beats"));
+            CollectionAssert.AreEqual(new[] { "resumer:BadArgument" }, faults);
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("resumer");
+            Assert.AreEqual(1, errors.Count);
+            StringAssert.Contains("dead thread", errors[0].Error);
+
+            Assert.DoesNotThrow(() => bindings.Scheduler.Advance(0.5d));
+            Assert.AreEqual(1, faults.Count, "the dead thread is reported once and then forgotten");
+        }
+
+        [Test]
+        public void TickDriver_ContainsAdvanceAndTickSeparately()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            stack.Runtime.LoadMod("m", @"
+                hooks_every(0, function()
+                    store_set('ticks', tostring((tonumber(store_get('ticks')) or 0) + 1))
+                end)");
+            // WHY a PhaseReached subscriber: with no HostFaulted subscriber its failure is rethrown by
+            // Advance once the frame completes, which is exactly what reaches the driver.
+            bindings.Scheduler.PhaseReached += (SchedulerPhase phase, double delta) =>
+            {
+                if (phase == SchedulerPhase.Heartbeat)
+                {
+                    throw new System.InvalidOperationException("driver-test phase failure");
+                }
+            };
+            GameObject driverObject = new("LuaModRuntimeTickDriver");
+            try
+            {
+                LuaModRuntimeTickDriver driver = driverObject.AddComponent<LuaModRuntimeTickDriver>();
+                ActorContext hostActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                driver.Initialize(stack.Runtime, hostActor, bindings.Scheduler);
+
+                LogAssert.Expect(LogType.Error,
+                    new Regex("ModScheduler\\.Advance failed.*driver-test phase failure"));
+                Assert.DoesNotThrow(() => driver.PumpFrame(0.1f));
+
+                Assert.AreEqual("1", store.Get("m", "ticks"),
+                    "the runtime still ticks in a frame whose Advance threw");
+            }
+            finally
+            {
+                Object.DestroyImmediate(driverObject);
+            }
         }
 
         [Test]

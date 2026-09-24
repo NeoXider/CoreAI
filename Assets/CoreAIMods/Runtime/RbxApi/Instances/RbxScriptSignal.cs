@@ -37,6 +37,16 @@ namespace CoreAI.Mods.Rbx.Instances
 
         internal string SignalName => _signal.SignalName;
 
+        /// <summary>
+        /// The mod that opened this connection, stamped by <see cref="ModConnectionRegistry.Track"/>;
+        /// null for host-owned connections and the ownerless one-off surface. The scheduler attributes a
+        /// handler failure, a signal cascade and a fan-out budget overflow to this owner (M2-02).
+        /// </summary>
+        public string OwnerModId { get; internal set; }
+
+        /// <summary>Index of this connection in its signal's connection list; -1 once removed.</summary>
+        internal int SignalSlot { get; set; } = -1;
+
         /// <summary>Roblox RBXScriptConnection.Connected.</summary>
         public bool Connected => _disconnectKind == DisconnectKind.None;
 
@@ -119,10 +129,21 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public sealed class RbxScriptSignal
     {
+        private const int MinTombstonesBeforeCompaction = 16;
+
         private static RbxInstance _readableTombstone;
 
         private readonly string _signalName;
+
+        /// <summary>
+        /// Connections in connect order. A disconnected connection leaves a null tombstone in its slot
+        /// so removal is O(1) instead of a List.Remove scan (M2-26); tombstones are compacted in
+        /// amortized O(1), and compaction keeps the connect order that dispatch follows.
+        /// </summary>
         private readonly List<RbxScriptConnection> _connections = new();
+        private int _liveConnectionCount;
+        private int _tombstoneCount;
+        private bool _disconnectingAll;
         private ModScheduler _scheduler;
 
         public RbxScriptSignal(string signalName)
@@ -136,7 +157,13 @@ namespace CoreAI.Mods.Rbx.Instances
         public string SignalName => _signalName;
 
         /// <summary>True when at least one live handler or waiter is connected.</summary>
-        public bool HasConnections => _connections.Count > 0;
+        public bool HasConnections => _liveConnectionCount > 0;
+
+        /// <summary>Connection slots held, tombstones included (M2-26 regression counter).</summary>
+        internal int ConnectionSlotCount => _connections.Count;
+
+        /// <summary>Connections moved by tombstone compaction (M2-26 regression counter).</summary>
+        internal long CompactionMoveCount { get; private set; }
 
         public RbxScriptConnection Connect(object handler)
         {
@@ -180,7 +207,7 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             if (_scheduler != null && !ReferenceEquals(_scheduler, scheduler)
-                && _connections.Count > 0)
+                && _liveConnectionCount > 0)
             {
                 throw RbxError.BadArgument(
                     _signalName + " is already bound to another ModScheduler",
@@ -197,16 +224,27 @@ namespace CoreAI.Mods.Rbx.Instances
 
         internal void DisconnectAll()
         {
-            if (_connections.Count == 0)
+            if (_liveConnectionCount == 0)
             {
                 return;
             }
 
-            RbxScriptConnection[] snapshot = _connections.ToArray();
-            for (int index = 0; index < snapshot.Length; index++)
+            // WHY no snapshot: disconnecting only turns slots into tombstones and never calls out, so
+            // the list can be walked in place; compaction is held off until the walk is over.
+            _disconnectingAll = true;
+            try
             {
-                snapshot[index].DisconnectFromDestroy();
+                for (int index = 0; index < _connections.Count; index++)
+                {
+                    _connections[index]?.DisconnectFromDestroy();
+                }
             }
+            finally
+            {
+                _disconnectingAll = false;
+            }
+
+            CompactIfWorthwhile();
         }
 
         internal static bool CanReadTombstone(RbxInstance instance)
@@ -228,22 +266,77 @@ namespace CoreAI.Mods.Rbx.Instances
 
         internal void Remove(RbxScriptConnection connection)
         {
-            _connections.Remove(connection);
+            int slot = connection.SignalSlot;
+            if (slot < 0 || slot >= _connections.Count
+                || !ReferenceEquals(_connections[slot], connection))
+            {
+                return;
+            }
+
+            _connections[slot] = null;
+            connection.SignalSlot = -1;
+            _liveConnectionCount--;
+            _tombstoneCount++;
+            if (!_disconnectingAll)
+            {
+                CompactIfWorthwhile();
+            }
+        }
+
+        private void CompactIfWorthwhile()
+        {
+            if (_liveConnectionCount == 0)
+            {
+                _connections.Clear();
+                _tombstoneCount = 0;
+                return;
+            }
+
+            if (_tombstoneCount < MinTombstonesBeforeCompaction
+                || _tombstoneCount * 2 < _connections.Count)
+            {
+                return;
+            }
+
+            int writeIndex = 0;
+            for (int readIndex = 0; readIndex < _connections.Count; readIndex++)
+            {
+                RbxScriptConnection connection = _connections[readIndex];
+                if (connection == null)
+                {
+                    continue;
+                }
+
+                if (writeIndex != readIndex)
+                {
+                    _connections[writeIndex] = connection;
+                    connection.SignalSlot = writeIndex;
+                    CompactionMoveCount++;
+                }
+
+                writeIndex++;
+            }
+
+            _connections.RemoveRange(writeIndex, _connections.Count - writeIndex);
+            _tombstoneCount = 0;
         }
 
         private void FireCore(RbxInstance readableTombstone, object[] args)
         {
-            if (_connections.Count == 0)
+            if (_liveConnectionCount == 0)
             {
                 return;
             }
 
             object[] arguments = args ?? Array.Empty<object>();
-            RbxScriptConnection[] snapshot = _connections.ToArray();
-            for (int index = 0; index < snapshot.Length; index++)
+            // WHY no snapshot copy: queueing an invocation never calls out (handlers run later in the
+            // scheduler's drain), so nothing can connect or disconnect while this loop runs. The count
+            // is still captured up front so a connection made later can never see this fire (R5.5).
+            int slotCount = _connections.Count;
+            for (int index = 0; index < slotCount; index++)
             {
-                RbxScriptConnection connection = snapshot[index];
-                if (connection.TryQueueInvocation())
+                RbxScriptConnection connection = _connections[index];
+                if (connection != null && connection.TryQueueInvocation())
                 {
                     connection.Scheduler.EnqueueSignalInvocation(
                         connection, arguments, readableTombstone);
@@ -268,7 +361,9 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             RbxScriptConnection connection = new(this, _scheduler, action, once);
+            connection.SignalSlot = _connections.Count;
             _connections.Add(connection);
+            _liveConnectionCount++;
             return connection;
         }
     }
