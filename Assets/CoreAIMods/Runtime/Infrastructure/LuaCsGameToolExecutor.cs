@@ -726,6 +726,17 @@ namespace CoreAI.Mods.WorldPackages
             {
                 request = await _service.RequestAutoLoadAsync(actor, name, cancellationToken);
             }
+            catch (RbxWorldLoadRefusedException ex)
+            {
+                // WHY before the base-class catch: a session-rule refusal carries its own status
+                // (network_sessions_active tells the model to wait for clients to leave, not to pick
+                // another autosave), and the base-class catch would flatten it to invalid_package.
+                return RefuseUnloadable(
+                    name,
+                    ex.Status,
+                    "Autosave '" + name + "' cannot be loaded into this session: " + ex.Message
+                    + " The tool was NOT executed.");
+            }
             catch (System.IO.FileNotFoundException)
             {
                 return RefuseUnloadable(name, NotFoundStatus, DescribeNotFound(name));

@@ -1301,6 +1301,26 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             CollectionAssert.AreEqual(new[] { ValidAutoName }, service.RequestedAutoFiles);
         }
 
+        [TestCase("refused-acl", "invalid_package")]
+        [TestCase("refused-network", "network_sessions_active")]
+        public async Task LoadAutoSaveTool_SessionRefusals_ReportTheRefusalsOwnStatus(
+            string fault,
+            string expectedStatus)
+        {
+            RecordingRuntimeService service = new() { AutoLoadFault = CreateManualLoadFault(fault) };
+            LoadAutoSaveLlmTool tool = new(service, ToolIdentity(), BuiltInAgentRoleIds.Programmer);
+
+            JObject json = JObject.Parse(await tool.ExecuteAsync(ValidAutoName));
+
+            AssertUnloadableAutosave(json, ValidAutoName, expectedStatus);
+            StringAssert.Contains("cannot be loaded into this session", (string)json["error"],
+                "A session-rule refusal is not reported as a corrupt package.");
+            StringAssert.Contains("Injected", (string)json["error"], "The refusal's reason is reported to the model.");
+            StringAssert.DoesNotContain("Pick another autosave", (string)json["error"],
+                "Another autosave would be refused by the same session rule.");
+            CollectionAssert.AreEqual(new[] { ValidAutoName }, service.RequestedAutoFiles);
+        }
+
         [Test]
         public void LoadAutoSaveTool_ServiceCancellation_PropagatesInsteadOfBecomingAResult()
         {

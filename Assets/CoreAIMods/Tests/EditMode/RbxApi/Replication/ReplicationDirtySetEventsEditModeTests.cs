@@ -308,6 +308,56 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
             Assert.AreEqual(1, _dirty.DeltasFor("anyone").Count);
         }
 
+        [Test]
+        public void ADestroyedServerStorageChild_IsNoDeltaForAnyStream()
+        {
+            // WHY: a removal handed to a client that never saw the instance tells it that the server
+            // kept an object there, under which id, and when it went.
+            RbxInstance storage = ((RbxDataModel)_registry.WorldRoot.Parent).GetService("ServerStorage");
+            RbxInstance secret = _registry.Create("Folder");
+            secret.Parent = storage;
+            ReplicationStream alice = new(_dirty, "alice");
+            ReplicationStream bob = new(_dirty, "bob");
+            alice.PlanWorld();
+            bob.PlanWorld();
+            _dirty.Clear();
+
+            secret.Destroy();
+
+            Assert.AreEqual(1, _dirty.Pending.Count(delta => delta.Removed), "precondition: the removal is pending");
+            Assert.IsEmpty(_dirty.DeltasFor(alice));
+            Assert.IsEmpty(_dirty.DeltasFor(bob));
+            Assert.IsNull(alice.Plan(), "and the planner sends nothing either");
+        }
+
+        [Test]
+        public void ADestroyedInstanceTheStreamKnows_IsARemovalDeltaForThatStream()
+        {
+            ReplicationStream alice = new(_dirty, "alice");
+            ReplicationStream fresh = new(_dirty, "fresh");
+            alice.PlanWorld();
+            _dirty.Clear();
+
+            _part.Destroy();
+
+            ReplicationDelta removal = _dirty.DeltasFor(alice).Single(delta => delta.InstanceId == _part.Id);
+            Assert.IsTrue(removal.Removed);
+            Assert.IsFalse(_dirty.DeltasFor(fresh).Any(delta => delta.InstanceId == _part.Id),
+                "a stream that never received the part is not told it went");
+            Assert.AreEqual(ReplicationOperationKind.Remove,
+                alice.Plan().Operations.Single(op => op.InstanceId == _part.Id).Kind);
+        }
+
+        [Test]
+        public void Negative_DeltasFor_AStreamOfAnotherDirtySet_IsRefused()
+        {
+            using ReplicationDirtySet other = new(_registry);
+            ReplicationStream foreign = new(other, "alice");
+
+            Assert.Throws<ArgumentException>(() => _dirty.DeltasFor(foreign));
+            Assert.Throws<ArgumentNullException>(() => _dirty.DeltasFor((ReplicationStream)null));
+        }
+
         private ReplicationDelta Only(RbxInstance instance)
         {
             IEnumerable<ReplicationDelta> matches = _dirty.Pending.Where(delta => delta.InstanceId == instance.Id);

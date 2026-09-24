@@ -326,6 +326,35 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
         }
 
         [Test]
+        public void PlanWorld_ForARecipientThatHeldSomething_IsABatchEvenWhenItMayNowSeeNothing()
+        {
+            // WHY: that empty world is the only answer that tells a resyncing replica to drop what it
+            // holds; null would leave its resync unanswered.
+            InstanceRegistry registry = new(
+                binder: new InMemoryInstanceBackingBinder(),
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion,
+                worldId: "blind-world");
+            ToggleFilter filter = new();
+            using ReplicationDirtySet dirty = new(registry, filter);
+            DataModelBootstrap.CreateGame(registry);
+            ReplicationStream held = new(dirty, "alice");
+            ReplicationStream never = new(dirty, "bob");
+            Assert.IsNotNull(held.PlanWorld(), "precondition: alice was sent a world");
+            dirty.Clear();
+            filter.Visible = false;
+
+            ReplicationBatchPlan emptied = held.PlanWorld();
+            ReplicationBatchPlan nothing = never.PlanWorld();
+
+            Assert.IsNotNull(emptied);
+            Assert.IsEmpty(emptied.Operations);
+            Assert.AreEqual(2L, emptied.Sequence, "the empty world takes a sequence like any batch");
+            Assert.AreEqual(0, held.KnownCount);
+            Assert.IsNull(nothing, "a recipient that held nothing and sees nothing is sent nothing");
+            Assert.AreEqual(0L, never.LastSequence);
+        }
+
+        [Test]
         public void Negative_AStreamOverAWorldItsDirtySetNeverSaw_RefusesToPlan_UntilSeeded()
         {
             InstanceRegistry registry = new(
@@ -440,6 +469,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
         {
             _registry.TryGetRecord(instance.Id, out InstanceRecord record);
             return record.Revision;
+        }
+
+        private sealed class ToggleFilter : IReplicationFilter
+        {
+            public bool Visible { get; set; } = true;
+
+            public bool IsVisibleTo(string recipientActorId, RbxInstance instance)
+            {
+                return Visible && DefaultReplicationFilter.Instance.IsVisibleTo(recipientActorId, instance);
+            }
         }
 
         private sealed class HideArchivable : IReplicationFilter

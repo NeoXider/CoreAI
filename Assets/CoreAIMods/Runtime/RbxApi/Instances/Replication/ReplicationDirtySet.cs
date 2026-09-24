@@ -71,7 +71,7 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
     /// reaches it with the gate still held by the destroying thread. The lock is therefore taken
     /// both with and without the gate, and it cannot deadlock against the gate because nothing that
     /// runs under it can take the gate: a mark touches the dictionary and one entry, a view copies
-    /// the entries into an array, and <see cref="DeltasFor"/> asks the registry and the filter only
+    /// the entries into an array, and <see cref="DeltasFor(string)"/> asks the registry and the filter only
     /// after the lock is released. Lock order is always gate then set, never set then gate. An
     /// uncontended monitor is what every setter can afford; a lock-free structure would buy nothing
     /// on that path and cost the per-entry member list its simplicity.
@@ -258,8 +258,10 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         }
 
         /// <summary>
-        /// Takes this step's deltas for one recipient without consuming them; the caller clears
-        /// the set once every recipient has been served.
+        /// Takes this step's deltas for one recipient known only by actor id, without consuming them;
+        /// the caller clears the set once every recipient has been served. Every removal is included,
+        /// because nothing here knows which ids the recipient holds; a recipient served over a wire
+        /// is served through <see cref="DeltasFor(ReplicationStream)"/>, which knows.
         /// </summary>
         /// <remarks>
         /// WHY visibility is decided per recipient at publish time: two clients in the same world do
@@ -268,6 +270,41 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         /// </remarks>
         public IReadOnlyList<ReplicationDelta> DeltasFor(string recipientActorId)
         {
+            return Collect(recipientActorId, null);
+        }
+
+        /// <summary>
+        /// Takes this step's deltas for the recipient a stream serves, without consuming them: the
+        /// visible changes, and a removal only for an id the stream knows the recipient holds — the
+        /// rule <see cref="ReplicationStream.Plan"/> plans by. Read it before the stream plans the
+        /// step: planning forgets the ids it removes.
+        /// </summary>
+        /// <remarks>
+        /// WHY a removal is not sent to every recipient: its id and its timing are the server's
+        /// information. A ServerStorage child destroyed would tell every client that the server kept
+        /// an object there, under which id, and when it went. The instance is already gone, so the
+        /// filter has nothing left to ask; the stream's record of what the recipient holds is the one
+        /// thing that still knows.
+        /// </remarks>
+        public IReadOnlyList<ReplicationDelta> DeltasFor(ReplicationStream recipient)
+        {
+            if (recipient == null)
+            {
+                throw new ArgumentNullException(nameof(recipient));
+            }
+
+            if (!ReferenceEquals(recipient.Dirty, this))
+            {
+                throw new ArgumentException(
+                    "The stream for '" + recipient.RecipientActorId + "' plans from another dirty set, so "
+                    + "what it knows says nothing about this one.", nameof(recipient));
+            }
+
+            return Collect(recipient.RecipientActorId, recipient);
+        }
+
+        private List<ReplicationDelta> Collect(string recipientActorId, ReplicationStream knownBy)
+        {
             List<ReplicationDelta> visible = new();
             IReadOnlyList<ReplicationDelta> pending = Pending;
             for (int index = 0; index < pending.Count; index++)
@@ -275,10 +312,15 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
                 ReplicationDelta delta = pending[index];
                 if (delta.Removed)
                 {
-                    // WHY a removal goes to everyone: the instance is already gone, so the filter has
-                    // nothing left to inspect, and sending it to a client that never saw the instance
-                    // is harmless — it removes nothing.
-                    visible.Add(delta);
+                    // WHY a removal is judged by what the recipient holds and not by the filter: the
+                    // instance is already gone, so the filter has nothing left to inspect.
+                    // TODO: MVP12 wire phase — retire the actor-id overload once no caller lacks a
+                    // stream; it is the one path that still hands out removals for unseen ids.
+                    if (knownBy == null || knownBy.Knows(delta.InstanceId))
+                    {
+                        visible.Add(delta);
+                    }
+
                     continue;
                 }
 

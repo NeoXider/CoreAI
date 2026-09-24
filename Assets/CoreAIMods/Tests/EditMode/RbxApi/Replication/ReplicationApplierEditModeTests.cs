@@ -123,6 +123,301 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
         }
 
         [Test]
+        public void AWorldAfterBeginResync_IsAppliedOntoTheReplicaThatHoldsIt_InPlace()
+        {
+            // WHY this is the regression: before BeginResync, the only cure for a gap was
+            // CompleteResync plus the world batch, and the world's first spawn for an id the replica
+            // held was a protocol violation, so a replica that lost one batch stayed in resync for good.
+            _applier.Apply(Join(), _state);
+            RbxInstance workspace = Get(WorkspaceId);
+            RbxStringValue greeting = (RbxStringValue)Get(ValueId);
+            Assert.AreEqual(ReplicationApplyStatus.GapDetected, _applier.Apply(Batch(3L), _state).Status);
+            InstanceSnapshot renamed = Node(ValueId, WorkspaceId, "StringValue", "Farewell");
+            renamed.Value = new ValueSnapshot { StringValue = "bye" };
+            _state.Replace(renamed);
+            _state.Add(Node(9UL, WorkspaceId, "Folder", "Arrived"));
+
+            _applier.BeginResync(4L);
+            Assert.IsFalse(_applier.NeedsResync, "the world is on its way; nothing is dropped any more");
+            Assert.IsTrue(_applier.IsAwaitingWorld);
+            ReplicationApplyResult result = _applier.Apply(Batch(4L, Spawn(GameId, 1L), Spawn(WorkspaceId, 6L),
+                Spawn(ValueId, 7L, ReplicationMembers.Name, ReplicationMembers.Archivable, ReplicationMembers.Value),
+                Spawn(9UL, 1L)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, result.Status, result.Detail);
+            Assert.AreEqual(1, result.Spawned, "only the id the replica lacked is created");
+            Assert.AreEqual(3, result.Patched, "the ids the replica held are brought up to date in place");
+            Assert.AreEqual(0, result.Removed);
+            Assert.AreSame(workspace, Get(WorkspaceId), "an instance the server still has keeps its identity");
+            Assert.AreSame(greeting, Get(ValueId));
+            Assert.AreSame(workspace, _replica.WorldRoot);
+            Assert.AreEqual("Farewell", greeting.Name);
+            Assert.AreEqual("bye", greeting.Value);
+            Assert.AreSame(workspace, Get(9UL).Parent);
+            _replica.TryGetRecord(greeting.Id, out InstanceRecord record);
+            Assert.AreEqual(7L, record.Revision, "the world's revision is stamped on the held instance");
+            Assert.IsFalse(record.IsLocallyDiverged, "the world is the server's write, not the client's divergence");
+            Assert.AreEqual(5L, _applier.ExpectedSequence);
+            Assert.IsFalse(_applier.IsAwaitingWorld);
+            Assert.IsFalse(_applier.NeedsResync);
+            Assert.AreEqual(1, _resyncs.Count, "only the gap asked for the world; the world itself is no fault");
+            Assert.IsFalse(_replica.IsApplyingReplication);
+        }
+
+        [Test]
+        public void Negative_CompleteResyncAlone_StillRefusesAWorldOntoAReplicaThatHoldsIt()
+        {
+            // WHY pinned: CompleteResync declares a replica rebuilt by other means, so an ordinary
+            // spawn for a held id stays a violation after it; only BeginResync arms the in-place world.
+            _applier.Apply(Join(), _state);
+            _applier.Apply(Batch(3L), _state);
+            _applier.CompleteResync(4L);
+
+            ReplicationApplyResult result = _applier.Apply(
+                Batch(4L, Spawn(GameId, 1L), Spawn(WorkspaceId, 5L), Spawn(ValueId, 2L)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.ProtocolViolation, result.Status);
+            StringAssert.Contains("already holds", result.Detail);
+            Assert.IsFalse(_applier.IsAwaitingWorld);
+        }
+
+        [Test]
+        public void AWorld_RemovesTheServerInstancesItNoLongerNames_AndKeepsTheReplicasOwn()
+        {
+            _applier.Apply(Join(), _state);
+            _state.Add(Node(9UL, WorkspaceId, "Folder", "Crates"));
+            _state.Add(Node(10UL, 9UL, "Part", "Crate"));
+            _applier.Apply(Batch(2L, Spawn(9UL, 1L), Spawn(10UL, 1L)), _state);
+            RbxInstance crates = Get(9UL);
+            RbxInstance crate = Get(10UL);
+            RbxInstance kept = _replica.CreateScripted("Part");
+            kept.Name = "LocalMarker";
+            kept.Parent = Get(WorkspaceId);
+            RbxInstance underCrates = _replica.CreateScripted("Part");
+            underCrates.Parent = crates;
+
+            _applier.BeginResync(3L);
+            ReplicationApplyResult result = _applier.Apply(
+                Batch(3L, Spawn(GameId, 1L), Spawn(WorkspaceId, 5L), Spawn(ValueId, 2L)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, result.Status, result.Detail);
+            Assert.AreEqual(2, result.Removed, "both server instances the world no longer names are removed");
+            Assert.IsTrue(crates.IsDestroyed);
+            Assert.IsTrue(crate.IsDestroyed);
+            Assert.IsFalse(_replica.TryGet(new InstanceId(9UL), out _));
+            Assert.IsTrue(kept.Id.IsLocallyAssigned);
+            Assert.IsFalse(kept.IsDestroyed, "the replica's own instance is not the world's to remove");
+            Assert.AreSame(Get(WorkspaceId), kept.Parent);
+            Assert.AreEqual("LocalMarker", kept.Name);
+            Assert.IsTrue(underCrates.IsDestroyed, "a local instance under a removed one goes with it");
+            Assert.IsEmpty(_resyncs);
+        }
+
+        [Test]
+        public void AWorld_ClearsTheAttributesTagsAndReferencesItNoLongerNames()
+        {
+            _applier.Apply(Join(), _state);
+            InstanceSnapshot tagged = Node(ValueId, WorkspaceId, "StringValue", "Greeting");
+            tagged.Attributes.Add(new AttributeSnapshot { Name = "Hp", Kind = AttributeValueKind.Number, NumberValue = 3d });
+            tagged.Tags.Add("Enemy");
+            _state.Replace(tagged);
+            InstanceSnapshot pointer = Node(11UL, WorkspaceId, "ObjectValue", "Pointer");
+            pointer.Value = new ValueSnapshot { ObjectTargetId = ValueId };
+            _state.Add(pointer);
+            _applier.Apply(Batch(2L, Spawn(11UL, 1L, ReplicationMembers.Name, ReplicationMembers.Value),
+                Patch(ValueId, 3L, ReplicationMembers.Attribute("Hp"), ReplicationMembers.Tag("Enemy"))), _state);
+            RbxInstance greeting = Get(ValueId);
+            RbxObjectValue objectValue = (RbxObjectValue)Get(11UL);
+            Assert.AreEqual(3d, greeting.GetAttribute("Hp"), "precondition: the attribute arrived");
+            Assert.IsTrue(greeting.HasTag("Enemy"), "precondition: the tag arrived");
+            Assert.AreSame(greeting, objectValue.Value, "precondition: the reference resolved");
+            Assert.AreEqual(1, _applier.TrackedReferenceCount);
+            _state.Replace(Node(ValueId, WorkspaceId, "StringValue", "Greeting"));
+            _state.Replace(Node(11UL, WorkspaceId, "ObjectValue", "Pointer"));
+
+            _applier.BeginResync(3L);
+            ReplicationApplyResult result = _applier.Apply(Batch(3L, Spawn(GameId, 1L), Spawn(WorkspaceId, 5L),
+                Spawn(ValueId, 4L), Spawn(11UL, 2L)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, result.Status, result.Detail);
+            Assert.IsNull(greeting.GetAttribute("Hp"), "an attribute the world does not name was cleared on the server");
+            Assert.IsFalse(greeting.HasTag("Enemy"), "a tag the world does not name was removed on the server");
+            Assert.IsNull(objectValue.Value, "a reference the world does not name is nil, as on a fresh spawn");
+            Assert.AreEqual(0, _applier.TrackedReferenceCount, "and it leaves the ledger");
+            Assert.IsEmpty(_resyncs);
+        }
+
+        [Test]
+        public void AnEmptyWorld_RemovesEveryServerInstance_AndTheReplicaCanBeSeededAgain()
+        {
+            _applier.Apply(Join(), _state);
+            RbxInstance detached = _replica.CreateScripted("Folder");
+
+            _applier.BeginResync(2L);
+            ReplicationApplyResult emptied = _applier.Apply(Batch(2L), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, emptied.Status, emptied.Detail);
+            Assert.AreEqual(3, emptied.Removed);
+            Assert.AreEqual(1, _replica.Count, "only the replica's own instance is left");
+            Assert.IsFalse(detached.IsDestroyed);
+            Assert.IsNull(_replica.WorldRoot, "the removed Workspace is no longer the world root");
+
+            ReplicationApplyResult reseeded = _applier.Apply(
+                Batch(3L, Spawn(GameId, 1L), Spawn(WorkspaceId, 5L), Spawn(ValueId, 2L)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, reseeded.Status, reseeded.Detail);
+            Assert.AreSame(Get(WorkspaceId), _replica.WorldRoot);
+            Assert.IsEmpty(_resyncs);
+        }
+
+        [Test]
+        public void AFailedWorld_AsksForTheWorldAgain_AndTheNextWorldStillConverges()
+        {
+            _applier.Apply(Join(), _state);
+            _state.Add(Node(9UL, WorkspaceId, "Folder", "Landed"));
+            InstanceSnapshot counter = Node(10UL, WorkspaceId, "IntValue", "Counter");
+            counter.Value = new ValueSnapshot { StringValue = "not-a-number" };
+            _state.Add(counter);
+            _applier.BeginResync(2L);
+
+            ReplicationApplyResult failed = _applier.Apply(Batch(2L, Spawn(GameId, 1L), Spawn(WorkspaceId, 5L),
+                Spawn(ValueId, 2L), Spawn(9UL, 1L), Spawn(10UL, 1L, ReplicationMembers.Name, ReplicationMembers.Value)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.ProtocolViolation, failed.Status);
+            Assert.IsTrue(_applier.NeedsResync);
+            Assert.IsFalse(_applier.IsAwaitingWorld, "a refused world is spent; the next resync arms a new one");
+            Assert.AreEqual(1, _resyncs.Count);
+            RbxInstance landed = Get(9UL);
+            Assert.AreEqual(ReplicationApplyStatus.AwaitingResync, _applier.Apply(Batch(2L), _state).Status);
+
+            counter.Value.StringValue = "4";
+            _applier.BeginResync(3L);
+            ReplicationApplyResult result = _applier.Apply(Batch(3L, Spawn(GameId, 1L), Spawn(WorkspaceId, 5L),
+                Spawn(ValueId, 2L), Spawn(9UL, 1L), Spawn(10UL, 1L, ReplicationMembers.Name, ReplicationMembers.Value)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, result.Status, result.Detail);
+            Assert.AreEqual(0, result.Spawned, "the half-applied world left every id behind; each is reconciled");
+            Assert.AreSame(landed, Get(9UL));
+            Assert.AreEqual(4L, ((RbxIntValue)Get(10UL)).Value);
+            Assert.AreSame(Get(WorkspaceId), Get(10UL).Parent, "the instance the failed world left unparented is placed");
+            Assert.AreEqual(4L, _applier.ExpectedSequence);
+            Assert.AreEqual(1, _resyncs.Count);
+        }
+
+        [Test]
+        public void WhileTheWorldIsPending_AnOlderBatchIsADuplicate_AndTheWorldStillApplies()
+        {
+            _applier.Apply(Join(), _state);
+            _applier.Apply(Batch(3L), _state);
+            _applier.BeginResync(5L);
+
+            ReplicationApplyResult older = _applier.Apply(Batch(3L, Spawn(9UL, 1L)), _state);
+            ReplicationApplyResult world = _applier.Apply(
+                Batch(5L, Spawn(GameId, 1L), Spawn(WorkspaceId, 5L), Spawn(ValueId, 2L)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.Duplicate, older.Status, "a batch planned before the world is superseded by it");
+            Assert.AreEqual(ReplicationApplyStatus.Applied, world.Status, world.Detail);
+            Assert.AreEqual(6L, _applier.ExpectedSequence);
+            Assert.AreEqual(1, _resyncs.Count);
+        }
+
+        [Test]
+        public void Negative_WhileTheWorldIsPending_ANewerBatchIsAGap_ThatAsksForTheWorldAgain()
+        {
+            _applier.Apply(Join(), _state);
+            _applier.BeginResync(5L);
+
+            ReplicationApplyResult newer = _applier.Apply(Batch(6L), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.GapDetected, newer.Status);
+            Assert.IsTrue(_applier.NeedsResync);
+            Assert.IsFalse(_applier.IsAwaitingWorld, "the world that was lost is not waited for any longer");
+            Assert.AreEqual(1, _resyncs.Count);
+        }
+
+        [Test]
+        public void Negative_BeginResync_BehindTheExpectedSequence_Throws_AndChangesNothing()
+        {
+            _applier.Apply(Join(), _state);
+            _applier.Apply(Batch(3L), _state);
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => _applier.BeginResync(1L));
+
+            Assert.IsTrue(_applier.NeedsResync);
+            Assert.IsFalse(_applier.IsAwaitingWorld);
+            Assert.AreEqual(2L, _applier.ExpectedSequence);
+        }
+
+        [Test]
+        public void Negative_AWorldSpawnNamingAnotherClassForAHeldId_IsAProtocolViolation()
+        {
+            _applier.Apply(Join(), _state);
+            _state.Replace(Node(ValueId, WorkspaceId, "IntValue", "Greeting"));
+            _applier.BeginResync(2L);
+
+            ReplicationApplyResult result = _applier.Apply(
+                Batch(2L, Spawn(GameId, 1L), Spawn(WorkspaceId, 5L), Spawn(ValueId, 2L)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.ProtocolViolation, result.Status);
+            StringAssert.Contains("names class IntValue", result.Detail);
+            Assert.IsInstanceOf<RbxStringValue>(Get(ValueId), "the held instance is not replaced by a guess");
+            Assert.IsTrue(_applier.NeedsResync);
+            Assert.AreEqual(1, _resyncs.Count);
+        }
+
+        [Test]
+        public void Negative_AWorldSpawnUnderAParentTheWorldHasNotPlaced_IsAProtocolViolation()
+        {
+            // WHY the parent is held but not placed: the replica still has Workspace, but a world that
+            // does not name it is about to remove it, and the child would go with it.
+            _applier.Apply(Join(), _state);
+            _applier.BeginResync(2L);
+
+            ReplicationApplyResult result = _applier.Apply(Batch(2L, Spawn(GameId, 1L), Spawn(ValueId, 2L)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.ProtocolViolation, result.Status);
+            StringAssert.Contains("has not placed", result.Detail);
+            Assert.IsTrue(_replica.TryGet(new InstanceId(WorkspaceId), out _), "a refused world removes nothing");
+        }
+
+        [Test]
+        public void Negative_AWorldBatchThatRemoves_IsAProtocolViolation()
+        {
+            _applier.Apply(Join(), _state);
+            _applier.BeginResync(2L);
+
+            ReplicationApplyResult result = _applier.Apply(Batch(2L, Spawn(GameId, 1L), Remove(ValueId)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.ProtocolViolation, result.Status);
+            StringAssert.Contains("may only spawn", result.Detail);
+            Assert.IsTrue(_replica.TryGet(new InstanceId(ValueId), out _));
+        }
+
+        [Test]
+        public void ASpawn_DoesNotRestoreTheServersOwnershipOrAccessFields()
+        {
+            // WHY: these fields are the server's authorization metadata — another player's durable
+            // actor id among them — and a client has no use for them but to read them.
+            _applier.Apply(Join(), _state);
+            InstanceSnapshot owned = Node(9UL, WorkspaceId, "Folder", "Loot");
+            owned.OwnerModId = "server-mod";
+            owned.OriginTag = OriginTag.FromMod("server-mod");
+            owned.OwnerActorId = "durable-bob";
+            owned.AccessScope = InstanceAccessScope.HostProtected;
+            _state.Add(owned);
+
+            ReplicationApplyResult result = _applier.Apply(Batch(2L, Spawn(9UL, 1L)), _state);
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, result.Status, result.Detail);
+            Assert.IsTrue(_replica.TryGetRecord(new InstanceId(9UL), out InstanceRecord record));
+            Assert.IsNull(record.OwnerModId);
+            Assert.IsNull(record.OriginTag);
+            Assert.IsNull(record.OwnerActorId, "another player's durable actor id never lands on a client");
+            Assert.AreEqual(InstanceAccessScope.SharedWritable, record.AccessScope,
+                "the replica's own default, not the server's verdict");
+        }
+
+        [Test]
         public void Negative_APatchForAnIdTheReplicaDoesNotHold_IsAProtocolViolation_NeverASilentCreate()
         {
             _applier.Apply(Join(), _state);

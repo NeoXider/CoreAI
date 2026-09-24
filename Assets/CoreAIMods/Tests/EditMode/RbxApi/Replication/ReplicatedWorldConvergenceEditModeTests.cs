@@ -154,6 +154,105 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
         }
 
         [Test]
+        public void AGap_ThenTheWorldResent_ConvergesOntoTheSameReplica_WithoutAViolation()
+        {
+            // WHY this is the regression: the documented cure for a gap was a PlanWorld re-seed, and
+            // applied to the replica that asked for it, the world's first spawn was a protocol
+            // violation — the replica could never leave resync.
+            RbxInstance door = _world.CreateOnServer("Part", "Door", _world.ServerWorkspace);
+            RbxInstance crate = _world.CreateOnServer("Part", "Crate", _world.ServerWorkspace);
+            RbxInstance props = _world.CreateOnServer("Folder", "Props", _world.ServerWorkspace);
+            door.SetAttribute("Locked", true);
+            door.AddTag("Interactive");
+            _world.Step();
+            _world.AssertConverged(Alice);
+            RbxInstance replicaDoor = _alice.Find(door);
+            RbxInstance replicaRemote = _alice.Find(_remote);
+            RbxDataModel replicaGame = _alice.Game;
+            RbxInstance local = _alice.Registry.CreateScripted("Part");
+            local.Parent = _alice.Registry.WorldRoot;
+
+            _world.HoldOutgoing = true;
+            door.Name = "Gate";
+            door.SetAttribute("Locked", null);
+            door.RemoveTag("Interactive");
+            crate.Destroy();
+            _world.Step();
+            long lost = _alice.LastPlan.Sequence;
+            door.Parent = props;
+            RbxInstance fresh = _world.CreateOnServer("Part", "Fresh", props);
+            _world.Step();
+            _world.DropHeld(Alice, lost);
+            _world.ReleaseHeld(Alice);
+            _world.HoldOutgoing = false;
+            Assert.AreEqual(ReplicationApplyStatus.GapDetected, _alice.LastResult.Status);
+
+            ReplicationBatchPlan world = _world.Resync(Alice);
+
+            Assert.AreEqual(world.Sequence, _alice.LastResult.Sequence);
+            Assert.AreEqual(ReplicationApplyStatus.Applied, _alice.LastResult.Status, _alice.LastResult.Detail);
+            Assert.IsFalse(_alice.Applier.NeedsResync);
+            Assert.AreEqual(1, _alice.ResyncRequests.Count, "only the gap asked for the world; the world is no fault");
+            _world.AssertConverged(Alice);
+            Assert.AreSame(replicaDoor, _alice.Find(door), "an instance the server still has keeps its identity");
+            Assert.AreSame(replicaRemote, _alice.Find(_remote), "a remote a client script connected to is the same object");
+            Assert.AreSame(replicaGame, _alice.Game);
+            Assert.AreSame(_alice.Find(props), replicaDoor.Parent);
+            Assert.AreEqual("Gate", replicaDoor.Name);
+            Assert.IsNull(replicaDoor.GetAttribute("Locked"), "the attribute cleared in the lost batch is cleared");
+            Assert.IsFalse(replicaDoor.HasTag("Interactive"), "the tag removed in the lost batch is removed");
+            Assert.IsNull(_alice.Find(crate), "the instance destroyed in the lost batch is removed");
+            Assert.IsNotNull(_alice.Find(fresh));
+            Assert.IsFalse(local.IsDestroyed, "the client's own instance survives the resync");
+            Assert.AreSame(_alice.Registry.WorldRoot, local.Parent);
+
+            door.Name = "Portcullis";
+            _world.Step();
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, _alice.LastResult.Status, _alice.LastResult.Detail);
+            Assert.AreEqual("Portcullis", replicaDoor.Name, "deltas resume on the reconciled replica");
+            _world.AssertConverged(Alice);
+        }
+
+        [Test]
+        public void AResync_KeepsAStayingPlayerAdmittedOnce_AndReleasesThePlayerWhoLeftDuringTheGap()
+        {
+            using ReplicatedWorldHarness world = new();
+            ReplicaEndpoint alice = world.AddClient(Alice);
+            RbxPlayers players = (RbxPlayers)world.ServerService("Players");
+            players.CharacterAutoLoads = false;
+            RbxPlayer alicePlayer = players.EnsureActor(world.Server, Alice);
+            players.EnsureActor(world.Server, "bob");
+            world.Step();
+            AssertAllApplied(alice);
+            RbxPlayers replicaPlayers = (RbxPlayers)alice.Find(players);
+            RbxInstance replicaAlice = alice.Find(alicePlayer);
+            Assert.AreEqual(2, replicaPlayers.GetPlayers().Count, "precondition: both players are admitted");
+
+            world.HoldOutgoing = true;
+            players.RemoveActor("bob");
+            world.Step();
+            long lost = alice.LastPlan.Sequence;
+            alicePlayer.SetAttribute("Level", 2d);
+            world.Step();
+            world.DropHeld(Alice, lost);
+            world.ReleaseHeld(Alice);
+            world.HoldOutgoing = false;
+            Assert.AreEqual(ReplicationApplyStatus.GapDetected, alice.LastResult.Status);
+
+            world.Resync(Alice);
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, alice.LastResult.Status, alice.LastResult.Detail);
+            world.AssertConverged(Alice);
+            Assert.AreSame(replicaAlice, alice.Find(alicePlayer));
+            CollectionAssert.AreEqual(new[] { replicaAlice }, replicaPlayers.GetPlayers(),
+                "the player who left is released and the one who stayed is listed once");
+            Assert.AreSame(replicaAlice, replicaPlayers.GetLocalPlayer(Alice));
+            Assert.IsNull(replicaPlayers.GetLocalPlayer("bob"));
+            Assert.AreEqual(2d, replicaAlice.GetAttribute("Level"));
+        }
+
+        [Test]
         public void LeavingAndReenteringVisibility_ArrivesAsRemoveThenSpawn()
         {
             RbxInstance door = _world.CreateOnServer("Part", "Door", _world.ServerWorkspace);
@@ -462,6 +561,30 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
             Assert.IsNull(late.Game, "nothing was guessed into place");
             Assert.AreEqual(ReplicationApplyStatus.Applied, _alice.LastResult.Status,
                 "the established client is unaffected");
+        }
+
+        [Test]
+        public void ALateJoiner_AnsweredWithTheWorldItAskedFor_Converges()
+        {
+            ReplicaEndpoint late = _world.AddClient("late");
+            RbxInstance door = _world.CreateOnServer("Part", "Door", _world.ServerWorkspace);
+            _world.Step();
+            Assert.AreEqual(ReplicationApplyStatus.ProtocolViolation, late.LastResult.Status);
+
+            _world.Resync("late");
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, late.LastResult.Status, late.LastResult.Detail);
+            Assert.IsNotNull(late.Find(door));
+            _world.AssertConverged("late");
+
+            door.Name = "Gate";
+            _world.Step();
+
+            Assert.AreEqual(ReplicationApplyStatus.Applied, late.LastResult.Status, late.LastResult.Detail);
+            Assert.AreEqual("Gate", late.Find(door).Name);
+            Assert.AreEqual(1, late.ResyncRequests.Count, "the violation asked once; the world answered it");
+            _world.AssertConverged("late");
+            _world.AssertConverged(Alice);
         }
 
         private static void AssertAllApplied(ReplicaEndpoint endpoint)

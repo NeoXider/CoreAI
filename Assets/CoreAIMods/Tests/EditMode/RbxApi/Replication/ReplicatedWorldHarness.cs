@@ -111,6 +111,21 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
             return plan;
         }
 
+        /// <summary>
+        /// Answers a client's resync the way the protocol does: plans its whole visible world from the
+        /// registry, arms its applier for that batch with <see cref="ReplicationApplier.BeginResync"/>,
+        /// and ships or holds the batch like any other.
+        /// </summary>
+        public ReplicationBatchPlan Resync(string actorId)
+        {
+            ReplicaEndpoint endpoint = Client(actorId);
+            ReplicationBatchPlan plan = endpoint.Stream.PlanWorld();
+            Assert.IsNotNull(plan, "a client that asked for the world is sent one, even an empty one");
+            endpoint.Applier.BeginResync(plan.Sequence);
+            Dispatch(endpoint, plan);
+            return plan;
+        }
+
         public ReplicaEndpoint Client(string actorId)
         {
             return _clients[actorId];

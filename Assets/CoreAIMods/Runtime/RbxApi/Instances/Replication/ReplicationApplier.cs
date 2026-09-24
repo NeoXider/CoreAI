@@ -62,10 +62,19 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         /// <summary>Why the batch was not applied; empty when it was.</summary>
         public string Detail { get; }
 
+        /// <summary>Instances the batch created on the replica.</summary>
         public int Spawned { get; }
 
+        /// <summary>
+        /// Patches applied; in a world batch (<see cref="ReplicationApplier.BeginResync"/>), also the
+        /// spawns that brought an instance the replica already held up to date in place.
+        /// </summary>
         public int Patched { get; }
 
+        /// <summary>
+        /// Removals applied; in a world batch, also the server-assigned instances the world no
+        /// longer names, each counted whether it went on its own or with an ancestor.
+        /// </summary>
         public int Removed { get; }
 
         /// <summary>Removals for ids the replica never had; harmless, but counted.</summary>
@@ -106,6 +115,12 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
     /// finds players through <c>Players:GetPlayers()</c> and <c>Players.LocalPlayer</c>, never by
     /// walking the tree, so a Player node restored without its identity and without the service
     /// knowing it is a player nobody can find — and its removal must leave the service as well.
+    /// </para>
+    /// <para>
+    /// WHY a resync is answered by a world batch applied onto the replica as it stands
+    /// (<see cref="BeginResync"/>): the fault that asked for it leaves the replica holding most of
+    /// the world already, and a world batch spawns every id it names, so a replica that treated
+    /// those spawns like any other would refuse the very answer it asked for.
     /// </para>
     /// </remarks>
     public sealed class ReplicationApplier : IDisposable
@@ -166,6 +181,7 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         private readonly Dictionary<ulong, List<ReferenceSlot>> _slotsByTarget = new();
         private readonly Dictionary<ulong, RbxPlayers> _admittedPlayers = new();
         private long _expectedSequence = FirstSequence;
+        private bool _worldPending;
         private bool _disposed;
 
         /// <summary>Creates the applier over one replica registry.</summary>
@@ -209,8 +225,17 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         /// <summary>How many batches were dropped while a resync was pending.</summary>
         public int DroppedAwaitingResyncCount { get; private set; }
 
-        /// <summary>True from the first gap or violation until <see cref="CompleteResync"/>.</summary>
+        /// <summary>
+        /// True from the first gap or violation until <see cref="BeginResync"/> or
+        /// <see cref="CompleteResync"/>.
+        /// </summary>
         public bool NeedsResync { get; private set; }
+
+        /// <summary>
+        /// True from <see cref="BeginResync"/> until the world batch it named has been applied, or
+        /// refused — a refusal asks for the world again.
+        /// </summary>
+        public bool IsAwaitingWorld => _worldPending;
 
         /// <summary>Why a resync is pending; empty otherwise.</summary>
         public string ResyncReason { get; private set; } = "";
@@ -263,6 +288,7 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
             string violation = null;
             List<DeferredReference> deferred = new();
             List<InstanceId> arrivals = new();
+            HashSet<ulong> placed = _worldPending ? new HashSet<ulong>() : null;
             using (_registry.BeginReplicationApply())
             {
                 try
@@ -270,11 +296,22 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
                     for (int index = 0; index < batch.Operations.Count && violation == null; index++)
                     {
                         ReplicationOperation operation = batch.Operations[index];
+                        if (placed != null && operation.Kind != ReplicationOperationKind.Spawn)
+                        {
+                            violation = "the world batch may only spawn, but operation " + index + " is a "
+                                        + operation.Kind + " for id " + operation.InstanceId.Value;
+                            break;
+                        }
+
                         switch (operation.Kind)
                         {
                             case ReplicationOperationKind.Spawn:
-                                violation = ApplySpawn(operation, state, deferred);
-                                if (violation == null)
+                                violation = ApplySpawn(operation, state, deferred, placed, out bool reconciled);
+                                if (violation == null && reconciled)
+                                {
+                                    patched++;
+                                }
+                                else if (violation == null)
                                 {
                                     spawned++;
                                     arrivals.Add(operation.InstanceId);
@@ -308,6 +345,11 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
 
                     if (violation == null)
                     {
+                        if (placed != null)
+                        {
+                            removed += RemoveUnplaced(placed);
+                        }
+
                         ResolveDeferred(deferred);
                         SettleArrivals(arrivals);
                     }
@@ -349,14 +391,55 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
                     batch.Sequence, reason, spawned, patched, removed, ignored);
             }
 
+            _worldPending = false;
             _expectedSequence = checked(_expectedSequence + 1L);
             return new ReplicationApplyResult(ReplicationApplyStatus.Applied, batch.Sequence, "",
                 spawned, patched, removed, ignored);
         }
 
         /// <summary>
-        /// Declares the replica whole again after the resync path (a later phase) has rebuilt it;
-        /// the next batch expected is the one after the snapshot's.
+        /// Arms the replica for the answer to a resync — the batch
+        /// <see cref="ReplicationStream.PlanWorld"/> plans for this recipient, carrying
+        /// <paramref name="worldSequence"/> — and lifts a pending resync. That batch is applied as the
+        /// whole world: a spawn for an id the replica holds brings the held instance to the state the
+        /// spawn carries, in place, and every server-assigned instance the batch does not name is
+        /// removed afterwards. Instances the replica created itself (local ids) are kept, except one
+        /// parented under a removed instance, which goes with it. A batch older than the world is a
+        /// duplicate; a newer one is a gap and asks for the world again.
+        /// </summary>
+        /// <remarks>
+        /// Call it with the world batch's sequence before applying that batch. The world may be empty:
+        /// a recipient that held something and may now see nothing is sent a batch without operations,
+        /// and applying it empties the replica of the server's instances.
+        /// </remarks>
+        public void BeginResync(long worldSequence)
+        {
+            // WHY the world is reconciled in place instead of clearing every server-space instance and
+            // spawning it again: client scripts hold the replica's instances — the DataModel, the
+            // Workspace, a RemoteEvent they connected to — and the handlers live on those objects.
+            // Clearing would hand each script a destroyed object and disconnect every handler without
+            // a word, and a local instance parented under Workspace would be destroyed with it. In place,
+            // what the server still has keeps its identity and its connections, a setter fires only
+            // where the world differs from what the replica held, and only what the server no longer
+            // shows this recipient is removed — the replica the lost batches would have produced.
+            if (worldSequence < _expectedSequence)
+            {
+                throw new ArgumentOutOfRangeException(nameof(worldSequence), worldSequence,
+                    "The world batch must be newer than every batch this replica applied; the next "
+                    + "expected sequence is " + _expectedSequence + ".");
+            }
+
+            NeedsResync = false;
+            ResyncReason = "";
+            _expectedSequence = worldSequence;
+            _worldPending = true;
+        }
+
+        /// <summary>
+        /// Declares the replica whole again after something other than a world batch rebuilt it;
+        /// the next batch expected is the one after the snapshot's. A replica that holds the world it
+        /// is being re-sent must use <see cref="BeginResync"/> instead: after this call a spawn for
+        /// an id it holds is still refused.
         /// </summary>
         public void CompleteResync(long nextExpectedSequence)
         {
@@ -368,6 +451,7 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
 
             NeedsResync = false;
             ResyncReason = "";
+            _worldPending = false;
             _expectedSequence = nextExpectedSequence;
         }
 
@@ -375,17 +459,25 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         {
             NeedsResync = true;
             ResyncReason = reason;
+            _worldPending = false;
             // WHY the report is contained: ResyncRequested IS the recovery, and the host's logger
             // must not be able to stand between the fault and the subscriber that fetches the world.
             _registry.ReportDiagnostic("[CoreAI.RbxApi] replica requests resync: " + reason);
             ResyncRequested?.Invoke(reason);
         }
 
+        /// <summary>
+        /// Creates the instance a spawn names; in a world batch (<paramref name="placed"/> is not
+        /// null) an id the replica already holds is brought up to date in place instead, and
+        /// <paramref name="reconciled"/> says which of the two happened.
+        /// </summary>
         private string ApplySpawn(ReplicationOperation operation, IReplicationStateSource state,
-            List<DeferredReference> deferred)
+            List<DeferredReference> deferred, HashSet<ulong> placed, out bool reconciled)
         {
+            reconciled = false;
             InstanceId id = operation.InstanceId;
-            if (_registry.TryGet(id, out _))
+            bool held = _registry.TryGet(id, out RbxInstance existing);
+            if (held && placed == null)
             {
                 return "spawn for id " + id.Value + " which the replica already holds";
             }
@@ -404,8 +496,38 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
                        + " which the replica does not hold";
             }
 
-            RbxInstance instance = _registry.RestoreInstance(node.ClassName, id, node.OwnerModId,
-                node.OriginTag, node.OwnerActorId, node.AccessScope);
+            if (placed != null)
+            {
+                // WHY the parent must be one the world already placed, not merely one the replica
+                // holds: a held parent the world never names is about to be removed, and the child
+                // would go with it; the planner sends the world parent-first, so this never refuses
+                // a batch it planned.
+                if (node.ParentId != 0UL && !placed.Contains(node.ParentId))
+                {
+                    return "world spawn for id " + id.Value + " names parent " + node.ParentId
+                           + " which the world batch has not placed before it";
+                }
+
+                if (!placed.Add(id.Value))
+                {
+                    return "the world batch spawns id " + id.Value + " twice";
+                }
+            }
+
+            if (held)
+            {
+                reconciled = true;
+                return ReconcileHeld(existing, operation, node, parent, deferred);
+            }
+
+            // WHY the snapshot's ownership and access fields are not restored: authorization is decided
+            // on the server, against the server's records. On a replica those fields would only publish,
+            // to every client script that reads a record, which durable actor owns what — other players'
+            // identities included. The replica's records take the registry's defaults, which govern
+            // nothing but the client's own local writes.
+            // TODO: MVP12 wire phase — strip OwnerModId, OriginTag, OwnerActorId and AccessScope from the
+            // node state at capture (InstanceTreeSerializer) so they never leave the server at all.
+            RbxInstance instance = _registry.RestoreInstance(node.ClassName, id);
             if (instance is RbxDataModel game)
             {
                 // WHY: a replica has no bootstrap of its own; its roots are the server's, by id.
@@ -513,6 +635,168 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
             service.AdoptReplicated(player);
             _admittedPlayers[player.Id.Value] = service;
             return null;
+        }
+
+        /// <summary>
+        /// Brings an instance the replica already holds to the state a world batch spawns it with:
+        /// what the spawn names lands through the ordinary setters, the attributes, tags and
+        /// references it does not name are cleared, and the instance moves under the parent the
+        /// world names — parent last, as for a fresh spawn.
+        /// </summary>
+        private string ReconcileHeld(RbxInstance instance, ReplicationOperation operation,
+            InstanceSnapshot node, RbxInstance parent, List<DeferredReference> deferred)
+        {
+            if (!string.Equals(instance.ClassName, node.ClassName, StringComparison.Ordinal))
+            {
+                // WHY refused rather than replaced: the server never reuses an id, so one id naming two
+                // classes means the replica and the server disagree about what the id is.
+                return "world spawn for id " + node.Id + " names class " + node.ClassName
+                       + " but the replica holds a " + instance.ClassName + " at that id";
+            }
+
+            if (instance is RbxPlayer player)
+            {
+                PlayerSnapshot identity = node.Player;
+                if (identity == null)
+                {
+                    return "world spawn for Player id " + node.Id + " carried no Player identity";
+                }
+
+                if (!string.Equals(identity.ActorId, player.NetworkActorId, StringComparison.Ordinal)
+                    || identity.UserId != player.UserId)
+                {
+                    return "world spawn for Player id " + node.Id + " names actor '" + identity.ActorId
+                           + "' (UserId " + identity.UserId + ") but the replica's Player at that id is actor '"
+                           + player.NetworkActorId + "' (UserId " + player.UserId + ")";
+                }
+            }
+
+            ClearUnnamed(instance, operation.Members);
+            string violation = ApplyMembers(instance, node, operation.Members, deferred, isSpawn: true);
+            if (violation != null)
+            {
+                return violation;
+            }
+
+            ApplySpecializedState(instance, node);
+            instance.Parent = parent;
+            if (instance is RbxPlayer admitted)
+            {
+                if (_admittedPlayers.TryGetValue(admitted.Id.Value, out RbxPlayers admittedBy)
+                    && !ReferenceEquals(admittedBy, admitted.Parent))
+                {
+                    _admittedPlayers.Remove(admitted.Id.Value);
+                    admittedBy.ReleaseReplicated(admitted);
+                }
+
+                if (!_admittedPlayers.ContainsKey(admitted.Id.Value))
+                {
+                    string refused = AdmitPlayer(admitted);
+                    if (refused != null)
+                    {
+                        return refused;
+                    }
+                }
+            }
+
+            _registry.SetReplicatedRevision(instance.Id, operation.Revision);
+            return null;
+        }
+
+        /// <summary>
+        /// Drops from a held instance the attributes, tags and references a world spawn of it does not
+        /// name — state a fresh spawn of the same batch would not have.
+        /// </summary>
+        /// <remarks>
+        /// WHY these three: their absence is state. An attribute set to nil, a tag removed or a
+        /// reference cleared in a batch the replica lost is named nowhere in the world, so the world
+        /// not naming it is the only news of it. Name, Archivable, a value payload and a Player's
+        /// DisplayName travel with every spawn the member filter lets through; one the filter hides
+        /// keeps the value the replica last received, which is all a fresh spawn would lack.
+        /// </remarks>
+        private void ClearUnnamed(RbxInstance instance, IReadOnlyList<string> members)
+        {
+            HashSet<string> named = new(members, StringComparer.Ordinal);
+            foreach (string attribute in instance.GetAttributes().Keys)
+            {
+                if (!named.Contains(ReplicationMembers.Attribute(attribute)))
+                {
+                    instance.SetAttribute(attribute, null);
+                }
+            }
+
+            IReadOnlyList<string> tags = instance.GetTags();
+            for (int index = 0; index < tags.Count; index++)
+            {
+                if (!named.Contains(ReplicationMembers.Tag(tags[index])))
+                {
+                    instance.RemoveTag(tags[index]);
+                }
+            }
+
+            for (int index = 0; index < ReferenceMembers.Length; index++)
+            {
+                string member = ReferenceMembers[index];
+                if (named.Contains(member))
+                {
+                    continue;
+                }
+
+                Remember(instance, member, 0UL);
+                if (ReadReference(instance, member) != null)
+                {
+                    WriteReference(instance, member, null);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Removes every server-assigned instance a world batch did not place — the server no longer
+        /// has it, or no longer lets this recipient see it — and returns how many there were. The
+        /// replica's own instances carry local ids and are never selected here.
+        /// </summary>
+        private int RemoveUnplaced(HashSet<ulong> placed)
+        {
+            List<RbxInstance> stale = new();
+            bool sceneRootStale = false;
+            IReadOnlyList<RbxInstance> live = _registry.GetLiveInstances();
+            for (int index = 0; index < live.Count; index++)
+            {
+                RbxInstance instance = live[index];
+                if (instance.Id.IsServerAssigned && !placed.Contains(instance.Id.Value))
+                {
+                    stale.Add(instance);
+                    if (instance is RbxDataModel && instance.Parent == null && _registry.IsInScene(instance))
+                    {
+                        sceneRootStale = true;
+                    }
+                }
+            }
+
+            for (int index = 0; index < stale.Count; index++)
+            {
+                RbxInstance instance = stale[index];
+                if (!instance.IsDestroyed)
+                {
+                    ReleasePlayers(instance);
+                    instance.Destroy();
+                }
+            }
+
+            // WHY the roots are dropped with their instances: a replica whose world no longer holds a
+            // DataModel is the empty replica it was before its first spawn, and the spawn that brings
+            // one back sets the roots again.
+            if (sceneRootStale)
+            {
+                _registry.SetSceneRoot(null);
+            }
+
+            if (_registry.WorldRoot != null && _registry.WorldRoot.IsDestroyed)
+            {
+                _registry.SetWorldRoot(null);
+            }
+
+            return stale.Count;
         }
 
         private string ApplyPatch(ReplicationOperation operation, IReplicationStateSource state,

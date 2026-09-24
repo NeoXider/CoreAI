@@ -136,6 +136,9 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
 
         public string RecipientActorId { get; }
 
+        /// <summary>The dirty set this stream plans from.</summary>
+        internal ReplicationDirtySet Dirty => _dirty;
+
         /// <summary>The sequence of the last batch planned; zero before the first.</summary>
         public long LastSequence => _lastSequence;
 
@@ -171,12 +174,21 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         /// Plans the recipient's whole visible world as one batch of spawns, read from the registry
         /// rather than the dirty set: the seed for a stream built over a world that already existed,
         /// and the answer to a replica that asked for the world again. Whatever the recipient was
-        /// known to hold is forgotten first, so the batch stands on its own; the replica that receives
-        /// it starts from empty. Returns null when the recipient may see nothing.
+        /// known to hold is forgotten first, so the batch stands on its own. A replica that holds
+        /// nothing applies it like any batch; one that already holds a world applies it after
+        /// <see cref="ReplicationApplier.BeginResync"/>, which reconciles what it holds instead of
+        /// refusing the spawns. Returns null only when the recipient may see nothing and was known to
+        /// hold nothing.
         /// </summary>
+        /// <remarks>
+        /// WHY a recipient that held something gets a batch even when it may now see nothing: that
+        /// empty world is what tells its replica to drop what it holds. Returning null there would
+        /// leave the replica's resync unanswered while the stream has already forgotten what it held.
+        /// </remarks>
         public ReplicationBatchPlan PlanWorld()
         {
             _seeded = true;
+            bool heldAnything = _known.Count > 0;
             _known.Clear();
             List<TreeOrdered<RbxInstance>> spawns = new();
             HashSet<ulong> spawnIds = new();
@@ -189,7 +201,7 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
                 }
             }
 
-            return spawns.Count == 0
+            return spawns.Count == 0 && !heldAnything
                 ? null
                 : Commit(spawns, new List<TreeOrdered<ReplicationOperation>>(), new List<InstanceId>());
         }
