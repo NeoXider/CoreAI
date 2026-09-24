@@ -1899,6 +1899,15 @@ namespace CoreAI.Mods.WorldPackages
                 return false;
             }
 
+            // WHY the same device rule as a manual slot: on Windows "CON.world" or "nul.WORLD" opens the
+            // device, not a file, and the open throws instead of refusing (audit B2-14).
+            int dotIndex = fileName.IndexOf('.');
+            if (ReservedDeviceNames.Contains(dotIndex >= 0 ? fileName.Substring(0, dotIndex) : fileName))
+            {
+                error = "Auto package name '" + fileName + "' is a reserved device name.";
+                return false;
+            }
+
             return true;
         }
 

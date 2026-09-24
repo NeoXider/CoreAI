@@ -3094,6 +3094,27 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         /// <summary>
+        /// B2-14: an auto package named after a Windows device opened the device instead of a file, and the
+        /// open threw; it is refused like a manual slot with that name. A longer name that only starts
+        /// with a device name is an ordinary file.
+        /// </summary>
+        [TestCase("CON.world")]
+        [TestCase("nul.WORLD")]
+        [TestCase("COM1.x.world")]
+        [TestCase("LPT9.world")]
+        public void PackageNames_AutoFileNamedAfterADevice_IsRefusedWithoutThrowing(string name)
+        {
+            bool accepted = true;
+            string error = null;
+
+            Assert.DoesNotThrow(() => accepted = RbxWorldPackageNames.TryValidateAutoFileName(name, out error));
+
+            Assert.IsFalse(accepted);
+            Assert.AreEqual("Auto package name '" + name + "' is a reserved device name.", error);
+            Assert.IsTrue(RbxWorldPackageNames.TryValidateAutoFileName("CONSOLE.world", out error), error);
+        }
+
+        /// <summary>
         /// A1-06: the WebGL work budget left out value strings (a StringValue holds 200,000 characters,
         /// and every Vector3 and CFrame value is encoded into the same string) and Humanoid state, so a
         /// world far past two million characters passed it. Both now count, exactly at the boundary.
