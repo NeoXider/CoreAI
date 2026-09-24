@@ -1,10 +1,12 @@
-# Roblox-like Mod API — Definitive Roadmap (MVP0..MVP17)
+# CoreAI MVP ladder and the Roblox-like Mod API — Definitive Roadmap (MVP0..MVP19)
 
 CoreAI's mod system evolves into a **Roblox-shaped Lua API**. Rationale: LLMs know the Roblox API
 better than any custom game API (training-data volume), so an AI that writes mods in this dialect
 hallucinates less and ships working code faster. Humans get a familiar, documented API for free.
 
-This document is the single plan of record. It supersedes the previous MVP1..MVP4 seed roadmap;
+This document is the single plan of record, and its §4 is the one MVP ladder of record for the whole
+framework — the Roblox API, multiplayer, the framework consolidation and the Studio (renumbered
+2026-09-24; §4.1 maps the old numbers). It supersedes the previous MVP1..MVP4 seed roadmap;
 "Standing decisions" below are carried over in substance and refined where the detailed design
 forced a choice. MVP0 (the engine abstraction seam) has **landed (2026-07-22)** and **MVP1
 landed in 6.3.0 with the §5.1.8 acceptance gate green**, including the pulled-forward input and
@@ -12,12 +14,15 @@ camera slice (§MVP1); the Lua log service core has **landed** in
 `Assets/CoreAIMods/Runtime/Logging/`, editor Lua/Luau syntax highlighting has **shipped
 (editor-side)**, and the three normative Roblox-behavior reference docs are **complete** in
 `Docs/CoreAIMods/RobloxReference/` (§2.1).
-Since then **MVP2 has largely landed** (scheduler, deferred signals, services framework, loopback
-remotes, the shared JSON contract, the Model pivot slice, and the complete 45-item `Enum.Material`
-catalog — see §MVP2 for the remaining items) and **MVP3 (the world/place package) is code complete
-(2026-09-24)** with its Unity verification gate pending; its contract and acceptance evidence are in
-[`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). Audits of MVP1, MVP2 and MVP8 (2026-09-24) were followed by
-fix waves recorded in the rung sections below and in `TODO.md`; they are unreleased.
+Since then **MVP2's functional surface has landed** (scheduler, deferred signals, services framework,
+loopback remotes, the shared JSON contract, the clocks, the Model pivot slice, and the complete 45-item
+`Enum.Material` catalog; two items keep it open — the G10 capacity gate and `BindToRenderStep`, §MVP2),
+so has the "Gameplay services I" slice (the old MVP8), and **MVP3 (the world/place package) is code
+complete (2026-09-24)** with its Unity verification gate pending; its contract and acceptance evidence
+are in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). Audits of MVP1, MVP2, the gameplay services and the
+multiplayer foundation (2026-09-24) were followed by fix waves and two audit rounds over them, recorded
+in the rung sections below and in `TODO.md`; they are unreleased. Next is MVP4 (script contexts),
+the first of the multiplayer rungs.
 
 **Architecture (normative)**: every deliverable in this ladder is built to
 `Docs/ARCHITECTURE_RULES.md` — engine-free Domain assemblies (`noEngineReferences: true`),
@@ -32,7 +37,7 @@ with the five packages that existed then bumped together. Today all **seven** pa
 (`com.neoxider.coreai`, `coreaiunity`, `coreaimods`, `coreaihub`, `coreaibenchmark`, `coreaimcp`,
 `coreaimirror`) move in lockstep (ROADMAP.md §4, mod-system.md §8); the current release is in each
 package's `package.json` and the changelogs. `mod.json` `api_version` is a **separate contract line
-starting at 1**, independent of the package version (§MVP5).
+starting at 1**, independent of the package version (§MVP18).
 
 **Roblox API parity (LOCKED — user, 2026-07-23):** the Lua-facing API replicates Roblox **1:1** —
 identical class / method / property / event / enum names and semantics — so copy-paste Roblox
@@ -46,6 +51,12 @@ behavior must match Roblox regardless of backend. **Exception:** FullAccess (the
 CoreAI-isms (`input_*` poll, `coreai_world_*`) stay for back-compat but are NOT the canonical Roblox
 surface. Applies to every current and future rung.
 
+**Round-trip parity (owner, 2026-09-24):** scripts, models and places are interchangeable with Roblox in
+**both** directions — a Roblox script or model runs here unchanged, and what is made here exports and
+runs in Roblox. It is the explicit DoD of MVP14, prepared by MVP4 (script instances, `require`,
+`RunContext`) and MVP13 (Luau stdlib extensions, coercion parity, the Luau-only export lint, the
+welds/constraints subset); the gaps RT1–RT13 are listed under §MVP14.
+
 ---
 
 ## 1. Principles
@@ -56,12 +67,14 @@ Two principles override Roblox fidelity whenever they conflict:
    docs, error messages, and logs are optimized for machine consumption and self-repair loops.
    Every error a mod can trigger carries: mod id, script, line, a stable error code, and a
    *suggested fix* — because the reader is an agent that will immediately try to patch the mod.
-   The AI's skill document **is** the documentation (§MVP6): one artifact teaches the LLM and the
-   human, and embeds the machine-readable implemented-vs-stub manifest generated from code.
-2. **Realtime.** The game is created and modified *while it runs* (unlike Roblox edit-then-play).
-   Hot reload, live logs, and in-play AI debugging are core features, not tooling extras. Every
-   feature must answer "does this work in a built player on device, mid-session?" (see
-   `AGENTS.md` — RUNTIME-first).
+   The AI's skill document **is** the documentation: one artifact teaches the LLM and the human, and
+   (from MVP18) embeds the machine-readable implemented-vs-stub manifest generated from code.
+2. **Realtime.** The game is created and modified *while it runs*. Live edit is the default: hot
+   reload, live logs, and in-play AI debugging are core features, not tooling extras. The in-game
+   Studio (MVP12) adds an explicit Play/Stop "test run" for a Creator (plan decision D2) — an isolated
+   per-creator session, never a rewind of a world other players are in — so edit-then-play is an
+   option, never the only loop. Every feature must answer "does this work in a built player on
+   device, mid-session?" (see `AGENTS.md` — RUNTIME-first).
 
 Derived rules:
 
@@ -78,19 +91,26 @@ Derived rules:
   once-per-mod deprecation note in the mod log.
 - **Multiplayer-shaped from day one.** Single-player is "a server with one local client"
   (Roblox's own model). All networking APIs exist from MVP2 in local-loopback form behind
-  `INetworkBridge`; Mirror replaces the loopback in MVP11 without changing any mod-facing API.
+  `INetworkBridge`; the Mirror bridge (`com.neoxider.coreaimirror`, since 7.42.0) replaces the
+  loopback when a scene switches it on, without changing any mod-facing API; host mode is MVP5.
   The bridge is topology-aware from the first interface draft (§2, Network topology).
-- **WebGL must not break.** WebGL is not the priority target overall, but it must stay green as a
-  **solo player** (Null loopback bridge) and, later, as a **pure client** against a dedicated
-  server. Every MVP's Definition of Done implicitly includes the WebGL acceptance checklist
-  (§6.5): no threads, no blocking waits, no sync-over-async, IDBFS flush after persistence writes.
+- **WebGL is first-class** (`AGENTS.md`). It must stay green as a **solo player** (Null loopback
+  bridge), as a **pure client** against a dedicated server (MVP8), and as a **creator-mode client**
+  of a server (plan decision D6); it never hosts. Every rung's Definition of Done includes the WebGL
+  acceptance checklist (§6.5): no threads, no blocking waits, no sync-over-async, and after a
+  persistence write `CoreAiWebGlPersistence.Sync()` must report the engine's automatic
+  `persistentDataPath` persistence as armed (`false` is a failure; `FS.syncfs` is never driven by
+  hand).
 
 ## 2. Standing decisions (researched 2026-07; items marked LOCKED are user-confirmed)
 
 - **VM**: keep Lua-CSharp v0.5.6 (bundled `Lua.dll`/`Lua.Annotations.dll` in
-  `Assets/CoreAIMods/Plugins`; Lua 5.2, double-only numbers — near-Luau semantics). No MoonSharp
-  return, no native Luau (WebGL). Stock upstream build: the local `NotifyTop` patch we carried on
-  0.5.5 landed upstream as PR #331, and our WebGL coroutine deadlock report (issue #327) as PR #329.
+  `Assets/CoreAIMods/Plugins`; Lua 5.2, double-only numbers — near-Luau semantics). No MoonSharp return,
+  no native Luau on the client (WebGL). Plan decision D8 (2026-09-24): keep Lua-CSharp with a cheaper
+  guard first; native Luau **on the server only**, behind `IScriptEngine`, is the fallback if spike S1
+  shows the guarded VM cannot meet the MVP9 budget. Stock upstream build: the local `NotifyTop` patch we
+  carried on 0.5.5 landed upstream as PR #331, and our WebGL coroutine deadlock report (issue #327)
+  as PR #329.
 - **Luau syntax**: pure-C# downlevel preprocessor at mod ingestion (strip type annotations, rewrite
   `+=`/`continue`/string interpolation/`if`-expressions/`//`). Parser: the targeted
   **mini-rewriter**, chosen and **implemented on disk** (`Assets/CoreAIMods/Runtime/LuauDownlevel/`:
@@ -108,21 +128,26 @@ Derived rules:
   The existing `LuaCs*` classes (`LuaCsModRuntime`, `LuaCsSecureEnvironment`,
   `LuaCsExecutionGuard`, `LuaCsCoroutineHandle`/`Runner`) become the single adapter layer. The
   Roblox API layer in this roadmap is written **only** against the neutral interfaces.
-- **Multiplayer transport**: **Mirror**, via NeoxiderTools `Neo.Network` (a separate repository),
-  which already has a solo fallback when the `MIRROR` define is absent. Proven mappings:
-  `NetworkEventDispatcher` ≈ `FireServer`→`FireAllClients`; `NetworkActionRelay` TargetRpc scopes
-  ≈ `FireClient`; `NetworkPropertySync` ≈ replicated properties;
-  `NeoNetworkSpawner` ≈ server spawn; `NeoNetworkPlayer` ≈ `Players.LocalPlayer`/ownership;
-  `NetworkContextActionRelay` demonstrates the paired `NetworkMessage` request/response pattern
-  for `RemoteFunction`. CoreAI itself has zero multiplayer code today — the bridge is **designed
-  now, implemented in MVP11–13**.
+- **Multiplayer transport**: **Mirror** over kcp, plus a WebSocket transport for WebGL clients,
+  behind `INetworkBridge` (plan decision D4, 2026-09-24). CoreAI's own optional package
+  `com.neoxider.coreaimirror` (`Assets/CoreAIMirror/`, compiled only with the `MIRROR` define) is
+  the bridge: raw Mirror message handlers with CoreAI's own envelopes, shipped since 7.42.0; the
+  engine-free replication core has shipped since 7.39.0. NeoxiderTools' `Neo.Network` is **not** the
+  bridge (owner decision 2, `dev-docs/MVP25_ONLINE_PLAN.md` §7): a framework package cannot depend on
+  a separate product. The first draft (2026-07) borrowed its patterns as a design reference only —
+  `NetworkEventDispatcher` ≈ `FireServer`→`FireAllClients`, `NetworkActionRelay` ≈ `FireClient`,
+  `NetworkPropertySync` ≈ replicated properties, `NeoNetworkSpawner` ≈ server spawn,
+  `NeoNetworkPlayer` ≈ `Players.LocalPlayer`, `NetworkContextActionRelay` ≈ the paired
+  request/response of `RemoteFunction`. Host mode, world-state replication and the dedicated server
+  are MVP5, MVP6 and MVP8.
 - **Network topology (LOCKED)**: supported targets are **host mode** (listen server: server +
   local client in one desktop process) and **dedicated server** (headless, no local client).
   Implementation order: **Null loopback (solo) → host → dedicated** — host mode first because it
   is the fastest dev loop and mirrors Roblox Studio play-testing; dedicated server follows as its
   own MVP step (mostly headless bootstrap + CLI). WebGL can never host or listen: in browsers the
-  only modes are **solo** and **pure client** of a dedicated/remote server, and WebGL is not a
-  priority. `INetworkBridge` stays topology-agnostic
+  modes are **solo**, **pure client** of a dedicated/remote server, and **creator-mode client** of a
+  server (plan decision D6 — a Creator's edits travel as intents, so no hosting is needed); WebGL is a
+  first-class target (`AGENTS.md`). `INetworkBridge` stays topology-agnostic
   (`Solo | Host | DedicatedServer | Client`) and **never** assumes "the server always has a local
   client" (e.g. `PreRender` must be skippable server-side; `Players.LocalPlayer` is nil on a
   dedicated server, Roblox parity).
@@ -133,10 +158,10 @@ Derived rules:
 - **Coordinates (LOCKED)**: Roblox datatypes (`Vector3`, `CFrame`) are implemented as **pure math
   exactly to Roblox spec** — right-handed, `LookVector = -Z`, every constructor/operator/`lookAt`/
   `ToWorldSpace` per the official docs; mods never touch a Unity `Transform`. Exactly **one
-  conversion boundary** exists: the static `RobloxSpace` class (§5.1.4, D2). Nothing outside it
+  conversion boundary** exists: the static `RbxSpace` class (§5.1.4, D2). Nothing outside it
   converts — enforced by a lint-style test.
 - **Units / scale (LOCKED, supersedes the earlier 1:1 default)**: scale is a single configurable
-  constant inside `RobloxSpace`; **default 1 stud = 0.28 m**. Rationale: the AI author's trained
+  constant inside `RbxSpace`; **default 1 stud = 0.28 m**. Rationale: the AI author's trained
   priors (`WalkSpeed 16`, `JumpPower 50`, `Gravity 196.2`, part sizes) produce correct *game
   feel* at 0.28 without re-teaching — copy-paste corpus achieves feel-parity, not just
   math-parity (Roblox gravity 196.2 studs/s² = 54.9 m/s² ≈ 5.6 g is the intended snappy feel).
@@ -144,10 +169,10 @@ Derived rules:
   + 1:1 smoke. Implementation rule: mod-driven rigidbodies get gravity applied **per-body**
   (custom force, `Rigidbody.useGravity = false`), never via global `Physics.gravity`, so
   Roblox-physics mods coexist with a host game running Earth gravity. The AI skill teaches the
-  active scale (§MVP6).
+  active scale (the "Rbx API" skill; §MVP18).
 - **Assets under scale (LOCKED)**: **only numbers convert at the API boundary; assets are never
   rescaled.** (1) Primitives (`Part` Block/Ball/…) use Unity unit primitives; the binder sets
-  `localScale = Size × RobloxSpace.MetersPerStud`. Shapes Unity lacks (Wedge, CornerWedge, the
+  `localScale = Size × RbxSpace.MetersPerStud`. Shapes Unity lacks (Wedge, CornerWedge, the
   Roblox-oriented Cylinder) get our own meshes authored **normalized to 1 unit = 1 stud** — the
   only stud-authored assets allowed; the same scaling formula applies. (2) Existing
   meter-authored prefabs (host game, NeoxiderTools) are **never** rescaled — that breaks
@@ -160,35 +185,39 @@ Derived rules:
   `IRbxCharacterMotorProvider` and drives Rbx characters with its own controller, with CoreAI's own
   motor answering for whatever the provider declines — see
   [CHARACTER_MOTOR_BRIDGE.md](CHARACTER_MOTOR_BRIDGE.md). (4) Switching the scale config (0.28 ↔ 1:1)
-  must require touching **zero assets** — only the `RobloxSpace` constant (tested: §5.1.8).
+  must require touching **zero assets** — only the `RbxSpace` constant (tested: §5.1.8).
 - **Host integration profile**: embedding CoreAI mods into an **existing meter-scale Unity game** is a
-  first-class scenario. A per-project host profile (ScriptableObject: `RobloxSpace` scale [default
+  first-class scenario. A per-project host profile (ScriptableObject: `RbxSpace` scale [default
   0.28], capability defaults, which host services/objects are bound, the per-world `ClientWritePolicy`
   — `RobloxParity` [default] / `Strict`, resolved through the single authority-resolver seam so future
-  partial-authority rules are a resolver swap, §MVP12; co-building is a host grant, not an `Open` mode
+  partial-authority rules are a resolver swap, §MVP6; co-building is a host grant, not an `Open` mode
   (owner decision 3) — plus the per-role human tool-surface config and the Players-may-fly flag from
   the roles/locomotion decisions below) makes integration "drop a config and it works".
-  `RobloxSpace`'s configurable scale **is** the meter-world adapter — no second conversion layer
-  exists or is planned. Ships as a small deliverable in MVP16 (§MVP16).
+  `RbxSpace`'s configurable scale **is** the meter-world adapter — no second conversion layer
+  exists or is planned. It is part of MVP10's `CoreAiProfile` (§MVP10): since composability became
+  normative (`Docs/ARCHITECTURE_RULES.md` §2.1) presets are a foundation item, not a late one.
 - **Roles: Creator / Player (LOCKED — studio == game)**: every connected player has a per-world
-  **role** — **Creator** (the host's default in their own world; grantable to others = the Team
-  Create analog) or **Player** (joiner default). The role gates the **human-driven** AI tool
+  **player role** — **Creator** (the host's default in their own world; grantable to others = the Team
+  Create analog) or **Player** (joiner default). The player role Creator is not the built-in agent
+  role `Creator` (the `world_command` designer, `Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md`); documents say
+  "player role" or "agent role" wherever both could be meant, and in code the player role is its own
+  type on `RbxPlayer` (MVP11). The role gates the **human-driven** AI tool
   surface (Hub chat: `manage_mods`, `execute_lua`, save/load world), configurable per world in
   the host integration profile — from fully locked down to full sandbox. **Critical
   separation: game-sanctioned AI creation is NOT role-gated** — a mod calling the reserved
   `AIService` (e.g. ability-crafting gameplay where the AI generates a new ability as part of
   game logic) runs under the **mod's** capability grants/quotas set by the creator and works
   for pure Players; generated content carries the origin tag `ai:<modId>` and the normal
-  budgets/quarantine apply. Role is an input to the authority resolver (§MVP12) — the player
-  dimension. Reservation is cheap in the early MVPs: a `Role` field on the Player record (the
-  synthetic player in MVP2, real `Player`s in MVP8) plus one tool-gating point; mature
-  enforcement (role granting, UI) arrives with multiplayer (MVP12). Regardless of role, the
-  chat/agent interaction itself is always non-blocking — play and task the AI in parallel
-  (§MVP16, async agent workflow).
+  budgets/quarantine apply. Role is an input to the authority resolver (§MVP6) — the player
+  dimension. None of it is built yet: `RbxPlayer` has no `Role` field
+  (`Assets/CoreAIMods/Runtime/RbxApi/Instances/Networking/RbxPlayers.cs`); the role, its tool gating
+  and the grant UI are MVP11. Regardless of role, the chat/agent interaction itself is always
+  non-blocking — play and task the AI in parallel (§MVP11, async agent workflow).
 - **Locomotion: Humanoid / Fly (orthogonal to role)**: `Humanoid` = the normal character;
   `Fly` = free-fly, the in-game analog of the Studio camera. A Creator defaults to Fly while
   building; whether Players may fly is a per-world host-profile config (a cheat in most games,
-  normal in creative worlds). Implementation rides the Humanoid rung (§MVP8).
+  normal in creative worlds). Not built yet: Fly as a locomotion mode is MVP7, the Fly camera of the
+  Studio is MVP12.
 - **Event mode (LOCKED)**: **Deferred** signal behavior only, matching Roblox's current direction
   (templates default to `Enum.SignalBehavior.Deferred` [^10]) — details §5.1.4 (D4).
 - **Clocks (LOCKED)**: the scheduler (`task.wait`, `task.delay`) and the frame pipeline run on
@@ -200,13 +229,14 @@ Derived rules:
   Instances are destroyed by default (opt-out `preserveInstances` flag per mod); mod stores
   **always** survive. Full survival matrix in §6.3.
 - **Mod manifest (LOCKED)**: `mod.json` carries `api_version` from day one; the loader
-  version-gates mods against the host's mod-API version (§MVP5).
+  version-gates mods against the host's mod-API version (§MVP18).
 - **One JSON contract (LOCKED)**: a single table↔JSON mapping (`HttpService:JSONEncode/JSONDecode`
   parity — arrays vs dictionaries, null handling, number formatting) implemented once and shared
   by DataStore marshalling **and** remote payload serialization (§5.2.4).
 - **Skill = docs (LOCKED)**: the in-game LLM's Lua skill and the human-facing API docs are one
-  artifact, with the generated API manifest embedded; every MVP that grows the API surface must
-  update it as part of its DoD (§MVP6).
+  artifact; every rung that grows the API surface updates it as part of its DoD (§4, implicit item
+  (b)). Today it is the hand-written "Rbx API" skill; the generated API manifest embedded in it is
+  MVP18.
 - **Test hierarchy (LOCKED convention)**: the layout and the rule-citing conformance-test naming
   convention in §6.6; every MVP DoD references it.
 - **One-shot execution + ownership ledger (LOCKED)**: `execute_lua` is a first-class **runtime**
@@ -222,10 +252,10 @@ Derived rules:
 - **World file / place package (LOCKED)**: a shareable zip (`world.json` + `Mods/` +
   `manifest.json` carrying `format_version` + `api_version`; all JSON per the `RobloxJson`
   contract) containing the world-owned instance tree (with owner/origin metadata), world
-  settings (gravity, `RobloxSpace` scale), and mod sources. Mod-ephemeral state is **not**
+  settings (gravity, `RbxSpace` scale), and mod sources. Mod-ephemeral state is **not**
   saved — mods restart clean on world load, per the hot-reload contract (§6.3). **One
   serializer** serves disk save **and** the multiplayer join snapshot the host streams to
-  connecting clients (the MVP11/MVP12 join flow is designed to reuse it). Save/load work at
+  connecting clients (the MVP5/MVP6 join flow is designed to reuse it). Save/load work at
   runtime without restart (load = `TeardownModEffects` for all mods → restore tree → start the
   world's mods); AI tools `save_world`/`load_world`. Evolves CoreAI's existing WorldState save.
   MVP1 consequence (explicit): `InstanceRegistry` records are serializable with stable ids from
@@ -246,18 +276,18 @@ Derived rules:
   escalation, and world load. Script chunk names become `mod:<id>` — the §5.2.7 error contract
   depends on it.
 - **AI-call reservations (LOCKED — cheap now, from the AIService feasibility audit)**:
-  (i) `LuaCapabilities` gains `Ai = 1<<5` (excluded from `All`, like `Full`) when `mod.json`
-  capability parsing lands (MVP5) — the same parsing also reserves `Data = 1<<6` for DataStore
-  access (§MVP9); `LuaCapabilities.cs` currently ends at `Full = 1<<4`, so both bits are free;
+  (i) `LuaCapabilities` gains `Ai = 1<<5` (excluded from `All`, like `Full`) when `AIService`
+  lands (MVP11), and `Data = 1<<6` for DataStore access (§MVP16); `LuaCapabilities.cs` currently
+  ends at `Full = 1<<4`, so both bits are free;
   (ii) MVP2's `ModScheduler` wait system is built on a generic
   "resume a Lua thread when a host `Task`/callback completes" primitive (`ScheduleWaitUntil`),
-  with time waits as the special case — DataStore `GetAsync` (MVP9) and the future `agent:Ask`
+  with time waits as the special case — DataStore `GetAsync` (MVP16) and the future `agent:Ask`
   both need it (§5.2.2); (iii) conventions from day one: `AiTaskRequest.SourceTag =
   "Mod:<modId>"`, `CancellationScope = "Mod:<modId>"`, hot-reload teardown calls
   `CancelTasks(scope)`; chat-history keying reserved as `(roleId, sessionKey)`.
 - **Frame-budget reservation**: `IExecutionBudget` and the scheduler interfaces carry a
   **per-frame / per-mod slice** concept (accounting + skip/downgrade + `BUDGET_EXCEEDED`
-  warning) from the first interface draft, even though slice *enforcement* lands later (MVP17)
+  warning) from the first interface draft, even though slice *enforcement* lands later (MVP9)
   — retrofitting accounting seams is expensive; reserving them is free (§5.2.3).
 
 ### 2.1 Normative references (behavior rulebooks)
@@ -284,18 +314,18 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-1 | cyclic `require` hangs forever (R3.7) | raise `CYCLIC_REQUIRE` naming the cycle path | hangs are hostile to AI self-repair; an error is patchable |
 | DEV-2 | `SignalBehavior.Immediate` exists | Deferred only; setter is a loud stub | D4; budget enforcement and reentrancy safety |
 | DEV-3 | no per-slice instruction budgets | budget kills + quarantine per mod (§2, quarantine policy) | sandbox safety in a live game |
-| DEV-4 | fixed stud scale | configurable `RobloxSpace` scale (default 0.28 m) | host-game integration |
+| DEV-4 | fixed stud scale | configurable `RbxSpace` scale (default 0.28 m) | host-game integration |
 | DEV-5 | `task.synchronize/desynchronize` switch Parallel Luau contexts; `RBXScriptSignal:ConnectParallel` runs the handler in parallel | no-op + once-per-mod log note; `ConnectParallel` is `Connect` (serial) with the same once-per-mod note | Parallel-annotated scripts are otherwise runnable; throwing would fail working code |
 | DEV-6 | global gravity | per-body gravity forces, host `Physics.gravity` untouched | mods coexist with the host game's physics |
 | DEV-7 | destroyed instances stay readable (`Parent` nil + locked, R5.8/R6.2) | member access on a destroyed instance raises `INSTANCE_DESTROYED` — **except** inside destruction-queued handlers (`Destroying`/`AncestryChanged`), which read a **tombstone** (`Name`, `ClassName`, `Parent == nil`; connections gone). A `Parent` change notification raised by the destruction itself is tombstone-readable too, and `BasePart` properties read inside those handlers return the part's last-known values (both part sinks keep the most recent 2,048 destroyed parts; older ones are forgotten) | loud errors drive AI self-repair; the tombstone keeps R5.8's observable post-destruction state |
 | DEV-9 | legacy `wait`/`spawn`/`delay` have a ~29 ms floor + load-dependent throttling (R4.9) | preserve the **0.029 s minimum delay**, but omit load-dependent throttling | the real floor preserves timing compatibility; deterministic scheduling avoids machine-load-dependent behavior |
-| DEV-10 | `GetAsync`/`UpdateAsync` return a `DataStoreKeyInfo` second value (S1.4/S1.7 — S1.4 is `GetAsync`'s `(value, DataStoreKeyInfo)` tuple; S1.7 is `UpdateAsync`'s transform contract) | second return is `nil` in MVP9 — documented reduced fidelity | version/metadata model not emulated locally; loud stubs cover the explicit version APIs |
+| DEV-10 | `GetAsync`/`UpdateAsync` return a `DataStoreKeyInfo` second value (S1.4/S1.7 — S1.4 is `GetAsync`'s `(value, DataStoreKeyInfo)` tuple; S1.7 is `UpdateAsync`'s transform contract) | second return is `nil` in MVP16 — documented reduced fidelity | version/metadata model not emulated locally; loud stubs cover the explicit version APIs |
 | DEV-11 | `GetAsync` results are cached for 4 s (S1.5) | cache **not emulated** — every `GetAsync` reads the store | the local store is fast; emulating the cache would only add staleness surprises |
 | DEV-12 | command-bar/one-shot execution is Studio-only | `execute_lua` one-shots are a first-class **runtime** feature (full API env, same sandbox/budgets; §2 one-shot decision) | Realtime principle — the game is authored while it runs |
 | DEV-13 | a Lua string is a byte string; non-ASCII text built from UTF-8 byte sequences (e.g. `'\195\169'` for "é") is one Unicode codepoint by Luau's own character-counting (`utf8.len`), even though `#s` counts the 2 raw bytes | crossing the C#/Lua boundary maps each byte to one `System.Char` (UTF-16 code unit) — a non-ASCII codepoint spanning 2+ UTF-8 bytes becomes that many C# chars, not one; pinned by `RoundTrip_UnicodeStrings_SurviveEncodeDecodeUnescaped` (`RbxJsonContractEditModeTests`) | the VM boundary marshals bytes, not codepoints; a mod author, or C# code reading a Lua string (logs, `GetAttribute`, `JSONEncode` output), must not assume `String.Length`/indexing on a crossed string matches Luau's `utf8.len`/perceived character count for non-ASCII text |
 | DEV-15 | "The name of an instance cannot exceed 100 characters" — the mirror states the cap, not what an over-long assignment does | an over-long `Name` keeps its first 100 characters (never splitting a surrogate pair) | truncation instead of an error keeps a world saved before the cap existed restorable |
 | DEV-16 | `Humanoid.MaxHealth = math.huge` stores infinity (a common "invincible" idiom) | accepted, but stored as the largest finite double, so `Health == math.huge` is false (compare with `MaxHealth`); `TakeDamage(math.huge)` still kills; NaN is refused | a non-finite value cannot be saved in a world package; the idiom keeps working without making the world unsavable |
-| DEV-14 | members carrying `security: PluginSecurity` are unreachable from a running game — they exist for Studio and plugins, and the shipped experience never sees them (e.g. `ScriptContext:SetTimeout`, which limits how long a script may run without yielding) | the same members are reachable at RUNTIME, gated to the elevated actor tier (`ActorContext.Grants.IsUnrestricted`); an ordinary mod is refused exactly as it is for any other privileged member | CoreAI has no Studio: authoring and playing are ONE application, so "Studio-only" has no place to live. Mapping these to "unavailable" would delete a control the creator legitimately needs while the game runs; mapping them to "anyone" would let a mod raise its own execution budget. The elevated tier is the only honest reading, and it is the same tier that already gates the rest of the privileged surface. Sibling of DEV-12, which made the same call for one-shot execution |
+| DEV-14 | members carrying `security: PluginSecurity` are unreachable from a running game — they exist for Studio and plugins, and the shipped experience never sees them (e.g. `ScriptContext:SetTimeout`, which limits how long a script may run without yielding) | the same members are reachable at RUNTIME, gated to the elevated actor tier (`ActorContext.Grants.IsUnrestricted`); an ordinary mod is refused exactly as it is for any other privileged member | CoreAI's Studio is the running game itself (the in-game creator mode, MVP12): authoring and playing are ONE application, so "Studio-only" has no separate place to live. Mapping these to "unavailable" would delete a control the creator legitimately needs while the game runs; mapping them to "anyone" would let a mod raise its own execution budget. The elevated tier is the only honest reading, and it is the same tier that already gates the rest of the privileged surface. Sibling of DEV-12, which made the same call for one-shot execution |
 
 ---
 
@@ -313,14 +343,14 @@ flowchart TD
     A2 --> F
     F --> P[Luau downlevel preprocessor\nRuntime/LuauDownlevel  LANDED  mini-rewriter Q1]
     P --> E[Engine seam\nIScriptEngine / IValueMarshaller / IScriptCoroutine\nRuntime/Scripting  LANDED\nadapter: LuaCs* + ExecutionGuard sandbox]
-    E --> R[Roblox API layer  Runtime/RobloxApi  NEW\nInstanceRegistry + DataModel + pure-spec datatypes\nModScheduler + signals + task.*\nServiceCatalog: GetService + loud stubs]
-    R --> W[World / binding layer\nRobloxSpace converter → InstanceGameObjectBinder → Unity scene\nexisting WorldBindings / world commands]
-    R --> N[INetworkBridge\nNullNetworkBridge now → MirrorNetworkBridge MVP11+\ntopology: Solo / Host / DedicatedServer / Client]
+    E --> R[Roblox API layer  Runtime/RbxApi  LANDED\nInstanceRegistry + DataModel + pure-spec datatypes\nModScheduler + signals + task.*\nServiceCatalog: GetService + loud stubs]
+    R --> W[World / binding layer\nRbxSpace converter → InstanceGameObjectBinder → Unity scene\nexisting WorldBindings / world commands]
+    R --> N[INetworkBridge\nNullNetworkBridge solo · MirrorNetworkBridge optional package\ntopology: Solo / Host / DedicatedServer / Client]
     L[Lua log service  Runtime/Logging  LANDED\nLuaLogService ring buffers · ILuaLogService\nLuaLogFormatter · GetModLogsLlmTool · LuaLogFileSink] -.cross-cuts.- P
     L -.-> E
     L -.-> R
     L -.-> N
-    S[AI Lua skill + API manifest  MVP6\ngenerated from ServiceCatalog/ClassCatalog] -.teaches.-> A1
+    S[AI Lua skill + API manifest  MVP18\ngenerated from ServiceCatalog/ClassCatalog] -.teaches.-> A1
     R -.generates.-> S
 ```
 
@@ -328,7 +358,7 @@ Rules of the arrows:
 
 - Mods never touch Unity types directly; the Roblox API layer is pure C# over the engine seam and
   talks to Unity only through the binder (`InstanceGameObjectBinder`) and existing world bindings
-  (`Assets/CoreAIMods/Runtime/WorldBindings/`). All spatial values cross through `RobloxSpace`
+  (`Assets/CoreAIMods/Runtime/WorldBindings/`). All spatial values cross through `RbxSpace`
   (§5.1.4, D2) — the single conversion boundary.
 - The Roblox API layer never references `Lua.*` types — only `Runtime/Scripting` interfaces. This
   keeps a future VM swap (or a second VM for tests) a one-adapter job.
@@ -339,11 +369,13 @@ Rules of the arrows:
   budget kills, stub hits, and network-bridge drops all land in the same per-mod ring buffer
   (`LuaLogService`).
 - The skill/manifest is **generated from** the same catalogs that implement `GetService` and the
-  class registry — documentation cannot drift from code (§MVP6).
+  class registry — documentation cannot drift from code (§MVP18; until then the hand-written skill is
+  updated with every rung).
 
 ### 3.2 Execution contexts (Roblox-style single+multi)
 
-Three script contexts, declared per-script by folder (§MVP5), semantics per R1.x/R2.x:
+Three script contexts, declared per script (§MVP4; by folder for folder mods, §MVP18), semantics per
+R1.x/R2.x. Today the side is still derived from the actor's grant; MVP4 makes it declared:
 
 | Context | Roblox analogue | Solo | Host mode | Dedicated server | Pure client (incl. WebGL) |
 |---|---|---|---|---|---|
@@ -352,8 +384,8 @@ Three script contexts, declared per-script by folder (§MVP5), semantics per R1.
 | `shared` | ModuleScript in ReplicatedStorage | on require, both sides | both sides | server side | client side |
 
 In solo play the same process hosts both contexts, but they still communicate **only** via
-remotes/replication (loopback). This is enforced from MVP5 so mods do not accidentally develop
-solo-only coupling that breaks in MVP11. Note the host-mode column: host = server + one local
+remotes/replication (loopback). This is enforced from MVP4 so mods do not accidentally develop
+solo-only coupling that breaks in host mode (MVP5). Note the host-mode column: host = server + one local
 client in one process, but that is a *topology*, not an API assumption — a dedicated server runs
 the `server` column with no local client at all.
 
@@ -372,7 +404,7 @@ Three identity spaces must reconcile:
 ```
 InstanceRecord {
   InstanceId  Id;         // ulong, monotonic per session, never reused; 0 = invalid
-  uint        NetId;      // 0 until Mirror binds it (MVP12); server-assigned
+  uint        NetId;      // 0 until replication binds it (MVP6); server-assigned
   string      WorldName;  // CoreAI world-command name; null until bound to a world object
   RbxInstance Instance;   // the live Lua-visible proxy
   string      OwnerModId; // teardown owner; null = host/world-owned
@@ -386,51 +418,173 @@ Invariants (testable from MVP1):
   `TryGetByWorldName`).
 - `Id` is allocated at registration and stable until `Destroy`; it appears in every log line and
   error concerning the instance, so the AI can correlate logs ↔ tree ↔ world queries.
-- MVP12 rule reserved now: on a Mirror client, spawn messages carry the server's `InstanceId` so
+- MVP6 rule reserved now: on a Mirror client, spawn messages carry the server's `InstanceId` so
   client-side registries mirror server ids 1:1 (no translation table in mod code, ever).
 - The id space is **partitioned by an authority bit from MVP1** (e.g. the top bit:
   server-assigned vs locally-assigned); only server-space ids ever cross the wire — the
-  MVP11+ marshal/spawn paths reject locally-assigned ids.
+  network marshal/spawn paths (MVP5 on) reject locally-assigned ids.
 - Records are **serializable with stable ids from day one** — the world-file serializer (§2,
   world file; §MVP3) round-trips them without a remap table.
 - Host/world objects discovered by CoreAI world queries get lazily wrapped: first Lua access
   creates the record with `WorldName` set and `OwnerModId = null` (positions read through the
-  `RobloxSpace` inverse, §5.1.4 D2 — consistent both ways).
+  `RbxSpace` inverse, §5.1.4 D2 — consistent both ways).
 
 ---
 
-## 4. MVP ladder
+## 4. MVP ladder (the ladder of record)
 
-Effort scale: S ≈ ≤2 agent-days, M ≈ ≤1 agent-week, L ≈ multi-week / parallelizable.
-Each MVP's Definition of Done (DoD) is a testable gate; corpus percentages defined in §6.4; test
-placement and naming follow §6.6. **Two implicit DoD items apply to every MVP**: (a) the WebGL
-acceptance checklist (§6.5) passes; (b) if the MVP grows the Lua-visible API surface, the
-skill/docs are updated and the API manifest regenerated (§MVP6). Gate (b) activates once MVP6
-lands — there is no skill to update before it; MVP6's own DoD includes retroactive coverage of
-the MVP1–MVP5 surface.
+**Decided 2026-09-24 (tech lead; owner may override).** This section is the one ladder of record for
+CoreAI — not only the Roblox API, but multiplayer, the framework consolidation and the Studio as well.
+`Docs/ROADMAP.md` §4 carries the same ladder as a one-screen release table, `TODO.md` files open work
+under the same rung names, and `PLAN.md` says where the work stands today. Any other plan (the
+dev-docs MVP2.5 plans included) is history and defers to this section.
 
-| # | Title | Depends on | Effort |
-|---|-------|-----------|--------|
-| MVP0 | Engine abstraction seam *(landed 2026-07-22)* | — | M |
-| MVP1 | Instance/DataModel core + pure-spec datatypes + RobloxSpace + identity *(landed 6.3.0; §5.1.8 gate green)* | MVP0 | L |
-| MVP2 | Scheduler, signals, clocks, services/materials framework, loopback remotes | MVP1 | L |
-| MVP3 | World file (place package) + two-tier backups *(code complete 2026-09-24; Unity verification gate pending)* | MVP1, MVP2 | M |
-| MVP4 | RBXL import/export (round trip both directions; scripts arrive as disabled mods) | MVP1, MVP2, MVP3 | M |
-| MVP5 | Mod system UX (hierarchy, contexts, hot reload, AI tools) | MVP2 + preprocessor *(landed — mini-rewriter, Q1)* | M |
-| MVP6 | AI Lua skill = the documentation (+ generated API manifest) | MVP2; co-evolves with MVP5 | M |
-| MVP7 | Editor tooling (highlighting *(shipped, editor-side)*, viewer, manager) | MVP5 | M |
-| MVP8 | Gameplay services I (Players, Humanoid, Touched, Debris, TweenService) | MVP2 | L |
-| MVP9 | DataStoreService + leaderstats | MVP2, MVP8 | M |
-| MVP10 | Input services (UserInputService, ContextActionService) | MVP2 | M |
-| MVP11 | Mirror bridge core — **host mode** (remotes over the wire) | MVP5, MVP8 | L |
-| MVP12 | Replication (spawn, property sync, authority, rate limits) | MVP11 | L |
-| MVP13 | Dedicated server (headless bootstrap + CLI; WebGL pure client validated) | MVP12 | M |
-| MVP14 | GUI subset (ScreenGui → runtime UI Toolkit) | MVP2, MVP8, MVP10 | L |
-| MVP15 | Audio / FX / animation services | MVP8 | M |
-| MVP16 | In-game console + AI self-repair loop | MVP5, MVP6, MVP7 | M |
-| MVP17 | Perf + WebGL hardening + benchmark corpus | all | M |
+Rules of the ladder:
 
-Ordering changes vs. the seed roadmap, with justification:
+- **Strictly sequential.** Each rung depends only on earlier rungs and ends testable on its own. A rung
+  ships as one minor release after its gate (`Docs/ROADMAP.md` §4).
+- **Multiplayer first.** After MVP3 closes, MVP4–MVP9 finish multiplayer — script contexts, host mode,
+  replication, characters, the dedicated server and scale — before the framework consolidation
+  (MVP10), roles (MVP11) and the Studio (MVP12).
+- **Every rung states** its goal, what is done so far (with paths), what remains, how it is tested, a
+  measurable Definition of Done (DoD), what it reuses, and what belongs in the packages versus the
+  flagship product. Paths without a root are relative to `Assets/CoreAIMods/Runtime/`.
+- **Implicit DoD items for every rung from MVP4 on:**
+  (a) the WebGL acceptance checklist (§6.5) passes;
+  (b) if the rung grows the Lua-visible surface, the "Rbx API" skill (`RbxApi.txt` and
+  `BuiltInRbxApiSkillText.cs`, byte-identical) and `Assets/CoreAI/Docs/RBX_API.md` change in the same
+  commit — and from MVP18 on the generated API manifest is regenerated and CI-diffed too;
+  (c) composability (`Docs/ARCHITECTURE_RULES.md` §2.1): every block the rung adds can be configured,
+  replaced or left out without editing package code, a block that claims to be replaceable has a
+  replace-with-fake test, and a preset the rung introduces has a boot test.
+- **Product split (plan decision D7).** The flagship Studio+Play Roblox-like app lives in its own Unity
+  project and consumes the packages through UPM. This repository keeps the packages, presets, samples,
+  bot clients and test harnesses. Each rung says which side each part lands on.
+
+Effort: **S** ≈ ≤2 agent-days · **M** ≈ ≤1 agent-week · **L** ≈ multi-week, parallelizable · **XL** ≈
+several L-sized milestones; an XL rung is split into milestones when it starts.
+
+Test methods: **EM** Unity EditMode · **PM** PlayMode `FastNoLlm` · **PT** portable engine-free suite
+(`tools/portable/Tests`) · **PL** portable Lua tier (`tools/portable/LuaTests`) · **MP** two or more OS
+processes (Standalone builds, or Multiplayer Play Mode virtual players — `com.unity.multiplayer.playmode`
+2.0.2 is installed) · **LT** load test with bot clients · **MS** a manual scene in a sample or the
+flagship, with recorded evidence.
+
+### 4.1 Numbering: old → new
+
+The ladder was renumbered on 2026-09-24. Landed rungs keep their names; the new rungs are numbered in
+execution order.
+
+| Old | Old title | Now | Where its content went |
+|---|---|---|---|
+| MVP0 | Engine abstraction seam | **MVP0** (landed) | unchanged |
+| MVP1 | Instance/DataModel core | **MVP1** (landed) | unchanged |
+| MVP2 | Scheduler, signals, clocks, services | **MVP2** (surface landed; two items open) | unchanged |
+| MVP2.5 | "MVP3 + MVP8 + MVP11 + MVP12" and the 7.3.0 persistence release | **MVP2.5** (history) | its parts are MVP3, Gameplay services I, MVP5 and MVP6 |
+| MVP3 | World file + two-tier backups | **MVP3** (closing) | + spikes S1/S2 |
+| MVP4 | RBXL import/export | **MVP14** | widened to rbxl/rbxlx/rbxm/rbxmx both ways + the round-trip parity gate |
+| MVP5 | Mod system UX | **MVP4** + **MVP16** + **MVP18** | contexts, `require`, script instances and `CONTEXT_VIOLATION` → MVP4; `game:BindToClose` → MVP16; folder mods, `api_version`, enable/disable, hot-reload latency and the AI tools → MVP18 |
+| MVP6 | AI Lua skill = the documentation | **MVP18** | generated manifest + CI diff; until then every rung updates the hand-written skill |
+| MVP7 | Editor tooling | **dropped** | highlighting shipped; the runtime Studio (MVP12) replaces the rest |
+| MVP8 | Gameplay services I | **Gameplay services I** (landed slice, name kept) | Fly → MVP7/MVP12; `Role` on `Player` → MVP11 |
+| MVP9 | DataStoreService | **MVP16** | + leaderstats |
+| MVP10 | Input services | **MVP7** + **MVP15** | `Humanoid:Move`, default controls and ContextActionService-lite → MVP7; touch buttons and the rest → MVP15 |
+| MVP11 | Mirror bridge core (host mode) | **MVP5** | + join snapshot, inbound rate limit, version handshake |
+| MVP12 | Replication | **MVP6** | + binary delta codec |
+| MVP13 | Dedicated server | **MVP8** | + WebGL client, dedicated-server preset |
+| MVP14 | GUI subset | **MVP15** | + remaining input |
+| MVP15 | Audio / FX / animation | **MVP17** | unchanged scope |
+| MVP16 | In-game console + AI self-repair | **MVP18** + **MVP10** + **MVP11** | console and runtime self-repair → MVP18; host integration profile → MVP10; task queue and HUD → MVP11 |
+| MVP17 | Performance + WebGL hardening | **MVP9** + **MVP19** | slice enforcement and the scale work → MVP9; the rest → MVP19 |
+| — | (new) | **MVP7, MVP9, MVP10, MVP11, MVP12, MVP13** | networked characters, scale, composable framework, roles, Studio, model packages and templates |
+
+Old numbers stay where history lives: test class prefixes (`Mvp1*`, `Mvp2*`, `Mvp3*`, `Mvp8*`), the
+dev-docs files (`MVP2_*`, `MVP8_ACCEPTANCE_MANIFEST.md`, `MVP25_*`), the CHANGELOG entries, and — until
+they are retagged (`TODO.md`) — the phase names in the loud stubs of `RbxApi/Instances/ServiceCatalog.cs`
+and `ClassCatalog.cs` (`MVP9`, `MVP10`, `MVP11`, `MVP14`, `MVP15`), the `MVP5` phase of
+`game:BindToClose` in `RbxDataModel.cs`, and the "Rbx API" skill that quotes them. Read them through
+this table: a stub that names "MVP9" means DataStore, which is MVP16 now.
+
+### 4.2 The ladder at a glance
+
+| # | Rung | Status (2026-09-24) | Size | Test | Old |
+|---|---|---|---|---|---|
+| MVP0 | Engine abstraction seam | landed 2026-07-22 | M | EM | MVP0 |
+| MVP1 | Instance/DataModel core | landed in 6.3.0 | L | EM, PT | MVP1 |
+| MVP2 | Scheduler, signals, clocks, services | surface landed; G10 and `BindToRenderStep` open | L | EM, PL | MVP2 |
+| MVP2.5 | Online foundation + persistence release | landed 7.3.0–7.43.0 (history) | — | EM | MVP2.5 |
+| — | Gameplay services I | landed slice | L | EM, PM, PL | MVP8 |
+| MVP3 | World/place package + two-tier backups (+ spikes S1/S2) | **closing**: code complete, Unity gate pending | S | EM, PM, manual WebGL | MVP3 |
+| MVP4 | Script contexts & client runtime | **next** | M | PL, EM, PT | MVP5 (part) |
+| MVP5 | Host mode over a real socket + join snapshot | planned | L | EM, MP, MS | MVP11 |
+| MVP6 | World-state replication + write authority | planned | L | PT, EM, MP | MVP12 |
+| MVP7 | Networked characters & controls | planned | L | PM, MP, EM | MVP10 (part) + new |
+| MVP8 | Dedicated server + WebGL client | planned | M–L | MP, LT | MVP13 |
+| MVP9 | Scale to ~100 players per room | planned | XL | LT, PT, EM | MVP17 (part) + new |
+| MVP10 | Composable framework: one root, presets, host profile | planned | M | EM, PM, MP | MVP16 (part) + new |
+| MVP11 | Roles (Creator/Player) & per-player AI over the network | planned | M | EM, MP | new |
+| MVP12 | Studio mode core | planned | XL | PM, EM, MP, MS | new (replaces MVP7) |
+| MVP13 | Model packages, template library, Luau parity prerequisites | planned | M–L | PT, PL, EM, PM | new |
+| MVP14 | Roblox interchange + round-trip parity gate | planned | L | PT, PL, EM, MS | MVP4 |
+| MVP15 | GUI + remaining input | planned | L | PM, PL, MP | MVP14 + MVP10 (rest) |
+| MVP16 | DataStore + leaderstats | planned | M | EM, PL, LT | MVP9 |
+| MVP17 | Audio / FX / animation | planned | M | PM, MP | MVP15 |
+| MVP18 | Mod UX rest, skill manifest, console + self-repair | planned | M–L | EM, PL, PM | MVP5 (rest) + MVP6 + MVP16 |
+| MVP19 | Performance, WebGL and mobile hardening | planned | M | LT, manual WebGL/Android | MVP17 (rest) |
+
+### 4.3 Spikes, scale targets and risks
+
+Three spikes turn the largest unknowns into measured numbers before the rungs that depend on them:
+
+| Spike | Where | What is measured | What it decides |
+|---|---|---|---|
+| **S1** VM cost | MVP3 close | Guarded VM throughput and per-resume cost in an IL2CPP **Linux server** build and a Standalone Mono x64 build, on the `tools/vmbench` workload and the `tools/ScaleHarness` N=100 workload | Whether the cheaper guard (plan decision D8 (a)) is enough for MVP9, or the server-only native Luau fallback (plan decision D8 (b)) is needed |
+| **S2** bytes per update | MVP3 close | Bytes per CFrame patch through `Scripting/LuaCs/LuaCsRbxNetworkCodec.cs` (JSON) vs a hand-packed binary record | The bytes-per-patch bar of MVP6's binary delta codec |
+| **S3** big snapshot | MVP5 | A 5 MB join snapshot over real kcp | The snapshot chunk size and the reliable-message path |
+
+S1 and S2 are recorded measurements (no pass/fail); their numbers go into `TODO.md`.
+
+**Scale targets (plan decision D5).** The flagship's room size is the gated product goal, frozen before
+anything is measured and published only when the MVP9 staircase passes on the reference machine:
+
+| Target | Value |
+|---|---|
+| Players per room | 100 |
+| Server tick | 30 Hz; p99 frame ≤ 33 ms, of which server Lua ≤ 8 ms |
+| Downstream per client | average ≤ 50 KB/s, p99 ≤ 100 KB/s |
+| Upstream per client | ≤ 10 KB/s |
+| Join | ≤ 10 s on LAN |
+| Place | 10,000 instances; 30 min run, 0 disconnects, retained heap delta ≤ 100 MB |
+| Reference machine | 8-vCPU Linux server |
+
+Today's instance ceilings are 16,384 per desktop world and 2,048 per actor
+(`LuaExecution/LuaCsModRuntime.cs`), 4,032 per WebGL world, and 100,000 in the package format
+(`Docs/CoreAIMods/WORLD_PACKAGE.md`); MVP9 raises the desktop ceilings with measurement.
+
+The ranked risks (R1–R13) and their mitigations are in `Docs/ROADMAP.md` §6; each mitigation is placed
+in a rung below.
+
+### 4.4 Why the order changed on 2026-09-24
+
+- **Multiplayer moved ahead of breadth.** The owner put multiplayer completion first; its skeleton
+  (the Mirror bridge, the replication core, the authority model) already existed, so finishing it is
+  the shortest path to a playable online product.
+- **Script contexts were pulled forward (MVP4).** They are the one hard dependency of host mode: the
+  server cannot tell client code from server code while the side is derived from grants
+  (`Scripting/LuaCs/LuaCsRbxInstanceBindings.cs`), so the join snapshot would leak server sources.
+- **Networked characters became their own rung (MVP7).** `Humanoid:Move` and default controls are
+  needed for a playable networked character, so they left the old input rung.
+- **RBXL interchange moved after model packages (MVP13 → MVP14).** Round-tripping Roblox content needs
+  script instances, `require`, `RunContext`, the Luau stdlib extensions and an export lint first; a
+  file format built before them would carry scripts it cannot represent.
+- **The Studio became a rung (MVP12)** and replaced the editor-tooling rung, because the flagship needs
+  an in-game creator mode and the RUNTIME-first rule puts it in the player, not the Unity editor.
+- **The framework consolidation became a rung (MVP10)** once composability became normative
+  (`Docs/ARCHITECTURE_RULES.md` §2.1); it lands before roles and the Studio, whose gating is profile
+  data.
+
+History — the ordering rationale of the first ladder (2026-07), kept as the record; the numbers are the
+old ones, and 4.1 maps them:
 
 - **Networking loopback stubs moved from "MVP1" to MVP2.** `RemoteEvent`/`RemoteFunction` are
   signal-and-yield objects; they cannot exist before `RBXScriptSignal`, the scheduler, and
@@ -439,6 +593,7 @@ Ordering changes vs. the seed roadmap, with justification:
   decision).** Opening real Roblox maps is a headline capability that exercises the MVP1/MVP2
   surface broadly; the native place package comes first because import produces `world.json` —
   and keeping it a small dedicated rung isolates the RBXL converter from serializer churn.
+  (Superseded: RBXL is MVP14 now, above.)
 - **Mod-system UX and log wiring moved after the API core (MVP5).** Hot-reload teardown rules are
   meaningless before instance ownership exists (MVP1: `OwnerModId`) and connection lifetimes exist
   (MVP2). The preprocessor is a parallel track that merges here; the log core has already landed.
@@ -447,153 +602,173 @@ Ordering changes vs. the seed roadmap, with justification:
   catalogs (the manifest source) plus MVP5's authoring workflow (which it teaches). Motivation is
   a real incident, not theory: a small 4B model hand-animated a 2-second movement with raw
   `execute_lua` loops instead of using `TweenService` — wrong-tool-choice errors are prevented by
-  the skill, not by the API.
+  the skill, not by the API. (Since then the hand-written skill has grown with every rung; the
+  generated manifest is MVP18.)
 - **Input (MVP10) split from gameplay services (MVP8).** UserInputService interacts with CoreAI's
   cursor gating and the Hub's focus model — an isolatable risk that should not block Players/
   Humanoid work.
 - **Host mode before dedicated server (MVP11 → MVP13).** Locked topology order: host mode is the
   fastest dev loop (one desktop process, mirrors Roblox Studio play-testing); the dedicated
   server is mostly headless bootstrap + CLI on top of an already-working bridge, so it lands as
-  its own step after replication.
+  its own step after replication. (Unchanged: MVP5 → MVP8 now.)
 - **The seed's "MVP4 tooling" is split**: editor tooling (MVP7) vs. in-game console + self-repair
   (MVP16), because the latter depends on the Mirror-era log routing and the mature tool surface.
+  (Editor tooling is dropped now; the console is MVP18.)
 
 ### MVP0 — Engine abstraction seam *(landed 2026-07-22)*
 
-- **Goal**: no code outside the adapter references `Lua.*`; the Roblox layer builds on neutral
-  interfaces only.
-- **Deliverables** (contract **landed on disk** in `Assets/CoreAIMods/Runtime/Scripting/`):
-  `IScriptEngine`, `IScriptState`, `IValueMarshaller`, `IScriptFunctionRegistry`,
-  `IScriptCoroutine` (with `Kill()`), `IScriptExecutionGuard`, `IExecutionBudget`,
-  `ScriptValueKind`, `IScriptTable`, `ScriptCallContext`, `ScriptCallResult`,
-  `ScriptSandboxProfile`, `ScriptRuntimeException`; `LuaCs*` classes refactored into the adapter
-  (`Scripting/LuaCs/`: `LuaCsScriptEngine`, `LuaCsScriptState`, `LuaCsValueMarshaller`,
-  `LuaCsScriptCoroutine`, …); `LuaCsApiRegistry` leak closed; `LuaCsCoroutineHandle`/`Runner`
-  exposed through `IScriptCoroutine`.
-- **DoD**: `CoreAI.Mods.csproj` compiles with the seam in place; existing EditMode tests green;
-  a grep for `using Lua;` outside `Scripting/LuaCs/`+`Infrastructure/` adapters returns nothing.
-- **Effort**: M (landed).
+- **Done**: no code outside the adapter references `Lua.*`; the Roblox layer builds on neutral
+  interfaces only. The contract lives in `Scripting/`: `IScriptEngine`, `IScriptState`,
+  `IValueMarshaller`, `IScriptFunctionRegistry`, `IScriptCoroutine` (with `Kill()`),
+  `IScriptExecutionGuard`, `IExecutionBudget`, `ScriptValueKind`, `IScriptTable`, `ScriptCallContext`,
+  `ScriptCallResult`, `ScriptSandboxProfile`, `ScriptRuntimeException`; the `LuaCs*` classes form the
+  single adapter in `Scripting/LuaCs/` (`LuaCsScriptEngine`, `LuaCsScriptState`,
+  `LuaCsValueMarshaller`, `LuaCsScriptCoroutine`, …); the `LuaCsApiRegistry` leak is closed;
+  `LuaCsCoroutineHandle`/`Runner` are exposed through `IScriptCoroutine`.
+- **DoD (met)**: `CoreAI.Mods.csproj` compiles with the seam in place; the EditMode tests are green; a
+  grep for `using Lua;` outside the `Scripting/LuaCs/` and `Infrastructure/` adapters returns nothing
+  (`ScriptingSeamHonestyEditModeTests`).
 
-### MVP1 — Instance/DataModel core (detail: §5.1) *(landed 6.3.0; input slice + camera pulled forward)*
+### MVP1 — Instance/DataModel core (detail: §5.1) *(landed in 6.3.0)*
 
-- **Status**: the engine-free datatypes, `InstanceRegistry`/`RbxDataModel` core, the `RobloxSpace`
-  conversion boundary, the `IInstanceBackingBinder`/`InstanceGameObjectBinder` materialization
-  slice, and the Lua surface (`Instance.new`/`game`/`workspace`, datatype globals, Part spatial
-  properties pushed through `IPartPropertySink`) are on disk in
-  `Assets/CoreAIMods/Runtime/RbxApi/` + `Runtime/Scripting/LuaCs/LuaCsRbx*.cs` and wired by
-  `CoreAiModsInstaller`. Shipped in 6.3.0 with the §5.1.8 acceptance gate green (build/query/clone/
-  destroy + RobloxSpace round-trip + golden fixtures + conversion lint), `Part.Shape`
-  (Ball/Cylinder/Wedge meshes; CornerWedge, a Block fallback then, has its own mesh now), and — pulled
-  forward from MVP10/§camera —
-  a Roblox-1:1 `UserInputService` slice (behind a swappable `IInputSource` seam) and
-  `workspace.CurrentCamera` (over a swappable camera rig), so mini-games are playable on the MVP1 base.
-- **Goal**: `game`, `workspace`, `Instance.new`, the full navigation/lifecycle member set,
-  pure-spec datatypes with the `RobloxSpace` conversion boundary, and the unified identity
-  registry.
-- **Deliverables**: see §5.1 (the detailed half of this document).
-- **Dependencies**: MVP0.
-- **DoD**: MVP1 acceptance test list (§5.1.8) green — including the `RobloxSpace` round-trip
-  property tests, golden fixtures, and the conversion lint test; a mod can build, query, clone,
-  and destroy an instance tree that materializes as GameObjects and is visible to CoreAI world
-  queries.
-- **Effort**: L.
+- **Done**: the engine-free datatypes, the `InstanceRegistry`/`RbxDataModel` core, the `RbxSpace`
+  conversion boundary, the `IInstanceBackingBinder`/`InstanceGameObjectBinder` materialization slice,
+  and the Lua surface (`Instance.new`/`game`/`workspace`, datatype globals, Part spatial properties
+  pushed through `IPartPropertySink`) are in `RbxApi/` and `Scripting/LuaCs/LuaCsRbx*.cs`, wired by
+  `Composition/CoreAiModsInstaller.cs`. Shipped in 6.3.0 with the §5.1.8 acceptance gate green
+  (build/query/clone/destroy, the `RbxSpace` round trip, golden fixtures, the conversion lint),
+  `Part.Shape` (Ball/Cylinder/Wedge meshes; CornerWedge has its own mesh now) and two slices pulled
+  forward so mini-games are playable on this base: a Roblox-1:1 `UserInputService` (behind the
+  swappable `IInputSource` seam) and `workspace.CurrentCamera` (over a swappable camera rig).
+- **DoD (met)**: the §5.1.8 list is green, including the `RbxSpace` round-trip property tests, the
+  golden fixtures and the conversion lint; a mod builds, queries, clones and destroys an instance tree
+  that materializes as GameObjects and is visible to CoreAI world queries. The audit fix waves of
+  2026-09-24 (M1-xx, A3-xx; `TODO.md`) are unreleased.
 
-### MVP2 — Scheduler, signals, clocks, services framework (detail: §5.2)
+### MVP2 — Scheduler, signals, clocks, services framework (detail: §5.2) *(surface landed; two items open)*
 
-- **Current state**: `ModScheduler`, `task.*` plus the legacy aliases, general deferred
-  signal dispatch, yieldable signal handlers, and `ServiceCatalog` with member-access loud stubs
-  have landed, together with the shared JSON contract / `HttpService` JSON members, loopback
-  `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction`, absent-child `WaitForChild` yield (with
-  the 5 s infinite-yield warning and the timeout overload), the `Model`/`PVInstance` pivot slice,
-  and the **complete materials catalog** — all 45 `Enum.Material` items render (catalog-driven
-  `RbxTextureMaterialProvider`: thirty-six packaged CC0 sets, any item overridable from a project-local
-  2K–4K catalog via the Editor menus; the rest procedural via `RbxProceduralMaterialProvider`) with an
-  opaque magenta diagnostic material for an unmapped id, plus `MaterialVariant`/`MaterialService` for
-  a game's own textures.
+- **Done**: `ModScheduler`, `task.*` plus the legacy aliases, general deferred signal dispatch,
+  yieldable signal handlers, `ServiceCatalog` with member-access loud stubs, the shared JSON contract
+  and the `HttpService` JSON members, loopback `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction`,
+  absent-child `WaitForChild` yield (with the 5 s infinite-yield warning and the timeout overload), the
+  `Model`/`PVInstance` pivot slice, and the complete materials catalog — all 45 `Enum.Material` items
+  render (catalog-driven `RbxTextureMaterialProvider`: thirty-six packaged CC0 sets, any item
+  overridable from a project-local 2K–4K catalog via the Editor menus; the rest procedural via
+  `RbxProceduralMaterialProvider`) with an opaque magenta diagnostic material for an unmapped id, plus
+  `MaterialVariant`/`MaterialService` for a game's own textures. The clocks (`time`, `os.time`,
+  `os.clock`, `tick`, `workspace:GetServerTimeNow`) run on the injectable `IRbxClockSource` port, so a
+  game can redefine time and monotonicity is testable without the machine clock; `os` holds exactly
+  `time` and `clock`. The RunService topology queries (`IsServer`/`IsClient`/`IsStudio`/`IsRunning`)
+  answer through the swappable `IRbxRuntimeTopology` seam (`RbxApi/Instances/RbxRuntimeTopology.cs`).
+  The Tier-A corpus gate is green: `TierACorpusEditModeTests` enforces the 30% floor and the frozen
+  catalog clears it roughly threefold. The observability seam the frame gate needs
+  (`ILuaCsGuardObserver`) has landed.
+- **Open (MVP2 is not closed)**: (1) the **G10 capacity gate** fails on the AI backend, not on CoreAI —
+  at the measured 17.4–38.5 s provider p95 on one lane, forty requests cannot be served inside a 60 s
+  window; the arithmetic in `dev-docs/MVP2_ACCEPTANCE_MANIFEST.md` calls for 12–25 backend lanes, and a
+  single provider response already exceeds the 5 s p95. That is a model and hardware decision, and it
+  belongs with the LLM-capacity risk R7 (MVP11). (2) `RunService:BindToRenderStep`/
+  `UnbindFromRenderStep` are still MVP2-phased loud stubs: implement them on the render phase with
+  Roblox's priority order, or re-phase the stubs and amend §5.2.4 (`TODO.md`). Neither blocks MVP4.
+- **DoD**: the §5.2.9 list is green, including frame order per R4.2 and deferred dispatch per
+  R5.4–R5.7; stances for U1–U7 recorded (§2.1); **corpus gate ≥30%** of Tier A (§6.4) — met.
 
-  The functional surface is complete. **Clocks** (`time`, `os.time`, `os.clock`, `tick`,
-  `workspace:GetServerTimeNow`) landed on the injectable `IRbxClockSource` port, so a game can redefine
-  time — accelerated days, a deterministic replay, a server-synchronised session — and monotonicity is
-  testable without touching the machine clock. `os` is still not the stock library: the sandbox table
-  holds exactly `time` and `clock`, asserted by pair count. The **RunService topology queries**
-  (`IsServer`/`IsClient`/`IsStudio`/`IsRunning`) answer through the swappable `IRbxRuntimeTopology`
-  seam MVP11 will replace; `BindToRenderStep`/`UnbindFromRenderStep` stay loud stubs, being render-step
-  binding rather than topology. The **Tier-A corpus gate was already green** — the 30% floor is
-  enforced by `TierACorpusEditModeTests` and the frozen catalog clears it roughly threefold.
+### MVP2.5 — Online foundation + persistence release *(landed 7.3.0–7.43.0; history)*
 
-  What remains is **not code**: the G10 capacity gate fails on the AI backend, not on CoreAI. At the
-  measured 17.4–38.5 s provider p95 with one lane, forty requests cannot be served inside a 60 s
-  window by any implementation — the arithmetic in the acceptance manifest calls for 12–25 backend
-  lanes, and even then the 5 s p95 is unreachable because a single provider response already exceeds
-  it. That is a model and hardware decision. The observability seam the frame gate needs before it can
-  be measured honestly (`ILuaCsGuardObserver`) has landed.
-- **Goal**: time and events — `task.*`, `RunService`, the clock surface,
-  `RBXScriptSignal`/connections, `game:GetService` with the loud-stub catalog, the materials
-  catalog, the shared JSON contract, and loopback remotes. Conformance targets:
-  R4.x (scheduler), R5.x (signals).
-- **Deliverables**: see §5.2.
-- **Dependencies**: MVP1.
-- **DoD**: MVP2 acceptance list (§5.2.9) green, incl. frame order per R4.2 and deferred dispatch
-  per R5.4–R5.7; stances for U1–U7 recorded (§2.1); **corpus gate: ≥30%** of the Tier-A corpus
-  runs unmodified (§6.4).
-- **Effort**: L.
+MVP2.5 was the name of the bundle "MVP3 + MVP8 + MVP11 + MVP12" in `dev-docs/MVP25_ONLINE_PLAN.md` and
+`dev-docs/MVP25_BUILD_PLAN_2026-09-04.md` (both history now). What landed under it:
 
-### MVP3 — World file (place package) + two-tier backups *(code complete 2026-09-24; Unity gate pending)*
+- **Persistence release 7.3.0**: save/load of the world state, the predecessor of the MVP3 package.
+- **Authority model** (in process): `WorldAclAuthorizer` (`RbxApi/Instances/WorldAcl.cs`),
+  `WriteGrantLedger`, `IntentGateway`, `MutationIntent` and `ClientWritePolicy {RobloxParity, Strict}`
+  (`RbxApi/Instances/Replication/`), `InstanceRegistry.Authority` separating server from replica; shown
+  by the `Assets/CoreAI.Demos/OnlineAuthority` demo.
+- **Replication phase 0** (7.39.0): member-level change reporting, `ReplicationDirtySet`,
+  `ReplicationStream`, `ReplicationApplier` and the guarded filter, tested registry-to-registry
+  (`dev-docs/REPLICATION_PHASE0.md`).
+- **Mirror bridge core** (7.42.0–7.43.0): `com.neoxider.coreaimirror` with `MirrorNetworkBridge`,
+  `CoreAiMirrorAuthenticator`, `CoreAiMirrorSessionHost` and the scene provider
+  (`Assets/CoreAIMirror/Runtime/`); remotes over Mirror's real handlers, proven over an in-memory
+  transport; `Player:Kick()` closes the connection.
 
-- **Status**: code complete (2026-09-24); the Unity verification gate is pending — EditMode 0 failed
-  and PlayMode `FastNoLlm` 0 failed must be run in Unity (the portable `dotnet test` suites on Linux:
-  engine-free 2112 passed / 0 failed / 3 skipped; Lua tier 1575 passed / 0 failed / 37 not executed,
-  the engine-bound cases Inconclusive by design). The rung closes, and MVP4 starts, only after that
-  gate and the release.
-- **Current state**: the deliverables below are built and covered by EditMode tests.
-  The `.world` ZIP container, `FileRbxWorldPackageStore` (create-once manual slots + the two-phase
-  durable autosave ring), `ConfirmedWorldMutationGate` in front of every `execute_lua` and every
-  mutating `manage_mods` action, `RbxWorldRuntimeSessionController` transactional session
-  replacement, the `save_world`/`load_world` tools with the confirm-before-restore flow, and the
-  built-player **Hub → World Loads** page all exist. The shipped contract, its validation limits,
-  and the WebGL execution budget are specified in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). The W3.5
-  tail is implemented: a player-confirmed load is recorded as a durable startup selection
-  (`Saves/Startup`, create-once entries, the same durability rule as every save) and restored at boot
-  through the same staged swap, with the default world on any failure and a Hub reset button. Also
-  closed: restore as one host-enveloped operation (rung-zero residue), the ACL floor (an ACL-composed
-  session refuses a legacy package), restored trees charging the instance quota, JSON failures from
-  every world tool, and a refusal of world loads while network sessions are live (the MVP11 entry
-  guard). After the first audit round of the world package: the startup selection follows the live
-  world (every gated mutation records it again, so the AI's later changes reopen too), a world stores
-  at most 256 distinct mod sources (the package limit, enforced before a 257th mod runs), a confirmed
-  load takes the shared gate and re-checks the network and ACL rules right before publication, the
-  load tools refuse at request time what the confirmation would refuse and answer
-  `session_unavailable` after shutdown, and manual slots are capped at 64 / 256 MiB per store. Still
-  open: mods restart in id order rather than load order (A1-02, `TODO.md`). The real WebGL page-reload
-  gate is still open.
+Its unfinished parts are rungs now: the world package is MVP3, the gameplay slice is "Gameplay services
+I" below, host mode and the join snapshot are MVP5, world-state replication is MVP6.
 
-- **Goal**: the world is a savable, shareable artifact — the single serializer that disk save,
-  backups, and (later) the multiplayer join snapshot all share (§2, world file / backups).
-- **Placement**: a small dedicated rung right after MVP2 — RBXL import (MVP4) must produce
-  `world.json`, so the native format and serializer come first; keeping them a separate rung
-  isolates the converter from serializer churn.
-- **Deliverables**:
-  1. Place-package format: zip of `world.json` + `Mods/` + `manifest.json` (`format_version`,
-     `api_version`), all JSON via `RobloxJson`; contains the world-owned instance tree (with
-     owner/origin metadata from the ownership ledger), world settings (gravity, `RobloxSpace`
-     scale), and mod sources. Mod-ephemeral state is **not** saved — mods restart clean on
-     world load (§6.3 contract).
-  2. **One serializer** for disk save and the MVP11/MVP12 join snapshot — the join flow is
-     designed against this component from the start.
-  3. Runtime save/load without restart: load = `TeardownModEffects` for all mods → restore
-     tree → start the world's mods.
-  4. AI tools `save_world`/`load_world` (§6.2); evolves CoreAI's existing WorldState save.
-  5. Two-tier backups (§2): `Saves/Manual/` named slots (AI tools can create but never
-     overwrite/delete; AI-initiated restore requires player confirmation) + `Saves/Auto/
-     <timestamp>-<trigger>.world` rolling ring (~10), snapshot taken before each AI mutation
-     (mod load/reload, world-mutating `execute_lua`) with trigger metadata.
-- **Dependencies**: MVP1 (registry with stable, serializable ids), MVP2 (`RobloxJson`).
-- **DoD**: save → load round-trips the world-owned tree with stable ids (golden comparison);
-  mods restart clean on load; a manual slot is provably untouchable by AI tools (negative
-  test); the autosave ring rotates and records triggers; WebGL IDBFS flush after save.
-  (Since Unity 6.3 the flush is the engine's automatic `persistentDataPath` persistence, reported by
-  `CoreAiWebGlPersistence.SyncAsync`.)
-- **DoD evidence** (each item proven by a named test that fails on a wrong implementation):
+### Gameplay services I *(landed slice; the old MVP8)*
+
+- **Done**: the minimum service set that makes classic tutorial scripts (kill bricks, pickups, doors,
+  speed pads) run with Roblox game feel at the default scale. `Players` (`LocalPlayer`, nil on a
+  dedicated server; `PlayerAdded`/`PlayerRemoving`, `GetPlayers`, `GetPlayerByUserId`,
+  `GetPlayerFromCharacter`; solo = one synthetic `Player`), `Player` with `Character`/`CharacterAdded`
+  and the `leaderstats` convention over `IntValue`/`StringValue`/`NumberValue`
+  (`RbxApi/Instances/Networking/RbxPlayers.cs`, `RbxApi/Instances/RbxValueObjects.cs`); characters built
+  by `RbxApi/Instances/Networking/RbxCharacterFactory.cs` and driven by
+  `RbxApi/Binding/UnityRbxCharacterMotor.cs`, with `IRbxCharacterMotorProvider` for a host's own
+  controller ([CHARACTER_MOTOR_BRIDGE.md](CHARACTER_MOTOR_BRIDGE.md)); `Humanoid` basics
+  (`RbxApi/Instances/RbxHumanoid.cs`: `Health`, `MaxHealth`, `WalkSpeed`, `JumpPower`/`JumpHeight`/
+  `UseJumpPower`, `MoveDirection`, `TakeDamage`, `MoveTo`/`MoveToFinished`, `Died`, `HealthChanged`);
+  `BasePart.Touched`/`TouchEnded` through CoreAI's own `RbxApi/Binding/RbxContactRelay.cs` (not a
+  NeoxiderTools dependency); `Debris:AddItem`; `TweenService`, `TweenInfo`, `Tween:Play/Pause/Cancel`
+  and `Completed`; `workspace:Raycast`; per-body gravity (DEV-6); `CollectionService` tag queries and
+  signals. After the 2026-09-24 audit fix waves (unreleased): TweenService advances in O(1) per step,
+  refuses non-finite goals, contains a faulting tween, plays `Reverses` as two legs, never fires
+  `Touched` for a tweened move, and charges each tween to the creating actor with at most 256 finished
+  tweens kept per actor; `Humanoid:TakeDamage`/`MoveTo`/`ChangeState`, `Debris:AddItem` and the Tween
+  calls need `WorldEdit` and write authority; `CanCollide = false` behaves as in Roblox; `Died` fires
+  only inside the Workspace; `MoveTo` ends with `false` when a script, a `PivotTo` or a tween moves the
+  `HumanoidRootPart`; a character `Model` is `Archivable = false`; `ClickDetector.MouseClick` passes the
+  clicking player; `Player:Kick(message)` carries its text to the client. Per-item evidence:
+  `dev-docs/MVP8_ACCEPTANCE_MANIFEST.md`.
+- **Moved out**: the `Role` field on `Player` (never built) → MVP11; Fly locomotion (never built) →
+  MVP7 (Fly as a locomotion mode) and MVP12 (Fly camera for Creators); `Humanoid:Move` → MVP7.
+- **Open**: the 1:1-scale smoke half of gate P8.2 is not covered (no PlayMode test runs
+  `RbxSpace.Configure(1)`), and the character motor has known limits (`TODO.md`, "Left on MVP2.5").
+- **DoD**: kill-brick, touch-pickup-with-leaderstats and door-tween corpus fixtures pass at 0.28 scale
+  (primary) and 1:1 (smoke — the open half above); a dropped part falls with Roblox-feel acceleration
+  under per-body gravity while the host scene keeps Earth gravity; **corpus gate ≥60%** of Tier A+B
+  (enforced by `TierACorpusEditModeTests` over the frozen Tier-B catalog); the skill's TweenService
+  section and its wrong→right pair are verified.
+
+### MVP3 — World/place package + two-tier backups + spikes S1/S2 *(closing: code complete 2026-09-24, Unity gate pending)* (S)
+
+- **Goal**: the world is a savable, shareable artifact — the single serializer that disk save, backups
+  and the multiplayer join snapshot share (§2, world file / backups) — released, with the two unknowns
+  that most affect scale measured.
+- **Done so far**: the deliverables below are built and covered by EditMode tests; the contract, its
+  validation limits and the WebGL execution budget are in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). The
+  `.world` ZIP container, `FileRbxWorldPackageStore` (create-once manual slots, capped at 64 / 256 MiB
+  per store, and the two-phase durable autosave ring), `ConfirmedWorldMutationGate` in front of every
+  `execute_lua` and every mutating `manage_mods` action (`Infrastructure/LuaCsGameToolExecutor.cs`),
+  `RbxWorldRuntimeSessionController` transactional session replacement
+  (`Infrastructure/RbxWorldPackageContracts.cs`), the `save_world`/`load_world`/`list_autosaves`/
+  `load_autosave` tools with the confirm-before-restore flow and JSON failure statuses, and the
+  built-player **Hub → World Loads** page. The W3.5 tail: a player-confirmed load is recorded as a
+  durable startup selection (`Saves/Startup`) and restored at boot through the same staged swap, with
+  the default world on any failure and a Hub reset button. Also closed: restore as one host-enveloped
+  operation, the ACL floor, restored trees charging the instance quota, a refusal of world loads while
+  network sessions are live (the entry guard of MVP5), at most 256 distinct mod sources per world, a
+  confirmed load under the shared gate, and — since audit round 2 — mods restarting and restoring in
+  their load order (`LuaModManifest.LoadOrder`, A1-02). Portable suites on Linux at `f817225b`:
+  engine-free 2112 passed / 0 failed / 3 skipped; Lua tier 1606 passed / 0 failed (engine-bound cases
+  Inconclusive by design).
+- **To do**:
+  - Finish audit rounds 2 and 3 over the whole wave and their fixes (`TODO.md`).
+  - Run the Unity checklist in `TODO.md` ("Check the tests"): EditMode in the four module legs plus
+    `MIRROR`, PlayMode `FastNoLlm`, and the fixtures that have never run.
+  - Run the real WebGL page-reload gate (save → reload the page → the bytes and the startup selection
+    survive).
+  - Bump and tag (`python tools/bump_version.py <version>`).
+  - **S1** and **S2** (§4.3); record the numbers in `TODO.md`.
+  - The MVP3 tail items in `TODO.md` ("Persistence (MVP3 tail)") are follow-ups; they do not gate the
+    release.
+- **Test**: EM, PM, manual WebGL; S1 and S2 as recorded measurements.
+- **DoD**: EditMode 0 failed and PlayMode `FastNoLlm` 0 failed on Unity 6000.3.14f1; the WebGL reload
+  survives; the release tag exists; the S1 and S2 numbers are in `TODO.md`. The original DoD — save →
+  load round-trips the world-owned tree with stable ids (golden comparison); mods restart clean on
+  load; a manual slot is provably untouchable by AI tools (negative test); the autosave ring rotates and
+  records triggers; a save is durable on WebGL (since Unity 6.3 the engine's automatic
+  `persistentDataPath` persistence, reported by `CoreAiWebGlPersistence.SyncAsync`) — is proven item by
+  item:
   (a) golden round trip — `WritePackage_AuthoredWorld_MatchesLiteralGoldenJson`,
   `ReadPackage_HandWrittenLiteralPackage_RestoresLiteralIdsParentsRevisionsAndPartState`;
   (b) clean restart — `ConfirmedPackageLoad_SwapsEveryFacadeAndRestartsOnlyActiveModsOnce` (active mods
@@ -607,532 +782,805 @@ Ordering changes vs. the seed roadmap, with justification:
   `ListAutoSaves_HyphenatedTriggers_RoundTripExactly`, `ListAutoSavesTool_ReturnsExactNameTriggerTimestampAndSize`,
   `ConfirmedBackup_GatedExecuteLua_WritesExactlyOneExecuteLuaAutosaveToFileStore`;
   (e) persistence after save — `FileStores_WithoutInjectedHook_DefaultToCoreAiWebGlPersistenceSyncAsync`
-  (the real-browser reload stays an open gate);
-  (f) invalid names as JSON results (7.45.0) — `SaveWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`,
+  (the real-browser reload is the open gate above);
+  (f) invalid names as JSON results — `SaveWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`,
   `LoadWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`,
   `LoadAutoSave_InvalidName_IsRefusedAsResult_WithoutCallingService`.
-  Rung-zero envelope: `RungZeroHostRestore_AclPackageLoad_RestoresTreeAsOneHostEnvelopedOperation` (and
-  its headless twin); ACL floor: `AclComposedSession_LegacyPackage_IsRefusedBeforeAnySideEffect`,
-  `WorldLoadRequest_AclComposedSession_RefusesLegacyPackageBeforeAskingThePlayer`; startup selection:
-  `StartupSelection_ConfirmedAutosaveLoad_SurvivesTheAutosaveRotatingAway`,
-  `StartupRestore_CorruptOversizedOrMissingEntry_KeepsDefaultWorld_NeverThrows`,
-  `StartupSequence_RestoresFirst_AndRehydratesTheDefaultWorldUnlessRestored`. The full list is in
+  Rung-zero envelope, ACL floor, startup selection and load order: the full list is in
   [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md#acceptance-status-mvp3).
-- **Effort**: M.
+- **Deliverables (as designed)**:
+  1. Place-package format: zip of `world.json` + `Mods/` + `manifest.json` (`format_version`,
+     `api_version`), all JSON via `RobloxJson`; the world-owned instance tree (with owner/origin
+     metadata from the ownership ledger), world settings (gravity, `RbxSpace` scale) and mod sources.
+     Mod-ephemeral state is **not** saved — mods restart clean on world load (§6.3 contract).
+  2. **One serializer** for disk save and the join snapshot of MVP5/MVP6 — the join flow is designed
+     against this component from the start.
+  3. Runtime save/load without restart: load = `TeardownModEffects` for all mods → restore tree →
+     start the world's mods.
+  4. AI tools `save_world`/`load_world` (§6.2); evolves CoreAI's existing WorldState save.
+  5. Two-tier backups (§2): `Saves/Manual/` named slots (AI tools can create but never
+     overwrite/delete; an AI-initiated restore requires player confirmation) + a rolling
+     `Saves/Auto/<timestamp>-<trigger>.world` ring (~10), a snapshot taken before each AI mutation (mod
+     load/reload, world-mutating `execute_lua`) with trigger metadata.
+- **Reuses**: MVP1 (registry with stable, serializable ids), MVP2 (`RobloxJson`).
+- **Package/flagship**: packages only.
 
-### MVP4 — RBXL import/export
+### MVP4 — Script contexts & client runtime *(next)* (M)
 
-- **Goal**: real `.rbxl`/`.rbxm` maps open in CoreAI **and our worlds export back — the
-  round trip works in both directions** (user requirement: import from Roblox and back), as a
-  converter layered over the native place package (import produces `world.json` + mod entries;
-  it never bypasses the native format). Import breadth exceeds export breadth by design:
-  export emits only the Roblox-shaped subset we model.
-- **Deliverables**:
-  1. **First task — reader verification**: candidate C# implementation
-     MaximumADHD/Roblox-File-Format (pure C#) — verify license + netstandard/Unity (IL2CPP)
-     compatibility; fall back to our own reader against the rbx-dom spec if it fails either.
-  2. `import_rbxl` (binary + XML formats) → `world.json` + mod entries. Scope tiers:
-     (1) geometry/instance tree — `Part`/Wedge/`Model` sizes, CFrames, colors, materials →
-     `InstanceRegistry` via `RobloxSpace`; (2) embedded Luau scripts imported as **disabled**
-     mods — untrusted code: the player/AI enables after review, the downleveler processes them
-     on enable, quarantine applies; (3) Lighting/SpawnLocations/Value objects/attributes as API
-     coverage allows. Scripts-as-disabled-mods needs only the source store (exists today), not
-     the MVP5 mod UX — the dependency graph stays MVP1+MVP2+MVP3.
+- **Goal**: every script declares `server | client | shared`; the process topology, not the actor's
+  grant, decides which side runs it; a client process runs only client and shared code against a
+  replica registry. This is the one hard dependency of multiplayer: without declared contexts the join
+  snapshot would ship server sources to clients, and a host-mode server script written by a restricted
+  actor would run as "client".
+- **Done so far**:
+  - `RbxNetworkTopology {Solo, Host, DedicatedServer, Client}` (`RbxApi/Instances/Networking/INetworkBridge.cs`)
+    and the `IRbxRuntimeTopology` seam (`RbxApi/Instances/RbxRuntimeTopology.cs`).
+  - `IsNetworkServer`/`RequireNetworkSide` (`Scripting/LuaCs/LuaCsRbxInstanceBindings.cs`) — derived
+    today from the topology and the actor's grant (`Topology != Client && IsHost`).
+  - `InstanceRegistry.Authority` with `RegistryAuthority.Replica` (`RbxApi/Instances/InstanceRegistry.cs`).
+  - Non-creatable `Script`/`LocalScript` descriptors (`RbxApi/Instances/ClassCatalog.cs`) and one
+    synthetic `script` per mod under ServerScriptService (`Scripting/LuaCs/LuaCsRbxApiBindings.cs`).
+  - `LuaModManifest.LoadOrder` (`LuaExecution/LuaModManifest.cs`) and the Luau downlevel at every load
+    (`LuaExecution/LuauSourceGate.cs`, line numbers preserved).
+- **To do**:
+  - **Script instances (plan decision D1 (c))**: `Script`, `LocalScript` and `ModuleScript` become real,
+    creatable instances whose `Source` is a view over the mod source store (versioned stores, revert,
+    quarantine and the world package's `Mods/` stay the only storage); `Enabled` and `RunContext` are
+    real members; `script.Parent` is the containing instance. This removes the round-trip blockers
+    RT1–RT3 (§MVP14) before any template or importer depends on the script model.
+  - A declared context in the `@coreai` header, `LuaModManifest` and the package's
+    `Mods/NNNN/manifest.json` (decide whether this needs a `format_version` bump); an old package
+    without contexts loads as `shared` or is refused — the rung decides which, with a test.
+  - Rewrite `IsNetworkServer` on the declared context plus the topology.
+  - `require` for `shared` modules with Roblox caching (R3.2/R3.4: one execution per VM, cached table
+    identity) and `CYCLIC_REQUIRE` for a cycle (DEV-1).
+  - Enforce the §3.2 matrix: a server-only API from a `client` script raises `CONTEXT_VIOLATION` naming
+    the rule (old MVP11 deliverable 5).
+  - Stop minting `Player`s on a replica (`TODO.md`, "Left on MVP2.5": `EnsureNetworkActor` never checks
+    `registry.Authority`).
+  - A client composition that stages a replica world through `IRbxWorldSessionHost`
+    (`HeadlessRbxWorldSessionHost` in `Infrastructure/RbxWorldPackageContracts.cs` is the model).
+- **Test**: PL (context enforcement, the R3_x `require` conformance tests named per §6.6, e.g.
+  `R3_2_RequireExecutesOnce`, `DEV1_CyclicRequireRaisesError`), EM (composition, script instances in
+  the tree), PT (manifest and package round trip with contexts).
+- **DoD**:
+  - A server-only API called from a `client` script raises `CONTEXT_VIOLATION`, and its negative twin
+    (the same call from a `server` script) passes.
+  - Solo runs all three contexts talking through loopback remotes only.
+  - `script.Parent` of a `Script` inside a `Part` is that part, and `script.Parent.Touched` works from it.
+  - An old package without contexts loads (or is refused) exactly as decided, pinned by a test.
+  - The Tier-A corpus pass rate does not drop; **corpus gate ≥50%** of Tier A (§6.4).
+- **Reuses**: the MVP2 scheduler and sandbox, the MVP3 package.
+- **Package/flagship**: packages only.
+
+### MVP5 — Host mode over a real socket + join snapshot (L) *(the old MVP11)*
+
+- **Goal**: a desktop host (server plus local player) and remote clients play one world over kcp, and
+  a joining client receives the world. Topology order stays Null loopback (solo) → host → dedicated
+  (MVP8).
+- **Done so far**:
+  - `MirrorNetworkBridge : INetworkBridge` (`Assets/CoreAIMirror/Runtime/MirrorNetworkBridge.cs`) with
+    authenticated admission (`CoreAiMirrorAuthenticator`), the session host (`CoreAiMirrorSessionHost`)
+    and the scene provider (`CoreAiMirrorNetworkBridgeProvider`): readiness handshake, server clock
+    anchors, kick and supersede notices, per-channel payload limits, reliable sends held until
+    admission, in-process delivery for server-local actors (`LocalDeliveries`) —
+    [Mirror README](../../Assets/CoreAIMirror/README.md), Sessions.
+  - The world-session staging bridge (`StagedNetworkBridge`, forwarding the clock since audit round 2)
+    and the world-load guard `network_sessions_active`.
+  - In-memory Mirror tests (`Assets/CoreAIMirror/Tests/EditMode/OfflineMirror.cs`).
+  - The MVP3 serializer — the snapshot source (`Infrastructure/RbxWorldPackageSerializer.cs`,
+    `RbxApi/Instances/InstanceTreeSerializer.cs`).
+- **To do**:
+  - Host mode: serve Mirror's host-mode local connection as the host's own `Player` (today it is refused
+    loudly, `CoreAiMirrorSessionHost.HostModeConnectionsRefused`), and rewrite
+    `KnownLimitation_HostMode_AServerBridgeDoesNotServeTheLocalClient` as the positive test.
+  - A filtered join snapshot over the wire: no ServerStorage/ServerScriptService, no `server` sources
+    (MVP4), owner/ACL metadata stripped at capture (MP-20 remainder); chunked; decoded as a stream.
+  - **S3**: a 5 MB snapshot over real kcp (§4.3).
+  - A roster message; an **inbound rate limit** on decode/dispatch with drop-and-count (Mirror README,
+    Known limits); a deferred refusal notice so a refused client learns why; a protocol version
+    handshake.
+  - Live-session handoff when a world loads at runtime, or keep the `network_sessions_active` refusal
+    and document it as the contract.
+  - Server→client encode-side filtering (`FireClient(player, ServerStorage.X)` still sends the
+    reference; only the decode side filters).
+  - Make the client registry a replica once the join snapshot fills it (MP-11, deferred to this rung by
+    the audit fix waves because it would break the remote demos before a snapshot exists), and decide
+    whether registration admission (the instance quota) skips replica applies.
+  - The first MP harness (Multiplayer Play Mode or two Standalone players).
+  - **Preset "player-host co-op"** with a boot test (implicit item (c)).
+- **Test**: EM (`OfflineMirror` rules), MP (host + 2 clients), MS (sample scene "remote chat + kill
+  brick").
+- **DoD**:
+  - Two processes, host + 2 clients, on localhost kcp.
+  - The join snapshot of a 2,000-part world applies in ≤3 s and the client tree equals the server's
+    filtered tree (golden by ids).
+  - The `RemoteEvent` chat fixture and a `RemoteFunction` round trip with its timeout pass.
+  - A custom client flooding 10,000 remotes/s leaves the server's p99 frame < 33 ms, with the drops
+    counted.
+  - A client of another CoreAI version is refused with a reason.
+  - All solo tests pass without `MIRROR`; the player-host preset boots in its test.
+- **Reuses**: MVP3 (snapshot = world-file serializer), MVP4 (contexts decide what a client receives).
+- **Package/flagship**: packages (bridge, presets, sample scene, MP harness); matchmaking and hosting UX
+  are flagship.
+- **Design detail carried from the old MVP11** (wire behaviour per the M-rules in
+  `02_MULTIPLAYER_REPLICATION.md`, including its serialization/limits appendices):
+  1. `MirrorNetworkBridge : INetworkBridge` behind the `MIRROR` define; `NullNetworkBridge` remains the
+     no-define/solo path. Topologies of this rung: `Host` + `Client`; the `DedicatedServer` bootstrap is
+     MVP8 (the interface already carries it). As built, CoreAI uses Mirror's raw message handlers with
+     its own envelopes, not `NetworkIdentity` components, and NeoxiderTools' `Neo.Network` is **not**
+     the bridge (owner decision 2, `dev-docs/MVP25_ONLINE_PLAN.md` §7); the `Neo.Network` classes the
+     first draft named (`NetworkEventDispatcher`, `NetworkActionRelay`, `NetworkContextActionRelay`) were
+     patterns only.
+  2. `RemoteEvent` over the wire: `FireServer` → client-to-server message, `FireClient(player, ...)` →
+     that player's connection, `FireAllClients` → every admitted connection. `UnreliableRemoteEvent` on
+     the unreliable channel with a loud `PAYLOAD_TOO_LARGE` over the limit (Roblox's documented drop
+     threshold is 1,000 B, [^6-note]). As built, the limit is per channel: an unreliable payload is
+     capped at 1,000 B, or at the transport's datagram when that is smaller; a reliable remote or
+     `RemoteFunction` payload at the codec's 64 KiB, or at the transport's reliable message size when
+     that is smaller.
+  3. `RemoteFunction` request/response over paired messages, with timeout → Lua error, matching the
+     "InvokeClient is hazardous" guidance [^7].
+  4. Payload marshalling per the M-doc serialization appendix — the wire envelope is the **identical
+     MVP2 loopback envelope** (§5.2.4: `RobloxJson` + tagged datatype/`InstanceId` entries; table-key
+     stringification — conformance tests like `M3_8_TableKeysStringified` per §6.6); Instances marshal
+     as `InstanceId` and resolve through the registry on the far side (nil + warning if unknown).
+  5. `Players` becomes real: one `Player` per admitted connection, `PlayerAdded`/`PlayerRemoving` from
+     connect/disconnect (built; identity through `Players.IdentitySource`, set by
+     `AttachWorld(Func<LuaCsRbxApiBindings>)`).
+  6. `workspace:GetServerTimeNow()` stays Unix-epoch seconds (D9 table): the bridge side is
+     `INetworkBridge.ServerClockOffsetSeconds` plus `IsServerClockSynchronized`, fed by the server's
+     clock anchors (`CoreAiServerClockMessage`); the world side re-bases at the first synchronization and
+     slews afterwards (built).
+  - Old MVP11 DoD, kept inside the DoD above: host + client playtest — chat-via-RemoteEvent fixture,
+    server-authoritative kill brick, `RemoteFunction` round trip with timeout; all solo corpus fixtures
+    still pass with `MIRROR` absent.
+  - State of the bridge before this rung (7.45.0 plus the unreleased fix waves): one connection per
+    actor with the newest winning on reconnect (teardown keyed by connection); one admission attempt per
+    connection and an admission deadline (10 s); per-channel payload limits; client handlers that do not
+    require Mirror authentication; stale answers, malformed envelopes and orphaned requests dropped and
+    counted; kcp2k's negative connection ids handled (MP-25); `AttachWorld` wiring
+    `Players.IdentitySource`, and a server world refusing a transport-admitted actor without one
+    (`NOT_AUTHORITY`); client-authored `Instance` references resolving only if the sender can see them
+    (MP-01); a 64 KiB packet decoded without hundreds of megabytes (MP-02); NaN/±Infinity as bare
+    numbers (MP-17); the readiness handshake (MP-09); a server clock from the server's own Unix-time
+    anchors (MP-06); kick and supersede notices with `Player:Kick(message)`'s text (MP-22); a per-sender
+    budget of 32 live handler threads (MP-10); a disconnected actor's mods unloaded once their running
+    code returns (M2-24). After audit rounds 1 and 2: threads a remote-started handler schedules are
+    charged to the sender (A4-01), unreliable sends are dropped and reliable ones held until admission
+    (A4-04, B1-07), an admission belongs to its connection (B1-08), the server's clock hold reaches
+    clients (A4-08, A4-13, B1-10) — also from a world loaded from a package (B1-01) — a host's own
+    `DisconnectActor` ends the connection (A4-09), Mirror's host-mode local client is refused loudly
+    (A4-10), and unresolved-value reports are throttled (A4-02, A4-12, B1-06). Mixed CoreAI versions
+    must not run together (a missing message fails loudly with Mirror's default `exceptionsDisconnect`;
+    an added field is not detected).
+
+### MVP6 — World-state replication + write authority (L) *(the old MVP12)*
+
+- **Goal**: server-created and server-changed instances and part properties replicate to clients;
+  client writes follow `ClientWritePolicy`, and host grants travel as intents. The identity promise
+  (§3.3) is cashed in.
+- **Done so far**:
+  - Replication phase 0 (`RbxApi/Instances/Replication/`): `ReplicationDirtySet`, `ReplicationStream`
+    (ordered Spawn/Patch/Remove per recipient), `ReplicationApplier` (duplicate/gap/violation handling,
+    resync in place with `BeginResync(worldSequence)`), `GuardedReplicationFilter` — tested
+    registry-to-registry (`dev-docs/REPLICATION_PHASE0.md`).
+  - `WriteGrantLedger`, `IntentGateway`, `MutationIntent`, `ClientWritePolicy {RobloxParity, Strict}`;
+    the `Assets/CoreAI.Demos/OnlineAuthority` demo (in process).
+- **To do**:
+  - A per-tick `ReplicationPublisher` with coalescing; it replaces the synchronous `FireAllClients`
+    fan-out (`Scripting/LuaCs/LuaCsRbxApiBindings.cs`).
+  - A **binary, revision-stamped delta codec below the bridge**, sized against S2.
+  - Member-level marks for `BasePart` and camera state and tweens, removing the whole-node limit (today
+    part and camera properties do not reach a replica as patches, so their `Changed` never fires there).
+  - `SendIntent`/`IntentReceived` on `INetworkBridge`.
+  - Strip owner/ACL metadata at capture for a client (if MVP5 did not already).
+  - The authority-resolver seam `(instance, member) → WriteVerdict`.
+  - Retire `ReplicationDirtySet`'s actor-id overload once every caller holds a `ReplicationStream`.
+- **Test**: PT (codec, dirty set, stream), EM (resolver, grants), MP (3 processes).
+- **DoD**:
+  - A server mod moves 200 parts at 20 Hz; clients match ids, names and CFrames within 1 tick + RTT.
+  - A late joiner converges.
+  - `RobloxParity`, `Strict` and grant tests pass over the wire (below).
+  - The 100-instance churn soak runs 10 min with no violation and within its rate budget.
+  - A measured average of ≤24 B per CFrame patch on the wire, unless S2 sets another bar before the
+    rung starts.
+- **Reuses**: MVP3 (the join snapshot is the world-file serializer), MVP5 (bridge and snapshot).
+- **Package/flagship**: packages only.
+- **Design detail carried from the old MVP12**: instance trees and properties replicate; semantics per
+  the M-rules (authority, ownership, replication order). Server-side `Instance.new` under
+  `workspace`/`ReplicatedStorage` replicates to clients; property sync for the whitelisted mutable set
+  (`Name`, transform/CFrame, `Color`, `Transparency`, `Anchored`, attributes), dirty-flagged and
+  batched per tick; the `instanceId ↔ netId` binding in `InstanceRegistry` (server assigns, clients
+  mirror). Client-write behaviour is a configurable per-world **`ClientWritePolicy`**:
+  **`RobloxParity` (default)** — a client mod writing to a server-owned replicated instance succeeds
+  **locally**, never replicates, and the next server sync overwrites it (M2.6/M1.5; local-only VFX are a
+  feature, not an error) — default because the Roblox corpus and the AI's priors assume it;
+  **`Strict`** — such writes are rejected with `NOT_AUTHORITY` (+ the "use a RemoteEvent" hint), for
+  competitive games. There is **no `Open` policy** (owner decision 3,
+  `dev-docs/MVP25_BUILD_PLAN_2026-09-04.md` §D): creative/co-build worlds use a **host grant**
+  (`WriteGrantLedger`) — under either policy, a client write covered by a grant for `(instance, action)`
+  is not applied locally but sent as a `MutationIntent` that the server checks, applies and replicates;
+  nothing a client sends selects authority. Under every policy `NOT_AUTHORITY` also fires on an explicit
+  replication attempt (a client calling a server-only bridge operation). The policy is resolved through
+  a single **authority resolver** `(instance, property/action) → WriteVerdict { ApplyLocalOnly |
+  Replicate | Reject }`, so future partial-authority rules (per instance / property / player — "clients
+  may move furniture but not delete walls") are a new resolver, not a replication rewrite; they are a
+  backlog item. Per-connection rate limits on remotes and property writes; late-joiner snapshot replay
+  **reuses the MVP3 serializer**, never a second tree-serialization path. Old DoD, kept: the server mod
+  builds a tree and the client sees identical ids/names/positions; under `RobloxParity` a client write
+  to a server-owned instance stays local and is overwritten by the next sync (M2.6) while an explicit
+  replication attempt raises `NOT_AUTHORITY` and is logged; a test for `Strict`, one for a host grant
+  (the write travels as an intent, is applied by the server and replicates) and one asserting the
+  policy enum has exactly two values; conformance tests cite M-rule ids (§6.6).
+
+### MVP7 — Networked characters & controls (L)
+
+- **Goal**: each player walks, jumps and sees the others move smoothly — the base of any Roblox-like
+  game.
+- **Done so far**: `RbxCharacterFactory`, `RbxHumanoid` (`MoveTo`, `Jump`, `WalkSpeed`, `Died`),
+  `UnityRbxCharacterMotor` and `IRbxCharacterMotorProvider` (`RbxApi/Binding/`); `UserInputService`
+  over `UnityNewInputSource`; `workspace.CurrentCamera`, `CameraSubject` and the position-only
+  `RbxCameraFollower`.
+- **To do**:
+  - `Humanoid:Move` (a loud stub phased `MVP10` in `ClassCatalog.cs`).
+  - A default control script and camera (a ControlModule/PlayerModule-lite, as Lua in a `client`
+    context).
+  - ContextActionService-lite (below).
+  - Character replication at tick rate with interpolation.
+  - Own-character authority per **plan decision D3 (b)**: the client owns its own character, the server
+    validates it (speed and teleport limits); every other part stays server-owned.
+  - `Player:GetNetworkPing`.
+  - Fly as a locomotion mode (Creators use it in MVP12).
+- **Test**: PM (solo WASD moves the character, at 0.28 and at 1:1 — this also closes the uncovered
+  1:1 half of gate P8.2), MP (3 players), EM (validation rules with negative twins).
+- **DoD**:
+  - Solo input-to-motion ≤1 frame.
+  - Networked: remote characters render with ≤100 ms added latency on LAN and no visible teleport
+    jitter (position error p95 ≤0.5 stud).
+  - The server corrects a speed hack (a sustained move above 1.5× `WalkSpeed`), with a negative twin.
+  - **Corpus gate ≥70%** of Tier A+B (§6.4), with the sprint-on-shift and click-to-place fixtures
+    passing with the Hub open and closed.
+- **Reuses**: Gameplay services I (characters, Humanoid), MVP4 (client context), MVP6 (replication).
+- **Package/flagship**: packages (control scripts, validation, interpolation); character art and feel
+  tuning are flagship.
+- **Design detail carried from the old MVP10 (input services)**: mods read input the Roblox way
+  without fighting CoreAI's own input/cursor model. `UserInputService` already landed in MVP1
+  (`InputBegan`/`InputChanged`/`InputEnded(input, gameProcessedEvent)`, `IsKeyDown`,
+  `GetMouseLocation`, `MouseBehavior`, `InputObject`, `Enum.KeyCode`/`UserInputType`/
+  `UserInputState`); `TouchTap` and touch buttons go with MVP15. `ContextActionService`:
+  `BindAction(actionName, functionToBind, createTouchButton, ...inputTypes)`, `BindActionAtPriority`,
+  `UnbindAction`, `SetTitle`, `SetImage`; the handler receives `(actionName, inputState, inputObject)`
+  and may return `Enum.ContextActionResult.Pass/Sink` [^13]. **Cursor-gating aware**: when the CoreAI
+  Hub or chat has focus, `gameProcessedEvent = true` (Roblox's meaning: the engine consumed it) — mods
+  keep receiving events and can filter, exactly as Roblox tutorials teach. Input services exist only
+  in contexts that have a client (never on a dedicated server), bridged to the Unity Input System
+  through one adapter so the host game's input stack stays authoritative. Old DoD: sprint-on-shift and
+  click-to-place fixtures pass with the Hub open and closed (above); a touch button appears on a touch
+  device (MVP15).
+
+### MVP8 — Dedicated server + WebGL client (M–L) *(the old MVP13)*
+
+- **Goal**: the same bridge and mod stack runs headless on Linux; desktop and WebGL clients join.
+- **Done so far**: `HeadlessRbxWorldSessionHost` (`Infrastructure/RbxWorldPackageContracts.cs`); the
+  `RendersFrames` topology flag and `Players.LocalPlayer = nil` on a dedicated server;
+  `Logging/LuaLogFileSink.cs`; `com.unity.dedicated-server` 2.0.2 installed (`Packages/manifest.json`).
+- **To do**:
+  - A Dedicated Server build-target bootstrap and CLI (port, world/place, mod set, max players,
+    admission provider).
+  - Headless log routing plus remote log fetch for the AI.
+  - A WebSocket transport, multiplexed with kcp, for WebGL clients (plan decision D4: Mirror/kcp +
+    WebSocket behind `INetworkBridge`).
+  - Enforce `Players.MaxPlayers` at admission (today a property that is never checked,
+    `RbxApi/Instances/Networking/RbxPlayers.cs`).
+  - **Preset "dedicated server"** with a headless boot test.
+- **Test**: MP (Linux server + desktop + WebGL), LT-lite (10 bots, 1 h — the bot client starts here and
+  grows in MVP9).
+- **DoD**:
+  - The Linux binary hosts 2 desktop clients and 1 WebGL client through the MVP5–MVP7 fixtures.
+  - A 1 h soak with 10 bots: retained heap delta ≤50 MB and 0 disconnects.
+  - Solo and host modes are unaffected; the dedicated-server preset boots headless in its test.
+- **Reuses**: MVP5–MVP7.
+- **Package/flagship**: packages (bootstrap, CLI, preset, WebSocket transport); server hosting and
+  operations are flagship.
+- **Design detail carried from the old MVP13**: headless bootstrap (the Unity dedicated-server build
+  target / `-batchmode -nographics`), a CLI/config surface (port, world/save selection, mod set,
+  capability grants); the `DedicatedServer` topology live end to end: `Players.LocalPlayer = nil`,
+  `client` scripts never load, `PreRender` never fires, input/GUI services absent (§3.2/§5.2.3);
+  headless log routing (no Hub): `LuaLogFileSink` + remote log fetch for the host-side AI; a **WebGL
+  pure client validated against the dedicated server** (the browser connects out and never hosts —
+  plan decision D6). Old DoD: the dedicated binary hosts 2 clients (one desktop, one WebGL) through the
+  client fixture set; a 1-hour soak without leaks; solo/host modes unaffected.
+
+### MVP9 — Scale to ~100 players per room (XL)
+
+- **Goal**: one room holds 100 players within the budgets of the scale targets (§4.3), proven by a
+  load test.
+- **Done so far**: `tools/ScaleHarness` (loopback, CoreCLR) and the staircase method
+  (`dev-docs/SCALE_CHARACTERIZATION.md`); `AiOrchestrationQueueOptions.ForActorCount`
+  (`Assets/CoreAI/Runtime/Core/Features/Orchestration/AiOrchestrationQueueOptions.cs`); the per-sender
+  handler cap; the per-recipient filter seam (`RbxApi/Instances/Replication/ReplicationFilter.cs`);
+  `tools/vmbench` and the S1 numbers.
+- **To do**:
+  - **Bot client**: a headless client that speaks the real protocol and drives characters and remotes;
+    100 bots from 2–4 processes.
+  - **Interest management**: a distance/cell `IReplicationFilter` plus per-tier send rates (a
+    StreamingEnabled-lite; the Roblox names stay loud stubs until built).
+  - **VM guard cost** (risk R1): an adaptive batch with a bounded allocation exposure, or per-thread
+    allocation accounting; per-mod slice enforcement on the accounting seams reserved since MVP2 (§2,
+    frame-budget reservation; the old MVP17 item); if S1 says the guard cannot reach the budget, the
+    server-only native Luau fallback behind `IScriptEngine` (plan decision D8 (b)).
+  - Retire the known O(N) paths (`TODO.md`, "MVP5/MVP6 scalability debt": `ProcessPreSimulation`
+    visiting every instance, the O(live) thread-quota scan, synchronous fan-out, one mutation gate held
+    across an operation).
+  - Raise the instance ceilings with measurement.
+- **Test**: LT (frozen workload, staircase 20/50/100, 3 repeats), PT/EM for the filters.
+- **DoD**: the scale targets of plan decision D5 (§4.3), frozen before measuring, met on the reference
+  8-vCPU Linux server:
+  100 bots in a 10,000-instance place for 30 min — 30 Hz tick with p99 frame ≤33 ms (server Lua
+  ≤8 ms); downstream average ≤50 KB/s and p99 ≤100 KB/s per client; upstream ≤10 KB/s; join ≤10 s on
+  LAN; 0 disconnects; retained heap delta ≤100 MB. The staircase results are published.
+- **Reuses**: MVP5–MVP8, S1, S2.
+- **Package/flagship**: packages (bot client, filters, harness); room sizing and matchmaking are
+  flagship.
+
+### MVP10 — Composable framework: one composition root, presets, host profile (M)
+
+- **Goal**: building blocks (`AGENTS.md`, `Docs/ARCHITECTURE_RULES.md` §2.1). One entry point assembles
+  any product from presets, and every preset boots in a test. This rung consolidates what MVP5 and MVP8
+  started with their own presets and must land before MVP11–MVP12, whose role and tool gating is
+  profile data.
+- **Done so far**:
+  - Installers and DI ports: `IActorIdentityProvider`, `IActorAdmissionProvider`,
+    `IRbxCharacterMotorProvider`, `IBundledModSource`, the network-bridge provider
+    (`RbxApi/Binding/RbxNetworkBridgeProviderBehaviour.cs`), `HubPageRegistry`
+    (`Assets/CoreAI/Runtime/Core/Features/Hub/HubPageRegistry.cs`).
+  - Configuration assets: `AgentPromptsManifest`, `LlmRoutingManifest`, `SkillSetAsset`,
+    `CoreAISettingsAsset`, `AiPermissionsAsset`, `CoreAiPrefabRegistryAsset`.
+  - The player-host (MVP5) and dedicated-server (MVP8) presets. The solo AI sandbox is today's default
+    composition (two lifetime scopes, `CoreAILifetimeScope` and `CoreAiModsLifetimeScope`), not yet a
+    named preset.
+  - The principle is normative (`Docs/ARCHITECTURE_RULES.md` §2.1); existing violations are tracked in
+    `TODO.md` under the grandfathering rule.
+- **To do**:
+  - A `CoreAiProfile` asset composing agent roles, tools per role, skills, LLM routing, capability
+    tiers, Hub pages, stores, world settings and scale, topology, admission and the
+    `ClientWritePolicy`. It absorbs the **host integration profile** (§2; the old MVP16 deliverable).
+  - One scope, or one root that builds both scopes.
+  - Presets: solo AI sandbox, player-host co-op, dedicated N-player server, client, embed-in-my-game.
+  - Remove the process-wide statics from the main paths, or document the ones that stay:
+    `CoreAISettings.Instance` (set by `CoreAILifetimeScope`, read at ~115 sites), the static scale of
+    `RbxSpace` (one scale per world, so one process can host two rooms), and the static `CoreAi` locator
+    (`Assets/CoreAiUnity/Runtime/Source/Api/CoreAi.cs`).
+  - Retire `AiNetworkExecutionPolicy.AllPeers` as the default in favour of the bridge topology.
+  - Tool enable/disable per role as data (today every Lua/world tool is wired to the `Programmer` role in
+    `Composition/CoreAiModsInstaller.cs`).
+  - Fix the editor setup menus that hard-code `Assets/<package>` paths and break on a Git-URL install
+    (`TODO.md`).
+- **Test**: EM (profile → container validation), PM (each preset boots), MP (host and dedicated
+  presets).
+- **DoD**:
+  - Five presets each boot in a test (PM, or headless for the server) with 0 errors.
+  - Every block of the composability audit (`Docs/ROADMAP.md` §3, Track E) has a replace-with-fake test.
+  - The difference between two presets is data only.
+  - An architecture-fitness test forbids a new `static Instance` in feature code
+    (`Docs/ARCHITECTURE_RULES.md` §2).
+- **Reuses**: MVP5 and MVP8 presets, every existing installer.
+- **Package/flagship**: packages (profile, presets, boot tests); the flagship is one more preset plus
+  its own code (plan decision D7).
+- **Design detail carried from §2 and the old MVP16 (host integration profile)**: embedding CoreAI mods
+  into an existing meter-scale Unity game is a first-class scenario. A per-project profile
+  (ScriptableObject: the `RbxSpace` scale [default 0.28], capability defaults, which host services and
+  objects are bound, the per-world `ClientWritePolicy` resolved through the authority-resolver seam, the
+  per-role human tool surface and the Players-may-fly flag) makes integration "drop a config and it
+  works"; the configurable `RbxSpace` scale **is** the meter-world adapter.
+
+### MVP11 — Roles (Creator/Player) & per-player AI over the network (M)
+
+- **Goal**: every connected player has a per-world **player role** — Creator or Player (§2, roles
+  decision) — and their AI chat runs server-side under their identity, gated by that role.
+- **Done so far**: the actor-keyed chat factory `ActorKeyedInGameLlmChatServiceFactory`
+  (`Assets/CoreAI/Runtime/Core/Features/Orchestration/InGameLlmChatServiceFactory.cs`) and
+  `AttachChatFactory` in the Rbx bindings; per-actor quotas; the in-process
+  `Assets/CoreAI.Demos/MultiplayerFoundation` demo; the autosave gate before every AI mutation; the
+  `AIService` name reserved as a stub (`RbxApi/Instances/ServiceCatalog.cs`); background generation
+  (Esc collapses the Hub, generation continues).
+- **To do**:
+  - A `Role` on `RbxPlayer` plus a grant/revoke API and UI (the Team Create analog).
+  - Tool-surface gating per role, as profile data from MVP10.
+  - A network chat channel (request/stream/cancel) over the bridge.
+  - `AIService` with an `Ai` capability bit (`Ai = 1<<5`, excluded from `All`, §2 AI-call reservations)
+    and the origin tag `ai:<modId>`.
+  - The **async agent workflow** (carried from the old MVP16): a task queue, so new instructions enqueue
+    instead of blocking or derailing the current work, and an unobtrusive HUD status ("agent building:
+    X…" plus a completion notification) that needs no open Hub.
+  - Resolve the "Creator" name collision: `Creator` is also a built-in **agent** role (the
+    `world_command` designer, `Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md`). Documents say "player role
+    Creator" and "agent role Creator"; in code the player role is its own type on `RbxPlayer`, never an
+    agent role id.
+  - Re-measure G10 (MVP2) with role gating and the task queue in place (risk R7).
+- **Test**: EM (gating matrix with negative twins), MP (a Player cannot call `manage_mods`; a granted
+  Creator can).
+- **DoD**:
+  - With 3 players, role gating holds on every human-facing tool.
+  - A Creator's AI edit replicates as an intent.
+  - A Player's AIService-driven mod still works under the mod's grants.
+  - Chat privacy between actors holds over the wire.
+- **Reuses**: MVP6 (intents), MVP10 (profile data).
+- **Package/flagship**: packages (roles, gating, chat channel, AIService); the grant UI's polish is
+  flagship.
+
+### MVP12 — Studio mode core (XL)
+
+- **Goal**: an in-game creator mode and a switch between creating and playing, in one application —
+  runtime-first (`AGENTS.md`): every panel works in a built player. This reverses the old non-goal
+  "a Studio-like 3D editing UI" (§7) and replaces the old MVP7 (editor tooling).
+- **Done so far**: the Hub shell and `HubPageRegistry`; a runtime Lua editor
+  (`HubIntegration/HubModEditorPage.cs`, `HubIntegration/LuaSyntaxHighlighter.cs`); the click pick
+  source (`RbxApi/Binding/IClickPickSource.cs`, `UnityClickPickSource.cs`); the world package as the
+  snapshot (staged swap); the autosave ring, revert and origin tags (`RbxApi/Instances/OriginTag.cs`);
+  `world_command`/`execute_lua`; grants and intents (MVP6); roles (MVP11).
+- **To do**:
+  - A runtime Explorer (a UI Toolkit tree over `InstanceRegistry` with live `ChildAdded`/`Destroying`)
+    and a Properties panel driven by `ClassCatalog` and the binding member tables.
+  - Selection and highlight (`SelectionBox`/`Highlight` are backlog stubs today); multi-select.
+  - Move/rotate/scale gizmos that write through Instance operations as intents.
+  - Insert from a basic parts palette.
+  - An undo/redo command stack over registry mutations, per player and network-aware.
+  - The Fly camera.
+  - **Play/Stop (plan decision D2 (c))**: live edit stays the default for Creators; Play/Stop is an added
+    "test run" — capture the edit state, run it in a per-creator isolated session, restore on Stop. In a
+    room with other players present it is never a world rewind.
+  - `RunService:IsStudio/IsRunning/Run/Stop` semantics (today constants in `RbxRuntimeTopology.cs`), with
+    a DEV entry; re-check DEV-14 (PluginSecurity members reachable at runtime by the elevated tier)
+    against the creator mode once it exists.
+  - Scripts shown in the tree (MVP4's script instances).
+  - A selection-aware AI copilot context ("this part").
+- **Test**: PM (UI Toolkit panels, gizmo operations, undo), EM (command stack), MP (2 Creators
+  co-editing, 1 Player playing), MS.
+- **DoD**:
+  - A Creator builds a 50-part obby with gizmos only, presses Play, dies on a kill brick, presses Stop,
+    and the edit state is byte-identical to before Play (golden).
+  - Undo/redo holds 100 steps.
+  - A second Creator's edits appear within 1 tick + RTT.
+  - A Player cannot open creator mode.
+- **Reuses**: MVP3 (snapshot), MVP6 (intents), MVP11 (roles).
+- **Package/flagship**: the mechanisms (Explorer, Properties, gizmo, selection, undo services, Play/Stop)
+  go in the packages as Hub pages or a new package; the final UX polish goes in the flagship (risk R10).
+- **Carried from §7 (the reversed non-goal)**: manual building is architecturally cheap because manual
+  operations go through the same Instance operations and authority resolver as the AI and mods — a UI
+  layer, not a new system.
+
+### MVP13 — Model packages, template library, Luau parity prerequisites (M–L)
+
+- **Goal**: save or insert any subtree plus its scripts as a model; place templates come from a local
+  library and the AI starts from them; close the script-level gaps a Roblox round trip needs before any
+  file format is built (MVP14).
+- **Done so far**: the world package codec and validation (`Infrastructure/RbxWorldPackageSerializer.cs`,
+  `RbxApi/Instances/InstanceTreeSerializer.cs`); the single-mod bundle (`ExportMod`,
+  [MOD_SHARING.md](MOD_SHARING.md)); `FileRbxWorldPackageStore`; the Luau downlevel at load
+  (`LuaExecution/LuauSourceGate.cs`); script instances and contexts (MVP4); mod-core number→string
+  coercion (B2-12; the Rbx surface is in progress, `TODO.md`).
+- **To do**:
+  - A `.model` package: a subtree of the world codec, with id remapping on insert and scripts carried as
+    instances.
+  - An InsertService analog and a template store (local first, then shareable).
+  - Place templates: Baseplate, Obby, Tycoon-lite, Arena.
+  - AI tools `list_templates`/`insert_template`/`new_place_from_template`; a Studio "Toolbox" panel.
+  - **Parity prerequisites**: the Luau standard-library extensions (RT5); a "Luau-only" export lint that
+    refuses `goto`, `_ENV` and CoreAI-only APIs (RT6, RT7); a round-trip decision per DEV item (map
+    DEV-16 back to `math.huge` on export; DEV-7 reads as last-known values or stays documented; RT8); a
+    Roblox-save mode that drops non-archivable instances (RT10); `Weld`/`WeldConstraint`/`Attachment`/
+    `SpawnLocation`, the minimum the templates need (RT9); one coercion rule on both surfaces (RT4).
+- **Test**: PT (codec), PL (stdlib conformance against the documented behaviour), EM (insert and remap,
+  lint), PM (Toolbox), a benchmark scenario (the AI builds from a template).
+- **DoD**:
+  - A 1,000-instance model with scripts round-trips through the `.model` package with zero diff.
+  - Three insertions of the same model get distinct ids and working `script.Parent` wiring.
+  - Each place template boots through the MVP10 presets.
+  - The export lint flags 100% of a seeded list of CoreAI-only constructs.
+- **Reuses**: MVP3, MVP4, MVP10, MVP12 (Toolbox panel).
+- **Package/flagship**: packages (formats, store, tools, lint, a minimal template set as samples); the
+  template content library is flagship.
+
+### MVP14 — Roblox interchange + round-trip parity gate (L) *(the old MVP4, widened)*
+
+- **Goal**: Roblox places and models open here and run unchanged, and what is made here exports and runs
+  in Roblox — proven by a corpus, not by fixtures written for the implementation (owner requirement:
+  scripts and templates interchangeable both ways).
+- **Done so far**: none of the four formats; MVP4 and MVP13 supply script instances, contexts, the
+  stdlib extensions and the export lint.
+- **To do**:
+  - The reader/writer for **rbxl, rbxlx, rbxm and rbxmx**. First task: the licence and IL2CPP check of
+    the candidate library (below).
+  - Import into the world package or a `.model`: `Script` → `server`, `LocalScript` → `client`,
+    `ModuleScript` → `shared`, honouring `RunContext`; imported scripts stay disabled until reviewed.
+  - An asset-id substitution table and placeholders (RT12).
+  - Export of the supported subset; anything outside it is reported, never silently dropped, and
+    CoreAI-only constructs are refused or flagged (RT6, RT7).
+  - `import_rbxl`/`export_rbxl` AI tools.
+  - A **licensed round-trip corpus** (RT13): owner-authored or permissively licensed Roblox scripts,
+    models and places, in tiers — scripts only, models with scripts, whole places.
+- **Test**: PT (format codecs, golden files), PL (the corpus runs), EM (import/export), MS (the exported
+  file opened in Roblox Studio and played; recorded evidence).
+- **DoD (round-trip parity, explicit)**:
+  - (a) Every corpus item imports and **runs unchanged** here: zero `NOT_IMPLEMENTED` hits, its
+    assertions green.
+  - (b) Export → re-import gives a **zero diff** on the supported subset: class, name, parent,
+    properties, attributes, tags, script source, `RunContext`. The subset is defined by the
+    `ClassCatalog`/durable surface, and the diff tool is committed.
+  - (c) Export → open in Roblox Studio → run: the same corpus assertions pass there. This is a recorded
+    manual gate per release, since Roblox cannot run in CI.
+  - (d) Items outside the subset produce a machine-readable loss report, never a silent loss.
+  - (e) A size gate: at least N corpus items per tier; the owner sets N before measuring.
+- **Reuses**: MVP3 (package), MVP4 (script instances), MVP13 (models, lint, stdlib).
+- **Package/flagship**: packages (codecs, tools, corpus harness); the corpus content that is not
+  licensable for a public repository stays with the owner.
+- **Round-trip gaps (RT1–RT13)** and the rung that closes each:
+
+  | # | Gap | Direction broken | Closed in |
+  |---|---|---|---|
+  | RT1 | Script containers are not instances: a `Script` inside a `Part` using `script.Parent.Touched` cannot be represented | both | MVP4 |
+  | RT2 | No `require`/`ModuleScript` (the sandbox removes `require`) | import | MVP4 |
+  | RT3 | No `RunContext` or declared client/server split | both | MVP4 |
+  | RT4 | Coercion differs from Roblox: the mod-core API takes a number for a string (B2-12); the Rbx surface still refuses one (`Part.Name = 5`) | import | MVP13 (in progress now) |
+  | RT5 | Missing Luau stdlib extensions (`string.split`, `table.find`, `table.clear`, `table.freeze`, `table.create`, `math.clamp`, `math.round`, `math.sign`, `math.noise`, `utf8`, `buffer`) | import | MVP13 |
+  | RT6 | Lua 5.2-only syntax (`goto`, labels, `_ENV`) is accepted and would fail in Roblox | export | MVP13 (lint), MVP14 (export) |
+  | RT7 | CoreAI-only surface (`hooks_*`, `report`, `coreai_world_*`, `unity_*`, `AIService`, PluginSecurity members reachable under DEV-14) | export | MVP13 (lint), MVP14 (export) |
+  | RT8 | DEV deviations that change observable behaviour (DEV-7, DEV-16, DEV-13, DEV-10/11, DEV-2, DEV-15) | both | MVP13 (a decision per DEV item) |
+  | RT9 | Class coverage: welds, constraints, `Attachment`, `MeshPart`, `SpawnLocation`, `Seat`, `Decal`/`Texture`, lights, `Tool`, `Team`, `BindableEvent`, `Terrain` | both | MVP13 (the template minimum), later rungs and backlog |
+  | RT10 | Package semantics: the world package keeps `Archivable = false` instances; scripted gravity is not saved; `Lighting` properties are backlog | export | MVP13 (Roblox-save mode) |
+  | RT11 | The four file formats are absent | both | MVP14 |
+  | RT12 | `rbxassetid://` content is never fetched (ToS); CoreAI has no asset-id system of its own | both | MVP14 (substitution table) |
+  | RT13 | No licensed corpus of real Roblox scripts, models and places | test | MVP14 |
+
+- **Design detail carried from the old MVP4**: the converter is layered over the native place package —
+  import produces `world.json` + mod entries and never bypasses the native format.
+  1. **First task — reader verification**: candidate C# implementation MaximumADHD/Roblox-File-Format
+     (pure C#) — verify licence and netstandard/Unity (IL2CPP) compatibility; fall back to an own reader
+     against the rbx-dom spec if it fails either.
+  2. `import_rbxl` (binary and XML) → `world.json` + mod entries. Scope tiers: (1) geometry/instance tree
+     — `Part`/Wedge/`Model` sizes, CFrames, colours, materials → `InstanceRegistry` through `RbxSpace`;
+     (2) embedded Luau scripts imported as **disabled** scripts — untrusted code: the player/AI enables
+     them after review, the downleveler processes them on enable, quarantine applies; (3) Lighting,
+     SpawnLocations, value objects and attributes as API coverage allows.
   3. Explicit limits: `rbxassetid://` marketplace assets (meshes/textures/sounds) are **not**
-     auto-downloaded (ToS + third-party rights) — placeholders preserve the id, with a
-     user-supplied substitution table; `Terrain` instances are skipped with an info diagnostic
-     (Terrain voxel import is far-future — §7 Non-goals).
-  4. `export_rbxl` — **in scope, not secondary**: exports the Roblox-shaped subset of the
-     world (only the subset we model — import breadth exceeds export breadth); DoD (b) self
-     round-trip is mandatory. Effort note: the export path reuses the same file-format library
-     as the reader, so it stays within the MVP4 estimate.
-- **Dependencies**: MVP1 (datatypes + registry), MVP2 (`RobloxJson`), MVP3 (place package).
-  **Not** MVP5.
-- **DoD**: (a) a real community/test `.rbxl` map imports (geometry tier) with instance counts
-  and transforms verified via the registry + a golden comparison; (b) self round-trip: export
-  our world to `.rbxl` and re-import it, lossless for the Roblox-shaped subset; (c) embedded
-  Luau scripts arrive as disabled mod entries, source preserved, downleveler-processed on
-  enable. Fixture `.rbxl` files live under
-  `Assets/CoreAIMods/Tests/EditMode/RobloxApi/Corpus/Fixtures/`.
-- **Effort**: M.
+     downloaded (ToS + third-party rights) — placeholders keep the id, with a user-supplied substitution
+     table; `Terrain` instances are skipped with an info diagnostic (Terrain voxel import is a non-goal,
+     §7).
+  4. `export_rbxl` — **in scope, not secondary**; the export path reuses the reader's file-format
+     library. The first draft said "import breadth exceeds export breadth by design: export emits only
+     the Roblox-shaped subset" — that stands for breadth, but export now also **refuses or flags**
+     CoreAI-only constructs instead of dropping them (DoD (d)).
+  - Old DoD, kept inside the DoD above: (a) a real `.rbxl` map imports (geometry tier) with instance
+    counts and transforms verified through the registry and a golden comparison; (b) self round trip:
+    export our world to `.rbxl` and re-import it, lossless for the supported subset; (c) embedded Luau
+    scripts arrive disabled, source preserved, downleveled on enable. Fixture files live under
+    `Assets/CoreAIMods/Tests/EditMode/RbxApi/CompatibilityCorpus/` (a new subfolder of the existing
+    corpus).
 
-### MVP5 — Mod system UX
+### MVP15 — GUI + remaining input (L) *(the old MVP14 and the rest of the old MVP10)*
 
-- **Goal**: the Roblox-inspired-but-file-native mod layout, contexts, enable/disable, hot reload,
-  and the AI management tool surface — equally usable by humans and the LLM.
-- **Deliverables**:
-  1. Folder mods: `Mods/<ModName>/mod.json` + `server/`, `client/`, `shared/` script folders.
-     `mod.json` schema: `id`, `name`, `version`, **`api_version`** (a single int starting at 1 —
-     the mod-API contract version the mod targets, no major/minor; the loader refuses a mod
-     whose `api_version` is above the host's and warns with `API_VERSION_MISMATCH` when it is
-     below), `enabled`, `loadOrder` (int, ascending),
-     `capabilities` (maps to existing `LuaCapabilities`; parsing also reserves `Ai = 1<<5`,
-     excluded from `All` like `Full` — the AIService hook — and `Data = 1<<6`, the DataStore
-     gate for §MVP9; §2 AI-call reservations), `contexts`
-     (implicit from folders, overridable), `preserveInstances` (hot-reload flag, §6.3),
-     `category`, `description`.
-  2. Single-file mods keep the existing `--[[@coreai ...]]` frontmatter (`LuaModHeader.cs`,
-     spec in `Docs/CoreAIMods/mod-system.md` §1) and are treated as a one-script `shared`-context
-     mod; the seeder (`BundledModSeeder`) continues to work unchanged. The header gains an
-     optional `api_version:` key with the same gating.
-  3. `require` for `shared` modules with Roblox caching semantics per R3.2/R3.4 (one execution
-     per VM, cached table identity); cyclic require = `CYCLIC_REQUIRE` error (deviation DEV-1
-     from R3.7).
-  4. Enable/disable without deletion (persisted `enabled`; disabled mods keep source + store).
-  5. Hot reload pipeline: file/store change → preprocessor → teardown per §6.3 → re-run; reload
-     latency target < 250 ms for a 500-line mod.
-  6. Preprocessor wired into `LoadMod` (source maps: reported line numbers refer to the
-     *author's* file, not the downleveled text — mandatory for AI self-repair).
-  7. Log service wired end-to-end: mod lifecycle events and preprocessor diagnostics flow into
-     `LuaLogService` (`Assets/CoreAIMods/Runtime/Logging/`); the existing-but-unwired
-     `GetModLogsLlmTool` is registered with the agent toolset (its TODO closes here);
-     `LuaLogFileSink` optional file sink configurable per build.
-  8. AI tools (§6.2): `list_mods`, `enable_mod`, `disable_mod`, `get_api_surface` added next to
-     the existing `manage_mods` actions (`LuaModsLlmTool.cs`) and the newly wired
-     `GetModLogsLlmTool`.
-  9. `game:BindToClose(fn)` with M6.1 semantics: multiple callbacks may be bound; on shutdown
-     they run **in parallel** with a bounded flush window (~30 s); invoked on world unload, app
-     quit, server shutdown, and world-load teardown (rides the `TeardownModEffects` pipeline).
-     Closes the MVP1/MVP2 `→MVP5` stubs (§5.1.3 DataModel row, §5.2.4).
-- **Dependencies**: MVP2; preprocessor (parallel track) merges here.
-- **DoD**: AI can, via tools only: create a folder mod, break it, read the error from
-  `GetModLogsLlmTool` output (correct file/line), patch it, hot-reload, and confirm recovery — as
-  an automated integration test. Disabled mod provably runs zero instructions. Require-semantics
-  conformance tests named per §6.6 (e.g. `R3_2_RequireExecutesOnce`). **Corpus gate: ≥50% of
-  Tier-A (§6.4)**.
-- **Effort**: M.
+- **Goal**: tutorial-grade GUI scripts run on host, client and WebGL: `ScreenGui`/`Frame`/`TextLabel`/
+  `TextButton`/`ImageLabel`/`TextBox` + `UICorner`/`UIListLayout`, rendered as runtime UI Toolkit
+  (UXML/USS interpreted at runtime — RUNTIME-first, the same approach as the Hub).
+- **Done so far**: the class descriptors are planned loud stubs (`ClassCatalog.cs`, phase `MVP14`); the
+  `PlayerGui` container; `UserInputService`. The runtime UI interpreter of `TODO.md` [R4] has not
+  started.
+- **To do**:
+  - The runtime UI Toolkit mapping for the class set above; `UDim2` layout (Scale+Offset → USS
+    percent+px); `MouseButton1Click`, `Activated`, `FocusLost(enterPressed)`; `player.PlayerGui`;
+    z-order via `DisplayOrder`/`ZIndex`; everything else in the GUI family stays a loud stub.
+  - Replication of `StarterGui` → `PlayerGui` (client context, MVP4).
+  - Touch buttons (ContextActionService `createTouchButton`) and `TouchTap` for mobile.
+  - Share the element factory with the runtime UI of [R4], which is re-prioritized behind the
+    multiplayer rungs.
+- **Test**: PM, PL, MP.
+- **DoD**: the "score label + shop button" fixtures pass on host, client and WebGL; GUI survives a hot
+  reload (rebuilt); a touch button appears on a touch device or the device simulator; **corpus gate
+  ≥75%** of Tier A+B+C (§6.4).
+- **Reuses**: MVP4 (client context), MVP6 (replication), MVP7 (ContextActionService).
+- **Package/flagship**: packages (GUI classes, UI mapping); HUD and menu design are flagship.
+- **Design detail carried from the old MVP14**: the class set above; `UDim2` layout semantics; the
+  events above; the `player.PlayerGui` container; z-order via `DisplayOrder`/`ZIndex`; it coexists with
+  Hub windows. Old dependencies (MVP2 signals, Players, input focus rules) are all met by earlier rungs.
 
-### MVP6 — AI Lua skill = the documentation
+### MVP16 — DataStore + leaderstats (M) *(the old MVP9)*
 
-- **Goal**: one artifact that (a) is injected as the in-game LLM's modding skill, (b) serves as
-  the human-facing API docs, and (c) embeds the machine-readable API manifest — so the LLM never
-  calls unimplemented API and never picks the wrong tool for a job the API already solves.
-- **Motivating incident (real)**: a 4B in-game model animated a 2-second movement by hand —
-  a raw `execute_lua` loop updating position every iteration — instead of one
-  `TweenService:Create` call. The API was capable; the model's guidance was not. The skill exists
-  to preempt exactly this class of failure.
-- **Deliverables**:
-  1. Skill document (single source, English) with per-service teaching sections: short correct
-     examples in the CoreAI dialect (verified against the corpus harness so examples cannot rot).
-  2. A **"Common mistakes"** section of wrong→right pairs, seeded with the known wrong-tool
-     patterns and grown from observed repair sessions:
-     - manual per-frame movement loops → `TweenService:Create` (the incident above);
-     - polling (`while true do ... FindFirstChild ...`) → events (`ChildAdded`,
-       `GetPropertyChangedSignal`) or `WaitForChild` (immediate child in MVP1; absent-child yield
-       in MVP2);
-     - busy-wait / `os.clock()` spin → `task.wait(seconds)`;
-     - per-frame `FindFirstChild`/`GetService` in `Heartbeat` → cache the reference once;
-     - `while wait() do` → `RunService.Heartbeat:Connect`;
-     - forgetting `:Disconnect()`/relying on GC → connection lifetime rules (§5.2.5);
-     - assuming a `shared` ModuleScript is one shared object → each context gets its own
-       isolated copy (R3.4, §3.2 matrix); share state via remotes/attributes, never module
-       tables (moved here from Q5);
-     - **scale confusion (named entry)**: the active `RobloxSpace` scale and how canonical
-       Roblox numbers (`WalkSpeed 16`, `Gravity 196.2`, `JumpPower 50`) translate under it —
-       at the default 0.28 m/stud they apply verbatim; at 1:1 they must be rescaled.
-     - **units-per-channel rule (named entry, MUST be stated explicitly in the skill)**:
-       everything that goes through the mod API / `execute_lua` speaks **studs + right-handed
-       Roblox space** — both read and write, round-trip symmetric; everything that goes through
-       Unity-side C# tools (scene inspection, screenshots, world queries) speaks **meters +
-       Unity space**. Never mix numbers taken from one channel into calls on the other without
-       converting — the model must always know which channel a number came from.
-  3. **API manifest**: machine-readable (JSON) listing every class/member/service with status
-     `implemented | stub(planned_mvp) | not_planned`, **generated** from `ServiceCatalog` +
-     `ClassCatalog` (same single source as the `get_api_surface` tool, §6.2). Embedded in or
-     referenced by the skill so the model checks capability before writing code.
-  4. Delivery: evolves/replaces the existing baked prompt text
-     `Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInLuaModdingSkillText.cs` — the new
-     skill is assembled at build time from the doc + generated manifest, not hand-maintained C#
-     string literals.
-  5. Update protocol: every API-surface MVP (1, 2, 8, 9, 10, 11, 12, 14, 15) has "skill/docs
-     updated + manifest regenerated" in its DoD; a CI check fails when the generated manifest and
-     the committed skill disagree.
-- **Dependencies**: MVP2 (catalogs exist to generate from); co-evolves with MVP5 (it documents the
-  mod layout and tools).
-- **DoD**: manifest generation is deterministic and CI-diffed against the catalogs; the skill
-  covers 100% of implemented services (checked mechanically: every catalog entry has a doc
-  section), **retroactively covering the full MVP1–MVP5 surface at ship time** (the implicit
-  gate (b) in §4 activates from here on); a prompt-eval fixture set exists — the "move a part smoothly over 2 s" task answered
-  with TweenService, the "wait for a child" task answered with yielding `WaitForChild` (MVP2;
-  immediate-child lookup shipped in MVP1) — runnable against a
-  small model as a regression harness.
-- **Effort**: M.
-
-### MVP7 — Editor tooling
-
-- **Goal**: humans can read and edit mods comfortably inside Unity.
-- **Deliverables**: Lua/Luau syntax highlighting (importer + inspector, `Editor/` +
-  `Runtime/LuaAssets` *(shipped, editor-side)*); read-only script viewer with revision diff
-  (`ILuaScriptVersionStore` data); Mod Manager editor window mirroring Hub Mods-tab actions
-  (enable/disable/reload/logs); mod log console window (an `ILuaLogService` view with per-mod
-  filter — no Unity console involvement).
-- **Dependencies**: MVP5.
-- **DoD**: opening a `.lua` mod shows highlighted source; toggling a mod in the window
-  hot-swaps it in play mode; log window updates live from `LuaLogService` subscriptions.
-- **Effort**: M. Editor-only by nature; runtime equivalents live in the Hub (MVP16 completes).
-
-### MVP8 — Gameplay services I
-
-- **Current state (audit fix waves, 2026-09-24, unreleased)**: TweenService advances in O(1) per
-  step (a `TweenInfo.new(1e-300, …, -1)` hung the host), refuses non-finite goals at `Create`, contains
-  a faulting tween (cancelled with `Completed(Cancelled)`), plays `Reverses` as two legs per repeat,
-  never fires `Touched` for a tweened move, and charges each tween to the creating actor's quota with at
-  most 256 finished tweens kept per actor; a mod's tweens die with it. `Humanoid:TakeDamage`/`MoveTo`/
-  `ChangeState`, `Debris:AddItem` and the Tween calls need `WorldEdit` and write authority, so one
-  actor's mod can no longer kill or steer another actor's character; Debris refuses services, `game`,
-  the camera and a `Player`, and re-adding an item keeps its eviction order. `CanCollide = false`
-  behaves as in Roblox (bodies pass, `Touched` and `Raycast` still see the part), only Workspace
-  content is physical, cylinders are hit and touched, a nested part is independent of its parent, and
-  an unanchored part reads its live pose. `Died` fires only inside the Workspace, `MoveTo` arrives
-  within ~1 stud on the ground plane, `JumpPower` is clamped to [0, 1000], and `MaxHealth = math.huge`
-  follows DEV-16. Later in the same waves: `MoveTo` ends with `false` when a script, a `PivotTo` or a
-  tween moves the `HumanoidRootPart` (M8-18); `Humanoid:Clone` keeps its health and movement values;
-  a character `Model` is `Archivable = false`; a mod's tweens are destroyed when it unloads, is
-  quarantined or its actor disconnects (M8-22); `CollectionService.TagAdded`/`TagRemoved`/`GetAllTags`
-  count only holders inside the DataModel (M8-10); `ClickDetector.MouseClick` passes the clicking
-  player, measures the range from that player's character and works for detectors under a `Model` or
-  `Folder`, the deepest winning (M8-11, M8-08); and `Player:Kick(message)` carries its text to the
-  client. Acceptance item P8.4 (Debris) and the per-item evidence live in
-  `dev-docs/MVP8_ACCEPTANCE_MANIFEST.md`.
-- **Goal**: the minimum service set that makes classic tutorial gameplay scripts (kill bricks,
-  pickups, doors, speed pads) run — with Roblox game feel at the default scale.
-- **Deliverables**:
-  1. `Players` service: `LocalPlayer` (nil on dedicated server — Roblox parity),
-     `PlayerAdded`/`PlayerRemoving`, `GetPlayers`, `GetPlayerByUserId`,
-     `GetPlayerFromCharacter` [^14]; solo = one synthetic `Player` with `UserId = 1`,
-     `Name`/`DisplayName` from profile.
-  2. `Player`: `Character`, `CharacterAdded`, `UserId`, `Name`, `DisplayName`, `leaderstats`
-     convention (a `Folder` named `leaderstats` with Value objects — requires `IntValue`/
-     `StringValue`/`NumberValue` classes, added here). The Player record carries the CoreAI
-     `Role` field (Creator/Player — §2 roles decision; the MVP2 synthetic player already
-     reserves it).
-  3. `Humanoid` basics on the CoreAI player avatar: `Health`, `MaxHealth`, `WalkSpeed`,
-     `JumpPower` (default 50) + `JumpHeight` + `UseJumpPower` (default **true**) per S3.5 —
-     the jump impulse derives from whichever mechanic is active — `MoveDirection` (read-only),
-     `TakeDamage(amount)`,
-     `MoveTo(location, part?)` + `MoveToFinished(reached)`, `Died`, `HealthChanged(health)` [^11].
-     Backed by CoreAI's existing player/controller, which **stays metric** — the Humanoid
-     adapter converts numbers only (`WalkSpeed` studs/s → m/s, `JumpPower`; per the LOCKED asset
-     rule) so `WalkSpeed = 16` feels Roblox-correct at 0.28 m/stud; unsupported states = loud
-     stubs. The **Fly** locomotion mode (§2, locomotion decision) lands alongside: Creator
-     free-fly by default while building; Players-may-fly per host profile.
-  4. `BasePart.Touched`/`TouchEnded` bridged from NeoxiderTools `PhysicsEvents3D`
-     (collision+trigger relay); PlayMode-tested (§6.6); debounce documented in the skill, not
-     built-in (Roblox parity).
-  5. `Debris:AddItem(item, lifetime = 10)` [^15] on the scheduler.
-  6. `TweenService:Create(instance, tweenInfo, propertyTable)` [^12], `TweenInfo.new(...)`,
-     `Tween:Play/Pause/Cancel`, `Completed(playbackState)`; tween driver runs in the Heartbeat
-     phase on scaled game time (D9); tweenable: number, Vector3, CFrame, Color3, UDim2; other
-     S4.3 types (bool, Rect, UDim, Vector2, Vector2int16, EnumItem) raise a loud stub naming
-     the MVP backlog.
-  7. `workspace:Raycast(origin, direction, params?)` over `Physics.Raycast` (through
-     `RobloxSpace`).
-  8. Per-body gravity for mod-driven rigidbodies per DEV-6: `Rigidbody.useGravity = false` +
-     custom force from `Workspace.Gravity` (default `196.2` studs/s²) scaled via `RobloxSpace`.
-  9. `CollectionService`: `GetTagged(tag)` + `GetInstanceAddedSignal(tag)`/
-     `GetInstanceRemovedSignal(tag)` over the MVP1 tag store (S5.2/S5.3) — closes the MVP2
-     `→MVP8` stub and Q7.
-- **Dependencies**: MVP2 (signals/scheduler); NeoxiderTools package present.
-- **DoD**: kill-brick, touch-pickup-with-leaderstats, and door-tween corpus fixtures pass at
-  0.28 scale (primary) and 1:1 (smoke); a dropped part falls with Roblox-feel acceleration under
-  per-body gravity while the host scene keeps Earth gravity; **corpus gate ≥60%** of Tier-A+B;
-  skill updated (TweenService section + the incident's wrong→right pair verified).
-- **Effort**: L.
-
-### MVP9 — DataStoreService + persistence
-
-- **Goal**: Roblox-shaped persistence over CoreAI's existing store, semantics per S-rules
-  (`03_SERVICES_AND_DATA.md` DataStore emulation table).
-- **Deliverables**: `DataStoreService:GetDataStore(name, scope?)` →
+- **Goal**: Roblox-shaped persistence over CoreAI's existing store, semantics per the S-rules
+  (`03_SERVICES_AND_DATA.md`, DataStore emulation table), running server-side on a dedicated server.
+- **Done so far**: the `DataStoreService` stub (`ServiceCatalog.cs`, phase `MVP9`);
+  `ScheduleWaitUntil` (the yield primitive); `FileLuaModStore` with atomic writes; the `game:BindToClose`
+  stub (`RbxApi/Instances/RbxDataModel.cs`, phase `MVP5`).
+- **To do**: the design below, with the server-only context (MVP4) and dedicated-server storage (MVP8);
+  `game:BindToClose` (carried from the old MVP5, below) so a place can save on shutdown.
+- **Test**: EM, PL, LT (a 100-player concurrent `UpdateAsync` soak).
+- **DoD**: a save/load round-trip test including the WebGL durability check; concurrent `UpdateAsync`
+  calls serialize correctly; conformance tests named per §6.6 (e.g. `S1_8_UpdateAsyncNilAborts`); the
+  corpus DataStore fixtures pass; a 100-player concurrent `UpdateAsync` soak loses no write.
+- **Reuses**: MVP4, MVP8, the JSON contract of MVP2.
+- **Package/flagship**: packages (the service, a pluggable backend); cloud storage is a host or
+  flagship backend.
+- **Design detail carried from the old MVP9**: `DataStoreService:GetDataStore(name, scope?)` →
   `GlobalDataStore` facade: `GetAsync(key)`, `SetAsync(key, value, userIds?, options?)`,
-  `UpdateAsync(key, transformFunction)`, `IncrementAsync(key, delta = 1)`,
-  `RemoveAsync(key)` [^4] — all *yield* the calling Lua thread via the scheduler's
-  `ScheduleWaitUntil` completion primitive (§2 AI-call reservations; never block the frame),
-  resolving next Heartbeat. `UpdateAsync` semantics (incl. nil-return aborts the
-  write, S1.8) per S1.x. Backend — **store identity is WORLD-GLOBAL (S1.1 parity)**: the key is
-  `"ds:<name>:<scope>:<key>"` with **no modId prefix** — the same `(name, scope)` requested from
-  any mod hits the same store; access is capability-gated (the `Data = 1<<6` capability reserved
-  by MVP5 capability parsing, §2 AI-call reservations). The MVP6
-  skill must teach that stores are shared across mods — name collisions are the author's
-  responsibility, same as Roblox. Values stored as JSON strings in
-  `FileLuaModStore` (atomic writes, WebGL IDBFS flush already handled); pluggable
-  `Neo.Save.ISaveProvider` backend behind an interface. `UpdateAsync` = read-modify-write under
-  the existing store lock. Table↔JSON via the **shared JSON contract** (`RobloxJson`, §5.2.4 —
-  the same component behind `HttpService:JSONEncode`); non-JSON values (functions, Instances)
-  raise `BAD_ARGUMENT` naming the offending key path. Loud-stub set (explicit):
-  `GetVersionAsync`, `ListKeysAsync`, `ListVersionsAsync`/`GetVersionAtTimeAsync`/
-  `RemoveVersionAsync` (S1.18), `GetRequestBudgetForRequestType` (S1.24), and
-  `GetOrderedDataStore` (S1.2, S1.27–S1.29) — `GetOrderedDataStore` is a stub in MVP9, but a
-  minimal integer-sorted implementation is a cheap fast-follow worth costing (leaderboards are
-  corpus-common); the `DataStoreKeyInfo` second return of `GetAsync`/`UpdateAsync` is `nil` in
-  MVP9 — documented reduced fidelity (DEV-10). The S1.5 4-second `GetAsync` cache is **not
-  emulated** (DEV-11): every `GetAsync` reads the store. `leaderstats` + DataStore sample mod
-  ships as a bundled fixture.
-- **Dependencies**: MVP2 (yield, JSON), MVP8 (Players for per-player keys, `Player.UserId`
-  scoping convention `u:<UserId>`).
-- **DoD**: save/load round-trip test incl. WebGL editor-simulated flush; concurrent
-  `UpdateAsync` calls serialize correctly; conformance tests named per §6.6 (e.g.
-  `S1_8_UpdateAsyncNilAborts`); corpus DataStore fixtures pass.
-- **Effort**: M.
+  `UpdateAsync(key, transformFunction)`, `IncrementAsync(key, delta = 1)`, `RemoveAsync(key)` [^4] — all
+  *yield* the calling Lua thread through the scheduler's `ScheduleWaitUntil` primitive (§2 AI-call
+  reservations; never block the frame), resolving next Heartbeat. `UpdateAsync` semantics (including a
+  nil return aborting the write, S1.8) per S1.x. **Store identity is world-global (S1.1 parity)**: the
+  key is `"ds:<name>:<scope>:<key>"` with **no modId prefix** — the same `(name, scope)` from any mod
+  hits the same store; access is capability-gated (`Data = 1<<6`, reserved by the capability parsing,
+  §2 AI-call reservations). The skill must teach that stores are shared across mods — name collisions
+  are the author's responsibility, as in Roblox. Values are stored as JSON strings in `FileLuaModStore`
+  (atomic writes; durability through `CoreAiWebGlPersistence` on WebGL, as for every store) behind a
+  pluggable save-provider interface (a host can adapt its own backend). `UpdateAsync` is a
+  read-modify-write under the store lock. Table↔JSON through the **shared JSON contract** (`RobloxJson`,
+  §5.2.4); non-JSON values (functions, Instances) raise `BAD_ARGUMENT` naming the key path. Loud stubs:
+  `GetVersionAsync`, `ListKeysAsync`, `ListVersionsAsync`/`GetVersionAtTimeAsync`/`RemoveVersionAsync`
+  (S1.18), `GetRequestBudgetForRequestType` (S1.24) and `GetOrderedDataStore` (S1.2, S1.27–S1.29; a
+  minimal integer-sorted implementation is a cheap fast-follow worth costing — leaderboards are
+  corpus-common); the `DataStoreKeyInfo` second return of `GetAsync`/`UpdateAsync` is `nil` (DEV-10);
+  the 4-second `GetAsync` cache is not emulated (DEV-11). A `leaderstats` + DataStore sample mod ships as
+  a bundled fixture; per-player keys use the `u:<UserId>` convention.
+- **`game:BindToClose(fn)`** (carried from the old MVP5, deliverable 9), M6.1 semantics: several
+  callbacks may be bound; on shutdown they run **in parallel** with a bounded flush window (~30 s);
+  invoked on world unload, app quit, server shutdown and world-load teardown (it rides the
+  `TeardownModEffects` pipeline).
 
-### MVP10 — Input services
+### MVP17 — Audio / FX / animation (M) *(the old MVP15)*
 
-- **Goal**: mods read input the Roblox way without fighting CoreAI's own input/cursor model.
-- **Deliverables**: `UserInputService`: `InputBegan`/`InputChanged`/`InputEnded`
-  `(input: InputObject, gameProcessedEvent: bool)`, `IsKeyDown(keyCode)`, `GetMouseLocation()`,
-  `TouchTap`, `MouseBehavior`; `InputObject` (`KeyCode`, `UserInputType`, `UserInputState`,
-  `Position`, `Delta`); `Enum.KeyCode`/`UserInputType`/`UserInputState` tables.
-  `ContextActionService`: `BindAction(actionName, functionToBind, createTouchButton,
-  ...inputTypes)`, `BindActionAtPriority`, `UnbindAction`, `SetTitle`, `SetImage`; handler
-  receives `(actionName, inputState, inputObject)` and may return
-  `Enum.ContextActionResult.Pass/Sink` [^13]. **Cursor-gating aware**: when the CoreAI Hub or
-  chat has focus, `gameProcessedEvent = true` (mirroring Roblox's meaning: the engine consumed
-  it) — mods keep receiving events and can filter, exactly like Roblox tutorials teach. Input
-  services exist only in contexts that have a client (never on a dedicated server).
-- **Dependencies**: MVP2. Bridged to Unity Input System through one adapter class so the host
-  game's input stack stays authoritative.
-- **DoD**: sprint-on-shift and click-to-place corpus fixtures pass with the Hub both open and
-  closed; touch button appears on a touch device / device simulator; **corpus gate ≥70%** of
-  Tier-A+B.
-- **Effort**: M.
+- **Goal**: presentation-layer breadth, networked.
+- **Done so far**: loud stubs only (`Sound`, `ParticleEmitter` in `ClassCatalog.cs`, `SoundService` in
+  `ServiceCatalog.cs`, all phased `MVP15`).
+- **To do**: `Sound` (`Play/Stop/Pause`, `Playing`, `Volume`, `Looped`, `Ended`) over the host audio
+  manager; `SoundService:PlayLocalSound`; a minimal `ParticleEmitter` (`Enabled`, `Rate`, `Color`,
+  `Emit(count)`) over a pooled Unity particle prefab; an Animator-lite so MVP7's characters animate
+  (`AnimationController` otherwise stays loud stubs, except a documented CoreAI extension
+  `humanoid:PlayAnimationByName(name)`; R15 rig fidelity is a non-goal); networked playback of sound and
+  animation.
+- **Test**: PM, MP.
+- **DoD**: sound-on-touch and emit-burst fixtures pass on desktop and WebGL solo; a sound and an
+  animation started on the server play on every client.
+- **Reuses**: MVP6, MVP7.
+- **Package/flagship**: packages (services); audio and animation content are flagship.
 
-### MVP11 — Mirror bridge core (host mode)
+### MVP18 — Mod UX rest, skill manifest, console + self-repair (M–L) *(the old MVP5 rest, MVP6 and MVP16)*
 
-- **Current state (7.45.0 plus the unreleased fix waves)**: `com.neoxider.coreaimirror` ships
-  `MirrorNetworkBridge : INetworkBridge` behind the `MIRROR` define, `CoreAiMirrorAuthenticator` and
-  `CoreAiMirrorSessionHost`. Since 7.42.0 a scene switches it on through
-  `CoreAiMirrorNetworkBridgeProvider` on `CoreAiModsLifetimeScope`, and `RemoteEvent` /
-  `RemoteFunction` traffic runs through Mirror's real handlers and batcher — proven over an in-memory
-  transport; no two-process run over a real socket has been made. Since 7.43.0 `Player:Kick()` closes
-  the connection. The unreleased fix waves add: one connection per actor with the newest winning on
-  reconnect (the Player carries over; teardown is keyed by connection); one admission attempt per
-  connection and an admission deadline (`AdmissionTimeoutSeconds`, 10 s); per-channel payload limits
-  (reliable and `RemoteFunction` up to 64 KiB, unreliable up to Roblox's 1,000 B, an oversize answer
-  returned as a failure); in-process delivery for actors local to the server; client handlers that no
-  longer require Mirror authentication; stale answers, malformed envelopes and orphaned requests
-  dropped and counted instead of thrown; kcp2k's negative connection ids handled (MP-25);
-  `AttachWorld(Func<LuaCsRbxApiBindings>)` wiring `Players.IdentitySource` itself, and a world that
-  refuses a transport-admitted actor with `NOT_AUTHORITY` when it has no identity source. On the
-  remote codec: client-authored `Instance` references resolve only if the sender can see them (MP-01),
-  a 64 KiB packet no longer costs hundreds of megabytes to decode (MP-02), and NaN/±Infinity travel as
-  bare numbers (MP-17). Later in the same waves: a readiness handshake (the server holds a joining
-  client's reliable remotes until it acknowledges, drops and counts its unreliable ones, and drops a
-  client that has not acknowledged within 10 s, MP-09), a server clock carried by the server's own
-  Unix-time anchors instead of `NetworkTime.offset` (MP-06), kick and supersede notices that reach the
-  client before the drop — with `Player:Kick(message)`'s text — and a client's own kick disconnecting
-  it (MP-22), the in-process loopback refusing an `UnreliableRemoteEvent` over 1,000 B like the wire,
-  and a per-sender budget of 32 live handler threads for remote-started
-  `OnServerEvent`/`OnServerInvoke` work (MP-10); a disconnected actor's mods are unloaded once their
-  running code has returned (M2-24). After the first audit round of the multiplayer layer: threads a
-  remote-started handler schedules are charged to the sender too (A4-01), a client sends nothing
-  before its admission (A4-04), the server's clock hold reaches clients through the anchors (A4-08,
-  A4-13), a host's own `DisconnectActor` ends the connection (A4-09), Mirror's host-mode local client
-  is refused as a player loudly (A4-10), and a sender's unresolved-value reports are throttled (A4-02,
-  A4-12). Mixed CoreAI versions on server and client must not run together (a missing message fails
-  loudly with Mirror's default `exceptionsDisconnect`; an added field is not detected). Host
-  mode, world-state replication, the join snapshot over the wire and handing live sessions to a world
-  loaded at runtime are still open — until MVP11 a world load is refused while network sessions are
-  live (`network_sessions_active`). See `Assets/CoreAIMirror/README.md` (Sessions, Known limits) and
-  `TODO.md`.
-- **Goal**: real multiplayer transport under the *unchanged* mod-facing API, in the **host mode**
-  topology first (desktop listen server — fastest dev loop, mirrors Roblox Studio play-testing).
-  Wire behavior per M-rules (`02_MULTIPLAYER_REPLICATION.md`, incl. serialization/limits
-  appendices).
-- **Deliverables**:
-  1. `MirrorNetworkBridge : INetworkBridge` (guarded by `MIRROR` define; `NullNetworkBridge`
-     remains the no-define/solo path — same pattern as `Neo.Network`). Topologies delivered in
-     this MVP: `Host` + `Client`. `DedicatedServer` bootstrap is MVP13; the interface already
-     carries it.
-  2. `RemoteEvent` over the wire: `FireServer` → Mirror Command path (pattern:
-     `NetworkEventDispatcher`), `FireClient(player, ...)` → TargetRpc (pattern:
-     `NetworkActionRelay`), `FireAllClients` → Rpc. `UnreliableRemoteEvent` on Mirror's
-     unreliable channel; payload size checked against transport MTU with a loud
-     `PAYLOAD_TOO_LARGE` error (Roblox: documented drop threshold 1000 B; practical budget
-     ~900 B — community-measured, UNCERTAIN [^6-note]). As built, the limit is per channel:
-     an unreliable payload is capped at Roblox's 1,000 B, or at the transport's datagram when that
-     is smaller; a reliable remote or `RemoteFunction` payload at the codec's 64 KiB, or at the
-     transport's reliable message size when that is smaller.
-  3. `RemoteFunction` request/response over paired `NetworkMessage`s (pattern:
-     `NetworkContextActionRelay`), with timeout → Lua error, matching "InvokeClient is
-     hazardous" guidance [^7] in the docs string.
-  4. Payload marshalling per the M-doc serialization appendix — the wire envelope is the
-     **identical MVP2 loopback envelope** (§5.2.4: `RobloxJson` + tagged datatype/`InstanceId`
-     entries; table-key stringification etc. — conformance tests like `M3_8_TableKeysStringified`
-     per §6.6); Instances marshal as `InstanceId` and resolve via the registry on the far side
-     (nil + warning if unknown — the same rule as MVP2).
-  5. Script contexts enforced for real per the §3.2 matrix; context violation of server-only
-     APIs (e.g. DataStore on client) is a loud `CONTEXT_VIOLATION` error naming the rule
-     (Roblox parity, M-rules).
-  6. `Players` becomes real: one `Player` per Mirror connection (`NeoNetworkPlayer` mapping),
-     `PlayerAdded`/`PlayerRemoving` from connect/disconnect.
-  7. `workspace:GetServerTimeNow()` stays Unix-epoch seconds (D9 table): the server's epoch
-     clock is synced to clients via the Mirror clock offset (`INetworkBridge.ServerTimeNow`).
-     As built, the bridge side is real: `INetworkBridge.ServerClockOffsetSeconds` plus
-     `IsServerClockSynchronized`, fed by the server's clock anchors (`CoreAiServerClockMessage`);
-     the world side re-bases at the first synchronization and slews afterwards (D9 table).
-- **Dependencies**: MVP5 (contexts declared), MVP8 (Players), NeoxiderTools `Neo.Network`.
-- **DoD**: host + client playtest: chat-via-RemoteEvent fixture, server-authoritative kill brick,
-  RemoteFunction round trip with timeout test; all solo corpus fixtures still pass with `MIRROR`
-  absent.
-- **Effort**: L.
+- **Goal**: close the realtime loop — the AI (and the player) see, diagnose and fix mods during play with
+  zero editor involvement — and make the skill generated from the code so it cannot drift.
+- **Done so far**: the Lua log service is wired end to end (`Logging/`); `get_mod_logs`
+  (`Logging/GetModLogsLlmTool.cs`) is registered for the Programmer role; skills
+  (`read_skill`/`manage_skills`); load-error auto-repair (`LuaExecution/LuaModAutoRepairPolicy.cs`,
+  `Presentation/CoreAiLuaModAutoRepair.cs`); the preprocessor at load with author line numbers
+  (`LuaExecution/LuauSourceGate.cs`); the hand-maintained "Rbx API" skill kept byte-identical in
+  `Assets/CoreAiUnity/Resources/AgentSkills/RbxApi.txt` and
+  `Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInRbxApiSkillText.cs`.
+- **To do**: folder mods and `api_version`; `list_mods`/`enable_mod`/`disable_mod`/`get_api_surface`; a
+  generated API manifest with a CI diff; `watch_mod_logs`, the in-game console and runtime self-repair
+  (below).
+- **Test**: EM, PL, PM (console), a scripted chaos test in a built player.
+- **DoD**: the three carried DoDs below — the AI fixes a broken folder mod through tools only; the
+  manifest is deterministic and CI-diffed with a prompt-eval fixture set; a mod that starts failing at
+  runtime is fixed autonomously within N repair attempts in a built player.
+- **Reuses**: everything before it.
+- **Package/flagship**: packages.
+- **Design detail carried from the old MVP5 (mod system UX, the rest)**: the Roblox-inspired but
+  file-native layout, enable/disable, hot reload and the AI management tool surface, equally usable by
+  humans and the LLM.
+  1. Folder mods: `Mods/<ModName>/mod.json` + `server/`, `client/`, `shared/` script folders (with
+     MVP4's script instances and declared contexts). `mod.json` schema: `id`, `name`, `version`,
+     **`api_version`** (a single int starting at 1 — the mod-API contract version; the loader refuses a
+     mod whose `api_version` is above the host's and warns with `API_VERSION_MISMATCH` when it is below),
+     `enabled`, `loadOrder` (the manifest already records `LoadOrder`, A1-02), `capabilities` (maps to
+     `LuaCapabilities`; parsing also reserves `Ai = 1<<5`, used by MVP11, and `Data = 1<<6`, used by
+     MVP16), `contexts` (implicit from folders, overridable), `preserveInstances` (§6.3), `category`,
+     `description`.
+  2. Single-file mods keep the `--[[@coreai ...]]` frontmatter (`LuaModHeader.cs`, `mod-system.md` §1)
+     as one-script mods; the seeder (`BundledModSeeder`) keeps working; the header gains an optional
+     `api_version:` key with the same gating.
+  3. (`require` → MVP4.)
+  4. Enable/disable without deletion (persisted `enabled`; a disabled mod keeps its source and store).
+  5. Hot reload pipeline: file/store change → preprocessor → teardown per §6.3 → re-run; reload latency
+     target < 250 ms for a 500-line mod.
+  6. Preprocessor at load with author line numbers — **done** (`LuauSourceGate`, line-preserving).
+  7. Log service end to end — **done** (`get_mod_logs` registered; `LuaLogFileSink` optional).
+  8. AI tools (§6.2): `list_mods`, `enable_mod`, `disable_mod`, `get_api_surface` next to the existing
+     `manage_mods` actions (`LuaModsLlmTool.cs`) and `get_mod_logs`.
+  9. (`game:BindToClose` → MVP16.)
+  - Old DoD: the AI can, through tools only, create a folder mod, break it, read the error from
+    `get_mod_logs` (correct file/line), patch it, hot-reload and confirm recovery — as an automated
+    integration test; a disabled mod provably runs zero instructions.
+- **Design detail carried from the old MVP6 (AI Lua skill = the documentation)**: one artifact that (a)
+  is injected as the in-game LLM's modding skill, (b) serves as the human-facing API docs and (c) embeds
+  the machine-readable API manifest — so the LLM never calls unimplemented API and never picks the wrong
+  tool for a job the API already solves. Motivating incident: a 4B in-game model animated a 2-second
+  movement with a raw `execute_lua` loop instead of one `TweenService:Create` call.
+  1. The skill document (single source, English) with per-service teaching sections and short correct
+     examples verified against the corpus harness.
+  2. A **"Common mistakes"** section of wrong→right pairs, grown from observed repair sessions: manual
+     per-frame movement loops → `TweenService:Create`; polling → events or `WaitForChild`; busy-wait →
+     `task.wait(seconds)`; per-frame `FindFirstChild`/`GetService` in `Heartbeat` → cache the reference;
+     `while wait() do` → `RunService.Heartbeat:Connect`; forgetting `:Disconnect()` → the connection
+     lifetime rules (§5.2.5); assuming a `shared` ModuleScript is one shared object → each context gets
+     its own copy (R3.4, §3.2); **scale confusion** — the active `RbxSpace` scale and how canonical Roblox
+     numbers (`WalkSpeed 16`, `Gravity 196.2`, `JumpPower 50`) translate under it; the **units-per-channel
+     rule** — the mod API and `execute_lua` speak studs and right-handed Roblox space, the Unity-side C#
+     tools speak meters and Unity space, and numbers are never mixed across channels without converting.
+  3. **API manifest**: machine-readable JSON listing every class/member/service with status
+     `implemented | stub(planned rung) | not_planned`, **generated** from `ServiceCatalog` +
+     `ClassCatalog` (the same source as `get_api_surface`).
+  4. Delivery: the skill is assembled at build time from the doc and the generated manifest, replacing
+     the hand-maintained C# string literals (`BuiltInRbxApiSkillText.cs`, `BuiltInLuaModdingSkillText.cs`).
+  5. Update protocol: every API-surface rung updates the skill in the same change (implicit DoD (b)); a
+     CI check fails when the generated manifest and the committed skill disagree.
+  - Old DoD: manifest generation is deterministic and CI-diffed against the catalogs; the skill covers
+    100% of the implemented services (every catalog entry has a doc section); a prompt-eval fixture set
+    exists — "move a part smoothly over 2 s" answered with TweenService, "wait for a child" answered with
+    a yielding `WaitForChild` — runnable against a small model as a regression harness.
+- **Design detail carried from the old MVP16 (in-game console + AI self-repair loop)**: a Hub "Console"
+  page — the merged live log stream from `LuaLogService` (filter by mod/level/context, including client
+  logs forwarded to the host's AI, rendered through `LuaLogFormatter.ToPromptText` for the agent path); a
+  REPL line executing in a chosen mod's sandbox — REPL/`execute_lua` one-shots follow the §2 ownership
+  rules (world-owned instances with `console:<invocationId>` origin tags, selective undo by invocation,
+  an auto-cleaning preview scope); self-repair extended from load errors to *runtime* errors — the agent
+  subscribes to `watch_mod_logs` (§6.2), correlates structured errors (id + file + line + code + hint),
+  patches through `manage_mods reload` and verifies through the same stream; repair attempts are
+  rate-limited (`LuaGenerationRateLimiter`) and every attempt is a recorded revision (rollback through
+  `TryRevertMod`); repair outcomes feed the skill's "Common mistakes". (The async agent workflow moved to
+  MVP11, the host integration profile to MVP10.) Old DoD: a scripted chaos test — a mod that starts
+  failing at runtime is fixed by the agent within N repair attempts in a built player, with no Unity
+  console consulted.
 
-### MVP12 — Replication
+### MVP19 — Performance, WebGL and mobile hardening (M) *(the old MVP17, rest)*
 
-- **Current state (2026-09-10, phase 0)**: the engine-free core under this rung is built and tested
-  registry-to-registry — every registry setter reports the member it changed (`RevisionAdvanced`),
-  `ReplicationDirtySet` accumulates it, `ReplicationStream` plans ordered Spawn/Patch/Remove per
-  recipient through `GuardedReplicationFilter` (the floor a game filter cannot open, transcribed
-  from the mirror's class tags), and `ReplicationApplier` applies a plan to a replica registry with
-  duplicate/gap/violation handling. Nothing in production constructs these types and no bytes cross
-  a socket; a replicated `Player` and cross-batch references are named open limits — `TODO.md`,
-  "MVP2.5 rungs". Since the 2026-09-24 audit (unreleased): a resync converges onto a replica that
-  already holds a world (`ReplicationApplier.BeginResync(worldSequence)` reconciles in place and keeps
-  client handlers connected), `PlanWorld` sends an empty batch to a recipient that held something and
-  may now see nothing, a removal goes only to streams that knew the id (`DeltasFor(stream)`), and a
-  replica no longer restores the server's owner/ACL metadata (MP-13, MP-20; stripping it at capture is
-  open). `dev-docs/REPLICATION_PHASE0.md` has the detail.
-- **Goal**: instance trees and properties replicate; the identity promise (§3.3) is cashed in.
-  Semantics per M-rules (authority, ownership, replication order).
-- **Deliverables**: server-side `Instance.new` under `workspace`/`ReplicatedStorage` replicates
-  to clients (spawn path via `NeoNetworkSpawner`); property sync for the whitelisted mutable set
-  (`Name`, transform/CFrame, `Color`, `Transparency`, `Anchored`, attributes) via
-  `NetworkPropertySync`-style hooks, dirty-flagged and batched per tick; `instanceId ↔ netId`
-  binding in `InstanceRegistry` (server assigns, clients mirror); authority model — CoreAI is a
-  **framework**, so client-write behavior is a configurable per-world **`ClientWritePolicy`**
-  (lives in the host integration profile, §2):
-  **`RobloxParity` (DEFAULT)** — a client mod writing to a server-owned replicated instance
-  succeeds **locally**, never replicates, and the server state overwrites it on the next sync
-  (M2.6/M1.5; local-only VFX/hides are a feature, not an error) — default because the Roblox
-  corpus and the AI's trained priors assume it;
-  **`Strict`** — such writes are rejected with `NOT_AUTHORITY` (+ the "use a RemoteEvent"
-  hint) — competitive games / anti-cheat.
-  There is **no `Open` policy** (owner decision 3, `dev-docs/MVP25_BUILD_PLAN_2026-09-04.md` §D):
-  creative/co-build worlds (the "friend's AI edits the host's world" scenario) use a **host grant**
-  (`WriteGrantLedger`) — under either policy, a client write covered by a grant for
-  `(instance, action)` is not applied locally but sent as a `MutationIntent` that the server
-  checks, applies and replicates; nothing a client sends selects authority.
-  Under every policy, `NOT_AUTHORITY` also fires on explicit replication attempts (e.g. a
-  client calling a server-only bridge op). **Implementation shape (reserved seam)**: the policy
-  is not a raw enum check scattered through replication code but a single **authority
-  resolver** queried as `(instance, property/action) → WriteVerdict { ApplyLocalOnly |
-  Replicate | Reject }`; the only MVP implementation is the world-default policy above, but
-  because the seam's signature already takes instance + property, future **partial-authority
-  rules** (per-Instance / per-property / per-player — e.g. "clients may move furniture but not
-  delete walls", or a per-Instance attribute override) are a new resolver implementation, not a
-  replication rewrite. Partial-authority rules are a backlog item — no new MVP rung;
-  per-connection rate limits on remotes and property writes (`NeoNetworkComponent.RateLimitCheck`
-  pattern); late-joiner snapshot replay — the join snapshot **reuses the MVP3 world-file
-  serializer** (§2, world file), not a second tree-serialization path.
-- **Dependencies**: MVP11; MVP3 (join snapshot = world-file serializer).
-- **DoD**: server mod builds a tree, client sees identical ids/names/positions; client tamper
-  test under the default `RobloxParity` policy: a client write to a server-owned instance stays
-  local and is overwritten by the next server sync (M2.6), while an explicit replication attempt
-  raises `NOT_AUTHORITY` + logged; a test for `Strict` (write rejected with `NOT_AUTHORITY`), one
-  for a host grant (the granted write travels as an intent, is applied by the server and
-  replicates) and one asserting the policy enum has exactly two values; late joiner converges;
-  100-instance churn soak stays under rate budget;
-  conformance tests cite M-rule IDs per §6.6.
-- **Effort**: L.
+- **Goal**: the whole stack holds its budget on the weakest targets: WebGL client and Android client.
+- **Done so far**: the per-resume budgets and quarantine; `ILuaCsGuardObserver`; the WebGL browser gate
+  (2026-09-02, `TODO.md`); the WebGL save budget (4 MiB / 4,032 instances,
+  [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md)); MVP9's scale work.
+- **To do**: lazy material textures (the ~99 MB eager load, `TODO.md`); incremental JSON/ZIP on WebGL;
+  the WebGL client soak; an Android client build; the performance regression suite (F-20); the carried
+  items below.
+- **Test**: LT, manual WebGL and Android runs with recorded evidence.
+- **DoD**: the old MVP17 DoD below, plus the WebGL client and the Android client in a 20-player room.
+- **Reuses**: everything before it.
+- **Package/flagship**: packages.
+- **Design detail carried from the old MVP17**: the benchmark corpus (Tier C, §6.4) as a performance
+  suite; per-phase scheduler budget telemetry into Statistics; a zero-allocation audit of hot paths
+  (signal fire, marshalling, `RbxSpace` conversions, tick); a WebGL soak as solo **and** as a pure
+  client (single-thread yields; durability through `CoreAiWebGlPersistence`, never a hand-driven
+  `FS.syncfs`); a stress profile of 50 mods / 5,000 instances / 2,000 connections on the weakest target;
+  kill-switch UX for runaway mods (quarantine after K consecutive budget kills —
+  `ModQuarantined`/`ModTearingDown` over the `ILuaModRuntime.ModHandlerErrored` consumers; tune and
+  surface it). (Per-mod slice enforcement moved to MVP9.) Old DoD: the mod stack's frame cost ≤2 ms at the
+  stress profile on mid-tier hardware; the WebGL build passes the same ≥85% A+B+C corpus gate as desktop,
+  restricted to the solo-eligible subset (multi-client fixtures excluded), plus the client-mode fixture
+  set.
 
-### MVP13 — Dedicated server
+### Dropped: the old MVP7 (editor tooling)
 
-- **Goal**: the same bridge and mod stack running headless — no local client, no rendering.
-- **Deliverables**: headless bootstrap (Unity dedicated-server build target / `-batchmode
-  -nographics`), CLI/config surface (port, world/save selection, mod set, capability grants);
-  `DedicatedServer` topology live end-to-end: `Players.LocalPlayer = nil`, `client` scripts never
-  load, `PreRender` never fires, input/GUI services absent (per §3.2/§5.2.3); headless log
-  routing (no Hub): `LuaLogFileSink` + remote log fetch for the host-side AI; **WebGL pure
-  client validated against the dedicated server** (browser connects out; never hosts).
-- **Dependencies**: MVP12.
-- **DoD**: dedicated binary hosts 2 clients (one desktop, one WebGL) through the client fixture
-  set; 1-hour soak without leaks; solo/host modes unaffected.
-- **Effort**: M.
-
-### MVP14 — GUI subset
-
-- **Goal**: tutorial-grade GUI scripts run: `ScreenGui`/`Frame`/`TextLabel`/`TextButton`/
-  `ImageLabel`/`TextBox` + `UICorner`/`UIListLayout`, rendered as runtime UI Toolkit (UXML/USS
-  interpreted at runtime — RUNTIME-first, same approach as the Hub).
-- **Deliverables**: class set above; `UDim2` layout semantics (Scale+Offset → USS percent+px);
-  `MouseButton1Click`, `Activated`, `FocusLost(enterPressed)`; `player.PlayerGui` container;
-  z-order via `DisplayOrder`/`ZIndex`. Everything else in the GUI family = loud stubs.
-- **Dependencies**: MVP2 (signals), MVP8 (Players/`player.PlayerGui`), MVP10 (input focus
-  rules); coexists with Hub windows.
-- **DoD**: "score label + shop button" corpus fixtures pass; GUI survives hot reload (rebuilt);
-  **corpus gate ≥75%** of Tier-A+B+C.
-- **Effort**: L.
-
-### MVP15 — Audio / FX / animation services
-
-- **Goal**: presentation-layer breadth.
-- **Deliverables**: `Sound` (`Play/Stop/Pause`, `Playing`, `Volume`, `Looped`, `Ended`) over the
-  host audio manager; `SoundService:PlayLocalSound`; `ParticleEmitter` minimal (`Enabled`,
-  `Rate`, `Color`, `Emit(count)`) over a pooled Unity particle prefab; `AnimationController`-area
-  = loud stubs except a documented CoreAI extension `humanoid:PlayAnimationByName(name)` (R15 rig
-  fidelity is a non-goal).
-- **Dependencies**: MVP8.
-- **DoD**: sound-on-touch and emit-burst fixtures pass on desktop + WebGL solo.
-- **Effort**: M.
-
-### MVP16 — In-game console + AI self-repair loop
-
-- **Goal**: close the realtime loop — the AI (and player) can see, diagnose, and fix mods
-  *during play* with zero editor involvement.
-- **Deliverables**: Hub "Console" page — merged live log stream from `LuaLogService`
-  (filter by mod/level/context, incl. client logs forwarded from Mirror clients to the host's AI,
-  rendered via `LuaLogFormatter.ToPromptText` for the agent path); a REPL line executing in a
-  chosen mod's sandbox — REPL/`execute_lua` one-shots follow the §2 ownership rules: created
-  instances are world-owned with `console:<invocationId>` origin tags, selective undo by
-  invocation, and the preview scope auto-cleans; self-repair upgrade: the existing auto-repair path
-  (`LuaModAutoRepairPolicy.cs`, `Presentation/CoreAiLuaModAutoRepair.cs`) is extended from
-  load-error repair to *runtime* repair — the agent subscribes to `watch_mod_logs` (§6.2),
-  correlates structured errors (id+file+line+code+hint), patches via `manage_mods reload`, and
-  verifies via the same log stream; repair attempts are rate-limited
-  (`LuaGenerationRateLimiter`) and every attempt is a recorded revision (rollback via
-  `TryRevertMod`). Repair outcomes feed the skill's "Common mistakes" backlog (§MVP6).
-  Also here: the **async agent workflow** — role-independent core UX, not a Creator mode:
-  the player keeps playing as a normal character (including playing what the AI is currently
-  building) and in parallel types new tasks to the AI; the chat is always non-blocking
-  (background generation already landed — Esc collapses the Hub, generation continues).
-  Remaining deliverables: a **task queue** (new instructions enqueue instead of blocking or
-  derailing the current work) and an unobtrusive **HUD status indicator** ("agent building:
-  X…" + completion notification) that needs no open Hub. The loop is closed by existing
-  pieces: autosave before every AI mutation, quarantine, and the agent reading Lua logs to
-  self-fix while the player keeps playing. Roles/world config only gate WHAT the AI may do
-  on a player's behalf (§2, roles decision), never this play-while-tasking pattern.
-  Also lands here: the **host integration profile** (§2) — a per-project ScriptableObject
-  (`RobloxSpace` scale, capability defaults, bound host services/objects, `ClientWritePolicy`
-  §MVP12) so embedding the mod stack into an existing meter-scale game is a drop-in config,
-  not code.
-- **Dependencies**: MVP5 (tools), MVP6 (skill in the loop), MVP7 (viewer parts reused); benefits
-  from MVP11+ (remote logs).
-- **DoD**: scripted chaos test — a mod that starts erroring at runtime is autonomously fixed by
-  the agent within N repair attempts in a built player, no Unity console consulted.
-- **Effort**: M.
-
-### MVP17 — Performance + WebGL hardening
-
-- **Goal**: the whole stack holds its budget on the weakest target.
-- **Deliverables**: benchmark corpus (Tier-C, §6.4) as a perf suite; per-phase scheduler budget
-  telemetry into Statistics; zero-alloc audit of hot paths (signal fire, marshalling,
-  `RobloxSpace` conversions, tick); WebGL soak as solo **and** as pure client (IDBFS flush
-  cadence, single-thread yields); stress: 50 mods / 5k instances / 2k connections; kill-switch
-  UX for runaway mods (**quarantine** after K consecutive budget kills — `ModQuarantined`/
-  `ModTearingDown` flow over the `ILuaModRuntime.ModHandlerErrored` consumers, tune + surface
-  it; §2 quarantine policy); per-frame/per-mod **slice enforcement** lands here on the
-  accounting seams reserved since MVP2 (§2, frame-budget reservation).
-- **Dependencies**: everything shipped so far.
-- **DoD**: frame cost of the mod stack ≤ 2 ms at the stress profile on mid-tier hardware;
-  WebGL build passes the same ≥85% A+B+C gate as desktop, restricted to the solo-eligible
-  subset (multi-client fixtures excluded), plus the client-mode fixture set.
-- **Effort**: M.
+Dropped on 2026-09-24. Under the RUNTIME-first rule and the Studio-in-game goal, the runtime Studio
+(MVP12) replaces its value; the Lua/Luau syntax highlighting it contained has shipped (editor-side:
+`.lua`/`.luau` importers, the highlighted inspector, the `CoreAI/Lua Script Viewer` window, and the
+engine-independent tokenizer in `Runtime/LuaAssets`). Kept as the record of what it planned: a
+read-only script viewer with revision diff (`ILuaScriptVersionStore` data); a Mod Manager editor window
+mirroring the Hub Mods-tab actions (enable/disable/reload/logs); a mod log console window (an
+`ILuaLogService` view with a per-mod filter). Its runtime equivalents are the Hub pages of MVP12 and
+MVP18. The `diff_mod_versions` AI tool it listed (§6.2) moves to MVP18.
 
 ---
 
 ## 5. MVP1 and MVP2 in detail
 
-New code home: `Assets/CoreAIMods/Runtime/RobloxApi/` (asmdef: part of `CoreAI.Mods`), all files
-guarded `#if COREAI_LUA` where they touch the VM adapter, namespace `CoreAI.Mods.Rbx`.
+This section is the MVP1/MVP2 design as it was written and then built. Rung numbers in it are the
+**old** ones (map them through §4.1: MVP5 → MVP4/MVP16/MVP18, MVP6 → MVP18, MVP8 → Gameplay services I,
+MVP9 → MVP16, MVP10 → MVP7/MVP15, MVP11 → MVP5, MVP12 → MVP6, MVP13 → MVP8, MVP14 → MVP15, MVP15 →
+MVP17, MVP17 → MVP9/MVP19), and the stub phase names it quotes are the ones the code raises today.
+
+Code home: `Assets/CoreAIMods/Runtime/RbxApi/` — engine-free assemblies `CoreAI.RbxApi.Datatypes`
+(`RbxApi/Datatypes/`) and `CoreAI.RbxApi.Instances` (`RbxApi/Instances/`), the Unity-side
+`CoreAI.RbxApi.Binding` (`RbxApi/Binding/`) and `CoreAI.RbxApi.Unity` (`RbxApi/Unity/`, which holds
+`RbxSpace`) — plus the Lua bindings in `Assets/CoreAIMods/Runtime/Scripting/LuaCs/LuaCsRbx*.cs`, guarded
+`#if COREAI_LUA` where they touch the VM adapter. (The first draft planned one `RobloxApi/` folder inside
+`CoreAI.Mods`; the tables below keep the planned names next to the shipped files.)
 C# classes use the `Rbx` prefix to avoid colliding with Unity types (`RbxInstance` vs. Unity
 `Object`); the *Lua-visible* names are unprefixed Roblox names. Rule IDs cited below refer to
 the normative docs in §2.1.
@@ -1141,31 +1589,31 @@ the normative docs in §2.1.
 
 #### 5.1.1 Task breakdown
 
-| # | Task | Files (new unless noted) |
-|---|------|--------------------------|
-| 1 | Identity: `InstanceId`, `InstanceRecord`, `InstanceRegistry` | `RobloxApi/Identity/InstanceId.cs`, `InstanceRegistry.cs` |
-| 2 | `RbxInstance` base: hierarchy, navigation, lifecycle, attributes, tags | `RobloxApi/Instances/RbxInstance.cs` |
-| 3 | Class set: `Folder`, `Model`, `BasePart`/`Part`, `Workspace`, container services, `DataModel` | `RobloxApi/Instances/*.cs` |
-| 4 | Pure-spec datatypes: `Vector3`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Enum` registry | `RobloxApi/Datatypes/*.cs` |
-| 5 | **`RobloxSpace` conversion boundary** (D2/D3): `ToUnity`/`FromUnity` for position/rotation/CFrame/velocity + the scale constant | `RobloxApi/Spatial/RobloxSpace.cs` |
-| 6 | Marshalling: datatypes + instances over `IValueMarshaller` | `RobloxApi/Marshalling/RobloxValueMarshaller.cs` |
-| 7 | Unity binder: materialize/track GameObjects for spatial instances (all transforms via `RobloxSpace`) | `RobloxApi/Binding/InstanceGameObjectBinder.cs` |
-| 8 | World bridge: lazy-wrap CoreAI world objects as Instances (reads via `RobloxSpace` inverse) | `RobloxApi/Binding/WorldInstanceAdapter.cs` (uses `WorldBindings/WorldQuerySceneWalker.cs`) |
-| 9 | Lua global installation: `game`, `workspace`, `Instance`, datatype constructors | `RobloxApi/RobloxApiInstaller.cs` (registered from `Composition/CoreAiModsInstaller.cs`) |
-| 10 | Error surface: `RbxError` codes + formatter (§5.2.7, shared) | `RobloxApi/RbxError.cs` |
-| 11 | Tests: datatype goldens, `RobloxSpace` suite, instance lifecycle | `Assets/CoreAIMods/Tests/EditMode/RobloxApi/{Datatypes,Instances}/` (§6.6) |
+| # | Task | Planned file (first draft) | Shipped in (`Assets/CoreAIMods/Runtime/`) |
+|---|------|----------------------------|--------------------------------------------|
+| 1 | Identity: `InstanceId`, `InstanceRecord`, `InstanceRegistry` | `RobloxApi/Identity/InstanceId.cs`, `InstanceRegistry.cs` | `RbxApi/Instances/InstanceId.cs`, `InstanceIdAllocator.cs`, `InstanceRecord.cs`, `InstanceRegistry.cs` |
+| 2 | `RbxInstance` base: hierarchy, navigation, lifecycle, attributes, tags | `RobloxApi/Instances/RbxInstance.cs` | `RbxApi/Instances/RbxInstance.cs`, `InstanceTagStore.cs`, `AttributeContract.cs` |
+| 3 | Class set: `Folder`, `Model`, `BasePart`/`Part`, `Workspace`, container services, `DataModel` | `RobloxApi/Instances/*.cs` | `RbxApi/Instances/ClassCatalog.cs`, `DataModelBootstrap.cs`, `RbxDataModel.cs` |
+| 4 | Pure-spec datatypes: `Vector3`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Enum` registry | `RobloxApi/Datatypes/*.cs` | `RbxApi/Datatypes/Rbx*.cs` |
+| 5 | **`RbxSpace` conversion boundary** (D2/D3): `ToUnity`/`FromUnity` for position/rotation/CFrame/velocity + the scale constant | `RobloxApi/Spatial/RobloxSpace.cs` | `RbxApi/Unity/RbxSpace.cs` |
+| 6 | Marshalling: datatypes + instances over `IValueMarshaller` | `RobloxApi/Marshalling/RobloxValueMarshaller.cs` | `Scripting/LuaCs/LuaCsRbxValues.cs`, `LuaCsRbxDatatypeBindings.cs` |
+| 7 | Unity binder: materialize/track GameObjects for spatial instances (all transforms via `RbxSpace`) | `RobloxApi/Binding/InstanceGameObjectBinder.cs` | `RbxApi/Binding/InstanceGameObjectBinder.cs` |
+| 8 | World bridge: lazy-wrap CoreAI world objects as Instances (reads via `RbxSpace` inverse) | `RobloxApi/Binding/WorldInstanceAdapter.cs` | `RbxApi/Binding/WorldInstanceAdapter.cs`, `WorldQuerySceneWalker.cs` |
+| 9 | Lua global installation: `game`, `workspace`, `Instance`, datatype constructors | `RobloxApi/RobloxApiInstaller.cs` | `Scripting/LuaCs/LuaCsRbxApiBindings.cs`, `LuaCsRbxInstanceBindings.cs` (registered from `Composition/CoreAiModsInstaller.cs`) |
+| 10 | Error surface: `RbxError` codes + formatter (§5.2.7, shared) | `RobloxApi/RbxError.cs` | `RbxApi/Instances/RbxError.cs` |
+| 11 | Tests: datatype goldens, `RbxSpace` suite, instance lifecycle | `Tests/EditMode/RobloxApi/{Datatypes,Instances}/` | `Assets/CoreAIMods/Tests/EditMode/RbxApi/{Datatypes,Instances,Acceptance}/` (§6.6) |
 
-The `RobloxSpace` test suite (task 5/11), named explicitly:
+The `RbxSpace` test suite (task 5/11), named explicitly:
 
-- `RobloxSpaceRoundTripTests` — property-based: `FromUnity(ToUnity(x)) == x` over randomized
+- `RbxSpaceRoundTripEditModeTests` — property-based: `FromUnity(ToUnity(x)) == x` over randomized
   positions/rotations/CFrames (and the Unity-first direction), at both scales. Dual-scale
   EditMode runs require a **test-only reset hook / per-test config injection** for the scale
   (production keeps the constant-per-session rule).
-- `RobloxSpaceGoldenFixtureTests` — golden fixtures against documented Roblox values:
+- `RbxSpaceGoldenFixtureEditModeTests` — golden fixtures against documented Roblox values:
   `CFrame.lookAt` cases, `CFrame.Angles` chirality, nested `ToWorldSpace`/`ToObjectSpace`
   compositions, `LookVector/RightVector/UpVector` handedness.
-- `RobloxSpaceUsageLintTests` — lint-style scan of the `RobloxApi` layer sources: no direct
-  `UnityEngine.Transform`/`Vector3`/`Quaternion` math outside `RobloxSpace` and the binder's
+- `Mvp1ConversionLintEditModeTests` — lint-style scan of the `RbxApi` layer sources: no direct
+  `UnityEngine.Transform`/`Vector3`/`Quaternion` math outside `RbxSpace` and the binder's
   single call sites (the tripwire against scattered double conversions).
 
 #### 5.1.2 Public C# API sketch
@@ -1193,12 +1641,12 @@ public sealed class InstanceRegistry
     public event Action<InstanceRecord> Unregistered;
 }
 
-// Spatial/RobloxSpace.cs — THE single conversion boundary (D2/D3). Pure static, no state
+// Spatial/RbxSpace.cs — THE single conversion boundary (D2/D3). Pure static, no state
 // beyond the configured scale. Nothing else in the API layer converts (lint-enforced).
-public static class RobloxSpace
+public static class RbxSpace
 {
     /// <summary>Meters per stud. Default 0.28; configurable at host bootstrap, constant per session.</summary>
-    public static float MetersPerStud { get; }   // set once via RobloxSpaceConfig;
+    public static float MetersPerStud { get; }   // set once via RbxSpace.Configure;
                                                  // internal test-only reset hook for dual-scale EditMode runs (§5.1.1)
 
     public static UnityEngine.Vector3 ToUnity(RbxVector3 position);       // scale + negate Z
@@ -1312,17 +1760,17 @@ appears in any datatype signature.
   `ToWorldSpace`/`ToObjectSpace` matching the official reference. Mods never touch a Unity
   `Transform`. Scripts that hand-build rotation matrices from raw components therefore work
   unmodified. Golden-fixture tests pin the behavior to documented Roblox values (§5.1.1).
-- **D2 — One conversion boundary: `RobloxSpace`. LOCKED.** A single static class owns
+- **D2 — One conversion boundary: `RbxSpace`. LOCKED.** A single static class owns
   `ToUnity`/`FromUnity` for position/rotation/CFrame/velocity: the canonical handedness flip
   (negate Z position + the matching quaternion adjustment) so Roblox `LookVector` (−Z) maps onto
-  Unity `transform.forward` (+Z). Nothing outside `RobloxSpace` converts — enforced by
-  `RobloxSpaceUsageLintTests`, a lint-style test scanning the API layer for direct Transform math
+  Unity `transform.forward` (+Z). Nothing outside `RbxSpace` converts — enforced by
+  `Mvp1ConversionLintEditModeTests`, a lint-style test scanning the API layer for direct Transform math
   (the tripwire against scattered double conversions, which are this design's primary failure
   mode). Reading existing Unity scene objects (world wrap, §3.3) goes through the same
   converter's inverse, so the mapping is consistent both ways. Documented visible artifact:
   **mod-space `z` = −Unity `z`** — stated in the skill and in world-query tool docs.
 - **D3 — Scale: configurable, default 1 stud = 0.28 m. LOCKED (supersedes the earlier 1:1
-  default).** One constant inside `RobloxSpace` (`MetersPerStud`); positions, velocities, and
+  default).** One constant inside `RbxSpace` (`MetersPerStud`); positions, velocities, and
   gravity all flow through it. 0.28 is the default because the AI's trained priors
   (`WalkSpeed 16`, `JumpPower 50`, `Gravity 196.2`, part sizes) then produce correct game feel
   without re-teaching — feel-parity, not just math-parity (196.2 studs/s² × 0.28 = 54.9 m/s²
@@ -1335,7 +1783,7 @@ appears in any datatype signature.
   never rescaled and read back through the meters→studs inverse; switching 0.28 ↔ 1:1 touches
   zero assets, only the constant. Part mass/density scales by volume (×scale³). Corpus tests run
   at 0.28 primary + 1:1 smoke (§6.4); the skill teaches the active scale as a named "common
-  mistakes" entry (§MVP6).
+  mistakes" entry (§MVP18).
 - **D4 — Signal mode: Deferred only. LOCKED (DEV-2).** Handlers never run inside the C# mutation
   that fired them; they are queued and drained at defined resumption points per R5.4–R5.7
   (§5.2.3), matching Roblox's deferred-signal direction (templates default to Deferred [^10]).
@@ -1439,16 +1887,16 @@ post-publish port after the world commits rather than while it is still staging
 
 | Risk | Mitigation |
 |---|---|
-| **Scattered coordinate conversions** — a second ad-hoc Z-flip or scale factor sneaks in somewhere (double conversion = subtly mirrored/mis-scaled worlds; the classic failure mode of this design) | single boundary rule (D2) enforced mechanically by `RobloxSpaceUsageLintTests`; property-based round-trip tests catch asymmetry; golden fixtures catch chirality regressions |
+| **Scattered coordinate conversions** — a second ad-hoc Z-flip or scale factor sneaks in somewhere (double conversion = subtly mirrored/mis-scaled worlds; the classic failure mode of this design) | single boundary rule (D2) enforced mechanically by `Mvp1ConversionLintEditModeTests`; property-based round-trip tests catch asymmetry; golden fixtures catch chirality regressions |
 | Registry proxy indirection too slow for hot loops (`part.Position` per frame) | property access resolves via a cached record reference invalidated on destroy, not a dictionary hit per call; benchmark in MVP1 tests, budget: ≤1 µs/access editor-Mono |
-| Class hierarchy sprawl | class ancestry is data (`ClassCatalog` table: name → parent, creatable flag), not C# inheritance depth; adding a class = one row + optional behavior class; the same catalog feeds the API manifest (§MVP6) |
+| Class hierarchy sprawl | class ancestry is data (`ClassCatalog` table: name → parent, creatable flag), not C# inheritance depth; adding a class = one row + optional behavior class; the same catalog feeds the API manifest (§MVP18) |
 | GameObject leak on mod crash | binder subscribes to `InstanceRegistry.Unregistered` *and* hot-reload teardown enumerates `GetOwnedBy(modId)` — two independent sweeps |
 | Divergent `tostring`/format breaking string-matching scripts | corpus fixtures assert formatting; formatting rules centralized in one class |
 
 #### 5.1.8 Acceptance criteria (MVP1 test list, EditMode; names per §6.6)
 
 1. `Instance.new("Part")` → ClassName/Name defaults; registry has record; no GameObject yet (D5).
-2. Parent into `workspace` → GameObject appears with the `RobloxSpace`-converted transform;
+2. Parent into `workspace` → GameObject appears with the `RbxSpace`-converted transform;
    detach → deactivated.
 3. Navigation: `FindFirstChild` (+recursive), `FindFirstChildOfClass/WhichIsA`, ancestor trio,
    `GetChildren` order = insertion order, `GetDescendants` preorder.
@@ -1462,14 +1910,14 @@ post-publish port after the world commits rather than while it is still staging
    `Color3.fromRGB` of whole channels — golden fixtures against documented Roblox values; a
    fractional channel follows CoreAI's locked nearest-integer, midpoint-away-from-zero rounding,
    because the mirror documents none (`Color3_FromRGB_FractionalChannelsUseLockedCoreAiRounding`).
-10. `RobloxSpace` suite (§5.1.1): round-trip identity at 0.28 and 1:1; lookAt/Angles chirality
+10. `RbxSpace` suite (§5.1.1): round-trip identity at 0.28 and 1:1; lookAt/Angles chirality
     goldens; usage lint clean; mod-space z = −Unity z asserted explicitly.
 11. Asset-scale rule: `Part` with `Size = Vector3.new(4, 1, 2)` produces
     `localScale = (4, 1, 2) × MetersPerStud` — asserted under **both** scale configs with zero
-    asset differences (only the `RobloxSpace` constant changes); wedge/corner-wedge meshes obey
+    asset differences (only the `RbxSpace` constant changes); wedge/corner-wedge meshes obey
     the same formula. Holds for a part nested in a part too: the child container carries no scale.
 12. Identity: `TryGetByWorldName` resolves a CoreAI world object lazily wrapped (position equals
-    the `RobloxSpace` inverse of its Unity position — a 1.8 m-tall host object reads ~6.4 studs
+    the `RbxSpace` inverse of its Unity position — a 1.8 m-tall host object reads ~6.4 studs
     at default scale); same record via `TryGet(id)`. **PARTIAL** for writes: an adopted host
     object follows pose writes only — the binder never changes the scale, shape, material or
     Rigidbody of a GameObject the host owns (M1-16).
@@ -1483,26 +1931,26 @@ post-publish port after the world commits rather than while it is still staging
 
 #### 5.2.1 Task breakdown
 
-Tasks 1-3 and 6-10 plus 12 and 13 have landed, and 5 is wired for the frame signals (its topology
-query methods are still loud stubs). Task 4 (the clock surface) has landed except `DateTime`, which is
-a loud backlog stub (M2-15, 2026-09-24); task 11 (the Tier-A corpus gate) remains. File paths below
-are the original plan; the shipped code uses the `RbxApi` namespace and folder layout.
+Every task has landed except the `DateTime` part of task 4 (a loud backlog stub, M2-15) and two
+members of task 5 (`BindToRenderStep`/`UnbindFromRenderStep`, MVP2-phased loud stubs; §MVP2 lists them
+as open). The RunService topology queries answer through `IRbxRuntimeTopology`; the Tier-A corpus
+gate (task 11) is green.
 
-| # | Task | Files |
-|---|------|-------|
-| 1 | `RbxScriptSignal` / `RbxScriptConnection` + deferred queue (R5.x) | `RobloxApi/Events/RbxScriptSignal.cs` |
-| 2 | `ModScheduler`: phases, thread pool over `IScriptCoroutine`, wait/delay heaps (R4.x), `ScheduleWaitUntil` completion primitive | `RobloxApi/Scheduling/ModScheduler.cs` |
-| 3 | `task` library + legacy aliases (`wait`, `spawn`, `delay`) | `RobloxApi/Scheduling/TaskLibrary.cs` |
-| 4 | Clock surface (D9): `time`, `os.time`, `os.clock`, `DateTime`, `GetServerTimeNow` — landed on `IRbxClockSource` except `DateTime` (a loud backlog stub, M2-15; no `RbxDateTime` exists) | `RobloxApi/Scheduling/RbxClocks.cs`, `RobloxApi/Datatypes/RbxDateTime.cs` |
-| 5 | `RunService` service + tick-driver wiring | `RobloxApi/Services/RunServiceImpl.cs`; edit `Infrastructure/LuaModRuntimeTickDriver.cs` |
-| 6 | `ServiceCatalog`: `GetService`, registration, stub factory | `RobloxApi/Services/ServiceCatalog.cs` |
-| 7 | Shared JSON contract + `HttpService` JSON members | `RobloxApi/Marshalling/RobloxJson.cs`, `RobloxApi/Services/HttpServiceImpl.cs` |
-| 8 | `INetworkBridge` + `NullNetworkBridge` + `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction` loopback | `RobloxApi/Networking/INetworkBridge.cs`, `NullNetworkBridge.cs`, `RobloxApi/Instances/RemoteEvent.cs` |
-| 9 | Absent-child `WaitForChild` yield, 5 s warning, and timeout overload (the immediate-child path shipped in MVP1); `signal:Wait()`; `Destroying`-order guarantees | edits in `RbxInstance` |
-| 10 | Error formatter finalized + budget-kill integration | `RobloxApi/RbxError.cs`; edits `Scripting/LuaCs/LuaCsExecutionGuard.cs` adapter |
-| 11 | Tier-A corpus harness (20 fixtures) | `Assets/CoreAIMods/Tests/EditMode/RobloxApi/Corpus/` (+`Fixtures/`) |
-| 12 | `BasePart.Material` materials catalog, following the [materials research](../../dev-docs/MATERIALS_RESEARCH.md) — **landed** as `RbxProceduralMaterialProvider` + `RbxTextureMaterialProvider` (all 45 items, magenta fallback) | `RbxApi/Unity/Rbx*MaterialProvider.cs`; part binder + Lua bindings |
-| 13 | `Model` pivot — **landed**: `PivotTo`/`GetPivot` aggregating child-part CFrames, plus `PrimaryPart`/`WorldPivot` | `RbxApi/Instances/RbxModel.cs`; Lua bindings |
+| # | Task | Planned file (first draft) | Shipped in (`Assets/CoreAIMods/Runtime/`) |
+|---|------|----------------------------|--------------------------------------------|
+| 1 | `RbxScriptSignal` / `RbxScriptConnection` + deferred queue (R5.x) | `RobloxApi/Events/RbxScriptSignal.cs` | `RbxApi/Instances/RbxScriptSignal.cs`, `ModConnectionRegistry.cs`; `Scripting/LuaCs/LuaCsRbxSignalRunner.cs` |
+| 2 | `ModScheduler`: phases, thread pool over `IScriptCoroutine`, wait/delay heaps (R4.x), `ScheduleWaitUntil` completion primitive | `RobloxApi/Scheduling/ModScheduler.cs` | `RbxApi/Instances/Scheduling/ModScheduler.cs`, `RbxSchedulerCompletion.cs` |
+| 3 | `task` library + legacy aliases (`wait`, `spawn`, `delay`) | `RobloxApi/Scheduling/TaskLibrary.cs` | `Scripting/LuaCs/LuaCsRbxSchedulerAdapter.cs`, `LuaCsRbxApiBindings.cs` |
+| 4 | Clock surface (D9): `time`, `os.time`, `os.clock`, `DateTime`, `GetServerTimeNow` — landed on `IRbxClockSource` except `DateTime` (a loud backlog stub, M2-15; no `RbxDateTime` exists) | `RobloxApi/Scheduling/RbxClocks.cs`, `RobloxApi/Datatypes/RbxDateTime.cs` | `RbxApi/Datatypes/IRbxClockSource.cs`; `Scripting/LuaCs/LuaCsRbxApiBindings.cs` |
+| 5 | `RunService` service + tick-driver wiring | `RobloxApi/Services/RunServiceImpl.cs`; edit `Infrastructure/LuaModRuntimeTickDriver.cs` | `RbxApi/Instances/RbxRunService.cs`, `RbxRuntimeTopology.cs`; `Infrastructure/LuaModRuntimeTickDriver.cs` |
+| 6 | `ServiceCatalog`: `GetService`, registration, stub factory | `RobloxApi/Services/ServiceCatalog.cs` | `RbxApi/Instances/ServiceCatalog.cs` |
+| 7 | Shared JSON contract + `HttpService` JSON members | `RobloxApi/Marshalling/RobloxJson.cs`, `RobloxApi/Services/HttpServiceImpl.cs` | `Scripting/LuaCs/LuaCsRbxJson.cs`, `LuaCsRbxHttpServiceAdapter.cs`, `RbxHttpPolicy.cs` |
+| 8 | `INetworkBridge` + `NullNetworkBridge` + `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction` loopback | `RobloxApi/Networking/INetworkBridge.cs`, `NullNetworkBridge.cs`, `RobloxApi/Instances/RemoteEvent.cs` | `RbxApi/Instances/Networking/INetworkBridge.cs`, `NullNetworkBridge.cs`, `RbxRemotes.cs`; `Scripting/LuaCs/LuaCsRbxNetworkCodec.cs` |
+| 9 | Absent-child `WaitForChild` yield, 5 s warning, and timeout overload (the immediate-child path shipped in MVP1); `signal:Wait()`; `Destroying`-order guarantees | edits in `RbxInstance` | `RbxApi/Instances/RbxInstance.cs`; `Scripting/LuaCs/LuaCsRbxInstanceBindings.cs` |
+| 10 | Error formatter finalized + budget-kill integration | `RobloxApi/RbxError.cs`; edits `Scripting/LuaCs/LuaCsExecutionGuard.cs` adapter | `RbxApi/Instances/RbxError.cs`; `Scripting/LuaCs/LuaCsExecutionGuard.cs` |
+| 11 | Tier-A corpus harness (20 fixtures) | `Tests/EditMode/RobloxApi/Corpus/` (+`Fixtures/`) | `Assets/CoreAIMods/Tests/EditMode/RbxApi/CompatibilityCorpus/` (`Fixtures/`, `FixturesB/`, `TierACorpusEditModeTests.cs`) |
+| 12 | `BasePart.Material` materials catalog, following the [materials research](../../dev-docs/MATERIALS_RESEARCH.md) — **landed** as `RbxProceduralMaterialProvider` + `RbxTextureMaterialProvider` (all 45 items, magenta fallback) | — | `RbxApi/Unity/Rbx*MaterialProvider.cs`; part binder + Lua bindings |
+| 13 | `Model` pivot — **landed**: `PivotTo`/`GetPivot` aggregating child-part CFrames, plus `PrimaryPart`/`WorldPivot` | `RbxApi/Instances/RbxModel.cs` | `RbxApi/Instances/RbxInstance.cs`; `Scripting/LuaCs/LuaCsRbxInstanceBindings.cs` |
 
 #### 5.2.2 Public C# API sketch
 
@@ -1804,7 +2252,7 @@ Notes:
   path even in loopback (encode → decode via the §5.2.4 envelope: `RobloxJson` + tagged
   datatype/`InstanceId` entries), so marshalling bugs surface in solo play, not first in MVP11.
 - U1–U7 stances (§2.1) are recorded alongside these notes during implementation; testable ones
-  become conformance tests in `Tests/EditMode/RobloxApi/Scheduler/`.
+  become conformance tests in `Tests/EditMode/RbxApi/Scheduling/`.
 
 #### 5.2.6 Clock model (D9, LOCKED)
 
@@ -1961,42 +2409,44 @@ inverse of the formatter); only a plain Lua error is wrapped as `BAD_ARGUMENT`, 
 
 ## 6. Cross-cutting concerns
 
-### 6.1 Lua logging integration points per MVP
+### 6.1 Lua logging integration points per rung
 
-Log core **(landed)**: `Assets/CoreAIMods/Runtime/Logging/` — `LuaLogService` per-mod ring
+Log core **(landed and wired)**: `Assets/CoreAIMods/Runtime/Logging/` — `LuaLogService` per-mod ring
 buffers behind `ILuaLogService` (C# query + subscription), `LuaLogFormatter.ToPromptText` for
-agent-facing rendering, `GetModLogsLlmTool` (exists, unwired — MVP5 registers it), optional
-`LuaLogFileSink`. No Unity console dependency anywhere in the mod path.
+agent-facing rendering, `GetModLogsLlmTool` (`get_mod_logs`, registered for the Programmer role),
+optional `LuaLogFileSink`. No Unity console dependency anywhere in the mod path.
 
-| MVP | What starts logging |
+| Rung | What starts logging |
 |---|---|
-| 1 | instance lifecycle at debug level (create/parent/destroy with `InstanceId`), stub hits, deprecation notes |
-| 2 | scheduler: thread spawn/kill, budget kills, signal cascade traces; structured error records (§5.2.7) |
-| 3 | world save/load timeline; backup snapshots with trigger metadata (§MVP3) |
-| 4 | RBXL import diagnostics: skipped `Terrain` (info), asset placeholders, script→disabled-mod entries |
-| 5 | load/reload/teardown timeline per mod (incl. quarantine events `ModQuarantined`/`ModTearingDown`); preprocessor diagnostics with author line numbers; `GetModLogsLlmTool` wired |
-| 8–10 | service-level warnings (Touched without collider, tween on destroyed instance, input while unfocused) |
-| 11–12 | bridge: send/receive counters, drops, rate-limit trips, `CONTEXT_VIOLATION`; client logs forwarded to host buffers tagged with player id |
-| 13 | headless routing: `LuaLogFileSink` + remote log fetch (no Hub on a dedicated server) |
-| 16 | live stream to Hub Console + `watch_mod_logs` push tool |
-| 17 | log-path overhead audit (target: disabled-level record ≤ 100 ns, zero alloc) |
+| MVP1 | instance lifecycle at debug level (create/parent/destroy with `InstanceId`), stub hits, deprecation notes |
+| MVP2 | scheduler: thread spawn/kill, budget kills, signal cascade traces; structured error records (§5.2.7) |
+| MVP3 | world save/load timeline; backup snapshots with trigger metadata (§MVP3) |
+| Gameplay services I | service-level warnings (Touched without collider, tween on destroyed instance) |
+| MVP4 | `CONTEXT_VIOLATION`; `require` cycles (`CYCLIC_REQUIRE`) |
+| MVP5–MVP6 | bridge: send/receive counters, drops, rate-limit trips; client logs forwarded to host buffers tagged with player id |
+| MVP7 | input while unfocused; speed-hack corrections |
+| MVP8 | headless routing: `LuaLogFileSink` + remote log fetch (no Hub on a dedicated server) |
+| MVP14 | RBXL import diagnostics: skipped `Terrain` (info), asset placeholders, script→disabled entries, the loss report |
+| MVP18 | load/reload/teardown timeline per mod in the console; live stream to the Hub Console + `watch_mod_logs` push tool |
+| MVP19 | log-path overhead audit (target: disabled-level record ≤ 100 ns, zero alloc) |
 
-### 6.2 AI toolchain per MVP (what the LLM can call)
+### 6.2 AI toolchain per rung (what the LLM can call)
 
 Existing today: `manage_mods` (`LuaModsLlmTool.cs`) — load/reload/unload/forget/export/import/
-versions/revert/diagnostics; `GetModLogsLlmTool` (built, awaiting wiring); plus world tools and
-`LuaCsGameToolExecutor`.
+versions/revert/diagnostics; `get_mod_logs` (`GetModLogsLlmTool`, wired for the Programmer role); the
+world tools `save_world`, `load_world`, `list_autosaves`, `load_autosave`; `execute_lua` and
+`world_command`; the hand-written "Rbx API" skill (`read_skill`). Tool-to-role wiring is hard-coded
+today (every Lua/world tool goes to `Programmer`); MVP10 makes it profile data.
 
-| MVP | Tool additions |
+| Rung | Tool additions |
 |---|---|
-| 3 | `save_world`/`load_world` — **shipped**: `save_world` writes a create-once manual slot; `load_world` never applies a package, it returns `player_confirmation_required` plus a one-use request id that the player accepts or rejects through the Hub World Loads page ([WORLD_PACKAGE.md](WORLD_PACKAGE.md)) |
-| 4 | `import_rbxl`/`export_rbxl` (scripts arrive as disabled mod entries; asset placeholders reported) |
-| 5 | `list_mods` (id, enabled, contexts, load order, error count), `enable_mod`/`disable_mod`, `GetModLogsLlmTool` wired (filters: mod, level, since, code; coalesced via `LuaLogFormatter`), `get_api_surface` (machine-readable: every class/member → implemented / stub-with-phase — **kills hallucinated-API loops**, the tool answers "can I call this" without trial-and-error) |
-| 6 | the skill itself ships (the biggest "tool": correct priors incl. the active `RobloxSpace` scale); `get_api_surface` and the skill manifest are generated from the same catalogs |
-| 7 | `diff_mod_versions` (revision diff text for repair context) |
-| 8–10 | `get_api_surface` grows automatically from the ServiceCatalog + ClassCatalog (single source of truth — the tool reflects the registry, no hand-kept list) |
-| 11–13 | `get_network_stats` (per-mod send rates, drops), log filters gain `player:` scope |
-| 16 | `watch_mod_logs` (push subscription for the repair agent), `run_console` (REPL in a mod sandbox; one-shot ownership rules §2), auto-repair policy upgraded (§MVP16) |
+| MVP3 | `save_world`/`load_world` — **shipped**: `save_world` writes a create-once manual slot; `load_world` never applies a package, it returns `player_confirmation_required` plus a one-use request id that the player accepts or rejects through the Hub World Loads page ([WORLD_PACKAGE.md](WORLD_PACKAGE.md)); `list_autosaves`/`load_autosave` — shipped |
+| MVP5–MVP8 | `get_network_stats` (per-mod send rates, drops), log filters gain a `player:` scope; remote log fetch on a dedicated server |
+| MVP11 | role-gated human tool surface; `AIService` for mods |
+| MVP12 | selection-aware context ("this part") for the copilot |
+| MVP13 | `list_templates`/`insert_template`/`new_place_from_template` |
+| MVP14 | `import_rbxl`/`export_rbxl` (imported scripts arrive disabled; asset placeholders and losses reported) |
+| MVP18 | `list_mods` (id, enabled, contexts, load order, error count), `enable_mod`/`disable_mod`, `get_api_surface` (machine-readable: every class/member → implemented / stub-with-rung — **kills hallucinated-API loops**; generated from the same catalogs as the skill manifest), `diff_mod_versions` (revision diff text for repair context; from the dropped old MVP7), `watch_mod_logs` (push subscription for the repair agent), `run_console` (REPL in a mod sandbox; one-shot ownership rules §2), auto-repair policy upgraded (§MVP18) |
 
 ### 6.3 Realtime / hot-reload rules (LOCKED)
 
@@ -2011,7 +2461,7 @@ Reload = teardown + fresh run of the mod's scripts with clean state. What surviv
 | Running threads (`task.*`) | **no** — cancelled via `IScriptCoroutine.Kill` | no | same |
 | Mod-owned instance tree (`OwnerModId`) | **no by default** — destroyed; **yes** with `mod.json: "preserveInstances": true`, then the new run re-acquires by `WaitForChild`/names (`WaitForChild` is immediate for an existing child from MVP1; absent-child yield is MVP2) | no (destroyed) | default favors deterministic re-runs; opt-out flag favors stateful builds (e.g. a mod that spent minutes generating a level) |
 | Attributes the mod set on *host* instances | yes | yes | the mod decorated someone else's object; teardown must not vandalize the world |
-| GUI (MVP14) | rebuilt | destroyed | GUI is a projection of code |
+| GUI (MVP15) | rebuilt | destroyed | GUI is a projection of code |
 
 Additional rules: reload is atomic per mod (old version torn down only after the new source
 preprocesses successfully — a syntax error leaves the old version running and logs the failure);
@@ -2025,39 +2475,45 @@ logic-slot overrides and (future) owned instances/coroutines, and cancelling AI 
 
 ### 6.4 Compatibility policy (the measurable corpus gate)
 
-Corpus home: `Assets/CoreAIMods/Tests/EditMode/RobloxApi/Corpus/` (+`Fixtures/`) — real-world,
-tutorial-grade Roblox scripts (rewritten from scratch to the same shape — never copied, per
-Non-goals) with a tiny assertion harness. Fixtures run at the default 0.28 m/stud scale as
-primary and 1 stud = 1 m as smoke (D3). Tiers:
+Corpus home: `Assets/CoreAIMods/Tests/EditMode/RbxApi/CompatibilityCorpus/` (`Fixtures/`, `FixturesB/`)
+— real-world, tutorial-grade Roblox scripts (rewritten from scratch to the same shape — never copied;
+the licensed round-trip corpus of real Roblox content is MVP14's, §7) with a tiny assertion harness.
+Fixtures run at the default 0.28 m/stud scale as primary and 1 stud = 1 m as smoke (D3). Tiers:
 
 - **Tier A (MVP2, 20 scripts)**: language + core API — loops with `task.wait`, part spawning,
   parenting, signals, kill-brick-shaped logic with a fake Touched, Luau syntax constructs
   (through the preprocessor).
-- **Tier B (MVP8–10, +20)**: Players/Humanoid/leaderstats, Touched for real, tweens, Debris,
-  DataStore save/load, input binding.
-- **Tier C (MVP11–17, +20)**: remotes over the wire, replication assertions, GUI, perf
-  micro-benchmarks (Tier C doubles as the MVP17 benchmark suite).
+- **Tier B (Gameplay services I, MVP7, MVP16; frozen at 10 fixtures today)**: Players/Humanoid/
+  leaderstats, Touched for real, tweens, Debris, DataStore save/load, input binding.
+- **Tier C (MVP5–MVP19, +20)**: remotes over the wire, replication assertions, GUI, perf
+  micro-benchmarks (Tier C doubles as the MVP19 benchmark suite).
 
-Gates (CI-enforced EditMode tests; a gate is part of the owning MVP's DoD):
-MVP2 ≥ 30% of A · MVP5 ≥ 50% of A (preprocessor wired into `LoadMod`) · MVP8 ≥ 60% of A+B · MVP10 ≥ 70% of A+B ·
-MVP14 ≥ 75% of A+B+C · MVP17 ≥ 85% of A+B+C. "Pass" = unmodified source preprocesses, loads,
-runs to completion, assertions green, zero `NOT_IMPLEMENTED` hits. Corpus fixtures double as the
-verified-example pool for the skill (§MVP6) — a fixture that passes is eligible to be quoted as
-a documented example.
+Gates (CI-enforced EditMode tests; a gate is part of the owning rung's DoD):
+MVP2 ≥ 30% of A (met) · Gameplay services I ≥ 60% of A+B (enforced) · MVP4 ≥ 50% of A (already exceeded;
+it must not drop) · MVP7 ≥ 70% of A+B · MVP15 ≥ 75% of A+B+C · MVP19 ≥ 85% of A+B+C. "Pass" =
+unmodified source preprocesses, loads, runs to completion, assertions green, zero `NOT_IMPLEMENTED`
+hits. Corpus fixtures double as the verified-example pool for the skill — a fixture that passes is
+eligible to be quoted as a documented example. MVP14 adds a separate gate: the licensed round-trip
+corpus (§MVP14, DoD (a)–(e)).
 
-### 6.5 WebGL acceptance checklist (gate on every MVP)
+### 6.5 WebGL acceptance checklist (gate on every rung)
 
-WebGL is not the priority target, but it must never rot. Every MVP's DoD includes:
+WebGL is a first-class target (`AGENTS.md`). Every rung's DoD includes:
 
 1. No threads, no `Task.Wait()`/`.Result`, no blocking waits anywhere in the new code
    (single-threaded WASM; the coroutine substrate already resumes synchronously —
    `LuaCsCoroutineHandle` docs).
 2. No sync-over-async: anything that must wait yields through the scheduler (D9), never spins.
-3. Persistence writes flush IDBFS (`CoreAiWebGlPersistence.Sync()` — already done by
-   `FileLuaModStore`/`FileLuaModSourceStore`; new stores must match).
+3. After a persistence write, `CoreAiWebGlPersistence.Sync()` (or `SyncAsync()`) is asked whether
+   the engine's automatic `persistentDataPath` persistence is armed, and `false` is surfaced as a
+   failure — already done by `FileLuaModStore`, `FileLuaModSourceStore` and
+   `FileRbxWorldPackageStore`; new stores must match. `FS.syncfs` is never driven by hand (deprecated
+   since Unity 6.3; its callback never fires), and no code awaits a durability confirmation the
+   browser never sends.
 4. New plugins/parsers (Loretta, JSON) pass an IL2CPP/WebGL AOT smoke test before adoption.
 5. Networking code compiles and runs with the browser constraint: WebGL is only ever `Solo` or
-   `Client` topology — never `Host`/`DedicatedServer` (no listen sockets in browsers).
+   `Client` topology (a pure client, or a creator-mode client of a server, decision D6) — never
+   `Host`/`DedicatedServer` (no listen sockets in browsers).
 
 ### 6.6 Test layout and conformance naming (LOCKED convention)
 
@@ -2079,11 +2535,14 @@ Assets/CoreAIMods/Tests/
       LiveCheck/              # small-model live-check harness
       LuaBindings/            # Lua-visible Rbx surface and pulled-forward services
       Scheduling/             # task.*, phases and budget attribution
-      Services/               # planned — MVP2 ServiceCatalog/per-service fixtures
-      Networking/             # planned — MVP2 bridge/remotes/serialization
-      Corpus/     +Fixtures/  # planned — MVP2 Tier-A compatibility corpus (§6.4)
-  PlayMode/                   # planned — MVP8+
+      Networking/             # bridge, remotes, serialization, topology and clock
+      Replication/            # replication core (registry-to-registry harness)
+      Unity/                  # engine-bound Rbx fixtures
+      CompatibilityCorpus/    # Tier-A/Tier-B corpus (Fixtures/, FixturesB/) and its gates (§6.4)
+      Services/               # planned — per-service fixtures (today they live in LuaBindings/)
+  PlayMode/
     RbxApi/                   # physics/Touched, real tick-order, per-body gravity
+Assets/CoreAIMirror/Tests/EditMode/   # Mirror bridge fixtures (compile against Mirror; OfflineMirror.cs)
 ```
 
 **Conformance-test naming convention**: tests that pin behavior specified by a normative rule
@@ -2101,40 +2560,64 @@ Tests that pin a recorded DEV decision use the `DEV<n>_` prefix in the same way 
 - Full Roblox fidelity: R15/R6 rigs, `MarketplaceService`, avatar/catalog systems, real
   DataStore cloud semantics (versioning, ordered stores), Parallel Luau actors, Terrain,
   `HttpService` open internet access (CoreAI's own AI backend is the only network egress;
-  when its planned MVP2 surface lands, `HttpService` will expose JSON members only).
-- Copying any Roblox code, assets, or documentation text — API *shape* compatibility only;
-  corpus scripts are written from scratch.
-- A Studio-like 3D editing UI. CoreAI's editor is conversation + Hub + (optionally) Unity.
-  Backlog note (explicitly NOT a priority — AI does everything first): Creator hand-placing/
-  moving/gizmos besides the AI chat is architecturally free later, because manual ops go
-  through the same Instance operations + authority resolver as AI/mods — a UI layer, not a
-  new system.
+  `HttpService` exposes JSON members only).
+- Copying Roblox **documentation text or assets** — API *shape* compatibility only; the corpus
+  scripts of §6.4 are written from scratch. Revised 2026-09-24 for the round-trip requirement: the
+  round-trip corpus of MVP14 needs **real** Roblox scripts, models and places, so it is built only
+  from owner-authored or permissively licensed content, each item carrying its licence (RT13).
 - Immediate signal mode (D4/DEV-2).
 - Auto-downloading Roblox-hosted assets: `rbxassetid://` content (meshes/textures/sounds) is
-  **never** fetched automatically (ToS + third-party rights) — RBXL import (§MVP4) leaves
+  **never** fetched automatically (ToS + third-party rights) — RBXL import (§MVP14) leaves
   placeholders carrying the original id for user-supplied substitution.
 - Terrain voxel import: far future, revisited only on demand — RBXL import simply skips
   `Terrain` instances with an info diagnostic.
-- WebGL as a server of any kind (host or dedicated) — browsers are client/solo only.
+- WebGL as a server of any kind (host or dedicated) — browsers are solo, pure client or
+  creator-mode client only (plan decision D6).
+- **Reversed 2026-09-24 — no longer a non-goal: a Studio-like 3D editing UI.** It was listed here
+  ("CoreAI's editor is conversation + Hub + (optionally) Unity"; manual building a backlog note,
+  "explicitly NOT a priority"). The flagship needs an in-game creator mode, so it is **MVP12**, built
+  runtime-first in the player (never as Unity editor tooling). The reasoning that made it cheap still
+  holds: manual operations go through the same Instance operations and authority resolver as the AI
+  and mods — a UI layer, not a new system.
 
 ## 8. Open questions
+
+### 8.1 Plan decisions D1–D8
+
+**Decided 2026-09-24 (tech lead; owner may override).** The options and the reasoning are the plan
+review's; each row names the rung that depends on it. This document calls them "plan decision D1–D8"
+to keep them apart from the semantics decisions D1–D10 of §5.1.4 (for example D4 = Deferred signals,
+D9 = the clock model), which keep their names.
+
+| # | Decision | Options considered | Decided | Why | Rung |
+|---|---|---|---|---|---|
+| D1 | Script model | (a) mods as files with a declared context; (b) Roblox-style `Script`/`LocalScript`/`ModuleScript` instances holding source; (c) hybrid: instances are views over the mod source store | **(c)** | The Explorer, `require(script.Parent.X)`, RBXL import and templates all want scripts in the tree, and round-tripping Roblox models is impossible without it (RT1); versioned stores, revert, quarantine and the package's `Mods/` stay the only storage | MVP4 |
+| D2 | Default creator workflow | (a) Play/Stop snapshot (Roblox Studio); (b) live edit only; (c) both | **(c)** | Live edit stays the default for Creators (the realtime principle survives); Play/Stop is an added per-creator "test run" in an isolated session — never a world rewind while other players are present | MVP12 |
+| D3 | Own-character authority at 100 players (revisits owner decision 5) | (a) server-owned physics + input over remotes; (b) client-owned own character + server validation (Roblox's model); (c) server-authoritative + client prediction/reconciliation | **(b)**, for characters only | (a) makes the character feel RTT-bound; (c) needs deterministic physics PhysX does not give; (b) matches the corpus priors. Every other part stays server-owned | MVP7 |
+| D4 | Transport | (a) Mirror/kcp (+ WebSocket for WebGL); (b) NGO; (c) a custom UDP library | **(a)** | Decided before (owner decision 2) and already built; the codec and interest management are CoreAI's own either way, so a later change stays behind `INetworkBridge`. Revisit only if spike S3 fails | MVP5, MVP8 |
+| D5 | Scale target and release promise (revisits owner decision 4) | (a) keep the 20-client bar; (b) adopt the scale targets (100 per room, 30 Hz, ≤50 KB/s/client) as the gated product goal; (c) no numbers | **(b)** | The flagship goal needs a target the plan can be judged against; the numbers (§4.3) are frozen before measuring and published only when the staircase passes | MVP9 |
+| D6 | WebGL role | (a) solo + pure client; (b) plus creator-mode client of a server; (c) plus a browser-hosted listen server | **(b)** | Creator edits travel as intents, so no hosting is needed; (c) is impossible (no listen sockets in browsers) | MVP8, MVP12 |
+| D7 | Where the flagship lives | (a) a separate Unity project consuming the packages via UPM; (b) a demo in this repo; (c) a package sample | **(a)** | It enforces the framework/product split and dogfoods the Git-URL install (broken today, `TODO.md`); this repo keeps packages, presets, samples, bots and harnesses | all |
+| D8 | Server Lua VM if S1 is bad | (a) keep Lua-CSharp with a cheaper guard (adaptive batch / accounting); (b) native Luau on the server only, behind `IScriptEngine` (WebGL keeps Lua-CSharp); (c) cap per-player server script work | **(a) first, (b) as the fallback** | The seam exists (§2, engine abstraction), so (b) is one adapter, but two VMs double the conformance surface | MVP9 |
+
+### 8.2 Earlier questions
 
 | # | Question | Blocking | Current lean |
 |---|---|---|---|
 | Q1 | Loretta vs mini-rewriter after the IL2CPP/WebGL smoke test | — | **Resolved**: mini-rewriter chosen and implemented on disk (`Assets/CoreAIMods/Runtime/LuauDownlevel/`: `LuauLexer.cs`, `LuauRewriteParser.cs`, `LuauDownleveler.cs`); Loretta reconsidered only if construct coverage proves insufficient |
 | Q2 | Golden-fixture source values for datatype tests — hand-derived from docs vs captured from a live Roblox session | MVP1 | hand-derive core cases from documented examples; capture a verification set from a live session if licensing-clean |
 | Q3 | Do `instanceId`s persist into world save files (stable across sessions)? | MVP3 | **Resolved** by the world-file decision (§2): registry records serialize with stable ids from day one — no remap table |
-| Q4 | Mirror unreliable-channel MTU per transport (KCP vs others) for `PAYLOAD_TOO_LARGE` | MVP11 | **Resolved**: per channel, read from Mirror's `NetworkMessages.MaxContentSize` at runtime — unreliable capped at Roblox's 1,000 B or the transport's datagram when smaller (kcp2k: 1194 B), reliable and `RemoteFunction` at the codec's 64 KiB or the transport's reliable message size |
-| Q5 | `shared` context double-execution: run on both sides (Roblox ModuleScript = per-VM copy) — confirm no shared-state illusions in docs/samples | — | **Resolved**: per-context isolated copies per R3.4 + the §3.2 matrix; "document loudly in the skill" moved to the MVP6 common-mistakes backlog |
-| Q6 | WebGL DataStore quota (IDBFS size) — cap per mod? | MVP9 | 1 MB/mod soft cap with `warn`, hard cap 5 MB |
-| Q7 | Do we need `CollectionService:GetTagged` + `GetInstanceAddedSignal` earlier than MVP8 (tags already work in MVP1)? | no | **Resolved**: committed as an MVP8 deliverable (S5.2/S5.3); pull into MVP2 only if a Tier-A fixture needs it |
-| Q8 | Player identity mapping when Mirror auth lands (UserId source) | MVP11 | connection id now; pluggable identity provider interface |
-| Q9 | Skill size vs small-model context budget (4B-class models) — full skill or tiered (core + per-service on demand)? | MVP6 | tiered: compact core skill + `get_api_surface`/per-service sections fetched on demand |
-| Q10 | Binary packing of remote payloads (perf) while keeping `RobloxJson` semantics | MVP17 | JSON on the wire until profiling says otherwise |
-| Q11 | Character controller interop at 0.28 scale: does the existing CoreAI avatar controller take `RobloxSpace`-scaled speeds directly, or need a calibration shim? | MVP8 | scale via `RobloxSpace` at the Humanoid binding; verify feel against Roblox reference clips |
+| Q4 | Mirror unreliable-channel MTU per transport (KCP vs others) for `PAYLOAD_TOO_LARGE` | MVP5 | **Resolved**: per channel, read from Mirror's `NetworkMessages.MaxContentSize` at runtime — unreliable capped at Roblox's 1,000 B or the transport's datagram when smaller (kcp2k: 1194 B), reliable and `RemoteFunction` at the codec's 64 KiB or the transport's reliable message size |
+| Q5 | `shared` context double-execution: run on both sides (Roblox ModuleScript = per-VM copy) — confirm no shared-state illusions in docs/samples | — | **Resolved**: per-context isolated copies per R3.4 + the §3.2 matrix; "document loudly in the skill" is on the MVP18 common-mistakes list |
+| Q6 | WebGL DataStore quota (browser storage) — cap per mod? | MVP16 | 1 MB/mod soft cap with `warn`, hard cap 5 MB |
+| Q7 | Do we need `CollectionService:GetTagged` + `GetInstanceAddedSignal` earlier than the gameplay services (tags already work in MVP1)? | no | **Resolved**: shipped with Gameplay services I (S5.2/S5.3) |
+| Q8 | Player identity mapping when Mirror auth lands (UserId source) | MVP5 | **Resolved**: host-supplied `IActorIdentityProvider`/`IActorAdmissionProvider` (owner decision 1, no anonymous online fallback); `AttachWorld(Func<LuaCsRbxApiBindings>)` makes the session host `Players.IdentitySource`, and a server world without one refuses a transport-admitted actor |
+| Q9 | Skill size vs small-model context budget (4B-class models) — full skill or tiered (core + per-service on demand)? | MVP18 | tiered: compact core skill + `get_api_surface`/per-service sections fetched on demand |
+| Q10 | Binary packing of remote payloads (perf) while keeping `RobloxJson` semantics | MVP6 | **Decided**: world-state replication gets a binary, revision-stamped delta codec below the bridge (MVP6, sized by spike S2); remote payloads stay `RobloxJson` until S2 or MVP9 measurements say otherwise |
+| Q11 | Character controller interop at 0.28 scale: does the existing CoreAI avatar controller take `RbxSpace`-scaled speeds directly, or need a calibration shim? | — | **Resolved**: there was no such controller; `UnityRbxCharacterMotor` was written for the Humanoid adapter, which converts numbers at the binding, and a host plugs its own controller in through `IRbxCharacterMotorProvider` ([CHARACTER_MOTOR_BRIDGE.md](CHARACTER_MOTOR_BRIDGE.md)) |
 
-Name reservation: **`AIService`** is reserved for future CoreAI agent/chat access from Lua —
-registered as a stub from MVP2 (§5.2.4) with the §2 AI-call reservations keeping the path open;
+Name reservation: **`AIService`** is reserved for CoreAI agent/chat access from Lua — registered as a
+stub from MVP2 (§5.2.4) with the §2 AI-call reservations keeping the path open, implemented in MVP11;
 the name must not be reused for anything else.
 
 ---

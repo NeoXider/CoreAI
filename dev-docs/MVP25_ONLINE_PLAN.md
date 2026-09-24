@@ -1,5 +1,15 @@
 # MVP2.5 online play plan
 
+> **History — superseded as a plan on 2026-09-24.** The ladder of record is
+> [`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4](../Docs/CoreAIMods/ROBLOX_API_ROADMAP.md); its §4.1 maps the old rung
+> numbers used below (MVP8 → Gameplay services I, MVP11 → MVP5, MVP12 → MVP6, MVP13 → MVP8). The owner decisions
+> of §7 stand except where the 2026-09-24 plan decisions revisit them: decision 4's 20-client bar is replaced by
+> the ~100-players-per-room targets (plan decision D5; the no-claim-before-measurement rule stays), and decision
+> 5's deferral of interest management and client-owned characters is revisited (plan decisions D3 and D5; both
+> are MVP7/MVP9 work). The §7 line "the transport is not the binding constraint today … CoreAI runs out before
+> any stack does" rests on a heap metric later shown to be broken (see decision 4's update); the likely binding
+> constraint is now guarded-VM CPU on Mono/IL2CPP (risk R1, spike S1), not yet measured in a player.
+
 ## 1. Entry condition: MVP1 and MVP2 are verified first
 
 **MVP2.5 does not begin until MVP1 and MVP2 are stable and fully verified.** A green fix-specific

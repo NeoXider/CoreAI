@@ -1,5 +1,11 @@
 # MVP2 + multiplayer foundation — plan of record (v6)
 
+> **History — superseded as a plan on 2026-09-24.** The ladder of record is
+> [`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4](../Docs/CoreAIMods/ROBLOX_API_ROADMAP.md) (§4.1 maps the old rung
+> numbers used below). The goal stated here as "20 concurrent players minimum, 100–200 target" is now the gated
+> scale target of MVP9: ~100 players per room with frozen tick, bandwidth and join budgets (plan decision D5,
+> §4.3 there).
+
 Branch `feature/mvp2-multiplayer`, forked from `v7.1.0`.
 Five adversarial audit rounds produced 31 findings (21 blocking) against v1–v5. §10 records what each
 version got wrong. **Every file:line below was opened and read while writing this version.**

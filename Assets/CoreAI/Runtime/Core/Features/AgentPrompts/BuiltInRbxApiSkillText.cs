@@ -227,9 +227,10 @@ alias).
   `inst:GetPropertyChangedSignal(""Name"")` fires with no args. It refuses an event or method name
   and a typo of a known property (wrong case or one letter off: ""position"" -> ""did you mean
   Position""); a real Roblox property CoreAI does not model yet gets a signal that never fires (logged
-  once). Writes by a script, a tween or PivotTo fire them (derived members too: a CFrame
-  write fires Position/Orientation/Rotation); an equal assignment fires nothing and physics
-  movement never does. `AncestryChanged(movedInstance, newParent)` fires on every descendant.
+  once; the same signal each time you ask for that name, and `Destroy()` disconnects it). Writes by
+  a script, a tween or PivotTo fire them (derived members too: a CFrame write fires
+  Position/Orientation/Rotation); an equal assignment fires nothing and physics movement never
+  does. `AncestryChanged(movedInstance, newParent)` fires on every descendant.
   ChildRemoved/DescendantRemoving and a tag's removed-signal handlers fired by `Destroy()` can
   still read the destroyed instance they were handed (e.g. its Name), as Destroying handlers can.
   `game:IsLoaded()` is true; `game.Loaded` never fires.
@@ -490,8 +491,9 @@ Argument numbers do not count `self` (in `part:SetAttribute(name, value)` the na
 with `pcall`; `pcall`, `xpcall` and `coroutine.resume` all receive exactly that one line (no stack
 trace). A budget cut (section 1) is the exception: it cannot be caught. The mod-core functions
 (`store_set`, `hooks_on`, `mods_call`, ...) report a wrong argument the way Lua does —
-`bad argument #1 to 'store_set' (string expected, got table)` — and never turn a number into a
-string. Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE, INSTANCE_DESTROYED,
+`bad argument #1 to 'store_set' (string expected, got table)`. Their string parameters take a
+number the way `tostring` writes it (`store_set(7, 8)` stores ""7"" = ""8""); a boolean or a table is
+refused. Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE, INSTANCE_DESTROYED,
 PARENT_LOCKED, NOT_IMPLEMENTED, WORLD_DETACHED, BUDGET_EXCEEDED, SIGNAL_CASCADE,
 CONTEXT_VIOLATION, NOT_AUTHORITY, THREAD_CAP, PAYLOAD_TOO_LARGE.
 

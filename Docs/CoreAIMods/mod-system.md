@@ -60,6 +60,17 @@ fields. It is a plain JSON DTO; new fields are backward-compatible (missing => d
 - `string SeededHash = "";`   — hash of the source at seed time (detects user edits).
 - `bool UpdateAvailable = false;` — set by the seeder when a newer bundled version exists but the
   local copy was user-edited (manual update offered in UI).
+- `long LoadOrder = 0;` — where the mod sits in its world's load order (implemented). A first load, and
+  a mod created on the Hub, is stamped with one past the highest value in the store (dormant mods
+  included; `LuaModManifest.NextLoadOrder(store)` is the shared rule for host tools that write
+  manifests). A reload, a Hub edit, a bundled update and a seeder update keep it; an unload followed by a
+  load moves the mod to the end; a rehydrate never stamps. `0` (or less) means no recorded order: a
+  store or package written before the field existed, or a bundled mod seeded on a fresh install. Both
+  restart paths (`RehydrateFromStore` and a world restore) start mods without an order first, by
+  ordinal id, then ordered mods ascending, ties by id — so a mod may use at init what an earlier mod
+  made. Two concurrent first loads may receive the same value; they then start by id. The field is
+  omitted from JSON when `0`, so an unordered manifest is byte-identical to one written before it
+  existed.
 
 ## 3. Bundled sources & the seeder
 
@@ -188,8 +199,10 @@ whose main chunk disconnects its own actor fails with `InvalidOperationException
 disconnected while its main chunk ran") and is rolled back.
 
 **A failed load or reload leaves nothing behind.** Its handlers are never added; the `logic_define`
-and `logic_reset` changes its chunk made are put back as they were (a successful reload still replaces
-them); a failed first load also drops its instance-quota attribution and removes the `OnServerInvoke`
+and `logic_reset` changes its chunk made are put back as they were — including another live mod's
+formula the chunk reset, and a formula defined inside a `coroutine.create` body, which belongs to the
+mod like any other (a successful reload still replaces them, and a reset by the formula's own mod
+stays); a failed first load also drops its instance-quota attribution and removes the `OnServerInvoke`
 callbacks, tweens and pending waits its chunk created, and an unload drops the attribution too, so the
 attribution map no longer grows with every mod id ever tried. Still open (`TODO.md`): a failed
 reload's candidate tweens and waits are not cancelled, the instances a failed first load's chunk
@@ -233,16 +246,16 @@ checks), not a third mode — there is no `Open` policy (owner decision 3,
   it, and the authoritative change replicates to everyone — creative / co-build worlds (the "friend's AI
   edits the host's world" scenario).
 
-Implementation seam (reserved now, implemented at MVP12): every mutation is routed through a single
-authority resolver `(instance, property/action) → ApplyLocalOnly | Replicate | Reject`. The MVP
-implementation behind that seam is just the world-default policy above; **partial authority** —
-per-instance / per-property / per-player rules ("clients may move furniture but not delete walls")
-— is planned future functionality that becomes a new resolver implementation, not a replication
-rewrite. `NOT_AUTHORITY` always fires on explicit replication attempts regardless of policy.
+Implementation seam (reserved now, implemented at MVP6, the replication rung; the old MVP12): every
+mutation is routed through a single authority resolver `(instance, property/action) → ApplyLocalOnly |
+Replicate | Reject`. The first implementation behind that seam is just the world-default policy above;
+**partial authority** — per-instance / per-property / per-player rules ("clients may move furniture but
+not delete walls") — is planned future functionality that becomes a new resolver implementation, not a
+replication rewrite. `NOT_AUTHORITY` always fires on explicit replication attempts regardless of policy.
 
 The AI-facing Lua skill deliberately does NOT document this yet: the skill only describes the
 implemented surface (a documented-but-missing feature is a bug magnet for LLM authors). The skill
-section for write policies ships together with MVP12. Details: `ROBLOX_API_ROADMAP.md` §MVP12.
+section for write policies ships together with MVP6. Details: `ROBLOX_API_ROADMAP.md` §MVP6.
 
 ## 6. Performance / optimization
 

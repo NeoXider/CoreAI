@@ -13,6 +13,16 @@ minimum-reader versions, UTC capture time, world entry, and sorted mod index. Th
 settings, DataModel tree, external BasePart state, and optional camera state. IDs and revisions are
 decimal strings so WebGL does not lose 64-bit precision. Only server-authority IDs are accepted.
 
+A mod manifest may carry `LoadOrder` (an integer, omitted when `0`): the order the mod was loaded in its
+world (`mod-system.md` §2). Capture keeps the entries in id order, so the bytes stay deterministic;
+restore starts the mods without a recorded order first (`0` or below — a negative value from an
+untrusted package is read as "no order", not refused), by ordinal id, then the ordered mods ascending,
+ties by id, so a world whose mods use each other's work at init reloads its own save. The field is
+additive: `format_version` is unchanged and a package whose mods carry no order is byte-identical to one
+written before it existed; a reader older than the field refuses a package that carries it explicitly
+("Could not find member 'LoadOrder'") and never restores it in the wrong order. Tests: the three
+`WorldPackage_*` load-order cases in `Mvp3WorldPackageFollowUpEditModeTests`.
+
 The durable v1 surface is class/name/Archivable, world-owned origin/ACL/revision metadata, attributes,
 tags, BasePart properties, Model PrimaryPart/stored WorldPivot, ClickDetector distance, camera CFrame,
 ValueBase `Value` payloads (Int/Number/String/Bool/Object/Vector3/CFrame/Color3; ObjectValue targets
@@ -304,15 +314,15 @@ an active `Full` mod or a staging failure keeps the default world live and is re
 `RbxWorldStartupRestoreOutcome.FellBack` with a diagnostic. It never clears the selection on its own and
 never falls back to an older entry. The player resets it from the Hub (below).
 
-**Live network sessions (MVP11 guard).** A world load is refused with status
+**Live network sessions (the MVP5 entry guard; the old MVP11).** A world load is refused with status
 `network_sessions_active`, and the live world is left unchanged, while the network bridge lists
 registered actors on a non-`Solo` topology — at request time, at confirmation and on a raw host load.
 The rule and the ACL floor are checked once more under the session lock right before publication, so a
 client that joins while the safety autosave is written makes the load fail and roll the staged world
 back instead of having its world replaced; `RbxWorldLoadResult.Status` then names the reason
 (`network_sessions_active`, `invalid_package`).
-Live Mirror sessions cannot be handed to a new world until MVP11 session handoff exists. The check is
-conservative (any registered actor counts), and loopback actors on the solo bridge never block a
+Live Mirror sessions cannot be handed to a new world until session handoff exists (MVP5, host mode). The
+check is conservative (any registered actor counts), and loopback actors on the solo bridge never block a
 load.
 
 `PumpFrame` contains `Advance` and `Tick` separately: a throwing tick still lets the scheduler advance,
@@ -339,7 +349,7 @@ failure (including a disposed session) as `capture_failed` and writes nothing, a
 an existing slot is refused with the first bytes kept. `load_world` and `load_autosave` report
 `not_found` (a missing slot, or an autosave that rotated away), `invalid_package` (corrupt, truncated,
 over the read limit, or a legacy package refused by an ACL-composed session — the error carries the
-session's refusal text), `read_failed` (an I/O failure), `network_sessions_active` (the MVP11 guard
+session's refusal text), `read_failed` (an I/O failure), `network_sessions_active` (the MVP5 entry guard
 above) and `session_unavailable` (the world session was already shut down because the game is closing
 or restarting it; it used to escape as an `ObjectDisposedException`); no request is created.
 `invalid_package` also covers a package the confirmation would refuse, now refused before the player
@@ -384,7 +394,7 @@ through the Hub page.
 **Code complete (2026-09-24); the Unity verification gate is pending.** EditMode (0 failed) and
 PlayMode `FastNoLlm` (0 failed) must still be run in Unity. On Linux, the portable `dotnet test`
 suites report 2112 passed / 0 failed / 3 skipped for the engine-free tests and 1575 passed / 0 failed /
-37 not executed for the Lua tier (`tools/portable/LuaTests`, which runs `Mvp3WorldPackageEditModeTests`
+37 not executed for the Lua tier at `07264057` (1606 passed / 0 failed at `f817225b`) (`tools/portable/LuaTests`, which runs `Mvp3WorldPackageEditModeTests`
 and `Mvp3WorldPackageQaEditModeTests` against a UnityEngine shim; a case that reaches the engine, a
 file-store load included, is Inconclusive by design and counts as not executed). MVP3 is not closed
 until that gate is green and the release is tagged.
@@ -431,7 +441,7 @@ The residue closed alongside the DoD:
 - **Tool failures as JSON** — `SaveWorldTool_CaptureFailure_IsReturnedAsCaptureFailedResult`,
   `LoadWorldTool_ReadPhaseFailuresAndRefusals_AreReturnedAsJsonResults`,
   `LoadAutoSaveTool_RotatedAwayName_IsRefusedAsNotFoundResult`, `ListAutoSavesTool_StoreFailure_IsReturnedAsJsonFailure`;
-  the MVP11 guard: `WorldLoad_LiveNetworkSessions_AreRefusedAtRequestConfirmAndRawLoad` and its twin
+  the MVP5 entry guard: `WorldLoad_LiveNetworkSessions_AreRefusedAtRequestConfirmAndRawLoad` and its twin
   `WorldLoad_LoopbackActors_DoNotBlockALoad`.
 - **Audit round 1 of the world package** — the mod-source limit:
   `ModSourceLimit_DistinctModBeyondTheFormatLimit_IsRefusedWithTheWayOut_AndTheWorldStaysCapturable`,
@@ -451,6 +461,13 @@ The residue closed alongside the DoD:
   `FileStore_ManualSlotCountAndByteCaps_RefuseAsResultsAndWriteNothing`,
   `SaveWorldTool_ManualSlotLimitReached_IsAnOrdinaryFailedResultAndWritesNothing`,
   `FileStore_Open_SweepsOnlyCrashLeftTemporaryFiles`.
+- **Load order (A1-02)** — `WorldPackage_ModsThatNeedEachOtherAtInit_ReloadTheirOwnSave_InLoadOrder`,
+  `WorldPackage_WrittenWithoutLoadOrder_StillRestores_ModsStartByOrdinalId`,
+  `WorldPackage_NegativeLoadOrder_IsNotRejected_AndCountsAsNoRecordedOrder`
+  (`Mvp3WorldPackageFollowUpEditModeTests`); the runtime restart paths:
+  `LuaCs_RehydrateFromStore_AfterRestart_StartsModsInTheirLoadOrder_NotInIdOrder`,
+  `LuaCs_RehydrateExactOrThrow_AfterRestart_StartsModsInTheirLoadOrder_NotInIdOrder`
+  (`LuaCsModRuntimePersistenceEditModeTests`).
 
 ## Compatibility policy
 

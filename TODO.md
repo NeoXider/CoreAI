@@ -1,14 +1,191 @@
 # TODO
 
 > Updated 2026-09-24. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
-> non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 7.3.1 (2026-09-02, all six packages in lockstep — WebGL tool-turn fix); 7.3.0 (2026-09-02, lockstep — MVP2.5 persistence release); 7.2.0 (2026-09-02, `com.neoxider.coreai` + `.coreaiunity` only); 7.1.1 (2026-08-31, `com.neoxider.coreai` + `.coreaiunity`); 7.1.0 (2026-08-30, all six packages
-> in lockstep); 7.0.7 (2026-08-27); 7.0.0 (2026-08-01) added `McpServerInfo.Version`. The browser gate passed on 2026-09-02; see the section below.
+> non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`; the current status in `PLAN.md`.
+> Latest release: 7.45.0 (2026-09-24, all seven packages in lockstep). Earlier: 7.3.1 (2026-09-02, the six
+> packages of that time in lockstep — WebGL tool-turn fix); 7.3.0 (2026-09-02, lockstep — MVP2.5 persistence
+> release); 7.2.0 (2026-09-02, `com.neoxider.coreai` + `.coreaiunity` only); 7.1.1 (2026-08-31,
+> `com.neoxider.coreai` + `.coreaiunity`); 7.1.0 (2026-08-30, all six packages in lockstep); 7.0.7 (2026-08-27);
+> 7.0.0 (2026-08-01) added `McpServerInfo.Version`; every release is in the changelogs. The browser gate passed on
+> 2026-09-02; see the section below.
 > Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
 > 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
+
+## The MVP ladder: numbering and open work by rung (2026-09-24)
+
+The one ladder of record is `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4 (decided 2026-09-24 by the tech lead;
+the owner may override): strictly sequential, multiplayer first, every rung with a measurable DoD. It was
+renumbered that day. **Closed and historical items in this file keep the old numbers; open items carry the new
+ones.** Old → new:
+
+| Old | Now |
+|---|---|
+| MVP0, MVP1, MVP2, MVP2.5, MVP3 | unchanged (MVP2.5 is history: the bundle "MVP3 + MVP8 + MVP11 + MVP12") |
+| MVP4 RBXL import/export | **MVP14** Roblox interchange + round-trip parity gate |
+| MVP5 Mod system UX | **MVP4** script contexts, `require`, script instances · **MVP16** `game:BindToClose` · **MVP18** folder mods, `api_version`, enable/disable, AI tools |
+| MVP6 AI skill = docs | **MVP18** (generated skill manifest) |
+| MVP7 Editor tooling | dropped (the runtime Studio, MVP12, replaces it) |
+| MVP8 Gameplay services I | the landed slice keeps its name, **Gameplay services I**; Fly → MVP7/MVP12, `Role` → MVP11 |
+| MVP9 DataStore | **MVP16** DataStore + leaderstats |
+| MVP10 Input services | **MVP7** (`Humanoid:Move`, controls, ContextActionService-lite) · **MVP15** (touch, rest) |
+| MVP11 Mirror bridge (host mode) | **MVP5** host mode over a real socket + join snapshot |
+| MVP12 Replication | **MVP6** world-state replication + write authority |
+| MVP13 Dedicated server | **MVP8** dedicated server + WebGL client |
+| MVP14 GUI | **MVP15** GUI + remaining input |
+| MVP15 Audio/FX/animation | **MVP17** |
+| MVP16 Console + self-repair | **MVP18** · host integration profile → **MVP10** · task queue + HUD → **MVP11** |
+| MVP17 Performance + WebGL | **MVP9** (slice enforcement, scale) · **MVP19** (the rest) |
+| — | new: **MVP7** networked characters, **MVP9** scale to ~100 players, **MVP10** composable framework, **MVP11** roles & per-player AI, **MVP12** Studio mode core, **MVP13** model packages & templates |
+
+Old numbers also stay in test class prefixes (`Mvp1*`, `Mvp2*`, `Mvp3*`, `Mvp8*`), the dev-docs `MVP2_*`,
+`MVP8_*` and `MVP25_*` files, the CHANGELOG history, and the loud-stub phase names in `ServiceCatalog.cs`,
+`ClassCatalog.cs` and `RbxDataModel.cs` until they are retagged (item below).
+
+### Open work by rung
+
+New items the ladder names are written out here with an owner and a plan; the open items that already exist
+further down are listed by their bold title and stay where they are.
+
+**MVP3 close (current rung)**
+
+- The Unity verification gate, **Check the tests**, the **Real WebGL page-reload gate** and audit rounds 2 and 3:
+  the next section.
+- [ ] **Spike S1: guarded VM cost on the target runtimes (risk R1).** *Owner:* Lua runtime + performance.
+      *Plan:* run the `tools/vmbench` workload and the `tools/ScaleHarness` N=100 workload in an IL2CPP Linux
+      server build and a Standalone Mono x64 build; record VM instructions/s per guard batch, the per-resume
+      fixed cost and the frame time at N=100 in this file. A recorded measurement, no pass/fail; it decides
+      whether MVP9 needs the server-only native Luau fallback (plan decision D8). It also answers the per-resume
+      heap-read cost on IL2CPP of "Allocation-budget follow-ups" below.
+- [ ] **Spike S2: bytes per update (risk R2).** *Owner:* replication. *Plan:* encode one CFrame patch through
+      `LuaCsRbxNetworkCodec` (JSON) and as a hand-packed binary record (id, revision, quantized position and
+      rotation); record both sizes and the encode/decode cost here; they set the bytes-per-patch bar of MVP6's
+      delta codec (the draft bar is ≤24 B).
+- [ ] Bump (`python tools/bump_version.py <version>`) and tag after the gate.
+- Follow-ups that do not gate the release: "Persistence (MVP3 tail)" in the next section.
+
+**MVP4 — script contexts & client runtime (next)**
+
+- [ ] **Design note for plan decision D1 (c) before any code.** *Owner:* mods runtime + Rbx API. *Plan:* write
+      into `ROBLOX_API_ROADMAP.md` §MVP4 how a `Script`/`LocalScript`/`ModuleScript` instance's `Source` maps
+      onto the mod source store (versions, revert, quarantine, the package's `Mods/`), what `Enabled` and
+      `RunContext` do, whether the package needs a `format_version` bump, and whether an old package without
+      contexts loads as `shared` or is refused; the owner may override D1 before the rung starts.
+- Existing: **7. Mod system UX** (its contexts part; section "Roblox API ladder … foundation items"); the replica
+  `Player` minting in **Two named Phase 0 limits of the replication core** ("the client composition must stop
+  minting Players on a replica").
+
+**MVP5 — host mode over a real socket + join snapshot**
+
+- [ ] **Spike S3: a 5 MB join snapshot over real kcp (risk R3).** *Owner:* multiplayer. *Plan:* two processes on
+      localhost kcp; send a 5 MB snapshot as reliable messages; record the time, the peak memory on both sides
+      and the largest message kcp accepts; the result sets the snapshot chunk size.
+- [ ] **Player-host preset with a boot test.** *Owner:* composition + multiplayer. *Plan:* a preset (scene or
+      profile) that composes the Mirror host, admission and the world; a PlayMode test boots it with 0 errors
+      (`Docs/ARCHITECTURE_RULES.md` §2.1, proof by test); MVP10 folds it into the profile.
+- [ ] **Protocol version handshake (risk R9).** *Owner:* Mirror bridge. *Plan:* carry a protocol version in the
+      admission request; the server refuses a mismatch with a reason the client can show (after the deferred
+      refusal notice exists); a test with an older and a newer peer stub.
+- Existing: **A Mirror HOST has no client-side remotes**; **No inbound rate limit on the server's world
+  dispatch**; **A refused client never learns it was refused**; **A runtime world load does not hand live Mirror
+  sessions to the new world**; **The join snapshot**; **A two-process over-the-wire run**; **Restart ordering is
+  unproven, not proven**; **`INetworkBridge.DisconnectActor` has an empty default body**; and in "Players,
+  Humanoid and multiplayer" below: **Server→client encode-side filtering**, **MP-20 remainder**, **After a world
+  swap on a Host**, **Host UserIds**, **Mirror follow-ups (after MIRROR-3)**, **A stale forward anchor during a
+  hold**, **The provider misses a client connection change**, **A Mirror stub end to end over the staged bridge**,
+  **Clicks and players** (the local player id of a composition), **Characters (after CORE-C)** (the MP-11
+  replica half); in "Persistence (MVP3 tail)": **The live-network-session guard is conservative**.
+
+**MVP6 — world-state replication + write authority**
+
+- [ ] **Binary revision-stamped delta codec below the bridge.** *Owner:* replication. *Plan:* a PT-tested codec
+      for Spawn/Patch/Remove with quantized CFrames, sized against S2; the MVP6 DoD measures ≤24 B per CFrame
+      patch on the wire unless S2 sets another bar.
+- Existing: **Wiring the gateway to the wire**; **Change notifications on a replica**; **Retire
+  `ReplicationDirtySet`'s actor-id overload**; **The tag cap is enforced on `RbxInstance.AddTag` only** (the
+  applier's removal order); **MVP6/MVP9 scalability debt** (the synchronous fan-out).
+
+**MVP7 — networked characters & controls**
+
+- Existing: **Gate P8.2's "1:1 smoke" half is NOT covered** (MVP7's solo WASD test runs at 1:1 too); the
+  "Character motor contract — known limits" section; **Input enum names**.
+
+**MVP8 — dedicated server + WebGL client**
+
+- [ ] **Dedicated-server preset with a headless boot test.** *Owner:* composition + multiplayer. *Plan:* the
+      Dedicated Server build-target bootstrap composed as a preset; a headless test boots it with 0 errors and
+      `Players.LocalPlayer == nil`.
+- [ ] **Bot client.** *Owner:* multiplayer + performance. *Plan:* a headless client that speaks the real
+      protocol (admission, readiness, remotes, character input); MVP8 runs 10 bots for 1 h, MVP9 runs 100 bots
+      from 2–4 processes; lives in this repository with the harnesses (plan decision D7).
+- Existing: `Players.MaxPlayers` not checked at admission (in **Mirror follow-ups (after MIRROR-3)**).
+
+**MVP9 — scale to ~100 players per room**
+
+- Existing: **MVP6/MVP9 scalability debt** (the O(N) paths); the heap slope in **Final QA verdict (2026-09-02)**;
+  **Allocation-budget follow-ups**; **`mods_call` exports from other callers still get the full handler
+  budget**. The D5 targets are in `ROBLOX_API_ROADMAP.md` §4.3.
+
+**MVP10 — composable framework: one root, presets, host profile**
+
+- [ ] **Presets with boot tests and replace-with-fake tests.** *Owner:* composition. *Plan:* a `CoreAiProfile`
+      asset and five presets (solo AI sandbox, player-host co-op, dedicated N-player server, client,
+      embed-in-my-game), a PlayMode (or headless) boot test for each, and a replace-with-fake test for every
+      block of the composability audit in `Docs/ROADMAP.md` §3, Track E.
+- Existing: **[A1, CRITICAL] Setup menus hardcode `Assets/<package>/…` paths and break on the Git-URL install**;
+  **[A2+B3+D9, MAJOR] A missing `COREAI_LLM` silently swaps the backend for `StubLlmClient`**; **Test
+  isolation** (no root parameter on `FileLuaModSourceStore`); **Runtime ceiling plumbing**.
+
+**MVP11 — roles (Creator/Player) & per-player AI over the network**
+
+- [ ] **A player-role type apart from the agent role `Creator`.** *Owner:* Rbx API + agents. *Plan:* `Role` on
+      `RbxPlayer` as its own type (never an agent role id); docs say "player role" and "agent role" where both
+      could be meant; a test that the player role cannot be passed where an agent role id is expected.
+- Existing: the G10 capacity gate (MVP2 manifest, **Final QA verdict (2026-09-02)**) is re-measured here with
+  role gating and the task queue (risk R7).
+
+**MVP12 — Studio mode core** · **MVP13 — model packages, templates, Luau parity prerequisites**
+
+- Existing for MVP13: **Number-to-string coercion for string parameters** (the Rbx-surface half, in progress in
+  this wave); **`Workspace.Gravity` assigned by a script is never saved** (round-trip gap RT10).
+
+**MVP14 — Roblox interchange + round-trip parity gate**
+
+- [ ] **Licensed round-trip corpus policy (round-trip gap RT13).** *Owner:* the owner (decision). *Plan:* decide
+      which sources are allowed (owner-authored, permissively licensed), where the part that cannot be public
+      lives, and the per-tier size N before anything is measured; `ROBLOX_API_ROADMAP.md` §7 states the rule.
+
+**MVP15 — GUI + remaining input** · **MVP16 — DataStore + leaderstats** · **MVP17 — audio / FX / animation**
+
+- Existing for MVP15: **[R4] Runtime UI** (its element factory is shared with the GUI classes).
+
+**MVP18 — mod UX rest, skill manifest, console + self-repair**
+
+- Existing: **7. Mod system UX** (folder mods, enable/disable, the AI tools); **`ClickDetector.MouseHoverEnter`/
+  `MouseHoverLeave` exist and never fire** (backlog).
+
+**MVP19 — performance, WebGL and mobile hardening**
+
+- Existing: **Material catalog memory + import defects** (the ~99 MB eager load); "Incrementally encode/decode
+  JSON/ZIP on WebGL"; **Owner question — manual-slot defaults on WebGL**.
+
+**Across rungs**
+
+- [ ] **Retag the loud-stub phase names to the new ladder.** *Owner:* Rbx API. *Plan:* in one change, move the
+      phase strings in `ServiceCatalog.cs` (`MVP9` → `MVP16`, `MVP10` → `MVP7`, `MVP15` → `MVP17`, `MVP14` →
+      `MVP15`), `ClassCatalog.cs` (the `MVP10`, `MVP11`, `MVP14` and `MVP15` phases, including the `Humanoid:Move`
+      and `StarterGear` stubs) and `RbxDataModel.BindToClose` (`MVP5` → `MVP16`), the `// TODO: MVP<n>` stub
+      comments, the tests that pin a phase text, the "Rbx API" skill pair (`RbxApi.txt` +
+      `BuiltInRbxApiSkillText.cs`, byte-identical) and the stub table in `mod-authoring.md`; until then the
+      mapping table above explains them.
+- [ ] **NGO in the demo project (risk R12).** *Owner:* the owner (decision). *Plan:* either record why the
+      example game keeps Netcode for GameObjects while the framework uses Mirror (owner decision 2), or move the
+      example game off NGO and drop it from `Packages/manifest.json`.
+- [ ] **The flagship's own Unity project (plan decision D7).** *Owner:* the owner. *Plan:* the Studio+Play app
+      consumes the packages over UPM Git URLs from its own project; it needs the Git-URL install fixed (MVP10
+      item above); until it exists, this repository's samples and harnesses stand in for it.
 
 ## MVP3 closure and the MVP1/MVP2/MVP8/multiplayer audit fix waves (2026-09-24, unreleased)
 
@@ -17,13 +194,17 @@ instance core, 37 findings; MVP2 scheduler/signals/budgets/sandbox, 28; MVP8 gam
 foundation, 24, plus MP-25 found while fixing; newcomer ergonomics, triaged in the next section) were followed by
 fix waves W1–W6; each fix ships with a regression test that fails on the old code. A first audit round over the
 whole wave (snapshot `300eb6a4`: A1 world package, A2 Lua runtime and guard, A3 instances and bindings, A4
-multiplayer, A5 tests, docs and conventions) was followed by its own fixes; rounds 2 and 3 are still to run. IDs
-are the audits' (M1-xx, M2-xx, M8-xx, MP-xx; A1-xx … A5-xx for round 1); the reports themselves are not kept.
+multiplayer, A5 tests, docs and conventions) was followed by its own fixes. Audit round 2 (B1 network and bindings,
+B2 world package and mod runtime, B3 sandbox) ran over the whole diff; its first fixes are committed (`6248fec2`
+A1-02, `9dc55a68`, `e0737b7b`, `f817225b`), the rest are in progress, and round 3 follows. IDs are the audits'
+(M1-xx, M2-xx, M8-xx, MP-xx; A1-xx … A5-xx for round 1; B1-xx … B3-xx for round 2); the reports themselves are not
+kept.
 Verified without Unity only: the Roslyn compile gate (C# 9, every asmdef, six configurations plus Mirror, no new
 error against 7.45.0) and the two portable `dotnet test` suites on Linux — engine-free 2112 passed / 0 failed /
 3 skipped, Lua tier (`tools/portable/LuaTests`, CI job `portable-lua`, floor 1,400 passed, ceiling 42 not
 executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_ENGINE_UNAVAILABLE`, 3 ignored in a
-`OneTimeSetUp`, 2 skipped), both at `07264057`. This section records everything landed up to `07264057`.
+`OneTimeSetUp`, 2 skipped), both at `07264057`; at `f817225b` the engine-free suite is unchanged and the Lua tier
+reports 1606 passed / 0 failed. This section records everything landed up to `f817225b`.
 
 - [ ] **Unity verification gate (owner/CI), then bump and tag:** full EditMode 0 failed and PlayMode `FastNoLlm`
       0 failed on this tree. Every EditMode fixture named below was written without a Unity run.
@@ -44,7 +225,14 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
         production-container twin of the Linux-run A4-01 case in `RbxTaskSchedulerLuaBindingsEditModeTests` —
         `InstanceGameObjectBinderCrossLayerEditModeTests`, `RbxWorldHostLazyWorldWrapEditModeTests`,
         `UnityRbxCharacterMotorLifecycleEditModeTests`), and the G10 no-LLM test
-        `RealProviderWithoutLlmModule_RefusesInsteadOfMeasuringAStub` (`core`/`lua` legs only, `f25ca635`).
+        `RealProviderWithoutLlmModule_RefusesInsteadOfMeasuringAStub` (`core`/`lua` legs only, `f25ca635`). Audit
+        round 2 added: the Mirror cases for held reliable sends, the per-connection admission and the set-aside
+        anchor rule (`B1_07_*`, `B1_08_*`, `B1_10_*` and the rewritten `A4_04_*` in
+        `MirrorClientRemoteRulesEditModeTests`, plus
+        `B1_07_ReliableFiresAndAnInvokeServerBeforeAdmission_ReachTheServerAfterIt_InOrder_AndTheJoinSurvives` in
+        `MirrorClientRemotesEndToEndEditModeTests`; `e0737b7b` — run only against Mirror stubs so far), and
+        `HubService_ApplyBundledUpdate_KeepsTheModsLoadOrder` in `CoreAiModsHubBinderFullTierEditModeTests`
+        (`6248fec2`; it needs Unity's `Resources`, and the HubIntegration tests have no Linux runner at all).
   - [ ] PlayMode `FastNoLlm` (incl. `Mvp8PhysicsPlayModeTests`): 0 failed.
   - [ ] The 37 Lua-tier cases the Linux runner reports as not executed (listed in `tools/portable/LuaTests/README.md`).
   - [ ] Guard behaviour on Mono and IL2CPP: a budget trip cannot be caught by `pcall`/`xpcall` and the state stays
@@ -208,6 +396,38 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
       both changelogs. The report-style files
       `dev-docs/ALLOC_SIGNALS_FINDING_2026-09-05.md` and `dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` were folded
       into this file (their open findings are items below) and deleted (A5-11).
+- [x] **Mods restart and restore in their load order (audit round 1 A1-02, `6248fec2`).** A mod's manifest records
+      `LoadOrder` (a first load and a Hub-created mod get the store's highest value + 1, dormant mods included;
+      reload, Hub edits, bundled and seeder updates keep it; unload then load moves the mod to the end; rehydrate
+      never stamps); `RehydrateFromStore` and `RehydrateExactOrThrow` start unordered mods first by ordinal id, then
+      ordered mods ascending; the world package carries the field (0 not written, no `format_version` bump, an
+      older reader refuses a stamped package explicitly). A world whose mods use each other at init reloads its own
+      save. Tests in `LuaCsModRuntimePersistenceEditModeTests`, `Mvp3WorldPackageFollowUpEditModeTests`,
+      `CoreAiModsHubBinderFullTierEditModeTests`, `BundledModSeederEditModeTests`.
+- [x] **Network, audit round 2 (B1-01/04/06, `9dc55a68`).** `StagedNetworkBridge` forwards `IsServerClockHeld`,
+      `AttachServerClock` (queued until the staged world goes live) and `DetachServerClock`, so a world loaded from a
+      package keeps the server's clock hold (closes "The staging bridge does not forward the server clock", A4-08
+      follow-up); a drift guard checks every `INetworkBridge` wrapper; the never-firing signal of an unmodelled
+      property is kept per instance and disconnected by `Destroy`; a server payload naming an instance a client does
+      not hold is reported at powers of two and counted.
+- [x] **Mirror, audit round 2 (B1-07/08/10, `e0737b7b`).** A client holds reliable `FireServer`/`InvokeServer`
+      sends until its admission (at most 256 messages / 256 KiB) and sends them in order right after it (closes "A
+      client drops even reliable remotes sent before its admission"); an admission belongs to its connection; a
+      set-aside clock anchor is taken only when the next one agrees with it within 1 s.
+- [x] **Mod runtime, audit round 2 (B2-03/05/08/12, `f817225b`).** A failed load puts back another live mod's
+      formula its chunk reset; a formula defined inside `coroutine.create` belongs to the mod; a load stopped inside
+      `mods_call` fails with the same cancellation as a stop in its own code; mod-core string parameters take a
+      number as `tostring` gives it (`store_set(7, 8)`), a boolean or table is still refused.
+- [x] **`tostring = warn` no longer ends the process (`d4d15070`).** `warn` converts its arguments through the
+      global `tostring` as a counted call, so a recursion through it stops at the 200-deep cap with a catchable
+      `C stack overflow (warn: …)` instead of a .NET stack overflow that closed the editor or player.
+- [x] **Docs (DOCS-4, the plan revision)** — the MVP ladder of record rewritten in `ROBLOX_API_ROADMAP.md` §4 with the
+      old → new mapping, `Docs/ROADMAP.md` (vision, tracks, release table, principles, risks, scale targets),
+      `PLAN.md`, this file's rung index, the 28 stale plan statements of the 2026-09-24 plan review corrected, the
+      superseded dev-docs plans marked as history; and the round-2 fixes above in `RBX_API.md`,
+      `LUA_SANDBOX_SECURITY.md`, `WORLD_PACKAGE.md`, `mod-system.md`, `mod-authoring.md`, the Mirror README, the
+      "Rbx API" skill pair (still byte-identical) with `RBX_API_SKILL.md`, and both changelogs. The stale `RobloxApi/…`
+      paths of the §5.1.1/§5.2.1 task breakdowns now sit next to the shipped files.
 
 ### Open follow-ups from the fix waves
 
@@ -229,12 +449,6 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
 - [ ] **The live-network-session guard is conservative:** it counts any registered actor on a non-`Solo` bridge,
       including one registered for a mod context whose socket is gone. Exact peers are known only to
       `MirrorNetworkBridge`; expose them through `INetworkBridge` if the guard ever refuses a legitimate load.
-- [ ] **Mods restart in id order, not in load order (audit round 1 A1-02, MAJOR; fix in progress).** Both restore
-      paths (`RehydrateExactOrThrow`, `RehydrateFromStore`) start mods in ordinal id order and capture sorts them by
-      id, so a world whose mod B reads at init what mod A created cannot reload its own save — the restore is
-      all-or-nothing. *Owner:* the A1-02 fix worker of this wave. *Plan:* a durable `LoadOrder` on the mod manifest,
-      stamped on a first load (max over the store + 1) and kept on reload; both restore paths start mods by it, legacy
-      manifests without it by id; the package carries the field.
 - [ ] **No way to delete a manual save.** A store at its 64-slot / 256 MiB cap (`02249815`) refuses every further
       `save_world`, and until then the player can only delete files under `persistentDataPath/CoreAI/Saves/Manual`
       by hand, which a WebGL player cannot do. *Owner:* Hub + world package. *Plan:* a Hub **Manual saves** section
@@ -287,8 +501,10 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
 - [ ] **A scheduler-owned thread starts at C-call depth 0** even when host code resumes it from inside a library
       call; the thread quota and the signal-generation cap bound that nesting today. *Owner:* Lua runtime. *Plan:*
       have the scheduler's resume carry the resumer's depth as the thread's base, as a raw coroutine's does.
-- [ ] **Host callbacks that re-enter Lua outside `CallCountedAsync`** (`warn`'s `DescribeForLog`, and any other
-      host function that runs a script's function or `__tostring`) are not counted by the C-call cap. *Owner:* Lua
+- [ ] **Host callbacks that re-enter Lua outside `CallCountedAsync`** (any host function that runs a script's
+      function or `__tostring`) are not counted by the C-call cap. `warn`'s `DescribeForLog` is counted since
+      `d4d15070` (`tostring = warn; warn(1)` used to crash the host process with an uncatchable .NET stack overflow;
+      it now raises the catchable `C stack overflow (warn: …)` line); the others are not audited yet. *Owner:* Lua
       runtime. *Plan:* route every such call through `LuaCsSecureEnvironment.CallCountedAsync`, with a nesting test
       per callback.
 - [ ] **Guard invariant: a host function that calls back into mod code must pass the token it received** (after
@@ -315,11 +531,14 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
       attribution as the failed build left them. Only concurrent loads of one id reach these paths. *Owner:* Lua
       runtime. *Plan:* run the same rollback the build-failure path runs on each of them, with a test that forces
       each branch.
-- [ ] **Number-to-string coercion for string parameters.** Mod APIs (`LuaCsValueMarshaller`) and the Rbx surface
-      refuse a number where a string is expected; stock Lua and Roblox convert it. *Owner:* the owner (decision).
-      *Plan:* keep the refusal everywhere (documented in `mod-authoring.md` and pinned by
-      `Negative_Kick_WithANumberMessage_IsRefusedLikeEveryOtherStringArgument`), or convert in one shared reader
-      for both surfaces and flip that test.
+- [ ] **Number-to-string coercion for string parameters (MVP13, round-trip gap RT4; in progress in this wave).**
+      The mod-core half is done (`f817225b`, B2-12): mod-core string parameters take a number as `tostring` gives
+      it (`store_set(7, 8)` stores "7" = "8"), a boolean or table is still refused. The Rbx surface still refuses a
+      number where a string is expected (`Part.Name = 5`, `player:Kick(42)`, `FindFirstChild(5)`), pinned by
+      `Negative_Kick_WithANumberMessage_IsRefusedLikeEveryOtherStringArgument`; Roblox converts it. *Owner:*
+      mods/Rbx API. *Plan:* one coercion rule for both surfaces, checked against the normative references, with a
+      conformance table test; update the Kick test deliberately (it pins the deviation), and update `RBX_API.md`,
+      `mod-authoring.md` and the skill pair in the same change.
 - [ ] **A2-07 reads every cancellation as a budget cut:** an `OnServerInvoke` callback stopped by any
       `OperationCanceledException` — a world dispose included — answers "the RemoteFunction callback was stopped: it
       exceeded its execution budget". *Owner:* Lua bindings. *Plan:* answer the budget line only when the cause is a
@@ -342,7 +561,7 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
 - [ ] **Change notifications on a replica:** every settable `BoundProperties` row notifies on the server since
       `4d107ae6` (a drift guard walks them all), but part and camera properties do not reach a replica as patches,
       so their `Changed` never fires there (engine-free members do — `ReplicationApplierEditModeTests`);
-      `dev-docs/REPLICATION_PHASE0.md` says so. *Owner:* MVP12. *Plan:* carry part and camera state in replication
+      `dev-docs/REPLICATION_PHASE0.md` says so. *Owner:* MVP6. *Plan:* carry part and camera state in replication
       patches and fire `Changed` on apply.
 - [ ] **A demoted keyed signal cannot be re-homed without a weak reference** (after `4d107ae6`): C# host code that
       takes a tag or attribute signal, requests 64 or more other keys, then connects — keeping neither reference —
@@ -379,7 +598,7 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
       decide at the same time whether a successful reload cancels the old instance's tweens.
 - [ ] **`RbxVector3.Lerp` overflows** to infinity near ±3e38 (engine-free datatypes).
 
-**Players, Humanoid and multiplayer (MVP8/MVP11/MVP12)**
+**Players, Humanoid and multiplayer (Gameplay services I, MVP5, MVP6)**
 
 - [ ] **Disconnect and load tails (after M2-24, `c233c9cf`/`7aa6f47c`):** decide the failed-load policy — sweep the
       instances a failed first load's chunk created and clear their registry attribution (the quota attribution
@@ -407,13 +626,13 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
 - [ ] **Host UserIds:** a local actor's counter `UserId` can collide with a transport-admitted `UserId` on a Host.
       A `Player` destroyed directly from C# runs the leave teardown but does not `DisconnectActor` on the transport.
 - [ ] **After a world swap on a Host,** new connections still use the `AttachWorld` connect delegate — acceptable
-      only because loads are refused while sessions are live; part of the MVP11 handoff below.
+      only because loads are refused while sessions are live; part of the MVP5 handoff below.
 - [ ] **Server→client encode-side filtering:** `FireClient(player, ServerStorage.X)` still sends the reference; only
-      the decode side (MP-01) filters. MVP11/MVP12.
+      the decode side (MP-01) filters. MVP5/MVP6.
 - [ ] **MP-20 remainder:** strip `OwnerActorId`/`OwnerModId`/`OriginTag`/`AccessScope` from the snapshot at capture
       for a client, not only on the replica.
 - [ ] **Mirror follow-ups (after MIRROR-3, `d6096dc6`):** an authenticator refusal still reaches the client only as
-      a dropped connection (the MVP2.5 item "A refused client never learns it was refused") — the owed-drop pattern
+      a dropped connection (the item "A refused client never learns it was refused", MVP5) — the owed-drop pattern
       the kick notice now uses is the fix shape; `Players.MaxPlayers` is not checked against the transport's
       capacity; after a Mirror restart without disconnect reports the bridge may keep stale acknowledged-connection
       state; the scene provider measures server time against the system clock and has no public way to take the
@@ -421,21 +640,21 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
       argument).
 - [ ] **Test harnesses:** `RungZeroEnvelopeEditModeTests`' `ForgingNetworkBridge` reports `Topology.Host`, so the
       fail-closed identity rule (MP-12) refuses its `ConnectActor` — give the harness an identity source.
-- [ ] **The staging bridge does not forward the server clock** (A4-08 follow-up, after `70a4d1ab`):
-      `StagedNetworkBridge` passes `IsServerClockSynchronized` and `DisconnectActor` through but not
-      `IsServerClockHeld`, `AttachServerClock` and `DetachServerClock`, so a world loaded at runtime never hands its
-      clock to the Mirror bridge. *Owner:* multiplayer. *Plan:* forward the three members like the other two, with a
-      test that a staged world's `GetServerTimeNow` and hold reach the anchors.
+- [ ] **A Mirror stub end to end over the staged bridge** (after B1-01, `9dc55a68`): the clock forwarding of
+      `StagedNetworkBridge` is tested over the engine-free bridges only. *Owner:* multiplayer. *Plan:* extend the
+      Mirror clock end-to-end fixture so its world is built through `ReplaceWorldAsync` (a package load), and assert
+      that the client's hold and `GetServerTimeNow` follow the staged world's clock once it is live.
 - [ ] **A stale forward anchor during a hold can run a client ahead** (after `70a4d1ab`): while a hold floor is set,
       one reordered non-held anchor ahead is taken at once and can move the client up to 5 s ahead until the next
       anchor. *Owner:* Mirror bridge. *Plan:* a two-strike rule for a non-held forward anchor while a hold floor is
       set, the mirror image of the set-aside rule for a lone anchor behind.
-- [ ] **A client drops even reliable remotes sent before its admission** (A4-04, `70a4d1ab`; documented in the
-      Mirror README), so a script that fires at startup loses them. *Owner:* Mirror bridge. *Plan:* queue reliable
-      sends (bounded, like the server's 256-message / 256 KiB hold for a joining connection) until the admission is
-      bound, keep dropping unreliable ones.
+- [ ] **The provider misses a client connection change** (after B1-08, `e0737b7b`): an admission now belongs to its
+      connection, but `CoreAiMirrorNetworkBridgeProvider.HookTransport` re-attaches the handlers only when
+      `NetworkClient.active` goes false, so a stop and start within one frame still loses the inbound handlers (the
+      `HACK:` there; see also "Restart ordering is unproven, not proven"). *Owner:* Mirror bridge. *Plan:* detect a
+      change of the client connection object and re-run `AttachHandlers`, with a same-frame restart test.
 - [ ] **Retire `ReplicationDirtySet`'s actor-id overload** (A5-04; the `TODO` in `ReplicationDirtySet.Collect`): it
-      is the one path that still hands a recipient removals for ids it never saw. *Owner:* MVP12 wire phase.
+      is the one path that still hands a recipient removals for ids it never saw. *Owner:* MVP6 wire phase.
       *Plan:* once every caller holds a `ReplicationStream`, remove the overload and its null-stream branch.
 
 **Build and test hygiene**
@@ -454,11 +673,6 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
 - [ ] **MVP2 DoD item 13 ("reaches `OnServerEvent` next drain")** — check that a test asserts the handler has NOT
       run before the drain; if none does, a synchronous dispatch would pass (from the 2026-09-06 closure audit, not
       re-checked since). *Owner:* test hygiene. *Plan:* add the pre-drain assertion to the loopback remote test.
-- [ ] **Stale MVP1 paths in the roadmap** (from the 2026-09-06 closure audit): the §5.1.1 and §5.2.1 task
-      breakdowns still name planned `RobloxApi/…` files (`RobloxApi/Spatial/RobloxSpace.cs`,
-      `RobloxApi/Scheduling/TaskLibrary.cs`, …); the code lives under `Assets/CoreAIMods/Runtime/RbxApi/` with other
-      file names. *Owner:* the next docs pass. *Plan:* map each row to the shipped file and rewrite the paths (the
-      MVP1 status paragraph and the `CornerWedge` fallback sentence were corrected in DOCS-3).
 
 ## 7.45.0 audit wave: 7.44.x re-audited, pipeline cancellation unified, docs swept (2026-09-24)
 
@@ -791,6 +1005,10 @@ the standard composition like every other demo, and the scene was regenerated.
 
 ## MVP2.5 rungs — status 2026-09-10
 
+> History section (2026-09-10), kept as written: its narrative uses the **old** rung numbers (MVP8 = Gameplay
+> services I, MVP11 = MVP5, MVP12 = MVP6 today). Its open items are tagged with the new rungs and indexed under
+> "Open work by rung" at the top of this file.
+
 Verified on the settled tree (Unity 6000.3.14f1 batchmode): full EditMode
 **4481 total / 4472 passed / 0 failed / 9 skipped** (`artifacts/testresults/r17.xml`), and the
 full-assembly PlayMode sweep **149 total / 135 passed / 4 failed / 10 skipped**
@@ -926,13 +1144,13 @@ Against the owner's bar, verified against the tree on 2026-09-10:
           connection's next remote is dropped as unadmitted and no player is re-created) and by a session-
           host test asserting `PlayerRemoving` fires ONCE, with the kick reason rather than a second
           `Unknown` from the drop's own teardown.
-    - [ ] **A runtime world load does not hand live Mirror sessions to the new world (MEDIUM) — the MVP11 entry
-          item, a known limit since 7.43.0.** Mitigated, not solved: since `82649c98` a world load is refused
+    - [ ] **A runtime world load does not hand live Mirror sessions to the new world (MEDIUM) — the MVP5 (old MVP11)
+          entry item, a known limit since 7.43.0.** Mitigated, not solved: since `82649c98` a world load is refused
           (`network_sessions_active`, the live world unchanged) at request, confirmation and raw host load while
           the bridge lists registered actors on a non-`Solo` topology, and since `cdf65b52`
           `AttachWorld(() => stack.GameplayBindings.RbxApi)` makes the session host the identity source of
           whichever world is live. The handoff itself (re-announcing admitted sessions to the new world) is
-          still MVP11. Original analysis:
+          still open (MVP5). Original analysis:
           `RbxWorldRuntimeSessionController.LoadConfirmedAsync` builds a NEW `LuaCsRbxApiBindings` over a
           `StagedNetworkBridge` around the same `INetworkBridge`, publishes it as `CurrentRbxApi` and
           disposes the outgoing one in `ShutdownOutgoing`. `CoreAiMirrorNetworkBridgeProvider.AttachWorld`
@@ -1101,7 +1319,7 @@ Fixed on 2026-09-06 in response to the audit:
 
 ### Left on MVP2.5 (named, not hidden)
 
-- [ ] **The character pipeline and the character motor** (MVP8 gates P8.2/P8.6) — landed, still not
+- [ ] **The character pipeline and the character motor** (Gameplay services I gates P8.2/P8.6) — landed, still not
       closed: a second and now a third review round on this same landing keep finding real
       defects in it. **Correction:** this line was previously checked off as fully implemented,
       including a claim that `DistanceFromCharacter` reads the live root position. It does not —
@@ -1134,14 +1352,14 @@ Fixed on 2026-09-06 in response to the audit:
       `09469f77`): 20 Tier-A fixtures, cross-checked by `FrozenTierBCatalog_MatchesItsFilesAndIds` and
       `FrozenCatalog_HasTwentyUniqueFixturesAndCompleteClassificationMetadata`. Verified present
       2026-09-09.
-- [ ] **The join snapshot** (MVP11): an admitted client still receives no filtered `ExportSnapshot`
+- [ ] **The join snapshot** (MVP5): an admitted client still receives no filtered `ExportSnapshot`
       over the wire. Phase 0 landed the layer under it on 2026-09-10 — `ReplicationStream.PlanWorld`
       seeds a recipient with every visible instance, and client Lua resolves
       `ReplicatedStorage.RemoteX` by reference in `ReplicatedWorldConvergenceEditModeTests` — but
       that runs registry-to-registry, not socket-to-socket. A stream created over a non-empty
       registry it has never observed now REFUSES to plan rather than silently sending an empty
       world.
-- [ ] **Wiring the gateway to the wire** (MVP12): `SendIntent`/`IntentReceived` on the bridge. The
+- [ ] **Wiring the gateway to the wire** (MVP6): `SendIntent`/`IntentReceived` on the bridge. The
       dirty set and the client-side apply are no longer missing — as of 2026-09-10 the registry
       itself feeds `ReplicationDirtySet` through `RevisionAdvanced`, `ReplicationStream` plans
       ordered Spawn/Patch/Remove per recipient, and `ReplicationApplier` applies a plan to a replica
@@ -1169,7 +1387,7 @@ Fixed on 2026-09-06 in response to the audit:
       must stop minting Players on a replica; there is nothing to break today because the replica
       path is not wired.
 
-- [ ] **A two-process over-the-wire run** (N11.3–N11.6). Mirror's host mode did not deliver
+- [ ] **A two-process over-the-wire run** (N11.3–N11.6; MVP5). Mirror's host mode did not deliver
       client→server inside the batch-mode test runner, so the bridge's rules are gated against its
       receive paths directly and **no claim is made that bytes cross a real socket**.
 - [x] **MVP2 criterion 14** (budget kill within a frame slice) — decided and implemented on
@@ -1184,7 +1402,7 @@ Fixed on 2026-09-06 in response to the audit:
       `RbxScriptContextEditModeTests`, including a runaway cut on an ALREADY-warmed handle. (Criterion 12, one JSON encoder, is decided: `HttpService` and the remote
       codec stay two independent encoders, pinned by `RbxJsonContractEditModeTests` — see
       `Assets/CoreAI/CHANGELOG.md` [Unreleased] and the audit.)
-- [ ] **MVP11/MVP12 scalability debt** (2026-09-02 online-readiness architecture audit, re-verified
+- [ ] **MVP6/MVP9 scalability debt** (old MVP11/MVP12; 2026-09-02 online-readiness architecture audit, re-verified
       against today's tree 2026-09-09 — most of that audit's security findings are now stale and are
       NOT repeated here, see below). Still open and unchanged: dispatch is O(actors)+O(pending) under
       one lock (`QueuedAiOrchestrator.SelectNextActorIdLocked`/`FindNextTaskIndexLocked`/
@@ -1547,7 +1765,8 @@ audit reports were absorbed into this file and deleted per the audit-report poli
       operation id, M2-10; the cached actor context; the interned `OriginTag`). The heap slope still fails at N=50:
       medium-lived garbage is promoted to gen1/gen2 (the ~300 chat requests per N=50 window are the first suspect),
       and the slope metric itself varies about 3× between runs of identical code (`dev-docs/SCALE_CHARACTERIZATION.md`
-      §12). *Owner:* capacity work (MVP17). *Plan:* re-measure with the frozen workload and full repeats in a
+      §12). *Owner:* capacity work (MVP9; the G10 half with MVP11). *Plan:* re-measure with the frozen workload
+      and full repeats in a
       Standalone player (not the host CoreCLR), then profile gen1/gen2 promotion at N=50 before any capacity claim.
 
 ## MVP1 residue closed + MVP2 scheduler core (2026-08-30) — 7.1.0 prepared
@@ -2039,6 +2258,9 @@ Open:
 
 ## Roblox API ladder (MVP0-MVP17) — foundation items (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md`)
 
+> History list from the first ladder (old rung numbers); the open item 7 is split over MVP4 and MVP18 of the
+> current ladder.
+
 > **Pending (2026-07-23):** `UserInputService` pulled into **MVP1** (from MVP10) for mini-game controls,
 > built on the **New Input System** (`com.unity.inputsystem` 1.19.0; `activeInputHandler = 2` Both).
 > **TODO: this dependency may be dropped later** — keep the Lua `UserInputService` behind a swappable
@@ -2080,8 +2302,9 @@ Open:
       (`Assets/CoreAIMods/Runtime/LuauDownlevel/`: `LuauLexer`/`LuauRewriteParser`/`LuauDownleveler`,
       standalone, 93 EditMode tests; Q1 resolved — Loretta reconsidered only if construct coverage
       proves insufficient). Remaining work is the MVP5 wiring into `LoadMod` with source maps.
-- [ ] 7. Mod system UX *(rung: MVP5)* — `Mods/<ModName>/` with `mod.json` manifest, script contexts mapped to
-      folders, enable/disable without deletion, hot reload, C# management API.
+- [ ] 7. Mod system UX *(old rung MVP5; now MVP4 for script contexts and `require`, MVP18 for the rest)* —
+      `Mods/<ModName>/` with `mod.json` manifest, script contexts mapped to folders, enable/disable without
+      deletion, hot reload, C# management API.
 - [x] 8. Lua log service *(rung: MVP5, deliverable 7)* — per-mod ring buffers + `get_mod_logs` AI tool (core shipped; wire into the — closed: the service is registered in `CoreAiModsInstaller`, the tool is wired up, `LuaCsModRuntime` writes into the buffers (verified 2026-09-04)
       mod runtime's print/warn/error capture, DI composition, and the Programmer tool set).
 - [x] 9. Editor syntax highlighting *(rung: MVP7)* — importer + highlighted inspector/editor window (shipped in — closed: `LuaScriptedImporter`, `LuauScriptedImporter`, `LuaScriptViewerWindow` exist (verified 2026-09-04)
@@ -2361,7 +2584,9 @@ Open:
 
 ### [R4] Runtime UI (UI Toolkit) — AI & mods build in-game interfaces (owner request 2026-07-12)
 
-> **Flagship of the next minor after the audit-wave release.** The agent (and Lua mods) must be able to
+> **Re-prioritized 2026-09-24:** R4 is no longer the next minor — the MVP ladder puts multiplayer first, and R4's
+> runtime element factory is to be shared with the GUI rung (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §MVP15). The
+> spec below is unchanged. The agent (and Lua mods) must be able to
 > create, style, animate, and evolve game UI **at runtime**, in one consistent visual theme, and the UI
 > must **persist** across sessions exactly like world state. Runtime target: `UIDocument` on the current
 > Unity 6000.3, `PanelRenderer` behind a version define once the project moves to 6.5+ (it is the successor

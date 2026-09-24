@@ -112,8 +112,9 @@ Keep these in step with the runtime when the skill text is edited:
 - Section 4 also states the instance-core rules: the per-actor instance quota (2,048; 4,032 per
   WebGL world) and its `BUDGET_EXCEEDED` refusal naming the call, `Instance.Changed` on every instance
   and `GetPropertyChangedSignal` refusing an event, a method or a near-miss typo of a known property
-  while a real unmodelled property gets a never-firing signal (script, tween and `PivotTo` writes fire
-  both; an equal assignment and physics movement fire nothing), removal handlers of a destroyed
+  while a real unmodelled property gets a never-firing signal (the same signal for a name, disconnected by
+  `Destroy()`; script, tween and `PivotTo` writes fire both; an equal assignment and physics movement fire
+  nothing), removal handlers of a destroyed
   instance reading the instance they were handed, `AncestryChanged` on every descendant, `game:IsLoaded()`, the 100-character `Name`, the 2,048-level depth limit, `Clone`
   remapping `PrimaryPart`/`ObjectValue.Value` onto the copies, `game:Clone()`/`player:Clone()` → nil,
   the Debris refusals (services, `game`, the camera, a `Player`) and the TweenService rules
@@ -133,7 +134,8 @@ Keep these in step with the runtime when the skill text is edited:
   `[mod:<id> script:main.lua line:N]` prefix on errors raised inside a mod, argument numbers that do
   not count `self`, that `pcall`, `xpcall` and `coroutine.resume` all receive exactly that one line
   (a budget cut excepted), and the Lua-style `bad argument #n to 'fn' (x expected, got y)` of the
-  mod-core functions, which never turn a number into a string. Section 14 lists the loud global stubs
+  mod-core functions, whose string parameters take a number as `tostring` writes it (`store_set(7, 8)`)
+  and refuse a boolean or a table. Section 14 lists the loud global stubs
   (`BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Ray`, `Region3`, `Rect`,
   `PhysicalProperties`, `OverlapParams`, `DateTime`, `shared`), each with its workaround.
 - `BasePart` exposes `Shape`, `Material`, `MaterialVariant` (string; `""` for none), `Orientation`, and `Rotation` in addition to the MVP1

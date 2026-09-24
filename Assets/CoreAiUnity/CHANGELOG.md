@@ -49,6 +49,28 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   `ClickDetector.MouseHoverEnter`/`MouseHoverLeave` as backlog (they exist and never fire).
   `dev-docs/ALLOC_SIGNALS_FINDING_2026-09-05.md` and `dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` were folded into
   `TODO.md` and removed.
+- **The second audit round's fixes are documented.** `WORLD_PACKAGE.md` and `mod-system.md` describe the mod
+  `LoadOrder` (how it is stamped and kept, the restore order, the additive package field); `mod-system.md` the
+  rollback of another mod's reset formula and of formulas defined in coroutines; `mod-authoring.md`,
+  `RBX_API_SKILL.md` and the "Rbx API" skill text (`RbxApi.txt` and `BuiltInRbxApiSkillText.cs`, still
+  byte-identical) the mod-core string parameters that take a number; `RBX_API.md`, `mod-authoring.md` and
+  `LUA_SANDBOX_SECURITY.md` add `warn` to the counted library-call boundaries; `RBX_API.md` and the skill the
+  per-instance never-firing signal and the throttled server-payload reports; the Mirror README the reliable sends
+  held until admission, the admission bound to its connection, the stricter set-aside anchor rule and the clock
+  hold of a world loaded from a package (its "does not hand its clock" limit is gone).
+- **One MVP ladder of record, multiplayer first.** `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4 is rewritten as a
+  strictly sequential ladder with an old-to-new numbering table: MVP0–MVP3, MVP2.5 and the landed "Gameplay
+  services I" slice keep their names; MVP4 (script contexts and client runtime) through MVP19 (performance, WebGL
+  and mobile hardening) are numbered in execution order, each with what is done (with paths), what remains, how it
+  is tested and a measurable Definition of Done; RBXL interchange (the old MVP4) is MVP14 with a round-trip parity
+  gate; editor tooling (the old MVP7) is dropped for the runtime Studio (MVP12). The Studio-like editing UI is no
+  longer a non-goal, and the eight plan decisions are recorded in §8.1. `Docs/ROADMAP.md` states the vision as a
+  framework of building blocks with the Studio+Play app as one product, gives the ladder as a one-screen release
+  table, adds composability and round-trip parity to the principles, and gains a risks section and the scale
+  targets. `PLAN.md` is a short current-status page; `TODO.md` carries the numbering table and files open work
+  under the new rungs. Stale statements (the `Neo.Network` transport, "zero multiplayer code", WebGL "not a
+  priority", the IDBFS flush, the `RobloxApi/` paths and others) are corrected, and superseded dev-docs plans are
+  marked as history.
 
 ### Tests
 
@@ -104,6 +126,17 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   `CanCollide = false` part does not stand on it.
   None of the new EditMode and PlayMode fixtures has run in Unity yet; the Lua-tier ones that the portable runner
   links have run on Linux.
+- **Second audit round.** Regression tests, each red on the old code: the mod load order through both restart
+  paths, the world package, the Hub and the seeder (`LuaCsModRuntimePersistenceEditModeTests`,
+  `Mvp3WorldPackageFollowUpEditModeTests`, `CoreAiModsHubBinderFullTierEditModeTests`,
+  `BundledModSeederEditModeTests`); the staged bridge's clock forwarding and its drift guard over every
+  `INetworkBridge` wrapper (`BridgeTopologyAndClockEditModeTests`); the per-instance unmodelled-property signal
+  (`RbxSignalConnectionTeardownEditModeTests`); the logic-slot rollback, the number-to-string coercion and the
+  cancellation through `mods_call` (`LuaCsModRuntimeEditModeTests`); `warn` used as `tostring`
+  (`RbxApiLuaBindingsEditModeTests`). The Mirror cases for the held reliable sends, the per-connection admission
+  and the set-aside anchor rule (`MirrorClientRemoteRulesEditModeTests`, `MirrorClientRemotesEndToEndEditModeTests`)
+  compile against the Mirror v96.0.1 sources and ran only against Mirror stubs, not in Unity.
+  `HubService_ApplyBundledUpdate_KeepsTheModsLoadOrder` needs Unity's `Resources` and has no Linux runner.
 
 ## [7.45.0] - 2026-09-24
 

@@ -126,7 +126,7 @@ Already in `Packages/manifest.json` — use these, do not hand-roll equivalents:
 `jp.hadashikick.vcontainer` 1.17.0 (DI), `com.cysharp.unitask` (async),
 `com.cysharp.messagepipe` + `.vcontainer` (events), `com.cysharp.r3` (reactive),
 `com.neoxider.tools` (gameplay modules), `com.unity.dedicated-server`,
-`com.unity.multiplayer.*` (topology work lands MVP11+). Mirror is deliberately not a manifest
-dependency: the optional `com.neoxider.coreaimirror` package compiles only in a project that installs
-Mirror itself (`MIRROR` define). New third-party dependencies require an explicit decision recorded in
-the roadmap.
+`com.unity.multiplayer.*` (Multiplayer Play Mode is the MP test method from MVP5 on). Mirror is
+deliberately not a manifest dependency: the optional `com.neoxider.coreaimirror` package compiles only in
+a project that installs Mirror itself (`MIRROR` define). New third-party dependencies require an explicit
+decision recorded in the roadmap.

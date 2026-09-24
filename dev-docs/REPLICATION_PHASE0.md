@@ -1,6 +1,7 @@
 # Replication core, phase 0 — engine-free, registry-to-registry (2026-09-10)
 
-Status: landed in 7.39.0 as the layer UNDER MVP11/MVP12, not those rungs. Nothing in production
+Status: landed in 7.39.0 as the layer UNDER MVP5/MVP6 (the old MVP11/MVP12; the ladder of record is
+`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4), not those rungs. Nothing in production
 constructs these types — no composition root builds a `ReplicationDirtySet`, no bytes cross a
 socket, and an admitted client still receives no join snapshot over the wire. Everything below is
 proven registry-to-registry in one process (`ReplicatedWorldHarness`). Rung status lives in
@@ -64,10 +65,10 @@ Tests, all EditMode under `Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/`
 ## What is not here (do not overclaim)
 
 - No production wiring. `CoreAiModsInstaller` builds no dirty set, stream or applier, and
-  `IntentGateway` is likewise never constructed in production. The layer exists so MVP11/MVP12 can be
-  built on it; it is not a delivered feature.
+  `IntentGateway` is likewise never constructed in production. The layer exists so MVP5/MVP6 (the old
+  MVP11/MVP12) can be built on it; it is not a delivered feature.
 - No transport. A batch is a `ReplicationBatchPlan` beside captured snapshots, not bytes. The delta
-  codec, the Mirror path and the socket-level join snapshot are the MVP11/MVP12 rows in `TODO.md`.
+  codec, the Mirror path and the socket-level join snapshot are the MVP5/MVP6 items in `TODO.md`.
 - Two named limits (`TODO.md`, "Two named Phase 0 limits of the replication core") were implemented
   on 2026-09-10: a replicated `Player` now travels with its identity and is admitted into the
   replica's `Players` service, and an unresolved reference is remembered and settled when its target

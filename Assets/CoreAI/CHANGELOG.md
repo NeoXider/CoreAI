@@ -5,8 +5,9 @@
 MVP3 (the world/place package) is code complete; its Unity verification gate (EditMode 0 failed, PlayMode
 `FastNoLlm` 0 failed) is still to be run. The entries below also cover the fix waves that followed the
 2026-09-24 audits of the MVP1 instance core, the MVP2 scheduler and sandbox, the MVP8 gameplay services and the
-multiplayer foundation, and the first audit round over those waves (audit ids in parentheses — A1-xx world package,
-A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for that round; details in `TODO.md`).
+multiplayer foundation, and the first two audit rounds over those waves (audit ids in parentheses — A1-xx world
+package, A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for round 1; B1-xx network and bindings,
+B2-xx world package and mod runtime for round 2; details in `TODO.md`).
 
 ### Security
 
@@ -34,13 +35,20 @@ A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for that roun
   returned" (`LuaCsSecureEnvironment.SchedulerThreadResumeRefusal`).
 - **Nested calls from library functions back into Lua outran the budget (A2-05).** Each such call — a `table.sort`
   comparator, a `__tostring` run by `tostring`/`print`/`string.format`, a `gsub` replacement function or
-  `__index`, a `__pairs`/`__ipairs` metamethod, a coroutine run by `coroutine.resume` — is a nested VM run, and an
+  `__index`, a `__pairs`/`__ipairs` metamethod, a coroutine run by `coroutine.resume`, `warn` converting an
+  argument through the global `tostring` — is a nested VM run, and an
   error raised N levels deep unwound in about N² time with no instruction running, so no hook could stop it: a
   comparator 1,000 deep took 8.1 s to fail, and unbounded it ran 64 s under a 10 s budget. They now nest at most 200
   deep per thread (`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's `LUAI_MAXCCALLS`); the next one raises
   `C stack overflow (<function>: more than 200 nested calls from library functions back into Lua)`
   (`CStackOverflowMessage`), which `pcall` catches. Plain Lua recursion is not limited; `__concat` is not counted
   yet (`TODO.md`).
+- **`tostring = warn; warn(1)` ended the host process.** `warn` converted its arguments through the global
+  `tostring` outside the nesting count, so a mod's own `tostring` that calls `warn`, or `warn` installed as
+  `tostring`, recursed until the .NET stack overflowed — an uncatchable crash that closes the Unity editor or
+  player. The conversion is a counted call now (the `warn` boundary): the recursion stops at the 200-deep cap with
+  the catchable `C stack overflow (warn: …)` line. A `__tostring` recursing through `warn` while `tostring` is the
+  sandbox's own wrapper counts twice per level and stops at 100, which is harmless.
 - **A raw coroutine escaped its mod's memory budget (A2-09).** A `coroutine.create` body ran under a fixed 256 MB
   budget, so a mod held to 16 MB kept 80 MB alive inside one. It now gets the budget of the run that resumes it — the
   mod's `HandlerMaxAllocatedBytes` for its handlers, tasks and main chunk — and a coroutine it resumes inherits it.
@@ -427,14 +435,23 @@ A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for that roun
 - **An equal `MaterialVariant` write repainted every part wearing it (A3-08);** it now changes nothing, and a real
   change repaints only the current wearers (the binder indexes them).
 - **`TweenService` allocated an array every frame (A3-09);** its step reuses one snapshot array.
-- **A failed load or reload left its logic-slot formulas behind (A2-04).** The `logic_define`/`logic_reset`
-  changes a failed build's chunk made are put back, so a mod that never loaded no longer answers the game's formula
-  calls and a failed reload leaves the loaded mod's formulas untouched; a successful reload still replaces them.
+- **A failed load or reload left its logic-slot formulas behind (A2-04, B2-03, B2-05).** The `logic_define`/
+  `logic_reset` changes a failed build's chunk made are put back, so a mod that never loaded no longer answers the
+  game's formula calls and a failed reload leaves the loaded mod's formulas untouched; a successful reload still
+  replaces them. This includes another live mod's formula the failed chunk reset (a reset by a successful load or by
+  the formula's own mod stands), and a formula defined inside a `coroutine.create` body: it is recorded on the mod's
+  main state from any stack, where without the Rbx API it used to land on the coroutine's state — a failed load did
+  not remove it and a successful reload deleted it.
 - **A mod whose thread faulted every frame escaped quarantine while any timer succeeded (A2-06).** A successful
   hook or timer call no longer resets a streak that a scheduler fault of the same frame lengthened.
-- **Mod-API argument errors named CLR types (A2-08).** `store_set({}, 'v')` read "Cannot convert LuaValueType.Table
-  to System.String." and some errors were prefixed twice (`hooks_on: hooks_on: …`); they now read like Lua's own,
-  `bad argument #1 to 'store_set' (string expected, got table)`.
+- **Mod-API argument errors named CLR types (A2-08, B2-12).** `store_set({}, 'v')` read "Cannot convert
+  LuaValueType.Table to System.String." and some errors were prefixed twice (`hooks_on: hooks_on: …`); they now
+  read like Lua's own, `bad argument #1 to 'store_set' (string expected, got table)`. A string parameter of the
+  mod-core API takes a number as Lua's library does, as the text `tostring` gives it (`store_set(7, 8)` stores
+  `"7"` = `"8"`; it used to fail with an error real Lua never raises); a boolean or a table is still refused. A
+  host function that fails to read a value that is not one of its arguments (a table field, a returned value)
+  says `bad value in 'fn' (x expected, got y)`. The Rbx surface is unchanged: `Part.Name = 5` and
+  `player:Kick(42)` are still refused (`TODO.md`).
 - **`mods_call` could stall a frame for seconds (A2-10, in part).** An export ran under a fresh handler budget
   (50,000,000 steps, 10 s) with no cancellation, so one call from a `Heartbeat` handler held the frame. It now runs
   with its caller's token (stopping the caller stops the export) and, from a signal handler, within that handler's
@@ -446,11 +463,21 @@ A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for that roun
   `Instance.new("Part")`, `cloning Part`, `TweenService:Create`, `restoring Part`, `creating Part` — with a fix hint
   to `Destroy()` what is no longer needed; a refusal an admission check writes as plain text stays an
   `InvalidOperationException` with that text.
-- **A cancellation that crossed a stopped run's host function became an error `pcall` could catch;** it stays a
-  cancellation.
-- **A client's remote sent before its admission could get it disconnected (A4-04).** A client drops every send
-  until the server has admitted it — counted in `MirrorNetworkBridge.UnadmittedSendsDropped`, said once, never
-  charged — and an `InvokeServer` fails at once.
+- **A load or thread stopped while inside a host function that runs mod code for it (`mods_call`) failed with that
+  function's error** ("mods_call: The operation was cancelled…"); it now fails with the same cancellation as a stop
+  anywhere else in its code (pinned by a test since B2-08, which also corrected the stated reason).
+- **A client's remote sent before its admission could get it disconnected (A4-04, B1-07).** A client puts nothing
+  on the wire until the server has admitted it. An unreliable remote is dropped — counted in
+  `MirrorNetworkBridge.UnadmittedSendsDropped`, said once, never charged. Reliable `FireServer` calls and
+  `InvokeServer` requests are held in order (at most 256 messages / 256 KiB), charged when held, and sent right
+  after the admission is bound, before the readiness acknowledgement, so a script that fires at startup no longer
+  loses them; one past the bound is dropped uncharged, counted and said once, and an `InvokeServer` among them fails
+  at once. A held `InvokeServer`'s 30 s timeout runs while it is held, and a connection that closes before its
+  admission drops the hold (`UnsentPacketsDropped`) and fails every held `InvokeServer`.
+- **An admission outlived its connection (B1-08).** A client that stopped and started again within one frame kept
+  the old admission. An admission now belongs to its connection: the new one starts unadmitted
+  (`AdmittedActorId` is null until its own admission), calls on the old connection fail, and new sends are held
+  until the new admission; a binding made before any connection belongs to the next one.
 - **A malformed client payload threw inside the transport's handler (A4-06),** which on Mirror logged an error and
   dropped the client for one bad packet; the world drops and counts it.
 - **`InvokeClient` to a player without a connection waited 30 s (A4-07);** it fails at once and leaves nothing
@@ -460,8 +487,10 @@ A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for that roun
   the bridge (`INetworkBridge.AttachServerClock`), anchors carry the held value and
   `CoreAiServerClockMessage.HeldAheadOfWallSeconds`, a hold change or a jump over 1 s sends a reliable step anchor
   at once, and a client holds while `INetworkBridge.IsServerClockHeld` is true.
-- **One late clock anchor pulled a client's clock seconds back (A4-13).** A single anchor more than 1 s behind the
-  estimate is set aside (`ClockAnchorsSetAside`) and taken only when the next anchor agrees with it.
+- **One late clock anchor pulled a client's clock seconds back (A4-13, B1-10).** A single anchor more than 1 s
+  behind the estimate is set aside (`ClockAnchorsSetAside`) and taken only when the next anchor, carried back to
+  the moment the set-aside one arrived, reads the server's clock within 1 s of it; otherwise the new anchor is set
+  aside in its place (the code used to take the set-aside anchor on any next one).
 - **A host's own `DisconnectActor` left the connection open and bound to nobody (A4-09).** The client is sent a
   `Kicked` notice, the session is forgotten and the transport drops the connection on a later `Pump`
   (`WorldReleasedConnections`).
@@ -476,6 +505,32 @@ A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for that roun
   tweens and pending waits are removed with the failed load.
 - **The caller of an `OnServerInvoke` callback stopped by its budget read Lua-CSharp's cancellation text (A2-07);**
   it is answered "the RemoteFunction callback was stopped: it exceeded its execution budget".
+- **Mods restarted in id order, so a world whose mods use each other at init could not reload its own save
+  (A1-02).** Both restart paths — `RehydrateFromStore` and a world restore — started mods by ordinal id and a world
+  package recorded no order, so a mod that read at init what a later-id mod created failed, and the all-or-nothing
+  restore refused the whole save ("Castle is not a valid member of Workspace"). A mod's manifest now records its
+  load order (`LuaModManifest.LoadOrder`): a first load, and a mod created on the Hub, gets one past the highest
+  value in the store, dormant mods included; a reload, a Hub edit, a bundled update and a seeder update keep it; an
+  unload followed by a load moves the mod to the end; a rehydrate never stamps. Both paths start mods without an
+  order (older stores and packages, freshly seeded bundled mods) first by ordinal id, then the ordered mods
+  ascending, ties by id. The world package carries the field; `0` is not written, so an unordered package is
+  byte-identical to before and `format_version` is unchanged, and a reader older than the field refuses a package
+  that carries it explicitly instead of restoring it in the wrong order.
+- **A world loaded from a package lost the server's clock hold (B1-01).** The world-session staging wrapper
+  (`StagedNetworkBridge`) left `IsServerClockHeld`, `AttachServerClock` and `DetachServerClock` to their interface
+  defaults, so every world opened from a package — at startup, from the Hub or by the AI — handed the transport no
+  clock: clients read the server's raw wall clock with no hold (302 s apart instead of 0.5 s in the regression
+  test). It forwards all three now; the attach is queued until the staged world goes live, so a world whose load
+  fails never displaces the live world's clock. A drift guard checks that every `INetworkBridge` wrapper implements
+  every default-bodied member.
+- **Watching an unmodelled property leaked a connection per instance (B1-04).** The never-firing signal
+  `GetPropertyChangedSignal` returns for a real Roblox property CoreAI does not model was not tied to its instance,
+  so 50 respawned characters left 50 live connections on destroyed instances. The signal is kept per instance and is
+  the same object for a name, as in Roblox, and `Destroy()` disconnects its connections.
+- **A server remote fired every frame logged every frame on a client (B1-06).** A server payload naming an
+  instance the client's registry does not hold (the client registry is not a replica yet) was reported on every
+  payload; it is reported at the 1st, 2nd, 4th, 8th… such payload, like a client's, and counted
+  (`UnresolvedInstanceReferences`, `UnresolvedInstanceReferencePayloads`).
 
 ### Added
 
@@ -546,12 +601,16 @@ A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for that roun
   `maximumManualSlots`/`maximumManualSlotBytes` constructor parameters; `InstanceTagStore.MaxTagLength` and
   `ValidateNewTag`; `RbxHumanoid.MoveDirectionResolution`; the `RbxServerClockReader` delegate and
   `INetworkBridge.IsServerClockHeld`, `AttachServerClock` and `DetachServerClock` (default interface members, so
-  existing bridges compile unchanged; the world-session staging wrapper does not forward them yet, see `TODO.md`).
+  existing bridges compile unchanged; the world-session staging wrapper forwards them, B1-01).
 - Mirror (`com.neoxider.coreaimirror`), audit round 1: `CoreAiServerClockMessage.HeldAheadOfWallSeconds`;
   `MirrorNetworkBridge.IsServerClockHeld`, `AttachServerClock`, `DetachServerClock` and the counters
   `UnadmittedSendsDropped`, `WorldReleasedConnections`, `ClockStepAnchorsSent`, `ClockAnchorsSetAside`;
   `CoreAiMirrorSessionHost.HostModeConnectionsRefused` and an optional `log` constructor parameter (where a refused
   host-mode connection is reported; a Unity error by default).
+- Audit round 2: `LuaModManifest.LoadOrder` and `LuaModManifest.NextLoadOrder(store)` (the shared rule for host
+  tools that write manifests). Mirror: `MirrorNetworkBridge.MaxHeldSendsUntilAdmitted` (256),
+  `MaxHeldBytesUntilAdmitted` (256 KiB) and the counters `SendsHeldUntilAdmitted` and `AdmissionHoldOverflowDrops`;
+  `AdmittedActorId` now answers for the live connection only.
 
 ### Changed
 
@@ -576,7 +635,10 @@ A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for that roun
   mod-API argument error reads `bad argument #n to 'fn' (x expected, got y)`; `task.*` threads started by a
   remote-started handler count against the sender; `os.time(t)` before 1970 is `nil`; a client sends no remote
   before its admission; `coroutine.resume` refuses a task, signal-handler or main-chunk thread; and library calls
-  back into Lua nest at most 200 deep.
+  back into Lua nest at most 200 deep. After the second audit round: a client holds its reliable remotes until its
+  admission and sends them right after it (unreliable ones are still dropped); mods restart and restore in their
+  load order; a mod-core string parameter takes a number as `tostring` gives it; and `warn` counts towards the
+  200-deep cap.
 - **Breaking wire change (Mirror).** The readiness, clock and notice messages are new and the clock anchor gained
   `HeldAheadOfWallSeconds`, so server and client must run the same CoreAI version. A missing message fails loudly
   with Mirror's default `exceptionsDisconnect`: an older server has no handler for `CoreAiClientReadyMessage` and
@@ -594,7 +656,9 @@ A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for that roun
   near-miss rule, `os.time(t)` returning `nil` before 1970 and the client clock hold, the `coroutine.resume` refusal
   of task threads (use `task.spawn(t)`), the 200-deep library call cap, the instance quota's `BUDGET_EXCEEDED`, the
   100-character tag rule, readable removal handlers and the Lua-style `bad argument` errors of the mod-core
-  functions.
+  functions. After the second audit round it says that the mod-core string parameters take a number as `tostring`
+  writes it (a boolean or a table is refused), and that an unmodelled property's never-firing signal is the same
+  signal for a name and is disconnected by `Destroy()`.
 
 ## [7.45.0] - 2026-09-24
 

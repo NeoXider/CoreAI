@@ -66,8 +66,9 @@ The reverse is refused as well: `coroutine.resume` of a task, signal-handler or 
 coroutine.resume; …" without touching it — resume a parked task with `task.spawn(t)`. A
 `coroutine.create` body is held to the memory budget of the run that resumes it, and calls from library
 functions back into Lua (a `table.sort` comparator, `__tostring` through `tostring`/`print`/
-`string.format`, a `gsub` callback, `__pairs`/`__ipairs`, `coroutine.resume`) nest at most 200 deep per
-thread, after which they raise a catchable `C stack overflow (…)`; plain Lua recursion is not limited.
+`string.format`, a `gsub` callback, `__pairs`/`__ipairs`, `coroutine.resume`, and `warn` converting an
+argument through the global `tostring`, a mod's own included) nest at most 200 deep per thread, after
+which they raise a catchable `C stack overflow (…)`; plain Lua recursion is not limited.
 
 ### Clocks
 
@@ -117,7 +118,8 @@ missing, added, changed or swapped with its neighbour; an edit of a digit never 
 `Attachment0`/`Attachment1` stay distinct). Any other name is accepted: a bound or catalogued
 property fires as described below, and a real Roblox property CoreAI does not model yet
 (`Humanoid.FloorMaterial`, `Players.NumPlayers`) gets a signal that never fires, with one log note per
-class and name (at most 64 per world, then one line saying the rest are suppressed). A name longer than
+class and name (at most 64 per world, then one line saying the rest are suppressed). That signal is kept per
+instance and is the same object for a name, as in Roblox, and `Destroy()` disconnects its connections. A name longer than
 100 characters is refused. Deviation: Roblox's deprecated lower-case aliases (`archivable`,
 `className`, `maxHealth`, `userId`, `localPlayer`, `brickColor`, `focus`) are near misses of the
 current names and are refused, with the current spelling in the hint. Writes
@@ -532,7 +534,9 @@ counted instead of throwing inside the transport, and a failure text in a networ
 200 characters. Values a payload names that this world does not have — an unknown `EnumItem`, an
 instance the sender cannot see — decode as `nil` and are reported per sender at its 1st, 2nd, 4th,
 8th… such payload, with names cut to 64 characters (up to 256 senders are tracked apart, the rest share
-one count); a sender is forgotten when its actor disconnects.
+one count); a sender is forgotten when its actor disconnects. On a client, a server payload naming an
+instance its registry does not hold (a client registry is not a replica yet) decodes as `nil` too and is
+reported at the same powers of two.
 
 A mod whose first load fails leaves no `OnServerInvoke` callback, tween or pending wait behind.
 

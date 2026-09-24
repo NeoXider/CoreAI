@@ -1,5 +1,11 @@
 # MVP2.5 build plan — 2026-09-04
 
+> **History — superseded as a plan on 2026-09-24.** The ladder of record is
+> [`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4](../Docs/CoreAIMods/ROBLOX_API_ROADMAP.md): the rung order below
+> (MVP3 → MVP8 → MVP11 → MVP12) is now MVP3 → MVP4 (script contexts, pulled forward as the hard dependency of
+> host mode) → MVP5 (the old MVP11) → MVP6 (the old MVP12); the old MVP8 landed as "Gameplay services I". The
+> repository facts and the §F risks remain useful as a record; where they disagree with the tree, the tree wins.
+
 Build plan for the three remaining MVP2.5 rungs (MVP8, MVP11, MVP12) against the owner decisions
 recorded in `dev-docs/MVP25_ONLINE_PLAN.md` §7 ("DECIDED 2026-09-04"). Every repository fact below
 was read from source on `main` at `dc86623f` (7.13.0); every Roblox semantic was checked against the

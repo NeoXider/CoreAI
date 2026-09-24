@@ -34,7 +34,7 @@ Use these paths when you have a concrete task:
 | Debug LLM requests, streaming, or WebGL SSE | CoreAiUnity streaming docs -> CoreAI routing docs -> transport-specific source comments |
 | Add a new LLM tool | Tool-calling best practices -> AgentBuilder -> relevant tests |
 | Expose Lua or AI-authored scripts | Lua sandbox security -> runtime binding code -> sandbox tests |
-| Decide what to build next | Roadmap -> TODO -> orchestration plan |
+| Decide what to build next | Roadmap (§4 ladder) -> PLAN.md (current status) -> TODO (open work by rung) |
 
 ## Roblox-style mod API (Rbx)
 
@@ -47,7 +47,7 @@ The Lua surface a mod builds worlds with, and the artifacts it produces:
 | [Assets/CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md](../Assets/CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md) | The procedural shader catalog behind `Enum.Material`: it defines all 45 items and the magenta diagnostic fallback; the packaged texture catalog overrides thirty-six of them at runtime, and the other nine stay procedural. |
 | [Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md](../Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md) | Catalog-driven texture materials: thirty-six packaged CC0 sets, project-local override catalog for any of the 45 items (ambientCG downloader, Quixel Bridge / Fab importer), projection and tint rules. |
 | [CoreAIMods/RBX_API_SKILL.md](CoreAIMods/RBX_API_SKILL.md) | How the agent-facing `Rbx API` skill text is produced and kept in sync. |
-| [CoreAIMods/ROBLOX_API_ROADMAP.md](CoreAIMods/ROBLOX_API_ROADMAP.md) | The definitive MVP0–MVP17 ladder and every locked API decision. |
+| [CoreAIMods/ROBLOX_API_ROADMAP.md](CoreAIMods/ROBLOX_API_ROADMAP.md) | The one MVP ladder of record (MVP0–MVP19, renumbered 2026-09-24 with an old → new table) and every locked API decision. |
 | [CoreAIMods/mod-authoring.md](CoreAIMods/mod-authoring.md) | Writing a CoreAI Lua mod: the `@coreai` header, the always-available mod API, capability tiers, Roblox-style signals and services, the per-resume execution budget, bundled mods. |
 | [CoreAIMods/CHARACTER_MOTOR_BRIDGE.md](CoreAIMods/CHARACTER_MOTOR_BRIDGE.md) | Driving Rbx characters with the game's own character controller: `IRbxCharacterMotor` / `IRbxCharacterMotorProvider` and the rules a bridge must keep. |
 | [CoreAIMods/SCRIPT_ENGINE_SEAM.md](CoreAIMods/SCRIPT_ENGINE_SEAM.md) | The engine-neutral scripting contracts and the Lua-CSharp adapter layer behind them. |

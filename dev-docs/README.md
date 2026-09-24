@@ -5,11 +5,11 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 ## Roblox API track, multiplayer and replication
 
 - MVP2_SCHEDULER_PLAN.md — `ModScheduler` core design: the phase pipeline, wait/delay heaps, per-thread ownership
-- MVP2_MULTIPLAYER_PLAN.md — MVP2 + multiplayer foundation, plan of record (v6) after five adversarial audit rounds
+- MVP2_MULTIPLAYER_PLAN.md — MVP2 + multiplayer foundation, plan (v6) after five adversarial audit rounds; history, superseded by the ladder in `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4
 - MVP2_PHASE1_CORRECTION.md — what phase 1 actually delivered: types built, not wired into production — the failure mode to watch for
 - MVP2_ACCEPTANCE_MANIFEST.md — the MVP2 acceptance manifest: fixed gates, each with a negative twin
-- MVP25_ONLINE_PLAN.md — MVP2.5 online play plan: entry gates, build order, acceptance gates, the owner's decisions of 2026-09-04
-- MVP25_BUILD_PLAN_2026-09-04.md — build plan for MVP8 / MVP11 / MVP12 against those decisions, every repository fact read from source
+- MVP25_ONLINE_PLAN.md — MVP2.5 online play plan: entry gates, build order, acceptance gates, the owner's decisions of 2026-09-04; history as a plan (superseded 2026-09-24), its decisions stand unless the 2026-09-24 plan decisions revisit them
+- MVP25_BUILD_PLAN_2026-09-04.md — build plan for the old MVP8 / MVP11 / MVP12 against those decisions, every repository fact read from source; history (superseded 2026-09-24)
 - MVP8_ACCEPTANCE_MANIFEST.md — the frozen MVP8 Tier-A fixture manifest gate P8.5 cites
 - REPLICATION_PHASE0.md — the engine-free replication core as it exists after 7.39.0: what is built and tested registry-to-registry, what is not wired, the two named limits
 - MOD_INSTANCE_OWNERSHIP_PLAN.md — mod-owned instances + cleanup-on-unload design

@@ -54,8 +54,10 @@ handler budget (50,000,000 steps / 10 s; tracked in `TODO.md`).
 
 Wrong arguments to these functions fail the way stock Lua reports them —
 `bad argument #1 to 'store_set' (string expected, got table)` — with no CLR type name and no doubled
-`hooks_on: hooks_on:` prefix. A number is not converted to a string for a string parameter (stock Lua would
-convert it; see `TODO.md`).
+`hooks_on: hooks_on:` prefix. A string parameter takes a number as `tostring` gives it, as stock Lua does
+(`store_set(7, 8)` stores `"7"` = `"8"`); a boolean or a table is refused. A value that is not an argument (a
+table field, a returned value) and has the wrong type reads `bad value in 'fn' (x expected, got y)`. The Rbx
+surface (`Part.Name = 5`, `player:Kick(42)`) still refuses a number where it expects a string (`TODO.md`).
 
 ## Capability tiers — gate the GAME bindings
 The mod-core + inter-mod API above is always present. Tiers gate the **game** bindings:
@@ -130,19 +132,22 @@ member exists.
 
 A known catalog service without an implementation also resolves successfully. It returns a
 placeholder, and the first member read, write, or method lookup raises `NOT_IMPLEMENTED` with the
-delivery rung recorded by `ServiceCatalog`:
+delivery rung recorded by `ServiceCatalog`. The phase a stub names is the old ladder's number until the
+stubs are retagged (`TODO.md`); the rung that delivers it now is in the last column
+([ROBLOX_API_ROADMAP.md](ROBLOX_API_ROADMAP.md) §4.1 maps the two):
 
-| Service | Catalog delivery rung |
-|---|---|
-| `DataStoreService` | MVP9 |
-| `ContextActionService` | MVP10 |
-| `SoundService` | MVP15 |
-| `AIService` | a future MVP (reserved) |
-| `PathfindingService` | no planned MVP (not planned) |
-| `MarketplaceService` | no planned MVP (not planned) |
+| Service | Phase the stub names | Rung now |
+|---|---|---|
+| `DataStoreService` | MVP9 | MVP16 |
+| `ContextActionService` | MVP10 | MVP7 (ContextActionService-lite), MVP15 (touch buttons) |
+| `SoundService` | MVP15 | MVP17 |
+| `AIService` | a future MVP (reserved) | MVP11 |
+| `PathfindingService` | no planned MVP (not planned) | — |
+| `MarketplaceService` | no planned MVP (not planned) | — |
 
 The catalog also retains fallback registrations for `RunService` (MVP2) and `UserInputService`
-(MVP10). The standard runtime replaces those fallbacks with their live tree-backed implementations
+(landed in MVP1). The standard runtime replaces those fallbacks with their live tree-backed
+implementations
 before returning them.
 
 This delayed failure is intentional. Roblox scripts commonly acquire services at the top of a file
@@ -154,7 +159,7 @@ local DataStoreService = game:GetService("DataStoreService") -- resolves
 
 print("unrelated setup still runs")
 
--- The first member lookup fails loudly and names MVP9.
+-- The first member lookup fails loudly and names its phase, MVP9 (the old number of MVP16).
 DataStoreService:GetDataStore("Saves")
 ```
 
@@ -210,7 +215,9 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   memory alive between two yields" — build big data across several yields, or keep less of it.
 - **Library calls back into Lua nest at most 200 deep per thread.** A `table.sort` comparator, a `__tostring` run by
   `tostring`, `print` or `string.format`, a `gsub` replacement function or `__index`, a `__pairs`/`__ipairs`
-  metamethod and a coroutine run by `coroutine.resume` each open one level; the 201st raises `C stack overflow
+  metamethod, a coroutine run by `coroutine.resume` and `warn` converting an argument through `tostring` (your own
+  `tostring` included, so `tostring = warn; warn(1)` raises the catchable error below instead of crashing the
+  game) each open one level; the 201st raises `C stack overflow
   (<function>: more than 200 nested calls from library functions back into Lua)`, which `pcall` catches. Plain Lua
   recursion and the metamethods the VM runs itself (`__index` on a table access, arithmetic, comparisons, `__call`)
   are not limited by it.

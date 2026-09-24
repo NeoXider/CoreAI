@@ -172,8 +172,10 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
 - **Calls from library functions back into Lua nest at most 200 deep per thread**
   (`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's `LUAI_MAXCCALLS`): a `table.sort` comparator, a
   `__tostring` run by `tostring`, `print` or `string.format`, a `gsub` replacement function or
-  `__index`, a `__pairs`/`__ipairs` metamethod, and a coroutine run by `coroutine.resume`, which
-  continues its resumer's count. The next call raises `C stack overflow (<function>: more than 200
+  `__index`, a `__pairs`/`__ipairs` metamethod, a coroutine run by `coroutine.resume`, which
+  continues its resumer's count, and `warn` converting an argument through the global `tostring` (a
+  mod's own `tostring` included, so `tostring = warn; warn(1)` stops at the cap instead of overflowing
+  the .NET stack and ending the process). The next call raises `C stack overflow (<function>: more than 200
   nested calls from library functions back into Lua)`, an ordinary error `pcall` catches. Each of these
   calls is a nested VM run on the .NET stack, and an error raised N levels deep is rethrown once per
   level with a growing stack trace, so unwinding cost about N² with no instruction running and no hook
@@ -181,7 +183,7 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
   64 s under a 10 s budget. Plain Lua recursion and the metamethods the VM runs in its own loop are not
   counted. Open (`TODO.md`): `__concat`, which the VM calls as a nested run where no sandbox code sits;
   a scheduler-owned thread resumed by host code from inside a library call starts from zero; and host
-  callbacks that re-enter Lua outside `CallCountedAsync`.
+  callbacks other than `warn` that re-enter Lua outside `CallCountedAsync`.
 - `execute_lua` (`LuaCsGameToolExecutor`) and `LuaCsAiEnvelopeProcessor` normalize and truncate results:
   the result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** (`LuaCsAiEnvelopeProcessor.MaxResultSummaryLength` / `MaxErrorMessageLength`) before they reach the model or the repair path.
 - **An error value is one line, never a CLR dump.** `LuaCsApiRegistry` (and the Rbx bindings) turn a
