@@ -23,6 +23,23 @@ the engine-bound cases Inconclusive by design. This section records everything l
 
 - [ ] **Unity verification gate (owner/CI), then bump and tag:** full EditMode 0 failed and PlayMode `FastNoLlm`
       0 failed on this tree. Every EditMode fixture named below was written without a Unity run.
+- [ ] **Check the tests (owner, in Unity 6000.3.14f1).** Run each suite below and fix, never skip or weaken, any
+      failure; the Linux suites already pass but prove nothing about Mono/IL2CPP or engine-bound code:
+  - [ ] EditMode, every package, in all four positive-module legs (`core`, `llm`, `lua`, `full`) and with Mirror
+        installed (`MIRROR` define): 0 failed. Compare the counts with the 2026-08-01 matrix above.
+  - [ ] The suites that have never run anywhere: every `CoreAIMirror/Tests/EditMode` fixture (compile-only so far),
+        `Mvp3WorldPackageFollowUpEditModeTests` (MVP3 DoD (c)/(d)/(f), startup selection, network guard — its
+        `[UnityTest]`s cannot run on Linux), `Mvp1AcceptanceGateEditModeTests`, the binder / `RbxWorldHost` / camera /
+        character-motor fixtures, the engine-bound tests moved into Unity-only classes by `80f2f30c`
+        (`RbxApiLuaBindingsProductionContainerEditModeTests`, `InstanceGameObjectBinderCrossLayerEditModeTests`,
+        `RbxWorldHostLazyWorldWrapEditModeTests`, `UnityRbxCharacterMotorLifecycleEditModeTests`), and the G10
+        no-LLM test (`core`/`lua` legs only).
+  - [ ] PlayMode `FastNoLlm` (incl. `Mvp8PhysicsPlayModeTests`): 0 failed.
+  - [ ] The 37 Lua-tier cases the Linux runner reports as not executed (listed in `tools/portable/LuaTests/README.md`).
+  - [ ] Guard behaviour on Mono and IL2CPP: a budget trip cannot be caught by `pcall`/`xpcall` and the state stays
+        guarded (`LuaCsGuardFrameAndAllocationEditModeTests`, `LuaCsSecureSandboxEditModeTests`) — the fix relies on
+        Lua-CSharp internals verified on .NET 8 only.
+  - [ ] A WebGL build smoke of the world package (save → reload the page → load), see the item below.
 - [ ] **Real WebGL page-reload gate** for the world package: save → reload the page → the bytes and the startup
       selection survive (`Docs/CoreAIMods/WORLD_PACKAGE.md`, "Acceptance status").
 
