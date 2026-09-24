@@ -20,8 +20,16 @@ untrusted package is read as "no order", not refused), by ordinal id, then the o
 ties by id, so a world whose mods use each other's work at init reloads its own save. The field is
 additive: `format_version` is unchanged and a package whose mods carry no order is byte-identical to one
 written before it existed; a reader older than the field refuses a package that carries it explicitly
-("Could not find member 'LoadOrder'") and never restores it in the wrong order. Tests: the three
-`WorldPackage_*` load-order cases in `Mvp3WorldPackageFollowUpEditModeTests`.
+("Could not find member 'LoadOrder'") and never restores it in the wrong order. A recorded order is at
+most 2^53 (`LuaModManifest.MaximumLoadOrder`): a package that carries a larger one is refused on read,
+and capture writes such a stored value as no order. Capture refuses a world whose mod source store
+cannot be listed (`ILuaModSourceStore.List` throws or answers a listing marked unreadable) instead of
+saving the world without its mods. A mod manifest may also carry `SuspendedAfterBudgetTrips` (omitted
+when false; `mod-system.md` §2), so a mod suspended after repeated budget trips stays suspended across a
+save and load. Tests: the three `WorldPackage_*` load-order cases in
+`Mvp3WorldPackageFollowUpEditModeTests`, and `Package_ModLoadOrderPastTheMaximum_IsRefusedOnRead_AndCapturedAsUnordered`,
+`Package_RoundTripAndCapture_KeepSuspendedAfterBudgetTrips` and
+`Capture_FromAStoreThatCannotBeListed_IsRefused_NotSavedWithoutItsMods` in `Mvp3WorldPackageEditModeTests`.
 
 The durable v1 surface is class/name/Archivable, world-owned origin/ACL/revision metadata, attributes,
 tags, BasePart properties, Model PrimaryPart/stored WorldPivot, ClickDetector distance, camera CFrame,
@@ -119,11 +127,18 @@ The mod limit holds at the source too. A live world stores at most 256 distinct 
 unloaded mod keeps its source, `manage_mods` action `forget` removes it — so a load that would add a
 257th distinct source is refused before its chunk runs, with a hint to forget a mod first, and a mod
 whose source is already stored is never refused. `FileLuaModSourceStore` refuses a 257th stored id and
-an exact replacement set of more than 256 sources the same way. A world that is already past the
-limit cannot be captured (`RbxWorldPackageFormatLimitException`), so `forget` and `unload` run
-without their pre-mutation backup until the world is under the limit again, while every other gated
-mutation stays refused. A bare `LuaCsModRuntime` composition without the world session gets only the
-store's refusal, which is logged: its 257th mod runs without a persisted source (see `TODO.md`).
+an exact replacement set of more than 256 sources the same way: its `Save` throws the refusal. The
+session and the store count by one rule, `ILuaModSourceAdmission.CanAdmit` (public, implemented by the
+file store and the session store): the session used to count the manifests the store could list while the
+store counted folders holding a manifest file, so one unreadable manifest let the session admit a mod
+whose source the store then refused to keep. A load whose source the store did not keep anyway is undone
+as a failed load — the formula it displaced is put back and no revision is written — and the tool result
+says why. A world that is already past the limit cannot be captured
+(`RbxWorldPackageFormatLimitException`), so `forget` — and only `forget`; an `unload` keeps the source
+and gains nothing — runs without its pre-mutation backup until the world is under the limit again,
+while every other gated mutation stays refused. A bare `LuaCsModRuntime` composition without the world
+session gets only the store's refusal, which is logged: its 257th mod runs without a persisted source
+(see `TODO.md`).
 
 The hierarchy validator and capture traversal are iterative and linear. Capture checks depth/count
 before accepting each node. The writer preflights
@@ -146,8 +161,11 @@ are create-once. A manual slot name is 1-64 letters, digits, `-` or `_` after tr
 whitespace, and not a reserved Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`,
 `LPT1`-`LPT9`, case-insensitive); an autosave name is exactly one `.world` file name with no
 directory part and no character a file name cannot hold on a supported player (`"`, `<`, `>`, `|`,
-a control character, `\0`). The autosave name is checked character by character rather than through
-`Path.GetFileName`, which throws on Mono for exactly those characters. The store throws
+a control character, `\0`) and not a reserved Windows device name either (`CON.world`, `nul.WORLD`,
+`COM1.x.world`, `LPT9.world` are refused with "Auto package name '…' is a reserved device name.";
+`CONSOLE.world` is fine), because such a name opens the device instead of a file. The autosave name is
+checked character by character rather than through `Path.GetFileName`, which throws on Mono for
+exactly those characters, and `load_autosave` answers `read_failed` for any failure to open the file. The store throws
 `ArgumentException` for a name that breaks these rules. A store keeps at most 64 manual slots and
 256 MiB of manual-slot bytes (`DefaultMaximumManualSlots`, `DefaultMaximumManualSlotBytes`; the
 constructor parameters `maximumManualSlots` and `maximumManualSlotBytes` change them); a save past
@@ -188,7 +206,19 @@ Every mutating `manage_mods` action (`load`, `reload`, `unload`, `import`, `forg
 the deterministic trigger `manage_mods-<action>`. Read-only `list`, `get_source`, `export`, `versions`,
 and `diagnostics` bypass capture and autosave. A null or unsuccessful write result, store/capture
 exception, or cancellation prevents the Lua/runtime mutation and becomes the tool's structured
-failure. Manual slots are not read, written, or rotated by this gate.
+failure. Manual slots are not read, written, or rotated by this gate. An `execute_lua` queued behind a
+confirmed load keeps its own error and gets the explanation (the world it ran against was replaced)
+after it, instead of in its place.
+
+A world session needs more from the shared gate than serialization: to keep the startup selection
+(below) in step it must see each mutation start and end, and it runs the boot-time startup restore
+under the gate. That second face is the public `IStartupAwareWorldMutationGate` (`IsHeld`,
+`MutationStarting`, `AfterMutationAsync`, `ExecuteWithoutBackupAsync`), which `ConfirmedWorldMutationGate`
+implements and a host gate that wraps one forwards. A host gate without it still serializes and backs
+up every mutation, but the controller says once, through its diagnostics, that it falls back: the
+startup world then follows mod source changes only (recorded from the frame pump), gated changes to the
+world tree are not recorded for the next start, the boot restore runs without the gate, and a source
+change may be recorded in the middle of a gated mutation (the next change records the finished state).
 
 File reads/writes are chunked with PlayerLoop yields. The JSON/ZIP codec itself is not incremental, so
 the actual WebGL player refuses to write a package above 4 MiB, with more than 4,096 instances, more
@@ -239,17 +269,44 @@ with the process. A failed selection write never rolls the live world back: `Rbx
 reports `StartupSelectionPersisted` / `StartupSelectionError`, and the next start opens the previous
 selection.
 
-While the selected world stays live, the selection follows it. After every mutation through the shared
-gate (`execute_lua`, a mutating `manage_mods` action) the session records the world as it is now as a
-new create-once startup entry — tree and exact mod sources from one capture, taken while the gate is
-still held — so the changes the AI makes after the confirmation reopen too; before, the entry stayed
-the package confirmed at load time, and mods whose sources lived only in the session's source version
-were gone after a restart. A refresh that fails (capture, write or durability) keeps the previous entry
-and logs `The live world changed ('<trigger>'), but the change was not recorded for the next start:
-<reason> The next start opens the world as it was before it.` The default world (nothing confirmed, or
-the Hub reset) and a world loaded through a raw host load are never recorded. Edits made on the Hub
-**Mods** page do not pass the gate, so they reach the entry only with the next gated mutation (see
-`TODO.md`). `IRbxWorldStartupSelection` (implemented by `RbxWorldRuntimeSessionController`, and
+While the selected world stays live, the selection follows it: the session records the world as it is
+now as a new create-once startup entry — tree and exact mod sources from one capture — so the changes
+made after the confirmation reopen too; before, the entry stayed the package confirmed at load time, and
+mods whose sources lived only in the session's source version were gone after a restart. What triggers
+a record (`RbxWorldRuntimeSessionController`, `Infrastructure/RbxWorldPackageContracts.cs`):
+
+- **A change to the mod sources is recorded at once**, whoever made it. A gated call (`execute_lua`, a
+  mutating `manage_mods` action) records it while the gate is still held; a write to the session's
+  source store from anywhere else — the Hub **Mods** page, host code — is recorded by the frame pump at
+  the next frame (so it needs the pump), never under the shared gate, and at most once per frame.
+- **A change to the world tree alone** — a world-owned instance created, removed, re-parented or
+  written, seen through the registry's events while a gated call runs — is recorded at most once per
+  `StartupRefreshInterval` (5 s by default; `TimeSpan.Zero` records every change at once). The first
+  change after a quiet interval is recorded at once; a change inside the interval is recorded by the
+  frame pump once it has passed, together with every change made meanwhile. A change made within the
+  interval before the process ends is not recorded (`TODO.md`). Each record is a whole package written,
+  synced and pruned while the gate is held — on WebGL up to 4 MB handed to the browser — which is why
+  an AI building in many small calls no longer writes one per call.
+- **Nothing else is.** A call that changed neither — a read-only call, one that only moved parts through
+  physics or moved the camera, or one that changed only the mods' own instances, which no entry holds —
+  writes nothing, and an entry whose content equals the newest one is not written again. (Before, the
+  refresh compared a digest of a whole capture, camera and part poses included, so in a live world every
+  gated call wrote an entry.)
+- **A world the startup restore would refuse is not recorded.** The refresh runs the restore's own checks
+  first (an active `Full`-capability mod, an ACL downgrade): such a world keeps the previous entry, and
+  the caller is told — a `manage_mods` result carries a `startup_warning` field, `execute_lua` appends
+  the note to its output, the log says it once per refused state — instead of every later start falling
+  back to the default world without a word. The isolation rule for `Full` mods is not weakened: in a
+  `Full`-tier composition a world with an active `Full` mod does not carry over.
+- **A record that fails** (capture, write or durability) keeps the previous entry and logs `The live
+  world changed ('<trigger>'), but the change was not recorded for the next start: <reason> The next
+  start opens the world as it was before it.` The caller's tool result carries the note too, and
+  `RbxWorldRuntimeSessionController.StartupSelectionNote` keeps it for a change made outside the gate
+  (a Hub edit) until a later record succeeds.
+
+A Hub edit made while a confirmed load is recording its selection is not lost: it is recorded after it.
+The default world (nothing confirmed, or the Hub reset) and a world loaded through a raw host load are
+never recorded. `IRbxWorldStartupSelection` (implemented by `RbxWorldRuntimeSessionController`, and
 deliberately not by `IRbxWorldRuntimeService`, so no AI tool reaches it) offers
 `RestoreStartupSelectionAsync`, `ClearStartupSelectionAsync` (writes the default marker; the live world
 is unchanged) and `ReadStartupSelectionAsync` (metadata only, no package decode).
@@ -308,7 +365,10 @@ durable startup pointer; the startup selection above is the only one.
 At boot the production composition seeds the bundled mods, then calls
 `RestoreStartupSelectionAsync`, and rehydrates the default world's persisted mods only when nothing was
 restored (`RbxWorldStartupSequence`, which runs without play mode in tests). The restore goes through
-the same staged swap as a confirmed load but writes no `load_world-pre` safety autosave. It never
+the same staged swap as a confirmed load but writes no `load_world-pre` safety autosave, and it holds the
+shared gate (`ExecuteWithoutBackupAsync`), so a mod change or an `execute_lua` that arrives during boot
+waits and then lands on the restored world — such an `execute_lua` reports that its world was replaced,
+by design. It never
 throws: a missing, corrupt, oversized or vanished entry, an ACL downgrade, a source-durability failure,
 an active `Full` mod or a staging failure keeps the default world live and is reported as
 `RbxWorldStartupRestoreOutcome.FellBack` with a diagnostic. It never clears the selection on its own and
@@ -391,13 +451,13 @@ through the Hub page.
 
 ## Acceptance status (MVP3)
 
-**Code complete (2026-09-24); the Unity verification gate is pending.** EditMode (0 failed) and
-PlayMode `FastNoLlm` (0 failed) must still be run in Unity. On Linux, the portable `dotnet test`
-suites report 2112 passed / 0 failed / 3 skipped for the engine-free tests and 1575 passed / 0 failed /
-37 not executed for the Lua tier at `07264057` (1606 passed / 0 failed at `f817225b`) (`tools/portable/LuaTests`, which runs `Mvp3WorldPackageEditModeTests`
-and `Mvp3WorldPackageQaEditModeTests` against a UnityEngine shim; a case that reaches the engine, a
-file-store load included, is Inconclusive by design and counts as not executed). MVP3 is not closed
-until that gate is green and the release is tagged.
+**Code complete (2026-09-24); the Unity verification gate is pending.** EditMode (0 failed) and PlayMode
+`FastNoLlm` (0 failed) must still be run in Unity. On Linux, the portable `dotnet test` suites report
+2137 passed / 0 failed / 3 skipped for the engine-free tests and 1790 passed / 0 failed / 37 not
+executed for the Lua tier at `d4d7f95b`, after audit rounds 1–3 (`tools/portable/LuaTests`, which runs
+`Mvp3WorldPackageEditModeTests` and `Mvp3WorldPackageQaEditModeTests` against a UnityEngine shim; a case
+that reaches the engine, a file-store load included, is Inconclusive by design and counts as not
+executed). MVP3 is not closed until that gate is green and the release is tagged.
 
 Each item of the roadmap's MVP3 Definition of Done is proven by a named test that fails on a wrong
 implementation (EditMode fixtures: `Mvp3WorldPackageEditModeTests`, `Mvp3WorldPackageFollowUpEditModeTests`,
@@ -445,7 +505,7 @@ The residue closed alongside the DoD:
   `WorldLoad_LoopbackActors_DoNotBlockALoad`.
 - **Audit round 1 of the world package** — the mod-source limit:
   `ModSourceLimit_DistinctModBeyondTheFormatLimit_IsRefusedWithTheWayOut_AndTheWorldStaysCapturable`,
-  `ConfirmedBackup_WorldPastTheModLimit_RunsForgetAndUnloadWithoutBackup_AndRefusesOtherMutations`,
+  `ConfirmedBackup_WorldPastTheModLimit_RunsOnlyForgetWithoutBackup_AndRefusesOtherMutations`,
   `Save_DistinctIdBeyondTheWorldPackageModLimit_IsRefused_ExistingIdsStillUpdate`
   (`FileLuaModSourceStoreEditModeTests`); the startup selection following the live world (`[UnityTest]`s,
   Unity only): `StartupSelection_GatedAiChangesAfterAConfirmedLoad_ReopenAfterRestart`,
@@ -468,6 +528,36 @@ The residue closed alongside the DoD:
   `LuaCs_RehydrateFromStore_AfterRestart_StartsModsInTheirLoadOrder_NotInIdOrder`,
   `LuaCs_RehydrateExactOrThrow_AfterRestart_StartsModsInTheirLoadOrder_NotInIdOrder`
   (`LuaCsModRuntimePersistenceEditModeTests`).
+- **Audit rounds 2 and 3 of the world package (B2-01…B2-14, `3d5b62d0`, `23f63eaa`; C2-01…C2-09,
+  `d4d7f95b`)** — the startup selection (`[UnityTest]`s in `Mvp3WorldPackageFollowUpEditModeTests`, Unity
+  only): `StartupSelection_ChangeWithAnActiveFullCapabilityMod_KeepsThePreviousEntryAndSaysWhy`,
+  `StartupSelection_FullCapabilityModForgotten_ChangesAreRecordedAgain`,
+  `StartupSelection_GatedModLoad_IsRecordedOnce_NotAgainOnTheNextFrame`,
+  `StartupSelection_HubAndHostModChangesOnTheStartupWorld_ReopenAfterRestart`,
+  `StartupSelection_UnchangedWorldWritesNoEntry_AChangeWritesExactlyOne`,
+  `StartupSelection_ReadOnlyCallsWhilePartsAndTheCameraMove_WriteNoEntry`,
+  `StartupSelection_WorldChangesInsideTheInterval_AreRecordedOnceItHasPassed`,
+  `StartupSelection_ZeroInterval_RecordsEveryWorldChangeAtOnce`,
+  `StartupSelection_HubChangeTheRestoreWouldRefuse_LeavesANote`,
+  `StartupSelection_HubChangeWhileTheConfirmedLoadRecordsIt_ReopensAfterRestart`; the boot restore and
+  host gates (`Mvp3WorldPackageEditModeTests`, like the rest of this item unless named otherwise):
+  `StartupRestore_HoldsTheSharedGate_SoAModChangeArrivingDuringBootLandsOnTheRestoredWorld`,
+  `StartupRestore_ExecuteLuaArrivingDuringBoot_WaitsAndReportsTheReplacedWorld`,
+  `HostGateForwardingTheStartupFace_RecordsGatedChanges_AndSerializesTheBootRestore`,
+  `HostGateWithoutTheStartupFace_IsReportedOnce_AndSourceChangesAreStillRecordedFromThePump`,
+  `GatedMutationThatThrows_TheWorldChangeItMadeIsRecordedByTheNextFrame`; the mod limit and admission:
+  `ModSourceLimit_UnreadableManifest_TheSessionRefusesWithTheStoresOwnRefusal`,
+  `ModSourceLoad_StoreThatDoesNotKeepTheSource_UndoesTheLoadAndTheToolSaysWhy`,
+  `ModSourceLoad_StoreThatDoesNotKeepTheSource_PutsBackTheFormulaItDisplaced_AndRecordsNoRevision`,
+  `HostSourceStoreWithAdmission_RefusesANewModBeforeItRuns`,
+  `Admission_CountsAFolderWhoseManifestCannotBeRead_AndAgreesWithSave` (`FileLuaModSourceStoreEditModeTests`);
+  `ExecuteLua_QueuedBehindAConfirmedLoad_KeepsItsOwnErrorAndExplainsTheReplacedWorld`;
+  `PackageNames_AutoFileNamedAfterADevice_IsRefusedWithoutThrowing`; the same-id build refusal and the
+  load-order bounds in `LuaCsModRuntimeEditModeTests` and `LuaCsModRuntimePersistenceEditModeTests`
+  (`LuaCs_FirstLoadOfAnIdAnotherLoadIsBuilding_IsRefusedBeforeItsChunkRuns_TheFirstKeepsRunning`,
+  `LuaCs_ReloadOfAnIdAnotherReloadIsBuilding_IsRefusedBeforeAnythingRuns_TheFirstCompletes`,
+  `LuaCs_AStoredLoadOrderPastTheMaximum_ReadsAsUnordered_AndLaterFirstLoadsKeepTheirOrder`,
+  `LuaCs_FirstLoadWhileTheStoreCannotBeListed_StampsNoLoadOrder_AndLogsIt`).
 
 ## Compatibility policy
 

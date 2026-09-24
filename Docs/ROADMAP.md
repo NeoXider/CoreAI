@@ -119,8 +119,12 @@ loud stub. The "Gameplay services I" slice (the old MVP8: Players, Humanoid, Tou
 TweenService, Raycast, CollectionService) has landed too. The 2026-09-24 audits and their fix waves
 (unreleased, after 7.45.0) made one mod's fault stop breaking the frame for others, budgeted string
 patterns and memory per resume, made budget trips uncatchable by `pcall`, and brought `CanCollide`,
-`Instance.Changed` and TweenService in line with Roblox. Mod-core string parameters take a number as
-Lua does (B2-12); the Rbx surface still refuses one (`TODO.md`).
+`Instance.Changed` and TweenService in line with Roblox. Three audit rounds over those waves followed.
+Both script surfaces now convert arguments and property writes by one Luau/Roblox rule (numbers ↔
+numeric strings, integer truncation, strict booleans, Enum Name/Value on instance members; round-trip
+gap RT4 closed, the `tostring` text residue is DEV-17), and a reload cleans the previous run's startup
+objects by default, with a keep mode for the old hot reload
+([`mod-system.md`](CoreAIMods/mod-system.md) §5c).
 
 **Next.** MVP4 (script contexts, `require`, and `Script`/`LocalScript`/`ModuleScript` instances per
 plan decision D1) is the next rung. API breadth then follows the multiplayer and Studio rungs: MVP13
@@ -148,8 +152,9 @@ Mirror's real message handlers and batcher — tested over an in-memory transpor
 over a real socket has been made yet. The bridge has authenticated admission with a deadline,
 newest-wins reconnects, per-channel payload limits, a readiness handshake, server clock anchors
 (held clocks reach clients, also from a world loaded from a package), kick and supersede notices,
-per-sender handler budgets, and reliable sends held until admission (unreleased fix waves and audit
-rounds 1–2). The engine-free replication core (member-level change reporting, dirty set,
+per-sender budgets — 32 remote-started handlers apart from 128 threads of induced work, with signal
+listeners deferred in a bounded queue instead of dropped — and reliable sends held until admission
+(unreleased fix waves and audit rounds 1–3). The engine-free replication core (member-level change reporting, dirty set,
 per-recipient Spawn/Patch/Remove planning, replica-side applier) and the authority model
 (`WorldAclAuthorizer`, `WriteGrantLedger`, `IntentGateway`, `ClientWritePolicy`) are built and tested
 in process. Missing: script contexts, host mode, the join snapshot over the wire, world-state
@@ -180,19 +185,21 @@ on-ramp and an export target.
 
 **Current state.** **MVP3 is code complete (2026-09-24); its Unity verification gate is pending** —
 EditMode 0 failed and PlayMode `FastNoLlm` 0 failed still have to be run in Unity (on Linux the
-portable suites are green: engine-free 2112 passed / 0 failed / 3 skipped, Lua tier 1606 passed /
-0 failed at `f817225b`). Built: the `.world` ZIP place package, `FileRbxWorldPackageStore` with
-create-once manual slots (capped at 64 / 256 MiB) and a two-phase-durable autosave ring,
-`ConfirmedWorldMutationGate` in front of every `execute_lua` and mutating `manage_mods` action,
-`RbxWorldRuntimeSessionController` for transactional session replacement, the
-`save_world`/`load_world`/`list_autosaves`/`load_autosave` tools with the confirm-before-restore flow
-and JSON failure statuses, the built-player **Hub → World Loads** page, a durable startup selection (a
-player-confirmed world reopens after a restart), at most 256 distinct mod sources per world, and —
-since audit round 2 — mods restarting and restoring in their load order (`LuaModManifest.LoadOrder`).
-Each MVP3 DoD item is proven by a named test
-([`WORLD_PACKAGE.md`](CoreAIMods/WORLD_PACKAGE.md#acceptance-status-mvp3)). The real WebGL page-reload
-gate is open. Model packages, templates and the Roblox formats are not built; the self-contained mod
-bundle (`ExportMod`) is.
+portable suites are green: engine-free 2137 passed / 0 failed / 3 skipped, Lua tier 1790 passed / 0
+failed / 37 not executed at `d4d7f95b`, after audit rounds 1–3). Built: the `.world` ZIP place package,
+`FileRbxWorldPackageStore` with create-once manual slots (capped at 64 / 256 MiB) and a
+two-phase-durable autosave ring, `ConfirmedWorldMutationGate` in front of every `execute_lua` and
+mutating `manage_mods` action, `RbxWorldRuntimeSessionController` for transactional session
+replacement, the `save_world`/`load_world`/`list_autosaves`/`load_autosave` tools with the
+confirm-before-restore flow and JSON failure statuses, the built-player **Hub → World Loads** page, a
+durable startup selection (a player-confirmed world reopens after a restart), at most 256 distinct mod
+sources per world, and — since audit round 2 — mods restarting and restoring in their load order
+(`LuaModManifest.LoadOrder`); after rounds 2 and 3 the startup selection also follows Hub and host
+edits of the mod sources, records world-tree changes at most every 5 s and never for physics or camera
+motion, and tells the caller when a change will not reopen. Each MVP3 DoD item is proven by a named
+test ([`WORLD_PACKAGE.md`](CoreAIMods/WORLD_PACKAGE.md#acceptance-status-mvp3)). The real WebGL
+page-reload gate is open. Model packages, templates and the Roblox formats are not built; the
+self-contained mod bundle (`ExportMod`) is.
 
 **Next.** The MVP3 Unity gate and release (with spikes S1/S2); MVP13 (`.model` packages, the template
 library, place templates); MVP14 (rbxl/rbxlx/rbxm/rbxmx both ways, the round-trip parity gate);
@@ -274,13 +281,15 @@ integration profile", "Units / scale", "Assets under scale") and §MVP10 ·
 **Goal.** Creating the game *inside* the running game: an in-game Studio for Creators, a runtime-first
 UI path where editor tooling is convenience, never a requirement, and readable mod sources everywhere.
 
-**Current state.** Shipped: a runtime Lua editor page in the Hub (highlighting, history, save =
-reload); Hub pages for mods, world loads, settings and statistics; `.lua`/`.luau` importers, the
-highlighted read-only `TextAsset` inspector and the `CoreAI/Lua Script Viewer` window, with an
-engine-independent tokenizer; the Getting Started window; the benchmark editor window. There is no
-Explorer, Properties panel, selection, gizmo, undo/redo, Play/Stop or Fly yet (`IsStudio` is a
-constant), and the runtime UI interpreter of [R4] has not started. The editor-tooling rung of the old
-ladder was dropped: its runtime equivalents are MVP12 and MVP18.
+**Current state.** Shipped: a runtime Lua editor page in the Hub (highlighting, history, Save & run = a
+reload that cleans the previous run's startup objects unless **Keep objects on Save & run** is on; the
+Mods and Logs tabs rebuild at most once per panel update, on the main thread); Hub pages for mods,
+world loads, settings and statistics; `.lua`/`.luau` importers, the highlighted read-only `TextAsset`
+inspector and the `CoreAI/Lua Script Viewer` window, with an engine-independent tokenizer; the Getting
+Started window; the benchmark editor window. There is no Explorer, Properties panel, selection, gizmo,
+undo/redo, Play/Stop or Fly yet (`IsStudio` is a constant), and the runtime UI interpreter of [R4] has
+not started. The editor-tooling rung of the old ladder was dropped: its runtime equivalents are MVP12
+and MVP18.
 
 **Next.** **MVP12** (the Studio core: runtime Explorer and Properties, selection, gizmos as intents,
 insert, a network-aware undo/redo stack, the Fly camera, Play/Stop per plan decision D2, scripts in the
@@ -299,18 +308,23 @@ limits. A room holds ~100 players within the scale targets (§4).
 
 **Current state.** Lua-CSharp is managed and AOT/WebGL-safe; sandbox budgets and the coroutine guard
 are shipped and adversarially audited (a budget trip cannot be caught by `pcall` and never disarms the
-guard); WebGL persistence is the engine's own automatic `persistentDataPath` synchronization, and
+guard; a nested run gets at most what its enclosing run has left; library calls back into Lua share a
+128-level weighted cap that keeps native stack use under ~512 KB, which an IL2CPP or WebGL player
+cannot otherwise bound; Luau source nested past 200 levels is refused instead of overflowing the stack
+— the IL2CPP/WebGL stack checks are on the Unity checklist in [`TODO.md`](../TODO.md)); WebGL
+persistence is the engine's own automatic `persistentDataPath` synchronization, and
 `CoreAiWebGlPersistence` reports immediately whether it is armed for this page instead of awaiting an
 `FS.syncfs` callback Unity 6.3 no longer delivers (`CoreAIWebGlPersistentDataSyncBuildGuard` fails a
 build whose web template does not arm it); local GGUF models are unavailable in a browser player and
 return a documented limitation message ([KNOWN_ISSUES.md](../Assets/CoreAiUnity/Docs/KNOWN_ISSUES.md));
 the benchmark package (G1–G8, six-dimension scoring, role fitness, model leaderboard) is the standing
 quality instrument. Scale so far is measured in process only: `tools/ScaleHarness` drives 20/50/100/200
-actors over the loopback on CoreCLR ([`dev-docs/SCALE_CHARACTERIZATION.md`](../dev-docs/SCALE_CHARACTERIZATION.md));
-the guarded VM on Mono runs about 150 k instructions/s against 24 M on CoreCLR
-([`tools/vmbench/RESULTS.md`](../tools/vmbench/RESULTS.md)), and IL2CPP has not been measured (risk R1).
-Instance ceilings today: 16,384 per desktop world and 2,048 per actor, 4,032 per WebGL world, 100,000
-in the package format.
+actors over the loopback on CoreCLR
+([`dev-docs/SCALE_CHARACTERIZATION.md`](../dev-docs/SCALE_CHARACTERIZATION.md)); the guarded VM on Mono
+runs about 150 k instructions/s against 24 M on CoreCLR
+([`tools/vmbench/RESULTS.md`](../tools/vmbench/RESULTS.md)), and IL2CPP has not been measured (risk
+R1). Instance ceilings today: 16,384 per desktop world and 2,048 per actor, 4,032 per WebGL world,
+100,000 in the package format.
 
 **Next.** Spikes S1 (VM cost on IL2CPP Linux and Mono) and S2 (bytes per update) with the MVP3 close;
 MVP8 (the Linux dedicated server and the WebGL client); **MVP9** (interest management, a bot client,

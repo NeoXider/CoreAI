@@ -51,8 +51,8 @@ further down are listed by their bold title and stay where they are.
 
 **MVP3 close (current rung)**
 
-- The Unity verification gate, **Check the tests**, the **Real WebGL page-reload gate** and audit rounds 2 and 3:
-  the next section.
+- The Unity verification gate, **Check the tests**, the **Real WebGL page-reload gate** and the round-3 sandbox
+  fixes (C3, in flight): the next section.
 - [ ] **Spike S1: guarded VM cost on the target runtimes (risk R1).** *Owner:* Lua runtime + performance.
       *Plan:* run the `tools/vmbench` workload and the `tools/ScaleHarness` N=100 workload in an IL2CPP Linux
       server build and a Standalone Mono x64 build; record VM instructions/s per guard batch, the per-resume
@@ -96,7 +96,8 @@ further down are listed by their bold title and stay where they are.
   swap on a Host**, **Host UserIds**, **Mirror follow-ups (after MIRROR-3)**, **A stale forward anchor during a
   hold**, **The provider misses a client connection change**, **A Mirror stub end to end over the staged bridge**,
   **Clicks and players** (the local player id of a composition), **Characters (after CORE-C)** (the MP-11
-  replica half); in "Persistence (MVP3 tail)": **The live-network-session guard is conservative**.
+  replica half), **A remote caller still reads the host mod in a host-raised callback error** (owner decision);
+  in "Persistence (MVP3 tail)": **The live-network-session guard is conservative**.
 
 **MVP6 — world-state replication + write authority**
 
@@ -126,7 +127,8 @@ further down are listed by their bold title and stay where they are.
 
 - Existing: **MVP6/MVP9 scalability debt** (the O(N) paths); the heap slope in **Final QA verdict (2026-09-02)**;
   **Allocation-budget follow-ups**; **`mods_call` exports from other callers still get the full handler
-  budget**. The D5 targets are in `ROBLOX_API_ROADMAP.md` §4.3.
+  budget**; **The remote admission budget has no ceiling across senders**. The D5 targets are in
+  `ROBLOX_API_ROADMAP.md` §4.3.
 
 **MVP10 — composable framework: one root, presets, host profile**
 
@@ -136,7 +138,8 @@ further down are listed by their bold title and stay where they are.
       block of the composability audit in `Docs/ROADMAP.md` §3, Track E.
 - Existing: **[A1, CRITICAL] Setup menus hardcode `Assets/<package>/…` paths and break on the Git-URL install**;
   **[A2+B3+D9, MAJOR] A missing `COREAI_LLM` silently swaps the backend for `StubLlmClient`**; **Test
-  isolation** (no root parameter on `FileLuaModSourceStore`); **Runtime ceiling plumbing**.
+  isolation** (no root parameter on `FileLuaModSourceStore`); **Runtime ceiling plumbing**; **The two remote
+  budgets are configurable only on the scheduler**.
 
 **MVP11 — roles (Creator/Player) & per-player AI over the network**
 
@@ -148,8 +151,9 @@ further down are listed by their bold title and stay where they are.
 
 **MVP12 — Studio mode core** · **MVP13 — model packages, templates, Luau parity prerequisites**
 
-- Existing for MVP13: **Number-to-string coercion for string parameters** (the Rbx-surface half, in progress in
-  this wave); **`Workspace.Gravity` assigned by a script is never saved** (round-trip gap RT10).
+- Existing for MVP13: **One number text and one number parser (DEV-17, audit R3 C1-06)** and **Coercion residue
+  after RBX-COERCE** (RT4 itself is closed); **`Workspace.Gravity` assigned by a script is never saved**
+  (round-trip gap RT10).
 
 **MVP14 — Roblox interchange + round-trip parity gate**
 
@@ -195,16 +199,17 @@ foundation, 24, plus MP-25 found while fixing; newcomer ergonomics, triaged in t
 fix waves W1–W6; each fix ships with a regression test that fails on the old code. A first audit round over the
 whole wave (snapshot `300eb6a4`: A1 world package, A2 Lua runtime and guard, A3 instances and bindings, A4
 multiplayer, A5 tests, docs and conventions) was followed by its own fixes. Audit round 2 (B1 network and bindings,
-B2 world package and mod runtime, B3 sandbox) ran over the whole diff; its first fixes are committed (`6248fec2`
-A1-02, `9dc55a68`, `e0737b7b`, `f817225b`), the rest are in progress, and round 3 follows. IDs are the audits'
-(M1-xx, M2-xx, M8-xx, MP-xx; A1-xx … A5-xx for round 1; B1-xx … B3-xx for round 2); the reports themselves are not
-kept.
+B2 world package and mod runtime, B3 sandbox) and audit round 3 (C1 multiplayer and coercion, C2 world package and
+runtime, C3 sandbox; snapshot `02f26388`) each ran over the whole diff, one auditor per area, followed by one fix
+worker; every fix is committed except the round-3 sandbox fixes (C3), which are in flight. IDs are the audits'
+(M1-xx, M2-xx, M8-xx, MP-xx; A1-xx … A5-xx for round 1; B1-xx … B3-xx for round 2; C1-xx … C3-xx for round 3;
+H1–H5 for the Hub-reload follow-ups); the reports themselves are not kept.
 Verified without Unity only: the Roslyn compile gate (C# 9, every asmdef, six configurations plus Mirror, no new
-error against 7.45.0) and the two portable `dotnet test` suites on Linux — engine-free 2112 passed / 0 failed /
+error against 7.45.0 besides the known false positive of `Rigidbody.linearVelocity`, a Unity 6 member the 2021.3
+reference assemblies lack) and the two portable `dotnet test` suites on Linux — engine-free 2137 passed / 0 failed /
 3 skipped, Lua tier (`tools/portable/LuaTests`, CI job `portable-lua`, floor 1,400 passed, ceiling 42 not
-executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_ENGINE_UNAVAILABLE`, 3 ignored in a
-`OneTimeSetUp`, 2 skipped), both at `07264057`; at `f817225b` the engine-free suite is unchanged and the Lua tier
-reports 1606 passed / 0 failed. This section records everything landed up to `f817225b`.
+executed) 1790 passed / 0 failed / 37 not executed, both at `d4d7f95b`. This section records everything landed up
+to `d4d7f95b`.
 
 - [ ] **Unity verification gate (owner/CI), then bump and tag:** full EditMode 0 failed and PlayMode `FastNoLlm`
       0 failed on this tree. Every EditMode fixture named below was written without a Unity run.
@@ -233,14 +238,42 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
         `MirrorClientRemotesEndToEndEditModeTests`; `e0737b7b` — run only against Mirror stubs so far), and
         `HubService_ApplyBundledUpdate_KeepsTheModsLoadOrder` in `CoreAiModsHubBinderFullTierEditModeTests`
         (`6248fec2`; it needs Unity's `Resources`, and the HubIntegration tests have no Linux runner at all).
+        After round 2 and round 3 (none has run anywhere): the Hub page tests (`#if COREAI_HAS_HUB`, no Linux runner)
+        in `LuaSyntaxHighlighterEditModeTests` — `LogsPage_ManyLogEventsBeforeThePanelUpdates_QueueOneRebuild`,
+        `ModsPage_ManyModChangesBeforeThePanelUpdates_ListTheModsOnce` and
+        `ModsPage_ChangeBeforeTheContentIsBuilt_QueuesNothing` (`c7397c77`),
+        `ModEditor_KeepObjectsToggle_DefaultsOff_PicksTheReloadMode_AndTheStatusSaysWhatWasCleaned`,
+        `ModEditor_KeepObjectsToggle_IsOneHubPreference_ReadByEveryEditorAndWrittenOnChange` and
+        `ModsPage_ASuspendedMod_SaysWhyItIsOffAndHowToStartIt` (`3a46a24c`) — and
+        `HubService_SaveAndRun_CleansThePreviousRunsStartupObjectsByDefault_AndSaysHowMany`,
+        `HubService_SaveAndRun_InKeepMode_KeepsThePreviousRunsObjects_AndSaysSo`,
+        `HubService_ASuspendedMod_IsListedAsSuspended_AndStartingItByHandClearsIt` and the three
+        `HubService_NewModTemplate_*` cases (`CoreAiModsHubBinderFullTierEditModeTests`, `3a46a24c`); the installer
+        facade reload test `Reload_ThroughTheInstallersAttributionFacade_HonoursTheMode`
+        (`LuaCsModRuntimeEditModeTests`, `d4d7f95b`; Inconclusive on Linux, which does not compile the
+        composition assembly); the new `[UnityTest]` startup-selection cases of `Mvp3WorldPackageFollowUpEditModeTests`
+        (`StartupSelection_*` of `3d5b62d0` and `d4d7f95b`, listed in `WORLD_PACKAGE.md`, "Acceptance status"); and the
+        Mirror fixtures of rounds 1 and 2 above, still run only against stubs.
+  - [ ] Native stack on IL2CPP and WebGL (from the Hub-crash investigation, `c7397c77`/`c0dd9fa4`/`02f26388`).
+        Lua-CSharp's only stack guard is `RuntimeHelpers.TryEnsureSufficientExecutionStack`, which an IL2CPP build
+        may answer with a constant `true`; the sandbox's 128-level weighted C-call cap and the downleveler's 200-level
+        nesting cap are sized to stay under ~512 KB for that case, measured on CoreCLR only. In an IL2CPP Standalone
+        player and a WebGL player, run as a mod or through `execute_lua`: `local function f() pcall(f) end f()`
+        (must end with the catchable `C stack overflow (…)` line, not a crashed player); the `__concat` chain
+        (`local mt = {}; mt.__concat = function(a, b) return a .. b end; local _ = setmetatable({}, mt) .. 'x'`,
+        uncounted by the cap — it must end on its budget, never crash);
+        and **Save & run** of `sample_castle3d` three times in a row on the Hub (the castle must not duplicate, the
+        editor must stay responsive, no crash). Record the outcome here.
   - [ ] PlayMode `FastNoLlm` (incl. `Mvp8PhysicsPlayModeTests`): 0 failed.
   - [ ] The 37 Lua-tier cases the Linux runner reports as not executed (listed in `tools/portable/LuaTests/README.md`).
   - [ ] Guard behaviour on Mono and IL2CPP: a budget trip cannot be caught by `pcall`/`xpcall` and the state stays
         guarded (`LuaCsGuardFrameAndAllocationEditModeTests`, `LuaCsSecureSandboxEditModeTests`,
         `LuaCs_RunawayHandlerAfterAnEarlierTrip_IsStillCut_AndTheStreakQuarantines` in `LuaCsModRuntimeEditModeTests`)
         — the fix (`1f667ade`) relies on Lua-CSharp internals verified on .NET 8 only; the same for the sandbox
-        fixes of `07264057` (a raw `coroutine.resume` of a handle's thread refused, library calls back into Lua capped
-        at 200 nested).
+        fixes of `07264057` (a raw `coroutine.resume` of a handle's thread refused), `02f26388` (`pcall`/`xpcall`
+        counted, nested runs held to what their enclosing run has left, the 128-level weighted cap) and `43605d2f`
+        (`gsub`/`format` callbacks awaited across `execute_lua` frame yields, the yield fence after a nested resume,
+        the signal runners' captured native yield).
   - [ ] A WebGL build smoke of the world package (save → reload the page → load), see the item below.
 - [ ] **Real WebGL page-reload gate** for the world package: save → reload the page → the bytes and the startup
       selection survive (`Docs/CoreAIMods/WORLD_PACKAGE.md`, "Acceptance status").
@@ -333,7 +366,7 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
       and is unloaded when its actor disconnects; a load whose chunk disconnects its own actor fails with a clear
       `InvalidOperationException`; a logic-slot formula counts as running mod code; `Player:Kick(42)` stays
       `BAD_ARGUMENT`, like every other string parameter of the Rbx surface (`FindFirstChild(5)`, `AddTag(p, 5)`,
-      `Part.Name = 5`; Roblox would convert the number — see the number-coercion item below) (`7aa6f47c`).
+      `Part.Name = 5`; Roblox would convert the number — converted since RBX-COERCE, `c0f6fdbc`) (`7aa6f47c`).
 - [x] **Lua-tier tests on Linux** — the portable runner `tools/portable/LuaTests` (`1459086c`; two platform-dependent
       tests fixed in `61bcfbef`), seven more fixtures linked after their engine-bound tests moved verbatim into
       Unity-only classes (`80f2f30c`), CI job `portable-lua` with a floor of 1,400 passing cases (`b094d878`).
@@ -387,7 +420,8 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
 - [x] **Sandbox, audit round 1 (A2-01/02/05/09, `07264057`).** `coroutine.resume` refuses a task, signal-handler or
       main-chunk thread before touching it (a trip inside such a resume was swallowed by `xpcall` and the rest ran
       unguarded, and a later kill of that thread crashed the process); calls from library functions back into Lua
-      nest at most 200 deep per thread (a catchable `C stack overflow (…)` instead of an unwind of seconds); a raw
+      nest at most 200 deep per thread (a catchable `C stack overflow (…)` instead of an unwind of seconds; one
+      weighted cap of 128 levels per chain of nested runs since `02f26388`); a raw
       coroutine is held to the memory budget of the run that resumes it.
 - [x] **Docs (DOCS-3)** — the guard, the portable runner and every audit-round-1 fix above are in `RBX_API.md`,
       `LUA_SANDBOX_SECURITY.md`, `WORLD_PACKAGE.md`, `mod-system.md`, `mod-authoring.md`, the "Rbx API" skill
@@ -419,7 +453,7 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
       `mods_call` fails with the same cancellation as a stop in its own code; mod-core string parameters take a
       number as `tostring` gives it (`store_set(7, 8)`), a boolean or table is still refused.
 - [x] **`tostring = warn` no longer ends the process (`d4d15070`).** `warn` converts its arguments through the
-      global `tostring` as a counted call, so a recursion through it stops at the 200-deep cap with a catchable
+      global `tostring` as a counted call, so a recursion through it stops at the C-call cap with a catchable
       `C stack overflow (warn: …)` instead of a .NET stack overflow that closed the editor or player.
 - [x] **Docs (DOCS-4, the plan revision)** — the MVP ladder of record rewritten in `ROBLOX_API_ROADMAP.md` §4 with the
       old → new mapping, `Docs/ROADMAP.md` (vision, tracks, release table, principles, risks, scale targets),
@@ -428,6 +462,82 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
       `LUA_SANDBOX_SECURITY.md`, `WORLD_PACKAGE.md`, `mod-system.md`, `mod-authoring.md`, the Mirror README, the
       "Rbx API" skill pair (still byte-identical) with `RBX_API_SKILL.md`, and both changelogs. The stale `RobloxApi/…`
       paths of the §5.1.1/§5.2.1 task breakdowns now sit next to the shipped files.
+- [x] **Network, audit round 2 (B1-02/03/05, `3f6c18e5`).** A signal a sender-charged thread fires starts its
+      handlers on the sender's quota (closes "Signal handlers fired from a sender-charged thread are charged to the
+      handler's owner"; its first form made honest play lose remotes and was replaced by round 3's two pools, C1-01
+      below); a failed load or reload puts back the `OnServerInvoke`/`OnClientInvoke` callbacks its chunk replaced
+      or cleared; a `RemoteFunction` caller gets the budget line only for a real budget cut and a fixed line for
+      every other stop (closes "A2-07 reads every cancellation as a budget cut"); a callback that dies before its
+      first wait answers at once; no host mod id is sent to a remote caller.
+- [x] **World package, audit round 2 (B2-01/02/04/06/07/09/10/11/13/14, `3d5b62d0`, `23f63eaa`).** The startup
+      selection refresh runs the restore's own checks (a world with an active `Full` mod keeps the previous entry
+      and says so: `startup_warning`), follows every write to the session's source store (Hub and host code too,
+      recorded by the frame pump) and skips an unchanged world; the boot restore holds the shared gate; post-build
+      checks run inside the build's rollback (closes "Failures after a successful build skip the rollback", with
+      C2-01 below); an `execute_lua` queued behind a load keeps its own error; the session and the file store
+      admit mod sources by one rule, `Save` throws its refusal and a load whose source was not kept is undone; past
+      the mod limit only `forget` skips its backup; an autosave name that is a Windows device name is refused and
+      `load_autosave` answers `read_failed` for any open failure.
+- [x] **The Unity crash while editing a mod on the Hub: two causes found and fixed (`c7397c77`, `c0dd9fa4`).** The
+      Luau downleveler's lexer and parser recursed without a bound, so ~2,000 nested brackets, tables, functions
+      or blocks (1,000 if-expressions or interpolations, 3,000 backtick strings) overflowed the .NET stack and
+      killed the process on Save & run, `execute_lua` and a world restore — and a saved mod like that crashed every
+      start; source nested past 200 levels (the VM parser's own limit) is now a diagnostic. The Hub Mods and Logs
+      tabs rebuilt on every notification, synchronously on the raising thread (500 failing `Heartbeat` handlers
+      queued 500 rebuilds a frame; a rehydrate of 30 mods ran 30 `ListMods` of 900 entries); each now rebuilds
+      at most once per panel update, on the main thread. The IL2CPP/WebGL stack checks are in "Check the tests".
+- [x] **Roblox coercion parity on both script surfaces (RBX-COERCE, `c0f6fdbc`; round-trip gap RT4).** One rule
+      (`LuaCsValueMarshaller`) for the Rbx API and the mod-core API, from Luau's sources and Roblox's docs: a
+      string parameter or property takes a number as `tostring` gives it (`Kick(42)`, `part.Name = 5`,
+      `FindFirstChild(5)`, `inst[5]`), a number one takes what Luau's `tonumber` accepts, integer parameters
+      truncate toward zero (the mod-core ones used to round), booleans are never converted, and an Enum property
+      or instance-method argument takes the item, its Name or its Value; `TweenService:Create` goals and datatype
+      Enum members stay strict. Closes "Number-to-string coercion for string parameters"; the Kick test pinning the
+      old refusal is now `Kick_WithANumberMessage_KicksWithTheTextTostringGivesIt`; the residue is filed below
+      ("One number text and one number parser", "Coercion residue after RBX-COERCE").
+- [x] **Sandbox, audit round 2 (B3-01/02/08, `02f26388`; B3-03/04/05/06/07, `43605d2f`).** `pcall` and `xpcall`
+      are counted calls; a nested run (a raw coroutine, an immediate `task.spawn`, a re-entrant guarded call) gets at
+      most what its enclosing run has left of steps, time and memory, and exhausting a lent limit ends the whole
+      chain; one weighted C-call cap of 128 levels per chain of nested runs replaces 200 per channel, and a resumed
+      thread continues its resumer's count (closes "A scheduler-owned thread starts at C-call depth 0", except the
+      `mods_call` item below); an `xpcall` recursion no longer hands its handler `nil`; `gsub`/`format` callbacks
+      survive `execute_lua` frame yields; the yield fence holds after a nested `coroutine.resume` (the gap named in
+      "Pattern budget"); counted `tostring`/`print`/`pairs`/`ipairs`/`table.sort` no longer allocate per call; the
+      sandbox's own lines start with `sandbox: `, `table.concat` names Lua types and bad-argument lines read like
+      Lua's; the signal runners use the native yield captured before mod code ran.
+- [x] **Reload modes and crash-loop protection (owner decision; `3a46a24c`, H1/H2/H4/H5 in `d4d7f95b`).** A reload
+      cleans the previous run's startup objects by default (`ModReloadMode.CleanStartupObjects`: taken out before
+      the new chunk runs, destroyed on success with the same mod's objects inside them, put back on failure; objects
+      others own are rescued) and keeps them in `KeepObjects` (Hub toggle, `manage_mods` `keep_objects`);
+      `ILuaModRuntime.ReloadMod(caller, id, code, ModReloadMode)` carries the mode through every facade; two budget
+      trips in a row quarantine a mod and suspend its stored package (`SuspendedAfterBudgetTrips`, kept by the world
+      package); the Hub's Add template uses `Heartbeat`/`task.wait` with the Rbx API; `LuaCsModRuntimeFactory` wires
+      the reload/unload teardown itself. A failed first load keeps what its chunk built, as Roblox does (the
+      failed-load policy question of "Disconnect and load tails").
+- [x] **Network and coercion, audit round 3 (C1-01…C1-11, B3-06b, `7cf2891e`).** Two budgets per remote sender:
+      remote admission (32, only the handlers its own remotes start) and induced work (128 per sender, 192 for all
+      senders, a host reserve of 64; `ModScheduler.ConfigureInducedThreadBudget`), so the host's parked listeners no
+      longer make an honest player's remotes fail; a listener invocation over the induced budget is deferred in a
+      bounded per-sender queue (256 / 4,096) instead of dropped; `Once` is used up only when its handler starts; a
+      `:Wait()` a charged fire resumed charges what it creates to the sender. `IntValue` refuses values outside
+      [-2^63, 2^63) instead of wrapping; `FindFirstChild`'s `recursive`, `GenerateGUID` and `PostAsync`'s `compress`
+      take only booleans; the Full-tier `ConvertArg` follows the same coercion rules; `Vector2 * "2"` works; number
+      text is read up to an embedded NUL; `task.cancel` of a `coroutine.running()` value has its own refusal; a
+      `RemoteFunction` error reaches the caller as its error value, without the engine's name or the chunk name.
+- [x] **World package and runtime, audit round 3 (C2-01…C2-09, `d4d7f95b`).** A load or reload of an id whose build
+      is running is refused before its chunk runs, so a rollback can no longer tear down the winning build; a Hub
+      edit made while a confirmed load records its selection is kept; the startup selection records a source change
+      at once and a world-tree change at most once per `StartupRefreshInterval` (5 s), never for physics or camera
+      motion; the source-kept check runs inside the build's commit, so a refusal is a full rollback; the controller
+      talks to the gate through the public `IStartupAwareWorldMutationGate` and says once when a host gate lacks it;
+      a failed startup record leaves a note in the tool result and in `StartupSelectionNote`;
+      `ILuaModSourceStore`'s contract is written down and `ILuaModSourceAdmission` is public; `LoadOrder` is bounded
+      at 2^53 and an unreadable store stamps none; a plain-Lua nesting error reads `syntax error:`.
+- [x] **Docs (audit rounds 2 and 3)** — everything above is in `RBX_API.md` (the coercion table, the two remote
+      budgets and the `RemoteFunction` answer lines, the 128-level cap, reloads, the startup selection),
+      `LUA_SANDBOX_SECURITY.md`, `WORLD_PACKAGE.md`, `mod-system.md` (§5c reload modes, the budget-trip suspension,
+      the Hub tabs, the store contract), `mod-authoring.md`, the "Rbx API" skill pair (still byte-identical) with
+      `RBX_API_SKILL.md`, the roadmaps (RT4 closed, DEV-17), `PLAN.md` and both changelogs.
 
 ### Open follow-ups from the fix waves
 
@@ -455,11 +565,39 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
       with a player-only two-step delete through a trusted surface kept apart from `IRbxWorldRuntimeService` (as
       `IRbxWorldStartupSelection` is), backed by a `FileRbxWorldPackageStore` delete that confirms durability like
       every write; no AI tool gains a delete path (DoD (c)).
-- [ ] **Hub Mods-page edits bypass the shared gate.** They take no pre-mutation autosave and do not refresh the
-      startup selection, so an edit reaches the startup entry only with the next gated mutation. *Owner:* the owner
-      decides, then the Hub pass implements. *Plan:* either route the page's mutating actions through
-      `ConfirmedWorldMutationGate` (autosave and refresh like `manage_mods`), or have the page call a controller
-      refresh after each edit.
+- [ ] **Hub Mods-page edits take no pre-mutation autosave.** Their startup recording is solved — every write to
+      the session's source store is recorded by the frame pump since `3d5b62d0`/`d4d7f95b` — but an edit on the
+      page still skips the shared gate's `manage_mods`-style autosave, so it cannot be undone from the autosave
+      ring. *Owner:* the owner decides, then the Hub pass implements. *Plan:* route the page's mutating actions
+      through `ConfirmedWorldMutationGate` (trigger `hub-<action>`), keeping the pump record as it is.
+- [ ] **The Hub World Loads page does not show `StartupSelectionNote`** (audit R3 C2-06 remainder). A Hub edit
+      whose change will not reopen after a restart (the restore would refuse the world, or the record was not
+      durable) is only logged; the note sits in `RbxWorldRuntimeSessionController.StartupSelectionNote`, which
+      no page reads. *Owner:* Hub. *Plan:* add the note to `IRbxWorldStartupSelection` (a default member answering
+      `""`, so other implementations compile) and show it in the page's startup section on every read
+      (`HubModsPages.cs`, `ShowStartupSelection`), with a Hub test that a refused Hub edit shows it and a later
+      successful record clears it.
+- [ ] **A world change made in the last `StartupRefreshInterval` before the process ends is not recorded**
+      (after C2-03, `d4d7f95b`). A world-tree change inside the 5 s interval waits for the frame pump. *Owner:*
+      world package. *Plan:* flush a deferred world record on an orderly shutdown; a synchronous flush is not
+      possible on WebGL (no blocking wait), so the design needs the quit path to await an async record, or a
+      shorter interval while a quit is pending — decide before coding.
+- [ ] **A startup object is only what the main chunk builds before its first yield** (after `3a46a24c`): a mod
+      that builds its scene in a `task.spawn` loop, after a `task.wait`, or from a handler has no startup objects,
+      so a clean reload leaves that scene in place and the new run builds a second one. *Owner:* mods runtime.
+      *Plan:* give scheduler threads the identity of the run that started them, count what a run's own threads
+      build during its startup window (up to its first frame, say) as startup objects, and keep objects built
+      in handlers out; a test with a `task.spawn`-built castle saved three times.
+- [ ] **A mod can imitate a budget trip** (after `3a46a24c`): the runtime classifies a failure as a budget trip
+      by its typed cause, with a text fallback for scheduler faults, so a mod that raises the trip line itself
+      is counted toward the two-trip quarantine. *Owner:* mods runtime. *Plan:* classify from the typed cause only
+      (`LuaCsHostFunctionException.HostException`, the scheduler's trip record) and drop the text fallback, with a
+      negative test that `error("…EXCEEDED_…")` twice does not suspend the mod.
+- [ ] **A third-party `ILuaModRuntime` wrapper that does not forward the reload mode gets a clean reload**
+      (after H2, `d4d7f95b`): `ReloadMod(caller, id, code, ModReloadMode)` has a default body that runs the
+      mode-less reload, so a host wrapper written before it silently turns a keep-objects reload into a clean one.
+      *Owner:* mods runtime. *Plan:* log once per wrapper type when the default body runs with `KeepObjects`, and
+      name the member in the changelog's upgrade note (done in the core changelog).
 - [ ] **A bare `LuaCsModRuntime` composition gets only the store's 256-source refusal,** which is logged: its 257th
       mod runs without a persisted source and is missing from every save. *Owner:* mods runtime. *Plan:* move the
       distinct-source check from the world-session facade into the runtime's load path, so every composition
@@ -475,8 +613,7 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
       `LuaCsCoroutineBudgetSettings`; revisit the high-water notes in `LuaCsModRuntimeEditModeTests` (around the
       memory-budget cases).
 - [ ] **Pattern budget:** the 5,000,000-step cap is per call; a step-charging API on the resume guard (so pattern
-      work counts against the resume's own budget) is optional. The fence has a gap after a nested
-      `coroutine.resume`.
+      work counts against the resume's own budget) is optional.
 - [ ] **Stale prose, one left:** the `WebGlUnsafeAsyncPrimitives` allowlist note for `LuaCsSecureEnvironment`
       ("coroutine resume and the string.format wrapper"). Done: `LUA_SANDBOX_SECURITY.md` (DOCS-2), the
       `IScriptCoroutine` summary and the
@@ -492,15 +629,36 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
       faults of a failed reload chunk are charged to the live instance's streak; a host that calls only `Advance`
       never closes a quarantine frame.
 - [ ] **Error line numbers:** errors raised through a tail call report line 0 (the traceback's existing behaviour).
-- [ ] **`__concat` recursion is not counted by the C-call cap** (after `07264057`): Lua-CSharp runs a `__concat`
-      metamethod as a nested VM call of its own, where no sandbox code sits, so `mt.__concat = function(a, b) return
-      a .. b end` still unwinds in quadratic time with no hook firing — 2.6–4.2 s at a mod-imposed depth of 1,000,
-      22.8–28 s unbounded under a 10 s budget. *Owner:* Lua runtime. *Plan:* get the call exposed by `Lua.dll`
-      (upstream, with the `IsInHook` report below), or let the guard hook scan the Lua frames for `CONCAT`
-      re-entries once the frame count grows and raise the same `C stack overflow` line.
-- [ ] **A scheduler-owned thread starts at C-call depth 0** even when host code resumes it from inside a library
-      call; the thread quota and the signal-generation cap bound that nesting today. *Owner:* Lua runtime. *Plan:*
-      have the scheduler's resume carry the resumer's depth as the thread's base, as a raw coroutine's does.
+- [ ] **`__concat` recursion is not counted by the C-call cap** (after `07264057`, still after `02f26388`):
+      Lua-CSharp runs a `__concat` metamethod as a nested VM call of its own (2,880 B of native stack a level),
+      where no sandbox code sits, so `mt.__concat = function(a, b) return a .. b end` still unwinds in quadratic
+      time with no hook firing — 2.6 s at a mod-imposed depth of 1,000, 24–28 s unbounded under a 10 s budget. It
+      cannot become a catchable error from inside the sandbox: the only code that runs there is the count hook,
+      which must never throw (a throw leaves `IsInHook` set), so a hook could only END the run. *Owner:* Lua
+      runtime. *Plan:* get `Lua.dll` to count its own metamethod calls (upstream, with the `IsInHook` report
+      below); the in-sandbox fallback — the hook counts frames whose caller instruction is a `CONCAT` once the
+      frame count grows and trips the run past the cap — misses a metamethod that tail-calls a helper (the TODO on
+      `CountCallsBackIntoLua` in `LuaCsSecureEnvironment.cs`). The IL2CPP/WebGL check is in "Check the tests".
+- [ ] **A `mods_call` export on another Lua state starts from that state's own C-call count and budget**
+      (after `02f26388`; the TODO on `CCallDepths` in `LuaCsSecureEnvironment.cs`). `MaxCrossCallDepth` (8) bounds
+      that nesting today, but 8 × ~474 KB exceeds the 512 KB the weighted cap is sized for. *Owner:* Lua runtime.
+      *Plan:* hand the caller's thread to the export's guard (`LuaCsExecutionGuard.TryGetRemainingAllowance`
+      already reads a caller's budget), so the export continues the caller's count and remaining budgets as a
+      nested handle resume does; a test that nests `mods_call` 8 deep inside 60 `pcall` levels and expects the cap.
+- [ ] **An overflow of the engine's own Lua stack is still reported as `nil`** (audit B3-08 residue, after
+      `02f26388`): `coroutine.resume` returns `false, nil` and a native `xpcall` lets it escape past its handler.
+      *Owner:* Lua runtime. *Plan:* turn Lua-CSharp's stack-overflow exception into the same one-line error value
+      the C-call cap raises, in the guarded `coroutine.resume` and in the counted `xpcall`, with a test per path.
+- [ ] **The guard's own trip lines do not carry the `sandbox: ` prefix yet** (audit B3-06c remainder, after
+      `43605d2f`): `EXCEEDED_HARD_LIMIT_STEPS` and `EXCEEDED_MEMORY_BUDGET` from `LuaCsExecutionGuard.cs` and the
+      `LuaCsSecureEnvironment: …` lines still name a CLR class. *Owner:* Lua runtime. *Plan:* build them on
+      `LuaCsSecureEnvironment.SandboxLinePrefix`, update the pinned texts in `LuaCsModRuntimeEditModeTests`,
+      `LuaCsGuardFrameAndAllocationEditModeTests` and `LuaCsSecureSandboxEditModeTests`, and the quoted lines in
+      `Assets/CoreAiUnity/Docs/TROUBLESHOOTING.md` and `JSON_COMMAND_FORMAT.md`; keep the native `xpcall`'s
+      `got nil))` double parenthesis, which a test pins for byte parity with the VM.
+- [ ] **`hooks_every(math.huge)` runs every frame** (audit R3 C1-10): the interval is clamped to 0, where
+      `task.delay(math.huge)` parks. *Owner:* mods runtime. *Plan:* treat an infinite interval (`math.huge`, `"inf"`)
+      as "never fires" — register nothing, or park the timer — with a test beside the `hooks_every` interval tests.
 - [ ] **Host callbacks that re-enter Lua outside `CallCountedAsync`** (any host function that runs a script's
       function or `__tostring`) are not counted by the C-call cap. `warn`'s `DescribeForLog` is counted since
       `d4d15070` (`tostring = warn; warn(1)` used to crash the host process with an uncatchable .NET stack overflow;
@@ -526,28 +684,21 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
       `53fb23b3`): from a `task.*` thread, the main chunk or a `hooks_on`/`hooks_every` handler an export runs under
       50,000,000 steps / 10 s. *Owner:* Lua runtime. *Plan:* expose the running guard's remaining budget from
       `LuaCsCoroutineHandle` and `LuaCsExecutionGuard`, and let `ResolveExportGuard` cap every export at it.
-- [ ] **Failures after a successful build skip the rollback** (after `53fb23b3`): "loaded concurrently", the second
-      `EnsureModCapacity` and "reloaded concurrently" leave the Rbx candidate, the logic-slot formulas and the quota
-      attribution as the failed build left them. Only concurrent loads of one id reach these paths. *Owner:* Lua
-      runtime. *Plan:* run the same rollback the build-failure path runs on each of them, with a test that forces
-      each branch.
-- [ ] **Number-to-string coercion for string parameters (MVP13, round-trip gap RT4; in progress in this wave).**
-      The mod-core half is done (`f817225b`, B2-12): mod-core string parameters take a number as `tostring` gives
-      it (`store_set(7, 8)` stores "7" = "8"), a boolean or table is still refused. The Rbx surface still refuses a
-      number where a string is expected (`Part.Name = 5`, `player:Kick(42)`, `FindFirstChild(5)`), pinned by
-      `Negative_Kick_WithANumberMessage_IsRefusedLikeEveryOtherStringArgument`; Roblox converts it. *Owner:*
-      mods/Rbx API. *Plan:* one coercion rule for both surfaces, checked against the normative references, with a
-      conformance table test; update the Kick test deliberately (it pins the deviation), and update `RBX_API.md`,
-      `mod-authoring.md` and the skill pair in the same change.
-- [ ] **A2-07 reads every cancellation as a budget cut:** an `OnServerInvoke` callback stopped by any
-      `OperationCanceledException` — a world dispose included — answers "the RemoteFunction callback was stopped: it
-      exceeded its execution budget". *Owner:* Lua bindings. *Plan:* answer the budget line only when the cause is a
-      guard trip (`LuaCsHostFunctionException` with a trip `HostException`), and a disposal line otherwise.
-- [ ] **Signal handlers fired from a sender-charged thread are charged to the handler's owner** (A4-01 follow-up,
-      after `70a4d1ab`): threads a remote-started handler schedules with `task.*` are charged to the sender, but a
-      signal that handler fires starts its handlers on the owners' quotas. *Owner:* scheduler. *Plan:* carry the
-      charged actor on the signal invocation and create the handler thread under it, with a flood test like the
-      A4-01 one.
+- [ ] **One number text and one number parser (DEV-17, audit R3 C1-06; MVP13).** Two parsers live in one
+      runtime: the sandbox's `tonumber("inf")`, `tonumber("nan")` and hex floats return `nil` (Lua-CSharp parses with
+      .NET rules and drops NaN, and string arithmetic like `"10" + 1` uses the same parser) while the host-side
+      coercion accepts them; and the text a number becomes is .NET's (`1E+20`, `Infinity`, `NaN`, 15 significant
+      digits on Mono) where Luau prints `1e+20`, `inf`, `nan` and the shortest round-trip digits — it flows into
+      `Name`, `Kick`, attribute names and store keys. *Owner:* sandbox + Lua bindings. *Plan:* route the sandbox's
+      `tonumber` through `LuaCsValueMarshaller.TryParseNumber` (`LuaCsSecureEnvironment`) and use one Luau-style
+      number formatter for `tostring` and `TryCoerceString`, with the Luau reference table of `RuleTable_*`
+      (`Mvp8ValueObjectsEditModeTests`) extended to `tostring`; remove DEV-17 from `ROBLOX_API_ROADMAP.md` §2.1 then.
+- [ ] **Coercion residue after RBX-COERCE (`c0f6fdbc`; MVP13).** Kept strict for lack of Roblox evidence either
+      way: Enum Name/Value for datatype members (`TweenInfo.new` easing, `CFrame` rotation orders,
+      `RaycastParams.FilterType`), an Enum by a fractional number (`Material = 256.5`), and a fractional
+      `TweenInfo.new` repeat count (`2.5`). *Owner:* Rbx API. *Plan:* check each against Roblox (a Studio probe
+      recorded in `Docs/CoreAIMods/RobloxReference/`) and convert or keep, updating the rule table and
+      `RBX_API.md`'s "How arguments and property writes convert".
 - [ ] **`RunService:BindToRenderStep`/`UnbindFromRenderStep` are MVP2-phased loud stubs,** so MVP2 cannot close
       while they are (from the 2026-09-06 closure audit). *Owner:* MVP2 closure. *Plan:* implement them on the
       scheduler's render phase with the priority order Roblox documents, or re-phase the stubs and amend §5.2.4.
@@ -591,24 +742,26 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
 - [ ] **Binder:** velocity is not read back from the body; host `CFrame` writes are not orthonormalized at the sink;
       an adopted host object's `Size` is not clamped. Host trigger volumes can block click picking (optional).
       `CanTouch`/`CanQuery` stay backlog stubs.
-- [ ] **TweenService and hot reload:** tweens survive a hot reload of their mod, like its parts, and a failed
-      reload's candidate tweens and waits are not cancelled (the A2-03 reload case; a failed first load cleans them
-      since `70a4d1ab`), because `RbxTweenService` has no generations. *Owner:* mods runtime. *Plan:* tag tweens and
-      waits with the scheduler generation of the build that created them and cancel a failed candidate's generation;
-      decide at the same time whether a successful reload cancels the old instance's tweens.
+- [ ] **TweenService and hot reload, remainder:** since `3a46a24c` a clean reload destroys the tweens the previous
+      run's main chunk created (they are startup objects), a failed reload destroys the objects its chunk built (its
+      tweens among them), and the factory's reload teardown stops the replaced run's tweens
+      (`Factory_Reload_StopsTheReplacedRunsThreadsHandlersAndTweens_WithoutHostWiring`). Left: a failed reload's
+      candidate `RemoteFunction` waits are not cancelled, because a reload candidate cannot be told apart from the
+      live generation by mod id (`LuaCsRbxApiBindings.RollbackModLoadCandidate`). *Owner:* mods runtime. *Plan:* tag
+      waits with the scheduler generation of the build that created them and cancel a failed candidate's
+      generation, with a test that a failed reload leaves the live run's waits pending and none of its own.
 - [ ] **`RbxVector3.Lerp` overflows** to infinity near ±3e38 (engine-free datatypes).
 
 **Players, Humanoid and multiplayer (Gameplay services I, MVP5, MVP6)**
 
-- [ ] **Disconnect and load tails (after M2-24, `c233c9cf`/`7aa6f47c`):** decide the failed-load policy — sweep the
-      instances a failed first load's chunk created and clear their registry attribution (the quota attribution
-      `_quotaActorByOwnerModId` is dropped since `53fb23b3`; callbacks, tweens and waits since `70a4d1ab`); an
-      active package is not restarted when its actor rejoins (today only `RehydrateFromStore` or the next world load
-      start it); `DisconnectActor` of the host's own actor kills the
-      host-authority mods' threads while the runtime leaves those mods loaded; a `ModTearingDown` listener that, after
-      an installer kill, disconnects the quarantined mod's own actor during the quarantine teardown restores the actor
-      record for a departed actor; `ModActorLedger.GetAttributedContext` creates an entry on demand without a load
-      record (no current path reaches it).
+- [ ] **Disconnect and load tails (after M2-24, `c233c9cf`/`7aa6f47c`):** the failed-load policy is decided — a
+      failed first load keeps what its chunk built, as a Roblox script that errors does, and a failed reload
+      destroys it (`3a46a24c`); left: an active package is not restarted when its actor rejoins (today only
+      `RehydrateFromStore` or the next world load start it); `DisconnectActor` of the host's own actor kills the
+      host-authority mods' threads while the runtime leaves those mods loaded; a `ModTearingDown` listener that,
+      after an installer kill, disconnects the quarantined mod's own actor during the quarantine teardown restores
+      the actor record for a departed actor; `ModActorLedger.GetAttributedContext` creates an entry on demand
+      without a load record (no current path reaches it).
 - [ ] **Characters (after CORE-C):** a `RootPart` set by hand that is not named `HumanoidRootPart` does not end
       `MoveTo` when moved; once MP-11 makes the client registry a replica, decide whether registration admission (the
       instance quota) skips replica applies (`IsApplyingReplication`).
@@ -656,6 +809,31 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
 - [ ] **Retire `ReplicationDirtySet`'s actor-id overload** (A5-04; the `TODO` in `ReplicationDirtySet.Collect`): it
       is the one path that still hands a recipient removals for ids it never saw. *Owner:* MVP6 wire phase.
       *Plan:* once every caller holds a `ReplicationStream`, remove the overload and its null-stream branch.
+- [ ] **A remote caller still reads the host mod in a host-raised callback error** (audit R2 B1-02 follow-up, R3
+      C1): a Lua error an `OnServerInvoke` callback raises reaches the caller as its error value since `7cf2891e`,
+      but an error a host function raised inside the callback keeps its `[mod:<host mod> script:… line:N]` prefix,
+      and Roblox hands the caller only the error text. *Owner:* the owner decides (strip or keep), then multiplayer
+      implements. *Plan:* decide in the MVP5 protocol work; if stripped, `LuaCsRbxApiBindings.RemoteFailureLine`
+      drops the prefix through `RbxError.TryParse` for a remote caller only (the host log keeps it), with a test
+      beside the B3-06 `RemoteFunction` error-value cases.
+- [ ] **The two remote budgets are configurable only on the scheduler** (after `7cf2891e`): the induced budget is
+      set through `ModScheduler.ConfigureInducedThreadBudget` and the 32-thread remote admission budget is a
+      constant (`LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender`), so a game composes them by reaching into
+      the scheduler. *Owner:* composition (MVP10). *Plan:* expose all five numbers on `LuaCsModStackOptions`, pass
+      them through the factory, and add a replace-with-other-numbers test.
+- [ ] **The remote admission budget has no ceiling across senders** (after `7cf2891e`): 32 threads per sender
+      times ~128 senders reaches `ModScheduler.EmergencyMaxThreads` (4,096), while the induced budget has an
+      all-senders ceiling (192). *Owner:* multiplayer (MVP9). *Plan:* an all-senders ceiling for remote admission
+      below the emergency cap, with a flood test from 200 senders that leaves the host's own threads room.
+- [ ] **A deferred listener invocation of a disconnected connection holds its queue slot** (after `7cf2891e`) until
+      the sender's next induced thread ends and the queue is drained. *Owner:* scheduler. *Plan:* drop a deferred
+      invocation when its connection disconnects (the connection already knows its owner), with a test that a
+      disconnect frees the slot at once.
+- [ ] **`LuaCsRbxScriptThread` kills its coroutine before it marks itself killed** (audit R2 B1 follow-up):
+      `ParkOrStopAfterNativeYield` and the resume's catch call `_coroutine.Kill()` and only then set `_killed`, so
+      `IsDead` alone does not cover the window between them (`LuaCsRbxSchedulerAdapter.cs`). *Owner:* runtime (small).
+      *Plan:* set `_killed` first on both paths; a test that a thread observed from a `ThreadRetired` subscriber
+      during the kill already reads dead.
 
 **Build and test hygiene**
 
@@ -663,10 +841,19 @@ reports 1606 passed / 0 failed. This section records everything landed up to `f8
       prose from its XML docs and its error string (`///   LLM + LLMAgent    PlayMode .`). Rewrite them in English
       and search the tree for other stripped fragments (runs of three or more spaces inside `///` comments and string
       literals).
-- [ ] **Link `Mvp3WorldPackageFollowUpEditModeTests` into the Lua-tier runner:** move its 21 `[UnityTest]` cases
-      (`UniTask.ToCoroutine`; three more since `02249815`) and the cases that call the internal
-      `RbxWorldStartupSequence` verbatim into a Unity-only class; the rest then run on Linux
-      (`tools/portable/LuaTests/README.md`).
+- [ ] **Link `Mvp3WorldPackageFollowUpEditModeTests` into the Lua-tier runner:** move its `[UnityTest]` cases
+      (`UniTask.ToCoroutine`; 31 since `d4d7f95b`) and the cases that call the internal `RbxWorldStartupSequence`
+      verbatim into a Unity-only class; the rest then run on Linux (`tools/portable/LuaTests/README.md`). The fix
+      waves already ran a converted copy of the fixture on Linux, all green at `3d5b62d0` and at `d4d7f95b`, with a
+      portable player-loop shim that yields instead of refusing. *Owner:* test infrastructure. *Plan:* add that shim to
+      `tools/portable/LuaTests` and link the fixture in CI, so the startup-selection cases stop depending on a
+      Unity run.
+- [ ] **Hub editor text size and UI Toolkit limits** (from the Hub-crash investigation, `c7397c77`): opening
+      `sample_castle3d` in the mod editor builds about 48,700 glyph vertices twice (the text field and the
+      highlight overlay), near UI Toolkit's per-mesh vertex limit, and re-highlighting costs about 8.5 ms per
+      keystroke at 14 KB of source. *Owner:* Hub. *Plan:* debounce the highlight overlay (re-highlight after
+      typing pauses), highlight only the visible lines, and add a size test with a 64 KB source; measure in
+      a Unity player.
 - [ ] **Move `Lua_A3_10_CameraGlobals_WithNoCamera_RefuseBeforeMovingAnything`** (`70a4d1ab`) from
       `RbxClockLuaBindingsEditModeTests.cs` into `RbxCameraLuaBindingsEditModeTests.cs`, where the camera tests live.
       *Owner:* test hygiene. *Plan:* move it verbatim in the next test-touching wave.

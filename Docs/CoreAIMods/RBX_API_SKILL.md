@@ -97,13 +97,20 @@ Keep these in step with the runtime when the skill text is edited:
   implemented), that a read-only script's `Instance.new` raises the capability error, and that a
   player's mods are unloaded when that player leaves. Its budget rules say that a budget cut cannot
   be caught by `pcall`/`xpcall` (only the resumer of a cut `coroutine.create` coroutine sees it),
-  that such a coroutine shares its resumer's memory budget, and that library calls back into Lua
-  nest at most 200 deep before a catchable "C stack overflow".
+  that such a coroutine (and a thread `task.spawn` runs at once) gets at most what its resumer has
+  left of steps, time and memory, and that library calls back into Lua share one 128-level weighted
+  cap (`pcall` 128 deep, `table.sort`/`tostring` 63) before a catchable "C stack overflow". It also
+  states the reload rule: `manage_mods reload` and the Hub's Save & run remove the previous run's
+  startup objects first, `keep_objects=true` keeps them, and two budget cuts in a row quarantine the
+  mod and keep it from starting with the next game.
 - Section 2 lists `Vector2:Angle`, the CFrame `components`/`ToEulerAngles`/`ToOrientation`/
   `ToAxisAngle`/`AngleBetween` family and `CFrame.fromRotationBetweenVectors`, `Color3.toHSV`, the
-  constructor coercion rule (numeric string → number, nil → 0, anything else `BAD_ARGUMENT`), 32-bit
+  argument coercion rule (Luau's: number ↔ numeric string, constructor numbers 0 when nil, booleans
+  never converted), 32-bit
   UDim offsets and the ±(2^53−1) `NextInteger` bounds. Section 3 lists `Enum.X:FromName` /
-  `:FromValue` and `Enum.KeyCode.None = 0` with `Unknown` as its alias.
+  `:FromValue`, `Enum.KeyCode.None = 0` with `Unknown` as its alias, and that an Enum property or
+  instance-method argument takes the item, its Name or its Value while datatype members need the
+  `EnumItem`.
 - Section 4 also states that an `UnreliableRemoteEvent` payload over 1,000 bytes is
   `PAYLOAD_TOO_LARGE` in solo as well as online, that `ClickDetector.MouseClick` passes the clicking
   player, measures `MaxActivationDistance` from that player's character (from the camera when there
@@ -119,8 +126,9 @@ Keep these in step with the runtime when the skill text is edited:
   remapping `PrimaryPart`/`ObjectValue.Value` onto the copies, `game:Clone()`/`player:Clone()` → nil,
   the Debris refusals (services, `game`, the camera, a `Player`) and the TweenService rules
   (WorldEdit, tweenable types, per-actor retention of 256 finished tweens with the WRONG/RIGHT pair).
-- Sections 5 and 6 state the Part write rules (strict booleans, `Size` clamped to [0.001, 2048],
-  non-finite spatial values refused, the `Part.Name expects a string, got number` error shape) and
+- Sections 5 and 6 state the Part write rules (strict booleans, numbers for strings and numeric
+  strings for numbers, Enum properties by Name or Value, `Size` clamped to [0.001, 2048], non-finite
+  spatial values refused, the `Part.Anchored expects a boolean, got string` error shape) and
   `CanCollide = false` as in Roblox (bodies pass through, `Touched` and `Raycast` still see the part;
   only `workspace` content is physical). Section 7 states the Humanoid rules (`Died` only inside
   `workspace`, `JumpPower` in [0, 1000], `math.huge` health, write authority for
@@ -128,14 +136,19 @@ Keep these in step with the runtime when the skill text is edited:
   with `false` when a script or a tween moves the `HumanoidRootPart`, `Humanoid:Clone` keeping the
   health and movement values). Section 8 adds the non-archivable character (`character:Clone()` is
   nil until the script sets `Archivable = true`) and `Player:Kick(message)` (the text reaches the
-  kicked client, cut to 1,024 UTF-8 bytes; a non-string is `BAD_ARGUMENT`). Section 12 caps
+  kicked client, cut to 1,024 UTF-8 bytes; a number is sent as its `tostring` text, any other
+  non-string is `BAD_ARGUMENT`). Section 9 says that `.Value` writes convert like arguments and that
+  `IntValue.Value` refuses a value outside -2^63..2^63-1. Section 12 caps
   attributes and tags at 256 per instance, limits a new attribute name to ASCII letters, digits,
   `.`, `-`, `/` and `_`, and a new tag to 100 characters. Section 13 documents the
   `[mod:<id> script:main.lua line:N]` prefix on errors raised inside a mod, argument numbers that do
   not count `self`, that `pcall`, `xpcall` and `coroutine.resume` all receive exactly that one line
-  (a budget cut excepted), and the Lua-style `bad argument #n to 'fn' (x expected, got y)` of the
-  mod-core functions, whose string parameters take a number as `tostring` writes it (`store_set(7, 8)`)
-  and refuse a boolean or a table. Section 14 lists the loud global stubs
+  (a budget cut excepted), the Lua-style `bad argument #n to 'fn' (x expected, got y)` of the
+  mod-core functions, and the one coercion rule of both surfaces: a string parameter takes a number as
+  `tostring` writes it (`store_set(7, 8)`, `FindFirstChild(5)`), a number parameter a string `tonumber`
+  accepts, an integer parameter truncates toward zero, and a boolean parameter takes only
+  `true`/`false` (`FindFirstChild(name, 1)` is `BAD_ARGUMENT`). Section 14 adds that Luau nesting
+  deeper than 200 levels is a syntax error. Section 14 lists the loud global stubs
   (`BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Ray`, `Region3`, `Rect`,
   `PhysicalProperties`, `OverlapParams`, `DateTime`, `shared`), each with its workaround.
 - `BasePart` exposes `Shape`, `Material`, `MaterialVariant` (string; `""` for none), `Orientation`, and `Rotation` in addition to the MVP1

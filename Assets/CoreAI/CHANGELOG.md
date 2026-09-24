@@ -5,9 +5,10 @@
 MVP3 (the world/place package) is code complete; its Unity verification gate (EditMode 0 failed, PlayMode
 `FastNoLlm` 0 failed) is still to be run. The entries below also cover the fix waves that followed the
 2026-09-24 audits of the MVP1 instance core, the MVP2 scheduler and sandbox, the MVP8 gameplay services and the
-multiplayer foundation, and the first two audit rounds over those waves (audit ids in parentheses — A1-xx world
+multiplayer foundation, and the three audit rounds over those waves (audit ids in parentheses — A1-xx world
 package, A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for round 1; B1-xx network and bindings,
-B2-xx world package and mod runtime for round 2; details in `TODO.md`).
+B2-xx world package and mod runtime, B3-xx sandbox for round 2; C1-xx multiplayer and coercion, C2-xx world package
+and runtime for round 3, whose sandbox findings are still being fixed; details in `TODO.md`).
 
 ### Security
 
@@ -38,25 +39,57 @@ B2-xx world package and mod runtime for round 2; details in `TODO.md`).
   `__index`, a `__pairs`/`__ipairs` metamethod, a coroutine run by `coroutine.resume`, `warn` converting an
   argument through the global `tostring` — is a nested VM run, and an
   error raised N levels deep unwound in about N² time with no instruction running, so no hook could stop it: a
-  comparator 1,000 deep took 8.1 s to fail, and unbounded it ran 64 s under a 10 s budget. They now nest at most 200
-  deep per thread (`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's `LUAI_MAXCCALLS`); the next one raises
-  `C stack overflow (<function>: more than 200 nested calls from library functions back into Lua)`
-  (`CStackOverflowMessage`), which `pcall` catches. Plain Lua recursion is not limited; `__concat` is not counted
-  yet (`TODO.md`).
+  comparator 1,000 deep took 8.1 s to fail, and unbounded it ran 64 s under a 10 s budget. They now count against
+  one cap (`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's `LUAI_MAXCCALLS`) — since audit round 2, 128 weighted
+  levels per chain of nested runs (B3-01, below) — and the call past it raises `C stack overflow (<function>: more
+  than 128 levels of nested calls from library functions back into Lua)` (`CStackOverflowMessage`), which `pcall`
+  catches. Plain Lua recursion is not limited; `__concat` is not counted yet (`TODO.md`).
 - **`tostring = warn; warn(1)` ended the host process.** `warn` converted its arguments through the global
   `tostring` outside the nesting count, so a mod's own `tostring` that calls `warn`, or `warn` installed as
   `tostring`, recursed until the .NET stack overflowed — an uncatchable crash that closes the Unity editor or
-  player. The conversion is a counted call now (the `warn` boundary): the recursion stops at the 200-deep cap with
+  player. The conversion is a counted call now (the `warn` boundary): the recursion stops at the C-call cap with
   the catchable `C stack overflow (warn: …)` line. A `__tostring` recursing through `warn` while `tostring` is the
-  sandbox's own wrapper counts twice per level and stops at 100, which is harmless.
+  sandbox's own wrapper counts twice per level and stops sooner, which is harmless.
 - **A raw coroutine escaped its mod's memory budget (A2-09).** A `coroutine.create` body ran under a fixed 256 MB
   budget, so a mod held to 16 MB kept 80 MB alive inside one. It now gets the budget of the run that resumes it — the
   mod's `HandlerMaxAllocatedBytes` for its handlers, tasks and main chunk — and a coroutine it resumes inherits it.
 - **A remote client could still fill the host's thread quota (A4-01).** A `task.spawn`/`task.defer`/`task.delay`
   from a handler that a client's remote started was charged to the handler's owner, so one client firing at a
   handler that calls `task.delay(60, f)` filled the host's whole quota and got its gameplay mod quarantined. Such
-  threads, and every thread they start, are charged to the sender and held to its limit; a start over it raises
-  `BUDGET_EXCEEDED` inside the handler, and a handler that ends on that refusal is not charged to its owner.
+  threads, and every thread they start, are charged to the sender and held to its limit — since audit round 3 its
+  induced budget (C1-01, below); a start over it raises `BUDGET_EXCEEDED` inside the handler, and a handler that
+  ends on that refusal is not charged to its owner.
+- **`pcall` recursion held a frame for half a minute, and nested runs outran their budget (B3-01, B3-02, B3-08).**
+  `pcall` and `xpcall` were not counted calls, so a `Heartbeat` handler recursing through `pcall` unwound for 33 s
+  under a 500 ms budget; they are counted now (native, with the caller's context: the same error values, a budget
+  trip still uncatchable, no allocation on the success path) and the same handler fails in 26 ms — a `pcall` past
+  the cap returns `false` and the line, an `xpcall` hands it to its handler, which has an eighth more room before
+  "error in error handling", and an `xpcall` recursion no longer hands its handler `nil`. A nested run — a raw
+  coroutine under `coroutine.resume`, a thread `task.spawn` runs at once, a guarded call re-entering a run on the
+  same state — got its own full budget, so twelve nested levels of 12 MB each kept 138 MB alive under a 16 MB guard;
+  it now gets its own budget or what the enclosing run has left, whichever is smaller, for steps, time and memory,
+  its steps are charged back, and exhausting a lent limit ends the whole chain (cut in 152 ms). The C-call cap is one
+  count of 128 weighted levels per chain of nested runs — `pcall`/`xpcall` bodies and `gsub` callbacks open one,
+  every other call back into Lua two — and a resumed thread continues its resumer's count, so any mix stays under
+  about 512 KB of native stack (at most 474 KB measured), which an IL2CPP or WebGL player may not bound itself;
+  before, the count ran 200 per channel and restarted in every task thread, and 250 nested `task.spawn` levels plus
+  200 `tostring` levels took 2.56 MB. `LuaCsSecureEnvironment.LightCallLevels` and `HeavyCallLevels` name the two
+  weights.
+- **A flooding client made the host's own listeners run on its budget and then starve (B1-02, C1-01, C1-02,
+  C1-03).** A signal fired from a thread a client's remote started (`Changed`, an attribute or `ChildAdded` signal,
+  a `BindableEvent`) started its handlers on the handlers' owners' quotas, so 300 `FireServer` calls filled the
+  host's 256 threads (`THREAD_CAP`). Round 2 charged them to the sender's 32-thread budget, which then made honest
+  play lose remotes: the host's own parked listeners used up the sender's budget and its next remote was refused.
+  A sender now has two budgets that never share threads: **remote admission** (32; only the handlers its own
+  remotes start) and **induced work** (128 per sender, 192 for all senders together, 64 of the actor quota kept for
+  the host; `ModScheduler.ConfigureInducedThreadBudget`) for everything those handlers cause — `task.*` threads,
+  the handlers their writes and fires start, the threads a `:Wait()` resumed by a charged fire creates. A listener
+  invocation that finds the induced budget full is deferred in a bounded per-sender queue (256 per sender, 4,096 in
+  all) and started in the sender's order once its threads end; only past the queue is it dropped, counted
+  (`InducedListenerDrops`) and logged once per sender. `Once` is used up only when its handler starts. The host's
+  own fires never wait. A coin pickup at 10 per second with a host listener that `task.wait`s now lands 40 of 40.
+- **A remote client learned the host's mod ids (B1-05).** Refusal and stop lines sent to a remote caller named the
+  host mod; they are fixed lines now, and the host log keeps the details.
 - **A client could write the server's log at its own packet rate (A4-02, A4-12).** Reports of an unknown
   `EnumItem` or a hidden instance reference in a client payload are logged per sender at its 1st, 2nd, 4th, 8th…
   such payload (256 senders tracked apart, the rest share one count), names are cut to 64 characters (a 60 KB name
@@ -249,7 +282,7 @@ B2-xx world package and mod runtime for round 2; details in `TODO.md`).
   property CoreAI does not model is accepted too). `game:IsLoaded()` is true and
   `game.Loaded` never fires; `Model:MoveTo` stays a loud stub. The method table is keyed by name and declaring class
   (the nearest declaration wins). `Camera` is a `PVInstance` with `GetPivot`/`PivotTo`. Property-assignment errors
-  read `Part.Name expects a string, got number`. Boolean, EnumItem, UDim and Vector2 tween goals reach the service.
+  read `Part.Anchored expects a boolean, got string`. Boolean, EnumItem, UDim and Vector2 tween goals reach the service.
 - **`G10MeasurementComposition` in `RealProvider` mode without `COREAI_LLM`** now refuses with an error naming the
   missing module instead of silently substituting a stub provider.
 - **Tasks could not be handed back to the scheduler (M2-14).** `task.spawn`, `task.defer` and `task.delay` accept a
@@ -327,8 +360,8 @@ B2-xx world package and mod runtime for round 2; details in `TODO.md`).
   instead of a raw `LuaCanceledException`, and leaves nothing loaded.
 - **`Player:Kick(message)` lost its message.** The text reaches the transport (`RbxPlayers.KickPlayer(player, reason,
   message)` → `INetworkBridge.DisconnectActor(actorId, message)`), cut to 1,024 UTF-8 bytes at a whole character;
-  `nil` leaves the transport's default, and a non-string — a number included — is `BAD_ARGUMENT` before anything is
-  kicked.
+  `nil` leaves the transport's default, a number is sent as its `tostring` text (since the coercion entry below),
+  and any other non-string is `BAD_ARGUMENT` before anything is kicked.
 - **A scheduler thread's host error got two prefixes and the wrong code.** A thread or handler that did not catch a
   host error reported `BAD_ARGUMENT: nil` (`0321448a`), then `[mod:x …] BAD_ARGUMENT: [mod:x …] UNKNOWN_SERVICE …`,
   which also told auto-repair it was a Lua bug. The fault keeps the host line's own code, fix and context under one
@@ -450,8 +483,8 @@ B2-xx world package and mod runtime for round 2; details in `TODO.md`).
   mod-core API takes a number as Lua's library does, as the text `tostring` gives it (`store_set(7, 8)` stores
   `"7"` = `"8"`; it used to fail with an error real Lua never raises); a boolean or a table is still refused. A
   host function that fails to read a value that is not one of its arguments (a table field, a returned value)
-  says `bad value in 'fn' (x expected, got y)`. The Rbx surface is unchanged: `Part.Name = 5` and
-  `player:Kick(42)` are still refused (`TODO.md`).
+  says `bad value in 'fn' (x expected, got y)`. The Rbx surface converts the same way since the coercion entry
+  below.
 - **`mods_call` could stall a frame for seconds (A2-10, in part).** An export ran under a fresh handler budget
   (50,000,000 steps, 10 s) with no cancellation, so one call from a `Heartbeat` handler held the frame. It now runs
   with its caller's token (stopping the caller stops the export) and, from a signal handler, within that handler's
@@ -504,7 +537,8 @@ B2-xx world package and mod runtime for round 2; details in `TODO.md`).
 - **A mod whose first load failed kept answering clients as the host (A2-03).** Its `OnServerInvoke` callbacks,
   tweens and pending waits are removed with the failed load.
 - **The caller of an `OnServerInvoke` callback stopped by its budget read Lua-CSharp's cancellation text (A2-07);**
-  it is answered "the RemoteFunction callback was stopped: it exceeded its execution budget".
+  it is answered "the RemoteFunction callback was stopped: it exceeded its execution budget" — for a real budget cut
+  only since B1-05 (below).
 - **Mods restarted in id order, so a world whose mods use each other at init could not reload its own save
   (A1-02).** Both restart paths — `RehydrateFromStore` and a world restore — started mods by ordinal id and a world
   package recorded no order, so a mod that read at init what a later-id mod created failed, and the all-or-nothing
@@ -531,6 +565,107 @@ B2-xx world package and mod runtime for round 2; details in `TODO.md`).
   instance the client's registry does not hold (the client registry is not a replica yet) was reported on every
   payload; it is reported at the 1st, 2nd, 4th, 8th… such payload, like a client's, and counted
   (`UnresolvedInstanceReferences`, `UnresolvedInstanceReferencePayloads`).
+- **Every stopped `RemoteFunction` callback was reported as a budget cut (B1-05).** An unload, reload, quarantine,
+  a host cancel or a native `coroutine.yield` answered the caller "it exceeded its execution budget". The caller now
+  reads `the RemoteFunction callback was stopped before it returned`, `the RemoteFunction callback was stopped: the
+  world serving it was shut down`, `the RemoteFunction callback could not start`, or, when its earlier calls' threads
+  fill a budget, `the RemoteFunction call was refused: threads this caller's earlier calls started are still running
+  on the server`; a callback that dies before its first wait answers at once instead of after the 30 s timeout.
+- **A failed reload wiped the `OnServerInvoke` callbacks it replaced (B1-03).** A load or reload that fails puts back
+  every `OnServerInvoke`/`OnClientInvoke` its chunk replaced or cleared — another mod's too — while the slot is empty
+  and the owner's generation is live; a successful reload replaces them as before.
+- **A `RemoteFunction` error reached the caller as Lua-CSharp's rendering (B3-06).** `error("boom")` arrived as
+  `Lua-CSharp: [string "sandbox_chunk"]:5: boom`, naming the engine and the host's internal chunk; the caller now
+  gets the error value (`boom`). A host function's error still carries its `[mod:<id> …]` prefix (`TODO.md`).
+- **A Full-capability mod broke the world that opens on the next start (B2-01).** The startup refresh recorded a
+  world the startup restore refuses, so every later start silently fell back to the default world. The refresh runs
+  the restore's own checks first; such a world keeps the previous entry, a `manage_mods` result carries a
+  `startup_warning` field, `execute_lua` appends the note to its output, and the log says it once. The isolation rule
+  for `Full` mods is unchanged.
+- **Hub and host edits of the mod sources were lost at restart (B2-02, C2-02).** Only gated tool calls refreshed the
+  startup selection. Every write to the session's source store is now recorded by the frame pump at the next frame
+  (never under the shared gate, at most once per frame), gated changes record themselves once, and a Hub edit made
+  while a confirmed load records its selection is kept.
+- **The startup selection wrote a whole package after every gated call in a live world (B2-09, C2-03).** The refresh
+  compared a digest of a whole capture, camera and part poses included. It now records a mod source change at once
+  and a world-tree change (seen through registry events while the call runs) at most once per
+  `RbxWorldRuntimeSessionController.StartupRefreshInterval` (5 s by default; zero records every change, a later change
+  is recorded by the frame pump), and a call that changed neither — physics and camera motion included — writes
+  nothing. A startup record that fails leaves a note in the tool result and in `StartupSelectionNote` (C2-06).
+- **The boot restore ran outside the shared gate (B2-10).** A mod change or an `execute_lua` arriving during boot
+  could land on the default world the restore then replaced; the restore now holds the gate.
+- **A load refused after its chunk ran kept its formulas, attribution and connections (B2-04), and a second build
+  of the same id could tear down the first (C2-01).** The checks that can still refuse a built candidate run inside
+  the build's rollback, and a load or reload of an id whose build is running — a chunk loading its own id, a
+  `ModTearingDown` listener reloading it — is refused before its chunk runs ("Mod '<id>' was loaded concurrently." /
+  "reloaded concurrently.").
+- **The session admitted a mod its store then refused to keep (B2-07, C2-04).** The session counted the manifests the
+  store could list, the file store the folders holding a manifest, so one unreadable manifest let a 257th mod run
+  without a saved source. Both now admit by one rule (`ILuaModSourceAdmission`, public); `FileLuaModSourceStore.Save`
+  throws its refusal; the source is saved and checked inside the build's commit, so a store that did not keep it
+  undoes the load as a full rollback (the displaced formula comes back, no revision is written) and the tool says why.
+- **Past the mod limit, `unload` skipped its backup too (B2-13);** only `forget`, which frees a source, does now.
+- **An `execute_lua` queued behind a confirmed load lost its own error (B2-06);** it keeps it, with the explanation
+  that the world was replaced after it.
+- **An autosave name that is a Windows device name opened the device (B2-14).** `CON.world`, `nul.WORLD`,
+  `COM1.x.world` and `LPT9.world` are refused like a manual slot of that name ("Auto package name '…' is a reserved
+  device name."), and `load_autosave` answers `read_failed` instead of throwing for any failure to open the file.
+- **The Luau downleveler could crash the process on deeply nested source.** Its lexer and parser, which run on every
+  Save & run, `execute_lua` and world restore before the VM's parser, recursed without a bound: about 2,000 nested
+  brackets, tables, functions or blocks, 1,000 nested if-expressions or interpolations, or 3,000 nested backtick
+  strings overflowed the .NET stack (confirmed on CoreCLR), and a saved mod like that crashed every start. Source
+  nested more than 200 levels — the VM parser's own limit, checked construct by construct — is refused with a
+  diagnostic; for plain Lua the line reads `syntax error:` (C2-09) instead of calling it a Luau error.
+- **The Hub Mods and Logs tabs rebuilt once per notification, off the main thread.** Each `LogsChanged` queued a full
+  rebuild (500 failing `Heartbeat` handlers, 500 rebuilds in one frame) and `ModsChanged` rebuilt the mod list
+  synchronously on the raising thread (a rehydrate of 30 mods ran 30 `ListMods` of 900 entries). Both tabs now
+  coalesce to at most one rebuild per panel update, on the main thread, and the Mods tab checks whether the editor is
+  open first. With the downleveler entry above, these are the two causes found for the Unity crash when a mod was
+  edited on the Hub.
+- **Scripts written for Roblox failed on argument and property types Roblox converts (round-trip gap RT4).** Both
+  script surfaces read arguments and property writes by one rule (`LuaCsValueMarshaller`), taken from Luau's
+  `luaL_check*` and Roblox's setters: a string parameter or property takes a number as `tostring` gives it
+  (`part.Name = 5`, `player:Kick(42)`, `FindFirstChild(5)` and `inst[5]` find the child `"5"`); a number one takes
+  what Luau's `tonumber` accepts (spaces, sign, `.5`, `1e3`, `0x10`, `0x1p4`, `inf`, `nan`; `1e999` is infinity; the
+  text is read up to an embedded NUL, C1-09), and `""`, `"abc"`, `"5x"` are refused; an integer parameter truncates
+  toward zero (the mod-core int parameters used to round), and NaN or a value with no integer
+  representation is refused; a boolean takes only `true`/`false`, an omitted one is `false` — also for
+  `FindFirstChild`'s `recursive`, `GenerateGUID` (default `true`) and `PostAsync`'s `compress`, which read Lua
+  truthiness before (C1-05); an Enum property or instance-method argument takes the item, its Name or its integer
+  Value (`part.Material = "Wood"` or `512`, `Humanoid:ChangeState("Jumping")`, `UserInputService:IsKeyDown("E")`).
+  `TweenService:Create` goals and datatype Enum members stay strict. The Full tier's `ConvertArg` follows the same
+  rules — numeric strings, strict booleans, checked integer casts, exact enum names (C1-07) — and `Vector2` arithmetic
+  takes a numeric-string scalar like `Vector3` (C1-08). The rule table is pinned on both surfaces
+  (`RuleTable_*`, `Mvp8ValueObjectsEditModeTests`).
+- **`IntValue.Value = 2^63` wrapped to a negative number (C1-04);** a value outside [-2^63, 2^63) is `BAD_ARGUMENT`.
+- **`task.cancel(coroutine.running())` read as a wrong type (C1-11).** It has its own refusal ("task.cancel cannot
+  cancel a coroutine.create thread or a coroutine.running() value …"); a running callback stops by returning.
+- **Sandbox callbacks and error lines (B3-03 … B3-07).** A `gsub` replacement function or a `string.format`
+  `__tostring` that ran long under `execute_lua`, whose guard hands the frame back, failed with an
+  `ArgumentOutOfRangeException` from the VM's call stack; it is awaited and completes. The yield fence of such a
+  callback holds after the callback resumed a coroutine of its own. The counted `tostring`, `print`, `pairs`, `ipairs`
+  and `table.sort` call the native function with the caller's context: 1,088 B per 20,000 calls instead of 2.4 MB.
+  The sandbox's own refusal and trip lines start with `sandbox: ` instead of a CLR class name (the codes are
+  unchanged), `table.concat` names Lua types, and bad-argument lines read like Lua's (one closing parenthesis,
+  `got no value` for a missing argument; `coroutine.resume`'s errors name `resume`). The signal runners park with the native
+  `coroutine.yield` captured before any mod code ran, so a mod that replaces `coroutine.yield` no longer breaks every
+  `Heartbeat` handler.
+- **A reload stacked a second copy of everything the mod built at startup.** Saving a castle-building mod five times
+  left six castles. A reload now cleans the previous run's startup objects first (Added: `ModReloadMode`); a reload
+  that fails destroys what its own chunk built and puts the previous run's objects back exactly where they were. A
+  clean reload also destroys the objects the same mod put inside its startup objects — a clicker's coins no longer
+  pile up — while objects players or other mods own are moved out first (H1).
+- **A mod stuck in a budget loop froze the game eight times, and again on the next start.** Two budget trips in a row
+  (no clean call or frame between them) quarantine the mod and mark its stored package `Active = false` with
+  `SuspendedAfterBudgetTrips`, which the world package keeps (H4), so neither a restart nor a world restore starts
+  it; a load, a reload or the Hub's **Enable** clears it. Ordinary errors still quarantine at 8.
+- **A host composed without `LuaCsModRuntimeFactory`'s teardown kept zombie loops after a reload.** The factory now
+  wires the reload and unload teardown (threads, connections, tweens, the mod's instances) itself; the installer's
+  duplicate wiring is gone (H5).
+- **A load order past 2^53 saturated every later first load (C2-08).** `LuaModManifest.LoadOrder` is recorded from 1
+  to 2^53 (`MaximumLoadOrder`); a larger stored value reads as unordered and is skipped when the next one is stamped,
+  a world package that carries one is refused on read, a first load while the store cannot be listed stamps no
+  order, and a capture from a store that cannot be listed fails instead of saving the world without its mods.
 
 ### Added
 
@@ -611,6 +746,33 @@ B2-xx world package and mod runtime for round 2; details in `TODO.md`).
   tools that write manifests). Mirror: `MirrorNetworkBridge.MaxHeldSendsUntilAdmitted` (256),
   `MaxHeldBytesUntilAdmitted` (256 KiB) and the counters `SendsHeldUntilAdmitted` and `AdmissionHoldOverflowDrops`;
   `AdmittedActorId` now answers for the live connection only.
+- **Reload modes (owner decision: both modes, clean by default).** `ModReloadMode` (`CleanStartupObjects`, the
+  default everywhere; `KeepObjects`, the old hot reload), `ModReloadReport` (`CleanedObjects`, `KeptObjects`,
+  `RescuedObjects`, `Describe()`), and `ILuaModRuntime.ReloadMod(caller, id, code, ModReloadMode)`, whose default
+  body runs the mode-less reload and answers null (a wrapper must forward it, or the mode is lost). A run's startup
+  objects are the instances its main chunk registered up to its first yield that the mod still owns
+  (`Docs/CoreAIMods/mod-system.md` §5c). `manage_mods reload` takes an optional `keep_objects` (the MCP
+  `manage_mods` forwards it) and reports the mode and what it cleaned. Hub: `IHubModService.SaveOrReload(id, code,
+  ModReloadMode)` returning `HubModSaveResult`, `IHubModService.NewModTemplate`, `HubModTemplates` (a
+  `Heartbeat`/`task.wait` template when the Rbx API is wired, `hooks_every` otherwise),
+  `HubModRecord.SuspendedAfterBudgetTrips`, and a **Keep objects on Save & run** toggle stored under the PlayerPrefs
+  key `CoreAI.Hub.Mods.KeepObjectsOnSave` (`PlayerPrefsHubModEditorPreferences.KeepObjectsOnSaveKey`; a host with
+  its own settings store supplies an `IHubModEditorPreferences`); the Save & run status line says what the reload
+  cleaned.
+- Crash-loop protection: `LuaCsModRuntime.MaxBudgetTripsBeforeQuarantine`, `DefaultMaxBudgetTripsBeforeQuarantine`
+  (2), the `maxBudgetTripsBeforeQuarantine` constructor parameter and
+  `LuaCsModStackOptions.MaxBudgetTripsBeforeQuarantine`; `LuaModManifest.SuspendedAfterBudgetTrips` (omitted from
+  JSON when false).
+- Audit rounds 2 and 3: `ModScheduler.ConfigureInducedThreadBudget(perSender, allSenders, deferredPerSender,
+  deferredAllSenders)`, `DefaultMaxInducedThreadsPerSender` (128), `DefaultInducedThreadsHostReserve` (64),
+  `DefaultMaxDeferredListenerInvocationsPerSender` (256), `DefaultMaxDeferredListenerInvocationsAllSenders` (4,096)
+  and the matching `MaxInducedThreadsPerSender`, `MaxInducedThreadsAllSenders`,
+  `MaxDeferredListenerInvocationsPerSender`, `MaxDeferredListenerInvocationsAllSenders`;
+  `LuaCsSecureEnvironment.LightCallLevels` (1) and `HeavyCallLevels` (2) (`MaxCCallDepth` is 128 now);
+  `IStartupAwareWorldMutationGate` (public; `ConfirmedWorldMutationGate` implements it),
+  `RbxWorldRuntimeSessionController.StartupRefreshInterval`, `DefaultStartupRefreshInterval` (5 s) and
+  `StartupSelectionNote`; `ILuaModSourceAdmission` is public; `LuaModManifest.MaximumLoadOrder` (2^53) and
+  `IsRecordedLoadOrder`.
 
 ### Changed
 
@@ -635,10 +797,31 @@ B2-xx world package and mod runtime for round 2; details in `TODO.md`).
   mod-API argument error reads `bad argument #n to 'fn' (x expected, got y)`; `task.*` threads started by a
   remote-started handler count against the sender; `os.time(t)` before 1970 is `nil`; a client sends no remote
   before its admission; `coroutine.resume` refuses a task, signal-handler or main-chunk thread; and library calls
-  back into Lua nest at most 200 deep. After the second audit round: a client holds its reliable remotes until its
-  admission and sends them right after it (unreliable ones are still dropped); mods restart and restore in their
-  load order; a mod-core string parameter takes a number as `tostring` gives it; and `warn` counts towards the
-  200-deep cap.
+  back into Lua count against a nesting cap. After the second and third audit rounds: a client holds its reliable
+  remotes until its admission and sends them right after it (unreliable ones are still dropped); mods restart and
+  restore in their load order; a string parameter or property of either surface takes a number as `tostring` gives
+  it, a number one a numeric string, an Enum one the item's Name or Value, and an integer one truncates (the
+  mod-core ones used to round), while `Random.new({})` is `BAD_ARGUMENT` and `inst[5]` finds the child `"5"`;
+  `FindFirstChild(name, 1)`, `GenerateGUID(0)` and `PostAsync(…, 1)` are refused; `IntValue` refuses values outside
+  [-2^63, 2^63); `warn`, `pcall` and `xpcall` count towards the C-call cap, which is 128 weighted levels per chain
+  of nested runs (63 nested `table.sort` or `tostring` levels, 128 `pcall`s) instead of 200 per channel, with the
+  text `more than 128 levels of nested calls`; a raw coroutine inside a task thread is held to that thread's
+  remaining 10,000 steps / 500 ms (it had its own 500,000 / 1 s), a spawned child that exhausts a lent allowance
+  also ends its spawner, and a memory-heavy immediate `task.spawn` in a main chunk can fail the load; the sandbox's
+  own lines start with `sandbox: `; a signal listener started by a client's remote waits for that client's induced
+  budget instead of running at once or being dropped, and `Once` is used up only when its handler starts; a
+  `RemoteFunction` caller reads a fixed line for a stopped callback and the error value for a failed one; a reload
+  removes the previous run's startup objects unless `KeepObjects` is chosen, and a failed reload destroys what its
+  chunk built; two budget trips in a row suspend a mod; Luau or plain Lua nested past 200 levels is a
+  `syntax error:`.
+- **Breaking for hosts that implement the interfaces themselves:** `IHubModService` gained
+  `SaveOrReload(id, code, ModReloadMode)` and `NewModTemplate` without default bodies, so an external
+  implementation must add them; `ILuaModRuntime.ReloadMod(caller, id, code, ModReloadMode)` has a default body, so
+  a wrapper compiles unchanged but turns every reload into a clean one until it forwards the member; a custom
+  `ILuaModSourceStore` should throw from `List` when it cannot be listed (an empty answer now means "no mods") and
+  may throw from `Save` to refuse a new mod (`ILuaModSourceStore.cs`). A host that wired its own reload/unload
+  teardown next to `LuaCsModRuntimeFactory` should drop it: the factory wires it now, and a second wiring tears
+  down twice.
 - **Breaking wire change (Mirror).** The readiness, clock and notice messages are new and the clock anchor gained
   `HeldAheadOfWallSeconds`, so server and client must run the same CoreAI version. A missing message fails loudly
   with Mirror's default `exceptionsDisconnect`: an older server has no handler for `CoreAiClientReadyMessage` and
@@ -654,11 +837,16 @@ B2-xx world package and mod runtime for round 2; details in `TODO.md`).
   `Player:Kick(message)`, new attribute names, and that a player's mods leave with the player. After the first
   audit round it also states that a budget cut cannot be caught by `pcall`/`xpcall`, the `GetPropertyChangedSignal`
   near-miss rule, `os.time(t)` returning `nil` before 1970 and the client clock hold, the `coroutine.resume` refusal
-  of task threads (use `task.spawn(t)`), the 200-deep library call cap, the instance quota's `BUDGET_EXCEEDED`, the
+  of task threads (use `task.spawn(t)`), the library call cap, the instance quota's `BUDGET_EXCEEDED`, the
   100-character tag rule, readable removal handlers and the Lua-style `bad argument` errors of the mod-core
   functions. After the second audit round it says that the mod-core string parameters take a number as `tostring`
   writes it (a boolean or a table is refused), and that an unmodelled property's never-firing signal is the same
-  signal for a name and is disconnected by `Destroy()`.
+  signal for a name and is disconnected by `Destroy()`. After the third round it states the coercion rule of both
+  surfaces (numbers ↔ numeric strings, integer truncation, strict booleans, Enum Name/Value on instance members,
+  `Part.Anchored expects a boolean, got string` as the wrong-type example, `Kick(42)` sending `"42"`), the
+  128-level weighted C-call cap and the nested-run budget, the reload rule with `keep_objects`, the two-trip
+  suspension, and the 200-level Luau nesting limit; `RbxApi.txt` and `BuiltInRbxApiSkillText.cs` stay
+  byte-identical.
 
 ## [7.45.0] - 2026-09-24
 

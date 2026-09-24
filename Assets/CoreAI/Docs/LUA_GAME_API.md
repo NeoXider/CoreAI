@@ -104,9 +104,14 @@ frame). Every call takes the calling `ActorContext` first — resolve it from `I
 modRuntime.LoadMod(host, "night_director", luaCode, LuaCapabilities.Read | LuaCapabilities.WorldEdit);
 modRuntime.EmitEvent(host, "wave_started", "3");           // game -> mods (host actor only)
 modRuntime.AddModEventEmittedListener(host, OnModEvent);   // mods -> game (host actor only)
-modRuntime.ReloadMod(host, "night_director", newCode);
+modRuntime.ReloadMod(host, "night_director", newCode);   // cleans the previous run's startup objects
+modRuntime.ReloadMod(host, "night_director", newCode, ModReloadMode.KeepObjects); // keeps them; returns a report
 modRuntime.UnloadMod(host, "night_director");
 ```
+
+A reload removes what the previous run's main chunk built before its first yield and the mod still owns
+before the new chunk runs, unless `ModReloadMode.KeepObjects` is passed
+([mod-system.md](../../../Docs/CoreAIMods/mod-system.md) §5c).
 
 ```lua
 -- inside a mod (runs during LoadMod, registers hooks):
@@ -135,7 +140,8 @@ needs no prefab registry at all.
 
 Budgets: every handler call gets 10 s / 50M instructions; <= 64 handlers and <= 16 timers per
 mod; event queue <= 256 (oldest evicted); 8 consecutive errors quarantine the mod automatically
-(kept loaded with dispatch suspended; a reload clears the quarantine).
+(kept loaded with dispatch suspended; a reload clears the quarantine), and so do 2 budget trips in a row, which
+also suspend the stored package until the mod is loaded or reloaded by hand.
 Storage: `FileLuaModStore` (`persistentDataPath/CoreAI/LuaMods`, <= 256 keys, value <= 64 KB).
 
 Persistence boundary: in the Unity composition (`CoreAiModsInstaller`) mod sources are

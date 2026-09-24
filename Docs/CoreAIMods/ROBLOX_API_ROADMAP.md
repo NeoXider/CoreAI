@@ -20,7 +20,7 @@ loopback remotes, the shared JSON contract, the clocks, the Model pivot slice, a
 so has the "Gameplay services I" slice (the old MVP8), and **MVP3 (the world/place package) is code
 complete (2026-09-24)** with its Unity verification gate pending; its contract and acceptance evidence
 are in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). Audits of MVP1, MVP2, the gameplay services and the
-multiplayer foundation (2026-09-24) were followed by fix waves and two audit rounds over them, recorded
+multiplayer foundation (2026-09-24) were followed by fix waves and three audit rounds over them, recorded
 in the rung sections below and in `TODO.md`; they are unreleased. Next is MVP4 (script contexts),
 the first of the multiplayer rungs.
 
@@ -326,6 +326,7 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-15 | "The name of an instance cannot exceed 100 characters" — the mirror states the cap, not what an over-long assignment does | an over-long `Name` keeps its first 100 characters (never splitting a surrogate pair) | truncation instead of an error keeps a world saved before the cap existed restorable |
 | DEV-16 | `Humanoid.MaxHealth = math.huge` stores infinity (a common "invincible" idiom) | accepted, but stored as the largest finite double, so `Health == math.huge` is false (compare with `MaxHealth`); `TakeDamage(math.huge)` still kills; NaN is refused | a non-finite value cannot be saved in a world package; the idiom keeps working without making the world unsavable |
 | DEV-14 | members carrying `security: PluginSecurity` are unreachable from a running game — they exist for Studio and plugins, and the shipped experience never sees them (e.g. `ScriptContext:SetTimeout`, which limits how long a script may run without yielding) | the same members are reachable at RUNTIME, gated to the elevated actor tier (`ActorContext.Grants.IsUnrestricted`); an ordinary mod is refused exactly as it is for any other privileged member | CoreAI's Studio is the running game itself (the in-game creator mode, MVP12): authoring and playing are ONE application, so "Studio-only" has no separate place to live. Mapping these to "unavailable" would delete a control the creator legitimately needs while the game runs; mapping them to "anyone" would let a mod raise its own execution budget. The elevated tier is the only honest reading, and it is the same tier that already gates the rest of the privileged surface. Sibling of DEV-12, which made the same call for one-shot execution |
+| DEV-17 | `tostring(number)` prints Luau's shortest round-trip text (`1e+21`, `inf`, `nan`, `0.1`), and a number passed where a string is expected becomes that text | this VM's `tostring` formats with .NET rules (`1E+21`, `Infinity`, `NaN`; 15 significant digits on Mono), and the argument coercion of both surfaces (`LuaCsValueMarshaller`) inherits it, so `part.Name = 1e21` is `"1E+21"`; the sandbox's own `tonumber` also refuses `"inf"`/`"nan"`/hex floats that the host-side coercion accepts | temporary, not a decision to keep: one Luau-style formatter for `tostring` and the coercion, and one parser for `tonumber`, are open in `TODO.md` (audit R3 C1-06); until then scripts that turn very large, non-finite or long-fraction numbers into names, attribute keys or store keys see different text than in Roblox |
 
 ---
 
@@ -748,11 +749,23 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   operation, the ACL floor, restored trees charging the instance quota, a refusal of world loads while
   network sessions are live (the entry guard of MVP5), at most 256 distinct mod sources per world, a
   confirmed load under the shared gate, and — since audit round 2 — mods restarting and restoring in
-  their load order (`LuaModManifest.LoadOrder`, A1-02). Portable suites on Linux at `f817225b`:
-  engine-free 2112 passed / 0 failed / 3 skipped; Lua tier 1606 passed / 0 failed (engine-bound cases
-  Inconclusive by design).
+  their load order (`LuaModManifest.LoadOrder`, A1-02). Audit rounds 2 and 3 (B1–B3, C1–C3) then
+  hardened the startup selection (it follows mod source changes from any path at once and world-tree
+  changes at most every 5 s, never records physics or camera motion, and keeps the previous entry, with
+  a note to the caller, for a world the restore would refuse), the mod-source admission (one rule for
+  session and store), the sandbox (a 128-level weighted C-call cap, nested runs held to what their
+  enclosing run has left) and the remote budgets (two pools per sender, deferred listeners). Two causes
+  of the Unity crash the owner hit while editing a mod on the Hub were found and fixed: the Luau
+  downleveler recursed without a bound on deeply nested source (now refused at 200 levels, the VM
+  parser's own limit, `LuauDownlevel/LuauRewriteParser.cs`), and the Hub Mods and Logs tabs rebuilt on
+  every notification, off the main thread (now once per panel update, on it); the IL2CPP/WebGL stack
+  checks are on the Unity checklist. A reload now cleans the previous run's startup objects by default
+  (`ModReloadMode`, `mod-system.md` §5c), and two budget trips in a row quarantine a mod and suspend its
+  stored package. Portable suites on Linux at `d4d7f95b`: engine-free 2137 passed / 0 failed / 3
+  skipped; Lua tier 1790 passed / 0 failed / 37 not executed (engine-bound cases Inconclusive by design).
 - **To do**:
-  - Finish audit rounds 2 and 3 over the whole wave and their fixes (`TODO.md`).
+  - Audit rounds 1–3 and their fixes are committed except the round-3 sandbox fixes (C3), in flight;
+    the open follow-ups they filed are in `TODO.md`.
   - Run the Unity checklist in `TODO.md` ("Check the tests"): EditMode in the four module legs plus
     `MIRROR`, PlayMode `FastNoLlm`, and the fixtures that have never run.
   - Run the real WebGL page-reload gate (save → reload the page → the bytes and the startup selection
@@ -946,8 +959,15 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
     numbers (MP-17); the readiness handshake (MP-09); a server clock from the server's own Unix-time
     anchors (MP-06); kick and supersede notices with `Player:Kick(message)`'s text (MP-22); a per-sender
     budget of 32 live handler threads (MP-10); a disconnected actor's mods unloaded once their running
-    code returns (M2-24). After audit rounds 1 and 2: threads a remote-started handler schedules are
-    charged to the sender (A4-01), unreliable sends are dropped and reliable ones held until admission
+    code returns (M2-24). After audit rounds 1–3: what a remote-started handler causes — its `task.*`
+    threads (A4-01), the signal handlers its writes and fires start (B1-02) and the threads a `:Wait()`
+    it resumed creates — is charged to the sender in a second, induced budget (128 per sender, 192 for
+    all senders, host reserve 64), apart from the 32 remote-admission threads, and a listener that finds
+    it full is deferred in a bounded per-sender queue, not dropped (C1-01..03,
+    `ModScheduler.ConfigureInducedThreadBudget`); a `RemoteFunction` caller gets a fixed line that names
+    no host mod when the callback does not return (B1-05) and the callback's own error value when it
+    fails (B3-06); a failed load or reload puts back the `OnServerInvoke`/`OnClientInvoke` callbacks its
+    chunk replaced (B1-03); unreliable sends are dropped and reliable ones held until admission
     (A4-04, B1-07), an admission belongs to its connection (B1-08), the server's clock hold reaches
     clients (A4-08, A4-13, B1-10) — also from a world loaded from a package (B1-01) — a host's own
     `DisconnectActor` ends the connection (A4-09), Mirror's host-mode local client is refused loudly
@@ -1259,8 +1279,9 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 - **Done so far**: the world package codec and validation (`Infrastructure/RbxWorldPackageSerializer.cs`,
   `RbxApi/Instances/InstanceTreeSerializer.cs`); the single-mod bundle (`ExportMod`,
   [MOD_SHARING.md](MOD_SHARING.md)); `FileRbxWorldPackageStore`; the Luau downlevel at load
-  (`LuaExecution/LuauSourceGate.cs`); script instances and contexts (MVP4); mod-core number→string
-  coercion (B2-12; the Rbx surface is in progress, `TODO.md`).
+  (`LuaExecution/LuauSourceGate.cs`); script instances and contexts (MVP4); one argument/property
+  coercion rule on both surfaces (B2-12, RBX-COERCE: numbers ↔ numeric strings, integer truncation,
+  strict booleans, Enum Name/Value on instance members; `Scripting/LuaCs/LuaCsValueMarshaller.cs`).
 - **To do**:
   - A `.model` package: a subtree of the world codec, with id remapping on insert and scripts carried as
     instances.
@@ -1271,7 +1292,8 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
     refuses `goto`, `_ENV` and CoreAI-only APIs (RT6, RT7); a round-trip decision per DEV item (map
     DEV-16 back to `math.huge` on export; DEV-7 reads as last-known values or stays documented; RT8); a
     Roblox-save mode that drops non-archivable instances (RT10); `Weld`/`WeldConstraint`/`Attachment`/
-    `SpawnLocation`, the minimum the templates need (RT9); one coercion rule on both surfaces (RT4).
+    `SpawnLocation`, the minimum the templates need (RT9); the coercion residue after RT4 (the `tostring`
+    text and `tonumber` of DEV-17, Enum Name/Value on datatype members; `TODO.md`).
 - **Test**: PT (codec), PL (stdlib conformance against the documented behaviour), EM (insert and remap,
   lint), PM (Toolbox), a benchmark scenario (the AI builds from a template).
 - **DoD**:
@@ -1323,11 +1345,11 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   | RT1 | Script containers are not instances: a `Script` inside a `Part` using `script.Parent.Touched` cannot be represented | both | MVP4 |
   | RT2 | No `require`/`ModuleScript` (the sandbox removes `require`) | import | MVP4 |
   | RT3 | No `RunContext` or declared client/server split | both | MVP4 |
-  | RT4 | Coercion differs from Roblox: the mod-core API takes a number for a string (B2-12); the Rbx surface still refuses one (`Part.Name = 5`) | import | MVP13 (in progress now) |
+  | RT4 | Coercion differed from Roblox (numbers for strings, numeric strings for numbers, Enum Name/Value); one shared rule now, see the open items in `TODO.md` and DEV-17 | import | MVP13 (done: RBX-COERCE, `c0f6fdbc`) |
   | RT5 | Missing Luau stdlib extensions (`string.split`, `table.find`, `table.clear`, `table.freeze`, `table.create`, `math.clamp`, `math.round`, `math.sign`, `math.noise`, `utf8`, `buffer`) | import | MVP13 |
   | RT6 | Lua 5.2-only syntax (`goto`, labels, `_ENV`) is accepted and would fail in Roblox | export | MVP13 (lint), MVP14 (export) |
   | RT7 | CoreAI-only surface (`hooks_*`, `report`, `coreai_world_*`, `unity_*`, `AIService`, PluginSecurity members reachable under DEV-14) | export | MVP13 (lint), MVP14 (export) |
-  | RT8 | DEV deviations that change observable behaviour (DEV-7, DEV-16, DEV-13, DEV-10/11, DEV-2, DEV-15) | both | MVP13 (a decision per DEV item) |
+  | RT8 | DEV deviations that change observable behaviour (DEV-7, DEV-16, DEV-13, DEV-10/11, DEV-2, DEV-15, DEV-17) | both | MVP13 (a decision per DEV item) |
   | RT9 | Class coverage: welds, constraints, `Attachment`, `MeshPart`, `SpawnLocation`, `Seat`, `Decal`/`Texture`, lights, `Tool`, `Team`, `BindableEvent`, `Terrain` | both | MVP13 (the template minimum), later rungs and backlog |
   | RT10 | Package semantics: the world package keeps `Archivable = false` instances; scripted gravity is not saved; `Lighting` properties are backlog | export | MVP13 (Roblox-save mode) |
   | RT11 | The four file formats are absent | both | MVP14 |
@@ -2306,8 +2328,8 @@ datatype errors too — through `RbxError.WithContext(modId, script, line)`, wit
 and the author's post-downlevel line from the live traceback. One-off `execute_lua` errors have no
 owning mod and stay unprefixed. What is still deferred to MVP5 is the VM chunk name `mod:<id>`, so
 that raw VM tracebacks resolve to the owning mod too. Argument positions in `BAD_ARGUMENT` never count
-`self`, and a property-assignment error reads `Part.Name expects a string, got number | fix: assign a
-string to Part.Name`.
+`self`, and a property-assignment error reads `Part.Anchored expects a boolean, got string | fix: assign a
+boolean to Part.Anchored` (a number assigned to a string property such as `Name` converts, as in Roblox).
 
 The same line is the error value a script receives: `pcall`, `xpcall` and a protected
 `coroutine.resume` all get exactly the line a failing host call raised (as built since 2026-09-24:
@@ -2459,12 +2481,13 @@ Reload = teardown + fresh run of the mod's scripts with clean state. What surviv
 | Revision history (`ILuaScriptVersionStore`) | yes | yes | rollback path |
 | Signal connections | **no** — always disconnected | no | stale closures over dead upvalues are the classic hot-reload bug; loud and predictable beats subtle |
 | Running threads (`task.*`) | **no** — cancelled via `IScriptCoroutine.Kill` | no | same |
-| Mod-owned instance tree (`OwnerModId`) | **no by default** — destroyed; **yes** with `mod.json: "preserveInstances": true`, then the new run re-acquires by `WaitForChild`/names (`WaitForChild` is immediate for an existing child from MVP1; absent-child yield is MVP2) | no (destroyed) | default favors deterministic re-runs; opt-out flag favors stateful builds (e.g. a mod that spent minutes generating a level) |
+| Mod-owned instance tree (`OwnerModId`) | **startup objects: no by default** — what the previous run's main chunk built before its first yield (with the same mod's objects inside them) is destroyed, objects built later and objects others own are kept; **yes** in `ModReloadMode.KeepObjects` (Hub toggle, `manage_mods` `keep_objects`), a per-reload choice instead of the planned `mod.json: "preserveInstances"` flag (shipped 2026-09-24, `mod-system.md` §5c) | no (destroyed) | default favors deterministic re-runs; the keep mode favors stateful builds (e.g. a mod that spent minutes generating a level) |
 | Attributes the mod set on *host* instances | yes | yes | the mod decorated someone else's object; teardown must not vandalize the world |
 | GUI (MVP15) | rebuilt | destroyed | GUI is a projection of code |
 
 Additional rules: reload is atomic per mod (old version torn down only after the new source
-preprocesses successfully — a syntax error leaves the old version running and logs the failure);
+preprocesses and runs successfully — a failure leaves the old version running, puts its startup
+objects back where they were, destroys what the failed chunk built and logs the failure);
 `loadOrder` respected on bulk reload; the world itself (host objects) is never touched by mod
 teardown. **Quarantine (§2) rides the same pipeline**: at the error threshold a mod stops
 dispatching but stays loaded/addressable (no auto-unload); reload clears quarantine;

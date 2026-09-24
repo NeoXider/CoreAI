@@ -276,7 +276,7 @@ Tools are registered **only when their backing service resolves** in the current
 | Tool | Present when | What it does |
 |------|--------------|--------------|
 | `execute_lua` | the Lua mod stack is installed | Runs a one-off snippet in the sandboxed Lua 5.2 VM. |
-| `manage_mods` | the mod runtime resolves **and** host-admin authority is configured (see below) — **absent by default** | list / get_source / load / reload / unload / export / import / forget / versions / revert / diagnostics on persistent mods. |
+| `manage_mods` | the mod runtime resolves **and** host-admin authority is configured (see below) — **absent by default** | list / get_source / load / reload / unload / export / import / forget / versions / revert / diagnostics on persistent mods; `reload` takes an optional `keep_objects` (default `false`: the previous run's startup objects are removed first). |
 | `get_mod_logs` | an `ILuaLogService` resolves | Reads mod `print`/`warn`/`error`/runtime-error output, independent of the Unity console. |
 | `read_skill` | the Programmer role has skills | Returns the full text of a registered skill (e.g. `Lua Modding`, `Rbx API`) — the same reference the on-board agent reads. |
 | `world_command` | a world-command executor resolves | Spawn / move / edit scene objects (meters; Euler degrees). |

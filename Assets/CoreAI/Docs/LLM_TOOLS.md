@@ -10,7 +10,7 @@ context, so the host adds them explicitly (the same pattern as a game's own tool
 |---|---|---|
 | `memory` | `MemoryLlmTool` | Agent memory (read/append/edit), added by `AgentBuilder` / per-role policy. |
 | `execute_lua` | `LuaLlmTool` / `LuaTool` | Sandboxed Lua, attached to the built-in Programmer role by `CoreAiModsInstaller.RegisterCoreAiMods`. |
-| `manage_mods` | `LuaModsLlmTool` | Persistent Lua mods (list/get_source/load/reload/unload/export/import/forget/versions/revert/diagnostics). |
+| `manage_mods` | `LuaModsLlmTool` | Persistent Lua mods (list/get_source/load/reload/unload/export/import/forget/versions/revert/diagnostics). `reload` cleans the previous run's startup objects unless `keep_objects: true`. |
 | skills | `DelegateLlmTool` + `SkillSet` / `read_skill` / `call_skill_tool` | Self-service skills (meta-tools), progressive disclosure. `call_skill_tool` refuses a call with a missing required argument or a type-mismatched one (e.g. `"yes"` for a bool) before the tool runs; the refusal names the tool, the argument and the expected parameters, says the tool was not executed, and the model may retry. |
 | `manage_skills` | `ManageSkillsLlmTool` | Agent-authored skills (create/update/list/get/delete). Opt-in via `AgentBuilder.WithSkillAuthoring(...)`. |
 | `wait` | `WaitLlmTool` | Opt-in via `AgentBuilder.WithWaitTool()`. |

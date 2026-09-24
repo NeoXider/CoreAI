@@ -234,9 +234,12 @@ default, which will not match.
 - **No inbound rate limit.** The rate limiter runs on the outbound path only, so an admitted peer can
   flood the server's world dispatch. What the world bounds is the handler work a sender's remotes
   start: at most 32 `OnServerEvent` handlers and `OnServerInvoke` callbacks per sender may be alive
-  at once (a `RemoteFunction` over that is answered `BUDGET_EXCEEDED`, an event is dropped, counted
-  and logged once per sender), and repeated receive warnings are logged once per sender and kind
-  every 10 s; decoding and dispatch themselves are still unmetered.
+  at once (a `RemoteFunction` over that is refused with a fixed line that names no host mod, an event
+  is dropped, counted and logged once per sender); what those handlers cause — `task.*` threads, the
+  signal handlers their writes start — is held to a second budget of 128 threads per sender and 192
+  for all senders, whose signal listeners wait in a bounded queue instead of being dropped
+  (`Assets/CoreAI/Docs/RBX_API.md`); and repeated receive warnings are logged once per sender and kind
+  every 10 s. Decoding and dispatch themselves are still unmetered.
 - **Server and client must run the same CoreAI version.** Adding a field to the admission response
   already broke older peers; the readiness, clock and notice messages are new too, and the clock
   anchor gained `HeldAheadOfWallSeconds`. A missing message fails loudly — provided Mirror's

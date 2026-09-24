@@ -8,6 +8,13 @@ A mod is Lua source that the runtime runs ONCE through `LoadMod`. During that ru
 afterwards the host drives those hooks. Persistent mods live across frames (and reloads). A one-off script
 (`execute_lua`) runs once and is not persisted.
 
+**A reload starts from a clean world.** Save & run on the Hub and `manage_mods reload` remove what the
+previous run's main chunk built before its first yield (its *startup objects*) before the new chunk runs,
+so a mod that builds a castle at startup can be saved again and again without stacking castles; objects
+built later by handlers, tasks or players stay. Pass `keep_objects: true` to `manage_mods reload` (or turn
+on **Keep objects on Save & run** in the Hub) to keep everything and build next to it. Build your scene in
+the main chunk, before the first `task.wait`, so a reload can replace it (`mod-system.md` §5c).
+
 ## Header
 Start with a `@coreai` block so the mod is discoverable/manageable:
 ```lua
@@ -52,12 +59,17 @@ killed, for example).
 Called from a `task.*` thread, the main chunk or a `hooks_on`/`hooks_every` handler it still gets the full
 handler budget (50,000,000 steps / 10 s; tracked in `TODO.md`).
 
-Wrong arguments to these functions fail the way stock Lua reports them —
-`bad argument #1 to 'store_set' (string expected, got table)` — with no CLR type name and no doubled
-`hooks_on: hooks_on:` prefix. A string parameter takes a number as `tostring` gives it, as stock Lua does
-(`store_set(7, 8)` stores `"7"` = `"8"`); a boolean or a table is refused. A value that is not an argument (a
-table field, a returned value) and has the wrong type reads `bad value in 'fn' (x expected, got y)`. The Rbx
-surface (`Part.Name = 5`, `player:Kick(42)`) still refuses a number where it expects a string (`TODO.md`).
+Wrong arguments to these functions fail the way stock Lua reports them — `bad argument #1 to 'store_set' (string
+expected, got table)` — with no CLR type name and no doubled `hooks_on: hooks_on:` prefix. A value that is not
+an argument (a table field, a returned value) and has the wrong type reads `bad value in 'fn' (x expected, got
+y)`. Both surfaces read arguments by one rule set (`LuaCsValueMarshaller`), the one Luau's `luaL_check*`
+functions use: a string parameter takes a number as `tostring` gives it (`store_set(7, 8)` stores `"7"` = `"8"`;
+a boolean or a table is refused), a number parameter takes a string `tonumber` accepts (`" 0x10 "`, `"1e3"`,
+`"inf"`), an integer parameter truncates toward zero (`4.6` -> `4`; the mod-core API used to round), and a
+boolean parameter takes only `true`/`false` (an omitted one is `false`). The Rbx surface converts the same way
+(`Part.Name = 5`, `player:Kick(42)`), and an Enum property or instance-method argument also takes the item's
+Name or Value (`part.Material = "Wood"`); the full table is in
+[RBX_API.md](../../Assets/CoreAI/Docs/RBX_API.md), "How arguments and property writes convert".
 
 ## Capability tiers — gate the GAME bindings
 The mod-core + inter-mod API above is always present. Tiers gate the **game** bindings:
@@ -116,6 +128,14 @@ returned. The stored package stays active, so the mod starts again on the next w
 is not restarted automatically when the player rejoins. A mod whose main chunk disconnects its own actor
 while it loads does not load (`InvalidOperationException`, "did not load: its actor … disconnected while its
 main chunk ran").
+
+**What a client's remote call causes is charged to that client.** Handlers started by a player's
+`FireServer`/`InvokeServer` count against that player's remote budget (32 alive), and everything they
+cause — `task.*` threads, the signal handlers their writes and fires start, a `:Wait()` they resume —
+against the player's induced budget (128). When that is full, a signal handler invocation waits in a
+queue and starts later, in the order that player's fires happened; so a host listener on such a signal
+can run late while a client floods, and the host's own writes can overtake the flooder's. Details in
+[RBX_API.md](../../Assets/CoreAI/Docs/RBX_API.md), "Mutation envelopes, access control and disconnects".
 
 A `Humanoid:MoveTo` ends with `MoveToFinished(false)` when your script or a tween moves the character's
 `HumanoidRootPart` (its `CFrame`, `Position`, `Orientation` or `Rotation`, or a `PivotTo` that carries it),
@@ -181,9 +201,13 @@ See `coroutine_countdown.lua`. Do NOT busy-wait; yield and resume from a timer/h
   or signal-handler thread with coroutine.resume; resume a parked task thread with task.spawn(thread, ...), passing
   the handle task.spawn, task.defer or task.delay returned", without touching the thread: resume a parked task with
   `task.spawn(handle)`.
-- A `coroutine.create` body is held to the memory budget of the run that resumes it — your mod's
-  `HandlerMaxAllocatedBytes` from a handler, a task or the main chunk — and what it keeps alive counts toward its
-  resumer too.
+- A `coroutine.create` body — and a thread `task.spawn` runs at once — is held to its own budget or what the
+  run that resumes it has left, whichever is smaller, for steps, time and memory alike (inside a task thread
+  that is the thread's remaining 10,000 steps / 500 ms, not the coroutine's own 500,000 / 1 s). The steps
+  it uses are charged back to its resumer, and when a limit it borrowed runs out the whole chain ends,
+  uncatchably. Memory is your mod's `HandlerMaxAllocatedBytes` from a handler, a task or the main chunk, and
+  what the coroutine keeps alive counts toward its resumer too. A thread the scheduler resumes from its own
+  frame gets its full budget.
 
 ## Design rule: native/Lua boundary
 C# owns per-frame hot loops (movement, camera, physics). Lua **tweaks parameters and reacts to discrete
@@ -195,15 +219,15 @@ authoritative channel) over direct mutation — it stays deterministic and multi
 ## Sandbox & limits
 - No `io`/`debug`/`package`/`require`; `load`/`loadstring`/`dofile`/`loadfile` are removed. The stock `os` library is
   removed too; the Rbx API provides an `os` table with only `os.time()` and `os.clock()`.
-- Every resume of your code — the main chunk, a signal handler, a `task.*` resume, a one-off `execute_lua`
-  chunk — runs under a **per-resume budget** with two halves: an instruction-step cap and a wall-clock cap
-  (CoreAI's defaults: 10,000 steps / 500 ms; a mod's own `coroutine.resume` gets a larger bound derived from
-  the same setting). It is enforced through Lua-CSharp's per-instruction hook, so a runaway handler
-  (`while true do end`) is cut on ALL platforms incl. WebGL — a buggy mod cannot hang a frame — and the
-  failure reaches you as a budget kill, `BUDGET_EXCEEDED`, naming the bound and your line, not as a Lua
-  error to "fix". A budget kill cannot be caught: `pcall`/`xpcall` inside the run that tripped let it
-  through (the `xpcall` handler does not run), so a runaway never outlives its budget. Only code that
-  resumed a raw `coroutine.create` coroutine sees its trip, as `false` plus the line from
+- Every resume of your code — the main chunk, a signal handler, a `task.*` resume, a one-off `execute_lua` chunk
+  — runs under a **per-resume budget** with two halves: an instruction-step cap and a wall-clock cap (CoreAI's
+  defaults: 10,000 steps / 500 ms; a mod's own `coroutine.resume` gets a larger bound derived from the same
+  setting, capped at what the resuming run has left — see Coroutines above). It is enforced through Lua-CSharp's
+  per-instruction hook, so a runaway handler (`while true do end`) is cut on ALL platforms incl. WebGL — a buggy
+  mod cannot hang a frame — and the failure reaches you as a budget kill, `BUDGET_EXCEEDED`, naming the bound
+  and your line, not as a Lua error to "fix". A budget kill cannot be caught: `pcall`/`xpcall` inside the run
+  that tripped let it through (the `xpcall` handler does not run), so a runaway never outlives its budget. Only
+  code that resumed a raw `coroutine.create` coroutine sees its trip, as `false` plus the line from
   `coroutine.resume`; that coroutine is dead.
 - **A thread may run forever as long as it yields.** The per-resume budget is the only CPU limit on a
   scheduler thread (the main chunk, `task.*`, signal handlers), exactly as in Roblox: `while true do
@@ -213,19 +237,26 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   is capped by the mod's allocation budget (`HandlerMaxAllocatedBytes`, 256 MB by default); a resume
   that exceeds it is cut with `BUDGET_EXCEEDED` / `EXCEEDED_MEMORY_BUDGET` and the fix hint "keep less
   memory alive between two yields" — build big data across several yields, or keep less of it.
-- **Library calls back into Lua nest at most 200 deep per thread.** A `table.sort` comparator, a `__tostring` run by
-  `tostring`, `print` or `string.format`, a `gsub` replacement function or `__index`, a `__pairs`/`__ipairs`
-  metamethod, a coroutine run by `coroutine.resume` and `warn` converting an argument through `tostring` (your own
-  `tostring` included, so `tostring = warn; warn(1)` raises the catchable error below instead of crashing the
-  game) each open one level; the 201st raises `C stack overflow
-  (<function>: more than 200 nested calls from library functions back into Lua)`, which `pcall` catches. Plain Lua
-  recursion and the metamethods the VM runs itself (`__index` on a table access, arithmetic, comparisons, `__call`)
-  are not limited by it.
+- **Library calls back into Lua share one cap of 128 levels along a chain of nested runs.** A `pcall` or
+  `xpcall` body and a `gsub` replacement function open one level; a `__tostring` run by `tostring`, `print`,
+  `warn` or `string.format` (your own `tostring` included, so `tostring = warn; warn(1)` raises the catchable
+  error below instead of crashing the game), a `table.sort` comparator, a `gsub` `__index`, a
+  `__pairs`/`__ipairs` metamethod, a coroutine run by `coroutine.resume`, a thread `task.spawn` runs at once
+  and a guarded call re-entering a run on the same state open two — so `pcall` nests 128 deep and
+  `table.sort` or `tostring` 63. A resumed thread continues its resumer's count. The call past the cap raises
+  `C stack overflow (<function>: more than 128 levels of nested calls from library functions back into Lua)`,
+  an ordinary error: `pcall` returns it, `xpcall` hands it to its handler. Plain Lua recursion and the
+  metamethods the VM runs itself (`__index` on a table access, arithmetic, comparisons, `__call`) are not
+  limited by it.
 - **String patterns are budgeted per call.** `string.find`/`match`/`gmatch`/`gsub` stop after 5,000,000
   matcher steps with `BUDGET_EXCEEDED` (`EXCEEDED_PATTERN_STEP_BUDGET`), and a `gsub` or `string.format`
   result may not exceed 1,000,000 characters. Pattern semantics are Luau's. Yielding inside a
   `string.format` `__tostring`, a `gsub` replacement function or an `__index` metamethod raises
-  `attempt to yield across a C-call boundary`.
+  `attempt to yield across a C-call boundary`, also after the callback resumed a coroutine of its own. A
+  callback that merely runs long is not a yield: under `execute_lua` the frame is handed back inside it and
+  the call completes. Refusals and budget lines the sandbox itself raises start with `sandbox: `
+  (`sandbox: string.rep result would exceed 1000000 chars.`), and its library wrappers report a bad
+  argument as Lua does, a missing one included: `bad argument #1 to 'rep' (string expected, got no value)`.
 - **The budget is the game's, not CoreAI's.** The host sets both halves on `CoreAiModsLifetimeScope`
   (**Lua coroutine resume budget**; `<= 0` falls back to the defaults) and every resume re-reads them, so a
   game may tighten the budget for untrusted mods or loosen it for a heavy simulation while mods are already
@@ -237,13 +268,19 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   ticks), quarantine after consecutive failures (the mod stays loaded; reload resumes it). A failed
   hook/timer call counts once and a successful one resets the streak; for scheduler threads a frame with
   any number of faults counts once and a frame whose threads ran cleanly resets it, so an error repeated
-  every frame (a signal cascade) is quarantined while a rare one is not.
+  every frame (a signal cascade) is quarantined while a rare one is not. Two budget cuts in a row
+  quarantine the mod at once and suspend its stored copy, so it does not start with the next game either;
+  loading or saving it again by hand clears that.
 
 ## Lua version note
 Lua-CSharp targets **Lua 5.2** semantics with **double-only numbers** — there is no integer/float
 subtype and no native bitwise operators (`&`, `|`, `~`, `<<`, `>>` postdate 5.2). Luau sources are
-run through the downleveler (Luau → Lua 5.2) at ingestion. Stdlib coverage is partial — a missing
-library function errors, so keep to common `string`/`table`/`math` calls.
+run through the downleveler (Luau → Lua 5.2) at ingestion. Source nested more than 200 levels deep
+(brackets, tables, functions, blocks, if-expressions, interpolations) is refused with a `syntax error:`
+line — the same limit the VM's parser has, for Luau and plain Lua alike — instead of overflowing the stack,
+which used to end the process on Save & run, `execute_lua` or a world restore
+(`Assets/CoreAIMods/Runtime/LuauDownlevel/README.md`). Stdlib coverage is partial — a missing library
+function errors, so keep to common `string`/`table`/`math` calls.
 
 ## Bundled mods — ship a game with ready-made mods
 Drop `.lua` files (each with an `@coreai` header) into a **`Resources/CoreAIMods/`** folder. On the first

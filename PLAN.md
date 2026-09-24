@@ -8,13 +8,19 @@ filed under the same rung names.
 ## Where we are
 
 - **MVP3 (world/place package) is closing.** Code complete, green on the Linux suites; its release and
-  tag wait for the Unity verification gate. Portable suites at `f817225b`: engine-free 2112 passed /
-  0 failed / 3 skipped; Lua tier 1606 passed / 0 failed (engine-bound cases Inconclusive by design).
-- **Audit round 2 fixes are landing** (one auditor per round over the whole wave, then one fix worker):
-  A1-02 load order (`6248fec2`), B1-01/04/06 (`9dc55a68`), B1-07/08/10 Mirror (`e0737b7b`),
-  B2-03/05/08/12 (`f817225b`) are committed; B1-02/03/05, the remaining world-package (B2) and sandbox
-  (B3) findings, the Rbx-surface number coercion and the Unity crash the owner hit while editing a mod on
-  the Hub Mods page are in progress. Audit round 3 follows.
+  tag wait for the Unity verification gate. Portable suites at `d4d7f95b`: engine-free 2137 passed /
+  0 failed / 3 skipped; Lua tier 1790 passed / 0 failed / 37 not executed (engine-bound cases
+  Inconclusive by design).
+- **Audit rounds 1–3 are done; their fixes are committed except the round-3 sandbox fixes (C3), in
+  flight.** Round 2: A1-02 load order (`6248fec2`), B1-01/04/06 (`9dc55a68`), B1-07/08/10 Mirror
+  (`e0737b7b`), B2-03/05/08/12 (`f817225b`), B1-02/03/05 (`3f6c18e5`), B2-01…B2-14 (`3d5b62d0`,
+  `23f63eaa`), B3-01/02/08 (`02f26388`), B3-03…B3-07 (`43605d2f`). Round 3: C1-01…C1-11 (`7cf2891e`:
+  two remote budget pools per sender, deferred listeners), C2-01…C2-09 (`d4d7f95b`). Also landed: one
+  Roblox/Luau coercion rule on both script surfaces (`c0f6fdbc`, round-trip gap RT4 closed), the two
+  causes of the Hub crash the owner hit while editing a mod (`c7397c77` Hub tabs rebuilt per
+  notification off the main thread, `c0dd9fa4` unbounded Luau downleveler recursion), and reload modes
+  with crash-loop protection (`3a46a24c`: a reload cleans the previous run's startup objects by default;
+  two budget trips in a row suspend a mod).
 - **The MVP ladder was revised** for the flagship goal (Studio+Play Roblox-like app, ~100 players per
   room, a general framework): strictly sequential, multiplayer first, plan decisions D1–D8 decided by
   the tech lead (the owner may override).
@@ -34,7 +40,7 @@ filed under the same rung names.
 ## Next three rungs
 
 1. **MVP3 close** (S) — first steps:
-   - finish audit rounds 2 and 3 and their fixes (`TODO.md`, top section);
+   - land the round-3 sandbox fixes (C3) and document them (`TODO.md`, top section);
    - run the "Check the tests" checklist in Unity 6000.3.14f1 (EditMode in all four legs plus `MIRROR`,
      PlayMode `FastNoLlm`, the never-run fixtures) and fix, never skip, any failure;
    - run the real WebGL page-reload gate;
@@ -57,6 +63,6 @@ filed under the same rung names.
 
 ## History of this wave
 
-The MVP3 closure items, the audit fix waves W1–W6, audit round 1 and its fixes, the docs passes
-DOCS-1/2/3 and the portable Lua-tier runner are recorded in `TODO.md` ("MVP3 closure and the
+The MVP3 closure items, the audit fix waves W1–W6, audit rounds 1–3 and their fixes, the docs passes
+DOCS-1/2/3/4 and the portable Lua-tier runner are recorded in `TODO.md` ("MVP3 closure and the
 MVP1/MVP2/MVP8/multiplayer audit fix waves", "Closed") and in both changelogs.

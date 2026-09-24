@@ -122,11 +122,12 @@ still have to be run in Unity. The corpus above is unchanged.
   (`M8_22_Dispose_DetachesTweenService_SoTheOldSchedulerStepsNoTween`,
   `KillAllScheduledOwnedBy_AlsoDestroysTheTweensTheModCreated`).
 - **Players.** `Player:Kick(message)` hands its text to the transport, cut to the 1,024-byte wire
-  ceiling, and a non-string is refused before anything is kicked
+  ceiling; a number is sent as its `tostring` text, as in Roblox (since RBX-COERCE, `c0f6fdbc`), and any
+  other non-string is refused before anything is kicked
   (`Kick_HandsTheScriptsMessageToTheTransport_AndNoMessageLeavesTheTransportsDefault`,
   `Kick_ALongMessage_ReachesTheTransportCutToTheWireCeiling`,
   `Negative_Kick_WithAMessageThatIsNotAString_IsRefusedBeforeAnythingIsKicked`,
-  `Negative_Kick_WithANumberMessage_IsRefusedLikeEveryOtherStringArgument`).
+  `Kick_WithANumberMessage_KicksWithTheTextTostringGivesIt`).
 - **Physics.** `CanCollide = false` lets bodies through but keeps `Touched` and raycast hits
   (`CanCollide_False_KeepsTheColliderEnabledAsATrigger`,
   `CanCollideFalsePart_IsHitByADefaultRay_AndSkippedWhenTheRayRespectsCanCollide`,

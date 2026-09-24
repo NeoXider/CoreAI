@@ -88,7 +88,12 @@ The **Chat / Settings / Statistics** trio comes from `HubBuiltInPages.RegisterAl
 opt-in via `CoreAiHubDemo`. The **Mods** and **World** tabs are not registered by this package: when
 `com.neoxider.coreaimods` is installed, the setup menu adds its `CoreAiModsHubBinder` (resolved by name
 from the `CoreAI.Mods.Hub` assembly) and its binders register the Mods, World state, and World Loads pages into the same
-registry — features light up when their packages appear.
+registry — features light up when their packages appear. On the Mods tab, the editor's **Save & run** reloads a
+loaded mod and first removes what its previous run built at startup, unless **Keep objects on Save & run** is on
+(one Hub-wide setting, PlayerPrefs key `CoreAI.Hub.Mods.KeepObjectsOnSave`); the status line says what was cleaned,
+**Add mod** opens a template that matches the composition (`RunService.Heartbeat` and `task.wait` with the Rbx API),
+a mod suspended after repeated budget trips is marked on its row, and the Mods and Logs tabs rebuild at most once
+per panel update, on the main thread — see [mod-system.md](../../Docs/CoreAIMods/mod-system.md) §4.2 and §5c.
 
 ## Collapse and Escape
 

@@ -72,13 +72,28 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   priority", the IDBFS flush, the `RobloxApi/` paths and others) are corrected, and superseded dev-docs plans are
   marked as history.
 
+- **Audit rounds 2 and 3 are documented.** `RBX_API.md` gained "How arguments and property writes convert" (the
+  one coercion rule of both surfaces), the two remote budgets with the deferred listeners and every
+  `RemoteFunction` answer line, the 128-level weighted C-call cap with the nested-run budget, the reload note and the
+  two-trip suspension, and the startup selection's new recording rules; `LUA_SANDBOX_SECURITY.md` the counted
+  `pcall`/`xpcall`, the borrowed budgets of nested runs, the weighted cap with its measurements, the `sandbox: `
+  prefix and the frame-yield callbacks; `WORLD_PACKAGE.md` the startup selection (source changes at once, world
+  changes per `StartupRefreshInterval`, notes to the caller, `IStartupAwareWorldMutationGate`), the admission rule,
+  the device-name autosave refusal, the `LoadOrder` bound and the round 2–3 acceptance tests; `mod-system.md` the new
+  §5c (reload modes), the budget-trip suspension, the Hub's toggle, template and coalesced rebuilds, and the
+  `ILuaModSourceStore` contract; `mod-authoring.md` the reload rule, the coercion rule, the remote budgets and the
+  200-level nesting limit; the "Rbx API" skill (`RbxApi.txt` and `BuiltInRbxApiSkillText.cs`, still byte-identical)
+  with `RBX_API_SKILL.md` the coercion rule, `keep_objects` and the cap. The roadmaps close round-trip gap RT4, add
+  deviation DEV-17 (the `tostring` text a number becomes) and update the ladder status; `TODO.md` closes what these
+  commits fixed and files every follow-up with an owner and a plan.
+
 ### Tests
 
 - **Engine-free Roblox-API tests run on Linux.** `tools/portable` gained `CoreAI.RbxApi.Datatypes`,
   `CoreAI.RbxApi.Instances` and `CoreAI.LuauDownlevel` projects (netstandard2.1, C# 9, one per asmdef), and the
   portable suite links 33 test files (388 cases at the time) covering instances, ACL, scheduler, replication,
-  networking, the Luau downleveler and datatypes; later waves added more (2112 passed / 0 failed / 3 skipped at the
-  last docs pass). The engine-free test project compiles as C# 9, like Unity, instead of
+  networking, the Luau downleveler and datatypes; later waves added more (2137 passed / 0 failed / 3 skipped at
+  `d4d7f95b`, after the third audit round). The engine-free test project compiles as C# 9, like Unity, instead of
   `latest`. `.gitignore` now keeps `tools/**/*.csproj`: the capitalised `!Tools/` exception did not
   match on Linux.
 - **Lua-tier EditMode tests run on Linux too** (`tools/portable/LuaTests`, see its README). The Lua runtime, the
@@ -88,9 +103,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   refusing surfaces for everything that needs the engine: a test that reaches one is reported Inconclusive, never
   passed. The Unity Test Framework log rule (an unexpected error log fails the test) and
   `Is.Not.AllocatingGCMemory()` are reproduced. 75 fixture files of `Assets/CoreAIMods/Tests/EditMode` plus
-  `LuaModAutoRepairPolicyEditModeTests` are linked; 31 are excluded with a reason. Result at the last docs pass:
-  1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_ENGINE_UNAVAILABLE`, 3 ignored in a
-  `OneTimeSetUp`, 2 skipped; the README lists them by fixture). The first run found two real
+  `LuaModAutoRepairPolicyEditModeTests` are linked; 31 are excluded with a reason. Result at `d4d7f95b`, after
+  the third audit round: 1790 passed / 0 failed / 37 not executed (Inconclusive `PORTABLE_ENGINE_UNAVAILABLE`,
+  ignored in a `OneTimeSetUp`, or skipped; the README lists them by fixture). The first run found two real
   runtime bugs (the `pcall` stack-trace leak and a solo `GetServerTimeNow` drift, both fixed) and two
   platform-dependent tests (an ICU culture-sensitive tag search and a Lua `tostring` of a non-exact double, made
   platform-independent).
@@ -137,6 +152,25 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   and the set-aside anchor rule (`MirrorClientRemoteRulesEditModeTests`, `MirrorClientRemotesEndToEndEditModeTests`)
   compile against the Mirror v96.0.1 sources and ran only against Mirror stubs, not in Unity.
   `HubService_ApplyBundledUpdate_KeepsTheModsLoadOrder` needs Unity's `Resources` and has no Linux runner.
+- **The rest of audit round 2 and round 3.** Regression tests, each red on the old code, with negative twins: the
+  sender-charged signals, the restored `OnServerInvoke` callbacks and the `RemoteFunction` answer lines
+  (B1-02/03/05, `RbxTaskSchedulerLuaBindingsEditModeTests`, `ModSchedulerEditModeTests`), rewritten for the two
+  remote budget pools and the deferred listeners of round 3 (C1-01…C1-03, 22 new cases and four updated to the
+  two-pool model); the world package's startup selection, admission, boot-restore gate, device-name and load-order
+  cases (B2-xx and C2-xx: `Mvp3WorldPackageEditModeTests`, `Mvp3WorldPackageFollowUpEditModeTests`,
+  `FileLuaModSourceStoreEditModeTests`, `LuaCsModRuntimePersistenceEditModeTests`, listed in `WORLD_PACKAGE.md`,
+  "Acceptance status"); the Luau downleveler's 200-level nesting cap (12 cases whose first step is a harmless 201
+  levels, so a regression fails the test instead of the host; `LuauDownlevelerEditModeTests`); the coercion rule
+  table on both surfaces (`RuleTable_*` in `Mvp8ValueObjectsEditModeTests`, the Full-tier `ConvertArg` table
+  included; the Kick test that pinned the refusal is now `Kick_WithANumberMessage_KicksWithTheTextTostringGivesIt`);
+  the sandbox's counted `pcall`/`xpcall`, nested budgets, weighted cap, frame-yield callbacks and error lines
+  (B3-01…B3-08, `LuaCsGuardFrameAndAllocationEditModeTests`, `LuaCsSecureSandboxEditModeTests`; 25 new cases in
+  `02f26388`, 24 in `43605d2f`); the reload modes, the budget-trip suspension and the factory teardown (`Reload_*`,
+  `BudgetTrips_*`, `Factory_*` in `LuaCsModRuntimeEditModeTests`, with the H1/H2 facade cases of `d4d7f95b`). The
+  Linux runners ran every linked case green; not run anywhere yet: the Hub page tests of `c7397c77` and `3a46a24c`
+  (`LuaSyntaxHighlighterEditModeTests`, `CoreAiModsHubBinderFullTierEditModeTests`, inside `#if COREAI_HAS_HUB`),
+  the `[UnityTest]` startup-selection cases, and `Reload_ThroughTheInstallersAttributionFacade_HonoursTheMode`,
+  which is Inconclusive on Linux — all on the "Check the tests" list in `TODO.md`.
 
 ## [7.45.0] - 2026-09-24
 

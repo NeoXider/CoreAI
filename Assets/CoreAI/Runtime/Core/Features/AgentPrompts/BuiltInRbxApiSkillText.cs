@@ -89,10 +89,17 @@ Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part propert
   resumes it. `string.find/match/gmatch/gsub` stop after 5,000,000 matcher steps per call and
   `gsub`/`string.format` results are capped at 1,000,000 chars (both catchable errors). Yielding
   inside a `__tostring`/`__index` or a gsub replacement function raises ""attempt to yield across
-  a C-call boundary"". Library functions that call back into your Lua (a `table.sort` comparator,
-  `__tostring` via tostring/print/string.format, a gsub function, `__pairs`/`__ipairs`,
-  `coroutine.resume`) nest at most 200 deep; the next raises a catchable ""C stack overflow (...)"".
-  Plain recursion is not limited this way.
+  a C-call boundary"". A `coroutine.create` body (and a thread task.spawn runs at once) gets at most
+  what the code resuming it has left of steps, time and memory. Library functions that call back into
+  your Lua share one cap of 128 levels: a pcall/xpcall body or a gsub function counts 1; a
+  `__tostring` via tostring/print/warn/string.format, a `table.sort` comparator, `__pairs`/`__ipairs`,
+  `coroutine.resume` or an immediate task.spawn counts 2 (pcall nests 128 deep, sort/tostring 63).
+  The next raises a catchable ""C stack overflow (...)"". Plain recursion is not limited this way.
+- Reloading: `manage_mods reload` (and the Hub's Save & run) first removes the previous run's
+  startup objects — what its main chunk built before its first yield and the mod still owns — so a
+  mod that builds its scene at startup never duplicates it; objects made later by handlers, tasks or
+  players stay. Pass keep_objects=true to keep everything and build next to it. Two budget cuts in a
+  row quarantine the mod and keep it from starting with the next game.
 
 ## 2. Datatypes (immutable value types; assigning a field errors)
 
@@ -126,8 +133,9 @@ Globals: `Vector3`, `Vector2`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Random`, `E
   `:NextNumber()` -> [0,1); `:NextNumber(min,max)`; `:NextInteger(min,max)`;
   `:NextUnitVector()`; `:Clone()`; `:Shuffle(arrayTable)` (in place, seeded Fisher-Yates).
   NextInteger bounds must be finite whole numbers within +/-9007199254740991.
-- Constructor arguments: a numeric string (""5"") counts as a number, nil as 0, anything else is
-  BAD_ARGUMENT. UDim/UDim2 offsets are 32-bit integers (fractions truncate).
+- Arguments convert like Luau (section 13): a numeric string counts as a number, a number as a
+  string (its tostring text); constructor numbers default to 0 when nil; a boolean is never
+  converted. UDim/UDim2 offsets are 32-bit integers (fractions truncate).
 
 ## 3. Enum
 
@@ -140,7 +148,10 @@ UserInputType, UserInputState, MouseBehavior, RaycastFilterType, HumanoidStateTy
 EasingDirection, PlaybackState. Any other `Enum.X` raises NOT_IMPLEMENTED. Item
 fields: Name, Value, EnumType. `Enum.GetEnums()`; `Enum.Material:GetEnumItems()`;
 `Enum.KeyCode:FromName(""Space"")` / `:FromValue(32)` return the item or nil. Items compare
-by identity (`==`). Names AND numeric values are the real Roblox ones (e.g. KeyCode gamepad
+by identity (`==`). An Enum property or instance-method argument also takes the item's Name or
+Value (`part.Material = ""Wood""` or `512`, `UserInputService:IsKeyDown(""E"")`); datatype members
+(`TweenInfo.new` easing, CFrame rotation orders, `RaycastParams.FilterType`) need the EnumItem.
+Names AND numeric values are the real Roblox ones (e.g. KeyCode gamepad
 buttons live at 1000+; all 283 KeyCode items; `Enum.KeyCode.None` is 0 and `Unknown` is its
 alias).
 
@@ -275,10 +286,11 @@ Read+write (writes need WorldEdit): `Position`, `Size`, `CFrame` (Vector3/Vector
 degrees; Orientation is YXZ, Rotation is XYZ).
 Setting `Position` keeps the part's rotation; setting `CFrame` sets position AND rotation;
 setting `Orientation` or `Rotation` sets the rotation and keeps the position.
-Booleans accept only true/false; number properties also accept numeric strings. `Size` is
+Booleans accept only true/false; number properties also accept numeric strings; string properties
+accept numbers; Enum properties accept the item, its Name or its Value (part.Material = ""Wood""). `Size` is
 clamped to [0.001, 2048] per axis; a NaN or infinite Position/Size/CFrame is BAD_ARGUMENT; a
 written CFrame is orthonormalized. An unanchored part reads its live physics pose. A wrong type
-reads `Part.Name expects a string, got number | fix: assign a string to Part.Name`; a read-only
+reads `Part.Anchored expects a boolean, got string | fix: assign a boolean to Part.Anchored`; a read-only
 property says it is read only. Assigning `workspace.CurrentCamera` raises NOT_IMPLEMENTED.
 `Shape` accepts `Enum.PartType.Ball`, `.Block`, `.Cylinder`, `.Wedge`, `.CornerWedge` — every
 one of them materializes its real mesh.
@@ -394,7 +406,8 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
 - A character Model has `Archivable = false`, so `character:Clone()` returns nil — set
   `character.Archivable = true` first to copy it.
 - `player:Kick([message])` removes the player; the message (a string, cut to 1,024 UTF-8 bytes) is
-  shown to that player's client. A non-string message is BAD_ARGUMENT.
+  shown to that player's client. A number is sent as its tostring text; any other non-string is
+  BAD_ARGUMENT.
     local Players = game:GetService(""Players"")
     Players.PlayerAdded:Connect(function(player)
       player.CharacterAdded:Connect(function(character)
@@ -407,12 +420,14 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
 - `IntValue`, `NumberValue`, `StringValue`, `BoolValue`, `ObjectValue`, `Vector3Value`,
   `CFrameValue`, `Color3Value` — all `Instance.new`-creatable; every one `IsA(""ValueBase"")`, the
   common abstract ancestor (`ValueBase` itself is NOT creatable).
-- One member, `.Value` (read+write, type-checked): a wrong-type write raises BAD_ARGUMENT and
+- One member, `.Value` (read+write, type-checked; numbers and numeric strings convert as in
+  section 13): a wrong-type write raises BAD_ARGUMENT and
   leaves the old value AND revision untouched. Defaults: Int/Number 0, String """", Bool false,
   Object nil, Vector3/CFrame their datatype's zero/identity, Color3 black (CoreAI's own default;
   the mirror does not specify one). `.Changed` fires once with the new value on every real change
   (assigning the SAME value again does not fire).
-- `IntValue.Value` rounds to the nearest integer, halfway away from zero (`2.5`->3, `-2.5`->-3).
+- `IntValue.Value` rounds to the nearest integer, halfway away from zero (`2.5`->3, `-2.5`->-3);
+  a value outside -2^63..2^63-1 is BAD_ARGUMENT.
   `StringValue.Value` is capped at 200,000 characters; longer raises ""String too long"".
   `ObjectValue.Value` accepts an Instance or nil.
 - `leaderstats` is CONVENTION, not an API: a `Folder` named exactly `""leaderstats""` parented
@@ -491,9 +506,12 @@ Argument numbers do not count `self` (in `part:SetAttribute(name, value)` the na
 with `pcall`; `pcall`, `xpcall` and `coroutine.resume` all receive exactly that one line (no stack
 trace). A budget cut (section 1) is the exception: it cannot be caught. The mod-core functions
 (`store_set`, `hooks_on`, `mods_call`, ...) report a wrong argument the way Lua does —
-`bad argument #1 to 'store_set' (string expected, got table)`. Their string parameters take a
-number the way `tostring` writes it (`store_set(7, 8)` stores ""7"" = ""8""); a boolean or a table is
-refused. Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE, INSTANCE_DESTROYED,
+`bad argument #1 to 'store_set' (string expected, got table)`. Both surfaces convert arguments and
+property writes like Luau: a string parameter takes a number as `tostring` writes it
+(`store_set(7, 8)` stores ""7"" = ""8""; `FindFirstChild(5)` finds ""5""); a number parameter takes a
+string `tonumber` accepts (""0x10"", ""1e3""); an integer parameter truncates toward zero; a boolean
+parameter takes only true/false, never a truthy value (`FindFirstChild(name, 1)` is BAD_ARGUMENT).
+Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE, INSTANCE_DESTROYED,
 PARENT_LOCKED, NOT_IMPLEMENTED, WORLD_DETACHED, BUDGET_EXCEEDED, SIGNAL_CASCADE,
 CONTEXT_VIOLATION, NOT_AUTHORITY, THREAD_CAP, PAYLOAD_TOO_LARGE.
 
@@ -514,7 +532,8 @@ the current world, so report it instead of retrying the spawn.
   `WaitForChild(name)` for an absent child: it yields through the scheduler bridge.
 - Luau syntax IS accepted and auto-downleveled to Lua 5.2 before compiling: `+=` (and
   `-=/*=//=/%=/^=/..=`), `continue`, `` `str{}` `` interpolation, if-then-else expressions, and
-  type annotations/casts all work. Plain Lua 5.2 is unaffected.
+  type annotations/casts all work. Plain Lua 5.2 is unaffected. Nesting deeper than 200 levels
+  is a syntax error.
 
 ## 15. Examples
 
