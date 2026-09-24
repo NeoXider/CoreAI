@@ -34,6 +34,7 @@ namespace CoreAI.Infrastructure.Luau
         private int _p;
         private int _line;
         private int _lineStart;
+        private int _interpolationDepth;
 
         public LuauLexer(string source)
         {
@@ -387,7 +388,28 @@ namespace CoreAI.Infrastructure.Luau
             return tok;
         }
 
+        // WHY: an interpolated string lexes the expressions inside its braces through Next, which
+        // re-enters here for a string nested inside them; unbounded, deeply nested backtick strings
+        // overflowed the .NET stack of any caller, plain Lua included (this lexer runs on every chunk).
         private LuauToken LexInterpString(int start, int line, int col)
+        {
+            if (_interpolationDepth >= LuauDownleveler.MaxNestingDepth)
+            {
+                throw new LuauDownlevelException(LuauDownleveler.NestingDepthExceededMessage, line, col);
+            }
+
+            _interpolationDepth++;
+            try
+            {
+                return LexInterpStringCore(start, line, col);
+            }
+            finally
+            {
+                _interpolationDepth--;
+            }
+        }
+
+        private LuauToken LexInterpStringCore(int start, int line, int col)
         {
             List<LuauInterpPart> parts = new();
             _p++;

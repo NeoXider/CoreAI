@@ -29,6 +29,12 @@ namespace CoreAI.Infrastructure.Luau
         public readonly List<RewriteNote> Notes = new();
         public int TempCounter;
         public int ChunkInsertionPosition;
+
+        /// <summary>
+        /// Statements and subexpressions open right now, across the chunk parser and the parsers of
+        /// its interpolated-string expressions (see <see cref="LuauDownleveler.MaxNestingDepth"/>).
+        /// </summary>
+        public int NestingDepth;
         public string GeneralizedIteratorName;
 
         public sealed class RewriteNote
@@ -172,6 +178,21 @@ namespace CoreAI.Infrastructure.Luau
         private void Throw(string message)
         {
             throw new LuauDownlevelException(message, Cur.Line, Cur.Column);
+        }
+
+        // WHY: this parser recurses once per statement and subexpression, exactly like Lua 5.2's own
+        // (enterlevel in statement and subexpr), but it runs BEFORE that parser and had no limit, so
+        // deeply nested source overflowed the .NET stack, which no catch can stop: about 2,000 nested
+        // parentheses, or 1,000 nested if-expressions, killed a process on a 1 MB stack. Counting the
+        // same levels against the VM parser's own limit refuses no statement or expression the VM compiles.
+        private void EnterLevel()
+        {
+            if (_ctx.NestingDepth >= LuauDownleveler.MaxNestingDepth)
+            {
+                Throw(LuauDownleveler.NestingDepthExceededMessage);
+            }
+
+            _ctx.NestingDepth++;
         }
 
         private LuauToken ExpectPunct(string text)
@@ -371,6 +392,19 @@ namespace CoreAI.Infrastructure.Luau
         }
 
         private void ParseStatement()
+        {
+            EnterLevel();
+            try
+            {
+                ParseStatementCore();
+            }
+            finally
+            {
+                _ctx.NestingDepth--;
+            }
+        }
+
+        private void ParseStatementCore()
         {
             LuauToken t = Cur;
             if (IsPunct(t, ";"))
@@ -1094,6 +1128,19 @@ namespace CoreAI.Infrastructure.Luau
 
         private (int Start, int End) ParseBinExpr(int limit)
         {
+            EnterLevel();
+            try
+            {
+                return ParseBinExprCore(limit);
+            }
+            finally
+            {
+                _ctx.NestingDepth--;
+            }
+        }
+
+        private (int Start, int End) ParseBinExprCore(int limit)
+        {
             const int UnaryPrecedence = 7;
             int start = Cur.Start;
             int end;
@@ -1502,6 +1549,19 @@ namespace CoreAI.Infrastructure.Luau
         /// type is rewritten — the whole span is deleted by the caller.
         /// </summary>
         private int SkipType()
+        {
+            EnterLevel();
+            try
+            {
+                return SkipTypeCore();
+            }
+            finally
+            {
+                _ctx.NestingDepth--;
+            }
+        }
+
+        private int SkipTypeCore()
         {
             if (IsPunct(Cur, "|") || IsPunct(Cur, "&"))
             {

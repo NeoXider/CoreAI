@@ -17,6 +17,22 @@ namespace CoreAI.Infrastructure.Luau
     /// </summary>
     public static class LuauDownleveler
     {
+        /// <summary>
+        /// Most statements and subexpressions that may be open inside each other, counted the way the
+        /// bundled Lua 5.2 parser counts its own syntax levels and with the same limit, so any chunk
+        /// that parser would compile passes; the one addition is a chain of more than 200 function-type
+        /// arrows in a type annotation, which Luau refuses past 1,000. Deeper source (nested
+        /// parentheses, tables, functions, blocks, if-expressions, types, or backtick strings nested
+        /// inside interpolations) is refused with an Error diagnostic instead of overflowing the stack.
+        /// </summary>
+        public const int MaxNestingDepth = 200;
+
+        /// <summary>The Error diagnostic text for source nested deeper than <see cref="MaxNestingDepth"/>.</summary>
+        internal static readonly string NestingDepthExceededMessage =
+            "code is nested more than " + MaxNestingDepth + " levels deep (statements, expressions, types or "
+            + "interpolated strings inside each other); simplify the expression or split the code into smaller "
+            + "functions";
+
         public static DownlevelResult Process(string luauSource)
         {
             return Process(luauSource, "chunk");

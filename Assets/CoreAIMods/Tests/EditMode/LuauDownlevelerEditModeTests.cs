@@ -661,6 +661,103 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(warned, "Expected an 'unsupported' warning for the vararg if-expression.");
         }
 
+        // ---------------------------------------------------------------- nesting depth
+
+        private static string Repeat(string text, int count)
+        {
+            StringBuilder builder = new(text.Length * count);
+            for (int i = 0; i < count; i++)
+            {
+                builder.Append(text);
+            }
+
+            return builder.ToString();
+        }
+
+        /// <summary>
+        /// Luau source nested <paramref name="depth"/> levels deep in one construct. Every shape carries
+        /// a compound assignment, so the rewriting parser runs, not only the lexer.
+        /// </summary>
+        private static string NestedSource(string shape, int depth)
+        {
+            const string head = "local x = 0\nx += 1\n";
+            switch (shape)
+            {
+                case "parentheses":
+                    return head + "local y = " + Repeat("(", depth) + "1" + Repeat(")", depth) + "\n";
+                case "tables":
+                    return head + "local y = " + Repeat("{", depth) + Repeat("}", depth) + "\n";
+                case "functions":
+                    return head + Repeat("local function f() ", depth) + Repeat("end ", depth) + "\n";
+                case "if-expressions":
+                    return head + "local y = " + Repeat("if x then (", depth) + "1" + Repeat(") else 2", depth) + "\n";
+                case "interpolations":
+                    return head + "local y = " + Repeat("`{", depth) + "1" + Repeat("}`", depth) + "\n";
+                case "return-type arrows":
+                    return head + "local f: " + Repeat("a -> ", depth) + "a = nil\n";
+                default:
+                    throw new ArgumentException("unknown shape " + shape, nameof(shape));
+            }
+        }
+
+        private static bool RefusedAsTooDeep(DownlevelResult result)
+        {
+            foreach (DownlevelDiagnostic d in result.Diagnostics)
+            {
+                if (d.Severity == DownlevelSeverity.Error && d.Message.Contains("levels deep"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// The rewriting parser and the lexer recursed once per nesting level with no limit, before the
+        /// VM parser (which stops at 200 levels) ever saw the source, so a deeply nested chunk overflowed
+        /// the .NET stack and killed the process: about 2,000 nested parentheses or 1,000 nested
+        /// if-expressions on a 1 MB stack. It is refused like the VM parser refuses it.
+        /// </summary>
+        [TestCase("parentheses")]
+        [TestCase("tables")]
+        [TestCase("functions")]
+        [TestCase("if-expressions")]
+        [TestCase("interpolations")]
+        [TestCase("return-type arrows")]
+        public void DeeplyNestedSource_IsRefusedWithAnError_InsteadOfOverflowingTheStack(string shape)
+        {
+            // WHY two steps: the first depth is one level past the limit and costs a few hundred KB of
+            // stack at most, so a parser without the limit fails this assertion instead of reaching the
+            // second depth, which would crash the test host rather than fail the test.
+            DownlevelResult justPastTheLimit = LuauDownleveler.Process(NestedSource(shape, 201));
+            Assert.IsTrue(RefusedAsTooDeep(justPastTheLimit),
+                "Source nested 201 levels deep (" + shape + ") must be refused with a nesting error, got: "
+                + DescribeDiagnostics(justPastTheLimit));
+
+            DownlevelResult farPastTheLimit = LuauDownleveler.Process(NestedSource(shape, 100000));
+            Assert.IsTrue(RefusedAsTooDeep(farPastTheLimit),
+                "Source nested 100,000 levels deep (" + shape + ") must be refused, not overflow the stack: "
+                + DescribeDiagnostics(farPastTheLimit));
+            Assert.AreEqual(200, LuauDownleveler.MaxNestingDepth,
+                "The limit must stay the bundled Lua 5.2 parser's own, so it refuses nothing that parser compiles.");
+        }
+
+        [TestCase("parentheses")]
+        [TestCase("tables")]
+        [TestCase("functions")]
+        [TestCase("if-expressions")]
+        [TestCase("interpolations")]
+        [TestCase("return-type arrows")]
+        public void NestedSourceWithinTheLimit_IsStillDownleveled(string shape)
+        {
+            // WHY 30: the deepest nested if-expression whose rewrite the bundled VM parser still compiles is
+            // 33 levels (each one becomes a closure), so 30 is legal source for every shape here.
+            DownlevelResult result = ProcessOk(NestedSource(shape, 30));
+
+            Assert.IsTrue(result.Changed, "Source nested 30 levels deep (" + shape + ") must still be rewritten.");
+        }
+
         // ---------------------------------------------------------------- string escapes
 
         [Test]

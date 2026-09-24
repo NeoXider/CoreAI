@@ -31,6 +31,12 @@ Luau-only constructs a typical Roblox gameplay script uses into forms the bundle
 ## Invariants
 
 - **Never throws**: every failure path returns the original source plus an Error diagnostic.
+- **Bounded recursion**: the lexer and the parser recurse once per nesting level, so both stop at
+  `LuauDownleveler.MaxNestingDepth` (200, the bundled Lua 5.2 parser's own syntax-level limit, counted
+  the same way: statements and subexpressions, plus function-type arrows and backtick strings nested
+  inside interpolations). Deeper source gets an Error diagnostic. Without the bound, about 2,000 nested
+  parentheses (or 1,000 nested if-expressions) overflowed a 1 MB .NET stack, which kills the process
+  before any catch runs.
 - **Byte-identical passthrough**: when nothing is rewritten (`Changed == false`) the original string
   instance is returned. The `NeedsDownlevel` trigger scan may false-positive (e.g. the generic-list
   heuristic on `a < b, c > d`); a false positive only costs a no-op parse that emits zero edits.
