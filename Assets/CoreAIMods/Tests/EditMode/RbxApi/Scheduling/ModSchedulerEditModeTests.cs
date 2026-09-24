@@ -2167,6 +2167,56 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
         }
 
         [Test]
+        public void B1_02_ASignalFiredInsideAChargedThread_TagsItsInvocationWithThatThreadsSenderAndLimit()
+        {
+            // WHY: only a remote event's own dispatch tagged an invocation with its sender. A handler
+            // charged to a sender that renamed an instance or set an attribute queued that signal's
+            // invocation untagged, so the listener it started, and everything the listener scheduled,
+            // was charged to the listener's owner: one client filled the host's thread quota through
+            // one indirection (B1-02).
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            RbxScriptSignal changed = new("Folder.Changed");
+            changed.BindScheduler(scheduler);
+            List<string> seen = new();
+            changed.Connect((Action<object[]>)(_ => seen.Add(
+                (scheduler.CurrentSignalQuotaActorId ?? "none") + "/" + scheduler.CurrentSignalQuotaLimit)));
+            FakeThreadPlan chargedHandler = new((FakeScriptThread thread, object[] args) => changed.Fire(),
+                completeOnResume: false);
+            FakeThreadPlan hostThread = new((FakeScriptThread thread, object[] args) => changed.Fire(),
+                completeOnResume: false);
+
+            scheduler.SpawnSignal("host-mod", chargedHandler, Array.Empty<object>(), "client-a", 3,
+                out RbxError refusal);
+            scheduler.Spawn("host-mod", hostThread, Array.Empty<object>());
+            scheduler.Advance(0d);
+
+            Assert.IsNull(refusal);
+            CollectionAssert.AreEqual(new[] { "client-a/3", "none/0" }, seen,
+                "the charged thread's fire carries its sender and limit; the host's own fire carries none");
+            Assert.IsNull(scheduler.CurrentSignalQuotaActorId);
+            Assert.AreEqual(0, scheduler.CurrentSignalQuotaLimit);
+        }
+
+        [Test]
+        public void B1_02_Negative_TheDispatchScopeStillTagsItsInvocationWithoutALimit()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            RbxScriptSignal onServerEvent = new("RemoteEvent.OnServerEvent");
+            onServerEvent.BindScheduler(scheduler);
+            List<string> seen = new();
+            onServerEvent.Connect((Action<object[]>)(_ => seen.Add(
+                (scheduler.CurrentSignalQuotaActorId ?? "none") + "/" + scheduler.CurrentSignalQuotaLimit)));
+
+            string previous = scheduler.BeginSignalsOnBehalfOf("client-b");
+            onServerEvent.Fire();
+            scheduler.EndSignalsOnBehalfOf(previous);
+            scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(new[] { "client-b/0" }, seen,
+                "a dispatch-scope tag leaves the limit to the caller that starts the handler");
+        }
+
+        [Test]
         public void M2_19_RollbackUnfinishedYield_ReturnsAWaitingRecordToRunningAndDropsItsSlots()
         {
             ModScheduler scheduler = CreateScheduler(out _, out _);

@@ -37,11 +37,12 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Handler threads one remote sender may keep alive at once on this machine (MP-10): the
         /// OnServerInvoke callbacks and OnServerEvent handlers its calls started that are still
-        /// suspended, and every thread those handlers start with <c>task.spawn</c>, <c>task.defer</c>
-        /// or <c>task.delay</c> (A4-01). They are charged to the sender, never to the handler's owner,
-        /// so a flooding client exhausts only this budget; a call over it is refused (RemoteFunction),
-        /// dropped and counted (RemoteEvent), or answered BUDGET_EXCEEDED inside the handler (a
-        /// <c>task.*</c> start), without faulting the handler's mod.
+        /// suspended, every thread those handlers start with <c>task.spawn</c>, <c>task.defer</c>
+        /// or <c>task.delay</c> (A4-01), and every signal handler a signal those threads fire starts (a
+        /// property or attribute write firing <c>Changed</c>, B1-02). They are charged to the sender,
+        /// never to the handler's owner, so a flooding client exhausts only this budget; a call over it
+        /// is refused (RemoteFunction), dropped and counted (RemoteEvent, signal handlers), or answered
+        /// BUDGET_EXCEEDED inside the handler (a <c>task.*</c> start), without faulting the handler's mod.
         /// </summary>
         internal const int MaxRemoteHandlerThreadsPerSender = 32;
 
@@ -51,6 +52,39 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         internal const string RemoteFunctionCallbackBudgetCutMessage =
             "the RemoteFunction callback was stopped: it exceeded its execution budget";
+
+        /// <summary>
+        /// What the caller of a RemoteFunction is answered when the callback serving it was stopped
+        /// before it returned for any reason other than its own budget: its mod was unloaded, reloaded
+        /// or quarantined, its thread was cancelled, or it yielded outside the task scheduler (B1-05).
+        /// It names no mod: on a server the caller is a remote client.
+        /// </summary>
+        internal const string RemoteFunctionCallbackStoppedMessage =
+            "the RemoteFunction callback was stopped before it returned";
+
+        /// <summary>
+        /// What the caller of a RemoteFunction is answered when the world serving the call was shut down
+        /// while the callback still ran (B1-05).
+        /// </summary>
+        internal const string RemoteFunctionWorldShutDownMessage =
+            "the RemoteFunction callback was stopped: the world serving it was shut down";
+
+        /// <summary>
+        /// What a remote caller is answered when its call, or a thread its callback tried to start, was
+        /// refused because the threads its earlier calls started already fill its budget
+        /// (<see cref="MaxRemoteHandlerThreadsPerSender"/>). The refusal itself, which names the host
+        /// mod, goes to the host log only (B1-05).
+        /// </summary>
+        internal const string RemoteFunctionCallRefusedMessage =
+            "the RemoteFunction call was refused: threads this caller's earlier calls started are still "
+            + "running on the server";
+
+        /// <summary>
+        /// What the caller of a RemoteFunction is answered when the scheduler could not start the callback;
+        /// the reason was reported to the callback's mod (B1-05).
+        /// </summary>
+        internal const string RemoteFunctionCallbackNotStartedMessage =
+            "the RemoteFunction callback could not start";
 
         private sealed class ExecutingScriptBacking
         {
@@ -65,7 +99,7 @@ namespace CoreAI.Ai.LuaCs
             public RbxInstance Script { get; }
         }
 
-        private sealed class RemoteFunctionCallbackRegistration
+        internal sealed class RemoteFunctionCallbackRegistration
         {
             public RemoteFunctionCallbackRegistration(LuaCsRbxModContext context,
                 IScriptState ownerState, LuaValue callback)
@@ -80,13 +114,22 @@ namespace CoreAI.Ai.LuaCs
             public IScriptState OwnerState { get; }
 
             public LuaValue Callback { get; }
+
+            /// <summary>
+            /// The context whose assignment last replaced or cleared this registration; null while it
+            /// serves. Lets a failed load put back exactly what its own chunk displaced (B1-03).
+            /// </summary>
+            public LuaCsRbxModContext DisplacedBy { get; set; }
         }
 
         internal sealed class ModLoadCandidate
         {
             public ModLoadCandidate(string ownerModId, bool hadPreviousGeneration,
                 int previousGeneration, HashSet<RbxScriptConnection> existingConnections,
-                bool hadExecutingScriptBacking, ModActorRecord previousActorRecord)
+                bool hadExecutingScriptBacking, ModActorRecord previousActorRecord,
+                Dictionary<InstanceId, RemoteFunctionCallbackRegistration> serverRemoteCallbacks,
+                Dictionary<InstanceId, Dictionary<string, RemoteFunctionCallbackRegistration>>
+                    clientRemoteCallbacks)
             {
                 OwnerModId = ownerModId;
                 HadPreviousGeneration = hadPreviousGeneration;
@@ -94,6 +137,8 @@ namespace CoreAI.Ai.LuaCs
                 ExistingConnections = existingConnections;
                 HadExecutingScriptBacking = hadExecutingScriptBacking;
                 PreviousActorRecord = previousActorRecord;
+                ServerRemoteCallbacks = serverRemoteCallbacks;
+                ClientRemoteCallbacks = clientRemoteCallbacks;
             }
 
             public string OwnerModId { get; }
@@ -111,6 +156,13 @@ namespace CoreAI.Ai.LuaCs
             /// if the load fails.
             /// </summary>
             public ModActorRecord PreviousActorRecord { get; }
+
+            /// <summary>Every OnServerInvoke registration as it stood before the load, by remote.</summary>
+            public Dictionary<InstanceId, RemoteFunctionCallbackRegistration> ServerRemoteCallbacks { get; }
+
+            /// <summary>Every OnClientInvoke registration as it stood before the load, by remote and actor.</summary>
+            public Dictionary<InstanceId, Dictionary<string, RemoteFunctionCallbackRegistration>>
+                ClientRemoteCallbacks { get; }
         }
 
         /// <summary>
@@ -1656,9 +1708,20 @@ namespace CoreAI.Ai.LuaCs
             HashSet<RbxScriptConnection> existingConnections =
                 new(_connections.GetOwnedBy(owner));
             bool hadExecutingScriptBacking = TryGetExecutingScriptBacking(owner, out _);
+            Dictionary<InstanceId, Dictionary<string, RemoteFunctionCallbackRegistration>> clientCallbacks =
+                new(_clientRemoteCallbacks.Count);
+            foreach (KeyValuePair<InstanceId, Dictionary<string, RemoteFunctionCallbackRegistration>> pair
+                     in _clientRemoteCallbacks)
+            {
+                clientCallbacks.Add(pair.Key,
+                    new Dictionary<string, RemoteFunctionCallbackRegistration>(pair.Value, StringComparer.Ordinal));
+            }
+
             return new ModLoadCandidate(owner, hadPreviousGeneration,
                 previousGeneration, existingConnections, hadExecutingScriptBacking,
-                CaptureModActorRecord(owner));
+                CaptureModActorRecord(owner),
+                new Dictionary<InstanceId, RemoteFunctionCallbackRegistration>(_serverRemoteCallbacks),
+                clientCallbacks);
         }
 
         internal void RollbackModLoadCandidate(ModLoadCandidate candidate)
@@ -1669,10 +1732,11 @@ namespace CoreAI.Ai.LuaCs
             }
 
             string ownerModId = candidate.OwnerModId;
-            if (_currentSchedulerGenerationByMod.TryGetValue(
-                    ownerModId, out int candidateGeneration)
-                && (!candidate.HadPreviousGeneration
-                    || candidateGeneration != candidate.PreviousGeneration))
+            bool hadCandidateGeneration = _currentSchedulerGenerationByMod.TryGetValue(
+                                              ownerModId, out int candidateGeneration)
+                                          && (!candidate.HadPreviousGeneration
+                                              || candidateGeneration != candidate.PreviousGeneration);
+            if (hadCandidateGeneration)
             {
                 CancelScheduledGeneration(ownerModId, candidateGeneration);
             }
@@ -1694,6 +1758,11 @@ namespace CoreAI.Ai.LuaCs
             else
             {
                 _currentSchedulerGenerationByMod.Remove(ownerModId);
+            }
+
+            if (hadCandidateGeneration)
+            {
+                RestoreRemoteFunctionCallbacksDisplacedBy(candidate, candidateGeneration);
             }
 
             IReadOnlyList<RbxScriptConnection> currentConnections =
@@ -1722,6 +1791,83 @@ namespace CoreAI.Ai.LuaCs
             // that never loaded, and the ledger would grow with every failed id) nor overwrite the
             // record of the mod a failed reload keeps.
             RestoreModActorRecord(candidate.PreviousActorRecord);
+        }
+
+        /// <summary>
+        /// Puts back every OnServerInvoke and OnClientInvoke registration the failed candidate of
+        /// <paramref name="candidate"/>'s mod (<paramref name="candidateGeneration"/>) replaced or
+        /// cleared, whichever mod owns it, while its slot is still empty, its remote still exists and
+        /// the generation that registered it is still its mod's live one. Call it after the candidate's
+        /// own registrations are removed and the mod's live generation is restored.
+        /// </summary>
+        /// <remarks>
+        /// WHY: a callback assignment takes effect at once, while the chunk still runs. The rollback
+        /// removed the candidate's registration (A2-03) but nothing restored the one it had replaced,
+        /// so a reload that failed after assigning OnServerInvoke left every client's InvokeServer
+        /// failing, although a failed reload promises to leave the loaded mod untouched (B1-03).
+        /// WHY only a registration the candidate itself displaced: a slot cleared by anything else
+        /// during the build (the owner's own code, its unload, the remote's destruction) stays cleared.
+        /// </remarks>
+        private void RestoreRemoteFunctionCallbacksDisplacedBy(ModLoadCandidate candidate,
+            int candidateGeneration)
+        {
+            foreach (KeyValuePair<InstanceId, RemoteFunctionCallbackRegistration> pair
+                     in candidate.ServerRemoteCallbacks)
+            {
+                if (_serverRemoteCallbacks.ContainsKey(pair.Key)
+                    || !IsRestorableRemoteFunctionCallback(pair.Key, pair.Value,
+                        candidate.OwnerModId, candidateGeneration))
+                {
+                    continue;
+                }
+
+                pair.Value.DisplacedBy = null;
+                _serverRemoteCallbacks.Add(pair.Key, pair.Value);
+            }
+
+            foreach (KeyValuePair<InstanceId, Dictionary<string, RemoteFunctionCallbackRegistration>> remotePair
+                     in candidate.ClientRemoteCallbacks)
+            {
+                foreach (KeyValuePair<string, RemoteFunctionCallbackRegistration> actorPair
+                         in remotePair.Value)
+                {
+                    bool hasCallbacks = _clientRemoteCallbacks.TryGetValue(remotePair.Key,
+                        out Dictionary<string, RemoteFunctionCallbackRegistration> callbacks);
+                    if ((hasCallbacks && callbacks.ContainsKey(actorPair.Key))
+                        || !IsRestorableRemoteFunctionCallback(remotePair.Key, actorPair.Value,
+                            candidate.OwnerModId, candidateGeneration))
+                    {
+                        continue;
+                    }
+
+                    if (!hasCallbacks)
+                    {
+                        callbacks = new Dictionary<string, RemoteFunctionCallbackRegistration>(
+                            StringComparer.Ordinal);
+                        _clientRemoteCallbacks.Add(remotePair.Key, callbacks);
+                    }
+
+                    actorPair.Value.DisplacedBy = null;
+                    callbacks.Add(actorPair.Key, actorPair.Value);
+                }
+            }
+        }
+
+        private bool IsRestorableRemoteFunctionCallback(InstanceId remoteId,
+            RemoteFunctionCallbackRegistration registration, string candidateOwnerModId,
+            int candidateGeneration)
+        {
+            LuaCsRbxModContext displacedBy = registration.DisplacedBy;
+            string registeringModId = registration.Context.OwnerModId;
+            return displacedBy != null
+                   && string.Equals(displacedBy.OwnerModId, candidateOwnerModId, StringComparison.Ordinal)
+                   && displacedBy.ConnectionGeneration == candidateGeneration
+                   && registeringModId != null
+                   && _currentSchedulerGenerationByMod.TryGetValue(registeringModId, out int liveGeneration)
+                   && liveGeneration == registration.Context.ConnectionGeneration
+                   && _registry.TryGet(remoteId, out RbxInstance instance)
+                   && instance is RbxRemoteFunction
+                   && !instance.IsDestroyed;
         }
 
         /// <summary>
@@ -1894,13 +2040,18 @@ namespace CoreAI.Ai.LuaCs
             }
 
             // WHY charged to the sender: this handler runs because a remote client fired an
-            // OnServerEvent. Charged to the handler's owner (normally the host), one client that fired
-            // faster than a yielding handler finishes filled the host's whole thread quota (MP-10).
+            // OnServerEvent, or because a thread that client's call started fired this signal (B1-02).
+            // Charged to the handler's owner (normally the host), one client that fired faster than a
+            // yielding handler finishes filled the host's whole thread quota (MP-10).
+            int inheritedLimit = _scheduler.CurrentSignalQuotaLimit;
             IRbxScriptThread thread = _scheduler.SpawnSignal(ownerModId, callable, arguments,
-                sender, MaxRemoteHandlerThreadsPerSender, out RbxError refusal);
+                sender, inheritedLimit > 0 ? inheritedLimit : MaxRemoteHandlerThreadsPerSender,
+                out RbxError refusal);
             if (refusal != null)
             {
-                NoteRemoteHandlerRefusal(sender, "an OnServerEvent invocation was dropped", refusal);
+                NoteRemoteHandlerRefusal(sender, inheritedLimit > 0
+                    ? "a signal handler a remote call's thread caused was dropped"
+                    : "an OnServerEvent invocation was dropped", refusal);
                 return;
             }
 
@@ -1909,8 +2060,9 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// Remote-induced thread starts refused because their sender's budget was full (MP-10):
-        /// dropped OnServerEvent invocations, refused OnServerInvoke calls, and <c>task.spawn</c>,
-        /// <c>task.defer</c> or <c>task.delay</c> calls those handlers made (A4-01).
+        /// dropped OnServerEvent invocations, refused OnServerInvoke calls, <c>task.spawn</c>,
+        /// <c>task.defer</c> or <c>task.delay</c> calls those handlers made (A4-01), and dropped
+        /// invocations of signals those threads fired (B1-02).
         /// </summary>
         internal long RemoteHandlerRefusalCount { get; private set; }
 
@@ -1997,11 +2149,19 @@ namespace CoreAI.Ai.LuaCs
             {
                 if (serverCallback)
                 {
-                    _serverRemoteCallbacks.Remove(remote.Id);
+                    if (_serverRemoteCallbacks.TryGetValue(remote.Id,
+                            out RemoteFunctionCallbackRegistration cleared))
+                    {
+                        cleared.DisplacedBy = context;
+                        _serverRemoteCallbacks.Remove(remote.Id);
+                    }
                 }
                 else if (_clientRemoteCallbacks.TryGetValue(remote.Id,
-                             out Dictionary<string, RemoteFunctionCallbackRegistration> callbacks))
+                             out Dictionary<string, RemoteFunctionCallbackRegistration> callbacks)
+                         && callbacks.TryGetValue(context.ActorContext.ActorId,
+                             out RemoteFunctionCallbackRegistration cleared))
                 {
+                    cleared.DisplacedBy = context;
                     callbacks.Remove(context.ActorContext.ActorId);
                     if (callbacks.Count == 0)
                     {
@@ -2035,6 +2195,12 @@ namespace CoreAI.Ai.LuaCs
                 context, schedulerCallable.OwnerState, callback);
             if (serverCallback)
             {
+                if (_serverRemoteCallbacks.TryGetValue(remote.Id,
+                        out RemoteFunctionCallbackRegistration replacedServer))
+                {
+                    replacedServer.DisplacedBy = context;
+                }
+
                 _serverRemoteCallbacks[remote.Id] = registration;
                 return;
             }
@@ -2045,6 +2211,12 @@ namespace CoreAI.Ai.LuaCs
                 clientCallbacks = new Dictionary<string, RemoteFunctionCallbackRegistration>(
                     StringComparer.Ordinal);
                 _clientRemoteCallbacks.Add(remote.Id, clientCallbacks);
+            }
+
+            if (clientCallbacks.TryGetValue(context.ActorContext.ActorId,
+                    out RemoteFunctionCallbackRegistration replacedClient))
+            {
+                replacedClient.DisplacedBy = context;
             }
 
             clientCallbacks[context.ActorContext.ActorId] = registration;
@@ -2497,6 +2669,9 @@ namespace CoreAI.Ai.LuaCs
         {
             LuaFunction callbackRunner = new("RemoteFunction.callback", async (ctx, ct) =>
             {
+                // WHY read before the call: the runner starts inside its own thread's first resume, so
+                // this is the callback's thread, whose state later tells a budget trip from a stop.
+                IRbxScriptThread callbackThread = _schedulerThreadFactory.CurrentThread;
                 try
                 {
                     LuaValue[] callbackArguments = ctx.Arguments.ToArray();
@@ -2509,16 +2684,21 @@ namespace CoreAI.Ai.LuaCs
                     // WHY a fixed line: the budget cut surfaces as the engine's own cancellation
                     // text, which names Lua-CSharp and not the reason, and it went to the caller —
                     // on a server, a remote client (A2-07).
-                    if (!responder.IsCompleted)
+                    // WHY only while the thread's own code runs: an unload, reload, quarantine,
+                    // task.cancel, world shutdown or a native coroutine.yield cancels the thread too,
+                    // while it is suspended or already marked dead; answered here, its caller was told
+                    // the callback ran too long. The thread's retirement answers it with the real
+                    // reason instead (B1-05).
+                    if (!responder.IsCompleted && !IsStoppedThread(callbackThread))
                     {
                         responder.Fail(RemoteFunctionCallbackBudgetCutMessage);
                     }
                 }
                 catch (Exception ex)
                 {
-                    if (!responder.IsCompleted)
+                    if (!responder.IsCompleted && !IsStoppedThread(callbackThread))
                     {
-                        responder.Fail(ex.Message);
+                        responder.Fail(DescribeRemoteFunctionCallbackFailure(ex));
                     }
                 }
 
@@ -2540,11 +2720,13 @@ namespace CoreAI.Ai.LuaCs
                         MaxRemoteHandlerThreadsPerSender, out RbxError refusal);
                     if (refusal != null)
                     {
+                        // WHY the caller gets a line of its own: the refusal names the host mod, and
+                        // the caller is a remote client; the host log keeps the refusal (B1-05).
                         NoteRemoteHandlerRefusal(senderActorId, "a RemoteFunction call was refused",
                             refusal);
                         if (!responder.IsCompleted)
                         {
-                            responder.Fail(refusal.Message);
+                            responder.Fail(RemoteFunctionCallRefusedMessage);
                         }
 
                         return;
@@ -2558,15 +2740,26 @@ namespace CoreAI.Ai.LuaCs
                     // the caller would otherwise wait for its whole timeout for an answer that never comes.
                     if (!responder.IsCompleted)
                     {
-                        responder.Fail("RemoteFunction callback of mod '" + ownerModId
-                                       + "' could not start");
+                        responder.Fail(RemoteFunctionCallbackNotStartedMessage);
                     }
 
                     return;
                 }
 
-                if (thread is LuaCsRbxScriptThread luaThread && !luaThread.IsDead
-                    && !responder.IsCompleted)
+                if (thread.IsDead)
+                {
+                    // WHY: a callback stopped inside its first resume (a native coroutine.yield, a kill
+                    // from its own code) retired before it had a responder to fail, so its caller would
+                    // otherwise wait for its whole timeout.
+                    if (!responder.IsCompleted)
+                    {
+                        responder.Fail(DescribeStoppedRemoteFunctionCallback());
+                    }
+
+                    return;
+                }
+
+                if (thread is LuaCsRbxScriptThread luaThread && !responder.IsCompleted)
                 {
                     luaThread.PendingResponder = responder;
                 }
@@ -2578,6 +2771,43 @@ namespace CoreAI.Ai.LuaCs
                     responder.Fail(ex.Message);
                 }
             }
+        }
+
+        /// <summary>
+        /// True when <paramref name="thread"/>, whose code was cancelled, was stopped while it was not
+        /// running: killed (marked dead first) or stopped after a native <c>coroutine.yield</c> (still
+        /// suspended). A budget trip cancels a thread whose own coroutine is running.
+        /// </summary>
+        private static bool IsStoppedThread(IRbxScriptThread thread)
+        {
+            if (thread == null)
+            {
+                return false;
+            }
+
+            return thread.IsDead || thread.Status == RbxScriptThreadStatus.Dead
+                   || thread is LuaCsRbxScriptThread luaThread && !luaThread.IsOwnCoroutineRunning;
+        }
+
+        /// <summary>The line the caller of a RemoteFunction whose callback stopped before it returned is answered.</summary>
+        private string DescribeStoppedRemoteFunctionCallback()
+        {
+            return _disposed ? RemoteFunctionWorldShutDownMessage : RemoteFunctionCallbackStoppedMessage;
+        }
+
+        /// <summary>
+        /// The line the caller of a RemoteFunction whose callback raised <paramref name="failure"/> is
+        /// answered: the error itself, except an induced-budget refusal the callback's thread raised,
+        /// which names the host mod and is answered with <see cref="RemoteFunctionCallRefusedMessage"/>
+        /// (B1-05). Called inside the callback's own resume, where that thread is the running one.
+        /// </summary>
+        private string DescribeRemoteFunctionCallbackFailure(Exception failure)
+        {
+            string message = failure.Message ?? "";
+            string refusal = _scheduler.RunningThreadInducedRefusalMessage;
+            return refusal != null && message.IndexOf(refusal, StringComparison.Ordinal) >= 0
+                ? RemoteFunctionCallRefusedMessage
+                : message;
         }
 
         private static List<LuaValue> ReadRemoteArguments(
@@ -3900,8 +4130,15 @@ namespace CoreAI.Ai.LuaCs
 
             try
             {
-                responder.Fail("RemoteFunction callback of mod '" + luaThread.OwnerModId
-                               + "' stopped before it returned");
+                // WHY no mod id in the answer: on a server the caller is a remote client, and the
+                // host's mod ids are not its business; the host log keeps the mod (B1-05).
+                if (!_disposed)
+                {
+                    _log?.Invoke("[RbxApi] a RemoteFunction callback of mod '" + luaThread.OwnerModId
+                                 + "' stopped before it returned; its caller was answered with a failure");
+                }
+
+                responder.Fail(DescribeStoppedRemoteFunctionCallback());
             }
             catch (Exception ex)
             {

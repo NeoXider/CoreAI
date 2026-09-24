@@ -251,7 +251,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private sealed class SignalInvocation
         {
             public SignalInvocation(RbxScriptConnection connection, object[] arguments,
-                RbxInstance readableTombstone, int generation, string[] chain, string quotaActorId)
+                RbxInstance readableTombstone, int generation, string[] chain, string quotaActorId,
+                int quotaLimit)
             {
                 Connection = connection;
                 Arguments = arguments;
@@ -259,6 +260,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 Generation = generation;
                 Chain = chain;
                 QuotaActorId = quotaActorId;
+                QuotaLimit = quotaLimit;
             }
 
             public RbxScriptConnection Connection { get; }
@@ -271,8 +273,17 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             public string[] Chain { get; }
 
-            /// <summary>Actor on whose behalf the fire happened (see <see cref="BeginSignalsOnBehalfOf"/>).</summary>
+            /// <summary>
+            /// Actor on whose behalf the fire happened: the one <see cref="BeginSignalsOnBehalfOf"/> named,
+            /// or the one the firing thread was charged to (B1-02).
+            /// </summary>
             public string QuotaActorId { get; }
+
+            /// <summary>
+            /// The firing thread's <see cref="ThreadRecord.QuotaLimit"/> when the charge came from it; zero
+            /// when <see cref="BeginSignalsOnBehalfOf"/> named the actor.
+            /// </summary>
+            public int QuotaLimit { get; }
         }
 
         private abstract class TimedEntry
@@ -565,6 +576,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private string[] _currentSignalChain;
         private string _currentInvocationOwnerModId;
         private string _currentInvocationQuotaActorId;
+        private int _currentInvocationQuotaLimit;
         private string _enqueueQuotaActorId;
         private string _runningOwnerModId;
         private ThreadRecord _runningRecord;
@@ -682,10 +694,19 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
         /// <summary>
         /// Actor on whose behalf the signal invocation being dispatched right now was fired (see
-        /// <see cref="BeginSignalsOnBehalfOf"/>); null outside such a dispatch and inside every thread
-        /// resume, so only the handler the invocation starts is charged to that actor (MP-10).
+        /// <see cref="BeginSignalsOnBehalfOf"/>), or the actor the thread that fired it was charged to
+        /// (B1-02); null outside such a dispatch and inside every thread resume, so only the handler the
+        /// invocation starts is charged to that actor (MP-10).
         /// </summary>
         internal string CurrentSignalQuotaActorId => _currentInvocationQuotaActorId;
+
+        /// <summary>
+        /// Live threads <see cref="CurrentSignalQuotaActorId"/>'s budget allows the handler the invocation
+        /// being dispatched starts, carried from the charged thread that fired the signal (B1-02); zero
+        /// when the invocation was tagged by <see cref="BeginSignalsOnBehalfOf"/>, which leaves the limit
+        /// to the caller, and outside a tagged dispatch.
+        /// </summary>
+        internal int CurrentSignalQuotaLimit => _currentInvocationQuotaLimit;
 
         /// <summary>Live threads charged to <paramref name="quotaActorId"/>'s induced-thread budget (MP-10).</summary>
         internal int CountInducedThreads(string quotaActorId)
@@ -701,6 +722,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         /// making them is charged to another actor whose induced-thread budget was full (A4-01).
         /// </summary>
         internal long InducedThreadRefusals { get; private set; }
+
+        /// <summary>
+        /// The raw message of the induced-budget refusal (A4-01) last raised inside the thread running
+        /// right now; null when none was raised there or no thread runs. Lets the host code a thread
+        /// runs tell that refusal apart from an error of the thread's own code (B1-05).
+        /// </summary>
+        internal string RunningThreadInducedRefusalMessage => _runningRecord?.InducedRefusalMessage;
 
         /// <summary>
         /// Raised with the charged actor and the refusal each time <see cref="InducedThreadRefusals"/>
@@ -1398,10 +1426,24 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 return;
             }
 
+            // WHY the running thread's charge as well as the dispatch scope: a handler a remote call
+            // started runs that call's request, and so does a signal it fires by writing a property
+            // or an attribute. Tagged by the dispatch scope alone, the listener that signal started
+            // was charged to the listener's owner, and one client filled the host's thread quota
+            // through that one indirection (B1-02).
+            string quotaActorId = _enqueueQuotaActorId;
+            int quotaLimit = 0;
+            ThreadRecord running = _runningRecord;
+            if (quotaActorId == null && running != null && running.QuotaActorId != null)
+            {
+                quotaActorId = running.QuotaActorId;
+                quotaLimit = running.QuotaLimit;
+            }
+
             string[] chain = BuildSignalChain(connection.SignalName);
             _signalQueue.Enqueue(new SignalInvocation(
                 connection, CopyArguments(arguments), readableTombstone, generation, chain,
-                _enqueueQuotaActorId));
+                quotaActorId, quotaLimit));
         }
 
         /// <summary>
@@ -1770,6 +1812,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                         _currentSignalTombstone = invocation.ReadableTombstone;
                         _currentInvocationOwnerModId = invocation.Connection.OwnerModId;
                         _currentInvocationQuotaActorId = invocation.QuotaActorId;
+                        _currentInvocationQuotaLimit = invocation.QuotaLimit;
                         try
                         {
                             invocation.Connection.InvokePending(invocation.Arguments);
@@ -1781,6 +1824,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                         finally
                         {
                             _currentInvocationQuotaActorId = null;
+                            _currentInvocationQuotaLimit = 0;
                         }
                     }
 
@@ -1796,6 +1840,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 _currentSignalTombstone = null;
                 _currentInvocationOwnerModId = null;
                 _currentInvocationQuotaActorId = null;
+                _currentInvocationQuotaLimit = 0;
                 _drainingSignals = false;
             }
         }
@@ -2261,7 +2306,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             // invocation starts. The threads that handler's code starts in turn inherit the charge
             // through the running record instead (see CreateScheduledRecord).
             string previousQuotaActor = _currentInvocationQuotaActorId;
+            int previousQuotaLimit = _currentInvocationQuotaLimit;
             _currentInvocationQuotaActorId = null;
+            _currentInvocationQuotaLimit = 0;
             RbxScriptThreadResumeResult result;
             try
             {
@@ -2275,6 +2322,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             finally
             {
                 _currentInvocationQuotaActorId = previousQuotaActor;
+                _currentInvocationQuotaLimit = previousQuotaLimit;
                 _runningRecord = previousRunningRecord;
                 _runningOwnerModId = previousRunningOwner;
                 RbxScriptSignal.ExitTombstoneScope(previousTombstone);

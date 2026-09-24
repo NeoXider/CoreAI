@@ -461,9 +461,471 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual(0L, bindings.RemoteHandlerRefusalCount);
         }
 
+        [TestCase("property")]
+        [TestCase("attribute")]
+        public void Lua_B1_02_ASignalFiredByAThreadChargedToASender_StartsItsHandlersOnThatSender(string variant)
+        {
+            // WHY: only the remote event's own dispatch tagged an invocation with its sender. A handler
+            // charged to the sender that renamed an instance or set an attribute queued that signal's
+            // invocation untagged, so the listener thread it started was charged to the listener's
+            // owner: 300 fires from one client left the host at 256 live threads, unable to load a mod
+            // (B1-02).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext flooder = new LocalActorIdentityProvider("b1-02-flooder")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            int budget = LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender;
+            stack.Runtime.LoadMod(host, "server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'Cooldown'
+                remote.Parent = workspace
+                local state = Instance.new('Folder')
+                state.Parent = workspace
+                " + ChargedSignalListener(variant) + @"
+                local handled = 0
+                remote.OnServerEvent:Connect(function(player)
+                    handled = handled + 1
+                    store_set('handled', tostring(handled))
+                    " + ChargedSignalWrite(variant) + @"
+                end)", LuaCapabilities.All, persistToStore: false);
+            stack.Runtime.LoadMod(flooder, "flooder", @"
+                local remote = workspace:FindFirstChild('Cooldown')
+                for index = 1, 300 do remote:FireServer(index) end",
+                LuaCapabilities.All, persistToStore: false);
+            PumpFrames(bindings, stack, host, 3);
+
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(host, "host-work", @"
+                local ok, err = pcall(function() task.spawn(function() store_set('ran', 'yes') end) end)
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))", LuaCapabilities.All, persistToStore: false),
+                "one client's flood must leave the host able to load a mod");
+            PumpFrames(bindings, stack, host, 1);
+
+            Assert.AreEqual("300", store.Get("server", "handled"),
+                "every fire under the rate limit still reaches the remote event's handler");
+            Assert.AreEqual("true", store.Get("host-work", "ok"), store.Get("host-work", "err"));
+            Assert.AreEqual("yes", store.Get("host-work", "ran"));
+            Assert.AreEqual(budget, bindings.Scheduler.CountInducedThreads(flooder.ActorId),
+                "the listener threads the sender's handlers caused are the sender's, held to its budget");
+            Assert.AreEqual(0,
+                bindings.Scheduler.LiveThreadCount - bindings.Scheduler.CountInducedThreads(flooder.ActorId),
+                "no thread the flood caused is left on the host's own quota");
+            Assert.AreEqual(300L - budget, bindings.RemoteHandlerRefusalCount,
+                "every listener start over the sender's budget is refused and counted against the sender");
+            Assert.IsFalse(IsQuarantined(stack, host, "server"),
+                "a listener refused for the sender's budget is not its owner's fault");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors(host, "server"));
+        }
+
+        [TestCase("property")]
+        [TestCase("attribute")]
+        public void Lua_B1_02_Negative_TheSameSignalFiredByTheHostsOwnThread_IsChargedToTheHost(string variant)
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            int fires = LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender + 8;
+            stack.Runtime.LoadMod(host, "server", @"
+                local state = Instance.new('Folder')
+                state.Parent = workspace
+                " + ChargedSignalListener(variant) + @"
+                for handled = 1, " + fires.ToString(CultureInfo.InvariantCulture) + @" do
+                    " + ChargedSignalWrite(variant) + @"
+                end", LuaCapabilities.All, persistToStore: false);
+
+            PumpFrames(bindings, stack, host, 1);
+
+            Assert.AreEqual(fires, bindings.Scheduler.LiveThreadCount,
+                "a listener no remote call caused runs on its owner's quota, beyond any sender budget");
+            Assert.AreEqual(0L, bindings.RemoteHandlerRefusalCount);
+        }
+
+        /// <summary>A listener on the folder <c>state</c> that holds its thread for a minute.</summary>
+        private static string ChargedSignalListener(string variant)
+        {
+            return variant == "property"
+                ? "state:GetPropertyChangedSignal('Name'):Connect(function() task.wait(60) end)"
+                : "state:GetAttributeChangedSignal('Hits'):Connect(function() task.wait(60) end)";
+        }
+
+        /// <summary>A write to <c>state</c> that fires the signal <see cref="ChargedSignalListener"/> listens to.</summary>
+        private static string ChargedSignalWrite(string variant)
+        {
+            return variant == "property"
+                ? "state.Name = 'hit-' .. tostring(handled)"
+                : "state:SetAttribute('Hits', handled)";
+        }
+
+        [Test]
+        public void Lua_B1_03_AFailedReloadThatSetOnServerInvoke_KeepsTheLiveCallbackServing()
+        {
+            // WHY: the reload candidate's assignment replaced the live generation's registration, and
+            // the rollback removed the candidate's without putting the live one back, so one reload
+            // that failed after that line left every client's InvokeServer failing (B1-03).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("b1-03-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "svc", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Svc'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player) return 'v1' end", LuaCapabilities.All, persistToStore: false);
+            RbxNetworkResponse before = InvokeServer(bindings, WorkspaceChild(bindings, "Svc"), client.ActorId);
+            Assert.IsTrue(before != null && before.Succeeded, before?.Error);
+
+            System.Exception error = Assert.Catch<System.Exception>(() => stack.Runtime.ReloadMod(host, "svc", @"
+                local remote = workspace:FindFirstChild('Svc')
+                remote.OnServerInvoke = function(player) return 'v2' end
+                error('reload fails here')"));
+            StringAssert.Contains("reload fails here", error.ToString());
+            Assert.IsTrue(stack.Runtime.IsLoaded(host, "svc"));
+
+            RbxNetworkResponse after = InvokeServer(bindings, WorkspaceChild(bindings, "Svc"), client.ActorId);
+
+            Assert.IsNotNull(after);
+            Assert.IsTrue(after.Succeeded, "the live generation keeps serving after a failed reload: " + after.Error);
+            Assert.AreEqual("[\"v1\"]", System.Text.Encoding.UTF8.GetString(after.Payload));
+        }
+
+        [Test]
+        public void Lua_B1_03_AFailedReloadThatClearedOnServerInvoke_KeepsTheLiveCallbackServing()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("b1-03-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "svc", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Svc'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player) return 'v1' end", LuaCapabilities.All, persistToStore: false);
+
+            Assert.Catch<System.Exception>(() => stack.Runtime.ReloadMod(host, "svc", @"
+                workspace:FindFirstChild('Svc').OnServerInvoke = nil
+                error('reload fails here')"));
+
+            RbxNetworkResponse after = InvokeServer(bindings, WorkspaceChild(bindings, "Svc"), client.ActorId);
+            Assert.IsTrue(after != null && after.Succeeded, "a failed reload's nil assignment is undone: " + after?.Error);
+            Assert.AreEqual("[\"v1\"]", System.Text.Encoding.UTF8.GetString(after.Payload));
+        }
+
+        [Test]
+        public void Lua_B1_03_AFailedReloadThatSetOnClientInvoke_KeepsTheLiveClientCallbackServing()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("b1-03-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "server", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Ping'
+                remote.Parent = workspace", LuaCapabilities.All, persistToStore: false);
+            stack.Runtime.LoadMod(client, "pong", @"
+                workspace:FindFirstChild('Ping').OnClientInvoke = function() return 'c1' end",
+                LuaCapabilities.All, persistToStore: false);
+            RbxNetworkResponse before = InvokeClient(bindings, WorkspaceChild(bindings, "Ping"), client.ActorId);
+            Assert.IsTrue(before != null && before.Succeeded, before?.Error);
+
+            Assert.Catch<System.Exception>(() => stack.Runtime.ReloadMod(client, "pong", @"
+                workspace:FindFirstChild('Ping').OnClientInvoke = function() return 'c2' end
+                error('reload fails here')"));
+
+            RbxNetworkResponse after = InvokeClient(bindings, WorkspaceChild(bindings, "Ping"), client.ActorId);
+            Assert.IsTrue(after != null && after.Succeeded,
+                "the live generation's OnClientInvoke keeps serving after a failed reload: " + after?.Error);
+            Assert.AreEqual("[\"c1\"]", System.Text.Encoding.UTF8.GetString(after.Payload));
+        }
+
+        [Test]
+        public void Lua_B1_03_AFailedLoadThatReplacedAnotherModsOnServerInvoke_GivesItBack()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("b1-03-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "owner", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Shared'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player) return 'owner' end", LuaCapabilities.All, persistToStore: false);
+
+            Assert.Catch<System.Exception>(() => stack.Runtime.LoadMod(host, "intruder", @"
+                workspace:FindFirstChild('Shared').OnServerInvoke = function(player) return 'intruder' end
+                error('load fails here')", LuaCapabilities.All, persistToStore: false));
+            Assert.IsFalse(stack.Runtime.IsLoaded(host, "intruder"));
+
+            RbxNetworkResponse after = InvokeServer(bindings, WorkspaceChild(bindings, "Shared"), client.ActorId);
+            Assert.IsTrue(after != null && after.Succeeded,
+                "a mod that never loaded must not leave another live mod's callback removed: " + after?.Error);
+            Assert.AreEqual("[\"owner\"]", System.Text.Encoding.UTF8.GetString(after.Payload));
+        }
+
+        [Test]
+        public void Lua_B1_03_Negative_ASuccessfulReload_ServesItsNewCallback()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("b1-03-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "svc", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Svc'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player) return 'v1' end", LuaCapabilities.All, persistToStore: false);
+
+            stack.Runtime.ReloadMod(host, "svc", @"
+                workspace:FindFirstChild('Svc').OnServerInvoke = function(player) return 'v2' end");
+
+            RbxNetworkResponse after = InvokeServer(bindings, WorkspaceChild(bindings, "Svc"), client.ActorId);
+            Assert.IsTrue(after != null && after.Succeeded, after?.Error);
+            Assert.AreEqual("[\"v2\"]", System.Text.Encoding.UTF8.GetString(after.Payload));
+        }
+
+        [Test]
+        public void Lua_B1_05_AnOnServerInvokeStoppedByItsModsUnload_TellsTheCallerItStopped_NotABudgetCut()
+        {
+            // WHY: every cancellation of a callback was answered as a budget cut, so a caller whose
+            // callback was waiting in task.wait when its mod unloaded was told the callback ran too
+            // long (B1-05).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("b1-05-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.ModTearingDown += (string modId, LuaModTeardownReason reason) =>
+            {
+                if (reason == LuaModTeardownReason.Reload)
+                {
+                    bindings.KillOutgoingScheduledGenerations(modId);
+                }
+                else
+                {
+                    bindings.KillAllScheduledOwnedBy(modId);
+                }
+            };
+            stack.Runtime.LoadMod(host, "slow-secret-mod", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Slow'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player) task.wait(10) return 'late' end",
+                LuaCapabilities.All, persistToStore: false);
+            PendingInvoke pending = BeginInvokeServer(bindings, WorkspaceChild(bindings, "Slow"), client.ActorId);
+            Assert.IsNull(pending.Response, "the callback is suspended in task.wait");
+
+            Assert.IsTrue(stack.Runtime.UnloadMod(host, "slow-secret-mod"));
+            AdvanceFrames(bindings, 4);
+
+            Assert.IsNotNull(pending.Response, "the unload answers the waiting caller at once");
+            Assert.IsFalse(pending.Response.Succeeded);
+            Assert.AreEqual(LuaCsRbxApiBindings.RemoteFunctionCallbackStoppedMessage, pending.Response.Error);
+            StringAssert.DoesNotContain("slow-secret-mod", pending.Response.Error,
+                "a line sent to a remote caller names no host mod");
+        }
+
+        [Test]
+        public void Lua_B1_05_AnOnServerInvokeStoppedByItsWorldsShutdown_TellsTheCallerTheWorldShutDown()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("b1-05-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "slow-secret-mod", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Slow'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player) task.wait(10) return 'late' end",
+                LuaCapabilities.All, persistToStore: false);
+            PendingInvoke pending = BeginInvokeServer(bindings, WorkspaceChild(bindings, "Slow"), client.ActorId);
+            Assert.IsNull(pending.Response, "the callback is suspended in task.wait");
+
+            bindings.Dispose();
+
+            Assert.IsNotNull(pending.Response, "disposing the world answers the waiting caller at once");
+            Assert.IsFalse(pending.Response.Succeeded);
+            Assert.AreEqual(LuaCsRbxApiBindings.RemoteFunctionWorldShutDownMessage, pending.Response.Error);
+        }
+
+        [Test]
+        public void Lua_B1_05_Negative_ACallbackCutByItsBudgetAfterItsFirstWait_StillGetsTheBudgetLine()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("b1-05-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "spin", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Spin'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player) task.wait(0.5) while true do end end",
+                LuaCapabilities.All, persistToStore: false);
+            PendingInvoke pending = BeginInvokeServer(bindings, WorkspaceChild(bindings, "Spin"), client.ActorId);
+            Assert.IsNull(pending.Response, "the callback is suspended in task.wait");
+
+            bindings.Scheduler.Advance(0.5d);
+            AdvanceFrames(bindings, 2);
+
+            Assert.IsNotNull(pending.Response);
+            Assert.IsFalse(pending.Response.Succeeded);
+            Assert.AreEqual(LuaCsRbxApiBindings.RemoteFunctionCallbackBudgetCutMessage, pending.Response.Error);
+        }
+
+        [Test]
+        public void Lua_B1_05_ACallRefusedForItsSendersBudget_TellsTheCallerWithoutNamingAHostMod()
+        {
+            List<string> log = new();
+            LuaCsRbxApiBindings bindings = new(log: log.Add);
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("b1-05-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "waiting-secret-mod", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Waits'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player) task.wait(60) return 'late' end",
+                LuaCapabilities.All, persistToStore: false);
+            RbxInstance remote = WorkspaceChild(bindings, "Waits");
+            for (int call = 0; call < LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender; call++)
+            {
+                Assert.IsNull(BeginInvokeServer(bindings, remote, client.ActorId).Response,
+                    "call " + call + " is still waiting inside its callback");
+            }
+
+            RbxNetworkResponse refused = BeginInvokeServer(bindings, remote, client.ActorId).Response;
+
+            Assert.IsNotNull(refused, "the call over the sender's budget is refused at once");
+            Assert.IsFalse(refused.Succeeded);
+            Assert.AreEqual(LuaCsRbxApiBindings.RemoteFunctionCallRefusedMessage, refused.Error);
+            StringAssert.DoesNotContain("waiting-secret-mod", refused.Error,
+                "a line sent to a remote caller names no host mod");
+            Assert.IsTrue(log.Exists(line => line.Contains("waiting-secret-mod")),
+                "the host's own log still names the mod whose callback was refused");
+        }
+
+        [Test]
+        public void Lua_B1_05_AWorkStartInsideACallbackRefusedForItsSendersBudget_TellsTheCallerWithoutNamingAHostMod()
+        {
+            // WHY: the refusal a callback's task.delay raised over its sender's budget reached the remote
+            // caller verbatim, and its text names the host mod that made the call (B1-05).
+            List<string> log = new();
+            LuaCsRbxApiBindings bindings = new(log: log.Add);
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("b1-05-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "delaying-secret-mod", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Delays'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player)
+                    task.delay(60, function() end)
+                    return 'ok'
+                end", LuaCapabilities.All, persistToStore: false);
+            RbxInstance remote = WorkspaceChild(bindings, "Delays");
+            for (int call = 1; call < LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender; call++)
+            {
+                RbxNetworkResponse served = BeginInvokeServer(bindings, remote, client.ActorId).Response;
+                Assert.IsTrue(served != null && served.Succeeded, "call " + call + ": " + served?.Error);
+            }
+
+            RbxNetworkResponse refused = BeginInvokeServer(bindings, remote, client.ActorId).Response;
+
+            Assert.IsNotNull(refused);
+            Assert.IsFalse(refused.Succeeded, "the callback's task.delay is refused once the sender's budget is full");
+            Assert.AreEqual(LuaCsRbxApiBindings.RemoteFunctionCallRefusedMessage, refused.Error);
+            StringAssert.DoesNotContain("delaying-secret-mod", refused.Error,
+                "a line sent to a remote caller names no host mod");
+            Assert.IsTrue(log.Exists(line => line.Contains("delaying-secret-mod")),
+                "the host's own log still names the mod whose work was refused");
+            Assert.IsFalse(IsQuarantined(stack, host, "delaying-secret-mod"));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void Lua_B1_05_AnOnServerInvokeStoppedForANativeYield_TellsTheCallerItStopped_NotABudgetCut(
+            bool afterAWait)
+        {
+            // WHY: a native coroutine.yield stops a callback by cancelling it while it is suspended, and
+            // that cancellation was answered as a budget cut too (B1-05).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext client = new LocalActorIdentityProvider("b1-05-client")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "yielding-secret-mod", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Yields'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player)
+                    " + (afterAWait ? "task.wait(0.5)" : "") + @"
+                    coroutine.yield()
+                    return 'unreachable'
+                end", LuaCapabilities.All, persistToStore: false);
+
+            PendingInvoke pending = BeginInvokeServer(bindings, WorkspaceChild(bindings, "Yields"), client.ActorId);
+            bindings.Scheduler.Advance(0.5d);
+            AdvanceFrames(bindings, 2);
+
+            Assert.IsNotNull(pending.Response, "the stopped callback's caller is answered, not left to its timeout");
+            Assert.IsFalse(pending.Response.Succeeded);
+            Assert.AreEqual(LuaCsRbxApiBindings.RemoteFunctionCallbackStoppedMessage, pending.Response.Error);
+        }
+
         private static RbxInstance WorkspaceChild(LuaCsRbxApiBindings bindings, string name)
         {
             return bindings.Game.FindFirstChildOfClass("Workspace").FindFirstChild(name);
+        }
+
+        /// <summary>The answer to one RemoteFunction request; null while the request is unanswered.</summary>
+        private sealed class PendingInvoke
+        {
+            public RbxNetworkResponse Response;
         }
 
         /// <summary>
@@ -473,17 +935,44 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         private static RbxNetworkResponse InvokeServer(LuaCsRbxApiBindings bindings, RbxInstance remote,
             string clientActorId)
         {
-            RbxNetworkResponse answer = null;
+            return BeginInvokeServer(bindings, remote, clientActorId).Response;
+        }
+
+        /// <summary>
+        /// Sends <c>RemoteFunction:InvokeServer</c> from a client actor and pumps four frames; the
+        /// returned request may still be unanswered when its callback waits.
+        /// </summary>
+        private static PendingInvoke BeginInvokeServer(LuaCsRbxApiBindings bindings, RbxInstance remote,
+            string clientActorId)
+        {
+            PendingInvoke pending = new();
             bindings.NetworkBridge.SendRequest(
                 new RbxNetworkRequestMessage(remote.Id, RbxNetworkDirection.ClientToServer,
                     clientActorId, null, System.Text.Encoding.UTF8.GetBytes("[]")),
+                response => pending.Response = response);
+            AdvanceFrames(bindings, 4);
+            return pending;
+        }
+
+        /// <summary>The in-process half of <c>RemoteFunction:InvokeClient</c> to a client actor.</summary>
+        private static RbxNetworkResponse InvokeClient(LuaCsRbxApiBindings bindings, RbxInstance remote,
+            string clientActorId)
+        {
+            RbxNetworkResponse answer = null;
+            bindings.NetworkBridge.SendRequest(
+                new RbxNetworkRequestMessage(remote.Id, RbxNetworkDirection.ServerToClient,
+                    null, clientActorId, System.Text.Encoding.UTF8.GetBytes("[]")),
                 response => answer = response);
-            for (int frame = 0; frame < 4; frame++)
+            AdvanceFrames(bindings, 4);
+            return answer;
+        }
+
+        private static void AdvanceFrames(LuaCsRbxApiBindings bindings, int frames)
+        {
+            for (int frame = 0; frame < frames; frame++)
             {
                 bindings.Scheduler.Advance(0d);
             }
-
-            return answer;
         }
 
         private static void PumpFrames(LuaCsRbxApiBindings bindings, LuaCsModStack stack,
