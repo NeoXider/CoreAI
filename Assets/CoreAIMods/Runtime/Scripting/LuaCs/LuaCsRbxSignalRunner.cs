@@ -15,10 +15,10 @@ namespace CoreAI.Ai.LuaCs
     /// Lua closure (<c>while true do run() yield() end</c>) rather than C# code because Lua-CSharp only
     /// accepts a yield whose immediate caller is a Lua closure; <c>run</c> is the C# function below that
     /// executes whatever handler is armed and flags completion, and <c>yield</c> is the native
-    /// <c>coroutine.yield</c> captured as an upvalue when the body is built. A handler that yields
-    /// (task.wait, signal:Wait, RemoteFunction) suspends inside <c>run</c> exactly as it would on a
-    /// dedicated thread; a handler that throws kills the coroutine in protected mode, so the runner is
-    /// never reused after an error.
+    /// <c>coroutine.yield</c> the sandbox captured before any mod code ran, bound as an upvalue when the body is
+    /// built. A handler that yields (task.wait, signal:Wait, RemoteFunction) suspends inside <c>run</c> exactly
+    /// as it would on a dedicated thread; a handler that throws kills the coroutine in protected mode, so the
+    /// runner is never reused after an error.
     /// </summary>
     internal sealed class LuaCsRbxSignalRunner
     {
@@ -179,8 +179,19 @@ namespace CoreAI.Ai.LuaCs
             return ctx.Return();
         }
 
+        // WHY the yield the sandbox captured when it built the environment, and not the environment's current one
+        // (audit B3-07): runners are built lazily, after mod code has run, and the environment is the mod's to
+        // change. A runner built after `coroutine.yield = function() end` never parked: its loop ran on until every
+        // Heartbeat handler was cut by its resume budget, blamed on this body's line. Only a state the sandbox
+        // did not build (a host's own) falls back to its environment.
         private static LuaValue ReadNativeYield(LuaState ownerState)
         {
+            LuaValue captured = LuaCsSecureEnvironment.NativeCoroutineYield(ownerState);
+            if (captured.Type == LuaValueType.Function)
+            {
+                return captured;
+            }
+
             LuaValue coroutineLibrary = ownerState.Environment["coroutine"];
             LuaValue yield = coroutineLibrary.Type == LuaValueType.Table
                 ? coroutineLibrary.Read<LuaTable>()["yield"]

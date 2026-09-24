@@ -378,6 +378,37 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_B3_07_ASignalRunnerBuiltAfterTheModReplacedCoroutineYield_StillParksBetweenHandlers()
+        {
+            // WHY (audit B3-07): signal runners are built lazily, after mod code ran, and read coroutine.yield
+            // from the mod's environment. After `coroutine.yield = function() end` the runner's loop never parked,
+            // so every Heartbeat handler, correct as it was, ended with EXCEEDED_RESUME_STEP_BUDGET at the runner
+            // body's own line. WHY the mod's replacement is still read back: the runner must use the native yield
+            // without taking the mod's own assignment away from it.
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            stack.Runtime.LoadMod("m", @"
+                coroutine.yield = function() return 'mine' end
+                local fires = 0
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    fires = fires + 1
+                    store_set('fires', tostring(fires))
+                    store_set('mod yield', tostring(coroutine.yield()))
+                end)");
+
+            for (int frame = 0; frame < 4; frame++)
+            {
+                bindings.Scheduler.Advance(1d / 60d);
+            }
+
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("m");
+            Assert.IsEmpty(errors, errors.Count > 0 ? errors[0].Error : "");
+            Assert.AreEqual("4", store.Get("m", "fires"));
+            Assert.AreEqual("mine", store.Get("m", "mod yield"));
+        }
+
+        [Test]
         public void Lua_A4_01_ARemoteFlood_ThroughAHandlerThatSchedulesWork_ChargesTheSender_NeverTheHost()
         {
             // WHY: the sender was charged for the handler thread only; the task.delay inside it was

@@ -146,6 +146,18 @@ namespace CoreAI.Sandbox.LuaCs
         public const string CStackOverflowMessage = "C stack overflow";
 
         /// <summary>
+        /// Start of every refusal and budget line the sandbox itself raises into Lua: a library result over its cap,
+        /// a pattern-step trip, a raw coroutine's or a coroutine handle's budget trip. What follows it (the
+        /// <c>EXCEEDED_...</c> marker, or the library function) is what code and tests classify by.
+        /// </summary>
+        /// <remarks>
+        /// WHY a neutral word and not the class that raised the line (audit B3-06): these lines reach the script,
+        /// the model and the auto-repair loop, and "LuaCsSecureEnvironment:" or "LuaCsCoroutineHandle:" named
+        /// CLR types they can do nothing with.
+        /// </remarks>
+        internal const string SandboxLinePrefix = "sandbox: ";
+
+        /// <summary>
         /// What the sandbox's <c>coroutine.resume</c> returns (after <c>false</c>) for a thread only the
         /// scheduler may resume: a task thread, a signal handler's thread or a mod's main chunk, as reached
         /// through <c>coroutine.running()</c>. The thread is not touched.
@@ -262,6 +274,12 @@ namespace CoreAI.Sandbox.LuaCs
             // WHY: strip the unguardable wrap primitive (see the note above) before any mod can reach it.
             coro["wrap"] = LuaValue.Nil;
 
+            LuaValue nativeYield = coro["yield"];
+            if (nativeYield.Type == LuaValueType.Function)
+            {
+                NativeYields.Add(state, nativeYield.Read<LuaFunction>());
+            }
+
             LuaValue nativeResume = coro["resume"];
             if (nativeResume.Type != LuaValueType.Function)
             {
@@ -275,6 +293,26 @@ namespace CoreAI.Sandbox.LuaCs
             // RawCoroutineResumeStepBudgetMultiplier.
             coro["resume"] = new LuaFunction("resume",
                 (ctx, ct) => GuardedCoroutineResume(ctx, ct, nativeResume, liveResumeBudget));
+        }
+
+        // WHY captured while the environment is built and never read from it again (audit B3-07): host code that
+        // suspends a thread of its own - the signal runner's loop - must park it with the real yield, and the
+        // environment is the mod's to change. Signal runners are built lazily, after mod code ran, and one built
+        // after `coroutine.yield = function() end` looped inside its body until every Heartbeat handler was cut
+        // by its resume budget at the runner's own line. Keyed by the state's main thread, so any of its threads
+        // finds it.
+        private static readonly ConditionalWeakTable<LuaState, LuaFunction> NativeYields = new();
+
+        /// <summary>
+        /// The <c>coroutine.yield</c> the coroutine library had when <see cref="Create"/> built the environment of
+        /// <paramref name="state"/>'s global state, whatever a script has assigned since; nil for a state
+        /// <see cref="Create"/> did not build.
+        /// </summary>
+        internal static LuaValue NativeCoroutineYield(LuaState state)
+        {
+            return state != null && NativeYields.TryGetValue(state.MainThread, out LuaFunction yield)
+                ? new LuaValue(yield)
+                : LuaValue.Nil;
         }
 
         // WHY one trip source per coroutine for its whole life, and NOT linked to the resumer's token:
@@ -319,6 +357,9 @@ namespace CoreAI.Sandbox.LuaCs
             LuaFunctionExecutionContext ctx, CancellationToken ct, LuaValue nativeResume,
             LuaCsCoroutineBudgetSettings liveResumeBudget)
         {
+            // WHY read here: the native resume's own check of its first argument raises "(thread expected, got
+            // nil))" (see ReadArgument).
+            ReadArgument<LuaState>(ctx, 0, "thread");
             LuaValue[] result = ResumeWithPerResumeGuard(
                 ctx.State, nativeResume, ctx.Arguments.ToArray(), ct, liveResumeBudget);
             return new System.Threading.Tasks.ValueTask<int>(ctx.Return(result));
@@ -415,6 +456,12 @@ namespace CoreAI.Sandbox.LuaCs
                 }
             }
 
+            // WHY the resumer's status is put back (audit B3-04): the native resume marks the thread that resumes
+            // Normal while the coroutine runs and Running when it returns, whatever it was before. A resumer inside
+            // a fenced library call (see CallFencedAsync) is Normal on purpose - that is the fence - and a nested
+            // coroutine.resume in a __tostring or gsub callback lifted it, so a coroutine.yield or task.wait later
+            // in the same callback suspended the thread under the library call and lost its error.
+            bool resumerFenced = callerState.IsCoroutine && callerState.GetStatus() == LuaThreadStatus.Normal;
             try
             {
                 LuaValue[] results = callerState.CallAsync(nativeResume, resumeArgs.AsSpan(),
@@ -427,6 +474,11 @@ namespace CoreAI.Sandbox.LuaCs
             }
             finally
             {
+                if (resumerFenced)
+                {
+                    callerState.UnsafeSetStatus(LuaThreadStatus.Normal);
+                }
+
                 if (armed)
                 {
                     hook.End();
@@ -546,11 +598,11 @@ namespace CoreAI.Sandbox.LuaCs
                         message = $"Lua coroutine resume exceeded {_timeoutMs} ms.";
                         break;
                     case LuaCsGuardTripKind.Memory:
-                        message = $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} "
+                        message = $"{SandboxLinePrefix}{LuaCsExecutionGuard.MemoryBudgetTripMarker} "
                                   + $"({_allocation.BudgetBytes} bytes)";
                         break;
                     default:
-                        message = $"LuaCsSecureEnvironment: EXCEEDED_COROUTINE_STEP_BUDGET ({_stepBudget})";
+                        message = $"{SandboxLinePrefix}EXCEEDED_COROUTINE_STEP_BUDGET ({_stepBudget})";
                         break;
                 }
 
@@ -719,7 +771,10 @@ namespace CoreAI.Sandbox.LuaCs
         // the .NET stack and must be counted against MaxCCallDepth. Runs after StripRiskyGlobals so that
         // string.format keeps the native tostring it counts itself. A call that cannot reach Lua keeps the
         // native result without the extra frame: tostring of a number and pairs over a plain table stay as
-        // cheap and allocation-free as before.
+        // cheap and allocation-free as before. A counted call runs the native function as this call itself (see
+        // CallNativeInPlace), never through CallAsync, which copied the arguments and built a result array on
+        // every tostring of an object and every table.sort: 2.4 MB per 20,000 calls against 1 KB natively, steady
+        // garbage for WebGL's non-moving collector (audit B3-05).
         // TODO: __concat is the one metamethod Lua-CSharp runs as a nested VM call of its own (the async
         // Concat path, 2,880 B of native stack a level), so `mt.__concat = function(a, b) return a .. b end;
         // local _ = o .. 'x'` still unwinds quadratically with no hook firing: 2.6 s at a mod-imposed depth of
@@ -741,8 +796,7 @@ namespace CoreAI.Sandbox.LuaCs
                 ? stringMeta[0].Read<LuaTable>()
                 : null;
 
-            LuaValue nativeToString = environment["tostring"];
-            if (nativeToString.Type == LuaValueType.Function)
+            if (environment["tostring"].Type == LuaValueType.Function)
             {
                 environment["tostring"] = new LuaFunction("tostring", (ctx, ct) =>
                 {
@@ -751,19 +805,18 @@ namespace CoreAI.Sandbox.LuaCs
                         return new System.Threading.Tasks.ValueTask<int>(ctx.Return(ctx.GetArgument(0).ToString()));
                     }
 
-                    return CallNativeCounted(ctx, ct, nativeToString, "tostring");
+                    return CallNativeInPlace(ctx, ct, NativeToString, "tostring");
                 });
             }
 
-            LuaValue nativePrint = environment["print"];
-            if (nativePrint.Type == LuaValueType.Function)
+            if (environment["print"].Type == LuaValueType.Function)
             {
                 environment["print"] = new LuaFunction("print",
-                    (ctx, ct) => CallNativeCounted(ctx, ct, nativePrint, "print"));
+                    (ctx, ct) => CallNativeInPlace(ctx, ct, NativePrint, "print"));
             }
 
-            WrapIterationFactory(state, environment, "pairs", Metamethods.Pairs, LuaValue.Nil);
-            WrapIterationFactory(state, environment, "ipairs", Metamethods.IPairs, 0d);
+            WrapIterationFactory(state, environment, "pairs", Metamethods.Pairs, LuaValue.Nil, NativePairs);
+            WrapIterationFactory(state, environment, "ipairs", Metamethods.IPairs, 0d, NativeIPairs);
 
             // WHY pcall and xpcall too (audit B3-01): each runs the protected function as one more VM run on the
             // .NET stack, so `local function f() pcall(f) end` nested until Lua-CSharp's own stack limit, and a
@@ -783,11 +836,12 @@ namespace CoreAI.Sandbox.LuaCs
             if (tableLibValue.Type == LuaValueType.Table)
             {
                 LuaTable tableLib = tableLibValue.Read<LuaTable>();
-                LuaValue nativeSort = tableLib["sort"];
-                if (nativeSort.Type == LuaValueType.Function)
+                if (tableLib["sort"].Type == LuaValueType.Function)
                 {
-                    tableLib["sort"] = new LuaFunction("sort",
-                        (ctx, ct) => CallNativeCounted(ctx, ct, nativeSort, "table.sort"));
+                    // WHY named like the native function: a call from host code (pcall(table.sort, nil)) names the
+                    // function by this name in its bad-argument line, and the native one is "table.sort".
+                    tableLib["sort"] = new LuaFunction("table.sort",
+                        (ctx, ct) => CallNativeInPlace(ctx, ct, NativeSort, "table.sort"));
                 }
             }
         }
@@ -820,7 +874,7 @@ namespace CoreAI.Sandbox.LuaCs
                 throw;
             }
 
-            return ExitWhenComplete(call, depth);
+            return ExitWhenComplete(call, depth, LightCallLevels);
         }
 
         /// <summary>
@@ -850,7 +904,7 @@ namespace CoreAI.Sandbox.LuaCs
                 throw;
             }
 
-            return ExitWhenComplete(call, depth);
+            return ExitWhenComplete(call, depth, LightCallLevels);
         }
 
         /// <summary>What <c>xpcall</c> returns when even its message handler has no room left to run in (Luau's text).</summary>
@@ -899,24 +953,24 @@ namespace CoreAI.Sandbox.LuaCs
         }
 
         /// <summary>
-        /// Closes the counted protected call (<see cref="LightCallLevels"/>) <paramref name="depth"/> holds once
+        /// Closes the counted call of <paramref name="levels"/> <paramref name="depth"/> holds once
         /// <paramref name="call"/> completes: at once when it already has, which allocates nothing, else when it
-        /// finishes after a yield inside it.
+        /// finishes after a yield or an awaited frame inside it.
         /// </summary>
         private static System.Threading.Tasks.ValueTask<int> ExitWhenComplete(
-            System.Threading.Tasks.ValueTask<int> call, CCallDepth depth)
+            System.Threading.Tasks.ValueTask<int> call, CCallDepth depth, int levels)
         {
             if (call.IsCompleted)
             {
-                ExitCCall(depth, LightCallLevels);
+                ExitCCall(depth, levels);
                 return call;
             }
 
-            return ExitWhenDone(call, depth);
+            return ExitWhenDone(call, depth, levels);
         }
 
         private static async System.Threading.Tasks.ValueTask<int> ExitWhenDone(
-            System.Threading.Tasks.ValueTask<int> call, CCallDepth depth)
+            System.Threading.Tasks.ValueTask<int> call, CCallDepth depth, int levels)
         {
             try
             {
@@ -924,8 +978,51 @@ namespace CoreAI.Sandbox.LuaCs
             }
             finally
             {
-                ExitCCall(depth, LightCallLevels);
+                ExitCCall(depth, levels);
             }
+        }
+
+        /// <summary>A native library function, called with the context of the call it runs as.</summary>
+        private delegate System.Threading.Tasks.ValueTask<int> NativeLibraryFunction(LuaFunctionExecutionContext ctx,
+            CancellationToken ct);
+
+        // WHY the native functions are held as delegates of the library singletons rather than read back from the
+        // environment: calling one directly with the caller's own context is what keeps a counted call as cheap as
+        // the native one (see CallNativeInPlace), and a LuaFunction's own delegate is not reachable from outside
+        // Lua.dll. They are the very functions OpenBasicLibrary and OpenTableLibrary install.
+        private static readonly NativeLibraryFunction NativeToString = BasicLibrary.Instance.ToString;
+
+        private static readonly NativeLibraryFunction NativePrint = BasicLibrary.Instance.Print;
+
+        private static readonly NativeLibraryFunction NativePairs = BasicLibrary.Instance.Pairs;
+
+        private static readonly NativeLibraryFunction NativeIPairs = BasicLibrary.Instance.IPairs;
+
+        private static readonly NativeLibraryFunction NativeSort = TableLibrary.Instance.Sort;
+
+        /// <summary>
+        /// Runs the native library function <paramref name="native"/> as this call itself, as one counted call back
+        /// into Lua of <see cref="HeavyCallLevels"/> (see <see cref="MaxCCallDepth"/>): with this call's own context,
+        /// on the caller's stack, the way <see cref="CountedPCall"/> runs native pcall. Its results, error values and
+        /// the function name in its errors are the native ones, and nothing is copied or allocated for the call.
+        /// Past the limit it raises the C-stack line instead; a call that suspends stays counted until it completes.
+        /// </summary>
+        private static System.Threading.Tasks.ValueTask<int> CallNativeInPlace(LuaFunctionExecutionContext ctx,
+            CancellationToken ct, NativeLibraryFunction native, string boundary)
+        {
+            CCallDepth depth = EnterCCall(ctx.State, boundary, HeavyCallLevels);
+            System.Threading.Tasks.ValueTask<int> call;
+            try
+            {
+                call = native(ctx, ct);
+            }
+            catch
+            {
+                ExitCCall(depth, HeavyCallLevels);
+                throw;
+            }
+
+            return ExitWhenComplete(call, depth, HeavyCallLevels);
         }
 
         /// <summary>
@@ -933,7 +1030,7 @@ namespace CoreAI.Sandbox.LuaCs
         /// native iterator triple directly, anything else goes to the native function as a counted call.
         /// </summary>
         private static void WrapIterationFactory(LuaState state, LuaTable environment, string name,
-            string metamethod, LuaValue control)
+            string metamethod, LuaValue control, NativeLibraryFunction nativeFunction)
         {
             LuaValue native = environment[name];
             if (native.Type != LuaValueType.Function)
@@ -959,30 +1056,45 @@ namespace CoreAI.Sandbox.LuaCs
                     }
                 }
 
-                return CallNativeCounted(ctx, ct, native, name);
+                return CallNativeInPlace(ctx, ct, nativeFunction, name);
             });
         }
 
+        // WHY a function, a thread and a light userdata never do: their metatables are per type and only
+        // debug.setmetatable, which the sandbox removes, could set one - exactly as for nil, booleans and numbers.
+        // WHY a userdata whose __tostring is a host function is still counted, although that function is C#: a
+        // script can replace it (getmetatable(part).__tostring = tostring), and a C# function such as the sandbox's
+        // own tostring, print or pairs runs Lua again - uncounted, `tostring(part)` would recurse until the native
+        // stack gave out.
         /// <summary>
         /// False when native <c>tostring</c> of <paramref name="value"/> runs no Lua: a value of a type no
-        /// sandboxed script can give a metatable, or a string or table whose metatable has no <c>__tostring</c>.
+        /// sandboxed script can give a metatable, or a string, table or userdata whose metatable has no
+        /// <c>__tostring</c>.
         /// </summary>
         private static bool MayRunToString(LuaValue value, LuaTable stringMetatable)
         {
+            LuaTable metatable;
             switch (value.Type)
             {
-                case LuaValueType.Nil:
-                case LuaValueType.Boolean:
-                case LuaValueType.Number:
-                    return false;
                 case LuaValueType.String:
-                    return stringMetatable == null || stringMetatable.TryGetValue(Metamethods.ToString, out LuaValue _);
+                    if (stringMetatable == null)
+                    {
+                        return true;
+                    }
+
+                    metatable = stringMetatable;
+                    break;
                 case LuaValueType.Table:
-                    LuaTable metatable = value.Read<LuaTable>().Metatable;
-                    return metatable != null && metatable.TryGetValue(Metamethods.ToString, out LuaValue _);
+                    metatable = value.Read<LuaTable>().Metatable;
+                    break;
+                case LuaValueType.UserData:
+                    metatable = value.TryRead(out ILuaUserData userData) ? userData.Metatable : null;
+                    break;
                 default:
-                    return true;
+                    return false;
             }
+
+            return metatable != null && metatable.TryGetValue(Metamethods.ToString, out LuaValue _);
         }
 
         /// <summary>
@@ -1014,9 +1126,9 @@ namespace CoreAI.Sandbox.LuaCs
         /// Calls <paramref name="function"/> as one counted call back into Lua on <paramref name="state"/> (see
         /// <see cref="MaxCCallDepth"/>): once the limit is reached it raises the C-stack error instead of calling.
         /// A call that suspends (a yield inside it, a frame yield of the async guard) stays counted on this
-        /// thread until it completes. Its callers are the sandbox's own counted <c>tostring</c>, <c>print</c>,
-        /// <c>pairs</c>, <c>ipairs</c> and <c>table.sort</c>, and <c>warn</c>, which converts its arguments with
-        /// the script's <c>tostring</c>. A host function that runs a script's function recursively must call
+        /// thread until it completes. Its one caller is <c>warn</c>, which converts its arguments with the
+        /// script's <c>tostring</c>; the sandbox's own library functions count their calls in place (see
+        /// <see cref="CallNativeInPlace"/>). A host function that runs a script's function recursively must call
         /// through here too; the host callbacks that run one as the body of a thread use plain <c>CallAsync</c>
         /// (see <see cref="MaxCCallDepth"/>).
         /// </summary>
@@ -1070,24 +1182,43 @@ namespace CoreAI.Sandbox.LuaCs
             }
         }
 
+        // WHY not ctx.GetArgument<T>: Lua-CSharp's typed read ends its reason with a closing parenthesis of its own
+        // before BadArgument wraps the reason in a pair, so every sandbox function handed the script "bad argument
+        // #1 to 'concat' (table expected, got nil))" (audit B3-06). LuaRuntimeException.BadArgument with the bare
+        // reason keeps everything else of the native line: the name the caller used and the "calling 'x' on bad
+        // self" form of a method call.
         /// <summary>
-        /// Calls the native <paramref name="function"/> with this call's own arguments through
-        /// <see cref="CallCountedAsync"/> and returns its results as this call's.
+        /// Argument <paramref name="index"/> read as <typeparamref name="T"/> with exactly the conversions
+        /// <c>ctx.GetArgument&lt;T&gt;</c> makes; a missing or unconvertible argument raises Lua's own line, "bad
+        /// argument #n to 'name' (<paramref name="expected"/> expected, got <c>type</c>)", with "got no value" for a
+        /// missing one.
         /// </summary>
-        private static System.Threading.Tasks.ValueTask<int> CallNativeCounted(LuaFunctionExecutionContext ctx,
-            CancellationToken ct, LuaValue function, string boundary)
+        private static T ReadArgument<T>(LuaFunctionExecutionContext ctx, int index, string expected)
         {
-            System.Threading.Tasks.ValueTask<LuaValue[]> call =
-                CallCountedAsync(ctx.State, function, ctx.Arguments, ct, boundary);
-            return call.IsCompleted
-                ? new System.Threading.Tasks.ValueTask<int>(ctx.Return(call.GetAwaiter().GetResult()))
-                : ReturnWhenDone(ctx, call);
-        }
+            string reason;
+            if (ctx.ArgumentCount > index)
+            {
+                LuaValue value = ctx.GetArgument(index);
+                if (value.TryRead(out T result))
+                {
+                    return result;
+                }
 
-        private static async System.Threading.Tasks.ValueTask<int> ReturnWhenDone(LuaFunctionExecutionContext ctx,
-            System.Threading.Tasks.ValueTask<LuaValue[]> call)
-        {
-            return ctx.Return(await call);
+                if ((typeof(T) == typeof(int) || typeof(T) == typeof(long)) && value.Type == LuaValueType.Number)
+                {
+                    LuaRuntimeException.BadArgumentNumberIsNotInteger(ctx.State, index + 1);
+                }
+
+                reason = expected + " expected, got " + value.TypeToString();
+            }
+            else
+            {
+                reason = expected + " expected, got no value";
+            }
+
+            LuaRuntimeException.BadArgument(ctx.State, index + 1, reason);
+            // WHY: BadArgument always throws; this line only satisfies the compiler.
+            throw new LuaRuntimeException(ctx.State, (LuaValue)("bad argument #" + (index + 1) + " (" + reason + ")"));
         }
 
         private static void RemoveGlobal(LuaState state, string name)
@@ -1105,9 +1236,9 @@ namespace CoreAI.Sandbox.LuaCs
             LuaFunctionExecutionContext ctx,
             CancellationToken ct)
         {
-            string s = ctx.GetArgument<string>(0);
-            double countRaw = ctx.GetArgument<double>(1);
-            string sep = ctx.ArgumentCount >= 3 ? ctx.GetArgument<string>(2) : "";
+            string s = ReadArgument<string>(ctx, 0, "string");
+            double countRaw = ReadArgument<double>(ctx, 1, "number");
+            string sep = ctx.ArgumentCount >= 3 ? ReadArgument<string>(ctx, 2, "string") : "";
 
             if (double.IsNaN(countRaw) || countRaw < 1)
             {
@@ -1119,7 +1250,7 @@ namespace CoreAI.Sandbox.LuaCs
             if (total > MaxStringRepLength)
             {
                 throw LibraryRefusal(ctx.State,
-                    $"LuaCsSecureEnvironment: string.rep result would exceed {MaxStringRepLength} chars.");
+                    $"{SandboxLinePrefix}string.rep result would exceed {MaxStringRepLength} chars.");
             }
 
             StringBuilder sb = new((int)total);
@@ -1144,10 +1275,10 @@ namespace CoreAI.Sandbox.LuaCs
             LuaFunctionExecutionContext ctx,
             CancellationToken ct)
         {
-            LuaTable table = ctx.GetArgument<LuaTable>(0);
-            string sep = ctx.HasArgument(1) ? ctx.GetArgument<string>(1) : "";
-            long start = ctx.HasArgument(2) ? (long)ctx.GetArgument<double>(2) : 1;
-            long end = ctx.HasArgument(3) ? (long)ctx.GetArgument<double>(3) : table.ArrayLength;
+            LuaTable table = ReadArgument<LuaTable>(ctx, 0, "table");
+            string sep = ctx.HasArgument(1) ? ReadArgument<string>(ctx, 1, "string") : "";
+            long start = ctx.HasArgument(2) ? (long)ReadArgument<double>(ctx, 2, "number") : 1;
+            long end = ctx.HasArgument(3) ? (long)ReadArgument<double>(ctx, 3, "number") : table.ArrayLength;
 
             StringBuilder sb = new(512);
             for (long i = start; i <= end; i++)
@@ -1163,7 +1294,9 @@ namespace CoreAI.Sandbox.LuaCs
                 }
                 else
                 {
-                    throw LibraryRefusal(ctx.State, $"invalid value ({v.Type}) at index {i} in table for 'concat'");
+                    // WHY TypeToString and not the value's Type: that is the CLR enum, "(Table)" (audit B3-06).
+                    throw LibraryRefusal(ctx.State,
+                        $"invalid value ({v.TypeToString()}) at index {i} in table for 'concat'");
                 }
 
                 if (i != end)
@@ -1174,7 +1307,7 @@ namespace CoreAI.Sandbox.LuaCs
                 if (sb.Length > MaxTableConcatLength)
                 {
                     throw LibraryRefusal(ctx.State,
-                        $"LuaCsSecureEnvironment: table.concat result would exceed {MaxTableConcatLength} chars.");
+                        $"{SandboxLinePrefix}table.concat result would exceed {MaxTableConcatLength} chars.");
                 }
             }
 
@@ -1192,15 +1325,24 @@ namespace CoreAI.Sandbox.LuaCs
             LuaValue originalFormat,
             LuaValue originalToString)
         {
-            LuaValue[] args = ctx.Arguments.ToArray();
+            return FormatAsync(ctx, ct, ctx.Arguments.ToArray(), originalFormat, originalToString);
+        }
+
+        /// <summary>
+        /// The body of <see cref="CappedStringFormat"/>, over <paramref name="args"/>, a copy of the call's
+        /// arguments; it completes synchronously unless a <c>__tostring</c> it runs awaits a frame.
+        /// </summary>
+        private static async System.Threading.Tasks.ValueTask<int> FormatAsync(LuaFunctionExecutionContext ctx,
+            CancellationToken ct, LuaValue[] args, LuaValue originalFormat, LuaValue originalToString)
+        {
             if (args.Length >= 1 && args[0].Type == LuaValueType.String)
             {
                 string format = args[0].Read<string>();
                 EnsureFormatWidthWithinCap(ctx.State, format);
-                PrepareFormatArguments(ctx.State, format, args, originalToString, ct);
+                await PrepareFormatArgumentsAsync(ctx.State, format, args, originalToString, ct);
             }
 
-            LuaValue[] results = CallWithoutYield(ctx.State, originalFormat, args, ct, "string.format",
+            LuaValue[] results = await CallFencedAsync(ctx.State, originalFormat, args, ct, "string.format",
                 HeavyCallLevels);
             if (results.Length > 0 && results[0].Type == LuaValueType.String
                                    && results[0].Read<string>().Length > MaxStringFormatResultLength)
@@ -1208,7 +1350,7 @@ namespace CoreAI.Sandbox.LuaCs
                 throw ResultTooLong(ctx.State, "string.format", MaxStringFormatResultLength);
             }
 
-            return new System.Threading.Tasks.ValueTask<int>(ctx.Return(results));
+            return ctx.Return(results);
         }
 
         /// <summary>
@@ -1218,8 +1360,8 @@ namespace CoreAI.Sandbox.LuaCs
         /// <see cref="MaxStringFormatResultLength"/>. It stops at the first specifier the native
         /// implementation rejects, because the native call then fails at that point too.
         /// </summary>
-        private static void PrepareFormatArguments(LuaState state, string format, LuaValue[] args,
-            LuaValue toStringFunction, CancellationToken ct)
+        private static async System.Threading.Tasks.ValueTask PrepareFormatArgumentsAsync(LuaState state,
+            string format, LuaValue[] args, LuaValue toStringFunction, CancellationToken ct)
         {
             long bound = 0;
             int argIndex = 1;
@@ -1281,7 +1423,7 @@ namespace CoreAI.Sandbox.LuaCs
                                                             && arg.Type != LuaValueType.Nil
                                                             && toStringFunction.Type == LuaValueType.Function)
                         {
-                            LuaValue[] converted = CallWithoutYield(state, toStringFunction, new[] { arg }, ct,
+                            LuaValue[] converted = await CallFencedAsync(state, toStringFunction, new[] { arg }, ct,
                                 "string.format", HeavyCallLevels);
                             if (converted.Length == 0 || converted[0].Type != LuaValueType.String)
                             {
@@ -1428,7 +1570,7 @@ namespace CoreAI.Sandbox.LuaCs
 
         private static LuaRuntimeException ResultTooLong(LuaState state, string function, int cap)
         {
-            return LibraryRefusal(state, $"LuaCsSecureEnvironment: {function} result would exceed {cap} chars.");
+            return LibraryRefusal(state, $"{SandboxLinePrefix}{function} result would exceed {cap} chars.");
         }
 
         // WHY LuaCsHostFunctionException and not LuaRuntimeException(LuaState, Exception) or a plain error
@@ -1446,35 +1588,38 @@ namespace CoreAI.Sandbox.LuaCs
         }
 
         /// <summary>
-        /// Calls <paramref name="function"/> from a sandbox library function and returns its results
-        /// without ever blocking. A yield inside the call is refused with
-        /// <see cref="YieldAcrossCallBoundaryMessage"/>: the running thread is marked non-running for
-        /// the duration, so Lua-CSharp's <c>coroutine.yield</c> fails BEFORE it signals the resumer.
+        /// Calls <paramref name="function"/> from a sandbox library function, as one counted call of
+        /// <paramref name="levels"/> (see <see cref="MaxCCallDepth"/>), under the yield fence: the running
+        /// coroutine is marked non-running for the duration, so Lua-CSharp's <c>coroutine.yield</c> fails BEFORE it
+        /// signals the resumer and the call raises <see cref="YieldAcrossCallBoundaryMessage"/> instead. A call
+        /// that comes back unfinished is awaited, never waited on; it completes synchronously otherwise.
         /// </summary>
         /// <remarks>
-        /// WHY the fence and not only a completion check: a yield that got through used to hand the
-        /// resumer a "suspended" result while this synchronous frame kept running the thread, after which
-        /// the caller saw "Operation is not valid due to the current state of the object." and every later
-        /// yield of that thread failed. Luau refuses the same yield ("attempt to yield across
-        /// metamethod/C-call boundary"). A call that still comes back unfinished (an awaited host
-        /// operation) is reported with the same error rather than waited for: WebGL has no thread to wait on.
+        /// WHY the fence: a yield that got through used to hand the resumer a "suspended" result while this frame
+        /// kept running the thread, after which the caller saw "Operation is not valid due to the current state
+        /// of the object." and every later yield of that thread failed. Luau refuses the same yield ("attempt to
+        /// yield across metamethod/C-call boundary").
+        /// <para>
+        /// WHY an unfinished call is awaited and not refused (audit B3-03): behind the fence it cannot be a
+        /// coroutine yield - the fence refuses a fenced thread's yield before it signals, and the main thread
+        /// cannot yield at all - so it is the execution guard awaiting a frame (the execute_lua path does every
+        /// 6 ms) or an awaited host operation. Refused, a replacement function or <c>__tostring</c> that merely
+        /// ran past one slice failed with the yield line, and the VM continuation it left behind resumed on the
+        /// next frame over a call stack that had moved on and faulted the whole run. Awaited, the fence stays up
+        /// for the whole call, frame yields included, so no real yield crosses it. The alternative, no frame
+        /// yields while a fenced call is open, would have held the player's frame for as long as a callback ran:
+        /// up to the chunk's whole 10 s budget.
+        /// </para>
         /// </remarks>
-        private static LuaValue[] CallWithoutYield(LuaState state, LuaValue function, LuaValue[] args,
-            CancellationToken ct, string boundary, int levels)
+        private static async System.Threading.Tasks.ValueTask<LuaValue[]> CallFencedAsync(LuaState state,
+            LuaValue function, LuaValue[] args, CancellationToken ct, string boundary, int levels)
         {
             CCallDepth depth = EnterCCall(state, boundary, levels);
             bool fenced = false;
             try
             {
                 fenced = BeginYieldFence(state);
-                System.Threading.Tasks.ValueTask<LuaValue[]> call = state.CallAsync(function, args.AsSpan(), ct);
-                if (!call.IsCompleted)
-                {
-                    throw YieldAcrossBoundary(state, boundary);
-                }
-
-                // WHY: the task is already complete, so this unwraps its result or exception, never waits.
-                return call.GetAwaiter().GetResult();
+                return await state.CallAsync(function, args.AsSpan(), ct);
             }
             catch (LuaRuntimeException ex) when (fenced && IsFencedYield(ex))
             {
@@ -1489,30 +1634,26 @@ namespace CoreAI.Sandbox.LuaCs
 
         /// <summary>
         /// Reads <paramref name="table"/>[<paramref name="key"/>] honouring <c>__index</c>, like
-        /// <c>lua_gettable</c> in the reference <c>gsub</c>, under the same yield fence as
-        /// <see cref="CallWithoutYield"/>.
+        /// <c>lua_gettable</c> in the reference <c>gsub</c>, under the same yield fence and counting as
+        /// <see cref="CallFencedAsync"/>; a read that comes back unfinished is awaited.
         /// </summary>
-        private static LuaValue GetTableWithoutYield(LuaState state, LuaTable table, LuaValue key,
-            CancellationToken ct, string boundary)
+        private static System.Threading.Tasks.ValueTask<LuaValue> GetTableFencedAsync(LuaState state,
+            LuaTable table, LuaValue key, CancellationToken ct, string boundary)
         {
-            if (table.Metatable == null)
-            {
-                return table[key];
-            }
+            return table.Metatable == null
+                ? new System.Threading.Tasks.ValueTask<LuaValue>(table[key])
+                : GetTableThroughMetatableAsync(state, table, key, ct, boundary);
+        }
 
+        private static async System.Threading.Tasks.ValueTask<LuaValue> GetTableThroughMetatableAsync(
+            LuaState state, LuaTable table, LuaValue key, CancellationToken ct, string boundary)
+        {
             CCallDepth depth = EnterCCall(state, boundary, HeavyCallLevels);
             bool fenced = false;
             try
             {
                 fenced = BeginYieldFence(state);
-                System.Threading.Tasks.ValueTask<LuaValue> read = state.GetTableAsync(table, key, ct);
-                if (!read.IsCompleted)
-                {
-                    throw YieldAcrossBoundary(state, boundary);
-                }
-
-                // WHY: the task is already complete, so this unwraps its result or exception, never waits.
-                return read.GetAwaiter().GetResult();
+                return await state.GetTableAsync(table, key, ct);
             }
             catch (LuaRuntimeException ex) when (fenced && IsFencedYield(ex))
             {
@@ -1724,7 +1865,7 @@ namespace CoreAI.Sandbox.LuaCs
                 if (value > MaxStringFormatLength)
                 {
                     throw LibraryRefusal(state,
-                        $"LuaCsSecureEnvironment: string.format width/precision exceeds {MaxStringFormatLength} chars.");
+                        $"{SandboxLinePrefix}string.format width/precision exceeds {MaxStringFormatLength} chars.");
                 }
 
                 i++;
@@ -1755,9 +1896,9 @@ namespace CoreAI.Sandbox.LuaCs
         private static int FindOrMatch(LuaFunctionExecutionContext ctx, bool find)
         {
             string function = find ? "string.find" : "string.match";
-            string subject = ctx.GetArgument<string>(0);
-            string pattern = ctx.GetArgument<string>(1);
-            int init = RelativePosition(ctx.HasArgument(2) ? ctx.GetArgument<int>(2) : 1, subject.Length);
+            string subject = ReadArgument<string>(ctx, 0, "string");
+            string pattern = ReadArgument<string>(ctx, 1, "string");
+            int init = RelativePosition(ctx.HasArgument(2) ? ReadArgument<int>(ctx, 2, "number") : 1, subject.Length);
             if (init < 1)
             {
                 init = 1;
@@ -1834,8 +1975,8 @@ namespace CoreAI.Sandbox.LuaCs
             LuaFunctionExecutionContext ctx,
             CancellationToken ct)
         {
-            string subject = ctx.GetArgument<string>(0);
-            string pattern = ctx.GetArgument<string>(1);
+            string subject = ReadArgument<string>(ctx, 0, "string");
+            string pattern = ReadArgument<string>(ctx, 1, "string");
             GMatchIterator iterator = new(subject, pattern);
             return new System.Threading.Tasks.ValueTask<int>(
                 ctx.Return(new LuaFunction("gmatch_iterator", iterator.Next)));
@@ -1881,7 +2022,7 @@ namespace CoreAI.Sandbox.LuaCs
 
         // WHY: port of Luau's str_gsub/add_value/add_s. The result is capped at MaxStringGsubLength before
         // every append, the whole call shares one pattern step budget, and replacement functions and
-        // __index run under the yield fence of CallWithoutYield (Luau refuses those yields too). Unlike the
+        // __index run under the yield fence of CallFencedAsync (Luau refuses those yields too). Unlike the
         // native build this also tries the position after the last char (("abc"):gsub("x*", "-") is
         // "-a-b-c-", 4), accepts a number replacement, and rejects '%' followed by a non-digit.
         private static System.Threading.Tasks.ValueTask<int> BudgetedGSub(
@@ -1889,10 +2030,10 @@ namespace CoreAI.Sandbox.LuaCs
             CancellationToken ct)
         {
             LuaState state = ctx.State;
-            string subject = ctx.GetArgument<string>(0);
-            string pattern = ctx.GetArgument<string>(1);
+            string subject = ReadArgument<string>(ctx, 0, "string");
+            string pattern = ReadArgument<string>(ctx, 1, "string");
             LuaValue replacement = ctx.GetArgument(2);
-            double maxArgument = ctx.HasArgument(3) ? ctx.GetArgument<double>(3) : subject.Length + 1;
+            double maxArgument = ctx.HasArgument(3) ? ReadArgument<double>(ctx, 3, "number") : subject.Length + 1;
             LuaRuntimeException.ThrowBadArgumentIfNumberIsNotInteger(state, 4, maxArgument);
 
             LuaValueType kind = replacement.Type;
@@ -1909,7 +2050,18 @@ namespace CoreAI.Sandbox.LuaCs
                     ? replacement.ToString()
                     : null;
             long maxReplacements = maxArgument > int.MaxValue ? int.MaxValue : (long)maxArgument;
+            return GSubAsync(ctx, ct, subject, pattern, replacement, replacementText, maxReplacements);
+        }
 
+        /// <summary>
+        /// The matching loop of <see cref="BudgetedGSub"/>; it completes synchronously unless a replacement
+        /// function or <c>__index</c> it runs awaits a frame (see <see cref="CallFencedAsync"/>).
+        /// </summary>
+        private static async System.Threading.Tasks.ValueTask<int> GSubAsync(LuaFunctionExecutionContext ctx,
+            CancellationToken ct, string subject, string pattern, LuaValue replacement, string replacementText,
+            long maxReplacements)
+        {
+            LuaState state = ctx.State;
             LuaPatternMatcher matcher = new(state, "string.gsub", subject, pattern, MaxPatternMatchSteps);
             bool anchor = pattern.Length > 0 && pattern[0] == '^';
             int patternStart = anchor ? 1 : 0;
@@ -1923,8 +2075,15 @@ namespace CoreAI.Sandbox.LuaCs
                 if (end >= 0)
                 {
                     count++;
-                    AppendReplacement(state, result, matcher, subject, source, end, replacement, replacementText,
-                        ct);
+                    if (replacementText != null)
+                    {
+                        AppendReplacementText(state, result, matcher, subject, source, end, replacementText);
+                    }
+                    else
+                    {
+                        LuaValue value = await ReplacementValueAsync(state, matcher, source, end, replacement, ct);
+                        AppendReplacementValue(state, result, subject, source, end, value);
+                    }
                 }
 
                 if (end >= 0 && end > source)
@@ -1948,38 +2107,41 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             AppendCapped(state, result, subject, source, subject.Length - source);
-            return new System.Threading.Tasks.ValueTask<int>(ctx.Return(result.ToString(), (double)count));
+            return ctx.Return(result.ToString(), (double)count);
         }
 
-        private static void AppendReplacement(LuaState state, StringBuilder result, LuaPatternMatcher matcher,
-            string subject, int start, int end, LuaValue replacement, string replacementText, CancellationToken ct)
+        /// <summary>
+        /// What the replacement function returns for the match [<paramref name="start"/>, <paramref name="end"/>)
+        /// (its first result), or what the replacement table holds for its first capture.
+        /// </summary>
+        private static async System.Threading.Tasks.ValueTask<LuaValue> ReplacementValueAsync(LuaState state,
+            LuaPatternMatcher matcher, int start, int end, LuaValue replacement, CancellationToken ct)
         {
-            if (replacementText != null)
+            if (replacement.Type != LuaValueType.Function)
             {
-                AppendReplacementText(state, result, matcher, subject, start, end, replacementText);
-                return;
+                return await GetTableFencedAsync(state, replacement.Read<LuaTable>(),
+                    matcher.GetCapture(0, start, end), ct, "string.gsub");
             }
 
-            LuaValue value;
-            if (replacement.Type == LuaValueType.Function)
+            int captureCount = matcher.Level == 0 ? 1 : matcher.Level;
+            LuaValue[] captures = new LuaValue[captureCount];
+            for (int i = 0; i < captureCount; i++)
             {
-                int captureCount = matcher.Level == 0 ? 1 : matcher.Level;
-                LuaValue[] captures = new LuaValue[captureCount];
-                for (int i = 0; i < captureCount; i++)
-                {
-                    captures[i] = matcher.GetCapture(i, start, end);
-                }
-
-                LuaValue[] returned = CallWithoutYield(state, replacement, captures, ct, "string.gsub",
-                    LightCallLevels);
-                value = returned.Length > 0 ? returned[0] : LuaValue.Nil;
-            }
-            else
-            {
-                value = GetTableWithoutYield(state, replacement.Read<LuaTable>(), matcher.GetCapture(0, start, end),
-                    ct, "string.gsub");
+                captures[i] = matcher.GetCapture(i, start, end);
             }
 
+            LuaValue[] returned = await CallFencedAsync(state, replacement, captures, ct, "string.gsub",
+                LightCallLevels);
+            return returned.Length > 0 ? returned[0] : LuaValue.Nil;
+        }
+
+        /// <summary>
+        /// Appends <paramref name="value"/>, what a replacement function or table gave for the match
+        /// [<paramref name="start"/>, <paramref name="end"/>): the match itself for false or nil.
+        /// </summary>
+        private static void AppendReplacementValue(LuaState state, StringBuilder result, string subject, int start,
+            int end, LuaValue value)
+        {
             if (!value.ToBoolean())
             {
                 AppendCapped(state, result, subject, start, end - start);
@@ -2677,7 +2839,7 @@ namespace CoreAI.Sandbox.LuaCs
             internal static LuaRuntimeException BudgetTrip(LuaState state, string function, long budget)
             {
                 return LuaCsCoroutineHandle.CreateBudgetTrip(state,
-                    $"LuaCsSecureEnvironment: {PatternStepBudgetTripMarker} ({budget}) in {function}: the resume "
+                    $"{SandboxLinePrefix}{PatternStepBudgetTripMarker} ({budget}) in {function}: the resume "
                     + "exceeded the step budget of one pattern-matching call; simplify the pattern or match a "
                     + "shorter string");
             }

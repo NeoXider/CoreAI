@@ -737,6 +737,190 @@ namespace CoreAI.Tests.EditMode
                 "the asynchronous chunk entry must return the same values as the synchronous one");
         }
 
+        #region Audit R2 B3-03: a frame yield inside a fenced library callback is awaited
+
+        /// <summary>
+        /// A frame port whose every yield stays pending until <see cref="ReleaseFrame"/>, the way a player loop
+        /// releases the frame on its next tick; a test is the player loop.
+        /// </summary>
+        private sealed class ManualFrameYielder : IScriptFrameYielder
+        {
+            private readonly object _gate = new();
+            private readonly List<TaskCompletionSource<bool>> _pending = new();
+            private int _yields;
+
+            /// <summary>Frame yields asked for so far.</summary>
+            public int Yields
+            {
+                get
+                {
+                    lock (_gate)
+                    {
+                        return _yields;
+                    }
+                }
+            }
+
+            /// <summary>Frame yields asked for and not released yet.</summary>
+            public int PendingCount
+            {
+                get
+                {
+                    lock (_gate)
+                    {
+                        return _pending.Count;
+                    }
+                }
+            }
+
+            public ValueTask YieldFrameAsync(CancellationToken cancellationToken)
+            {
+                TaskCompletionSource<bool> frame = new();
+                lock (_gate)
+                {
+                    _yields++;
+                    _pending.Add(frame);
+                }
+
+                return new ValueTask(frame.Task);
+            }
+
+            /// <summary>Releases every pending yield and returns how many there were.</summary>
+            public int ReleaseFrame()
+            {
+                TaskCompletionSource<bool>[] released;
+                lock (_gate)
+                {
+                    released = _pending.ToArray();
+                    _pending.Clear();
+                }
+
+                foreach (TaskCompletionSource<bool> frame in released)
+                {
+                    frame.SetResult(true);
+                }
+
+                return released.Length;
+            }
+        }
+
+        /// <summary>
+        /// Plays the player loop for <paramref name="run"/>: releases the frame each time the run asks for one, until
+        /// it completes or asks for no further frame within 30 s.
+        /// </summary>
+        private static void PlayFramesUntilDone(Task run, ManualFrameYielder yielder)
+        {
+            for (int frame = 0; frame < 100_000 && !run.IsCompleted; frame++)
+            {
+                if (yielder.ReleaseFrame() == 0
+                    && !SpinWait.SpinUntil(() => run.IsCompleted || yielder.PendingCount > 0,
+                        TimeSpan.FromSeconds(30)))
+                {
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// A sandboxed state with <c>frames()</c>, the frame yields <paramref name="yielder"/> was asked for so far,
+        /// and <c>slow(v)</c>, a Lua function that works until the guard has handed the frame back at least once
+        /// while it ran, then returns <c>v</c> in upper case.
+        /// </summary>
+        private static LuaState CreateFrameCountingState(LuaCsSecureEnvironment env, ManualFrameYielder yielder)
+        {
+            LuaCsApiRegistry registry = new();
+            registry.RegisterCallback("frames", (ctx, ct) => new ValueTask<int>(ctx.Return((double)yielder.Yields)));
+            LuaState state = env.Create(registry);
+            env.RunChunk(state,
+                "function slow(v)\n" +
+                "  local start = frames()\n" +
+                "  repeat local x = 0 for i = 1, 1000 do x = x + i end until frames() > start\n" +
+                "  return string.upper(v)\n" +
+                "end");
+            return state;
+        }
+
+        [TestCase("string.gsub('abc', '.', slow)", "ABC|3")]
+        [TestCase("string.gsub('abc', '.', setmetatable({}, {__index = function(t, k) return slow(k) end}))", "ABC|3")]
+        [TestCase("string.format('%s-%s', setmetatable({}, {__tostring = function() return slow('x') end}), 'y')",
+            "X-y")]
+        [Timeout(120000)]
+        public void AsyncExecute_AFencedCallbackThatOutlastsAFrameSlice_AwaitsTheFrame_AndReturnsTheNormalResult(
+            string expression, string expected)
+        {
+            // WHY (audit B3-03): on the execute_lua path the guard hands the frame back every 6 ms from inside its
+            // hook. When that happened inside a gsub replacement function, a gsub table's __index or a %s
+            // __tostring, the library call came back unfinished and was refused as a yield: correct code failed with
+            // "attempt to yield across a C-call boundary", and the abandoned VM continuation resumed on the next
+            // frame over a call stack that had moved on, faulting the run with ArgumentOutOfRangeException.
+            LuaCsSecureEnvironment env = new();
+            ManualFrameYielder yielder = new();
+            LuaState state = CreateFrameCountingState(env, yielder);
+
+            Task<LuaValue[]> run = env.RunChunkAsync(state,
+                "local out = { " + expression + " }\n" +
+                "for i = 1, #out do out[i] = tostring(out[i]) end\n" +
+                "return table.concat(out, '|')",
+                new LuaCsExecutionGuard(60_000, 5_000_000_000L, 0), yielder);
+            PlayFramesUntilDone(run, yielder);
+
+            Assert.IsTrue(run.IsCompleted, "the run must end once its frames are released");
+            Assert.AreEqual(TaskStatus.RanToCompletion, run.Status, run.Exception?.ToString());
+            Assert.AreEqual(expected, run.Result[0].Read<string>());
+            Assert.Greater(yielder.Yields, 0, "the callback must have handed the frame back while it ran");
+            Assert.AreEqual(0, yielder.PendingCount, "no continuation may be left behind the finished run");
+            Assert.AreEqual(2, (int)env.RunChunk(state, "return 1 + 1")[0].Read<double>(),
+                "the state must stay usable after the run");
+        }
+
+        [Test]
+        [Timeout(120000)]
+        public void AsyncExecute_ARealYieldInsideAFencedCallback_IsStillRefusedWithTheCallBoundaryLine()
+        {
+            // WHY the negative twin: awaiting an unfinished call behind the fence must not let a real coroutine
+            // yield through a gsub callback or a __tostring - the fence still refuses it before it signals, and the
+            // coroutine runs on normally afterwards.
+            LuaCsSecureEnvironment env = new();
+            ManualFrameYielder yielder = new();
+            LuaState state = CreateFrameCountingState(env, yielder);
+
+            Task<LuaValue[]> run = env.RunChunkAsync(state,
+                "local out = {}\n" +
+                "local co = coroutine.create(function()\n" +
+                "  local ok, e = pcall(string.gsub, 'abc', '.',\n" +
+                "    function(c) coroutine.yield('escaped') return c end)\n" +
+                "  out[#out + 1] = tostring(ok) .. '|' .. tostring(e)\n" +
+                "  local o = setmetatable({}, {__tostring = function() coroutine.yield('escaped') return 'x' end})\n" +
+                "  ok, e = pcall(string.format, '%s', o)\n" +
+                "  out[#out + 1] = tostring(ok) .. '|' .. tostring(e)\n" +
+                "  coroutine.yield('parked')\n" +
+                "  return 'done'\n" +
+                "end)\n" +
+                "local ok1, first = coroutine.resume(co)\n" +
+                "local ok2, second = coroutine.resume(co)\n" +
+                "slow('frame')\n" +
+                "out[#out + 1] = tostring(ok1) .. '|' .. first .. '|' .. tostring(ok2) .. '|' .. second\n" +
+                "out[#out + 1] = coroutine.status(co)\n" +
+                "return table.concat(out, '\\n')",
+                new LuaCsExecutionGuard(60_000, 5_000_000_000L, 0), yielder);
+            PlayFramesUntilDone(run, yielder);
+
+            Assert.AreEqual(TaskStatus.RanToCompletion, run.Status, run.Exception?.ToString());
+            string[] rows = run.Result[0].Read<string>().Split('\n');
+            Assert.AreEqual(4, rows.Length, string.Join(" / ", rows));
+            StringAssert.StartsWith("false|", rows[0]);
+            StringAssert.Contains(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage
+                                  + " (string.gsub called a Lua function that yielded)", rows[0]);
+            StringAssert.StartsWith("false|", rows[1]);
+            StringAssert.Contains(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage
+                                  + " (string.format called a Lua function that yielded)", rows[1]);
+            Assert.AreEqual("true|parked|true|done", rows[2], "no refused yield may reach the resumer");
+            Assert.AreEqual("dead", rows[3]);
+            Assert.Greater(yielder.Yields, 0, "the run must have handed the frame back");
+        }
+
+        #endregion
+
         #region A2-09 (FX-RT-A): a raw coroutine.resume is held to the resumer's allocation budget
 
         /// <summary>

@@ -376,15 +376,17 @@ namespace CoreAI.Tests.EditMode
         }
 
         [TestCase("string.rep('x', 2000000)",
-            "LuaCsSecureEnvironment: string.rep result would exceed 1000000 chars.")]
+            "sandbox: string.rep result would exceed 1000000 chars.")]
         [TestCase("table.concat({'a', true})",
-            "invalid value (Boolean) at index 2 in table for 'concat'")]
+            "invalid value (boolean) at index 2 in table for 'concat'")]
+        [TestCase("table.concat({{}})",
+            "invalid value (table) at index 1 in table for 'concat'")]
         [TestCase("table.concat({string.rep('x', 600000), string.rep('y', 600000)})",
-            "LuaCsSecureEnvironment: table.concat result would exceed 1000000 chars.")]
+            "sandbox: table.concat result would exceed 1000000 chars.")]
         [TestCase("string.format('%99999999d', 1)",
-            "LuaCsSecureEnvironment: string.format width/precision exceeds 1000000 chars.")]
+            "sandbox: string.format width/precision exceeds 1000000 chars.")]
         [TestCase("(string.rep('a', 30000):gsub('.', string.rep('b', 40)))",
-            "LuaCsSecureEnvironment: string.gsub result would exceed 1000000 chars.")]
+            "sandbox: string.gsub result would exceed 1000000 chars.")]
         public void SandboxLibraryRefusal_EveryProtectedPathGetsTheSameCleanLine(string call, string expected)
         {
             // WHY: string.rep, table.concat and the string.format width check raised their refusal over an inner
@@ -396,6 +398,7 @@ namespace CoreAI.Tests.EditMode
 
             AssertEveryProtectedPathGets(expected,
                 env.RunChunk(state, ProtectedPathsProbe + "return probe(function() return " + call + " end)"));
+            AssertNamesNoClrTypeOrEngine(expected);
 
             LuaCsHostFunctionException uncaught =
                 Assert.Throws<LuaCsHostFunctionException>(() => env.RunChunk(state, "return " + call));
@@ -422,7 +425,7 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(4, rows.Length, string.Join(" / ", rows));
             StringAssert.StartsWith(
-                "false|string|LuaCsSecureEnvironment: " + LuaCsSecureEnvironment.PatternStepBudgetTripMarker,
+                "false|string|sandbox: " + LuaCsSecureEnvironment.PatternStepBudgetTripMarker,
                 rows[0], "pcall must receive the trip line itself, with nothing in front of it");
             StringAssert.Contains("in string.gsub", rows[0]);
             for (int index = 1; index < rows.Length; index++)
@@ -431,6 +434,7 @@ namespace CoreAI.Tests.EditMode
             }
 
             AssertIsOnlyTheErrorLine(rows[0]);
+            AssertNamesNoClrTypeOrEngine(rows[0]);
         }
 
         [TestCase("steps")]
@@ -587,7 +591,7 @@ namespace CoreAI.Tests.EditMode
             {
                 "boolean:false|string:boom",
                 "boolean:false|string:handled boom",
-                "boolean:false|string:LuaCsSecureEnvironment: string.rep result would exceed 1000000 chars.",
+                "boolean:false|string:sandbox: string.rep result would exceed 1000000 chars.",
                 "string:after"
             }, rows);
         }
@@ -636,8 +640,9 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(2, rows.Count, "only the resumer may record anything: " + string.Join(" / ", rows));
             StringAssert.StartsWith(
-                "boolean:false|string:LuaCsSecureEnvironment: EXCEEDED_COROUTINE_STEP_BUDGET (500000)", rows[0]);
+                "boolean:false|string:sandbox: EXCEEDED_COROUTINE_STEP_BUDGET (500000)", rows[0]);
             AssertIsOnlyTheErrorLine(rows[0]);
+            AssertNamesNoClrTypeOrEngine(rows[0]);
             Assert.AreEqual("string:dead", rows[1], "a coroutine cut by its budget must be dead");
         }
 
@@ -695,8 +700,9 @@ namespace CoreAI.Tests.EditMode
 
             CollectionAssert.IsEmpty(rows, "nothing after the trip may run: " + string.Join(" / ", rows));
             Assert.IsFalse(handle.LastOk);
-            StringAssert.StartsWith("LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET (10000)", handle.LastErrorText);
+            StringAssert.StartsWith("sandbox: EXCEEDED_RESUME_STEP_BUDGET (10000)", handle.LastErrorText);
             AssertIsOnlyTheErrorLine(handle.LastErrorText);
+            AssertNamesNoClrTypeOrEngine(handle.LastErrorText);
             Assert.AreEqual(LuaCsGuardTripKind.Steps, handle.LastTrip);
             Assert.AreEqual(LuaThreadStatus.Dead, handle.Status, "a budget-cut thread is over");
             Assert.IsTrue(handle.IsFinished);
@@ -735,7 +741,7 @@ namespace CoreAI.Tests.EditMode
             handle.Resume();
 
             Assert.IsFalse(handle.LastOk);
-            StringAssert.StartsWith("LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET (10000)", handle.LastErrorText);
+            StringAssert.StartsWith("sandbox: EXCEEDED_RESUME_STEP_BUDGET (10000)", handle.LastErrorText);
             Assert.AreEqual(LuaCsGuardTripKind.Steps, handle.LastTrip);
             Assert.IsTrue(handle.IsFinished);
             Assert.Throws<System.InvalidOperationException>(() => handle.Resume(),
@@ -755,6 +761,23 @@ namespace CoreAI.Tests.EditMode
             StringAssert.DoesNotContain("\n", text, "the error must stay one line: " + text);
             StringAssert.DoesNotContain("System.", text, "no CLR type name may leak: " + text);
             StringAssert.DoesNotContain("LuaValueType", text, "no Lua-CSharp value type name may leak: " + text);
+        }
+
+        /// <summary>
+        /// Fails when <paramref name="text"/>, a line the sandbox raised into Lua, names a CLR class of the sandbox,
+        /// the engine, or a <see cref="LuaValueType"/> member as a type ("(Table)", "(Boolean)") where Lua writes a
+        /// lower-case type name, or carries Lua-CSharp's doubled closing parenthesis.
+        /// </summary>
+        internal static void AssertNamesNoClrTypeOrEngine(string text)
+        {
+            StringAssert.DoesNotContain("LuaCs", text, "no sandbox class may be named: " + text);
+            StringAssert.DoesNotContain("Lua-CSharp", text, "the engine must not be named: " + text);
+            StringAssert.DoesNotContain("))", text, "a bad-argument reason must close once: " + text);
+            foreach (string member in System.Enum.GetNames(typeof(LuaValueType)))
+            {
+                StringAssert.DoesNotContain("(" + member + ")", text,
+                    "a type must be named the way Lua names it, not by its enum member: " + text);
+            }
         }
 
         [Test]
@@ -1318,7 +1341,7 @@ namespace CoreAI.Tests.EditMode
 
             CollectionAssert.IsEmpty(rows, "the handle's own trip must end the thread before any work " + where);
             Assert.IsFalse(victim.LastOk);
-            StringAssert.StartsWith("LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET (10000)", victim.LastErrorText);
+            StringAssert.StartsWith("sandbox: EXCEEDED_RESUME_STEP_BUDGET (10000)", victim.LastErrorText);
             Assert.AreEqual(LuaCsGuardTripKind.Steps, victim.LastTrip);
             Assert.AreEqual(LuaThreadStatus.Dead, victim.Status);
         }
@@ -2061,7 +2084,7 @@ namespace CoreAI.Tests.EditMode
 
             string errors = HandlerErrorsOf(stack);
             StringAssert.Contains("BUDGET_EXCEEDED", errors);
-            StringAssert.Contains("LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET ("
+            StringAssert.Contains("sandbox: EXCEEDED_RESUME_STEP_BUDGET ("
                                   + LuaCsCoroutineHandle.DefaultBudgetPerResume + ")", errors);
             Assert.AreEqual("", store.Get("m", "handler returned"), "no pcall may catch the trip");
             Assert.Less(elapsedMs, 3000, "backstop: the frame must not be held for seconds");
@@ -2176,6 +2199,279 @@ namespace CoreAI.Tests.EditMode
                 "boolean:false|string:" + CStackLimitLine("nested guarded call") + "|number:" + maxReentries,
                 "string:still nests"
             }, rows, "the refusal released every level it held");
+        }
+
+        #endregion
+
+        #region Audit R2 B3-04..B3-06: the yield fence after a nested resume, counted calls in place, clean lines
+
+        [TestCase("string.format",
+            "local o = setmetatable({}, {__tostring = function() CALLBACK_BODY return 'x' end})\n" +
+            "local ok, e = pcall(string.format, '%s', o)\n")]
+        [TestCase("string.gsub",
+            "local ok, e = pcall(string.gsub, 'a', 'a', function() CALLBACK_BODY return 'x' end)\n")]
+        [Timeout(60000)]
+        public void FencedCallback_ANestedCoroutineResume_KeepsTheFence_SoALaterYieldIsStillRefused(string boundary,
+            string call)
+        {
+            // WHY (audit B3-04): the native resume sets the thread that resumes back to Running when it returns,
+            // so a coroutine.resume inside a __tostring or gsub callback lifted the fence its library call had put
+            // up. The coroutine.yield after it then suspended the thread under the library call: the resumer got
+            // `false, nil`, the error was lost and the coroutine was dead.
+            List<string> rows = new();
+            string callback =
+                "record('nested', coroutine.resume(coroutine.create(function() return 7 end))) " +
+                "record('status', coroutine.status(coroutine.running())) " +
+                "coroutine.yield('escaped') " +
+                "record('after the yield')";
+            LuaRuntimeException ended = RunRecordingChunk(
+                "local co = coroutine.create(function()\n" +
+                call.Replace("CALLBACK_BODY", callback) +
+                "  record('call', ok, e)\n" +
+                "  coroutine.yield('second')\n" +
+                "  record('body end')\n" +
+                "end)\n" +
+                "record(coroutine.resume(co))\n" +
+                "record(coroutine.status(co))\n" +
+                "record(coroutine.resume(co))\n" +
+                "record(coroutine.status(co))",
+                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
+
+            Assert.IsNull(ended, ended?.Message);
+            Assert.AreEqual(8, rows.Count, string.Join(" / ", rows));
+            Assert.AreEqual("string:nested|boolean:true|number:7", rows[0], "the nested resume itself still works");
+            Assert.AreEqual("string:status|string:normal", rows[1], "the fence must still be up after it");
+            StringAssert.StartsWith("string:call|boolean:false|string:", rows[2]);
+            StringAssert.Contains(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage + " (" + boundary
+                                  + " called a Lua function that yielded)", rows[2]);
+            CollectionAssert.AreEqual(new[]
+            {
+                "boolean:true|string:second",
+                "string:suspended",
+                "string:body end",
+                "boolean:true",
+                "string:dead"
+            }, rows.GetRange(3, 5), "the refused yield must leave the coroutine running on normally");
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        [Timeout(120000)]
+        public void TaskWaitInsideToString_IsRefusedAtTheFence_AlsoAfterANestedResume_AndTheTaskThreadRunsOn(
+            bool nestedResumeFirst)
+        {
+            // WHY (audit B3-04, the mod-runtime shape): after a nested coroutine.resume the task.wait in __tostring got
+            // through the lifted fence, the task thread died with "BAD_ARGUMENT: nil" and never reached its end. The
+            // twin without the nested resume pins what both must do.
+            LuaCsRbxApiBindings bindings = new();
+            NestedRunModStore store = new();
+            LuaCsModStack stack = NewNestedRunModStack(bindings, store);
+            string nested = nestedResumeFirst ? "coroutine.resume(coroutine.create(function() end)) " : "";
+            stack.Runtime.LoadMod("m",
+                "task.spawn(function()\n" +
+                "  local o = setmetatable({}, {__tostring = function() " + nested +
+                "task.wait(0.1) store_set('after the wait', 'yes') return 'x' end})\n" +
+                "  local ok, e = pcall(string.format, '%s', o)\n" +
+                "  store_set('format', tostring(ok) .. '|' .. tostring(e))\n" +
+                "  task.wait(0.1)\n" +
+                "  store_set('thread end', 'yes')\n" +
+                "end)\n" +
+                "store_set('chunk end', 'yes')");
+            for (int frame = 0; frame < 5; frame++)
+            {
+                bindings.Scheduler.Advance(0.1d);
+            }
+
+            string errors = HandlerErrorsOf(stack);
+            StringAssert.StartsWith("false|", store.Get("m", "format"), errors);
+            StringAssert.Contains(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage, store.Get("m", "format"));
+            Assert.AreEqual("", store.Get("m", "after the wait"), "the callback must not run on past its refused wait");
+            Assert.AreEqual("yes", store.Get("m", "chunk end"), errors);
+            Assert.AreEqual("yes", store.Get("m", "thread end"), errors);
+            Assert.AreEqual("", errors);
+        }
+
+        /// <summary>
+        /// tostring, table.sort, pairs, ipairs and print over native value shapes: numbers of every kind, nil,
+        /// booleans, strings, functions, threads, tables with __name, __tostring and __pairs, a non-string __tostring
+        /// result, extra arguments and the bad-argument errors. Addresses are cut, since they differ between states.
+        /// </summary>
+        private const string CountedLibrarySweep =
+            "local out = {}\n" +
+            "local function add(...)\n" +
+            "  local parts = {}\n" +
+            "  for i = 1, select('#', ...) do\n" +
+            "    local v = select(i, ...)\n" +
+            "    parts[#parts + 1] = type(v) .. ':' .. (type(v) == 'table' and 'T' or tostring(v))\n" +
+            "  end\n" +
+            "  out[#out + 1] = table.concat(parts, ',')\n" +
+            "end\n" +
+            "local vals = { -0.0, 0/0, 1/0, -1/0, 1e16, 2^53, 2^63, 1e100, 0.1, 123, 1e-5, math.pi, -3, nil, true,\n" +
+            "  false, 'str', 2^-1074 }\n" +
+            "for i = 1, 18 do add(tostring(vals[i])) end\n" +
+            "add(pcall(tostring))\n" +
+            "add(select('#', tostring(1, 2, 3)))\n" +
+            "add((tostring(print):match('^(%a+):')))\n" +
+            "add((tostring(coroutine.create(print)):match('^(%a+):')))\n" +
+            "add((tostring(setmetatable({}, {__name = 'MyType'})):gsub('%x+$', 'N')))\n" +
+            "add(tostring(setmetatable({}, {__tostring = function() return 'custom' end})))\n" +
+            "add(pcall(tostring, setmetatable({}, {__tostring = function() return 42 end})))\n" +
+            "add(pcall(tostring, setmetatable({}, {__tostring = function() error('in tostring', 0) end})))\n" +
+            "local t = {5, 3, 9, 1}\n" +
+            "table.sort(t)\n" +
+            "add(table.concat(t, ','))\n" +
+            "table.sort(t, function(a, b) return a > b end)\n" +
+            "add(table.concat(t, ','))\n" +
+            "add(pcall(table.sort, {3, 'a', 1}))\n" +
+            "add(pcall(table.sort, nil))\n" +
+            "add(pcall(table.sort, {3, 1, 2}, function(a, b) error('in the comparator', 0) end))\n" +
+            "add(pcall(pairs, nil))\n" +
+            "add(pcall(ipairs, 'x'))\n" +
+            "add(select('#', pairs({}, 1, 2)))\n" +
+            "local seen = {}\n" +
+            "for k, v in pairs(setmetatable({}, {__pairs = function(o) return function(_, k) if not k then\n" +
+            "  return 1, 'one' end end, o, nil end})) do seen[#seen + 1] = k .. '=' .. v end\n" +
+            "add(table.concat(seen, ','))\n" +
+            "local r = {}\n" +
+            "for i, v in ipairs({10, 20, 30}) do r[#r + 1] = i .. '=' .. v end\n" +
+            "add(table.concat(r, ','))\n" +
+            "add(pcall(print, setmetatable({}, {__tostring = function() error('in print', 0) end})))\n" +
+            "return table.concat(out, ' | ')";
+
+        [Test]
+        [Timeout(60000)]
+        public void CountedTostringSortPairsAndPrint_ReturnExactlyWhatTheNativeOnesReturn()
+        {
+            // WHY (audit B3-05): the counted wrappers now run the native functions as the call itself, with the
+            // caller's context, instead of through CallAsync; every result and error value must stay what
+            // Lua-CSharp's own functions give, compared against a state with nothing but the native libraries.
+            LuaCsSecureEnvironment env = new();
+            LuaState sandboxed = env.Create();
+            LuaState native = LuaState.Create();
+            Lua.Standard.OpenLibsExtensions.OpenBasicLibrary(native);
+            Lua.Standard.OpenLibsExtensions.OpenStringLibrary(native);
+            Lua.Standard.OpenLibsExtensions.OpenTableLibrary(native);
+            Lua.Standard.OpenLibsExtensions.OpenMathLibrary(native);
+            Lua.Standard.OpenLibsExtensions.OpenCoroutineLibrary(native);
+
+            string counted = env.RunChunk(sandboxed, CountedLibrarySweep,
+                new LuaCsExecutionGuard(30_000, 50_000_000, 0))[0].ToString();
+            string reference = native.ExecuteAsync(native.Load(CountedLibrarySweep, "sandbox_chunk"))
+                .AsTask().GetAwaiter().GetResult()[0].ToString();
+
+            Assert.AreEqual(reference, counted);
+            StringAssert.Contains("string:function", counted, "the sweep must reach the function fast path");
+            StringAssert.Contains("string:thread", counted, "the sweep must reach the thread fast path");
+        }
+
+        [Test]
+        public void CountedTostringAndSort_AllocateNoMoreThanTheNativeOnes()
+        {
+            // WHY (audit B3-05): every tostring of an object with __tostring and every table.sort went through
+            // LuaState.CallAsync, which copies the arguments and builds a result array: 20,000 tostring calls
+            // allocated 2.4 MB against 1 KB natively, steady garbage for WebGL's non-moving collector. They now run
+            // the native function as the call itself. WHY 0 passes: Unity's Mono answers 0 from
+            // GetAllocatedBytesForCurrentThread, so the bound is enforced where the counter exists (CoreCLR).
+            const string chunk =
+                "local o = setmetatable({}, {__tostring = function() return 'v' end})\n" +
+                "local t = {3, 1, 2}\n" +
+                "local n = 0\n" +
+                "for i = 1, 20000 do\n" +
+                "  n = n + #tostring(o)\n" +
+                "  t[1], t[2], t[3] = 3, 1, 2\n" +
+                "  table.sort(t)\n" +
+                "  n = n + t[1]\n" +
+                "end\n" +
+                "return n";
+            LuaCsSecureEnvironment env = new();
+            LuaState sandboxed = env.Create();
+            LuaState native = LuaState.Create();
+            Lua.Standard.OpenLibsExtensions.OpenBasicLibrary(native);
+            Lua.Standard.OpenLibsExtensions.OpenTableLibrary(native);
+            Lua.Runtime.LuaClosure sandboxedChunk = sandboxed.Load(chunk, "sandbox_chunk");
+            Lua.Runtime.LuaClosure nativeChunk = native.Load(chunk, "sandbox_chunk");
+            sandboxed.ExecuteAsync(sandboxedChunk).AsTask().GetAwaiter().GetResult();
+            native.ExecuteAsync(nativeChunk).AsTask().GetAwaiter().GetResult();
+
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            LuaValue[] sandboxedResult = sandboxed.ExecuteAsync(sandboxedChunk).AsTask().GetAwaiter().GetResult();
+            long sandboxedBytes = System.GC.GetAllocatedBytesForCurrentThread() - before;
+            before = System.GC.GetAllocatedBytesForCurrentThread();
+            LuaValue[] nativeResult = native.ExecuteAsync(nativeChunk).AsTask().GetAwaiter().GetResult();
+            long nativeBytes = System.GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.AreEqual(nativeResult[0].Read<double>(), sandboxedResult[0].Read<double>());
+            Assert.IsTrue(sandboxedBytes == 0 || sandboxedBytes <= nativeBytes + 16 * 1024,
+                "20,000 counted tostring and table.sort pairs allocated " + sandboxedBytes + " bytes against "
+                + nativeBytes + " natively");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void TostringOfAHostObject_UsesItsHostTostring_AndAScriptReplacedTostringIsStillCountedToTheLimit()
+        {
+            // WHY: tostring of a userdata runs its __tostring in place like any object's (audit B3-05). A host
+            // __tostring is C#, but the metatable is reachable from Lua and the function a script puts there can be
+            // C# that runs Lua again - the sandbox's own tostring - so the call stays counted: otherwise
+            // `getmetatable(obj).__tostring = tostring` would recurse until the native stack gave out.
+            LuaCsSecureEnvironment env = new();
+            LuaCsApiRegistry registry = new();
+            LuaTable hostMetatable = new();
+            hostMetatable["__tostring"] = new LuaFunction("host_tostring",
+                (ctx, ct) => new System.Threading.Tasks.ValueTask<int>(ctx.Return("HostObject")));
+            registry.RegisterCallback("host_object", (ctx, ct) =>
+                new System.Threading.Tasks.ValueTask<int>(ctx.Return(new LuaValue(new HostUserData(hostMetatable)))));
+            LuaState state = env.Create(registry);
+
+            LuaValue[] result = env.RunChunk(state,
+                "local host = host_object()\n" +
+                "local before = tostring(host)\n" +
+                "getmetatable(host).__tostring = tostring\n" +
+                "local ok, e = pcall(tostring, host)\n" +
+                "return before .. '|' .. tostring(ok) .. '|' .. tostring(e)",
+                new LuaCsExecutionGuard(30_000, 50_000_000, 0));
+
+            Assert.AreEqual("HostObject|false|" + CStackLimitLine("tostring"), result[0].Read<string>());
+        }
+
+        /// <summary>A host object with a metatable, as a registry binding hands one to Lua.</summary>
+        private sealed class HostUserData : ILuaUserData
+        {
+            public HostUserData(LuaTable metatable)
+            {
+                Metatable = metatable;
+            }
+
+            public LuaTable Metatable { get; set; }
+        }
+
+        [TestCase("string.rep()", "bad argument #1 to 'rep' (string expected, got no value)")]
+        [TestCase("string.rep('x', {})", "bad argument #2 to 'rep' (number expected, got table)")]
+        [TestCase("table.concat(nil)", "bad argument #1 to 'concat' (table expected, got nil)")]
+        [TestCase("table.concat({}, {})", "bad argument #2 to 'concat' (string expected, got table)")]
+        [TestCase("string.find(nil, 'a')", "bad argument #1 to 'find' (string expected, got nil)")]
+        [TestCase("string.find('abc', 'b', 1.5)", "bad argument #3 to 'find' (number has no integer representation)")]
+        [TestCase("string.match('a', {})", "bad argument #2 to 'match' (string expected, got table)")]
+        [TestCase("string.gmatch(true, 'a')", "bad argument #1 to 'gmatch' (string expected, got boolean)")]
+        [TestCase("string.gsub('a', 'a', 'b', {})", "bad argument #4 to 'gsub' (number expected, got table)")]
+        [TestCase("coroutine.resume(nil)", "bad argument #1 to 'resume' (thread expected, got nil)")]
+        [TestCase("coroutine.resume({})", "bad argument #1 to 'resume' (thread expected, got table)")]
+        public void SandboxLibraryFunction_ABadArgument_GetsLuasOwnLine_WithItsParenthesisClosedOnce(string call,
+            string expected)
+        {
+            // WHY (audit B3-06): the sandbox's own string.rep, table.concat, find/match/gmatch/gsub and
+            // coroutine.resume read their arguments with Lua-CSharp's typed read, whose refusal closes its
+            // parenthesis twice: "bad argument #1 to 'concat' (table expected, got nil))".
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+
+            LuaValue[] result = env.RunChunk(state,
+                "local ok, e = pcall(function() local v = " + call + " return v end)\n" +
+                "return tostring(ok) .. '|' .. tostring(e)");
+
+            Assert.AreEqual("false|[string \"sandbox_chunk\"]:1: " + expected, result[0].Read<string>(),
+                "pcall positions a bad argument like any level-1 error");
+            AssertNamesNoClrTypeOrEngine(result[0].Read<string>());
         }
 
         #endregion

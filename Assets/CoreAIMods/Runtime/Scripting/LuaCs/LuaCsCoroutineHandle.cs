@@ -813,17 +813,17 @@ namespace CoreAI.Sandbox.LuaCs
 
             private string OwnTripMessage(LuaCsGuardTripKind kind)
             {
+                const string prefix = LuaCsSecureEnvironment.SandboxLinePrefix;
                 switch (kind)
                 {
                     case LuaCsGuardTripKind.Timeout:
                         return $"Lua coroutine resume exceeded {_timeoutMs} ms.";
                     case LuaCsGuardTripKind.Memory:
-                        return $"LuaCsCoroutineHandle: {LuaCsExecutionGuard.MemoryBudgetTripMarker} "
-                               + $"({_allocation.BudgetBytes} bytes)";
+                        return $"{prefix}{LuaCsExecutionGuard.MemoryBudgetTripMarker} ({_allocation.BudgetBytes} bytes)";
                     default:
                         return _lifetimeBinds
-                            ? $"LuaCsCoroutineHandle: EXCEEDED_LIFETIME_STEP_BUDGET ({_lifetimeCap})"
-                            : $"LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET ({_budget})";
+                            ? $"{prefix}EXCEEDED_LIFETIME_STEP_BUDGET ({_lifetimeCap})"
+                            : $"{prefix}EXCEEDED_RESUME_STEP_BUDGET ({_budget})";
                 }
             }
 
