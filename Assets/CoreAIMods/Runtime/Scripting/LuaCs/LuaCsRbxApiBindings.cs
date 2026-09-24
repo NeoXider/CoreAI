@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
 using System.Threading;
+using CoreAI.Ai.Logging;
 using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
@@ -12,6 +13,7 @@ using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
 using Lua;
+using Lua.Runtime;
 using static CoreAI.Ai.LuaCs.LuaCsRbxLua;
 
 namespace CoreAI.Ai.LuaCs
@@ -115,10 +117,13 @@ namespace CoreAI.Ai.LuaCs
         private readonly ModConnectionRegistry _connections;
         private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
         private readonly ModScheduler _scheduler;
-        private readonly Dictionary<string, string> _resumeOperationByMod = new();
+        private readonly Dictionary<string, string> _resumeOperationByMod = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _originTagByMod = new(StringComparer.Ordinal);
         private readonly IRbxClockSource _clockSource;
         private readonly object _serverTimeGate = new();
-        private double _lastServerTimeNow = double.NegativeInfinity;
+        private double _lastServerTimeNow;
+        private double _lastServerTimeProcessSeconds;
+        private bool _serverTimeBased;
         private readonly INetworkBridge _networkBridge;
         private readonly RbxPlayers _players;
         private readonly LuaCsRbxNetworkCodec _networkCodec;
@@ -134,6 +139,8 @@ namespace CoreAI.Ai.LuaCs
         private readonly HashSet<string> _legacySchedulerDeprecationOwners =
             new(StringComparer.Ordinal);
         private readonly HashSet<string> _remoteRefusalLoggedSenders = new(StringComparer.Ordinal);
+        private readonly Dictionary<(string Sender, NetworkWarningKind Kind), NetworkWarningWindow>
+            _networkWarningWindows = new();
         private readonly Dictionary<string, Dictionary<int, HashSet<IRbxScriptThread>>>
             _scheduledThreadsByMod = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _currentSchedulerGenerationByMod =
@@ -143,6 +150,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly Dictionary<string, ActorContext> _actorContextsByOwnerModId =
             new(StringComparer.Ordinal);
         private readonly Action<string> _log;
+        private ILuaLogService _modLog;
         private CoreAI.Ai.IInGameLlmChatServiceFactory _chatFactory;
         private int _consoleInvocationCounter;
         private double _runServiceElapsed;
@@ -883,28 +891,93 @@ namespace CoreAI.Ai.LuaCs
         /// time.</summary>
         public IRbxClockSource ClockSource => _clockSource;
 
-        /// <summary>Server-synced epoch seconds behind <c>workspace:GetServerTimeNow()</c>,
-        /// monotonic-smoothed on top of <see cref="ClockSource"/> so it never steps back.</summary>
+        /// <summary>
+        /// The share of real time the server clock gives up while it slews back onto an estimate that
+        /// moved behind it: at 0.5 it runs at half speed, so a backward correction of N seconds is
+        /// absorbed in 2N seconds of real time and the clock never stands still.
+        /// </summary>
+        /// <remarks>
+        /// WHY not Roblox's 0.6%: Roblox corrects errors of milliseconds, while a CoreAI correction can
+        /// be a wall-clock step on the host or a client joining another server — whole seconds or
+        /// more. At 0.6% a ten-second correction would keep every client off the server's time for
+        /// half an hour; at half speed timers stay ordered and agree again within twenty seconds.
+        /// </remarks>
+        internal const double ServerTimeSlewRate = 0.5d;
+
+        /// <summary>
+        /// Server-synced epoch seconds behind <c>workspace:GetServerTimeNow()</c>. From the bridge's
+        /// first synchronization on it never decreases: an estimate that moves ahead is taken at once,
+        /// one that moves behind is slewed onto at <see cref="ServerTimeSlewRate"/> of real time.
+        /// Before the bridge is synchronized it is the local clock, unsmoothed.
+        /// </summary>
         internal double GetServerTimeNow()
         {
             // WHY the bridge's offset is added: on a client the local clock is its own machine's,
             // and a player whose system time is an hour off would otherwise disagree with the server
             // about when everything happened. The offset is zero on a server and on the loopback,
             // so solo behaviour is byte-identical to before.
-            double now = _clockSource.UnixTimeSecondsFractional
-                         + (_networkBridge?.ServerClockOffsetSeconds ?? 0d);
+            double estimate = _clockSource.UnixTimeSecondsFractional
+                              + (_networkBridge?.ServerClockOffsetSeconds ?? 0d);
+            bool synchronized = _networkBridge == null || _networkBridge.IsServerClockSynchronized;
+            double processSeconds = _clockSource.ProcessTimeSeconds;
             lock (_serverTimeGate)
             {
-                // WHY: clamp, don't throw — callers expect a clock that keeps ticking through
-                // NTP/system-clock corrections, never one that errors or rewinds.
-                if (now < _lastServerTimeNow)
+                // WHY nothing is kept before the first synchronization: an unsynchronized offset is zero
+                // because nothing is known, and a floor recorded from the local clock then froze the
+                // synchronized value for the whole skew — a day, for a client of a long-running server.
+                if (!synchronized)
                 {
+                    _serverTimeBased = false;
+                    return estimate;
+                }
+
+                if (!_serverTimeBased)
+                {
+                    // WHY a re-base and not a clamp: the first synchronized estimate replaces a guess, so
+                    // it may land on either side of the local clock once; monotonicity starts here.
+                    _serverTimeBased = true;
+                    _lastServerTimeNow = IsFinite(estimate) ? estimate : _clockSource.UnixTimeSecondsFractional;
+                    _lastServerTimeProcessSeconds = processSeconds;
                     return _lastServerTimeNow;
                 }
 
-                _lastServerTimeNow = now;
-                return now;
+                double elapsed = processSeconds - _lastServerTimeProcessSeconds;
+                if (elapsed > 0d)
+                {
+                    _lastServerTimeProcessSeconds = processSeconds;
+                }
+                else
+                {
+                    elapsed = 0d;
+                }
+
+                double freeRunning = _lastServerTimeNow + elapsed;
+                double next;
+                if (!IsFinite(estimate))
+                {
+                    next = freeRunning;
+                }
+                else if (estimate >= freeRunning)
+                {
+                    next = estimate;
+                }
+                else
+                {
+                    // WHY slewed instead of clamped: a clamp froze the clock for the whole size of a
+                    // backward step (an hour, for an hour's NTP correction), stalling every timer built
+                    // on it; running slower converges while every reading still moves forward.
+                    next = Math.Max(estimate,
+                        _lastServerTimeNow + elapsed * (1d - ServerTimeSlewRate));
+                }
+
+                _lastServerTimeNow = next;
+                return next;
             }
+        }
+
+        private static bool IsFinite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
         }
 
         /// <summary>
@@ -916,9 +989,109 @@ namespace CoreAI.Ai.LuaCs
         internal LuaValue BuildOsTable()
         {
             LuaTable os = new();
-            os["time"] = Fn("os.time", _ => (double)_clockSource.UnixTimeSeconds);
+            os["time"] = Fn("os.time", ctx =>
+            {
+                LuaValue date = Arg(ctx, 0);
+                if (date.Type == LuaValueType.Nil)
+                {
+                    return (double)_clockSource.UnixTimeSeconds;
+                }
+
+                if (!date.TryRead(out LuaTable fields))
+                {
+                    throw ExpectedArgument("os.time", "a date table or nil", date, 1);
+                }
+
+                return UnixSecondsFromDateTable(fields);
+            });
             os["clock"] = Fn("os.clock", _ => _clockSource.ProcessTimeSeconds);
             return new LuaValue(os);
+        }
+
+        /// <summary>
+        /// <c>os.time(t)</c>: the Unix seconds of the date the table describes. <c>year</c>,
+        /// <c>month</c> and <c>day</c> are required; <c>hour</c> defaults to 12 and <c>min</c> and
+        /// <c>sec</c> to 0; a field outside its range carries into the next one (month 13 is January of
+        /// the next year) and <c>isdst</c> is ignored.
+        /// </summary>
+        /// <remarks>
+        /// WHY the table is read as UTC: Luau replaced Lua 5.1's local-time <c>mktime</c> with a UTC
+        /// conversion ("we prefer UTC for consistency"), and every other CoreAI clock is UTC —
+        /// <c>os.time()</c> reads <see cref="IRbxClockSource.UnixTimeSeconds"/> — so
+        /// <c>os.time(os.date("!*t", t)) == t</c> holds and a server and a client in different time
+        /// zones compute the same timestamp. That is also why <c>isdst</c> changes nothing.
+        /// </remarks>
+        private const double MaxDateFieldMagnitude = 1e6 * 366d * 86400d;
+
+        private static double UnixSecondsFromDateTable(LuaTable fields)
+        {
+            long year = ReadDateField(fields, "year", null);
+            long month = ReadDateField(fields, "month", null);
+            long day = ReadDateField(fields, "day", null);
+            long hour = ReadDateField(fields, "hour", 12);
+            long minute = ReadDateField(fields, "min", 0);
+            long second = ReadDateField(fields, "sec", 0);
+
+            long monthIndex = month - 1;
+            year += FloorDivide(monthIndex, 12);
+            monthIndex -= FloorDivide(monthIndex, 12) * 12;
+            long days = DaysFromCivil(year, monthIndex + 1, 1) + (day - 1);
+            return days * 86400d + hour * 3600d + minute * 60d + second;
+        }
+
+        private static long ReadDateField(LuaTable fields, string name, long? fallback)
+        {
+            LuaValue value = fields[name];
+            if (value.Type == LuaValueType.Nil)
+            {
+                if (fallback.HasValue)
+                {
+                    return fallback.Value;
+                }
+
+                throw RbxError.BadArgument(
+                    "os.time: field '" + name + "' missing in date table",
+                    "pass year, month and day, e.g. os.time({year = 2024, month = 1, day = 1, hour = 0})");
+            }
+
+            if (!TryCoerceNumber(value, out double number))
+            {
+                throw RbxError.BadArgument(
+                    "os.time: field '" + name + "' must be a number, got " + Describe(value),
+                    "pass whole numbers, e.g. os.time({year = 2024, month = 1, day = 1, hour = 0})");
+            }
+
+            // WHY bounded by about a million years' worth of seconds: every field then stays exact
+            // through the date arithmetic in a long, and no real date comes near it, so a larger
+            // value (or NaN or an infinity) is a bug in the script rather than a date.
+            if (double.IsNaN(number) || Math.Abs(number) > MaxDateFieldMagnitude)
+            {
+                throw RbxError.BadArgument(
+                    "os.time: field '" + name + "' is out of range, got " + number.ToString(
+                        "R", System.Globalization.CultureInfo.InvariantCulture),
+                    "pass a calendar date, e.g. os.time({year = 2024, month = 1, day = 1, hour = 0})");
+            }
+
+            // WHY truncated: Luau reads each field with lua_tointeger, which drops the fraction.
+            return (long)Math.Truncate(number);
+        }
+
+        private static long FloorDivide(long value, long divisor)
+        {
+            long quotient = value / divisor;
+            return (value % divisor != 0 && (value < 0) != (divisor < 0)) ? quotient - 1 : quotient;
+        }
+
+        /// <summary>Days from 1970-01-01 to the proleptic Gregorian date (month 1..12).</summary>
+        private static long DaysFromCivil(long year, long month, long day)
+        {
+            long shiftedYear = month <= 2 ? year - 1 : year;
+            long era = FloorDivide(shiftedYear, 400);
+            long yearOfEra = shiftedYear - era * 400;
+            long monthFromMarch = month > 2 ? month - 3 : month + 9;
+            long dayOfYear = (153 * monthFromMarch + 2) / 5 + day - 1;
+            long dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+            return era * 146097 + dayOfEra - 719468;
         }
 
         /// <summary>Transport-neutral bridge used by the production Lua remote surface.</summary>
@@ -1076,7 +1249,51 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _remoteRefusalLoggedSenders.Remove(actorId);
+            ForgetNetworkWarningsFrom(actorId);
+            if (ownerModIds.Count > 0)
+            {
+                RaiseActorModsDisconnected(actorId, ownerModIds);
+            }
+
             return true;
+        }
+
+        /// <summary>
+        /// Raised by <see cref="DisconnectActor"/> after it has released an actor, with the actor id and
+        /// every mod that was loaded for it. Those mods stay loaded here: their threads are killed,
+        /// their connections dropped and their actor attribution released, so each later dispatch of
+        /// theirs is refused with NOT_AUTHORITY; the mod runtime subscribes to unload or quarantine
+        /// them so they stop dispatching at all (M2-24).
+        /// </summary>
+        /// <remarks>
+        /// WHY an event and not an unload here: loading and unloading belong to the mod runtime, which
+        /// owns the mods' states, stores and hooks; the bindings only know which mods ran as whom.
+        /// </remarks>
+        public event Action<string, IReadOnlyList<string>> ActorModsDisconnected;
+
+        private void RaiseActorModsDisconnected(string actorId, List<string> ownerModIds)
+        {
+            Action<string, IReadOnlyList<string>> handlers = ActorModsDisconnected;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            IReadOnlyList<string> mods = ownerModIds.AsReadOnly();
+            foreach (Delegate handler in handlers.GetInvocationList())
+            {
+                // WHY each subscriber is contained: the actor is already gone when this runs, and one
+                // subscriber that throws must not keep the others from releasing its mods.
+                try
+                {
+                    ((Action<string, IReadOnlyList<string>>)handler)(actorId, mods);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Invoke("[RbxApi] A disconnect subscriber failed for actor '" + actorId
+                                 + "': " + ex.Message);
+                }
+            }
         }
 
         /// <summary>Releases bridge subscriptions, scheduler work, and captured Lua callback state.</summary>
@@ -1132,6 +1349,10 @@ namespace CoreAI.Ai.LuaCs
             _scheduledThreadsByMod.Clear();
             _currentSchedulerGenerationByMod.Clear();
             _actorContextsByOwnerModId.Clear();
+            _resumeOperationByMod.Clear();
+            _originTagByMod.Clear();
+            _networkWarningWindows.Clear();
+            ActorModsDisconnected = null;
         }
 
         internal ModLoadCandidate BeginModLoadCandidate(string ownerModId)
@@ -1257,7 +1478,33 @@ namespace CoreAI.Ai.LuaCs
         internal ActorContext ResolveOwnerActorContext(string ownerModId)
         {
             return LuaCsRbxModContext.ResolveActorContext(
-                this, ownerModId, OriginTag.FromMod(ownerModId));
+                this, ownerModId, ModOriginTag(ownerModId));
+        }
+
+        /// <summary>
+        /// The <c>mod:&lt;id&gt;</c> origin tag of a mod, built once per mod: every scheduler resume and
+        /// every legacy hook dispatch resolves its actor through it.
+        /// </summary>
+        internal string ModOriginTag(string ownerModId)
+        {
+            if (!_originTagByMod.TryGetValue(ownerModId, out string originTag))
+            {
+                originTag = OriginTag.FromMod(ownerModId);
+                _originTagByMod[ownerModId] = originTag;
+            }
+
+            return originTag;
+        }
+
+        /// <summary>Mods holding an interned resume label or origin tag (both are released with the mod).</summary>
+        internal int ResumeCacheModCount
+        {
+            get
+            {
+                HashSet<string> mods = new(_originTagByMod.Keys, StringComparer.Ordinal);
+                mods.UnionWith(_resumeOperationByMod.Keys);
+                return mods.Count;
+            }
         }
 
         internal LuaState ResolveSchedulerOwnerState(LuaState fallbackState)
@@ -1472,13 +1719,145 @@ namespace CoreAI.Ai.LuaCs
             return false;
         }
 
+        /// <summary>
+        /// Seconds during which one sender's inbound network warning of one kind is logged once; the
+        /// rest in the window are counted in <see cref="RejectedNetworkEventCount"/> and summed into
+        /// the next line (MP-16).
+        /// </summary>
+        internal const double NetworkWarningWindowSeconds = 10d;
+
+        /// <summary>Distinct sender and kind pairs throttled apart; beyond it senders share one window per kind.</summary>
+        private const int MaxNetworkWarningWindows = 256;
+
+        private const string AnyNetworkSender = "*";
+
+        private enum NetworkWarningKind
+        {
+            NullMessage,
+            UnknownRemote,
+            ReliabilityMismatch,
+            UnknownDirection,
+            DeliveryFailed
+        }
+
+        private sealed class NetworkWarningWindow
+        {
+            public double OpenedAtSeconds;
+            public long Suppressed;
+        }
+
+        /// <summary>
+        /// Inbound network events dropped with a warning — a null message, an unknown or destroyed
+        /// remote, a reliability that does not match the remote, an unknown direction, a failed
+        /// delivery — whether or not the warning was logged.
+        /// </summary>
+        internal long RejectedNetworkEventCount { get; private set; }
+
+        /// <summary>
+        /// Logs an inbound network warning at most once per sender and kind every
+        /// <see cref="NetworkWarningWindowSeconds"/>, and counts every one.
+        /// </summary>
+        /// <remarks>
+        /// WHY throttled: these fire once per packet, and each line becomes a Unity warning with a stack
+        /// trace, so a client sending thousands of packets with a made-up remote id flooded the host's
+        /// log, disk and CPU with the one symptom worth seeing once. WHY per sender: one noisy client
+        /// must not hide a second one's first warning. WHY the process clock: it is real time that
+        /// never steps back, and a paused game still receives packets.
+        /// </remarks>
+        private void WarnNetworkEvent(string senderActorId, NetworkWarningKind kind,
+            RbxInstance remote = null, string failure = null)
+        {
+            RejectedNetworkEventCount++;
+            if (_log == null)
+            {
+                return;
+            }
+
+            (string Sender, NetworkWarningKind Kind) key = (senderActorId ?? "", kind);
+            if (!_networkWarningWindows.TryGetValue(key, out NetworkWarningWindow window)
+                && _networkWarningWindows.Count >= MaxNetworkWarningWindows)
+            {
+                key = (AnyNetworkSender, kind);
+                _networkWarningWindows.TryGetValue(key, out window);
+            }
+
+            double now = _clockSource.ProcessTimeSeconds;
+            if (window != null)
+            {
+                double open = now - window.OpenedAtSeconds;
+                if (open >= 0d && open < NetworkWarningWindowSeconds)
+                {
+                    window.Suppressed++;
+                    return;
+                }
+            }
+            else
+            {
+                window = new NetworkWarningWindow();
+                _networkWarningWindows[key] = window;
+            }
+
+            long suppressed = window.Suppressed;
+            window.OpenedAtSeconds = now;
+            window.Suppressed = 0;
+            _log("[RbxApi] " + DescribeNetworkWarning(senderActorId, kind, remote, failure)
+                 + (suppressed > 0
+                     ? " (" + suppressed + " more like it were dropped in the last window)"
+                     : "")
+                 + " (logged once per sender every " + NetworkWarningWindowSeconds
+                 + " s; the rest are only counted)");
+        }
+
+        /// <summary>The warning text, built only for a line that is actually logged.</summary>
+        private static string DescribeNetworkWarning(string senderActorId, NetworkWarningKind kind,
+            RbxInstance remote, string failure)
+        {
+            string sender = "'" + (senderActorId ?? "") + "'";
+            switch (kind)
+            {
+                case NetworkWarningKind.NullMessage:
+                    return "Network event message was null.";
+                case NetworkWarningKind.UnknownRemote:
+                    return "Network event from " + sender + " targeted an unknown RemoteEvent.";
+                case NetworkWarningKind.ReliabilityMismatch:
+                    return "Network event reliability from " + sender + " does not match "
+                           + (remote != null ? remote.GetFullName() : "the RemoteEvent") + ".";
+                case NetworkWarningKind.UnknownDirection:
+                    return "Network event from " + sender + " has an unknown delivery direction.";
+                default:
+                    return "Network event delivery failed: " + failure;
+            }
+        }
+
+        private void ForgetNetworkWarningsFrom(string actorId)
+        {
+            if (_networkWarningWindows.Count == 0)
+            {
+                return;
+            }
+
+            List<(string Sender, NetworkWarningKind Kind)> forgotten = new();
+            foreach ((string Sender, NetworkWarningKind Kind) key in _networkWarningWindows.Keys)
+            {
+                if (string.Equals(key.Sender, actorId, StringComparison.Ordinal))
+                {
+                    forgotten.Add(key);
+                }
+            }
+
+            for (int index = 0; index < forgotten.Count; index++)
+            {
+                _networkWarningWindows.Remove(forgotten[index]);
+            }
+        }
+
         private void DeliverNetworkEvent(RbxNetworkEventMessage message)
         {
             try
             {
                 if (message == null)
                 {
-                    _log?.Invoke("Network event message was null.");
+                    WarnNetworkEvent(null, NetworkWarningKind.NullMessage);
                     return;
                 }
 
@@ -1493,14 +1872,14 @@ namespace CoreAI.Ai.LuaCs
                     || !(instance is RbxRemoteEvent remote)
                     || remote.IsDestroyed)
                 {
-                    _log?.Invoke("Network event targeted an unknown RemoteEvent.");
+                    WarnNetworkEvent(message.SenderActorId, NetworkWarningKind.UnknownRemote);
                     return;
                 }
 
                 if (remote.Reliability != message.Reliability)
                 {
-                    _log?.Invoke(
-                        "Network event reliability does not match " + remote.GetFullName() + ".");
+                    WarnNetworkEvent(message.SenderActorId, NetworkWarningKind.ReliabilityMismatch,
+                        remote);
                     return;
                 }
 
@@ -1535,7 +1914,7 @@ namespace CoreAI.Ai.LuaCs
 
                         return;
                     default:
-                        _log?.Invoke("Network event has an unknown delivery direction.");
+                        WarnNetworkEvent(message.SenderActorId, NetworkWarningKind.UnknownDirection);
                         return;
                 }
             }
@@ -1545,7 +1924,8 @@ namespace CoreAI.Ai.LuaCs
             }
             catch (Exception ex)
             {
-                _log?.Invoke("Network event delivery failed: " + ex.Message);
+                WarnNetworkEvent(message?.SenderActorId, NetworkWarningKind.DeliveryFailed,
+                    failure: ex.Message);
             }
         }
 
@@ -1977,14 +2357,27 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Per-frame click pick: on the RISING edge of MouseButton1 (one fire per click), casts a
-        /// camera ray through the mouse position, resolves the nearest world instance, and fires the
-        /// MouseClick of a ClickDetector CHILD of that part when the hit is within its
-        /// MaxActivationDistance. Only the single nearest ray hit fires, so clicking one part never
-        /// fires another part's detector, and clicking empty space fires nothing. Every step is
-        /// null-guarded, so the headless default (no camera/physics) is a silent no-op.
+        /// The actor whose clicks the pick pump reports: this process's local player. Null (the
+        /// default) lets the pump work it out — the player whose loaded character the camera follows,
+        /// or else the only connected player.
         /// </summary>
-        // TODO: MVP2 — MouseHoverEnter/MouseHoverLeave once the pick pump tracks the hovered part
+        /// <remarks>
+        /// WHY settable: only the composition knows which connected actor sits at this screen, and a
+        /// host that runs several local actors names the one holding the mouse here.
+        /// </remarks>
+        public string LocalPlayerActorId { get; set; }
+
+        /// <summary>
+        /// Per-frame click pick: on the RISING edge of MouseButton1 (one fire per click), casts a
+        /// camera ray through the mouse position, resolves the nearest world instance, and fires
+        /// <c>MouseClick(playerWhoClicked)</c> of the deepest ClickDetector above it — a child of the
+        /// hit part, or of one of its Model or Folder ancestors below Workspace — when the clicking
+        /// player's character is within the detector's MaxActivationDistance of the hit part. Only the
+        /// single nearest ray hit fires, so clicking one part never fires another part's detector, and
+        /// clicking empty space fires nothing. Every step is null-guarded, so the headless default (no
+        /// camera/physics) is a silent no-op.
+        /// </summary>
+        // TODO: backlog — MouseHoverEnter/MouseHoverLeave once the pick pump tracks the hovered part
         // across frames; today only MouseClick is driven.
         private void PumpClicks()
         {
@@ -2010,7 +2403,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             RbxVector2 location = input.GetMouseLocation();
-            if (!_pickSource.TryPick(location, out InstanceId hitId, out double distanceStuds)
+            if (!_pickSource.TryPick(location, out InstanceId hitId, out double cameraDistanceStuds)
                 || !_registry.TryGet(hitId, out RbxInstance hit)
                 || hit.IsDestroyed)
             {
@@ -2018,33 +2411,131 @@ namespace CoreAI.Ai.LuaCs
             }
 
             RbxClickDetector detector = FindClickDetector(hit);
-            if (detector == null || detector.IsDestroyed)
+            // WHY: skip everything when nothing listens, so an unlistened detector boxes nothing.
+            if (detector == null || detector.IsDestroyed || !detector.MouseClick.HasConnections)
             {
                 return;
             }
 
-            // WHY: gate on MaxActivationDistance (studs from the camera) exactly like Roblox — a click
-            // farther than the detector's range does not activate it — and skip the fire when nothing
-            // listens so an unlistened detector boxes nothing.
-            if (distanceStuds <= detector.MaxActivationDistance && detector.MouseClick.HasConnections)
+            RbxPlayer player = ResolveClickingPlayer();
+            if (MeasureClickDistance(player, hit, cameraDistanceStuds)
+                <= detector.MaxActivationDistance)
             {
-                detector.MouseClick.Fire();
+                detector.MouseClick.Fire(new object[] { player });
             }
         }
 
-        // WHY: Roblox parents a ClickDetector UNDER the clickable part, so the hit part's direct
-        // children are searched for the first ClickDetector; a part with no detector is inert.
-        private static RbxClickDetector FindClickDetector(RbxInstance part)
+        /// <summary>
+        /// The deepest ClickDetector that owns a click on <paramref name="hit"/>: the first one among
+        /// the children of the hit part, else of its nearest Model or Folder ancestor that has one,
+        /// walking up to (not including) Workspace.
+        /// </summary>
+        /// <remarks>
+        /// WHY ancestors: Roblox detectors work when parented to a BasePart, a Model or a Folder, and a
+        /// door Model with its detector at model level is the common shape; searching only the hit
+        /// part's children left it inert. WHY the first child: of sibling detectors the first takes
+        /// priority. WHY Workspace is excluded: it is a Model too, and a detector parked there would
+        /// otherwise claim every click in the world.
+        /// </remarks>
+        private RbxClickDetector FindClickDetector(RbxInstance hit)
         {
-            foreach (RbxInstance child in part.GetChildren())
+            for (RbxInstance node = hit; node != null && !ReferenceEquals(node, _workspace)
+                                         && !ReferenceEquals(node, _game); node = node.Parent)
             {
-                if (child is RbxClickDetector detector)
+                if (!node.IsA("BasePart") && !node.IsA("Model") && !node.IsA("Folder"))
                 {
-                    return detector;
+                    continue;
+                }
+
+                foreach (RbxInstance child in node.GetChildren())
+                {
+                    if (child is RbxClickDetector detector && !detector.IsDestroyed)
+                    {
+                        return detector;
+                    }
                 }
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// The player a click on this screen belongs to: <see cref="LocalPlayerActorId"/>'s player when
+        /// it is set, else the player whose loaded character the camera follows, else the only
+        /// connected player; null when none of those resolves.
+        /// </summary>
+        private RbxPlayer ResolveClickingPlayer()
+        {
+            if (!string.IsNullOrEmpty(LocalPlayerActorId))
+            {
+                return _players.TryGetByActorId(LocalPlayerActorId, out RbxPlayer named)
+                       && !named.IsDestroyed
+                    ? named
+                    : null;
+            }
+
+            for (RbxInstance node = CameraSubject; node != null && !node.IsDestroyed; node = node.Parent)
+            {
+                RbxPlayer followed = _players.GetPlayerFromLoadedCharacter(node);
+                if (followed != null)
+                {
+                    return followed;
+                }
+            }
+
+            IReadOnlyList<RbxPlayer> players = _players.GetPlayers();
+            return players.Count == 1 ? players[0] : null;
+        }
+
+        /// <summary>
+        /// Studs between the clicking player's character root and the nearest point of the clicked
+        /// part's box; the camera-to-hit distance when there is no player or no character.
+        /// </summary>
+        /// <remarks>
+        /// WHY the character and not the camera: MaxActivationDistance is the distance between the
+        /// player's character and the detector. Measured from the camera, a third-person camera a dozen
+        /// studs behind the character made a detector twenty studs away unclickable, and a free-flying
+        /// camera let a far-away character click anything. WHY the nearest point of the box: the click
+        /// lands on the part's surface, so a player standing on a large part is next to what they
+        /// clicked even when its centre is far away. WHY the camera fallback (OURS, not Roblox's):
+        /// with no character there is nothing else to measure from, and a spectator without an avatar
+        /// keeps the range check it had.
+        /// </remarks>
+        private double MeasureClickDistance(RbxPlayer player, RbxInstance hit, double cameraDistanceStuds)
+        {
+            RbxInstance character = player?.Character;
+            RbxInstance root = character != null && !character.IsDestroyed
+                ? character.FindFirstChild(Mods.Rbx.Instances.Networking.RbxCharacterFactory.RootPartName)
+                : null;
+            if (root == null || !root.IsA("BasePart"))
+            {
+                return cameraDistanceStuds;
+            }
+
+            RbxVector3 from = _partSink.GetLivePositionStuds(root.Id);
+            if (!hit.IsA("BasePart"))
+            {
+                return (from - _partSink.GetLivePositionStuds(hit.Id)).Magnitude;
+            }
+
+            PartProperties part = _partSink.GetPartPropertiesOrDefault(hit.Id);
+            RbxVector3 local = part.CFrame.PointToObjectSpace(from);
+            RbxVector3 half = part.Size * 0.5f;
+            RbxVector3 nearest = new(
+                ClampAxis(local.X, half.X),
+                ClampAxis(local.Y, half.Y),
+                ClampAxis(local.Z, half.Z));
+            return (from - part.CFrame.PointToWorldSpace(nearest)).Magnitude;
+        }
+
+        private static float ClampAxis(float value, float halfExtent)
+        {
+            if (value > halfExtent)
+            {
+                return halfExtent;
+            }
+
+            return value < -halfExtent ? -halfExtent : value;
         }
 
         /// <summary>Camera.CameraType value shared by every script of this world (state only —
@@ -2224,17 +2715,317 @@ namespace CoreAI.Ai.LuaCs
             // WHY: the stock os library stays removed by the sandbox (execute/remove/rename/exit
             // and friends are a sandbox escape); mods get this two-member table and nothing else.
             luaRegistry.RegisterValue("os", () => BuildOsTable());
+            luaRegistry.RegisterValue("typeof", () => new LuaValue(Fn("typeof", ctx =>
+                ctx.ArgumentCount == 0
+                    ? throw RbxError.BadArgument("typeof expects a value at argument 1",
+                        "pass the value to name, e.g. typeof(workspace)")
+                    : RobloxTypeOf(ctx.State, ctx.GetArgument(0)))));
+            luaRegistry.RegisterValue("warn", () => new LuaValue(BuildWarn(context)));
+            RegisterUnimplementedGlobals(luaRegistry);
             // WHY: registered on every tier so a WorldEdit-less call fails with the actionable
             // capability message instead of "attempt to call a nil value".
             luaRegistry.RegisterValue("camera_set_cframe",
                 () => new LuaValue(BuildCameraSetCFrame(context)));
             luaRegistry.RegisterValue("camera_follow",
                 () => new LuaValue(BuildCameraFollow(context)));
+            // WHY on every tier, for the same reason: a read-tier Instance.new used to index a nil
+            // global; now it names the WorldEdit capability it lacks (M1-34). Creation itself is
+            // refused before anything is read or created.
+            luaRegistry.RegisterValue("Instance", () => BuildInstanceGlobal(context));
+        }
 
-            if (context.CanWorldEdit)
+        /// <summary>
+        /// Roblox <c>typeof</c>: the Roblox type name of every datatype CoreAI binds
+        /// (<c>"Instance"</c>, <c>"Vector3"</c>, <c>"EnumItem"</c>, <c>"RBXScriptSignal"</c>, ...), the
+        /// <c>Enum</c> global as <c>"Enums"</c>, a task thread handle as <c>"thread"</c>, and plain
+        /// Lua values exactly as <c>type</c> names them.
+        /// </summary>
+        internal static string RobloxTypeOf(LuaState state, LuaValue value)
+        {
+            switch (value.Type)
             {
-                luaRegistry.RegisterValue("Instance", () => BuildInstanceGlobal(context));
+                case LuaValueType.Nil: return "nil";
+                case LuaValueType.Boolean: return "boolean";
+                case LuaValueType.Number: return "number";
+                case LuaValueType.String: return "string";
+                case LuaValueType.Function: return "function";
+                case LuaValueType.Thread: return "thread";
+                case LuaValueType.Table:
+                    return IsEnumsGlobal(state, value) ? "Enums" : "table";
             }
+
+            if (TryGetInstance(value, out LuaCsRbxInstanceProxy _))
+            {
+                return "Instance";
+            }
+
+            if (!value.TryRead(out LuaCsRbxValueBox box))
+            {
+                return "userdata";
+            }
+
+            switch (box.Value)
+            {
+                case RbxVector3 _: return "Vector3";
+                case RbxVector2 _: return "Vector2";
+                case RbxCFrame _: return "CFrame";
+                case RbxColor3 _: return "Color3";
+                case RbxUDim _: return "UDim";
+                case RbxUDim2 _: return "UDim2";
+                case RbxTweenInfo _: return "TweenInfo";
+                case RbxEnumItem _: return "EnumItem";
+                case RbxEnum _: return "Enum";
+                case RbxRandom _: return "Random";
+                case RbxScriptSignal _: return "RBXScriptSignal";
+                case RbxScriptConnection _: return "RBXScriptConnection";
+                // WHY: InputObject is an Instance class in Roblox, so typeof names it "Instance".
+                case RbxInputObject _: return "Instance";
+                case IRbxScriptThread _: return "thread";
+            }
+
+            // WHY read from the metatable for the rest: TweenInfo, RaycastParams and RaycastResult box
+            // a carrier type private to the binding that builds them, but every datatype metatable
+            // names its __tostring "<Type>.__tostring", so the type name is recoverable there.
+            if (box.Metatable != null
+                && box.Metatable[Metamethods.ToString].TryRead(out LuaFunction toString)
+                && toString.Name != null
+                && toString.Name.EndsWith(".__tostring", StringComparison.Ordinal))
+            {
+                return toString.Name.Substring(0, toString.Name.Length - ".__tostring".Length);
+            }
+
+            return "userdata";
+        }
+
+        private static bool IsEnumsGlobal(LuaState state, LuaValue value)
+        {
+            LuaValue enums = state?.Environment["Enum"] ?? LuaValue.Nil;
+            return enums.Type == LuaValueType.Table && value.TryRead(out LuaTable table)
+                   && enums.TryRead(out LuaTable enumsTable) && ReferenceEquals(table, enumsTable);
+        }
+
+        /// <summary>
+        /// Attaches the per-mod log that <c>warn</c> writes to at <see cref="LuaLogLevel.Warn"/>, next to
+        /// what a mod's <c>print</c> writes at <see cref="LuaLogLevel.Print"/>. Null detaches it; without
+        /// one, <c>warn</c> goes to this world's log sink.
+        /// </summary>
+        public void AttachModLog(ILuaLogService modLog)
+        {
+            _modLog = modLog;
+        }
+
+        /// <summary>
+        /// Lines one script's <c>warn</c> may write to the world's log sink per
+        /// <see cref="WarnLogWindowSeconds"/>; the rest are counted and summed into the next line.
+        /// </summary>
+        internal const int MaxWarnLinesPerWindow = 20;
+
+        /// <summary>The window <see cref="MaxWarnLinesPerWindow"/> is counted over, in process seconds.</summary>
+        internal const double WarnLogWindowSeconds = 10d;
+
+        private sealed class WarnLogWindow
+        {
+            public double OpenedAtSeconds;
+            public int Lines;
+            public long Suppressed;
+        }
+
+        /// <summary>
+        /// Roblox <c>warn(...)</c>: the arguments, converted like <c>tostring</c> and joined by spaces,
+        /// go to the mod's log as a warning entry, or — for the one-off executor, or while no mod log is
+        /// attached — to the world's log sink as a line naming the script, at most
+        /// <see cref="MaxWarnLinesPerWindow"/> lines per <see cref="WarnLogWindowSeconds"/>.
+        /// </summary>
+        /// <remarks>
+        /// WHY the log-sink path is capped and the mod log is not: the mod log is a bounded ring buffer
+        /// per mod, while every line on the sink becomes a host warning with a stack trace, so a script
+        /// warning every frame would flood the host's log, disk and CPU. WHY the window lives in this
+        /// closure: it is per registration, so it goes away with the mod's state and needs no cleanup.
+        /// </remarks>
+        private LuaFunction BuildWarn(LuaCsRbxModContext context)
+        {
+            string ownerModId = string.IsNullOrWhiteSpace(context.OwnerModId) ? null : context.OwnerModId;
+            string source = ownerModId == null ? "one-off script" : "mod '" + ownerModId + "'";
+            WarnLogWindow window = new() { OpenedAtSeconds = _clockSource.ProcessTimeSeconds };
+            return new LuaFunction("warn", async (ctx, ct) =>
+            {
+                string[] parts = new string[ctx.ArgumentCount];
+                for (int index = 0; index < parts.Length; index++)
+                {
+                    parts[index] = await DescribeForLog(ctx.State, ctx.GetArgument(index), ct);
+                }
+
+                // WHY spaces: Roblox's output joins print and warn arguments with a space.
+                string message = string.Join(" ", parts);
+                ILuaLogService modLog = _modLog;
+                if (modLog != null && ownerModId != null)
+                {
+                    // WHY contained like the runtime's own log appends: a failing log consumer must not
+                    // turn a warning into an error of the mod that wrote it.
+                    try
+                    {
+                        modLog.Append(new LuaLogEntry
+                        {
+                            ModId = ownerModId,
+                            Level = LuaLogLevel.Warn,
+                            Message = message
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _log?.Invoke("[RbxApi] The mod log refused a warn from " + source + ": " + ex.Message);
+                    }
+
+                    return ctx.Return();
+                }
+
+                if (_log == null)
+                {
+                    return ctx.Return();
+                }
+
+                double now = _clockSource.ProcessTimeSeconds;
+                double open = now - window.OpenedAtSeconds;
+                if (open < 0d || open >= WarnLogWindowSeconds)
+                {
+                    long suppressed = window.Suppressed;
+                    window.OpenedAtSeconds = now;
+                    window.Lines = 0;
+                    window.Suppressed = 0;
+                    if (suppressed > 0)
+                    {
+                        _log("[RbxApi] " + suppressed + " more warn lines from " + source
+                             + " were dropped (at most " + MaxWarnLinesPerWindow + " every "
+                             + WarnLogWindowSeconds + " s reach this log)");
+                    }
+                }
+
+                if (window.Lines >= MaxWarnLinesPerWindow)
+                {
+                    window.Suppressed++;
+                    return ctx.Return();
+                }
+
+                window.Lines++;
+                _log("[RbxApi] warn from " + source + ": " + message);
+                return ctx.Return();
+            });
+        }
+
+        /// <summary>
+        /// A value's <c>tostring</c> text, including a datatype's own <c>__tostring</c>.
+        /// </summary>
+        /// <remarks>
+        /// WHY an error in a <c>__tostring</c> is not caught: Roblox's warn raises it too, and a budget
+        /// trip inside a runaway <c>__tostring</c> travels as the same exception and must reach the
+        /// scheduler instead of being turned into a log line.
+        /// </remarks>
+        private static async System.Threading.Tasks.ValueTask<string> DescribeForLog(LuaState state,
+            LuaValue value, CancellationToken cancellationToken)
+        {
+            LuaValue toString = state.Environment["tostring"];
+            if (toString.Type != LuaValueType.Function)
+            {
+                return value.ToString();
+            }
+
+            LuaValue[] converted = await state.CallAsync(toString, new[] { value }.AsSpan(),
+                cancellationToken);
+            return converted.Length > 0 && converted[0].Type == LuaValueType.String
+                ? converted[0].Read<string>()
+                : value.ToString();
+        }
+
+        /// <summary>
+        /// The Roblox globals CoreAI does not implement, as locked metatables whose every read, write
+        /// or call raises the same NOT_IMPLEMENTED stub the catalog raises for a known member, so
+        /// <c>BrickColor.new("Bright red")</c> names what is missing and what to use instead rather than
+        /// failing with "attempt to index a nil value".
+        /// </summary>
+        /// <remarks>
+        /// WHY every one is backlog or unsupported: none is scheduled on a roadmap rung, and a stub that
+        /// names a rung promises a delivery date. WHY built once for the process: a locked metatable
+        /// cannot be reached from Lua, so every mod can share it.
+        /// </remarks>
+        private static readonly KeyValuePair<string, LuaTable>[] UnimplementedGlobalMetas =
+            BuildUnimplementedGlobalMetas();
+
+        private static KeyValuePair<string, LuaTable>[] BuildUnimplementedGlobalMetas()
+        {
+            const string overlapWorkaround =
+                "cast with workspace:Raycast, or track overlaps with BasePart.Touched/TouchEnded";
+            const RbxKnownUnimplementedMemberStatus backlog = RbxKnownUnimplementedMemberStatus.Backlog;
+            return new[]
+            {
+                UnimplementedGlobalMeta("BrickColor", backlog,
+                    "use Color3.fromRGB(r, g, b) and assign it to part.Color"),
+                UnimplementedGlobalMeta("NumberSequence", backlog,
+                    "keep the keypoints in a Lua table; nothing CoreAI binds takes a NumberSequence yet"),
+                UnimplementedGlobalMeta("ColorSequence", backlog,
+                    "use a single Color3; nothing CoreAI binds takes a ColorSequence yet"),
+                UnimplementedGlobalMeta("NumberRange", backlog,
+                    "keep the minimum and maximum in two numbers and draw with Random:NextNumber(min, max)"),
+                UnimplementedGlobalMeta("Ray", backlog,
+                    "use workspace:Raycast(origin, direction, raycastParams)"),
+                UnimplementedGlobalMeta("Region3", backlog, overlapWorkaround),
+                UnimplementedGlobalMeta("Rect", backlog,
+                    "keep the Min and Max corners as two Vector2 values"),
+                UnimplementedGlobalMeta("PhysicalProperties", backlog,
+                    "use host-side Rigidbody and collider settings until physical properties land"),
+                UnimplementedGlobalMeta("OverlapParams", backlog, overlapWorkaround),
+                UnimplementedGlobalMeta("DateTime", backlog,
+                    "use os.time() for Unix seconds, or workspace:GetServerTimeNow() for time the server "
+                    + "and every client agree on"),
+                // WHY unsupported rather than backlog: a table every mod of the world can write is the
+                // shared mutable state mod isolation exists to prevent.
+                UnimplementedGlobalMeta("shared", RbxKnownUnimplementedMemberStatus.Unsupported,
+                    "share values between mods with mods_export/mods_get, or with attributes on an "
+                    + "instance both mods can see")
+            };
+        }
+
+        private static KeyValuePair<string, LuaTable> UnimplementedGlobalMeta(string name,
+            RbxKnownUnimplementedMemberStatus status, string workaround)
+        {
+            return new KeyValuePair<string, LuaTable>(name,
+                BuildUnimplementedGlobalMeta(name, status, workaround));
+        }
+
+        private static void RegisterUnimplementedGlobals(LuaCsApiRegistry luaRegistry)
+        {
+            for (int index = 0; index < UnimplementedGlobalMetas.Length; index++)
+            {
+                LuaTable meta = UnimplementedGlobalMetas[index].Value;
+                // WHY a fresh table per registration under the shared metatable: a script can still
+                // rawset into the table itself, and that must never leak into another mod's copy.
+                luaRegistry.RegisterValue(UnimplementedGlobalMetas[index].Key, () =>
+                {
+                    LuaTable stub = new();
+                    stub.Metatable = meta;
+                    return new LuaValue(stub);
+                });
+            }
+        }
+
+        private static LuaTable BuildUnimplementedGlobalMeta(string name,
+            RbxKnownUnimplementedMemberStatus status, string workaround)
+        {
+            LuaTable meta = new();
+            meta[Metamethods.Index] = Fn(name + ".__index", ctx =>
+                throw RbxKnownUnimplementedErrors.ForMember(
+                    DescribeUnimplementedAccess(name, Arg(ctx, 1)), status, null, workaround));
+            meta[Metamethods.NewIndex] = Fn(name + ".__newindex", ctx =>
+                throw RbxKnownUnimplementedErrors.ForMember(
+                    DescribeUnimplementedAccess(name, Arg(ctx, 1)), status, null, workaround));
+            meta[Metamethods.Call] = Fn(name + ".__call", _ =>
+                throw RbxKnownUnimplementedErrors.ForMember(name, status, null, workaround));
+            meta[Metamethods.ToString] = Fn(name + ".__tostring", _ => name);
+            return Lock(meta);
+        }
+
+        private static string DescribeUnimplementedAccess(string name, LuaValue key)
+        {
+            return key.Type == LuaValueType.String ? name + "." + key.Read<string>() : name;
         }
 
         private bool TryGetExecutingScriptBacking(string ownerModId,
@@ -2298,7 +3089,17 @@ namespace CoreAI.Ai.LuaCs
                 RbxInstance camera = _workspace.FindFirstChildOfClass("Camera");
                 context.RequireWorldEditForWrite(camera, "CFrame");
                 RbxCFrame cframe = ReadCFrame(ctx, 0, "camera_set_cframe");
-                _cameraRig.SetCFrame(cframe);
+                // WHY the shared write path: it fires Camera.Changed("CFrame") like the property write
+                // does, and a handler watching the camera must not miss moves made through this global.
+                if (camera != null)
+                {
+                    LuaCsRbxInstanceBindings.SetCameraCFrame(_cameraRig, camera, in cframe);
+                }
+                else
+                {
+                    _cameraRig.SetCFrame(cframe);
+                }
+
                 context.RecordMutation(camera);
                 return LuaValue.Nil;
             });
@@ -2311,23 +3112,30 @@ namespace CoreAI.Ai.LuaCs
                 RbxInstance camera = _workspace.FindFirstChildOfClass("Camera");
                 context.RequireWorldEditForWrite(camera, "CameraSubject");
                 LuaValue target = Arg(ctx, 0);
-                if (target.Type == LuaValueType.Nil)
+                RbxInstance subject = null;
+                if (target.Type != LuaValueType.Nil)
                 {
-                    SetCameraSubject(null);
-                    context.RecordMutation(camera);
-                    return LuaValue.Nil;
+                    if (!TryGetInstance(target, out LuaCsRbxInstanceProxy proxy))
+                    {
+                        throw RbxError.BadArgument(
+                            "camera_follow expects an Instance or nil at argument 1",
+                            "pass a world instance to follow (or nil to stop), got "
+                            + Describe(target) + " at argument 1");
+                    }
+
+                    subject = proxy.Instance;
                 }
 
-                if (!TryGetInstance(target, out LuaCsRbxInstanceProxy proxy))
-                {
-                    throw RbxError.BadArgument(
-                        "camera_follow expects an Instance or nil at argument 1",
-                        "pass a world instance to follow (or nil to stop), got "
-                        + Describe(target) + " at argument 1");
-                }
-
-                SetCameraSubject(proxy.Instance);
+                RbxInstance previousSubject = CameraSubject;
+                SetCameraSubject(subject);
                 context.RecordMutation(camera);
+                // WHY notified here as the Camera.CameraSubject write does: the subject lives on these
+                // bindings, not on the Camera instance, so no setter of the instance can fire Changed.
+                if (camera != null && !ReferenceEquals(previousSubject, CameraSubject))
+                {
+                    camera.NotifyPropertyChanged("CameraSubject");
+                }
+
                 return LuaValue.Nil;
             });
         }
@@ -2339,6 +3147,7 @@ namespace CoreAI.Ai.LuaCs
             LuaTable t = new();
             t["new"] = Fn("Instance.new", ctx =>
             {
+                context.RequireWorldEdit("Instance.new");
                 string className = ReadString(ctx, 0, "Instance.new");
                 LuaValue parentValue = Arg(ctx, 1);
                 RbxInstance parentInstance = null;
@@ -3130,6 +3939,10 @@ namespace CoreAI.Ai.LuaCs
             _scheduledThreadsByMod.Remove(ownerModId);
             _currentSchedulerGenerationByMod.Remove(ownerModId);
             _actorContextsByOwnerModId.Remove(ownerModId);
+            // WHY released here: a world that loads and unloads mods for hours would otherwise keep
+            // two strings for every mod id it ever ran; a reload rebuilds them on its first resume.
+            _resumeOperationByMod.Remove(ownerModId);
+            _originTagByMod.Remove(ownerModId);
             return killed;
         }
 

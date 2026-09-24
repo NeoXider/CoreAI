@@ -274,5 +274,20 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// agrees with the server about when things happened.
         /// </remarks>
         double ServerClockOffsetSeconds { get; }
+
+        /// <summary>
+        /// Whether <see cref="ServerClockOffsetSeconds"/> measures the server's clock yet: always on a
+        /// server, and on a client from its first synchronization on. Before that the offset is zero
+        /// because nothing is known, not because the clocks agree.
+        /// </summary>
+        /// <remarks>
+        /// WHY consumers need it: a clock kept monotonic on top of the offset must treat the first
+        /// synchronization as a re-base, not as time running backwards; without this answer a client
+        /// that read its own clock before the first anchor froze its server time until the whole
+        /// skew had elapsed. WHY a default body: a server and the loopback are synchronized by
+        /// definition; a transport that learns the offset later overrides this, and the wrappers
+        /// around one forward it.
+        /// </remarks>
+        bool IsServerClockSynchronized => true;
     }
 }

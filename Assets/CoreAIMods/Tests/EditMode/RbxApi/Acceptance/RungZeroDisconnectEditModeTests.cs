@@ -123,6 +123,63 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(200, harness.ChatFactory.ReleaseCount);
         }
 
+        [Test]
+        public void DisconnectActor_RaisesActorModsDisconnected_WithOnlyThatActorsMods()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actorA = harness.Actor("disconnect-a");
+            ActorContext actorB = harness.Actor("disconnect-b");
+            harness.Bindings.ConnectActor(actorA);
+            harness.Bindings.ConnectActor(actorB);
+            harness.Stack.Runtime.LoadMod(actorA, "released-mod-a",
+                "task.spawn(function() task.wait(1000) end)", persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorB, "kept-mod-b",
+                "task.spawn(function() task.wait(1000) end)", persistToStore: false);
+            List<string> raised = new();
+            harness.Bindings.ActorModsDisconnected += (actorId, mods) =>
+                raised.Add(actorId + ":" + string.Join(",", mods));
+
+            Assert.IsTrue(harness.Bindings.DisconnectActor(actorA));
+
+            CollectionAssert.AreEqual(new[] { "disconnect-a:released-mod-a" }, raised,
+                "the runtime learns exactly which mods ran as the departed actor");
+            Assert.IsFalse(harness.Bindings.DisconnectActor(actorA));
+            Assert.AreEqual(1, raised.Count, "a second disconnect of a released actor raises nothing");
+        }
+
+        [Test]
+        public void DisconnectActor_ASubscriberUnloadingTheReleasedMods_StopsTheirDispatch()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actorA = harness.Actor("disconnect-a");
+            ActorContext actorB = harness.Actor("disconnect-b");
+            harness.Bindings.ConnectActor(actorA);
+            harness.Bindings.ConnectActor(actorB);
+            harness.Stack.Runtime.LoadMod(actorA, "released-mod-a",
+                "task.spawn(function() task.wait(1000) end)", persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorB, "kept-mod-b",
+                "task.spawn(function() task.wait(1000) end)", persistToStore: false);
+            // WHY a throwing subscriber first: the actor is gone by the time the event runs, and one
+            // failing listener must not keep the next one from releasing the actor's mods.
+            harness.Bindings.ActorModsDisconnected += (actorId, mods) =>
+                throw new InvalidOperationException("a broken listener");
+            harness.Bindings.ActorModsDisconnected += (actorId, mods) =>
+            {
+                foreach (string modId in mods)
+                {
+                    harness.Stack.Runtime.UnloadMod(modId);
+                }
+            };
+
+            Assert.IsTrue(harness.Bindings.DisconnectActor(actorA));
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.IsFalse(harness.Stack.Runtime.IsLoaded("released-mod-a"),
+                "the departed actor's mod no longer dispatches at all (M2-24)");
+            Assert.IsTrue(harness.Stack.Runtime.IsLoaded("kept-mod-b"),
+                "another actor's mod is untouched");
+        }
+
         private static void Increment(Dictionary<string, int> counts, string actorId)
         {
             counts[actorId] = counts.TryGetValue(actorId, out int count)

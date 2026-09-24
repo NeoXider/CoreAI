@@ -240,6 +240,17 @@ namespace CoreAI.Sandbox.LuaCs
 
             args ??= EmptyValues;
 
+            // WHY the stack is emptied and refilled on every resume: ResumeAsync takes the WHOLE stack
+            // as the values coroutine.yield (or the first call) receives, and the previous resume left
+            // its [ok, values...] there. Reused as is, a parked task thread resumed by
+            // task.spawn(thread, 42) read `true, <what it last yielded>` from coroutine.yield instead of
+            // 42.
+            _callStack.Clear();
+            if (args.Length > 0)
+            {
+                _callStack.PushRange(args);
+            }
+
             // WHY: Re-arm a fresh per-resume budget (instruction steps + wall clock) via SetHook, mirroring
             // LuaCsExecutionGuard. In protected mode a breach throws a LuaRuntimeException inside the VM,
             // which Lua-CSharp turns into an [ok=false, error] result and marks the thread Dead. The hook

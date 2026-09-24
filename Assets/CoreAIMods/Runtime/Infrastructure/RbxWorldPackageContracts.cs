@@ -2755,6 +2755,12 @@ namespace CoreAI.Mods.WorldPackages
             /// <summary>Delegated: only the real transport can measure the server clock.</summary>
             public double ServerClockOffsetSeconds => _inner.ServerClockOffsetSeconds;
 
+            /// <summary>
+            /// Delegated with the offset: without it the staged world read every transport as already
+            /// synchronized, and a client's first clock anchor looked like time running backwards.
+            /// </summary>
+            public bool IsServerClockSynchronized => _inner.IsServerClockSynchronized;
+
             /// <inheritdoc />
             /// <remarks>
             /// Forwarded rather than queued: a peer that dropped during staging has already gone, and

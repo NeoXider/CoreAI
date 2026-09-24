@@ -2,8 +2,12 @@ using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Mods.Rbx.Binding;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
@@ -230,6 +234,223 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             // a RunService.Heartbeat connection, so a clicked part never fires a torn-down mod's handler.
             Assert.IsFalse(detector.MouseClick.HasConnections,
                 "unloading the mod disconnects its MouseClick connection");
+        }
+
+        /// <summary>A pick source that reports whatever part and camera distance the test sets.</summary>
+        private sealed class ScriptedPickSource : IClickPickSource
+        {
+            public InstanceId Hit { get; set; } = InstanceId.None;
+
+            public double CameraDistanceStuds { get; set; }
+
+            public bool TryPick(RbxVector2 screenPositionTopLeft, out InstanceId hitId,
+                out double distanceStuds)
+            {
+                hitId = Hit;
+                distanceStuds = CameraDistanceStuds;
+                return Hit != InstanceId.None;
+            }
+        }
+
+        private sealed class ClickWorld
+        {
+            public ClickWorld(bool withCharacter)
+            {
+                Pick = new ScriptedPickSource();
+                Input = new InMemoryInputSource();
+                Roblox = new LuaCsRbxApiBindings(pickSource: Pick, inputSource: Input,
+                    defaultCharacterAutoLoads: false);
+                Store = new MemoryStore();
+                Stack = BuildStack(Roblox, Store);
+                Player = Roblox.ConnectActor(new LocalActorIdentityProvider("clicker")
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer));
+                if (!withCharacter)
+                {
+                    return;
+                }
+
+                RbxInstance character = RbxCharacterFactory.Load(
+                    Roblox.Registry, Roblox.Registry.WorldRoot, Player);
+                RbxInstance root = character.FindFirstChild(RbxCharacterFactory.RootPartName);
+                Roblox.PartSink.SetPosition(root.Id, RbxVector3.Zero);
+            }
+
+            public ScriptedPickSource Pick { get; }
+
+            public InMemoryInputSource Input { get; }
+
+            public LuaCsRbxApiBindings Roblox { get; }
+
+            public MemoryStore Store { get; }
+
+            public LuaCsModStack Stack { get; }
+
+            public RbxPlayer Player { get; }
+
+            public RbxInstance Find(string name)
+            {
+                foreach (RbxInstance descendant in Roblox.Registry.WorldRoot.GetDescendants())
+                {
+                    if (descendant.Name == name)
+                    {
+                        return descendant;
+                    }
+                }
+
+                return null;
+            }
+
+            /// <summary>One full press and release of the left button over <paramref name="part"/>.</summary>
+            public void Click(RbxInstance part, double cameraDistanceStuds)
+            {
+                Pick.Hit = part.Id;
+                Pick.CameraDistanceStuds = cameraDistanceStuds;
+                Input.SetMouseButton(0, true);
+                Roblox.PumpPreRender(0f);
+                Input.SetMouseButton(0, false);
+                Roblox.PumpPreRender(0f);
+                Roblox.Scheduler.Advance(0d);
+            }
+        }
+
+        private const string DoorModSource = @"
+            local door = Instance.new('Model')
+            door.Name = 'Door'
+            door.Parent = workspace
+            local panel = Instance.new('Part')
+            panel.Name = 'Panel'
+            panel.Size = Vector3.new(1, 1, 1)
+            panel.Position = Vector3.new(20, 0, 0)
+            panel.Parent = door
+            local detector = Instance.new('ClickDetector')
+            detector.Parent = door
+            local clicks = 0
+            detector.MouseClick:Connect(function(player)
+                clicks = clicks + 1
+                store_set('clicks', tostring(clicks))
+                store_set('who', typeof(player) .. ':' .. tostring(player and player.Name))
+            end)";
+
+        [Test]
+        public void Lua_ClickDetector_MouseClick_PassesThePlayerWhoClicked_FromAModelLevelDetector()
+        {
+            ClickWorld world = new(withCharacter: true);
+            world.Stack.Runtime.LoadMod("door", DoorModSource);
+
+            world.Click(world.Find("Panel"), 40d);
+
+            Assert.AreEqual("1", world.Store.Get("door", "clicks"),
+                "a detector parented to the part's Model fires for a click on the part");
+            Assert.AreEqual("Instance:" + world.Player.Name, world.Store.Get("door", "who"),
+                "MouseClick passes the Player who clicked");
+        }
+
+        [Test]
+        public void Lua_ClickDetector_Distance_IsMeasuredFromTheCharacter_NotTheCamera()
+        {
+            ClickWorld world = new(withCharacter: true);
+            world.Stack.Runtime.LoadMod("door", DoorModSource);
+            RbxInstance panel = world.Find("Panel");
+
+            world.Click(panel, 40d);
+            Assert.AreEqual("1", world.Store.Get("door", "clicks"),
+                "19.5 studs from the character but 40 from the camera is within the default 32");
+
+            world.Roblox.PartSink.SetPosition(panel.Id, new RbxVector3(40f, 0f, 0f));
+            world.Click(panel, 5d);
+            Assert.AreEqual("1", world.Store.Get("door", "clicks"),
+                "39.5 studs from the character stays out of range even with the camera 5 studs away");
+        }
+
+        [Test]
+        public void Lua_ClickDetector_FolderLevelDetectorFires_AndTheDeepestDetectorWins()
+        {
+            ClickWorld world = new(withCharacter: true);
+            world.Stack.Runtime.LoadMod("m", @"
+                local folder = Instance.new('Folder')
+                folder.Parent = workspace
+                local button = Instance.new('Part')
+                button.Name = 'Button'
+                button.Position = Vector3.new(3, 0, 0)
+                button.Parent = folder
+                local folderDetector = Instance.new('ClickDetector')
+                folderDetector.Parent = folder
+                folderDetector.MouseClick:Connect(function() store_set('folder', 'fired') end)
+                local lever = Instance.new('Part')
+                lever.Name = 'Lever'
+                lever.Position = Vector3.new(0, 0, 3)
+                lever.Parent = folder
+                local leverDetector = Instance.new('ClickDetector')
+                leverDetector.Parent = lever
+                leverDetector.MouseClick:Connect(function() store_set('lever', 'fired') end)");
+
+            world.Click(world.Find("Button"), 10d);
+            Assert.AreEqual("fired", world.Store.Get("m", "folder"), "a Folder-level detector fires");
+
+            world.Store.Set("m", "folder", null);
+            world.Click(world.Find("Lever"), 10d);
+            Assert.AreEqual("fired", world.Store.Get("m", "lever"), "the part's own detector fires");
+            Assert.AreEqual("", world.Store.Get("m", "folder"),
+                "only the deepest detector fires, never its ancestor's as well");
+        }
+
+        [Test]
+        public void Negative_Lua_ClickDetector_ParentedToWorkspace_DoesNotClaimEveryClick()
+        {
+            ClickWorld world = new(withCharacter: true);
+            world.Stack.Runtime.LoadMod("m", @"
+                local part = Instance.new('Part')
+                part.Name = 'Loose'
+                part.Parent = workspace
+                local detector = Instance.new('ClickDetector')
+                detector.Parent = workspace
+                detector.MouseClick:Connect(function() store_set('fired', 'yes') end)");
+
+            world.Click(world.Find("Loose"), 5d);
+
+            Assert.AreEqual("", world.Store.Get("m", "fired"));
+        }
+
+        [Test]
+        public void Lua_ClickDetector_WithoutACharacter_FallsBackToTheCameraDistance()
+        {
+            ClickWorld world = new(withCharacter: false);
+            world.Stack.Runtime.LoadMod("door", DoorModSource);
+            RbxInstance panel = world.Find("Panel");
+
+            world.Click(panel, 40d);
+            Assert.AreEqual("", world.Store.Get("door", "clicks"), "40 camera studs is out of range");
+
+            world.Click(panel, 10d);
+            Assert.AreEqual("1", world.Store.Get("door", "clicks"));
+            Assert.AreEqual("Instance:" + world.Player.Name, world.Store.Get("door", "who"),
+                "the only connected player is the one who clicked");
+        }
+
+        [Test]
+        public void ClickDetector_Destroy_DisconnectsItsMouseClickHandlers()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+            stack.Runtime.LoadMod("m", @"
+                local part = Instance.new('Part')
+                part.Parent = workspace
+                local detector = Instance.new('ClickDetector')
+                detector.Parent = part
+                detector.MouseClick:Connect(function() store_set('clicked', 'yes') end)");
+            RbxClickDetector detector = FindClickDetector(roblox);
+            Assert.IsTrue(detector.MouseClick.HasConnections);
+
+            detector.Destroy();
+
+            // WHY: Destroy disconnects exactly the signals the instance holds in its signal table; a
+            // field-initialised MouseClick kept delivering to a destroyed detector's handlers.
+            Assert.IsFalse(detector.MouseClick.HasConnections,
+                "destroying the detector disconnects its MouseClick handlers");
+            detector.MouseClick.Fire();
+            roblox.Scheduler.Advance(0d);
+            Assert.AreEqual("", store.Get("m", "clicked"));
         }
     }
 }

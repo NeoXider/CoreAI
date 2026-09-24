@@ -2576,20 +2576,67 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_CapabilityGating_ReadTierHasNoInstanceNewAndCannotMutate()
+        public void Lua_CapabilityGating_ReadTierInstanceNewNamesWorldEditAndCannotMutate()
         {
             LuaCsRbxApiBindings roblox = new();
             LuaCapabilities readOnly =
                 LuaCapabilities.Read | LuaCapabilities.Gameplay | LuaCapabilities.LogicOverride;
             LuaCsModStack stack = BuildStack(roblox, caps: readOnly);
+            RbxInstance workspace = roblox.Game.FindFirstChildOfClass("Workspace");
+            int workspaceChildren = workspace.GetChildren().Count;
+            int detachedFolders = CountDetachedFolders(roblox);
 
+            // WHY Instance is present on the Read tier (M1-34): an absent global failed with
+            // "attempt to index a nil value", which names neither the capability nor the fix.
             stack.Runtime.LoadMod("reader", @"
-                assert(Instance == nil, 'Instance.new must be absent without WorldEdit')
+                assert(Instance ~= nil, 'Instance is registered on every tier')
+                local ok, err = pcall(Instance.new, 'Folder')
+                assert(not ok, 'Instance.new must be refused without WorldEdit')
+                assert(string.find(tostring(err),
+                    'Instance.new requires the WorldEdit capability', 1, true), tostring(err))
+                local okParented, errParented = pcall(Instance.new, 'Folder', workspace)
+                assert(not okParented, 'the parent overload is refused too')
+                assert(string.find(tostring(errParented), 'WorldEdit', 1, true), tostring(errParented))
                 assert(workspace.ClassName == 'Workspace', 'navigation stays available on Read tier')");
+            Assert.IsTrue(stack.Runtime.IsLoaded("reader"));
+            Assert.AreEqual(workspaceChildren, workspace.GetChildren().Count,
+                "a refused Instance.new parents nothing");
+            Assert.AreEqual(detachedFolders, CountDetachedFolders(roblox),
+                "a refused Instance.new leaves no detached instance behind");
 
             Exception ex = LoadFails(stack, "writer", "workspace.Name = 'Hacked'");
             StringAssert.Contains("WorldEdit", FullText(ex));
             Assert.AreEqual("Workspace", roblox.Game.FindFirstChildOfClass("Workspace").Name);
+        }
+
+        private static int CountDetachedFolders(LuaCsRbxApiBindings roblox)
+        {
+            int count = 0;
+            foreach (RbxInstance live in roblox.Registry.GetLiveInstances())
+            {
+                if (live.ClassName == "Folder" && live.Parent == null)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        [Test]
+        public void Lua_InstanceNew_WithoutWorldEdit_RaisesCapabilityError()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            LuaCsModStack stack = BuildStack(roblox, caps: LuaCapabilities.Read);
+
+            Exception ex = LoadFails(stack, "reader", "local part = Instance.new('Part')");
+
+            string fullText = FullText(ex);
+            StringAssert.Contains("BAD_ARGUMENT", fullText);
+            StringAssert.Contains(
+                "Instance.new requires the WorldEdit capability, which was not granted to this script",
+                fullText);
+            StringAssert.DoesNotContain("attempt to index a nil value", fullText);
         }
 
         [Test]
@@ -3243,6 +3290,327 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             stack.Runtime.LoadMod("m",
                 "assert(workspace:WaitForChild('NeverThere', 0) == nil)");
             Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_Typeof_ReturnsRobloxTypeNames()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+
+            stack.Runtime.LoadMod("m", @"
+                local function expect(value, name)
+                    local got = typeof(value)
+                    assert(got == name, 'typeof: expected ' .. name .. ', got ' .. tostring(got))
+                end
+                expect(workspace, 'Instance')
+                expect(Vector3.zero, 'Vector3')
+                expect(Vector2.new(1, 2), 'Vector2')
+                expect(CFrame.new(), 'CFrame')
+                expect(Color3.new(), 'Color3')
+                expect(UDim.new(0, 1), 'UDim')
+                expect(UDim2.new(), 'UDim2')
+                expect(Enum.KeyCode.A, 'EnumItem')
+                expect(Enum.KeyCode, 'Enum')
+                expect(Enum, 'Enums')
+                expect(Random.new(1), 'Random')
+                expect(TweenInfo.new(1), 'TweenInfo')
+                expect(RaycastParams.new(), 'RaycastParams')
+                expect(workspace.ChildAdded, 'RBXScriptSignal')
+                local connection = workspace.ChildAdded:Connect(function() end)
+                expect(connection, 'RBXScriptConnection')
+                connection:Disconnect()
+                expect(task.spawn(function() task.wait(1) end), 'thread')
+                expect(coroutine.create(function() end), 'thread')
+                expect(nil, 'nil')
+                expect(true, 'boolean')
+                expect(1, 'number')
+                expect('s', 'string')
+                expect({}, 'table')
+                expect(print, 'function')
+                assert(type(workspace) == 'userdata', 'type keeps the plain Lua name')
+                local ok, err = pcall(typeof)
+                assert(not ok and string.find(tostring(err), 'typeof expects a value', 1, true),
+                    tostring(err))");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_Warn_LogsAsWarning()
+        {
+            List<string> log = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(log: log.Add));
+
+            stack.Runtime.LoadMod("m", "warn('careful', 3, Vector3.new(1, 2, 3), nil)");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"), "warn is a registered global");
+            List<string> lines = log.FindAll(line => line.Contains("warn from"));
+            Assert.AreEqual(1, lines.Count, string.Join(" | ", log));
+            StringAssert.Contains("mod 'm'", lines[0]);
+            StringAssert.Contains("careful 3 1, 2, 3 nil", lines[0],
+                "arguments are converted like tostring and joined by spaces");
+        }
+
+        [Test]
+        public void Lua_Warn_WritesTheAttachedModLogAtWarnLevel()
+        {
+            List<string> log = new();
+            LuaCsRbxApiBindings roblox = new(log: log.Add);
+            CoreAI.Ai.Logging.LuaLogService modLog = new();
+            roblox.AttachModLog(modLog);
+            LuaCsModStack stack = BuildStack(roblox);
+
+            stack.Runtime.LoadMod("m", "warn('low fuel', 2)");
+
+            IReadOnlyList<CoreAI.Ai.Logging.LuaLogEntry> entries = modLog.Query(
+                new CoreAI.Ai.Logging.LuaLogQuery
+                {
+                    ModId = "m",
+                    MinLevel = CoreAI.Ai.Logging.LuaLogLevel.Warn
+                });
+            Assert.AreEqual(1, entries.Count, "one warn entry in the mod's own log");
+            Assert.AreEqual(CoreAI.Ai.Logging.LuaLogLevel.Warn, entries[0].Level);
+            Assert.AreEqual("low fuel 2", entries[0].Message);
+            Assert.IsFalse(log.Exists(line => line.Contains("warn from")),
+                "with a mod log attached the warning is not duplicated into the host log");
+        }
+
+        [Test]
+        public void Negative_Lua_Warn_AFloodIsCappedPerWindowAndTheRestAreSummed()
+        {
+            List<string> log = new();
+            SteppedClockSource clock = new() { ProcessTimeSeconds = 5d };
+            LuaCsRbxApiBindings roblox = new(log: log.Add, clockSource: clock);
+            LuaCsModStack stack = BuildStack(roblox);
+
+            stack.Runtime.LoadMod("chatty", @"
+                for i = 1, 25 do warn('tick', i) end
+                task.wait(1)
+                warn('after the window')");
+
+            Assert.AreEqual(LuaCsRbxApiBindings.MaxWarnLinesPerWindow,
+                log.FindAll(line => line.Contains("warn from mod 'chatty'")).Count,
+                "a script warning in a loop reaches the host log a bounded number of times");
+
+            clock.ProcessTimeSeconds += LuaCsRbxApiBindings.WarnLogWindowSeconds;
+            roblox.Scheduler.Advance(1d);
+
+            Assert.IsTrue(log.Exists(line => line.Contains("5 more warn lines from mod 'chatty'")),
+                string.Join(" | ", log));
+            Assert.IsTrue(log.Exists(line => line.Contains("warn from mod 'chatty': after the window")),
+                "the next window logs again");
+        }
+
+        [Test]
+        public void Negative_Lua_Warn_ATostringThatFailsRaisesInsteadOfLogging()
+        {
+            List<string> log = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(log: log.Add));
+
+            Exception ex = LoadFails(stack, "m",
+                "warn(setmetatable({}, {__tostring = function() error('tostring broke') end}))");
+
+            StringAssert.Contains("tostring broke", FullText(ex));
+            Assert.IsFalse(log.Exists(line => line.Contains("warn from")));
+        }
+
+        [TestCase("BrickColor")]
+        [TestCase("NumberSequence")]
+        [TestCase("ColorSequence")]
+        [TestCase("NumberRange")]
+        [TestCase("Ray")]
+        [TestCase("Region3")]
+        [TestCase("Rect")]
+        [TestCase("PhysicalProperties")]
+        [TestCase("OverlapParams")]
+        [TestCase("DateTime")]
+        public void Lua_UnimplementedDatatypeGlobal_RaisesLoudBacklogStub(string name)
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+
+            Exception ex = LoadFails(stack, "m", "local value = " + name + ".new()");
+
+            string fullText = FullText(ex);
+            StringAssert.Contains("NOT_IMPLEMENTED", fullText);
+            StringAssert.Contains(
+                name + ".new is a known Rbx member, but no roadmap rung is assigned.", fullText);
+            StringAssert.Contains("| fix: ", fullText);
+            StringAssert.DoesNotContain("attempt to index a nil value", fullText);
+        }
+
+        [Test]
+        public void Lua_BrickColorGlobal_RaisesNotImplemented_OnCallWriteAndRead()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+
+            string called = FullText(LoadFails(stack, "call", "local value = BrickColor('Bright red')"));
+            string written = FullText(LoadFails(stack, "write", "DateTime.now = 1"));
+
+            StringAssert.Contains(
+                "NOT_IMPLEMENTED: BrickColor is a known Rbx member, but no roadmap rung is assigned.",
+                called);
+            StringAssert.Contains("fix: use Color3.fromRGB(r, g, b)", called);
+            StringAssert.Contains("DateTime.now is a known Rbx member", written);
+            stack.Runtime.LoadMod("read", @"
+                assert(tostring(BrickColor) == 'BrickColor')
+                assert(typeof(BrickColor) == 'table')");
+            Assert.IsTrue(stack.Runtime.IsLoaded("read"), "naming the stub is not an access");
+        }
+
+        [Test]
+        public void Lua_SharedGlobal_IsADeliberatelyUnsupportedStub()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+
+            string written = FullText(LoadFails(stack, "writer", "shared.score = 1"));
+            string read = FullText(LoadFails(stack, "reader", "local score = shared.score"));
+
+            foreach (string fullText in new[] { written, read })
+            {
+                StringAssert.Contains("NOT_IMPLEMENTED", fullText);
+                StringAssert.Contains(
+                    "shared.score is a known Rbx member deliberately unsupported by CoreAI.", fullText);
+                StringAssert.Contains("mods_export", fullText);
+            }
+        }
+
+        [Test]
+        public void Lua_TypeofWarnAndStubs_AreRegisteredOnTheReadTier()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(), caps: LuaCapabilities.Read);
+
+            stack.Runtime.LoadMod("reader", @"
+                assert(typeof(workspace) == 'Instance')
+                assert(type(warn) == 'function')
+                local ok, err = pcall(function() return BrickColor.new end)
+                assert(not ok and string.find(tostring(err), 'NOT_IMPLEMENTED', 1, true), tostring(err))");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("reader"));
+        }
+
+        [Test]
+        public void Lua_CameraGlobals_FireCameraPropertyChanged_LikeThePropertyWrites()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local camera = workspace.CurrentCamera
+                local moves, follows = 0, 0
+                camera:GetPropertyChangedSignal('CFrame'):Connect(function()
+                    moves = moves + 1
+                    store_set('moves', tostring(moves))
+                end)
+                camera:GetPropertyChangedSignal('CameraSubject'):Connect(function()
+                    follows = follows + 1
+                    store_set('follows', tostring(follows))
+                end)
+                local part = Instance.new('Part')
+                part.Parent = workspace
+                camera_set_cframe(CFrame.new(1, 2, 3))
+                camera_follow(part)
+                camera_follow(part)
+                task.wait()
+                camera_follow(nil)");
+            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0d);
+
+            Assert.AreEqual("1", store.Get("m", "moves"), "camera_set_cframe fires Changed(CFrame)");
+            Assert.AreEqual("2", store.Get("m", "follows"),
+                "camera_follow fires Changed(CameraSubject) on each real change and not on a repeat");
+        }
+
+        private sealed class SteppedClockSource : IRbxClockSource
+        {
+            public double GameTimeSeconds { get; set; }
+
+            public long UnixTimeSeconds { get; set; }
+
+            public double ProcessTimeSeconds { get; set; }
+
+            public double UnixTimeSecondsFractional { get; set; }
+        }
+
+        private static RbxNetworkEventMessage UnknownRemoteEvent(ulong remoteId, string senderActorId)
+        {
+            return new RbxNetworkEventMessage(new InstanceId(remoteId), RbxNetworkDirection.ClientToServer,
+                RbxNetworkReliability.ReliableOrdered, senderActorId, null, Array.Empty<byte>());
+        }
+
+        [Test]
+        public void Network_UnknownRemoteFlood_LogsOncePerSenderAndWindow_AndCountsEveryPacket()
+        {
+            List<string> log = new();
+            SteppedClockSource clock = new() { ProcessTimeSeconds = 5d };
+            TrackingNetworkBridge bridge = new();
+            LuaCsRbxApiBindings roblox = new(log: log.Add, networkBridge: bridge, clockSource: clock);
+            roblox.ConnectActor(Actor("flooder"));
+            roblox.ConnectActor(Actor("bystander"));
+
+            for (int index = 0; index < 1000; index++)
+            {
+                bridge.SendEvent(UnknownRemoteEvent(900000UL + (ulong)index, "flooder"));
+            }
+
+            Assert.AreEqual(1, log.FindAll(line => line.Contains("unknown RemoteEvent")).Count,
+                "1,000 packets produce one line");
+            Assert.AreEqual(1000, roblox.RejectedNetworkEventCount, "every packet is counted");
+
+            bridge.SendEvent(UnknownRemoteEvent(99UL, "bystander"));
+            Assert.AreEqual(2, log.FindAll(line => line.Contains("unknown RemoteEvent")).Count,
+                "a second sender's first warning is not hidden by the first sender's flood");
+
+            clock.ProcessTimeSeconds += LuaCsRbxApiBindings.NetworkWarningWindowSeconds;
+            bridge.SendEvent(UnknownRemoteEvent(99UL, "flooder"));
+            List<string> lines = log.FindAll(line => line.Contains("unknown RemoteEvent"));
+            Assert.AreEqual(3, lines.Count, "the next window logs again");
+            StringAssert.Contains("'flooder'", lines[2]);
+            StringAssert.Contains("999 more like it", lines[2], "the suppressed packets are summed");
+            Assert.AreEqual(1002, roblox.RejectedNetworkEventCount);
+        }
+
+        [Test]
+        public void Negative_Network_ADisconnectedSendersWindowIsForgotten()
+        {
+            List<string> log = new();
+            SteppedClockSource clock = new() { ProcessTimeSeconds = 5d };
+            TrackingNetworkBridge bridge = new();
+            LuaCsRbxApiBindings roblox = new(log: log.Add, networkBridge: bridge, clockSource: clock);
+            ActorContext sender = Actor("returning");
+            roblox.ConnectActor(sender);
+            bridge.SendEvent(UnknownRemoteEvent(900001UL, "returning"));
+
+            Assert.IsTrue(roblox.DisconnectActor(sender));
+            roblox.ConnectActor(sender);
+            bridge.SendEvent(UnknownRemoteEvent(900002UL, "returning"));
+
+            Assert.AreEqual(2, log.FindAll(line => line.Contains("unknown RemoteEvent")).Count,
+                "a reconnected sender starts a fresh window instead of inheriting a stale one");
+        }
+
+        [Test]
+        public void SchedulerResume_ModOriginTagIsInterned_AndReleasedWhenTheModsThreadsAreKilled()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            LuaCsModStack stack = BuildStack(roblox);
+            for (int index = 0; index < 3; index++)
+            {
+                stack.Runtime.LoadMod("cached-" + index, "task.spawn(function() task.wait(0.1) end)");
+            }
+
+            roblox.Scheduler.Advance(0.2d);
+
+            Assert.AreEqual(3, roblox.ResumeCacheModCount, "every resuming mod interned its labels");
+            Assert.AreSame(roblox.ModOriginTag("cached-0"), roblox.ModOriginTag("cached-0"),
+                "a resume reuses the mod's origin tag instead of building one");
+            for (int index = 0; index < 3; index++)
+            {
+                roblox.KillAllScheduledOwnedBy("cached-" + index);
+            }
+
+            Assert.AreEqual(0, roblox.ResumeCacheModCount,
+                "the unload path releases both interned strings of every mod");
         }
 
         // ---- Shared world -------------------------------------------------------------------

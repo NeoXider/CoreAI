@@ -1549,6 +1549,35 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_M2_14_ParkedThread_CoroutineYieldReturnsTheValuesPassedToTaskSpawn()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local parked = task.spawn(function()
+                    local value, label = coroutine.yield('parking')
+                    store_set('first', tostring(value) .. ',' .. tostring(label))
+                    local again = select('#', coroutine.yield())
+                    store_set('second', tostring(again))
+                end)
+                task.spawn(parked, 42, 'answer')
+                task.defer(parked)");
+
+            // WHY: the handle used to hand coroutine.yield the previous resume's own results (true and
+            // what the thread had yielded), never the values the resumer passed.
+            Assert.AreEqual("42,answer", store.Get("m", "first"),
+                "coroutine.yield returns exactly what task.spawn(thread, ...) passed");
+
+            bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("0", store.Get("m", "second"),
+                "a resume that passes nothing makes coroutine.yield return nothing");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("m"));
+        }
+
+        [Test]
         public void Lua_M2_14_NegativeTwin_WaitingDeadRunningAndRawThreadsAreRefused()
         {
             LuaCsRbxApiBindings bindings = new();

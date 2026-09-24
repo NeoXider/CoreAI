@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.Logging;
@@ -142,6 +143,118 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
             Assert.IsTrue(stack.Runtime.IsLoaded("m2"));
         }
 
+        [Test]
+        public void ServerTimeNow_BeforeTheFirstSynchronization_IsTheLocalClockUnclamped()
+        {
+            FakeClockSource clock = new() { UnixTimeSecondsFractional = 1700000000d };
+            FakeBridge bridge = new(RbxNetworkTopology.Client) { IsServerClockSynchronized = false };
+            LuaCsRbxApiBindings bindings = new(networkBridge: bridge, clockSource: clock);
+
+            Assert.AreEqual(1700000000d, bindings.GetServerTimeNow());
+            clock.UnixTimeSecondsFractional = 1699999990d;
+            clock.ProcessTimeSeconds = 1d;
+
+            // WHY: before an anchor nothing is known about the server, so no floor is kept either; a
+            // floor recorded here is what used to freeze the synchronized clock afterwards.
+            Assert.AreEqual(1699999990d, bindings.GetServerTimeNow(),
+                "an unsynchronized client reads its own clock, not a clamped copy of it");
+        }
+
+        [TestCase(-3600d)]
+        [TestCase(3600d)]
+        public void ServerTimeNow_TheFirstSynchronization_ReBasesOnce_InEitherDirection(double skewSeconds)
+        {
+            FakeClockSource clock = new() { UnixTimeSecondsFractional = 1700000000d };
+            FakeBridge bridge = new(RbxNetworkTopology.Client) { IsServerClockSynchronized = false };
+            LuaCsRbxApiBindings bindings = new(networkBridge: bridge, clockSource: clock);
+            bindings.GetServerTimeNow();
+
+            bridge.IsServerClockSynchronized = true;
+            bridge.ServerClockOffsetSeconds = skewSeconds;
+            clock.UnixTimeSecondsFractional = 1700000001d;
+            clock.ProcessTimeSeconds = 1d;
+            double synchronized = bindings.GetServerTimeNow();
+            clock.UnixTimeSecondsFractional = 1700000002d;
+            clock.ProcessTimeSeconds = 2d;
+            double oneSecondLater = bindings.GetServerTimeNow();
+
+            Assert.AreEqual(1700000001d + skewSeconds, synchronized,
+                "the first synchronized reading is the server's time, even an hour behind the local one");
+            Assert.AreEqual(synchronized + 1d, oneSecondLater,
+                "after the re-base the clock runs at real time instead of freezing for the skew");
+        }
+
+        [Test]
+        public void ServerTimeNow_AfterSynchronization_ASmallBackwardCorrectionSlewsMonotonically()
+        {
+            FakeClockSource clock = new() { UnixTimeSecondsFractional = 1700000000d };
+            FakeBridge bridge = new(RbxNetworkTopology.Client) { ServerClockOffsetSeconds = 10d };
+            LuaCsRbxApiBindings bindings = new(networkBridge: bridge, clockSource: clock);
+            double previous = bindings.GetServerTimeNow();
+
+            bridge.ServerClockOffsetSeconds = 9.5d;
+            for (int second = 1; second <= 3; second++)
+            {
+                clock.UnixTimeSecondsFractional += 1d;
+                clock.ProcessTimeSeconds += 1d;
+                double next = bindings.GetServerTimeNow();
+                Assert.Greater(next, previous, "a correction never runs the clock backwards");
+                previous = next;
+            }
+
+            Assert.AreEqual(clock.UnixTimeSecondsFractional + 9.5d, previous,
+                "a half-second correction is absorbed within a second of real time");
+        }
+
+        [Test]
+        public void Negative_ServerTimeNow_ALargeBackwardCorrectionAfterSync_DoesNotFreezeForItsSize()
+        {
+            FakeClockSource clock = new() { UnixTimeSecondsFractional = 1700000000d };
+            FakeBridge bridge = new(RbxNetworkTopology.Client) { ServerClockOffsetSeconds = 0d };
+            LuaCsRbxApiBindings bindings = new(networkBridge: bridge, clockSource: clock);
+            double before = bindings.GetServerTimeNow();
+
+            bridge.ServerClockOffsetSeconds = -3600d;
+            clock.UnixTimeSecondsFractional += 10d;
+            clock.ProcessTimeSeconds += 10d;
+            double tenSecondsLater = bindings.GetServerTimeNow();
+
+            Assert.AreEqual(before + 10d * (1d - LuaCsRbxApiBindings.ServerTimeSlewRate), tenSecondsLater,
+                "an hour-sized correction slows the clock down; it no longer stops it for the hour");
+        }
+
+        [Test]
+        public void StagedNetworkBridge_ForwardsTheInnerBridgesClockSynchronization()
+        {
+            Type staged = typeof(CoreAI.Mods.WorldPackages.RbxWorldRuntimeSessionController)
+                .GetNestedType("StagedNetworkBridge", BindingFlags.NonPublic);
+            Assert.IsNotNull(staged, "the staged bridge wraps the live transport during a world swap");
+            FakeBridge inner = new(RbxNetworkTopology.Client) { IsServerClockSynchronized = false };
+            INetworkBridge wrapper = (INetworkBridge)Activator.CreateInstance(staged,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
+                new object[] { inner }, null);
+            try
+            {
+                Assert.IsFalse(wrapper.IsServerClockSynchronized,
+                    "a staged world must not read an unsynchronized client as synchronized");
+                inner.IsServerClockSynchronized = true;
+                Assert.IsTrue(wrapper.IsServerClockSynchronized);
+            }
+            finally
+            {
+                ((IDisposable)wrapper).Dispose();
+            }
+        }
+
+        [Test]
+        public void Negative_ABridgeWithoutAClockOfItsOwn_IsSynchronizedByDefault()
+        {
+            // WHY: the loopback and every server are the clock, so the default must never make a solo
+            // world wait for a synchronization that cannot come.
+            INetworkBridge loopback = new NullNetworkBridge();
+            Assert.IsTrue(loopback.IsServerClockSynchronized);
+        }
+
         private static LuaCsModStack StackWith(double localClockSeconds,
             RbxNetworkTopology topology, double offsetSeconds)
         {
@@ -253,6 +366,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
             public int MaxPayloadBytes => 65536;
 
             public double ServerClockOffsetSeconds { get; set; }
+
+            public bool IsServerClockSynchronized { get; set; } = true;
 
             public event Action<RbxNetworkEventMessage> EventReceived
             {

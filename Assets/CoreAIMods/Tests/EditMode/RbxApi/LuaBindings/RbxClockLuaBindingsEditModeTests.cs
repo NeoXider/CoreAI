@@ -244,6 +244,110 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_GetServerTimeNow_BackwardStepSlewsInsteadOfFreezing()
+        {
+            FakeClockSource fake = new()
+            {
+                UnixTimeSecondsFractional = 1700000000d,
+                ProcessTimeSeconds = 100d
+            };
+            LuaCsRbxApiBindings bindings = BindingsWith(fake);
+            Assert.AreEqual(1700000000d, bindings.GetServerTimeNow());
+
+            // WHY: a 10 s NTP correction used to freeze the clock for all 10 s, stalling every timer
+            // built on it. Slewed, it keeps moving at ServerTimeSlewRate below real time until it has
+            // caught up with the corrected source.
+            fake.UnixTimeSecondsFractional = 1699999991d;
+            fake.ProcessTimeSeconds = 101d;
+            double previous = bindings.GetServerTimeNow();
+            Assert.AreEqual(1700000000d + (1d - LuaCsRbxApiBindings.ServerTimeSlewRate), previous,
+                "one real second after the step the clock has moved on, at the slewed rate");
+
+            int secondsToConverge = 1;
+            while (previous != fake.UnixTimeSecondsFractional && secondsToConverge < 100)
+            {
+                fake.UnixTimeSecondsFractional += 1d;
+                fake.ProcessTimeSeconds += 1d;
+                double next = bindings.GetServerTimeNow();
+                Assert.Greater(next, previous, "every reading moves forward while slewing");
+                previous = next;
+                secondsToConverge++;
+            }
+
+            Assert.AreEqual(fake.UnixTimeSecondsFractional, previous, "the clock converges on the source");
+            Assert.LessOrEqual(secondsToConverge, 20,
+                "a 10 s correction is absorbed within twice its size of real time");
+        }
+
+        [Test]
+        public void Negative_Lua_GetServerTimeNow_ForwardStepIsTakenAtOnce()
+        {
+            FakeClockSource fake = new()
+            {
+                UnixTimeSecondsFractional = 1700000000d,
+                ProcessTimeSeconds = 100d
+            };
+            LuaCsRbxApiBindings bindings = BindingsWith(fake);
+            bindings.GetServerTimeNow();
+
+            fake.UnixTimeSecondsFractional = 1700000030d;
+            fake.ProcessTimeSeconds = 101d;
+
+            Assert.AreEqual(1700000030d, bindings.GetServerTimeNow(),
+                "moving ahead cannot run time backwards, so it needs no slewing");
+        }
+
+        [Test]
+        public void Lua_OsTimeTable_ReturnsUtcUnixSecondsOfTheDate()
+        {
+            LuaCsModStack stack = BuildStack(BindingsWith(new FakeClockSource { UnixTimeSeconds = 5L }));
+
+            stack.Runtime.LoadMod("m", @"
+                local function expect(fields, seconds, what)
+                    local got = os.time(fields)
+                    assert(got == seconds, what .. ': expected ' .. seconds .. ', got ' .. tostring(got))
+                end
+                expect({year = 2024, month = 1, day = 1, hour = 0}, 1704067200, 'midnight UTC')
+                expect({year = 1970, month = 1, day = 1}, 43200, 'hour defaults to 12')
+                expect({year = 2000, month = 2, day = 29, hour = 23, min = 59, sec = 58, isdst = true},
+                    951868798, 'leap day, minutes and seconds; isdst changes nothing under UTC')
+                expect({year = 2023, month = 13, day = 1, hour = 0}, 1704067200, 'month 13 carries a year')
+                expect({year = 2024, month = 0, day = 1, hour = 0}, 1701388800, 'month 0 is December')
+                expect({year = 2024, month = 1, day = 32, hour = 0}, 1706745600, 'day 32 carries a month')
+                expect({year = '2024', month = 1, day = 1, hour = 0}, 1704067200, 'numeric strings coerce')
+                assert(os.time() == 5, 'no argument still reads the clock source')
+                assert(os.time(nil) == 5, 'nil reads the clock source')");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Negative_Lua_OsTimeTable_MissingRequiredFieldOrWrongType_RaisesBadArgument()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+
+            stack.Runtime.LoadMod("m", @"
+                local ok, err = pcall(os.time, {year = 2024, month = 1})
+                assert(not ok, 'a date without a day must not become today')
+                assert(string.find(tostring(err), ""field 'day' missing in date table"", 1, true),
+                    tostring(err))
+                local okType, errType = pcall(os.time, 5)
+                assert(not okType and string.find(tostring(errType), 'BAD_ARGUMENT', 1, true),
+                    tostring(errType))
+                local okField, errField = pcall(os.time, {year = 2024, month = 'June', day = 1})
+                assert(not okField and string.find(tostring(errField), ""field 'month'"", 1, true),
+                    tostring(errField))
+                local okHuge, errHuge = pcall(os.time, {year = 1e300, month = 1, day = 1})
+                assert(not okHuge and string.find(tostring(errHuge), 'out of range', 1, true),
+                    tostring(errHuge))
+                local okNaN, errNaN = pcall(os.time, {year = 2024, month = 1, day = 0/0})
+                assert(not okNaN and string.find(tostring(errNaN), ""field 'day' is out of range"", 1, true),
+                    tostring(errNaN))");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
         public void Lua_CustomClockSource_FullyReplacesDefault()
         {
             FakeClockSource fake = new()
