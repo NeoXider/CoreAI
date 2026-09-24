@@ -5,7 +5,8 @@ using UnityEngine;
 namespace CoreAI.Mods.Rbx.Binding
 {
     /// <summary>
-    /// Sits on a bound part's GameObject and reports its collisions back to the binder.
+    /// Sits on a bound part's GameObject (and on a Cylinder's binder-owned Shape child) and reports
+    /// its collisions and trigger overlaps back to the binder.
     /// </summary>
     /// <remarks>
     /// WHY a component per part rather than one global listener: Unity delivers collision callbacks
@@ -13,6 +14,8 @@ namespace CoreAI.Mods.Rbx.Binding
     /// to hear a contact is to be on the object. The component holds no logic beyond translating the
     /// other collider back into an instance id; every Roblox rule about which signal fires lives on
     /// the engine-free side.
+    /// WHY trigger events too: a CanCollide=false part is a trigger on the Unity side, and Roblox
+    /// still fires Touched for it, so an overlap is reported exactly like a collision.
     /// </remarks>
     [DisallowMultipleComponent]
     public sealed class RbxContactRelay : MonoBehaviour
@@ -33,22 +36,32 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private void OnCollisionEnter(Collision collision)
         {
-            Report(collision, began: true);
+            Report(collision != null ? collision.collider : null, began: true);
         }
 
         private void OnCollisionExit(Collision collision)
         {
-            Report(collision, began: false);
+            Report(collision != null ? collision.collider : null, began: false);
         }
 
-        private void Report(Collision collision, bool began)
+        private void OnTriggerEnter(Collider other)
         {
-            if (_sink == null || collision == null || collision.collider == null)
+            Report(other, began: true);
+        }
+
+        private void OnTriggerExit(Collider other)
+        {
+            Report(other, began: false);
+        }
+
+        private void Report(Collider other, bool began)
+        {
+            if (_sink == null || other == null)
             {
                 return;
             }
 
-            _sink(gameObject, collision.collider.gameObject, began);
+            _sink(gameObject, other.gameObject, began);
         }
     }
 }

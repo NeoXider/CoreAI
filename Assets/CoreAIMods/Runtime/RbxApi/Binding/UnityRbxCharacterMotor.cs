@@ -125,7 +125,8 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <inheritdoc />
         public bool IsGrounded =>
-            _body != null && Physics.Raycast(_body.position, Vector3.down, _groundProbeOrigin + GroundProbeMetres);
+            _body != null && Physics.Raycast(_body.position, Vector3.down, _groundProbeOrigin + GroundProbeMetres,
+                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
 
         /// <inheritdoc />
         public void SetWalkSpeed(double studsPerSecond)

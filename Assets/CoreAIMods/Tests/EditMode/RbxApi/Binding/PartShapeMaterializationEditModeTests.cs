@@ -12,7 +12,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
     /// Block to the unit cube directly on the part GameObject; Cylinder corrects Unity's
     /// 2-unit-tall Y-axis mesh onto Roblox's X-axis stud-per-unit cylinder via a rotated,
     /// height-halved mesh child; Wedge and CornerWedge use custom normalized meshes on the root.
-    /// Shape switches rebuild the visual while keeping the GameObject identity.
+    /// Shape switches rebuild the visual while keeping the GameObject identity. CanCollide=false
+    /// turns whichever collider the shape built into a trigger, and a Cylinder's Shape child carries
+    /// its own contact relay and resolves back to the part.
     /// </summary>
     [TestFixture]
     public sealed class PartShapeMaterializationEditModeTests
@@ -137,7 +139,24 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             Assert.AreEqual(1f, block.GetColor("_Color").r, Epsilon);
 
             _binder.SetCanCollide(part.Id, false);
-            Assert.IsFalse(child.GetComponent<Collider>().enabled);
+            Collider childCollider = child.GetComponent<Collider>();
+            Assert.IsTrue(childCollider.isTrigger, "CanCollide reaches the Cylinder's own collider");
+            Assert.IsTrue(childCollider.enabled,
+                "a non-colliding Cylinder keeps its collider so Touched and raycasts still reach it");
+        }
+
+        [Test]
+        public void Cylinder_ShapeChild_CarriesAContactRelay_AndResolvesToThePart()
+        {
+            // WHY: an anchored Cylinder has no Rigidbody, so Unity sends its contact messages to the
+            // collider's own GameObject — the Shape child — and a relay only on the root never heard them.
+            RbxInstance part = CreatePartInWorld();
+            _binder.SetShape(part.Id, RbxPartShape.Cylinder);
+
+            GameObject child = BoundObject(part).transform.Find("Shape").gameObject;
+            Assert.IsNotNull(child.GetComponent<RbxContactRelay>(), "the Shape child must relay its contacts");
+            Assert.IsTrue(_binder.TryResolvePartInstanceId(child, out InstanceId resolved));
+            Assert.AreEqual(part.Id.Value, resolved.Value, "the Shape child's collider belongs to the Cylinder");
         }
 
         [Test]
@@ -182,7 +201,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             Assert.AreEqual(1f, block.GetColor("_Color").b, Epsilon);
 
             _binder.SetCanCollide(part.Id, false);
-            Assert.IsFalse(partGo.GetComponent<MeshCollider>().enabled);
+            MeshCollider collider = partGo.GetComponent<MeshCollider>();
+            Assert.IsTrue(collider.convex, "a trigger MeshCollider must be convex");
+            Assert.IsTrue(collider.isTrigger, "CanCollide reaches the Wedge's convex collider");
+            Assert.IsTrue(collider.enabled);
         }
 
         [Test]
@@ -273,8 +295,22 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             partGo.GetComponent<Renderer>().GetPropertyBlock(block);
             Assert.AreEqual(1f, block.GetColor("_Color").g, Epsilon,
                 "color lands on the rebuilt sphere renderer");
-            Assert.IsFalse(partGo.GetComponent<SphereCollider>().enabled,
-                "CanCollide toggles the rebuilt sphere collider, not a stale box collider");
+            Assert.IsTrue(partGo.GetComponent<SphereCollider>().isTrigger,
+                "CanCollide reaches the rebuilt sphere collider, not a stale box collider");
+        }
+
+        [Test]
+        public void ShapeSwitch_KeepsCanCollideFalse_OnTheRebuiltCollider()
+        {
+            RbxInstance part = CreatePartInWorld();
+            _binder.SetCanCollide(part.Id, false);
+
+            _binder.SetShape(part.Id, RbxPartShape.Ball);
+
+            SphereCollider sphere = BoundObject(part).GetComponent<SphereCollider>();
+            Assert.IsTrue(sphere.enabled, "the rebuilt collider exists and stays enabled");
+            Assert.IsTrue(sphere.isTrigger,
+                "a shape switch must not make a non-colliding part solid again");
         }
 
         [Test]

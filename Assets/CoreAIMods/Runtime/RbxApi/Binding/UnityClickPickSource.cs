@@ -11,10 +11,10 @@ namespace CoreAI.Mods.Rbx.Binding
     /// binder, resolved once at composition (RbxWorldHost) — no scene searches in the pick path.
     /// Mirrors <see cref="UnityCameraRig"/>: converts the Roblox top-left screen point to the
     /// camera's bottom-left screen space, casts a ray, and maps the nearest collider back to a world
-    /// instance through <see cref="InstanceGameObjectBinder.TryGetInstanceId"/> (walking up the hit
-    /// transform's ancestry so a Cylinder's Shape child or a nested visual still resolves to its
-    /// part). Distance is reported in studs through <see cref="RbxSpace"/> (D2, this file is in
-    /// the lint-allowed Binding folder).
+    /// instance through <see cref="InstanceGameObjectBinder.TryResolvePartInstanceId"/> (which walks
+    /// up the hit transform's ancestry so a Cylinder's Shape child or a nested visual still resolves
+    /// to its part). Distance is reported in studs through <see cref="RbxSpace"/> (D2, this file is
+    /// in the lint-allowed Binding folder).
     /// </summary>
     public sealed class UnityClickPickSource : IClickPickSource
     {
@@ -50,27 +50,26 @@ namespace CoreAI.Mods.Rbx.Binding
             float screenX = screenPositionTopLeft.X;
             float screenY = Screen.height - screenPositionTopLeft.Y;
             Ray ray = _camera.ScreenPointToRay(new Vector3(screenX, screenY, 0f));
-            if (!Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity))
+            // WHY Collide, stated rather than left to the project setting: a CanCollide=false part is
+            // a trigger on the Unity side, and Roblox still lets a player click it.
+            if (!Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, Physics.DefaultRaycastLayers,
+                    QueryTriggerInteraction.Collide))
             {
                 return false;
             }
 
-            // WHY: walk up from the hit collider — the collider may sit on the part root
-            // (Block/Ball/Wedge) or a binder-owned Shape child (Cylinder), and a mod may nest
-            // visuals; the first ancestor that is a bound backing object is the clicked part.
-            for (Transform t = hit.collider != null ? hit.collider.transform : null;
-                 t != null;
-                 t = t.parent)
+            // WHY the resolver: the collider may sit on the part root (Block/Ball/Wedge) or a
+            // binder-owned Shape child (Cylinder), and a mod may nest visuals; the nearest bound
+            // ancestor decides, and only a part counts as clicked.
+            if (hit.collider == null
+                || !_binder.TryResolvePartInstanceId(hit.collider.gameObject, out InstanceId id))
             {
-                if (_binder.TryGetInstanceId(t.gameObject, out InstanceId id))
-                {
-                    hitId = id;
-                    distanceStuds = RbxSpace.LengthFromUnity(hit.distance);
-                    return true;
-                }
+                return false;
             }
 
-            return false;
+            hitId = id;
+            distanceStuds = RbxSpace.LengthFromUnity(hit.distance);
+            return true;
         }
     }
 }

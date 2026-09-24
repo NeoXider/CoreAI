@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Spatial;
@@ -12,12 +13,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
     /// Unity materialization per D5/D3 (§5.1.8 items 2 and 11), mirroring the
     /// BackingBinderSeamEditModeTests contract with real GameObjects: hierarchy mirroring,
     /// deactivate-not-destroy, destroy cleanup, name sync, and the golden RbxSpace
-    /// conversions at the locked 0.28 scale.
+    /// conversions at the locked 0.28 scale. Also the binder's physics bookkeeping: only the
+    /// Workspace subtree is active, CanCollide=false keeps a trigger collider that still reports
+    /// contacts and answers rays, colliders resolve to parts through the parent chain in constant
+    /// time per level, and a GameObject destroyed behind the binder's back counts as unbound.
     /// </summary>
     [TestFixture]
     public sealed class InstanceGameObjectBinderEditModeTests
     {
         private const float Epsilon = 1e-4f;
+
+        /// <summary>Where the ray tests put their target, away from anything an open editor scene
+        /// is likely to hold at the origin.</summary>
+        private static readonly RbxVector3 RayTargetPosition = new(500f, 0f, 0f);
 
         private GameObject _root;
         private InstanceGameObjectBinder _binder;
@@ -54,6 +62,61 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             Assert.IsTrue(_binder.TryGetBoundObject(instance.Id, out GameObject gameObject),
                 instance.Name + " should have a backing GameObject");
             return gameObject;
+        }
+
+        private RbxInstance CreateAnchoredPartAt(RbxVector3 position)
+        {
+            RbxInstance part = CreatePartInWorld();
+            _binder.SetAnchored(part.Id, true);
+            _binder.SetPosition(part.Id, position);
+            return part;
+        }
+
+        /// <summary>Casts straight down through <paramref name="target"/>'s stored position and
+        /// reports whether the nearest accepted hit is that part.</summary>
+        private bool RayHits(UnityRbxPhysicsPort port, RbxInstance target, bool respectCanCollide)
+        {
+            // WHY: EditMode never steps physics, so transform writes reach the physics scene only
+            // through an explicit sync.
+            Physics.SyncTransforms();
+            RbxVector3 above = _binder.GetPartPropertiesOrDefault(target.Id).Position
+                               + new RbxVector3(0f, 20f, 0f);
+            return port.TryRaycast(above, new RbxVector3(0f, -40f, 0f), respectCanCollide, null,
+                       out RbxPhysicsRaycastHit hit)
+                   && hit.Instance.Value == target.Id.Value;
+        }
+
+        private GameObject ShapeChildOf(RbxInstance part)
+        {
+            Transform child = BoundObject(part).transform.Find("Shape");
+            Assert.IsNotNull(child, part.Name + " must have a Cylinder Shape child");
+            return child.gameObject;
+        }
+
+        private List<string> RecordContacts()
+        {
+            List<string> contacts = new();
+            _binder.ContactObserved += (first, second, began) =>
+                contacts.Add(first.Value + "-" + second.Value + ":" + (began ? "began" : "ended"));
+            return contacts;
+        }
+
+        private static string Contact(RbxInstance self, RbxInstance other, bool began)
+        {
+            return self.Id.Value + "-" + other.Id.Value + ":" + (began ? "began" : "ended");
+        }
+
+        /// <summary>Delivers a Unity trigger message to a relay the way the engine does, so the
+        /// binder's bookkeeping can be checked without stepping physics.</summary>
+        private static void DeliverTriggerMessage(RbxContactRelay relay, string message, Collider other)
+        {
+            Assert.IsNotNull(relay, "the part must carry a contact relay");
+            MethodInfo handler = typeof(RbxContactRelay).GetMethod(message,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            Assert.IsNotNull(handler,
+                "RbxContactRelay must handle Unity's " + message + " message: a CanCollide=false part " +
+                "is a trigger, and Roblox still fires Touched for it");
+            handler.Invoke(relay, new object[] { other });
         }
 
         /// <summary>Dot-joined transform names from just below the host (game) GameObject down to
@@ -403,17 +466,85 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         }
 
         [Test]
-        public void CanCollide_TogglesTheCollider()
+        public void CanCollide_False_KeepsTheColliderEnabledAsATrigger()
         {
             RbxInstance part = CreatePartInWorld();
             Collider collider = BoundObject(part).GetComponent<Collider>();
             Assert.IsTrue(collider.enabled);
+            Assert.IsFalse(collider.isTrigger, "a default part collides");
 
             _binder.SetCanCollide(part.Id, false);
-            Assert.IsFalse(collider.enabled);
+            Assert.IsTrue(collider.enabled,
+                "CanCollide=false must keep the collider: Roblox still fires Touched for the part and " +
+                "rays still hit it");
+            Assert.IsTrue(collider.isTrigger, "a non-colliding part lets bodies through as a trigger");
 
             _binder.SetCanCollide(part.Id, true);
             Assert.IsTrue(collider.enabled);
+            Assert.IsFalse(collider.isTrigger, "CanCollide=true makes it solid again");
+        }
+
+        [Test]
+        public void CanCollideFalsePart_IsHitByADefaultRay_AndSkippedWhenTheRayRespectsCanCollide()
+        {
+            RbxInstance ghost = CreateAnchoredPartAt(RayTargetPosition);
+            _binder.SetCanCollide(ghost.Id, false);
+            using UnityRbxPhysicsPort port = new(_binder);
+
+            Assert.IsTrue(RayHits(port, ghost, respectCanCollide: false),
+                "RaycastParams.RespectCanCollide defaults to false, so the query uses CanQuery (true) and " +
+                "a CanCollide=false part is still hit");
+            Assert.IsFalse(RayHits(port, ghost, respectCanCollide: true),
+                "with RespectCanCollide the query uses CanCollide, so the non-colliding part is skipped");
+        }
+
+        [Test]
+        public void Negative_SolidPart_IsHitWhetherOrNotTheRayRespectsCanCollide()
+        {
+            RbxInstance solid = CreateAnchoredPartAt(RayTargetPosition);
+            using UnityRbxPhysicsPort port = new(_binder);
+
+            Assert.IsTrue(RayHits(port, solid, respectCanCollide: false));
+            Assert.IsTrue(RayHits(port, solid, respectCanCollide: true),
+                "RespectCanCollide must only skip non-colliding parts");
+        }
+
+        [Test]
+        public void CanCollideFalsePart_TriggerOverlap_IsReportedAsAContactThenItsEnd()
+        {
+            RbxInstance ghost = CreatePartInWorld();
+            _binder.SetCanCollide(ghost.Id, false);
+            RbxInstance mover = CreatePartInWorld();
+            List<string> contacts = RecordContacts();
+            RbxContactRelay relay = BoundObject(ghost).GetComponent<RbxContactRelay>();
+            Collider moverCollider = BoundObject(mover).GetComponent<Collider>();
+
+            DeliverTriggerMessage(relay, "OnTriggerEnter", moverCollider);
+            DeliverTriggerMessage(relay, "OnTriggerExit", moverCollider);
+
+            CollectionAssert.AreEqual(
+                new[] { Contact(ghost, mover, true), Contact(ghost, mover, false) }, contacts,
+                "the pickup / kill-zone idiom: a non-colliding part's overlap must become Touched and TouchEnded");
+        }
+
+        [Test]
+        public void Negative_TriggerOverlapWithAnUnboundHostCollider_ReportsNothing()
+        {
+            RbxInstance ghost = CreatePartInWorld();
+            _binder.SetCanCollide(ghost.Id, false);
+            List<string> contacts = RecordContacts();
+            GameObject hostVolume = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            try
+            {
+                DeliverTriggerMessage(BoundObject(ghost).GetComponent<RbxContactRelay>(), "OnTriggerEnter",
+                    hostVolume.GetComponent<Collider>());
+
+                Assert.IsEmpty(contacts, "a host object is not an instance, so there is no pair to report");
+            }
+            finally
+            {
+                Object.DestroyImmediate(hostVolume);
+            }
         }
 
         [Test]
@@ -486,6 +617,253 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             Assert.AreEqual(7f, live.X, Epsilon);
             Assert.AreEqual(8f, live.Y, Epsilon);
             Assert.AreEqual(9f, live.Z, Epsilon);
+        }
+
+        [Test]
+        public void D5_OnlyWorkspaceIsActive_AmongTheDataModelsChildren()
+        {
+            IReadOnlyList<RbxInstance> children = _game.GetChildren();
+            Assert.Greater(children.Count, 1, "precondition: the bootstrap tree has services besides Workspace");
+            foreach (RbxInstance child in children)
+            {
+                bool isWorkspace = ReferenceEquals(child, _registry.WorldRoot);
+                Assert.AreEqual(isWorkspace, BoundObject(child).activeSelf,
+                    child.Name + ": only Workspace and its descendants are the physical world");
+            }
+        }
+
+        [Test]
+        public void D5_PartUnderLightingOrDataModelRoot_IsNotActiveInHierarchy_AndNotHitByARay()
+        {
+            RbxInstance part = CreateAnchoredPartAt(RayTargetPosition);
+            GameObject partGo = BoundObject(part);
+            using UnityRbxPhysicsPort port = new(_binder);
+            Assert.IsTrue(RayHits(port, part, respectCanCollide: false),
+                "precondition: under Workspace the ray hits the part");
+
+            part.Parent = _game.GetService("Lighting");
+            Assert.IsFalse(partGo.activeInHierarchy,
+                "Lighting is not the physical world: a Part stored there must not render or collide");
+            Assert.IsFalse(RayHits(port, part, respectCanCollide: false),
+                "a Part stored in Lighting must not answer workspace:Raycast");
+
+            part.Parent = _game;
+            Assert.IsFalse(partGo.activeSelf,
+                "a direct child of the DataModel other than Workspace is inactive itself");
+            Assert.IsFalse(partGo.activeInHierarchy);
+            Assert.IsFalse(RayHits(port, part, respectCanCollide: false),
+                "a Part parented straight to game must not answer workspace:Raycast");
+
+            part.Parent = _registry.WorldRoot;
+            Assert.IsTrue(partGo.activeInHierarchy, "back under Workspace the Part is physical again");
+            Assert.IsTrue(RayHits(port, part, respectCanCollide: false));
+        }
+
+        [Test]
+        public void D5_ContainerMovedBetweenTheDataModelRootAndWorkspace_RecomputesItsActiveFlag()
+        {
+            RbxInstance model = _registry.Create("Model");
+            model.Parent = _game;
+            RbxInstance part = _registry.Create("Part");
+            part.Parent = model;
+            GameObject modelGo = BoundObject(model);
+            GameObject partGo = BoundObject(part);
+            Assert.IsFalse(modelGo.activeSelf, "a Model parented straight to game is outside Workspace");
+            Assert.IsFalse(partGo.activeInHierarchy);
+            Assert.IsTrue(partGo.activeSelf, "only the top-level object below game carries the flag");
+
+            model.Parent = _registry.WorldRoot;
+            Assert.IsTrue(modelGo.activeSelf, "moving into Workspace must recompute the flag");
+            Assert.IsTrue(partGo.activeInHierarchy, "the whole subtree becomes physical");
+
+            model.Parent = _game;
+            Assert.IsFalse(partGo.activeInHierarchy, "moving back out leaves the physical world again");
+        }
+
+        [Test]
+        public void Negative_D5_DeeplyNestedWorkspaceContent_StaysActive()
+        {
+            RbxInstance folder = _registry.Create("Folder");
+            folder.Parent = _registry.WorldRoot;
+            RbxInstance model = _registry.Create("Model");
+            model.Parent = folder;
+            RbxInstance part = _registry.Create("Part");
+            part.Parent = model;
+
+            foreach (RbxInstance node in new[] { folder, model, part })
+            {
+                Assert.IsTrue(BoundObject(node).activeSelf, node.Name + " keeps its own flag on");
+                Assert.IsTrue(BoundObject(node).activeInHierarchy, node.Name + " is Workspace content");
+            }
+        }
+
+        [Test]
+        public void Raycast_HitsCylinderPart()
+        {
+            RbxInstance cylinder = CreateAnchoredPartAt(RayTargetPosition);
+            _binder.SetShape(cylinder.Id, RbxPartShape.Cylinder);
+            _binder.SetSize(cylinder.Id, new RbxVector3(4f, 2f, 2f));
+            using UnityRbxPhysicsPort port = new(_binder);
+
+            Assert.IsTrue(RayHits(port, cylinder, respectCanCollide: false),
+                "a Cylinder's collider lives on its Shape child, and the hit must still resolve to the part");
+        }
+
+        [Test]
+        public void ContactWithACylindersShapeChild_ResolvesToTheCylinder()
+        {
+            RbxInstance cylinder = CreatePartInWorld();
+            _binder.SetShape(cylinder.Id, RbxPartShape.Cylinder);
+            RbxInstance ball = CreatePartInWorld();
+            List<string> contacts = RecordContacts();
+
+            DeliverTriggerMessage(BoundObject(ball).GetComponent<RbxContactRelay>(), "OnTriggerEnter",
+                ShapeChildOf(cylinder).GetComponent<Collider>());
+
+            CollectionAssert.AreEqual(new[] { Contact(ball, cylinder, true) }, contacts,
+                "Touched must fire for a Cylinder even though its collider sits on a child");
+        }
+
+        [Test]
+        public void ReverseLookup_FollowsShapeSwitches_AndStopsAtContainers()
+        {
+            RbxInstance model = _registry.Create("Model");
+            model.Parent = _registry.WorldRoot;
+            RbxInstance part = _registry.Create("Part");
+            part.Parent = model;
+            GameObject partGo = BoundObject(part);
+            GameObject modelGo = BoundObject(model);
+
+            Assert.IsTrue(_binder.TryGetInstanceId(partGo, out InstanceId byRoot));
+            Assert.AreEqual(part.Id.Value, byRoot.Value);
+            Assert.IsTrue(_binder.TryGetInstanceId(modelGo, out InstanceId byModel),
+                "containers are bound objects too");
+            Assert.AreEqual(model.Id.Value, byModel.Value);
+            Assert.IsFalse(_binder.TryResolvePartInstanceId(modelGo, out _),
+                "a Model is a container, never the part a collider belongs to");
+
+            _binder.SetShape(part.Id, RbxPartShape.Cylinder);
+            GameObject shapeChild = ShapeChildOf(part);
+            Assert.IsFalse(_binder.TryGetInstanceId(shapeChild, out _),
+                "the exact lookup only knows backing objects");
+            Assert.IsTrue(_binder.TryResolvePartInstanceId(shapeChild, out InstanceId byShapeChild));
+            Assert.AreEqual(part.Id.Value, byShapeChild.Value, "the Shape child resolves to its Cylinder");
+
+            GameObject strayChild = new("HostObjectUnderAModel");
+            try
+            {
+                strayChild.transform.SetParent(modelGo.transform, false);
+                Assert.IsFalse(_binder.TryResolvePartInstanceId(strayChild, out _),
+                    "the nearest bound ancestor is a container, so the collider belongs to no part");
+            }
+            finally
+            {
+                Object.DestroyImmediate(strayChild);
+            }
+
+            _binder.SetShape(part.Id, RbxPartShape.Block);
+            Assert.IsTrue(_binder.TryGetInstanceId(partGo, out InstanceId afterSwitch),
+                "a shape switch keeps the backing object, and with it the reverse entry");
+            Assert.AreEqual(part.Id.Value, afterSwitch.Value);
+            Assert.IsTrue(_binder.TryResolvePartInstanceId(partGo, out InstanceId blockRoot));
+            Assert.AreEqual(part.Id.Value, blockRoot.Value);
+        }
+
+        [Test]
+        public void ReverseLookup_CostDoesNotGrowWithTheBoundSet()
+        {
+            RbxInstance crowd = _registry.Create("Folder");
+            crowd.Parent = _registry.WorldRoot;
+            for (int index = 0; index < 2048; index++)
+            {
+                RbxInstance filler = _registry.Create("Folder");
+                filler.Parent = crowd;
+            }
+
+            RbxInstance cylinder = CreatePartInWorld();
+            _binder.SetShape(cylinder.Id, RbxPartShape.Cylinder);
+            GameObject shapeChild = ShapeChildOf(cylinder);
+            GameObject stranger = new("UnboundLookupProbe");
+            try
+            {
+                Assert.Greater(_binder.BoundCount, 2048, "precondition: thousands of bound objects");
+                long before = _binder.ReverseLookupProbeCount;
+                int resolved = 0;
+                for (int index = 0; index < 1000; index++)
+                {
+                    if (!_binder.TryGetInstanceId(stranger, out _)
+                        && _binder.TryResolvePartInstanceId(shapeChild, out InstanceId id)
+                        && id.Value == cylinder.Id.Value)
+                    {
+                        resolved++;
+                    }
+                }
+
+                long probes = _binder.ReverseLookupProbeCount - before;
+                Assert.AreEqual(1000, resolved, "every lookup must still answer correctly");
+                Assert.LessOrEqual(probes, 3000,
+                    "a miss is one probe and a Shape child two (itself, then its part); a lookup that " +
+                    "scanned the " + _binder.BoundCount + " bound objects would cost millions per 1000 hits");
+            }
+            finally
+            {
+                Object.DestroyImmediate(stranger);
+            }
+        }
+
+        [Test]
+        public void Binder_ExternallyDestroyedGameObject_ReparentAndWritesDoNotThrow()
+        {
+            RbxInstance model = _registry.Create("Model");
+            model.Parent = _registry.WorldRoot;
+            RbxInstance part = CreatePartInWorld();
+            GameObject partGo = BoundObject(part);
+
+            // WHY: a host kill-plane script, a scene unload in progress or an editor deletion
+            // destroys the backing without asking the registry.
+            Object.DestroyImmediate(partGo);
+
+            Assert.DoesNotThrow(() => part.Name = "KilledByHost", "rename");
+            Assert.DoesNotThrow(() => _binder.SetPosition(part.Id, new RbxVector3(10f, 5f, -4f)),
+                "transform write");
+            Assert.DoesNotThrow(() => _binder.SetColor(part.Id, RbxColor3.FromRGB(255f, 0f, 0f)),
+                "appearance write");
+            Assert.DoesNotThrow(() => part.Parent = model, "re-parent inside the world");
+            Assert.IsFalse(_binder.TryGetBoundObject(part.Id, out _),
+                "a destroyed backing counts as unbound");
+            Assert.DoesNotThrow(() => part.Parent = null, "leaving the world");
+            Assert.DoesNotThrow(() => part.Parent = _registry.WorldRoot, "re-entering the world");
+
+            GameObject rematerialized = BoundObject(part);
+            Assert.IsFalse(ReferenceEquals(partGo, rematerialized), "re-entry builds a fresh backing");
+            Assert.AreEqual("KilledByHost", rematerialized.name);
+            Assert.AreEqual(2.8f, rematerialized.transform.position.x, Epsilon,
+                "writes made while unbound are kept and applied on re-entry");
+            Assert.IsTrue(rematerialized.activeInHierarchy);
+            Assert.DoesNotThrow(() => part.Destroy(), "destroy");
+        }
+
+        [Test]
+        public void NewChildOfAnExternallyDestroyedContainer_StillMaterializes()
+        {
+            RbxInstance worldModel = _registry.Create("Model");
+            worldModel.Parent = _registry.WorldRoot;
+            RbxInstance storedModel = _registry.Create("Model");
+            storedModel.Parent = _game.GetService("Lighting");
+            Object.DestroyImmediate(BoundObject(worldModel));
+            Object.DestroyImmediate(BoundObject(storedModel));
+
+            RbxInstance worldPart = _registry.Create("Part");
+            worldPart.Parent = worldModel;
+            RbxInstance storedPart = _registry.Create("Part");
+            storedPart.Parent = storedModel;
+
+            GameObject worldPartGo = BoundObject(worldPart);
+            Assert.AreEqual(_root.transform, worldPartGo.transform.parent,
+                "with its container's backing gone the part sits directly under the host");
+            Assert.IsTrue(worldPartGo.activeInHierarchy, "it is still Workspace content, so it stays physical");
+            Assert.IsFalse(BoundObject(storedPart).activeInHierarchy,
+                "Lighting content stays out of the physical world even without its container's backing");
         }
 
         [Test]

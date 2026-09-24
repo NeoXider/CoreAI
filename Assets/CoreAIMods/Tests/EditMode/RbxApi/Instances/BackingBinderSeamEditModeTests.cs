@@ -6,8 +6,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
     /// <summary>Backing-object seam per D5 (§5.1.8 items 1–2 at registry level): unparented
     /// instances have no backing; entering the DataModel (scene) subtree materializes — the whole
     /// explorer mirrors, storage services included; detaching deactivates; Destroy releases the
-    /// backing object. Active/inactive rendering of storage subtrees is the Unity adapter's job;
-    /// this seam only tracks tree membership.</summary>
+    /// backing object. Which materialized objects are physical (only Workspace and its descendants,
+    /// Workspace.yaml) is the Unity adapter's job; this seam only tracks tree membership.</summary>
     [TestFixture]
     public sealed class BackingBinderSeamEditModeTests
     {
@@ -61,11 +61,35 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         public void D5_StorageSubtrees_MaterializeThroughTheSameSeam()
         {
             // WHY: the Unity hierarchy mirrors the whole Roblox explorer, so storage-service
-            // contents materialize too — the Unity adapter renders them inactive; the seam itself
-            // only tracks tree membership, so the fake reports them materialized.
+            // contents materialize too (they are NOT skipped) — the Unity adapter keeps them inactive
+            // because they sit outside Workspace; the seam itself only tracks tree membership, so the
+            // fake reports them materialized.
             RbxInstance folder = _registry.Create("Folder");
             folder.Parent = _game.GetService("ReplicatedStorage");
             Assert.IsTrue(_binder.IsMaterialized(folder.Id));
+        }
+
+        [Test]
+        public void D5_NonWorkspaceSceneContent_MaterializesThroughTheSameSeam()
+        {
+            // WHY: "only Workspace is physical" is decided by the Unity adapter's active flag, not by
+            // skipping materialization here. A Part in Lighting or directly under game must still get
+            // a backing, or moving it back into Workspace would have nothing to reactivate.
+            RbxInstance stored = _registry.Create("Part");
+            stored.Parent = _game.GetService("Lighting");
+            RbxInstance loose = _registry.Create("Part");
+            loose.Parent = _game;
+
+            Assert.IsTrue(_binder.IsMaterialized(stored.Id), "Lighting content is in the scene tree");
+            Assert.IsTrue(_binder.IsMaterialized(loose.Id), "a Part parented straight to game is in the scene tree");
+
+            int eventsBefore = _binder.Events.Count;
+            stored.Parent = _registry.WorldRoot;
+            Assert.IsTrue(_binder.IsMaterialized(stored.Id));
+            Assert.AreEqual("reparent:" + stored.Id.Value, _binder.Events[_binder.Events.Count - 1],
+                "Lighting -> Workspace is a move inside the scene: the adapter hears a re-parent, " +
+                "which is where it recomputes the active flag");
+            Assert.AreEqual(eventsBefore + 1, _binder.Events.Count);
         }
 
         [Test]

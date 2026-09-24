@@ -44,6 +44,15 @@ namespace CoreAI.Mods.Rbx.Binding
                 return true;
             }
 
+            // WHY: the name walk also reaches the binder's own GameObjects, e.g. a Cylinder's "Shape"
+            // mesh child. Wrapping one would let a script move a piece of another part's visual, so
+            // the lookup refuses before a registry record is created for it.
+            if (_binder.IsInsideBinderOwnedBacking(worldObject))
+            {
+                instance = null;
+                return false;
+            }
+
             RbxInstance wrapper = registry.Create("Part");
             wrapper.Name = worldObject.name;
             _binder.AdoptWorldObject(wrapper.Id, worldObject);

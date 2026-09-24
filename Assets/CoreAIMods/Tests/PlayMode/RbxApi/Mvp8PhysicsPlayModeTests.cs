@@ -226,6 +226,72 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         }
 
         [UnityTest]
+        public IEnumerator NonCollidingSlab_BallFallsThrough_AndTheContactIsStillReported()
+        {
+            // WHY this shape: it is the coin / kill-zone idiom, an anchored CanCollide=false part with
+            // a Touched handler. Roblox lets the body through AND fires Touched; a disabled collider
+            // did neither half.
+            RbxInstance slab = _world.CreatePart("ghostSlab", new RbxVector3(0f, 0f, 0f), anchored: true);
+            _world.SetSize(slab, new RbxVector3(20f, 4f, 20f));
+            _world.SetCanCollide(slab, false);
+            RbxInstance ball = _world.CreatePart("ball", new RbxVector3(0f, 6f, 0f), anchored: false);
+            yield return null;
+
+            _world.Simulate(1f);
+
+            CollectionAssert.Contains(_world.Contacts, Pair(slab, ball, began: true),
+                "a body passing through a non-colliding part must still report the contact; contacts seen: "
+                + string.Join(", ", _world.Contacts));
+            CollectionAssert.Contains(_world.Contacts, Pair(slab, ball, began: false),
+                "and the contact ends once the body has left the part");
+            float slabBottomMetres = RbxSpace.ToUnity(new RbxVector3(0f, -2f, 0f)).y;
+            Assert.Less(_world.UnityPosition(ball).y, slabBottomMetres,
+                "CanCollide=false must let the ball fall straight through the slab");
+        }
+
+        [UnityTest]
+        public IEnumerator Raycast_HitsANonCollidingPartByDefault_AndSkipsItWithRespectCanCollide()
+        {
+            RbxInstance ghost = _world.CreatePart("ghost", new RbxVector3(0f, 0f, 0f), anchored: true);
+            _world.SetCanCollide(ghost, false);
+            RbxInstance floor = _world.CreatePart("floor", new RbxVector3(0f, -10f, 0f), anchored: true);
+            yield return null;
+            // WHY: nothing is simulated before the casts, so the pose and size writes reach the
+            // physics scene only through an explicit sync.
+            Physics.SyncTransforms();
+
+            RbxRaycastResult byDefault = _world.Physics.Raycast(
+                new RbxVector3(0f, 20f, 0f), new RbxVector3(0f, -40f, 0f), null);
+            RbxRaycastParams respectCanCollide = new() { RespectCanCollide = true };
+            RbxRaycastResult respecting = _world.Physics.Raycast(
+                new RbxVector3(0f, 20f, 0f), new RbxVector3(0f, -40f, 0f), respectCanCollide);
+
+            Assert.IsNotNull(byDefault, "the default query uses CanQuery, so the non-colliding part is hit");
+            Assert.AreSame(ghost, byDefault.Instance);
+            Assert.IsNotNull(respecting, "the ray continues to the solid floor below");
+            Assert.AreSame(floor, respecting.Instance,
+                "RespectCanCollide=true skips the non-colliding part and reports the next solid one");
+        }
+
+        [UnityTest]
+        public IEnumerator Touched_FiresForCylinderPart()
+        {
+            // WHY a Cylinder: its collider lives on a binder-owned Shape child, and its contacts must
+            // still resolve to the part.
+            RbxInstance drum = _world.CreatePart("drum", new RbxVector3(0f, 0f, 0f), anchored: true);
+            _world.SetShape(drum, RbxPartShape.Cylinder);
+            _world.SetSize(drum, new RbxVector3(12f, 4f, 4f));
+            RbxInstance ball = _world.CreatePart("ball", new RbxVector3(0f, 6f, 0f), anchored: false);
+            yield return null;
+
+            _world.Simulate(1.5f);
+
+            CollectionAssert.Contains(_world.Contacts, Pair(drum, ball, began: true),
+                "a part landing on a Cylinder must report the contact; contacts seen: "
+                + string.Join(", ", _world.Contacts));
+        }
+
+        [UnityTest]
         public IEnumerator Humanoid_WalksAtWalkSpeedInStudsPerSecond()
         {
             // The one number the whole metric contract rests on: WalkSpeed is studs per second, and
@@ -337,6 +403,21 @@ namespace CoreAI.Tests.PlayMode.RbxApi
                 _binder.SetPosition(part.Id, position);
                 _binder.SetAnchored(part.Id, anchored);
                 return part;
+            }
+
+            public void SetCanCollide(RbxInstance part, bool canCollide)
+            {
+                _binder.SetCanCollide(part.Id, canCollide);
+            }
+
+            public void SetShape(RbxInstance part, RbxPartShape shape)
+            {
+                _binder.SetShape(part.Id, shape);
+            }
+
+            public void SetSize(RbxInstance part, RbxVector3 size)
+            {
+                _binder.SetSize(part.Id, size);
             }
 
             public Vector3 UnityPosition(RbxInstance part)

@@ -13,7 +13,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
     /// Wedge Part — built through the Lua surface, asserted against the expected registry
     /// records (unique server-partition ids in insertion order, owner attribution) and the
     /// expected RbxSpace-transposed Unity transforms; rebuilt at 1:1 to prove a scale switch
-    /// touches only the RbxSpace constant, and rebuilt twice to prove id determinism.
+    /// touches only the RbxSpace constant, and rebuilt twice to prove id determinism. The same tree
+    /// moved out of Workspace (to Lighting, or straight under game) leaves the physical world and
+    /// comes back unchanged.
     /// </summary>
     [TestFixture]
     public sealed class Mvp1GoldenTreeFixtureEditModeTests
@@ -149,6 +151,42 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 new Vector3(2f, 1f, 4f),
                 new RbxVector3(-2f, 0.5f, 8f),
                 new RbxVector3(2f, 1f, 4f));
+        }
+
+        [Test]
+        public void GoldenTree_MovedOutOfWorkspace_LeavesThePhysicalWorld_AndReturnsIntact()
+        {
+            using Mvp1AcceptanceWorld world = new(0.28f);
+            RbxInstance root = BuildGoldenTree(world);
+            IReadOnlyList<RbxInstance> parts = root.GetChildren();
+            AssertPartsActive(world, parts, true, "built under Workspace");
+
+            // WHY both destinations: Lighting is the classic storage trick, and a tree parented
+            // straight to game is outside Workspace just the same; neither may render or collide.
+            root.Parent = world.Game.GetService("Lighting");
+            AssertPartsActive(world, parts, false, "stored in Lighting");
+
+            root.Parent = world.Game;
+            AssertPartsActive(world, parts, false, "parented straight to game");
+
+            root.Parent = world.Workspace;
+            AssertPartsActive(world, parts, true, "moved back into Workspace");
+            AssertPartGoldens(world, root, "Block",
+                new Vector3(2.8f, 1.4f, 1.12f),
+                new Vector3(1.12f, 0.28f, 0.56f),
+                new RbxVector3(10f, 5f, -4f),
+                new RbxVector3(4f, 1f, 2f));
+        }
+
+        private static void AssertPartsActive(Mvp1AcceptanceWorld world, IReadOnlyList<RbxInstance> parts,
+            bool expected, string situation)
+        {
+            Assert.AreEqual(3, parts.Count, "the golden tree has three parts");
+            foreach (RbxInstance part in parts)
+            {
+                Assert.AreEqual(expected, world.BoundObject(part).activeInHierarchy,
+                    part.Name + " " + situation + ": only Workspace content is the physical world");
+            }
         }
 
         [Test]

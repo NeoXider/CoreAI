@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Rendering;
@@ -18,12 +19,18 @@ namespace CoreAI.Mods.Rbx.Binding
     /// Semantics per D5: materialize on entering the scene (DataModel) subtree, DEACTIVATE (not
     /// destroy) on detach so re-parenting stays cheap, destroy on Destroy. Parts become unit-cube
     /// primitives scaled by Size * RbxSpace.MetersPerStud (asset rule, §2 — assets are never
-    /// rescaled, only numbers convert); services/Folder/Model become empty transforms. Storage
-    /// services (ReplicatedStorage etc.) materialize INACTIVE so their subtrees never render or
-    /// collide, mirroring Roblox where only Workspace content is the physical world; a Part
-    /// re-parented out of Workspace slides under the inactive service GO and disappears
-    /// automatically via Unity's activeInHierarchy. Every spatial conversion goes through
-    /// RbxSpace (D2) — this class holds the binder's single call sites allowed by the lint.
+    /// rescaled, only numbers convert); services/Folder/Model become empty transforms. Only
+    /// Workspace and its descendants are the physical world (Workspace.yaml): every other child of
+    /// the DataModel (Lighting, Players, MaterialService, the storage services, a Part parented
+    /// straight to game) materializes INACTIVE, so its subtree never renders, collides, fires
+    /// Touched or answers a raycast. A Part re-parented out of Workspace slides under an inactive
+    /// GameObject (or has its own flag recomputed) and leaves the world via Unity's
+    /// activeInHierarchy. Every spatial conversion goes through RbxSpace (D2) — this class holds
+    /// the binder's single call sites allowed by the lint.
+    /// CanCollide=false keeps the part's collider as a trigger: bodies pass through it, yet it
+    /// still reports contacts (Touched) and is hit by raycasts unless RespectCanCollide is set.
+    /// Host objects adopted through <see cref="AdoptWorldObject"/> follow pose writes only; their
+    /// scale, mesh, collider, material and Rigidbody stay exactly as the host authored them.
     /// Shapes: Block maps to the unit cube, Ball to the unit sphere (both directly on the part
     /// GameObject, localScale = Size * MetersPerStud); Cylinder needs an axis correction, so its
     /// mesh lives on a rotated child (see <see cref="BuildCylinderVisual"/>); Wedge and CornerWedge
@@ -53,17 +60,17 @@ namespace CoreAI.Mods.Rbx.Binding
         private static Material _defaultMaterial;
         private static bool _loggedFirstPart;
 
-        // WHY: Roblox's service set is fixed, so a static list here (rather than dynamic
-        // classification) is safe to hard-code.
-        private static readonly HashSet<string> InactiveServiceClasses =
-            new(System.StringComparer.Ordinal)
-            {
-                "ReplicatedStorage", "ServerStorage", "ServerScriptService", "StarterPlayer"
-            };
-
         private readonly Transform _worldParent;
         private readonly IRbxMaterialProvider<Material> _materialProvider;
         private readonly Dictionary<InstanceId, BindingEntry> _bindings = new();
+
+        // WHY: every contact event and every ray hit maps a collider back to its instance, and a scan
+        // of _bindings made that cost grow with the bound set on the hottest physics paths. Keyed by
+        // reference, like the scan it replaces, so Unity's overloaded equality never runs here and an
+        // externally destroyed GameObject can still be removed.
+        private readonly Dictionary<GameObject, InstanceId> _idsByGameObject =
+            new(GameObjectReferenceComparer.Instance);
+
         private readonly Dictionary<InstanceId, PartProperties> _partProperties = new();
 
         private ILog _log;
@@ -104,6 +111,25 @@ namespace CoreAI.Mods.Rbx.Binding
             /// visual lives on the root (Block/Ball/Wedge). Held by reference, NOT looked up by name,
             /// so a user-created child that happens to be named "Shape" can never be mistaken for it.</summary>
             public GameObject ShapeChild;
+
+            /// <summary>Set once a non-pose write reached a host-owned object and was reported, so
+            /// a script that recolors an adopted prop every frame logs one warning, not one per frame.</summary>
+            public bool ReportedHostOwnedWrite;
+        }
+
+        private sealed class GameObjectReferenceComparer : IEqualityComparer<GameObject>
+        {
+            public static readonly GameObjectReferenceComparer Instance = new();
+
+            public bool Equals(GameObject x, GameObject y)
+            {
+                return ReferenceEquals(x, y);
+            }
+
+            public int GetHashCode(GameObject obj)
+            {
+                return RuntimeHelpers.GetHashCode(obj);
+            }
         }
 
         /// <summary>Backing objects parent under <paramref name="worldParent"/> (the host that
@@ -141,7 +167,13 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <summary>Count of live backing GameObjects (materialized or parked-deactivated).</summary>
         public int BoundCount => _bindings.Count;
 
-        /// <summary>The backing GameObject, when one exists (world adapter / test seam).</summary>
+        /// <summary>
+        /// Diagnostic: how many GameObjects the GameObject → instance lookups have examined in total.
+        /// A lookup examines the hit object and at most its ancestors, never the bound set, so this
+        /// grows by a small constant per contact or ray hit however many objects are bound.
+        /// </summary>
+        public long ReverseLookupProbeCount { get; private set; }
+
         /// <summary>
         /// A bound part started or stopped touching another bound part, reported as instance ids.
         /// </summary>
@@ -153,8 +185,8 @@ namespace CoreAI.Mods.Rbx.Binding
         public event System.Action<InstanceId, InstanceId, bool> ContactObserved;
 
         /// <summary>
-        /// Fills <paramref name="bodies"/> with every bound part's Rigidbody, for the caller that
-        /// applies world gravity each fixed step.
+        /// Fills <paramref name="bodies"/> with the Rigidbody of every part the binder built (adopted
+        /// host objects excluded), for the caller that applies world gravity each fixed step.
         /// </summary>
         public void CollectSimulatedBodies(System.Collections.Generic.List<Rigidbody> bodies)
         {
@@ -165,7 +197,10 @@ namespace CoreAI.Mods.Rbx.Binding
 
             foreach (System.Collections.Generic.KeyValuePair<InstanceId, BindingEntry> pair in _bindings)
             {
-                if (pair.Value.IsPart && pair.Value.Rigidbody != null)
+                // WHY host-owned bodies are left out: the caller turns Unity gravity off on every body
+                // it gets and applies the world's own gravity instead. An adopted prop is still the
+                // host's object, and DEV-6 forbids a world's gravity from reaching the host's scene.
+                if (pair.Value.IsPart && pair.Value.OwnsGameObject && pair.Value.Rigidbody != null)
                 {
                     bodies.Add(pair.Value.Rigidbody);
                 }
@@ -175,8 +210,8 @@ namespace CoreAI.Mods.Rbx.Binding
         private void OnRelayContact(GameObject self, GameObject other, bool began)
         {
             if (ContactObserved == null
-                || !TryGetInstanceId(self, out InstanceId selfId)
-                || !TryGetInstanceId(other, out InstanceId otherId)
+                || !TryResolvePartInstanceId(self, out InstanceId selfId)
+                || !TryResolvePartInstanceId(other, out InstanceId otherId)
                 || selfId.Value == otherId.Value)
             {
                 return;
@@ -204,9 +239,11 @@ namespace CoreAI.Mods.Rbx.Binding
             relay.Attach(OnRelayContact);
         }
 
+        /// <summary>The backing GameObject, when a live one exists (world adapter / test seam). A
+        /// GameObject destroyed outside the binder counts as unbound.</summary>
         public bool TryGetBoundObject(InstanceId id, out GameObject gameObject)
         {
-            if (_bindings.TryGetValue(id, out BindingEntry entry))
+            if (TryGetLiveEntry(id, out BindingEntry entry))
             {
                 gameObject = entry.GameObject;
                 return true;
@@ -231,7 +268,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 throw new System.ArgumentNullException(nameof(gameObject));
             }
 
-            if (_bindings.ContainsKey(id))
+            if (TryGetLiveEntry(id, out _))
             {
                 throw new System.InvalidOperationException("The instance already has a backing GameObject.");
             }
@@ -240,6 +277,13 @@ namespace CoreAI.Mods.Rbx.Binding
             {
                 throw new System.InvalidOperationException(
                     "The host GameObject is already bound to instance " + existingId.Value + ".");
+            }
+
+            if (IsInsideBinderOwnedBacking(gameObject))
+            {
+                throw new System.InvalidOperationException(
+                    "'" + gameObject.name + "' belongs to a bound instance's backing hierarchy, so it " +
+                    "cannot be adopted as a separate part.");
             }
 
             Transform transform = gameObject.transform;
@@ -251,7 +295,9 @@ namespace CoreAI.Mods.Rbx.Binding
             // parent factor, so the adopted Size must reflect the part the user actually sees.
             properties.Size = RbxSpace.SizeFromUnity(transform.lossyScale);
             properties.Anchored = rigidbody == null;
-            properties.CanCollide = collider == null || collider.enabled;
+            // WHY isTrigger counts: a host trigger volume lets bodies through, which is exactly what
+            // CanCollide=false means on this side of the binder.
+            properties.CanCollide = collider == null || (collider.enabled && !collider.isTrigger);
 
             BindingEntry entry = new()
             {
@@ -262,36 +308,130 @@ namespace CoreAI.Mods.Rbx.Binding
                 Rigidbody = rigidbody
             };
             CacheVisualComponents(entry);
-            _partProperties.Add(id, properties);
-            _bindings.Add(id, entry);
+            _partProperties[id] = properties;
+            AddBinding(id, entry);
             AttachContactRelay(gameObject);
         }
 
         /// <summary>
-        /// Reverse of <see cref="TryGetBoundObject"/>: the world instance whose backing GameObject is
-        /// <paramref name="gameObject"/> (used by the click-pick source to map a raycast hit back to
-        /// an <see cref="InstanceId"/>). A part's own visual and collider sit on this GameObject
-        /// (Block/Ball/Wedge) or a binder-owned Shape child (Cylinder), so the pick source walks up
-        /// the hit transform's ancestry calling this until a bound object matches.
+        /// Reverse of <see cref="TryGetBoundObject"/>: the instance whose backing GameObject is
+        /// exactly <paramref name="gameObject"/>, in constant time. A collider that sits below a
+        /// backing object (a Cylinder's Shape child, a child of an adopted prop) is not matched here;
+        /// <see cref="TryResolvePartInstanceId"/> maps those.
         /// </summary>
-        // WHY: linear scan — a click is a per-click (not per-frame) event and the bound set is the
-        // live part count, so a reverse dictionary is not worth the extra bookkeeping on every
-        // create/destroy/reparent.
         public bool TryGetInstanceId(GameObject gameObject, out InstanceId id)
         {
             if (gameObject != null)
             {
-                foreach (KeyValuePair<InstanceId, BindingEntry> pair in _bindings)
+                ReverseLookupProbeCount++;
+                if (_idsByGameObject.TryGetValue(gameObject, out id))
                 {
-                    if (ReferenceEquals(pair.Value.GameObject, gameObject))
-                    {
-                        id = pair.Key;
-                        return true;
-                    }
+                    return true;
                 }
             }
 
             id = InstanceId.None;
+            return false;
+        }
+
+        /// <summary>
+        /// Maps a collider's GameObject (a raycast hit, the other side of a contact, a click) back to
+        /// the part it belongs to: the nearest bound GameObject at or above it, when that binding is a
+        /// part. A Cylinder keeps its collider on a binder-owned Shape child and an adopted host prop
+        /// may keep colliders on its children, so an exact match alone left both invisible to
+        /// Raycast, Touched and clicks. A collider whose nearest bound ancestor is a container
+        /// (Workspace, a Model, the DataModel host) is not a part and resolves to nothing. Cost is
+        /// one dictionary probe per ancestor climbed, independent of how many objects are bound.
+        /// </summary>
+        public bool TryResolvePartInstanceId(GameObject gameObject, out InstanceId id)
+        {
+            for (Transform current = gameObject != null ? gameObject.transform : null;
+                 current != null;
+                 current = current.parent)
+            {
+                ReverseLookupProbeCount++;
+                if (!_idsByGameObject.TryGetValue(current.gameObject, out InstanceId candidate))
+                {
+                    continue;
+                }
+
+                if (_bindings.TryGetValue(candidate, out BindingEntry entry) && entry.IsPart)
+                {
+                    id = candidate;
+                    return true;
+                }
+
+                break;
+            }
+
+            id = InstanceId.None;
+            return false;
+        }
+
+        /// <summary>
+        /// True when <paramref name="gameObject"/> is not itself bound but sits inside a GameObject
+        /// the binder created (a Cylinder's Shape child, anything under a materialized part or
+        /// container). Such an object is part of an instance's backing, never a separate world
+        /// object: adopting it would let a script move one piece of another part's visual.
+        /// </summary>
+        public bool IsInsideBinderOwnedBacking(GameObject gameObject)
+        {
+            if (gameObject == null || _idsByGameObject.ContainsKey(gameObject))
+            {
+                return false;
+            }
+
+            for (Transform current = gameObject.transform.parent; current != null; current = current.parent)
+            {
+                if (_idsByGameObject.TryGetValue(current.gameObject, out InstanceId candidate))
+                {
+                    return _bindings.TryGetValue(candidate, out BindingEntry entry) && entry.OwnsGameObject;
+                }
+            }
+
+            return false;
+        }
+
+        private void AddBinding(InstanceId id, BindingEntry entry)
+        {
+            _bindings.Add(id, entry);
+            _idsByGameObject[entry.GameObject] = id;
+        }
+
+        /// <summary>Forgets a binding in both directions. The reverse entry is removed only while it
+        /// still names <paramref name="id"/>, so a GameObject re-bound to a newer instance keeps its
+        /// newer mapping.</summary>
+        private void DropBinding(InstanceId id, BindingEntry entry)
+        {
+            _bindings.Remove(id);
+            if (!ReferenceEquals(entry.GameObject, null)
+                && _idsByGameObject.TryGetValue(entry.GameObject, out InstanceId mapped)
+                && mapped.Value == id.Value)
+            {
+                _idsByGameObject.Remove(entry.GameObject);
+            }
+        }
+
+        /// <summary>
+        /// The binding for <paramref name="id"/> when its GameObject is still alive. A GameObject
+        /// destroyed outside the binder (a host kill-plane script, a scene unload in progress, an
+        /// editor deletion) is dropped here and reported as unbound, so no callback ever touches a
+        /// dead object and throws halfway through a registry update.
+        /// </summary>
+        private bool TryGetLiveEntry(InstanceId id, out BindingEntry entry)
+        {
+            if (!_bindings.TryGetValue(id, out entry))
+            {
+                return false;
+            }
+
+            if (entry.GameObject != null)
+            {
+                return true;
+            }
+
+            DropBinding(id, entry);
+            entry = null;
             return false;
         }
 
@@ -306,21 +446,36 @@ namespace CoreAI.Mods.Rbx.Binding
 
             if (_bindings.TryGetValue(record.Id, out BindingEntry entry))
             {
-                if (entry.OwnsGameObject)
+                if (entry.GameObject == null)
                 {
-                    // WHY: re-entry reactivates the parked object — D5 makes re-parenting cheap.
-                    entry.GameObject.transform.SetParent(ResolveParentTransform(record.Instance), true);
-                    entry.GameObject.name = record.Instance.Name;
-                    entry.GameObject.SetActive(DesiredActiveSelf(record.Instance));
+                    // WHY: destroyed outside the binder. An owned backing re-materializes below, since
+                    // the instance is entering the world and must have one; a host-owned object stays
+                    // released, because the host that owns it decided it is gone.
+                    DropBinding(record.Id, entry);
+                    if (!entry.OwnsGameObject)
+                    {
+                        return;
+                    }
                 }
+                else
+                {
+                    if (entry.OwnsGameObject)
+                    {
+                        // WHY: re-entry reactivates the parked object — D5 makes re-parenting cheap.
+                        Transform parent = ResolveParentTransform(record.Instance, out bool parentIsBound);
+                        entry.GameObject.transform.SetParent(parent, true);
+                        entry.GameObject.name = record.Instance.Name;
+                        entry.GameObject.SetActive(DesiredActiveSelf(record.Instance, parentIsBound));
+                    }
 
-                return;
+                    return;
+                }
             }
 
             try
             {
                 entry = CreateEntry(record.Instance);
-                _bindings.Add(record.Id, entry);
+                AddBinding(record.Id, entry);
                 if (entry.IsPart)
                 {
                     Apply(entry, GetPartPropertiesOrDefault(record.Id));
@@ -362,7 +517,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
             // WHY: the DataModel host GameObject never leaves its own tree; guard so nothing
             // deactivates or re-parents the host.
-            if (!_bindings.TryGetValue(record.Id, out BindingEntry entry) || !entry.OwnsGameObject)
+            if (!TryGetLiveEntry(record.Id, out BindingEntry entry) || !entry.OwnsGameObject)
             {
                 return;
             }
@@ -376,19 +531,22 @@ namespace CoreAI.Mods.Rbx.Binding
         public void OnDestroyed(InstanceRecord record)
         {
             RepaintIfMaterialVariant(record);
+            _partProperties.Remove(record.Id);
             if (!_bindings.TryGetValue(record.Id, out BindingEntry entry))
             {
-                _partProperties.Remove(record.Id);
                 return;
             }
 
-            _bindings.Remove(record.Id);
-            _partProperties.Remove(record.Id);
+            DropBinding(record.Id, entry);
             // WHY: the DataModel's backing object is the host GameObject — teardown releases the
             // materialized children but never the host itself (RbxWorldHost owns its lifecycle).
             if (entry.OwnsGameObject)
             {
                 SafeDestroy(entry.GameObject);
+            }
+            else if (entry.IsPart)
+            {
+                ReleaseHostObject(entry);
             }
         }
 
@@ -400,20 +558,45 @@ namespace CoreAI.Mods.Rbx.Binding
             }
 
             RepaintIfMaterialVariant(record);
-            if (_bindings.TryGetValue(record.Id, out BindingEntry entry) && entry.OwnsGameObject)
+            if (TryGetLiveEntry(record.Id, out BindingEntry entry) && entry.OwnsGameObject)
             {
                 // WHY: worldPositionStays — CFrames are world-space, so a hierarchy move
                 // must not shift the rendered pose.
-                entry.GameObject.transform.SetParent(ResolveParentTransform(record.Instance), true);
+                Transform parent = ResolveParentTransform(record.Instance, out bool parentIsBound);
+                entry.GameObject.transform.SetParent(parent, true);
+                // WHY: a move can cross the Workspace boundary without leaving the DataModel
+                // (Workspace -> game, game -> Workspace), so the object's own flag is recomputed with
+                // its parent instead of relying on the new parent's activeInHierarchy alone.
+                entry.GameObject.SetActive(DesiredActiveSelf(record.Instance, parentIsBound));
             }
         }
 
         public void OnNameChanged(InstanceRecord record)
         {
             RepaintIfMaterialVariant(record);
-            if (_bindings.TryGetValue(record.Id, out BindingEntry entry) && entry.OwnsGameObject)
+            if (TryGetLiveEntry(record.Id, out BindingEntry entry) && entry.OwnsGameObject)
             {
                 entry.GameObject.name = record.Instance.Name;
+            }
+        }
+
+        /// <summary>
+        /// Hands an adopted host object back when its instance is destroyed: the contact relay is the
+        /// only thing the binder added to it, so the relay goes and the object itself stays, with the
+        /// host's own components untouched.
+        /// </summary>
+        private static void ReleaseHostObject(BindingEntry entry)
+        {
+            if (entry.GameObject == null)
+            {
+                return;
+            }
+
+            RbxContactRelay relay = entry.GameObject.GetComponent<RbxContactRelay>();
+            if (relay != null)
+            {
+                relay.Detach();
+                SafeDestroy(relay);
             }
         }
 
@@ -475,7 +658,7 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.Size = size;
-            Store(id, properties, PartAspect.Transform);
+            Store(id, properties, PartAspect.Size);
         }
 
         public void SetColor(InstanceId id, RbxColor3 color)
@@ -543,7 +726,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
             foreach (KeyValuePair<InstanceId, BindingEntry> pair in _bindings)
             {
-                if (!pair.Value.IsPart ||
+                if (!pair.Value.IsPart || !pair.Value.OwnsGameObject ||
                     !_partProperties.TryGetValue(pair.Key, out PartProperties properties) ||
                     !string.Equals(properties.MaterialVariant, variantName, StringComparison.Ordinal))
                 {
@@ -584,7 +767,7 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             foreach (KeyValuePair<InstanceId, BindingEntry> pair in _bindings)
             {
-                if (!pair.Value.IsPart ||
+                if (!pair.Value.IsPart || !pair.Value.OwnsGameObject ||
                     !_partProperties.TryGetValue(pair.Key, out PartProperties properties) ||
                     properties.MaterialVariant == null)
                 {
@@ -641,6 +824,7 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             Full,
             Transform,
+            Size,
             Appearance,
             Anchored,
             CanCollide
@@ -649,14 +833,21 @@ namespace CoreAI.Mods.Rbx.Binding
         private void Store(InstanceId id, in PartProperties properties, PartAspect aspect)
         {
             _partProperties[id] = properties;
-            if (!_bindings.TryGetValue(id, out BindingEntry entry) || !entry.IsPart)
+            if (!TryGetLiveEntry(id, out BindingEntry entry) || !entry.IsPart)
             {
+                return;
+            }
+
+            if (!entry.OwnsGameObject)
+            {
+                ApplyToHostOwnedObject(entry, properties, aspect);
                 return;
             }
 
             switch (aspect)
             {
                 case PartAspect.Transform:
+                case PartAspect.Size:
                     ApplyTransform(entry, properties);
                     break;
                 case PartAspect.Appearance:
@@ -672,6 +863,40 @@ namespace CoreAI.Mods.Rbx.Binding
                     Apply(entry, properties);
                     break;
             }
+        }
+
+        /// <summary>
+        /// A host object adopted as a Part follows pose writes (position and orientation) and nothing
+        /// else. The value is still stored, so the instance reads back what the script wrote, but
+        /// the host's scale, mesh, collider, material, renderer and Rigidbody are never touched:
+        /// writing Size back as localScale doubled a prop under a scaled parent, a Shape write
+        /// stripped the host's mesh and collider, and Anchored destroyed the host's own Rigidbody.
+        /// A whole-bundle write (shape switch, restore, clone copy) applies nothing at all, because
+        /// re-applying the stored pose would snap a prop the host has since moved back to where it
+        /// was adopted.
+        /// </summary>
+        private void ApplyToHostOwnedObject(BindingEntry entry, in PartProperties properties,
+            PartAspect aspect)
+        {
+            if (aspect == PartAspect.Transform)
+            {
+                ApplyPose(entry, properties);
+                return;
+            }
+
+            if (entry.ReportedHostOwnedWrite)
+            {
+                return;
+            }
+
+            entry.ReportedHostOwnedWrite = true;
+            Logger.Warn(
+                $"[CoreAI.RbxApi] '{entry.GameObject.name}' is a host-owned object adopted as a Part: " +
+                "only its position and orientation follow script writes. Size, Shape, Color, " +
+                "Material, Transparency, Anchored and CanCollide are kept on the instance but are " +
+                "not applied, so the host's own scale, mesh, collider, material and Rigidbody stay " +
+                "as the host authored them.",
+                LogTag.World);
         }
 
         // ---- Materialization ----------------------------------------------------------------
@@ -695,27 +920,61 @@ namespace CoreAI.Mods.Rbx.Binding
             // path for materialization and later Shape switches.
             GameObject gameObject = new();
             gameObject.name = instance.Name;
-            gameObject.transform.SetParent(ResolveParentTransform(instance), false);
-            gameObject.SetActive(DesiredActiveSelf(instance));
+            Transform parent = ResolveParentTransform(instance, out bool parentIsBound);
+            gameObject.transform.SetParent(parent, false);
+            gameObject.SetActive(DesiredActiveSelf(instance, parentIsBound));
             return new BindingEntry { GameObject = gameObject, IsPart = isPart, OwnsGameObject = true };
         }
 
-        /// <summary>Storage-service GameObjects materialize inactive so their subtrees stay out
-        /// of the physical world; everything else (Workspace, Lighting, Folder, Model, Part) is
-        /// active and inherits its parent's hierarchy state.</summary>
-        private static bool DesiredActiveSelf(RbxInstance instance)
-        {
-            return !InactiveServiceClasses.Contains(instance.ClassName);
-        }
-
-        private Transform ResolveParentTransform(RbxInstance instance)
+        /// <summary>
+        /// Only Workspace and its descendants are the physical world (Workspace.yaml: "While such
+        /// objects are descendant of Workspace, they will be active"). A direct child of the DataModel
+        /// other than Workspace (Lighting, Players, MaterialService, the storage services, a Part
+        /// parented straight to game) is inactive itself, so its whole subtree neither renders,
+        /// collides, fires Touched nor answers a raycast; everything below that level keeps its own
+        /// flag on and inherits the verdict through Unity's activeInHierarchy. When the parent has no
+        /// live backing the object sits directly under the host, so the verdict is read from the
+        /// instance tree instead.
+        /// </summary>
+        private static bool DesiredActiveSelf(RbxInstance instance, bool parentIsBound)
         {
             RbxInstance parent = instance.Parent;
-            if (parent != null && _bindings.TryGetValue(parent.Id, out BindingEntry parentEntry))
+            if (parent == null)
             {
+                return true;
+            }
+
+            if (!parentIsBound)
+            {
+                return IsWorkspaceOrDescendant(instance);
+            }
+
+            return !parent.IsA("DataModel") || instance.IsA("Workspace");
+        }
+
+        private static bool IsWorkspaceOrDescendant(RbxInstance instance)
+        {
+            for (RbxInstance current = instance; current != null; current = current.Parent)
+            {
+                if (current.IsA("Workspace"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private Transform ResolveParentTransform(RbxInstance instance, out bool parentIsBound)
+        {
+            RbxInstance parent = instance.Parent;
+            if (parent != null && TryGetLiveEntry(parent.Id, out BindingEntry parentEntry))
+            {
+                parentIsBound = true;
                 return parentEntry.GameObject.transform;
             }
 
+            parentIsBound = false;
             return _worldParent;
         }
 
@@ -732,20 +991,24 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private static void ApplyTransform(BindingEntry entry, in PartProperties properties)
         {
-            Transform transform = entry.GameObject.transform;
-            (Vector3 position, Quaternion rotation) = RbxSpace.ToUnityPose(properties.CFrame);
-            transform.SetPositionAndRotation(position, rotation);
+            ApplyPose(entry, properties);
             // WHY: for every shape the part root carries Size * MetersPerStud (D3); shape
             // primitives are authored so 1 local unit = 1 stud (Cylinder's child corrects
             // Unity's 2-unit-tall mesh, see BuildCylinderVisual).
-            transform.localScale = RbxSpace.SizeToUnity(properties.Size);
+            entry.GameObject.transform.localScale = RbxSpace.SizeToUnity(properties.Size);
+        }
+
+        private static void ApplyPose(BindingEntry entry, in PartProperties properties)
+        {
+            (Vector3 position, Quaternion rotation) = RbxSpace.ToUnityPose(properties.CFrame);
+            entry.GameObject.transform.SetPositionAndRotation(position, rotation);
         }
 
         // ---- Shape materialization ----------------------------------------------------------
 
         private const string ShapeChildName = "Shape";
 
-        private static void ApplyShape(BindingEntry entry, RbxPartShape shape)
+        private void ApplyShape(BindingEntry entry, RbxPartShape shape)
         {
             RbxPartShape normalized = shape;
             if (entry.MaterializedShape == normalized)
@@ -761,6 +1024,9 @@ namespace CoreAI.Mods.Rbx.Binding
                     break;
                 case RbxPartShape.Cylinder:
                     entry.ShapeChild = BuildCylinderVisual(entry.GameObject);
+                    // WHY: an anchored Cylinder has no Rigidbody, so Unity delivers its contact
+                    // messages to the collider's own GameObject — this child, not the root relay.
+                    AttachContactRelay(entry.ShapeChild);
                     break;
                 case RbxPartShape.Wedge:
                     BuildWedgeVisual(entry.GameObject);
@@ -1109,11 +1375,19 @@ namespace CoreAI.Mods.Rbx.Binding
             }
         }
 
+        /// <summary>
+        /// CanCollide=false turns the part's collider into a trigger rather than disabling it.
+        /// WHY: in Roblox a non-colliding part still fires Touched and is still hit by raycasts
+        /// (CanTouch and CanQuery default true); a disabled Unity collider does neither, so the
+        /// pickup and kill-zone idiom never fired and every ray passed through decorations. A
+        /// trigger lets bodies through while the contact relay still hears OnTrigger events, and
+        /// RespectCanCollide reads isTrigger back in the physics port.
+        /// </summary>
         private static void ApplyCanCollide(BindingEntry entry, bool canCollide)
         {
             if (entry.Collider != null)
             {
-                entry.Collider.enabled = canCollide;
+                entry.Collider.isTrigger = !canCollide;
             }
         }
 

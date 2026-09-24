@@ -106,15 +106,20 @@ namespace CoreAI.Mods.Rbx.Binding
             // ray. RaycastAll allocates a new array on every call regardless of hit count; growing
             // _hitScratch instead pays that allocation once per session, the first time a ray meets
             // an unusually crowded line, and every raycast after that stays allocation-free again.
+            //
+            // WHY QueryTriggerInteraction.Collide, stated rather than left to the project setting: a
+            // CanCollide=false part is a trigger on the Unity side, and a Roblox ray still hits it
+            // unless RespectCanCollide asks otherwise (CanQuery defaults to true). Host trigger
+            // volumes come back too and are dropped below, because they resolve to no part.
             int count = Physics.RaycastNonAlloc(
                 origin, direction / distance, _hitScratch, distance,
-                ~0, QueryTriggerInteraction.Ignore);
+                ~0, QueryTriggerInteraction.Collide);
             while (count == _hitScratch.Length && _hitScratch.Length < MaxHitScratchLength)
             {
                 _hitScratch = new RaycastHit[Math.Min(_hitScratch.Length * 2, MaxHitScratchLength)];
                 count = Physics.RaycastNonAlloc(
                     origin, direction / distance, _hitScratch, distance,
-                    ~0, QueryTriggerInteraction.Ignore);
+                    ~0, QueryTriggerInteraction.Collide);
             }
 
             bool found = false;
@@ -124,7 +129,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 RaycastHit candidate = _hitScratch[index];
                 if (candidate.distance >= bestDistance
                     || candidate.collider == null
-                    || !_binder.TryGetInstanceId(candidate.collider.gameObject, out InstanceId id))
+                    || !_binder.TryResolvePartInstanceId(candidate.collider.gameObject, out InstanceId id))
                 {
                     continue;
                 }
@@ -167,10 +172,12 @@ namespace CoreAI.Mods.Rbx.Binding
                 : RbxMaterialId.Plastic;
         }
 
+        /// <summary>
+        /// RespectCanCollide asks the query to use CanCollide instead of CanQuery. The binder keeps a
+        /// CanCollide=false part's collider as a trigger, so the collider's own flag is the answer.
+        /// </summary>
         private static bool CollidesWithQueries(Collider collider)
         {
-            // RespectCanCollide asks the query to use CanCollide instead of CanQuery; a non-colliding
-            // part is a trigger on the Unity side, so the collider's own flag is the answer.
             return !collider.isTrigger;
         }
 

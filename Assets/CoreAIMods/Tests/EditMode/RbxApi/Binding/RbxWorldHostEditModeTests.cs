@@ -51,12 +51,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         public void Bootstrap_MirrorsExplorerUnderHost_StorageServicesInactive()
         {
             // WHY: the host GameObject represents game (DataModel); every service nests under it,
-            // Workspace/Lighting active, storage services inactive so their content is not physical.
+            // only Workspace active (Roblox: only Workspace content is physical), so Lighting and the
+            // storage services stay inactive and their content neither renders nor collides.
             Assert.IsTrue(_host.Binder.TryGetBoundObject(_host.Game.Id, out GameObject gameGo));
             Assert.AreSame(_hostGo, gameGo, "the DataModel binds to the host GameObject itself");
 
             AssertServiceActive("Workspace", true);
-            AssertServiceActive("Lighting", true);
+            AssertServiceActive("Lighting", false);
             AssertServiceActive("ReplicatedStorage", false);
             AssertServiceActive("ServerStorage", false);
             AssertServiceActive("ServerScriptService", false);
