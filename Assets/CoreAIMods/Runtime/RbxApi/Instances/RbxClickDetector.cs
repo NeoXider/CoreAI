@@ -10,6 +10,8 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public sealed class RbxClickDetector : RbxInstance
     {
+        private double _maxActivationDistance = 32d;
+
         internal RbxClickDetector(ClassDescriptor descriptor)
             : base(descriptor)
         {
@@ -38,7 +40,21 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>Roblox ClickDetector.MaxActivationDistance (studs, default 32): a click by a
         /// player whose character is farther than this from the clicked part does not fire
-        /// MouseClick.</summary>
-        public double MaxActivationDistance { get; set; } = 32d;
+        /// MouseClick. A change fires <c>Changed("MaxActivationDistance")</c> and its property
+        /// signal; an equal write fires nothing.</summary>
+        public double MaxActivationDistance
+        {
+            get => _maxActivationDistance;
+            set
+            {
+                if (_maxActivationDistance.Equals(value))
+                {
+                    return;
+                }
+
+                _maxActivationDistance = value;
+                NotifyPropertyChanged(nameof(MaxActivationDistance));
+            }
+        }
     }
 }

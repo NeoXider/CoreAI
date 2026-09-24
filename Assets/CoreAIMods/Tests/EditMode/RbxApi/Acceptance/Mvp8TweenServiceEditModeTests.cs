@@ -1529,6 +1529,66 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(RbxTweenPlaybackState.Playing, tween.PlaybackState);
         }
 
+        [Test]
+        public void R6_11_PlaybackState_FiresChangedAndItsSignalOnEveryStateChange()
+        {
+            // WHY (A3-01): PlaybackState is a BoundProperties row GetPropertyChangedSignal accepts,
+            // yet the tween changed it silently, so a script watching it never heard Play, Pause or
+            // the end of the run.
+            TweenWorld world = new TweenWorld();
+            RbxInstance part = world.NewPart("StatePart");
+            RbxTween tween = world.Create(part, new RbxTweenInfo(0.5d, RbxEasingStyle.Linear,
+                RbxEasingDirection.Out, 0, false, 0d), ActorA, ("Transparency", 1d));
+            List<string> changed = new List<string>();
+            tween.Changed.BindScheduler(world.Scheduler);
+            tween.Changed.Connect(new Action<object[]>(arguments => changed.Add((string)arguments[0])));
+            int signalled = 0;
+            RbxScriptSignal stateSignal = tween.GetPropertyChangedSignal("PlaybackState");
+            stateSignal.BindScheduler(world.Scheduler);
+            stateSignal.Connect(new Action<object[]>(_ => signalled++));
+
+            tween.Play();
+            tween.Play();
+            world.Scheduler.Advance(0.25d);
+            tween.Pause();
+            tween.Pause();
+            tween.Play();
+            world.Scheduler.Advance(1d);
+            world.Scheduler.Advance(0d);
+
+            Assert.AreEqual(RbxTweenPlaybackState.Completed, tween.PlaybackState);
+            CollectionAssert.AreEqual(
+                new[] { "PlaybackState", "PlaybackState", "PlaybackState", "PlaybackState" }, changed,
+                "Playing, Paused, Playing, Completed; the repeated Play and Pause change nothing");
+            Assert.AreEqual(4, signalled);
+        }
+
+        [Test]
+        public void Heartbeat_ReusesOneSnapshotArray_AndKeepsNoTweenInItBetweenFrames()
+        {
+            // WHY (A3-09): the Heartbeat step allocated a fresh snapshot array on every frame any
+            // tween played. The reused one must not keep a finished tween alive either.
+            TweenWorld world = new TweenWorld();
+            for (int index = 0; index < 3; index++)
+            {
+                RbxInstance part = world.NewPart("ScratchPart" + index);
+                world.Create(part, new RbxTweenInfo(1d, RbxEasingStyle.Linear,
+                    RbxEasingDirection.Out, 0, false, 0d), ActorA, ("Transparency", 1d)).Play();
+            }
+
+            world.Scheduler.Advance(Frame);
+            RbxTween[] scratch = world.Service.StepScratch;
+            world.Scheduler.Advance(Frame);
+
+            Assert.IsNotNull(scratch, "the step keeps its snapshot array for the next frame");
+            Assert.GreaterOrEqual(scratch.Length, 3);
+            Assert.AreSame(scratch, world.Service.StepScratch, "the next frame reuses the same array");
+            foreach (RbxTween slot in scratch)
+            {
+                Assert.IsNull(slot, "the kept array holds no tween between frames");
+            }
+        }
+
         private static List<KeyValuePair<string, object>> Goals(
             params (string Property, object Goal)[] goals)
         {

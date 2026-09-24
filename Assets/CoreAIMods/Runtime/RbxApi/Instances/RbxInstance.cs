@@ -79,6 +79,7 @@ namespace CoreAI.Mods.Rbx.Instances
         private readonly Dictionary<string, object> _attributes = new(System.StringComparer.Ordinal);
         private Dictionary<string, RbxScriptSignal> _signals;
         private Dictionary<string, RbxScriptSignal> _propertyChangedSignals;
+        private KeyedSignalTable _attributeSignals;
 
         private string _name;
         private bool _archivable = true;
@@ -170,6 +171,10 @@ namespace CoreAI.Mods.Rbx.Instances
 
         public bool IsDestroyed => _destroyed;
 
+        /// <summary>True from the moment <see cref="Destroy"/> starts on this instance, so the
+        /// signals its removal raises can hand their handlers a readable tombstone.</summary>
+        internal bool IsBeingDestroyed => _destroying;
+
         /// <summary>Tombstone-readable after Destroy (always null then). Setter runs the full
         /// re-parent pipeline with hierarchy validation; throws PARENT_LOCKED after Destroy (D6),
         /// and BAD_ARGUMENT when the move would make the tree deeper than
@@ -231,7 +236,8 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxInstance ancestor = oldAncestors[ancestorIndex];
                 for (int movedIndex = 0; movedIndex < movedSubtree.Count; movedIndex++)
                 {
-                    ancestor.FireIfConnected("DescendantRemoving", movedSubtree[movedIndex]);
+                    ancestor.FireRemovalIfConnected("DescendantRemoving", movedSubtree[movedIndex],
+                        _destroying);
                 }
             }
 
@@ -244,7 +250,7 @@ namespace CoreAI.Mods.Rbx.Instances
             newParent?.Registry?.AdvanceRevision(newParent.Id, ReplicationMembers.Children);
 
             Registry?.OnParentChanged(this, wasInScene);
-            oldParent?.FireIfConnected("ChildRemoved", this);
+            oldParent?.FireRemovalIfConnected("ChildRemoved", this, _destroying);
             newParent?.FireIfConnected("ChildAdded", this);
             NotifyPropertyChangedCore(ReplicationMembers.Parent, _destroying);
             FireAncestryChanged(movedSubtree);
@@ -792,8 +798,12 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             Registry?.AdvanceRevision(Id, ReplicationMembers.Attribute(attribute));
-            FireSignal("AttributeChanged", attribute);
-            FireSignal("GetAttributeChangedSignal(" + attribute + ")");
+            FireIfConnected("AttributeChanged", attribute);
+            if (_attributeSignals != null
+                && _attributeSignals.TryGetConnected(attribute, out RbxScriptSignal attributeSignal))
+            {
+                attributeSignal.Fire();
+            }
         }
 
         public IReadOnlyDictionary<string, object> GetAttributes()
@@ -871,12 +881,19 @@ namespace CoreAI.Mods.Rbx.Instances
         /// </summary>
         public RbxScriptSignal Changed => GetSignal(ChangedSignalName);
 
+        /// <summary>Mirror Instance:GetAttributeChangedSignal: fires with no arguments right after
+        /// the named attribute changes. Asking again for a name returns the same signal for as long
+        /// as anything still holds it (see <see cref="KeyedSignalTable"/>).</summary>
         public RbxScriptSignal GetAttributeChangedSignal(string attribute)
         {
             ThrowIfDestroyed("GetAttributeChangedSignal");
             AttributeContract.ValidateName(attribute);
-            return GetSignal("GetAttributeChangedSignal(" + attribute + ")");
+            _attributeSignals ??= new KeyedSignalTable(ClassName + ".GetAttributeChangedSignal(");
+            return _attributeSignals.GetOrCreate(attribute, out _);
         }
+
+        /// <summary>Attribute-changed signals held strongly (A3-03 regression counter).</summary>
+        internal int AttributeSignalStrongCount => _attributeSignals?.StrongCount ?? 0;
 
         /// <summary>Mirror Object:GetPropertyChangedSignal: fires with no arguments right after
         /// <paramref name="property"/> changes; the same signal instance is returned on every
@@ -1050,6 +1067,33 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
+        /// <summary>Fires a removal signal (ChildRemoved, DescendantRemoving) with the instance
+        /// that left; a removal <see cref="Destroy"/> caused hands the handlers that instance as a
+        /// readable tombstone.</summary>
+        /// <remarks>
+        /// WHY (DEV-7, A3-07): the handlers run deferred, after Destroy has finished, so the
+        /// instance they receive is already destroyed; fired plainly, a handler reading its Name to
+        /// clean up after it raised INSTANCE_DESTROYED. Destroying and AncestryChanged already hand
+        /// over the tombstone, and these are the same removal seen from the parent's side.
+        /// </remarks>
+        private void FireRemovalIfConnected(string signalName, RbxInstance removed,
+            bool forDestruction)
+        {
+            if (!TryGetConnectedSignal(signalName, out RbxScriptSignal signal))
+            {
+                return;
+            }
+
+            if (forDestruction)
+            {
+                signal.FireForDestruction(removed, removed);
+            }
+            else
+            {
+                signal.Fire(removed);
+            }
+        }
+
         private bool TryGetConnectedSignal(string signalName, out RbxScriptSignal signal)
         {
             if (_signals != null
@@ -1078,6 +1122,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private void DisconnectSignals()
         {
+            _attributeSignals?.DisconnectAll();
             if (_signals == null)
             {
                 return;
@@ -1266,6 +1311,194 @@ namespace CoreAI.Mods.Rbx.Instances
         private protected override void RemapClonedReferences(in CloneReferenceMap map)
         {
             _primaryPart = map.Resolve(_primaryPart);
+        }
+    }
+
+    /// <summary>
+    /// Signals keyed by a string the script chooses — a CollectionService tag, an attribute name —
+    /// so how many keys exist is the script's decision, not the world's. A key's signal is found
+    /// again, and fires, for as long as anything holds it; a signal nothing holds any more can be
+    /// reclaimed by the garbage collector.
+    /// </summary>
+    /// <remarks>
+    /// WHY two tiers instead of one dictionary (A3-03): every distinct key used to keep its signal
+    /// for the life of the world, so a loop asking for twenty thousand keys left twenty thousand
+    /// signals behind although nothing ever connected to one. A signal with a live connection is
+    /// held strongly; once more than <see cref="StrongBudget"/> keys are held, the ones without a
+    /// connection are held only weakly. WHY weakly and not dropped: Roblox lets a script take a
+    /// signal now and connect to it later, and a signal the script still holds is exactly one the
+    /// collector cannot reclaim — so it is still found here when a change fires, and asking for its
+    /// key again returns the same object. A connection keeps its signal alive too: the mod's
+    /// connection registry holds every Lua connection. The one case left uncovered is C# code that
+    /// connects to a signal it took after the budget was passed and then keeps neither the signal
+    /// nor the connection.
+    /// </remarks>
+    internal sealed class KeyedSignalTable
+    {
+        /// <summary>Keys held strongly, connected or not, before unconnected ones are demoted.</summary>
+        internal const int StrongBudget = 64;
+
+        /// <summary>Weak entries tolerated before the first sweep of collected ones.</summary>
+        private const int MinimumWeakSweepThreshold = 256;
+
+        private readonly string _signalNamePrefix;
+        private readonly Dictionary<string, RbxScriptSignal> _strong =
+            new(System.StringComparer.Ordinal);
+        private readonly List<string> _keyScratch = new();
+        private Dictionary<string, System.WeakReference<RbxScriptSignal>> _weak;
+        private int _demotionThreshold = StrongBudget;
+        private int _weakSweepThreshold = MinimumWeakSweepThreshold;
+
+        /// <summary>Each signal is named <paramref name="signalNamePrefix"/> + key + ")".</summary>
+        internal KeyedSignalTable(string signalNamePrefix)
+        {
+            _signalNamePrefix = signalNamePrefix ?? string.Empty;
+        }
+
+        /// <summary>Signals held strongly (regression counter).</summary>
+        internal int StrongCount => _strong.Count;
+
+        /// <summary>Weak entries not yet swept, collected ones included (regression counter).</summary>
+        internal int WeakCount => _weak?.Count ?? 0;
+
+        /// <summary>The key's signal, made when none is alive; <paramref name="created"/> is true
+        /// for a new one, which the caller binds to its scheduler.</summary>
+        internal RbxScriptSignal GetOrCreate(string key, out bool created)
+        {
+            if (_strong.TryGetValue(key, out RbxScriptSignal signal) || TryGetWeak(key, out signal))
+            {
+                created = false;
+                return signal;
+            }
+
+            signal = new RbxScriptSignal(_signalNamePrefix + key + ")");
+            _strong.Add(key, signal);
+            created = true;
+            if (_strong.Count >= _demotionThreshold)
+            {
+                DemoteUnconnected(key);
+            }
+
+            return signal;
+        }
+
+        /// <summary>The key's signal when it has a live connection, so a fire can skip every key
+        /// nobody listens to; a weakly held signal found connected is held strongly from then on.</summary>
+        internal bool TryGetConnected(string key, out RbxScriptSignal signal)
+        {
+            if (_strong.TryGetValue(key, out signal))
+            {
+                return signal.HasConnections;
+            }
+
+            if (!TryGetWeak(key, out signal) || !signal.HasConnections)
+            {
+                signal = null;
+                return false;
+            }
+
+            _weak.Remove(key);
+            _strong.Add(key, signal);
+            return true;
+        }
+
+        /// <summary>Disconnects every signal still alive (the owner was destroyed).</summary>
+        internal void DisconnectAll()
+        {
+            foreach (RbxScriptSignal signal in _strong.Values)
+            {
+                signal.DisconnectAll();
+            }
+
+            if (_weak == null)
+            {
+                return;
+            }
+
+            foreach (System.WeakReference<RbxScriptSignal> reference in _weak.Values)
+            {
+                if (reference.TryGetTarget(out RbxScriptSignal signal))
+                {
+                    signal.DisconnectAll();
+                }
+            }
+        }
+
+        private bool TryGetWeak(string key, out RbxScriptSignal signal)
+        {
+            signal = null;
+            if (_weak == null
+                || !_weak.TryGetValue(key, out System.WeakReference<RbxScriptSignal> reference))
+            {
+                return false;
+            }
+
+            if (reference.TryGetTarget(out signal))
+            {
+                return true;
+            }
+
+            _weak.Remove(key);
+            return false;
+        }
+
+        /// <summary>Moves every strongly held signal without a connection, except the one just
+        /// made for <paramref name="keptKey"/>, to the weak tier; the next demotion waits until the
+        /// strong tier has doubled, so the cost stays amortized.</summary>
+        /// <remarks>
+        /// WHY the new signal stays strong: its caller has not had a chance to connect yet, and a
+        /// C# caller that connects at once and keeps only the handler must not lose it.
+        /// </remarks>
+        private void DemoteUnconnected(string keptKey)
+        {
+            foreach (KeyValuePair<string, RbxScriptSignal> pair in _strong)
+            {
+                if (!pair.Value.HasConnections
+                    && !string.Equals(pair.Key, keptKey, System.StringComparison.Ordinal))
+                {
+                    _keyScratch.Add(pair.Key);
+                }
+            }
+
+            if (_keyScratch.Count > 0)
+            {
+                _weak ??= new Dictionary<string, System.WeakReference<RbxScriptSignal>>(
+                    System.StringComparer.Ordinal);
+                for (int index = 0; index < _keyScratch.Count; index++)
+                {
+                    string key = _keyScratch[index];
+                    _weak[key] = new System.WeakReference<RbxScriptSignal>(_strong[key]);
+                    _strong.Remove(key);
+                }
+            }
+
+            _keyScratch.Clear();
+            _demotionThreshold = System.Math.Max(StrongBudget, _strong.Count * 2);
+            if (_weak != null && _weak.Count >= _weakSweepThreshold)
+            {
+                SweepCollected();
+            }
+        }
+
+        /// <summary>Drops the weak entries whose signal was collected; the next sweep waits until
+        /// the weak tier has doubled again.</summary>
+        private void SweepCollected()
+        {
+            foreach (KeyValuePair<string, System.WeakReference<RbxScriptSignal>> pair in _weak)
+            {
+                if (!pair.Value.TryGetTarget(out _))
+                {
+                    _keyScratch.Add(pair.Key);
+                }
+            }
+
+            for (int index = 0; index < _keyScratch.Count; index++)
+            {
+                _weak.Remove(_keyScratch[index]);
+            }
+
+            _keyScratch.Clear();
+            _weakSweepThreshold = System.Math.Max(MinimumWeakSweepThreshold, _weak.Count * 2);
         }
     }
 }

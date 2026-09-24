@@ -367,6 +367,96 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void DestroyedTaggedInstance_RemovalHandlers_ReadItsName_ButNoOtherTombstone()
+        {
+            // WHY (A3-07, DEV-7): the removed signal, ChildRemoved and DescendantRemoving a Destroy
+            // raises run deferred, after the instance is destroyed, and were fired plainly, so a
+            // cleanup handler reading the leaving instance's Name raised INSTANCE_DESTROYED —
+            // while Destroying and AncestryChanged already handed their handler a readable
+            // tombstone. The twin: each handler reads only the instance it was handed.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("tomb-a");
+            harness.Stack.Runtime.LoadMod(actor, "tomb", @"
+                local cs = game:GetService('CollectionService')
+                local function read(instance)
+                    local ok, name = pcall(function() return instance.Name end)
+                    return tostring(ok) .. '|' .. tostring(ok and name or 'refused')
+                end
+                local folder = Instance.new('Folder')
+                folder.Parent = workspace
+                local first = Instance.new('Part')
+                first.Name = 'Coin'
+                first.Parent = folder
+                first:AddTag('T')
+                local second = Instance.new('Part')
+                second.Name = 'Gem'
+                second.Parent = folder
+                second:AddTag('T')
+                cs:GetInstanceRemovedSignal('T'):Connect(function(instance)
+                    local seen = read(instance)
+                    store_set('removed_' .. seen, 'seen')
+                    if seen == 'true|Coin' then
+                        store_set('other', read(second))
+                    end
+                end)
+                folder.ChildRemoved:Connect(function(child)
+                    store_set('child_' .. read(child), 'seen')
+                end)
+                folder.DescendantRemoving:Connect(function(descendant)
+                    store_set('descendant_' .. read(descendant), 'seen')
+                end)
+                task.defer(function()
+                    first:Destroy()
+                    second:Destroy()
+                end)",
+                persistToStore: false);
+            harness.Bindings.Scheduler.Advance(0d);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            foreach (string key in new[]
+                     {
+                         "removed_true|Coin", "removed_true|Gem", "child_true|Coin", "child_true|Gem",
+                         "descendant_true|Coin", "descendant_true|Gem"
+                     })
+            {
+                Assert.AreEqual("seen", harness.Store.Get("tomb", key),
+                    key + "; log: " + string.Join(" || ", harness.LogLines));
+            }
+
+            Assert.AreEqual("false|refused", harness.Store.Get("tomb", "other"),
+                "a removal handler reads the instance it was handed, not every destroyed one");
+        }
+
+        [Test]
+        public void Negative_ARemovalThatIsNotADestroy_StillFiresPlainly()
+        {
+            // WHY the twin: parenting a tagged part to nil removes it from the DataModel without
+            // destroying it; its handlers read it as a live instance, and nothing is a tombstone.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("plain-a");
+            harness.Stack.Runtime.LoadMod(actor, "plain", @"
+                local cs = game:GetService('CollectionService')
+                local part = Instance.new('Part')
+                part.Name = 'Pooled'
+                part.Parent = workspace
+                part:AddTag('P')
+                cs:GetInstanceRemovedSignal('P'):Connect(function(instance)
+                    store_set('removed', instance.Name .. '|' .. tostring(instance.Parent == nil))
+                    instance.Name = 'Renamed'
+                    store_set('renamed', instance.Name)
+                end)
+                task.defer(function() part.Parent = nil end)",
+                persistToStore: false);
+            harness.Bindings.Scheduler.Advance(0d);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("Pooled|true", harness.Store.Get("plain", "removed"),
+                "log: " + string.Join(" || ", harness.LogLines));
+            Assert.AreEqual("Renamed", harness.Store.Get("plain", "renamed"),
+                "a live removed instance is still writable from its handler");
+        }
+
+        [Test]
         public void Negative_PreExistingTag_DoesNotFireOnConnect()
         {
             using ProductionHarness harness = new ProductionHarness();

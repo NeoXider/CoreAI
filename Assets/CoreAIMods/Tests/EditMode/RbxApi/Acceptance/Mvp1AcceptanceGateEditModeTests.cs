@@ -9,6 +9,7 @@ using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Rendering;
 using Lua;
 using NUnit.Framework;
 using UnityEngine;
@@ -1121,6 +1122,105 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             stale.Sort(StringComparer.Ordinal);
             CollectionAssert.IsEmpty(stale,
                 "these names are no longer answered by the read dispatch, so the lists above are stale");
+
+            // WHY (A3-02): GetPropertyChangedSignal hands an unknown name a signal that never fires
+            // rather than refusing it, so the events and bridges the read dispatch answers are
+            // refused by name from a runtime list, which must be exactly the list classified here.
+            List<string> refusedByName = new(LuaCsRbxInstanceBindings.EnumerateBoundNonProperties());
+            refusedByName.Sort(StringComparer.Ordinal);
+            List<string> classified = new(ReadDispatchNonProperties);
+            classified.Sort(StringComparer.Ordinal);
+            CollectionAssert.AreEqual(classified, refusedByName,
+                "the non-property names GetPropertyChangedSignal refuses must be the read dispatch's");
+        }
+
+        /// <summary>Counts, per variant name, how often the binder asked for a part's material.</summary>
+        private sealed class MaterialRequestCounter : IRbxMaterialProvider<Material>,
+            IRbxMaterialVariantConsumer
+        {
+            private readonly RbxTextureMaterialProvider _inner = new();
+
+            public Dictionary<string, int> Requests { get; } = new(StringComparer.Ordinal);
+
+            public Material FallbackMaterial => _inner.FallbackMaterial;
+
+            public IRbxMaterialVariantSource VariantSource
+            {
+                get => _inner.VariantSource;
+                set => _inner.VariantSource = value;
+            }
+
+            public bool TryGetMaterial(in RbxMaterialId material, out Material visualMaterial)
+            {
+                string key = material.Variant ?? "";
+                Requests.TryGetValue(key, out int count);
+                Requests[key] = count + 1;
+                return _inner.TryGetMaterial(in material, out visualMaterial);
+            }
+
+            public int Total()
+            {
+                int total = 0;
+                foreach (int count in Requests.Values)
+                {
+                    total += count;
+                }
+
+                return total;
+            }
+        }
+
+        [Test]
+        public void MaterialVariantEdit_RepaintsOnlyTheCurrentWearers_AndAnEqualWriteNothing()
+        {
+            // WHY (A3-08): a variant write repainted through a walk over every binding in the world,
+            // and did it even when the value was the one the variant already held. The binder keeps
+            // its wearers by variant name; this pins that the index follows a part switching
+            // variants and a part being destroyed, and that an equal write repaints nobody.
+            MaterialRequestCounter provider = new();
+            using Mvp1AcceptanceWorld world = new(materialProvider: provider);
+            world.Binder.MaterialVariantSource =
+                world.Game.GetService("MaterialService") as IRbxMaterialVariantSource;
+            world.Stack.Runtime.LoadMod("variants", @"
+                local service = game:GetService('MaterialService')
+                for _, name in ipairs({ 'Worn', 'Other' }) do
+                    local v = Instance.new('MaterialVariant')
+                    v.Name = name
+                    v.BaseMaterial = Enum.Material.Brick
+                    v.Parent = service
+                end
+                local function part(name, variant)
+                    local p = Instance.new('Part')
+                    p.Name = name
+                    p.Anchored = true
+                    p.Material = Enum.Material.Brick
+                    p.Parent = workspace
+                    if variant then p.MaterialVariant = variant end
+                end
+                part('Stays', 'Worn')
+                part('Switches', 'Worn')
+                part('Doomed', 'Worn')
+                part('Elsewhere', 'Other')
+                for i = 1, 5 do part('Plain' .. i, nil) end
+                workspace.Switches.MaterialVariant = 'Other'
+                workspace.Doomed:Destroy()");
+
+            provider.Requests.Clear();
+            world.Stack.Runtime.LoadMod("edit-worn", @"
+                game:GetService('MaterialService').Worn.StudsPerTile = 4");
+            Assert.AreEqual(1, provider.Total(), "only the one part still wearing Worn is repainted");
+            Assert.AreEqual(1, provider.Requests["Worn"]);
+
+            provider.Requests.Clear();
+            world.Stack.Runtime.LoadMod("edit-other", @"
+                game:GetService('MaterialService').Other.StudsPerTile = 2");
+            Assert.AreEqual(2, provider.Total(), "the part that switched to Other is repainted with it");
+            Assert.AreEqual(2, provider.Requests["Other"]);
+
+            provider.Requests.Clear();
+            world.Stack.Runtime.LoadMod("edit-equal", @"
+                game:GetService('MaterialService').Other.StudsPerTile = 2");
+            Assert.AreEqual(0, provider.Total(), "assigning the value the variant holds repaints nothing");
         }
 
         [Test]

@@ -220,6 +220,9 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         private readonly List<RbxPlayer> _players = new();
         private readonly HashSet<InstanceRegistry> _watchedRegistries = new();
         private long _nextUserId = 1;
+        private bool _characterAutoLoads = true;
+        private double _respawnTime = DefaultRespawnTime;
+        private int _maxPlayers = 1;
 
         internal RbxPlayers(ClassDescriptor descriptor)
             : base(descriptor)
@@ -233,9 +236,10 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         public RbxScriptSignal PlayerRemoving { get; }
 
         /// <summary>
-        /// Where an admitted actor's durable identity comes from. Null keeps the session counter
-        /// for a solo (loopback) world, a client world and a local actor, and refuses an actor a
-        /// server transport admitted (see <see cref="EnsureActor"/>).
+        /// Where an admitted actor's durable identity comes from. Null — or a source that does not
+        /// know the actor — keeps the session counter for a solo (loopback) world, a client world
+        /// and a local actor, and refuses an actor a server transport admitted (see
+        /// <see cref="EnsureActor"/>).
         /// </summary>
         /// <remarks>
         /// WHY it is consulted first: a UserId decided at admission is the same on every join, and
@@ -294,15 +298,43 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// mirror's default of true. Read at the moment the deferred join-spawn and the
         /// death-triggered respawn actually fire — see <see cref="EnsureActor"/>'s deferred spawn
         /// and the Lua-CSharp bindings' Humanoid.Died wiring — not when the join or death
-        /// happened, so a script that flips this off still wins the race.
+        /// happened, so a script that flips this off still wins the race. A change fires
+        /// <c>Changed("CharacterAutoLoads")</c> and its property signal.
         /// </summary>
-        public bool CharacterAutoLoads { get; set; } = true;
+        public bool CharacterAutoLoads
+        {
+            get => _characterAutoLoads;
+            set
+            {
+                if (_characterAutoLoads == value)
+                {
+                    return;
+                }
+
+                _characterAutoLoads = value;
+                NotifyPropertyChanged(nameof(CharacterAutoLoads));
+            }
+        }
 
         /// <summary>Seconds after a character's Humanoid dies before it respawns, when
         /// <see cref="CharacterAutoLoads"/> is (still) true when the timer elapses. Consumed by
         /// the Lua-CSharp bindings' Humanoid.Died wiring. Mirror default 5.0; negative values are
-        /// refused by the write path.</summary>
-        public double RespawnTime { get; set; } = DefaultRespawnTime;
+        /// refused by the write path. A change fires <c>Changed("RespawnTime")</c> and its
+        /// property signal.</summary>
+        public double RespawnTime
+        {
+            get => _respawnTime;
+            set
+            {
+                if (_respawnTime.Equals(value))
+                {
+                    return;
+                }
+
+                _respawnTime = value;
+                NotifyPropertyChanged(nameof(RespawnTime));
+            }
+        }
 
         /// <summary>
         /// How many players this host admits. Read-only to Lua, as in the mirror.
@@ -312,8 +344,22 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// default at all, and a CoreAI world with no transport installed genuinely admits exactly
         /// one actor. Inventing a Roblox-looking number would be a value a script could branch on
         /// that nothing in CoreAI honours; 1 is the true capacity until a host sets its own.
+        /// A host's change fires <c>Changed("MaxPlayers")</c> and its property signal.
         /// </remarks>
-        public int MaxPlayers { get; set; } = 1;
+        public int MaxPlayers
+        {
+            get => _maxPlayers;
+            set
+            {
+                if (_maxPlayers == value)
+                {
+                    return;
+                }
+
+                _maxPlayers = value;
+                NotifyPropertyChanged(nameof(MaxPlayers));
+            }
+        }
 
         /// <summary>
         /// Reads a part's position in studs, handed to every Player this service creates so
@@ -334,7 +380,8 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// <summary>
         /// Returns the real Player registered for an actor, creating it once if needed. Refuses,
         /// with <see cref="RbxErrorCode.NotAuthority"/>, an actor a server transport admitted
-        /// while no <see cref="IdentitySource"/> is set.
+        /// while no <see cref="IdentitySource"/> is set or the one set has no durable identity
+        /// for it.
         /// </summary>
         public RbxPlayer EnsureActor(InstanceRegistry registry, string actorId)
         {
@@ -349,7 +396,9 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 return existing;
             }
 
-            RequireIdentityForTransportAdmission(actor);
+            bool hasDurableIdentity = TryGetDurableIdentity(actor, out long durableUserId,
+                out string durableUsername, out string durableDisplayName);
+            RequireIdentityForTransportAdmission(actor, hasDurableIdentity);
             WatchUnregistrations(registry);
 
             // WHY: Player identities are runtime-created authorization infrastructure, not authored
@@ -361,14 +410,10 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 isRuntimeInfrastructure: true);
             try
             {
-                string username;
-                string displayName;
-                long userId;
-                if (IdentitySource == null
-                    || !IdentitySource.TryGetIdentity(actor, out userId, out username,
-                        out displayName)
-                    || userId <= 0L
-                    || string.IsNullOrWhiteSpace(username))
+                string username = durableUsername;
+                string displayName = durableDisplayName;
+                long userId = durableUserId;
+                if (!hasDurableIdentity)
                 {
                     userId = _nextUserId++;
                     IRbxPlayerProfileProvider provider =
@@ -837,8 +882,30 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         }
 
         /// <summary>
-        /// Refuses an actor a server transport admitted when no <see cref="IdentitySource"/> can
-        /// give it a durable identity (MP-12).
+        /// The identity <see cref="IdentitySource"/> admitted for the actor, when it has one with a
+        /// UserId above 0 and a non-blank name; false otherwise, the source missing included.
+        /// </summary>
+        private bool TryGetDurableIdentity(string actor, out long userId, out string username,
+            out string displayName)
+        {
+            if (IdentitySource != null
+                && IdentitySource.TryGetIdentity(actor, out userId, out username, out displayName)
+                && userId > 0L
+                && !string.IsNullOrWhiteSpace(username))
+            {
+                return true;
+            }
+
+            userId = 0L;
+            username = null;
+            displayName = null;
+            return false;
+        }
+
+        /// <summary>
+        /// Refuses an actor a server transport admitted when no durable identity is known for it
+        /// (MP-12): no <see cref="IdentitySource"/> is set, or the one that is set does not know the
+        /// actor, or knows it without a UserId above 0 and a name.
         /// </summary>
         /// <remarks>
         /// WHY refused and not given the counter: the counter restarts at 1 with every world, so
@@ -853,11 +920,15 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// WHY only a server topology: a solo world has no transport at all, and a client world
         /// admits nobody; the server decided this process's identity, and the client's own Player
         /// is a local stand-in for it.
+        /// WHY a source that does not know the actor fails the same way as no source (A4-05): the
+        /// counter UserId it fell back to is exactly the reused number this check exists to stop,
+        /// and a transport-admitted actor its own session host cannot name is an admission that
+        /// went wrong, not a local actor.
         /// </remarks>
-        private void RequireIdentityForTransportAdmission(string actor)
+        private void RequireIdentityForTransportAdmission(string actor, bool hasDurableIdentity)
         {
             INetworkBridge bridge = NetworkBridge;
-            if (IdentitySource != null || bridge == null)
+            if (hasDurableIdentity || bridge == null)
             {
                 return;
             }
@@ -870,14 +941,26 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 return;
             }
 
+            if (IdentitySource == null)
+            {
+                throw new RbxError(
+                    RbxErrorCode.NotAuthority,
+                    "actor '" + actor + "' was admitted by the " + topology + " network transport, "
+                    + "but Players has no IdentitySource to give it a durable UserId, so the join is "
+                    + "refused rather than given a session-counter UserId that another account can "
+                    + "receive after a restart",
+                    "set Players.IdentitySource to the transport's session host before players are "
+                    + "admitted (CoreAiMirrorNetworkBridgeProvider.AttachWorld does this for Mirror)");
+            }
+
             throw new RbxError(
                 RbxErrorCode.NotAuthority,
                 "actor '" + actor + "' was admitted by the " + topology + " network transport, but "
-                + "Players has no IdentitySource to give it a durable UserId, so the join is refused "
-                + "rather than given a session-counter UserId that another account can receive "
-                + "after a restart",
-                "set Players.IdentitySource to the transport's session host before players are "
-                + "admitted (CoreAiMirrorNetworkBridgeProvider.AttachWorld does this for Mirror)");
+                + "Players.IdentitySource has no durable identity for it (a UserId above 0 and a "
+                + "name), so the join is refused rather than given a session-counter UserId that "
+                + "another account can receive after a restart",
+                "admit the actor through the IdentitySource (the transport's session host) with its "
+                + "UserId and name before the world is asked for its Player");
         }
 
         private static bool IsRegisteredOnBridge(INetworkBridge bridge, string actor)

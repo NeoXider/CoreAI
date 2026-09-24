@@ -295,6 +295,21 @@ namespace CoreAI.Mods.Rbx.Instances
         public const double RunningStartSpeedStuds =
             RunningStopSpeedStuds + RunningSpeedResolutionStuds;
 
+        /// <summary>
+        /// Smallest change of <see cref="MoveDirection"/>, as the length of the difference between
+        /// the new direction and the last one reported, that fires its <c>Changed</c> and property
+        /// signal on the Heartbeat.
+        /// </summary>
+        /// <remarks>
+        /// OURS — the mirror does not publish one, because its MoveDirection is the input
+        /// direction. WHY a resolution at all: the bundled motor derives the direction from the
+        /// solver's velocity, which wobbles by a few thousandths of a unit at a steady walk, and
+        /// an exact comparison fired the signal on every frame of every walk. WHY 0.01: about half
+        /// a degree of heading, below anything a facing or camera script can show; a start or a
+        /// stop is a change of length 1 and always reported.
+        /// </remarks>
+        public const double MoveDirectionResolution = 0.01d;
+
         private IRbxCharacterMotor _motor = NullRbxCharacterMotor.Instance;
         private ModScheduler _scheduler;
         private double _maxHealth = DefaultMaxHealth;
@@ -309,6 +324,8 @@ namespace CoreAI.Mods.Rbx.Instances
         private RbxVector3? _walkTarget;
         private double _walkElapsed;
         private double _reportedRunningSpeed;
+        private RbxVector3 _reportedMoveDirection = RbxVector3.Zero;
+        private RbxInstance _rootPart;
 
         /// <summary>Constructed by the class catalog for <c>Humanoid</c>.</summary>
         protected internal RbxHumanoid(ClassDescriptor descriptor) : base(descriptor)
@@ -467,11 +484,33 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        /// <summary>Mirror <c>Humanoid.MoveDirection</c>: read-only, from the motor.</summary>
+        /// <summary>
+        /// Mirror <c>Humanoid.MoveDirection</c>: read-only, from the motor. The motor moves it
+        /// continuously, so its change is sampled once per Heartbeat: a direction that differs from
+        /// the last one reported by more than <see cref="MoveDirectionResolution"/> fires
+        /// <c>Changed("MoveDirection")</c> and its property signal.
+        /// </summary>
         public RbxVector3 MoveDirection => _motor.MoveDirection;
 
-        /// <summary>Mirror <c>Humanoid.RootPart</c>: the character's driving part, or null.</summary>
-        public RbxInstance RootPart { get; private set; }
+        /// <summary>
+        /// Mirror <c>Humanoid.RootPart</c>: the character's driving part, or null. Set by
+        /// <see cref="AttachHost"/>; a change fires <c>Changed("RootPart")</c> and its property
+        /// signal.
+        /// </summary>
+        public RbxInstance RootPart
+        {
+            get => _rootPart;
+            private set
+            {
+                if (ReferenceEquals(_rootPart, value))
+                {
+                    return;
+                }
+
+                _rootPart = value;
+                NotifyPropertyChanged(nameof(RootPart));
+            }
+        }
 
         /// <summary>
         /// True once the Humanoid died: Health reached zero inside the Workspace. A dead Humanoid
@@ -608,7 +647,15 @@ namespace CoreAI.Mods.Rbx.Instances
         /// </remarks>
         public void Advance(double deltaSeconds)
         {
-            if (_died || deltaSeconds < 0d)
+            if (deltaSeconds < 0d)
+            {
+                return;
+            }
+
+            // WHY before the death check: MoveDirection reads the motor whether or not the
+            // Humanoid is alive, so a corpse the motor still slides is still a change to report.
+            ReportMoveDirection();
+            if (_died)
             {
                 return;
             }
@@ -695,6 +742,29 @@ namespace CoreAI.Mods.Rbx.Instances
             {
                 Advance(delta);
             }
+        }
+
+        /// <summary>
+        /// Fires <c>Changed("MoveDirection")</c> and its property signal when the motor's direction
+        /// has moved past <see cref="MoveDirectionResolution"/> from the last one reported.
+        /// </summary>
+        /// <remarks>
+        /// WHY sampled here and not in <see cref="AttachHost"/>: a motor rebuild attaches the
+        /// Humanoid twice in a row (first with no motor, then with the new one), and reporting at
+        /// each attach announced a stop and a restart no script could ever observe. The next
+        /// Heartbeat sees the settled motor once.
+        /// </remarks>
+        private void ReportMoveDirection()
+        {
+            RbxVector3 direction = _motor.MoveDirection;
+            if ((direction - _reportedMoveDirection).Magnitude <= MoveDirectionResolution
+                && !(direction == RbxVector3.Zero && _reportedMoveDirection != RbxVector3.Zero))
+            {
+                return;
+            }
+
+            _reportedMoveDirection = direction;
+            NotifyPropertyChanged(nameof(MoveDirection));
         }
 
         private void FinishWalk(bool reached)
@@ -821,6 +891,13 @@ namespace CoreAI.Mods.Rbx.Instances
             RbxHumanoidState previous = _state;
             _state = next;
             StateChanged.Fire(previous, next);
+            // WHY: Jump reads "am I in the Jumping state" (the Lua binding answers it from
+            // GetState), so entering or leaving that state is the one moment its value changes.
+            if (previous == RbxHumanoidState.Jumping || next == RbxHumanoidState.Jumping)
+            {
+                NotifyPropertyChanged("Jump");
+            }
+
             if (next == RbxHumanoidState.Running)
             {
                 ReportRunningSpeed(force: true);

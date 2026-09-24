@@ -100,6 +100,7 @@ namespace CoreAI.Mods.Rbx.Instances
         private double _delayRemaining;
         private double _elapsed;
         private long _legIndex;
+        private RbxTweenPlaybackState _playbackState = RbxTweenPlaybackState.Begin;
 
         internal RbxTween(ClassDescriptor descriptor)
             : base(descriptor)
@@ -121,9 +122,22 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Mirror <c>Tween.TweenInfo</c> (read-only): the playback parameters.</summary>
         public RbxTweenInfo Info { get; private set; }
 
-        /// <summary>Mirror <c>TweenBase.PlaybackState</c> (read-only).</summary>
-        public RbxTweenPlaybackState PlaybackState { get; private set; } =
-            RbxTweenPlaybackState.Begin;
+        /// <summary>Mirror <c>TweenBase.PlaybackState</c> (read-only). Every state change fires
+        /// <c>Changed("PlaybackState")</c> and its property signal.</summary>
+        public RbxTweenPlaybackState PlaybackState
+        {
+            get => _playbackState;
+            private set
+            {
+                if (_playbackState == value)
+                {
+                    return;
+                }
+
+                _playbackState = value;
+                NotifyPropertyChanged(nameof(PlaybackState));
+            }
+        }
 
         /// <summary>Caller identity stored at creation for authorization re-checks.</summary>
         internal TweenCaller Caller { get; private set; }

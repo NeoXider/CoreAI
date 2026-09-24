@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Instances
@@ -217,6 +219,56 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.DoesNotThrow(() => _part.SetAttribute("Fresh", true),
                 "removing one attribute frees a slot for a new one");
             Assert.AreEqual(limit, _part.GetAttributes().Count);
+        }
+
+        [Test]
+        public void GetAttributeChangedSignal_TwentyThousandDistinctNames_StayBounded_AndAHeldSignalStillFires()
+        {
+            // WHY (A3-03): every distinct name kept its signal in the instance's signal table for
+            // the instance's whole life, so a loop over generated names grew it without bound.
+            // Roblox lets a script take a signal and connect later, so a held one must still fire.
+            ModScheduler scheduler = new(new NoThreads(), new RbxAccumulatingTimeSource());
+            RbxScriptSignal held = _part.GetAttributeChangedSignal("Held");
+            for (int index = 0; index < 20000; index++)
+            {
+                _part.GetAttributeChangedSignal("a" + index);
+            }
+
+            Assert.LessOrEqual(_part.AttributeSignalStrongCount, KeyedSignalTable.StrongBudget,
+                "signals nobody connected to must not all stay reachable");
+            Assert.AreSame(held, _part.GetAttributeChangedSignal("Held"),
+                "asking again for a held signal's name returns the same signal");
+            int fires = 0;
+            held.BindScheduler(scheduler);
+            held.Connect(new Action<object[]>(_ => fires++));
+            _part.SetAttribute("Held", 1);
+            _part.SetAttribute("a7", 1);
+            scheduler.Advance(0d);
+
+            Assert.AreEqual(1, fires, "the held signal fires for its own attribute only");
+        }
+
+        [Test]
+        public void GetAttributeChangedSignal_Destroy_DisconnectsItsConnections()
+        {
+            ModScheduler scheduler = new(new NoThreads(), new RbxAccumulatingTimeSource());
+            RbxScriptSignal signal = _part.GetAttributeChangedSignal("Health");
+            signal.BindScheduler(scheduler);
+            signal.Connect(new Action<object[]>(_ => { }));
+            Assert.IsTrue(signal.HasConnections);
+
+            _part.Destroy();
+
+            Assert.IsFalse(signal.HasConnections,
+                "Destroy disconnects the attribute signals like every other signal of the instance");
+        }
+
+        private sealed class NoThreads : IRbxScriptThreadFactory
+        {
+            public IRbxScriptThread Create(string ownerModId, object callable)
+            {
+                throw new InvalidOperationException("no scripts run in this test");
+            }
         }
     }
 }

@@ -10,6 +10,13 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public sealed class InstanceTagStore
     {
+        /// <summary>
+        /// The most characters a tag a script creates may have (OURS: the mirror's CollectionService
+        /// pages state no length, and 100 is the limit Roblox already applies to Name and to
+        /// attribute names).
+        /// </summary>
+        public const int MaxTagLength = 100;
+
         private static readonly string[] EmptyTags = new string[0];
 
         private readonly Dictionary<string, HashSet<InstanceId>> _byTag = new(StringComparer.Ordinal);
@@ -141,6 +148,31 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             _byInstance.Remove(id);
+        }
+
+        /// <summary>
+        /// The rule for a tag being created: non-empty and at most <see cref="MaxTagLength"/>
+        /// characters, else BAD_ARGUMENT. The store itself accepts any non-empty tag, so a world
+        /// saved before the limit existed still restores, replicates and clones with its longer
+        /// tags; the script-facing AddTag and the per-tag signal getters apply this rule to a tag
+        /// no instance holds yet — the split <see cref="AttributeContract.ValidateNewName"/> makes
+        /// for attribute names.
+        /// </summary>
+        /// <remarks>
+        /// WHY a limit at all (A3-03): a tag is a key in this store, in CollectionService's counts
+        /// and in its signal tables, and every one of those copies whatever length a script passes —
+        /// a single million-character tag was accepted and carried into the saved world.
+        /// </remarks>
+        public static void ValidateNewTag(string tag)
+        {
+            ValidateTag(tag);
+            if (tag.Length > MaxTagLength)
+            {
+                throw RbxError.BadArgument(
+                    "tag is " + tag.Length + " characters long; a tag may have at most "
+                    + MaxTagLength + " characters",
+                    "shorten the tag to " + MaxTagLength + " characters or less");
+            }
         }
 
         private static void ValidateTag(string tag)

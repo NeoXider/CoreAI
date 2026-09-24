@@ -22,10 +22,10 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public sealed class RbxCollectionService : RbxInstance
     {
-        private readonly Dictionary<string, RbxScriptSignal> _addedSignals =
-            new(StringComparer.Ordinal);
-        private readonly Dictionary<string, RbxScriptSignal> _removedSignals =
-            new(StringComparer.Ordinal);
+        private readonly KeyedSignalTable _addedSignals =
+            new("CollectionService.GetInstanceAddedSignal(");
+        private readonly KeyedSignalTable _removedSignals =
+            new("CollectionService.GetInstanceRemovedSignal(");
         private readonly Dictionary<string, int> _inTreeHolderCounts =
             new(StringComparer.Ordinal);
         private readonly RbxScriptSignal _tagAdded;
@@ -176,16 +176,16 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>
         /// The per-tag added signal: fires with the instance when the tag is assigned to an
         /// in-tree instance, or when a tagged instance enters the tree. Repeated calls with the
-        /// same tag return the same signal object.
+        /// same tag return the same signal object for as long as anything holds it (see
+        /// <see cref="KeyedSignalTable"/>).
         /// </summary>
         public RbxScriptSignal GetInstanceAddedSignal(string tag)
         {
             ValidateSignalTag(tag, "GetInstanceAddedSignal");
-            if (!_addedSignals.TryGetValue(tag, out RbxScriptSignal signal))
+            RbxScriptSignal signal = _addedSignals.GetOrCreate(tag, out bool created);
+            if (created)
             {
-                signal = new RbxScriptSignal("CollectionService.GetInstanceAddedSignal(" + tag + ")");
                 BindSignal(signal);
-                _addedSignals.Add(tag, signal);
             }
 
             return signal;
@@ -193,22 +193,25 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>
         /// The per-tag removed signal: fires with the instance when the tag is removed from an
-        /// in-tree instance, or when a tagged instance leaves the tree. Repeated calls with the
-        /// same tag return the same signal object.
+        /// in-tree instance, or when a tagged instance leaves the tree. A tagged instance that
+        /// leaves because it is destroyed is handed over as a readable tombstone, so a handler can
+        /// still read its Name. Repeated calls with the same tag return the same signal object for
+        /// as long as anything holds it.
         /// </summary>
         public RbxScriptSignal GetInstanceRemovedSignal(string tag)
         {
             ValidateSignalTag(tag, "GetInstanceRemovedSignal");
-            if (!_removedSignals.TryGetValue(tag, out RbxScriptSignal signal))
+            RbxScriptSignal signal = _removedSignals.GetOrCreate(tag, out bool created);
+            if (created)
             {
-                signal = new RbxScriptSignal(
-                    "CollectionService.GetInstanceRemovedSignal(" + tag + ")");
                 BindSignal(signal);
-                _removedSignals.Add(tag, signal);
             }
 
             return signal;
         }
+
+        /// <summary>Per-tag added and removed signals held strongly (A3-03 regression counter).</summary>
+        internal int TagSignalStrongCount => _addedSignals.StrongCount + _removedSignals.StrongCount;
 
         /// <summary>
         /// Attaches the registry tag-transition subscriptions; safe to call again (a snapshot
@@ -281,7 +284,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 _tagAdded.Fire(tag);
             }
 
-            if (_addedSignals.TryGetValue(tag, out RbxScriptSignal signal))
+            if (_addedSignals.TryGetConnected(tag, out RbxScriptSignal signal))
             {
                 signal.Fire(instance);
             }
@@ -301,7 +304,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 _tagRemoved.Fire(tag);
             }
 
-            if (_removedSignals.TryGetValue(tag, out RbxScriptSignal signal))
+            if (_removedSignals.TryGetConnected(tag, out RbxScriptSignal signal))
             {
                 signal.Fire(instance);
             }
@@ -325,6 +328,10 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
+            // WHY: a subtree that leaves because Destroy detached it is destroyed by the time the
+            // deferred handlers run, so each node goes out as the readable tombstone (DEV-7) —
+            // the same treatment Destroying and ChildRemoved give it.
+            bool destroyed = !entered && (root.IsDestroyed || root.IsBeingDestroyed);
             for (int nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
             {
                 IReadOnlyList<string> tags = registry.Tags.GetTags(nodes[nodeIndex].Id);
@@ -338,7 +345,7 @@ namespace CoreAI.Mods.Rbx.Instances
                             _tagAdded.Fire(tag);
                         }
 
-                        if (_addedSignals.TryGetValue(tag, out RbxScriptSignal added))
+                        if (_addedSignals.TryGetConnected(tag, out RbxScriptSignal added))
                         {
                             added.Fire(nodes[nodeIndex]);
                         }
@@ -350,9 +357,17 @@ namespace CoreAI.Mods.Rbx.Instances
                             _tagRemoved.Fire(tag);
                         }
 
-                        if (_removedSignals.TryGetValue(tag, out RbxScriptSignal removed))
+                        if (_removedSignals.TryGetConnected(tag, out RbxScriptSignal removed))
                         {
-                            removed.Fire(nodes[nodeIndex]);
+                            RbxInstance node = nodes[nodeIndex];
+                            if (destroyed)
+                            {
+                                removed.FireForDestruction(node, node);
+                            }
+                            else
+                            {
+                                removed.Fire(node);
+                            }
                         }
                     }
                 }

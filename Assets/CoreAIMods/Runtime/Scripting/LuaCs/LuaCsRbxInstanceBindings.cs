@@ -1635,12 +1635,15 @@ namespace CoreAI.Ai.LuaCs
                         ReadTargetInstance(Arg(ctx, 1), "CollectionService:AddTag", 1);
                     string addTagName = ReadString(ctx, 2, "CollectionService:AddTag", 2);
                     context.RequireMetadataMutation(addTagTarget, "add tag");
+                    RequireCreatableTag(addTagTarget, addTagName);
                     addTagService.AddTag(addTagTarget, addTagName);
                     return LuaValue.Nil;
                 }
 
                 context.RequireMetadataMutation(self, "add tag");
-                self.AddTag(ReadString(ctx, 1, "Instance:AddTag", 1));
+                string tag = ReadString(ctx, 1, "Instance:AddTag", 1);
+                RequireCreatableTag(self, tag);
+                self.AddTag(tag);
                 return LuaValue.Nil;
             });
             Method("RemoveTag", (ctx, self) =>
@@ -1723,19 +1726,20 @@ namespace CoreAI.Ai.LuaCs
             {
                 RbxCollectionService addedSignalService = (RbxCollectionService)self;
                 addedSignalService.EnsureHost(context.Bindings.Scheduler);
+                string addedTag = ReadString(ctx, 1, "CollectionService:GetInstanceAddedSignal", 1);
+                RequireWatchableTag(context, addedTag);
                 return LuaCsRbxDatatypeBindings.Wrap(
-                    addedSignalService.GetInstanceAddedSignal(
-                        ReadString(ctx, 1, "CollectionService:GetInstanceAddedSignal", 1)),
-                    context);
+                    addedSignalService.GetInstanceAddedSignal(addedTag), context);
             }, "CollectionService");
             Method("GetInstanceRemovedSignal", (ctx, self) =>
             {
                 RbxCollectionService removedSignalService = (RbxCollectionService)self;
                 removedSignalService.EnsureHost(context.Bindings.Scheduler);
+                string removedTag =
+                    ReadString(ctx, 1, "CollectionService:GetInstanceRemovedSignal", 1);
+                RequireWatchableTag(context, removedTag);
                 return LuaCsRbxDatatypeBindings.Wrap(
-                    removedSignalService.GetInstanceRemovedSignal(
-                        ReadString(ctx, 1, "CollectionService:GetInstanceRemovedSignal", 1)),
-                    context);
+                    removedSignalService.GetInstanceRemovedSignal(removedTag), context);
             }, "CollectionService");
             Method("GetAttributeChangedSignal", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
                 self.GetAttributeChangedSignal(
@@ -1743,8 +1747,10 @@ namespace CoreAI.Ai.LuaCs
             Method("GetPropertyChangedSignal", (ctx, self) =>
             {
                 string property = ReadString(ctx, 1, "Instance:GetPropertyChangedSignal", 1);
-                RequireKnownPropertyName(context, self, property);
-                return LuaCsRbxDatatypeBindings.Wrap(self.GetPropertyChangedSignal(property), context);
+                RbxScriptSignal propertySignal = IsKnownPropertyName(context, methods, self, property)
+                    ? self.GetPropertyChangedSignal(property)
+                    : CreateUnmodelledPropertySignal(context, self, property);
+                return LuaCsRbxDatatypeBindings.Wrap(propertySignal, context);
             });
 
             Method("GetPivot", (_, self) => LuaCsRbxDatatypeBindings.Wrap(
@@ -2044,30 +2050,79 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Refuses a GetPropertyChangedSignal name that is neither a bound property nor a catalogued
-        /// real property of the instance's class. The catalog counts because a real Roblox property
-        /// CoreAI has not bound yet is still a valid name — the author is not told it made a typo.
+        /// Members the Lua read dispatch answers that are events, methods or callbacks rather than
+        /// properties. The method table covers the rest of the methods, so GetPropertyChangedSignal
+        /// refuses every name here by the exact name, on any class.
+        /// </summary>
+        private static readonly HashSet<string> BoundNonProperties = Names(
+            "ChildAdded", "ChildRemoved", "DescendantAdded", "DescendantRemoving", "Destroying",
+            "AncestryChanged", "AttributeChanged", "Changed", "TagAdded", "TagRemoved", "WaitForChild",
+            "LoadCharacterAsync", "LoadCharacter", "Loaded", "PlayerAdded", "PlayerRemoving", "Died",
+            "HealthChanged", "MoveToFinished", "Running", "Jumping", "FreeFalling", "StateChanged",
+            "Touched", "TouchEnded", "CharacterAdded", "CharacterRemoving", "OnServerEvent",
+            "OnClientEvent", "OnServerInvoke", "OnClientInvoke", "InvokeServer", "InvokeClient",
+            "InputBegan", "InputEnded", "InputChanged", "IsKeyDown", "GetKeysPressed",
+            "GetMouseLocation", "Heartbeat", "Stepped", "RenderStepped", "PreAnimation",
+            "PreSimulation", "PostSimulation", "PreRender", "MouseClick", "MouseHoverEnter",
+            "MouseHoverLeave", "Completed");
+
+        /// <summary>
+        /// The names in <see cref="BoundNonProperties"/>; the drift guard in the acceptance tests
+        /// compares them with what the Lua member read actually answers.
+        /// </summary>
+        internal static IReadOnlyCollection<string> EnumerateBoundNonProperties()
+        {
+            return BoundNonProperties;
+        }
+
+        /// <summary>
+        /// The longest name GetPropertyChangedSignal hands an unmodelled-property signal for; a
+        /// longer one is refused (OURS — Roblox's longest property names are about forty
+        /// characters, and the name is copied into the signal's diagnostics).
+        /// </summary>
+        private const int MaxUnmodelledPropertyNameLength = 100;
+
+        /// <summary>Distinct class-and-name notes about unmodelled properties one world logs.</summary>
+        private const int MaxUnmodelledPropertyNotes = 64;
+
+        /// <summary>The unmodelled-property notes each world has logged, so each is logged once.</summary>
+        private static readonly ConditionalWeakTable<LuaCsRbxApiBindings, UnmodelledPropertyNoteSet>
+            UnmodelledPropertyNotes = new();
+
+        private sealed class UnmodelledPropertyNoteSet
+        {
+            public readonly HashSet<string> Keys = new(StringComparer.Ordinal);
+
+            public bool OverflowNoted;
+        }
+
+        /// <summary>
+        /// Sorts a GetPropertyChangedSignal name. True for a bound property, a catalogued real one,
+        /// or an empty name (which <see cref="RbxInstance.GetPropertyChangedSignal"/> refuses
+        /// itself); false for a name CoreAI knows nothing about, which gets a signal that never
+        /// fires. Refuses, with the mirror's "is not a valid property name.", an event, a method or
+        /// a callback, and a near miss of a known property name — the typo class.
         /// </summary>
         /// <remarks>
-        /// WHY refused at all: every distinct string used to mint a new signal that never fired, so a
-        /// typo (<c>"position"</c>) silently did nothing and each one grew the instance's signal
-        /// table (M1-03).
+        /// WHY an unknown name is not refused (M1-03, A3-02): the catalog lists only the real
+        /// properties someone wrote down, and refusing everything else failed the load of any
+        /// script watching a real property CoreAI has not modelled yet — Humanoid.FloorMaterial,
+        /// Players.NumPlayers. A typo is still refused, because it is recognisable without a
+        /// complete list: it is one edit — a letter of the wrong case, a letter missing, added,
+        /// changed or swapped with its neighbour — away from a name CoreAI does know
+        /// (<c>"position"</c>, <c>"Positoin"</c>, <c>"CFrameX"</c>). Checked against the Roblox
+        /// API reference, the only real property names that close to a bound or catalogued one
+        /// are the deprecated lower-case aliases (archivable, className, maxHealth, userId,
+        /// localPlayer, brickColor, focus), which are refused with the current spelling; names
+        /// that differ only in a digit (Attachment0/Attachment1, Color/Color3) are never a near
+        /// miss.
         /// </remarks>
-        private static void RequireKnownPropertyName(LuaCsRbxModContext context, RbxInstance instance,
-            string property)
+        private static bool IsKnownPropertyName(LuaCsRbxModContext context,
+            LuaCsRbxMethodTable methods, RbxInstance instance, string property)
         {
-            if (string.IsNullOrEmpty(property))
+            if (string.IsNullOrEmpty(property) || IsBoundProperty(instance, property))
             {
-                return;
-            }
-
-            for (int index = 0; index < BoundProperties.Length; index++)
-            {
-                if (BoundProperties[index].Properties.Contains(property)
-                    && instance.IsA(BoundProperties[index].ClassName))
-                {
-                    return;
-                }
+                return true;
             }
 
             ClassCatalog catalog = context.Bindings.Registry.Catalog;
@@ -2076,14 +2131,274 @@ namespace CoreAI.Ai.LuaCs
                 || IsCataloguedProperty(catalog, instance, property,
                     RbxKnownUnimplementedMemberAccess.Write))
             {
+                return true;
+            }
+
+            if (BoundNonProperties.Contains(property)
+                || methods.TryResolve(instance, property, out _)
+                || IsCataloguedMethod(catalog, instance, property))
+            {
+                throw NotAValidPropertyName(property,
+                    property + " is an event, a method or a callback of " + instance.ClassName
+                    + ", not a property; connect to the event itself, or watch a property, e.g. "
+                    + "GetPropertyChangedSignal(\"Name\")");
+            }
+
+            string intended = FindNearMissPropertyName(catalog, instance, property);
+            if (intended != null)
+            {
+                throw NotAValidPropertyName(property,
+                    "did you mean \"" + intended + "\"? property names are case-sensitive, e.g. "
+                    + "GetPropertyChangedSignal(\"" + intended + "\")");
+            }
+
+            if (property.Length > MaxUnmodelledPropertyNameLength)
+            {
+                throw NotAValidPropertyName(
+                    property.Substring(0, MaxUnmodelledPropertyNameLength) + "...",
+                    "no Roblox property name is longer than " + MaxUnmodelledPropertyNameLength
+                    + " characters; pass the exact name of a " + instance.ClassName + " property");
+            }
+
+            return false;
+        }
+
+        private static RbxError NotAValidPropertyName(string property, string hint)
+        {
+            return RbxError.BadArgument(property + " is not a valid property name.", hint);
+        }
+
+        private static bool IsBoundProperty(RbxInstance instance, string property)
+        {
+            for (int index = 0; index < BoundProperties.Length; index++)
+            {
+                if (BoundProperties[index].Properties.Contains(property)
+                    && instance.IsA(BoundProperties[index].ClassName))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsCataloguedMethod(ClassCatalog catalog, RbxInstance instance,
+            string member)
+        {
+            return catalog.TryGetKnownUnimplementedMember(instance.ClassName, member,
+                       RbxKnownUnimplementedMemberAccess.Read,
+                       out _, out RbxKnownUnimplementedMemberDescriptor descriptor)
+                   && descriptor.IsMethod;
+        }
+
+        /// <summary>
+        /// The bound or catalogued property of the instance's class that <paramref name="typed"/>
+        /// is one edit away from, or null.
+        /// </summary>
+        private static string FindNearMissPropertyName(ClassCatalog catalog, RbxInstance instance,
+            string typed)
+        {
+            for (int index = 0; index < BoundProperties.Length; index++)
+            {
+                if (!instance.IsA(BoundProperties[index].ClassName))
+                {
+                    continue;
+                }
+
+                foreach (string property in BoundProperties[index].Properties)
+                {
+                    if (IsOneEditAway(typed, property))
+                    {
+                        return property;
+                    }
+                }
+            }
+
+            string className = instance.ClassName;
+            while (className != null)
+            {
+                foreach (RbxKnownUnimplementedMemberDescriptor member in
+                         catalog.GetDeclaredKnownUnimplementedMembers(className))
+                {
+                    if (!member.IsMethod && IsOneEditAway(typed, member.Name))
+                    {
+                        return member.Name;
+                    }
+                }
+
+                className = catalog.TryGet(className, out ClassDescriptor descriptor)
+                    ? descriptor.BaseClassName
+                    : null;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// True when <paramref name="typed"/> differs from <paramref name="known"/> by exactly the
+        /// case of its letters or by one edit — a letter changed, missing, added, or swapped with its
+        /// neighbour — ignoring case; an edit that changes, adds or removes a digit does not count.
+        /// </summary>
+        internal static bool IsOneEditAway(string typed, string known)
+        {
+            if (string.Equals(typed, known, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            int lengthDifference = typed.Length - known.Length;
+            if (lengthDifference > 1 || lengthDifference < -1)
+            {
+                return false;
+            }
+
+            int shorter = Math.Min(typed.Length, known.Length);
+            int first = 0;
+            while (first < shorter && SameLetter(typed[first], known[first]))
+            {
+                first++;
+            }
+
+            if (lengthDifference != 0)
+            {
+                char extra = lengthDifference > 0 ? typed[first] : known[first];
+                if (char.IsDigit(extra))
+                {
+                    return false;
+                }
+
+                return lengthDifference > 0
+                    ? SameRest(typed, first + 1, known, first)
+                    : SameRest(typed, first, known, first + 1);
+            }
+
+            if (first == shorter)
+            {
+                return true;
+            }
+
+            if (char.IsDigit(typed[first]) && char.IsDigit(known[first]))
+            {
+                return false;
+            }
+
+            if (SameRest(typed, first + 1, known, first + 1))
+            {
+                return true;
+            }
+
+            return first + 1 < typed.Length
+                   && SameLetter(typed[first], known[first + 1])
+                   && SameLetter(typed[first + 1], known[first])
+                   && SameRest(typed, first + 2, known, first + 2);
+        }
+
+        private static bool SameRest(string left, int leftStart, string right, int rightStart)
+        {
+            if (left.Length - leftStart != right.Length - rightStart)
+            {
+                return false;
+            }
+
+            for (int offset = 0; leftStart + offset < left.Length; offset++)
+            {
+                if (!SameLetter(left[leftStart + offset], right[rightStart + offset]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool SameLetter(char left, char right)
+        {
+            return left == right || char.ToUpperInvariant(left) == char.ToUpperInvariant(right);
+        }
+
+        /// <summary>
+        /// A signal for a real property CoreAI does not model: it never fires, and nothing keeps
+        /// it — asking again makes a new one, so an unknown name leaves nothing behind in the
+        /// instance. The first time a world sees a class and name, it logs one note saying so.
+        /// </summary>
+        private static RbxScriptSignal CreateUnmodelledPropertySignal(LuaCsRbxModContext context,
+            RbxInstance instance, string property)
+        {
+            NoteUnmodelledProperty(context, instance.ClassName, property);
+            return new RbxScriptSignal(instance.ClassName + ".GetPropertyChangedSignal(" + property
+                                       + ")");
+        }
+
+        /// <summary>
+        /// Logs, once per class and name and for at most <see cref="MaxUnmodelledPropertyNotes"/>
+        /// of them per world, that a watched property is not modelled; one last line says when
+        /// further notes are suppressed.
+        /// </summary>
+        private static void NoteUnmodelledProperty(LuaCsRbxModContext context, string className,
+            string property)
+        {
+            Action<string> log = context.Bindings.LogSink;
+            UnmodelledPropertyNoteSet notes = UnmodelledPropertyNotes.GetValue(context.Bindings,
+                _ => new UnmodelledPropertyNoteSet());
+            string key = className + "." + property;
+            if (notes.Keys.Contains(key))
+            {
                 return;
             }
 
-            throw RbxError.BadArgument(
-                property + " is not a valid property name.",
-                "pass the exact name of a " + instance.ClassName
-                + " property, e.g. GetPropertyChangedSignal(\"Name\"); property names are "
-                + "case-sensitive");
+            if (notes.Keys.Count >= MaxUnmodelledPropertyNotes)
+            {
+                if (!notes.OverflowNoted)
+                {
+                    notes.OverflowNoted = true;
+                    log?.Invoke("[RbxApi] GetPropertyChangedSignal: " + MaxUnmodelledPropertyNotes
+                                + " unmodelled property names were noted in this world; further ones "
+                                + "are not logged.");
+                }
+
+                return;
+            }
+
+            notes.Keys.Add(key);
+            log?.Invoke("[RbxApi] " + className + ":GetPropertyChangedSignal(\"" + property
+                        + "\") returns a signal that never fires: CoreAI does not model " + key
+                        + " yet. (Logged once per class and property.)");
+        }
+
+        /// <summary>
+        /// Applies the new-tag rule (<see cref="InstanceTagStore.ValidateNewTag"/>) to a tag a
+        /// script is about to add, unless the target already holds it.
+        /// </summary>
+        /// <remarks>
+        /// WHY only a tag the target does not hold: a world saved before the limit may carry a
+        /// longer tag, and a script re-adding it is a no-op, not a creation — the same split the
+        /// SetAttribute binding makes with attribute names.
+        /// </remarks>
+        private static void RequireCreatableTag(RbxInstance target, string tag)
+        {
+            if (tag != null && tag.Length > InstanceTagStore.MaxTagLength && !target.IsDestroyed
+                && !target.HasTag(tag))
+            {
+                InstanceTagStore.ValidateNewTag(tag);
+            }
+        }
+
+        /// <summary>
+        /// Applies the new-tag rule to a tag a script asks CollectionService to watch, unless some
+        /// instance holds it already (a longer tag a restored world carries).
+        /// </summary>
+        /// <remarks>
+        /// WHY (A3-03): the tag becomes a key of the service's signal tables and part of the
+        /// signal's name, so a script passing an arbitrarily long string there made the host copy
+        /// it twice — for a tag no instance may carry.
+        /// </remarks>
+        private static void RequireWatchableTag(LuaCsRbxModContext context, string tag)
+        {
+            if (tag != null && tag.Length > InstanceTagStore.MaxTagLength
+                && !context.Bindings.Registry.Tags.IsTagInUse(tag))
+            {
+                InstanceTagStore.ValidateNewTag(tag);
+            }
         }
 
         private static bool IsCataloguedProperty(ClassCatalog catalog, RbxInstance instance,
@@ -3177,7 +3492,13 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        /// <summary>MaterialVariant member assignment (BaseMaterial, map strings, StudsPerTile).</summary>
+        /// <summary>MaterialVariant member assignment (BaseMaterial, map strings, StudsPerTile).
+        /// The parts wearing the variant are repainted only when the write changed it.</summary>
+        /// <remarks>
+        /// WHY the repaint waits for a real change (A3-08): the repaint re-resolves the material of
+        /// every part wearing the variant, and a script assigning the value a variant already holds
+        /// — every frame, from a settings loop — paid that walk for nothing.
+        /// </remarks>
         private static bool TryWriteMaterialVariant(LuaCsRbxModContext context, RbxInstance self,
             string key, LuaValue value)
         {
@@ -3186,50 +3507,47 @@ namespace CoreAI.Ai.LuaCs
                 return false;
             }
 
+            int changesBefore = variant.ChangeCount;
             switch (key)
             {
                 case "BaseMaterial":
                     context.RequireWorldEditForWrite(self, "BaseMaterial");
                     variant.BaseMaterial = ReadAssignedMaterial(value, self.ClassName, "BaseMaterial");
-                    context.RecordMutation(self);
-                    context.PartSink.RefreshMaterialVariant(variant.Name);
-                    return true;
+                    break;
                 case "ColorMap":
                     context.RequireWorldEditForWrite(self, "ColorMap");
                     variant.ColorMap = ReadAssignedString(value, self.ClassName, "ColorMap");
-                    context.RecordMutation(self);
-                    context.PartSink.RefreshMaterialVariant(variant.Name);
-                    return true;
+                    break;
                 case "NormalMap":
                     context.RequireWorldEditForWrite(self, "NormalMap");
                     variant.NormalMap = ReadAssignedString(value, self.ClassName, "NormalMap");
-                    context.RecordMutation(self);
-                    context.PartSink.RefreshMaterialVariant(variant.Name);
-                    return true;
+                    break;
                 case "RoughnessMap":
                     context.RequireWorldEditForWrite(self, "RoughnessMap");
                     variant.RoughnessMap =
                         ReadAssignedString(value, self.ClassName, "RoughnessMap");
-                    context.RecordMutation(self);
-                    context.PartSink.RefreshMaterialVariant(variant.Name);
-                    return true;
+                    break;
                 case "MetalnessMap":
                     context.RequireWorldEditForWrite(self, "MetalnessMap");
                     variant.MetalnessMap =
                         ReadAssignedString(value, self.ClassName, "MetalnessMap");
-                    context.RecordMutation(self);
-                    context.PartSink.RefreshMaterialVariant(variant.Name);
-                    return true;
+                    break;
                 case "StudsPerTile":
                     context.RequireWorldEditForWrite(self, "StudsPerTile");
                     variant.StudsPerTile =
                         ReadAssignedFloat(value, self.ClassName, "StudsPerTile");
-                    context.RecordMutation(self);
-                    context.PartSink.RefreshMaterialVariant(variant.Name);
-                    return true;
+                    break;
                 default:
                     return false;
             }
+
+            context.RecordMutation(self);
+            if (variant.ChangeCount != changesBefore)
+            {
+                context.PartSink.RefreshMaterialVariant(variant.Name);
+            }
+
+            return true;
         }
 
         // ---- ValueBase (Value + Changed over the engine-free value classes) -----------------

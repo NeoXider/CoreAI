@@ -871,6 +871,45 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void R6_11_RootPartMoveDirectionAndJump_FireChangedWhenTheirValueChanges()
+        {
+            // WHY (A3-01): RootPart, MoveDirection and Jump are BoundProperties rows
+            // GetPropertyChangedSignal accepts, yet none of them ever fired: the root part was
+            // assigned silently, the direction is the motor's and nobody compared it, and Jump
+            // reads the Jumping state, which changed without a notification.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxInstance character = harness.Registry.Create("Model");
+            character.Parent = harness.Registry.WorldRoot;
+            RbxHumanoid humanoid = harness.Humanoid(character);
+            humanoid.Changed.BindScheduler(harness.Bindings.Scheduler);
+            List<string> changed = new();
+            harness.Connect(humanoid.Changed, args => changed.Add((string)args[0]));
+
+            RbxInstance root = harness.Registry.Create("Part");
+            root.Name = "HumanoidRootPart";
+            root.Parent = character;
+            Assert.AreSame(root, humanoid.RootPart, "sanity: the character pipeline found the root");
+            harness.Motor.MoveDirectionValue = new RbxVector3(1f, 0f, 0f);
+            harness.Bindings.Scheduler.Advance(0d);
+            harness.Motor.MoveDirectionValue = new RbxVector3(1f, 0f, 0.001f);
+            harness.Bindings.Scheduler.Advance(0d);
+            humanoid.RequestJump();
+            harness.Bindings.Scheduler.Advance(0d);
+            harness.Motor.MoveDirectionValue = RbxVector3.Zero;
+            harness.Bindings.Scheduler.Advance(0d);
+            root.Parent = null;
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.IsNull(humanoid.RootPart, "sanity: the character lost its root part");
+            CollectionAssert.AreEqual(
+                new[] { "RootPart", "MoveDirection", "Jump", "Jump", "MoveDirection", "RootPart" },
+                changed,
+                "the root part arriving, the walk starting, the jump entering and the landing leaving "
+                + "the Jumping state, the stop, and the root part leaving; a wobble under the "
+                + "resolution is not a change");
+        }
+
+        [Test]
         public void R6_11_HumanoidHealth_FiresItsPropertyChangedSignal_ThroughLua()
         {
             using ProductionHarness harness = new ProductionHarness();

@@ -84,6 +84,13 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private readonly Dictionary<InstanceId, PartProperties> _partProperties = new();
 
+        // WHY an index by variant name (A3-08): editing a MaterialVariant repaints the parts wearing
+        // it, and finding them used to walk every binding in the world — a whole-world pass for each
+        // write to one variant. The index is kept in step with _partProperties, whose every write
+        // goes through PutPartProperties and every removal through RemovePartProperties.
+        private readonly Dictionary<string, HashSet<InstanceId>> _partsByVariant =
+            new(StringComparer.Ordinal);
+
         private readonly DestroyedPartStateStore _destroyedParts =
             new(InMemoryPartPropertySink.DestroyedPartRetention);
 
@@ -335,7 +342,10 @@ namespace CoreAI.Mods.Rbx.Binding
                 Rigidbody = rigidbody
             };
             CacheVisualComponents(entry);
-            _partProperties[id] = properties;
+            PutPartProperties(id, in properties,
+                _partProperties.TryGetValue(id, out PartProperties adoptedOver)
+                    ? adoptedOver.MaterialVariant
+                    : null);
             AddBinding(id, entry);
             AttachContactRelay(gameObject);
         }
@@ -645,7 +655,7 @@ namespace CoreAI.Mods.Rbx.Binding
             }
 
             PartProperties last = GetPartPropertiesOrDefault(id);
-            _partProperties.Remove(id);
+            RemovePartProperties(id);
             _destroyedParts.Remember(id, in last);
         }
 
@@ -896,21 +906,84 @@ namespace CoreAI.Mods.Rbx.Binding
         /// </summary>
         public void RefreshMaterialVariant(string variantName)
         {
-            if (_hostTeardownStarted || string.IsNullOrEmpty(variantName))
+            if (_hostTeardownStarted || string.IsNullOrEmpty(variantName)
+                || !_partsByVariant.TryGetValue(variantName, out HashSet<InstanceId> wearers))
             {
                 return;
             }
 
-            foreach (KeyValuePair<InstanceId, BindingEntry> pair in _bindings)
+            foreach (InstanceId id in wearers)
             {
-                if (!pair.Value.IsPart || !pair.Value.OwnsGameObject ||
-                    !_partProperties.TryGetValue(pair.Key, out PartProperties properties) ||
-                    !string.Equals(properties.MaterialVariant, variantName, StringComparison.Ordinal))
+                if (!_bindings.TryGetValue(id, out BindingEntry entry) || !entry.IsPart
+                    || !entry.OwnsGameObject
+                    || !_partProperties.TryGetValue(id, out PartProperties properties))
                 {
                     continue;
                 }
 
-                ApplyAppearance(pair.Value, properties);
+                ApplyAppearance(entry, properties);
+            }
+        }
+
+        /// <summary>Parts whose stored bundle names the variant (A3-08 regression counter).</summary>
+        internal int CountPartsWearingVariant(string variantName)
+        {
+            return variantName != null
+                   && _partsByVariant.TryGetValue(variantName, out HashSet<InstanceId> wearers)
+                ? wearers.Count
+                : 0;
+        }
+
+        /// <summary>Stores a part's bundle and moves it in the variant index when the variant it
+        /// names differs from <paramref name="previousVariant"/>, the one its stored bundle named
+        /// (null when none was stored).</summary>
+        private void PutPartProperties(InstanceId id, in PartProperties properties,
+            string previousVariant)
+        {
+            _partProperties[id] = properties;
+            if (string.Equals(previousVariant, properties.MaterialVariant, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            UnindexVariantWearer(previousVariant, id);
+            if (properties.MaterialVariant == null)
+            {
+                return;
+            }
+
+            if (!_partsByVariant.TryGetValue(properties.MaterialVariant,
+                    out HashSet<InstanceId> wearers))
+            {
+                wearers = new HashSet<InstanceId>();
+                _partsByVariant.Add(properties.MaterialVariant, wearers);
+            }
+
+            wearers.Add(id);
+        }
+
+        /// <summary>Forgets a part's bundle and its place in the variant index.</summary>
+        private void RemovePartProperties(InstanceId id)
+        {
+            if (_partProperties.TryGetValue(id, out PartProperties previous))
+            {
+                UnindexVariantWearer(previous.MaterialVariant, id);
+                _partProperties.Remove(id);
+            }
+        }
+
+        private void UnindexVariantWearer(string variantName, InstanceId id)
+        {
+            if (variantName == null
+                || !_partsByVariant.TryGetValue(variantName, out HashSet<InstanceId> wearers))
+            {
+                return;
+            }
+
+            wearers.Remove(id);
+            if (wearers.Count == 0)
+            {
+                _partsByVariant.Remove(variantName);
             }
         }
 
@@ -1106,12 +1179,13 @@ namespace CoreAI.Mods.Rbx.Binding
             // WHY: a per-property write to a destroyed part lands in its retained copy, never back
             // in the live store, so a late host write to a dead id cannot re-grow what destruction
             // released. A whole-bundle push revives the id before it gets here.
-            if (!_partProperties.ContainsKey(id) && _destroyedParts.TryReplace(id, in properties))
+            bool stored = _partProperties.TryGetValue(id, out PartProperties previous);
+            if (!stored && _destroyedParts.TryReplace(id, in properties))
             {
                 return;
             }
 
-            _partProperties[id] = properties;
+            PutPartProperties(id, in properties, stored ? previous.MaterialVariant : null);
             if (!TryGetLiveEntry(id, out BindingEntry entry) || !entry.IsPart)
             {
                 return;

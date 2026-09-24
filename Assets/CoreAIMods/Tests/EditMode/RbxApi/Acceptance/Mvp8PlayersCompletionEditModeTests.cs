@@ -812,6 +812,92 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void MP12_AnActorTheIdentitySourceDoesNotKnow_IsRefusedLikeAMissingSource()
+        {
+            // WHY (A4-05): only a missing IdentitySource failed closed. A source that did not know
+            // an actor the transport admitted fell back to the session counter's UserId — the very
+            // number another account receives after a restart, which MP-12 exists to stop.
+            TransportBridge bridge = new(RbxNetworkTopology.Host);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            harness.Bindings.Players.IdentitySource =
+                new FixedIdentitySource("someone-else", 90210L, "alice", "Alice A.");
+            ActorContext actor = harness.Actor("remote-b");
+            int instanceCount = harness.Registry.GetLiveInstances().Count;
+            bridge.RegisterActor(actor.ActorId);
+
+            RbxError error = Assert.Throws<RbxError>(() => harness.Bindings.ConnectActor(actor));
+
+            Assert.AreEqual(RbxErrorCode.NotAuthority, error.Code);
+            StringAssert.Contains("remote-b", error.RawMessage);
+            StringAssert.Contains("IdentitySource", error.RawMessage);
+            Assert.IsEmpty(harness.Bindings.Players.GetPlayers());
+            Assert.IsFalse(harness.Bindings.Players.TryGetByActorId(actor.ActorId, out _));
+            Assert.AreEqual(instanceCount, harness.Registry.GetLiveInstances().Count,
+                "nothing is created for a refused join");
+        }
+
+        [TestCase(0L, "alice")]
+        [TestCase(-7L, "alice")]
+        [TestCase(42L, "   ")]
+        public void MP12_AnAdmittedIdentityWithoutAUsableUserIdOrName_IsRefused(long userId,
+            string username)
+        {
+            TransportBridge bridge = new(RbxNetworkTopology.DedicatedServer);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            harness.Bindings.Players.IdentitySource =
+                new FixedIdentitySource("remote-c", userId, username, "C");
+            ActorContext actor = harness.Actor("remote-c");
+            bridge.RegisterActor(actor.ActorId);
+
+            RbxError error = Assert.Throws<RbxError>(() => harness.Bindings.ConnectActor(actor));
+
+            Assert.AreEqual(RbxErrorCode.NotAuthority, error.Code);
+            Assert.IsEmpty(harness.Bindings.Players.GetPlayers());
+        }
+
+        [Test]
+        public void MP12_ALocalActorASourceDoesNotKnow_StillJoinsWithTheSessionCounter()
+        {
+            // WHY the twin: a local actor on the host process is not a transport admission (its
+            // mod context registers on the bridge only after its Player exists), so a source that
+            // knows only remote players must not lock the host's own mods out.
+            TransportBridge bridge = new(RbxNetworkTopology.Host);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            harness.Bindings.Players.IdentitySource =
+                new FixedIdentitySource("someone-else", 90210L, "alice", "Alice A.");
+            ActorContext actor = harness.Actor("local-b");
+
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            Assert.AreEqual(1L, player.UserId);
+        }
+
+        [Test]
+        public void R6_11_PlayersSettings_FireChangedOncePerRealChange()
+        {
+            // WHY (A3-01): CharacterAutoLoads, RespawnTime and MaxPlayers are BoundProperties rows
+            // GetPropertyChangedSignal accepts, yet they were plain auto-properties that never
+            // fired, so a script watching them waited forever.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxPlayers players = harness.Bindings.Players;
+            players.Changed.BindScheduler(harness.Bindings.Scheduler);
+            List<string> changed = new();
+            players.Changed.Connect((Action<object[]>)(args => changed.Add((string)args[0])));
+
+            for (int pass = 0; pass < 2; pass++)
+            {
+                players.CharacterAutoLoads = false;
+                players.RespawnTime = 2d;
+                players.MaxPlayers = 8;
+            }
+
+            harness.Bindings.Scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(new[] { "CharacterAutoLoads", "RespawnTime", "MaxPlayers" },
+                changed, "each real change fires once; the second, equal pass is no change");
+        }
+
+        [Test]
         public void OwnPlayer_StillAcceptsChildren_LeaderstatsPattern()
         {
             // WHY: the twin of the Player lock — only the Player's own Parent and lifetime are

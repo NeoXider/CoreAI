@@ -37,6 +37,7 @@ namespace CoreAI.Mods.Rbx.Instances
         private Func<RbxTweenPlaybackState, RbxEnumItem> _stateItemResolver;
         private InstanceRegistry _subscribedRegistry;
         private Action<string> _log;
+        private RbxTween[] _stepScratch;
 
         internal RbxTweenService(ClassDescriptor descriptor)
             : base(descriptor)
@@ -55,6 +56,9 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>Tweens dropped because their step threw; each one is logged once.</summary>
         internal int FaultedTweenCount { get; private set; }
+
+        /// <summary>The array the Heartbeat step reuses as its snapshot (A3-09 regression probe).</summary>
+        internal RbxTween[] StepScratch => _stepScratch;
 
         /// <summary>Finished tweens currently kept for the actor.</summary>
         internal int IdleTweenCount(string actorId)
@@ -579,9 +583,34 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
-            RbxTween[] snapshot = new RbxTween[_active.Count];
+            // WHY a reused array: this runs every Heartbeat while any tween plays, and a fresh
+            // snapshot per frame was garbage on every frame of every animation. Renting it clears
+            // the field, so a step that somehow re-enters here takes a fresh array instead of
+            // overwriting the one being walked.
+            int count = _active.Count;
+            RbxTween[] snapshot = _stepScratch;
+            _stepScratch = null;
+            if (snapshot == null || snapshot.Length < count)
+            {
+                snapshot = new RbxTween[Math.Max(count, snapshot == null ? 0 : snapshot.Length * 2)];
+            }
+
             _active.CopyTo(snapshot);
-            for (int index = 0; index < snapshot.Length; index++)
+            try
+            {
+                StepSnapshot(snapshot, count, deltaSeconds, host);
+            }
+            finally
+            {
+                Array.Clear(snapshot, 0, count);
+                _stepScratch = snapshot;
+            }
+        }
+
+        private void StepSnapshot(RbxTween[] snapshot, int count, double deltaSeconds,
+            ITweenPropertyHost host)
+        {
+            for (int index = 0; index < count; index++)
             {
                 RbxTween tween = snapshot[index];
                 if (tween.IsDestroyed || !tween.IsActive)

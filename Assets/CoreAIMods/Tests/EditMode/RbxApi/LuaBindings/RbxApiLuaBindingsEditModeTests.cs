@@ -2499,6 +2499,554 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 "the unload path releases both interned strings of every mod");
         }
 
+        // ---- Property-changed notifications (A3-01, A3-02) ----------------------------------
+
+        /// <summary>A grounded motor whose direction a test sets; every jump is taken.</summary>
+        private sealed class SteerableMotor : IRbxCharacterMotor
+        {
+            public RbxVector3 Direction { get; set; } = RbxVector3.Zero;
+
+            public RbxVector3 Position => RbxVector3.Zero;
+
+            public RbxVector3 MoveDirection => Direction;
+
+            public bool IsGrounded => true;
+
+            public void SetWalkSpeed(double studsPerSecond)
+            {
+            }
+
+            public void Jump(double jumpPower, double jumpHeight, bool useJumpPower)
+            {
+            }
+
+            public void MoveTo(RbxVector3? targetStuds)
+            {
+            }
+        }
+
+        /// <summary>BoundProperties rows whose value cannot change once the instance exists.</summary>
+        private static readonly Dictionary<string, string> ImmutableBoundProperties =
+            new(StringComparer.Ordinal)
+            {
+                { "Instance.ClassName", "fixed by the class" },
+                { "Workspace.CurrentCamera", "the one world camera; assigning another is the loud stub" },
+                { "Workspace.SignalBehavior", "Deferred is the only mode" },
+                { "Player.UserId", "fixed when the player is admitted" },
+                { "Players.LocalPlayer", "fixed for the reading mod context" },
+                { "Tween.Instance", "fixed by TweenService:Create" },
+                { "Tween.TweenInfo", "fixed by TweenService:Create" }
+            };
+
+        private const string AnchoredPartLua =
+            "(function() local p = Instance.new('Part'); p.Anchored = true; p.Parent = workspace; "
+            + "return p end)()";
+
+        /// <summary>
+        /// One driver per mutable BoundProperties row: <c>Target</c> is a Lua expression for the
+        /// watched instance (bound to <c>t</c>), <c>Drive</c> makes one real change and then
+        /// assigns the same value again, which must fire nothing, and <c>Changes</c> is how many
+        /// real changes that causes. A null drive is made from C# (the motor's direction, the
+        /// host's MaxPlayers). Jump reads "in the Jumping state", so the jump enters that state and
+        /// the next Heartbeat's landing leaves it: two changes.
+        /// </summary>
+        private static readonly (string Row, string Target, string Drive, int Changes)[]
+            BoundPropertyDrivers =
+            {
+                ("Instance.Name", "Instance.new('Folder')", "t.Name = 'Renamed'; t.Name = 'Renamed'", 1),
+                ("Instance.Parent", "Instance.new('Folder')", "t.Parent = workspace; t.Parent = workspace", 1),
+                ("Instance.Archivable", "Instance.new('Folder')", "t.Archivable = false; t.Archivable = false", 1),
+                ("Workspace.Gravity", "workspace", "t.Gravity = 50; t.Gravity = 50", 1),
+                ("Model.PrimaryPart",
+                    "(function() local m = Instance.new('Model'); local p = Instance.new('Part'); "
+                    + "p.Anchored = true; p.Parent = m; m.Parent = workspace; return m end)()",
+                    "local p = t:FindFirstChildOfClass('Part'); t.PrimaryPart = p; t.PrimaryPart = p", 1),
+                ("Model.WorldPivot", "Instance.new('Model')",
+                    "t.WorldPivot = CFrame.new(1, 2, 3); t.WorldPivot = CFrame.new(1, 2, 3)", 1),
+                ("BasePart.Shape", AnchoredPartLua,
+                    "t.Shape = Enum.PartType.Ball; t.Shape = Enum.PartType.Ball", 1),
+                ("BasePart.Material", AnchoredPartLua,
+                    "t.Material = Enum.Material.Wood; t.Material = Enum.Material.Wood", 1),
+                ("BasePart.MaterialVariant", AnchoredPartLua,
+                    "t.MaterialVariant = 'Mossy'; t.MaterialVariant = 'Mossy'", 1),
+                ("BasePart.Position", AnchoredPartLua,
+                    "t.Position = Vector3.new(1, 2, 3); t.Position = Vector3.new(1, 2, 3)", 1),
+                ("BasePart.Size", AnchoredPartLua,
+                    "t.Size = Vector3.new(2, 3, 4); t.Size = Vector3.new(2, 3, 4)", 1),
+                ("BasePart.CFrame", AnchoredPartLua,
+                    "t.CFrame = CFrame.new(4, 5, 6); t.CFrame = CFrame.new(4, 5, 6)", 1),
+                ("BasePart.Orientation", AnchoredPartLua,
+                    "t.Orientation = Vector3.new(0, 90, 0); t.Orientation = Vector3.new(0, 90, 0)", 1),
+                ("BasePart.Rotation", AnchoredPartLua,
+                    "t.Rotation = Vector3.new(0, 45, 0); t.Rotation = Vector3.new(0, 45, 0)", 1),
+                ("BasePart.Color", AnchoredPartLua,
+                    "t.Color = Color3.new(1, 0, 0); t.Color = Color3.new(1, 0, 0)", 1),
+                ("BasePart.Transparency", AnchoredPartLua,
+                    "t.Transparency = 0.5; t.Transparency = 0.5", 1),
+                ("BasePart.Anchored", AnchoredPartLua, "t.Anchored = false; t.Anchored = false", 1),
+                ("BasePart.CanCollide", AnchoredPartLua, "t.CanCollide = false; t.CanCollide = false", 1),
+                ("Camera.CFrame", "workspace.CurrentCamera",
+                    "t.CFrame = CFrame.new(7, 8, 9); t.CFrame = CFrame.new(7, 8, 9)", 1),
+                ("Camera.CameraType", "workspace.CurrentCamera",
+                    "t.CameraType = Enum.CameraType.Scriptable; t.CameraType = Enum.CameraType.Scriptable", 1),
+                ("Camera.CameraSubject", "workspace.CurrentCamera",
+                    "local s = " + AnchoredPartLua + "; t.CameraSubject = s; t.CameraSubject = s", 1),
+                ("Humanoid.Health", "Instance.new('Humanoid')", "t.Health = 50; t.Health = 50", 1),
+                ("Humanoid.MaxHealth", "Instance.new('Humanoid')", "t.MaxHealth = 150; t.MaxHealth = 150", 1),
+                ("Humanoid.WalkSpeed", "Instance.new('Humanoid')", "t.WalkSpeed = 20; t.WalkSpeed = 20", 1),
+                ("Humanoid.JumpPower", "Instance.new('Humanoid')", "t.JumpPower = 60; t.JumpPower = 60", 1),
+                ("Humanoid.JumpHeight", "Instance.new('Humanoid')", "t.JumpHeight = 9; t.JumpHeight = 9", 1),
+                ("Humanoid.UseJumpPower", "Instance.new('Humanoid')",
+                    "t.UseJumpPower = false; t.UseJumpPower = false", 1),
+                ("Humanoid.DisplayName", "Instance.new('Humanoid')",
+                    "t.DisplayName = 'Hero'; t.DisplayName = 'Hero'", 1),
+                ("Humanoid.MoveDirection",
+                    "(function() local h = Instance.new('Humanoid'); h.Name = 'MoveProbe'; "
+                    + "h.Parent = workspace; return h end)()", null, 1),
+                ("Humanoid.RootPart",
+                    "(function() local m = Instance.new('Model'); m.Parent = workspace; "
+                    + "local h = Instance.new('Humanoid'); h.Parent = m; return h end)()",
+                    "local r = Instance.new('Part'); r.Name = 'HumanoidRootPart'; r.Anchored = true; "
+                    + "r.Parent = t.Parent", 1),
+                ("Humanoid.Jump", "Instance.new('Humanoid')", "t.Jump = true; t.Jump = true", 2),
+                ("Player.DisplayName", "game:GetService('Players'):GetPlayers()[1]",
+                    "t.DisplayName = 'Renamed'; t.DisplayName = 'Renamed'", 1),
+                ("Player.Character", "game:GetService('Players'):GetPlayers()[1]",
+                    "local m = Instance.new('Model'); t.Character = m; t.Character = m", 1),
+                ("Players.CharacterAutoLoads", "game:GetService('Players')",
+                    "t.CharacterAutoLoads = false; t.CharacterAutoLoads = false", 1),
+                ("Players.RespawnTime", "game:GetService('Players')",
+                    "t.RespawnTime = 1; t.RespawnTime = 1", 1),
+                ("Players.MaxPlayers", "game:GetService('Players')", null, 1),
+                ("UserInputService.MouseBehavior", "game:GetService('UserInputService')",
+                    "t.MouseBehavior = Enum.MouseBehavior.LockCenter; "
+                    + "t.MouseBehavior = Enum.MouseBehavior.LockCenter", 1),
+                ("ClickDetector.MaxActivationDistance", "Instance.new('ClickDetector')",
+                    "t.MaxActivationDistance = 10; t.MaxActivationDistance = 10", 1),
+                ("MaterialVariant.BaseMaterial", "Instance.new('MaterialVariant')",
+                    "t.BaseMaterial = Enum.Material.Wood; t.BaseMaterial = Enum.Material.Wood", 1),
+                ("MaterialVariant.ColorMap", "Instance.new('MaterialVariant')",
+                    "t.ColorMap = 'rbxassetid://1'; t.ColorMap = 'rbxassetid://1'", 1),
+                ("MaterialVariant.NormalMap", "Instance.new('MaterialVariant')",
+                    "t.NormalMap = 'rbxassetid://2'; t.NormalMap = 'rbxassetid://2'", 1),
+                ("MaterialVariant.RoughnessMap", "Instance.new('MaterialVariant')",
+                    "t.RoughnessMap = 'rbxassetid://3'; t.RoughnessMap = 'rbxassetid://3'", 1),
+                ("MaterialVariant.MetalnessMap", "Instance.new('MaterialVariant')",
+                    "t.MetalnessMap = 'rbxassetid://4'; t.MetalnessMap = 'rbxassetid://4'", 1),
+                ("MaterialVariant.StudsPerTile", "Instance.new('MaterialVariant')",
+                    "t.StudsPerTile = 4; t.StudsPerTile = 4", 1),
+                ("ValueBase.Value", "Instance.new('IntValue')", "t.Value = 5; t.Value = 5", 1),
+                ("Tween.PlaybackState",
+                    "game:GetService('TweenService'):Create(" + AnchoredPartLua
+                    + ", TweenInfo.new(1), {Transparency = 1})",
+                    "t:Play(); t:Play()", 1)
+            };
+
+        /// <summary>
+        /// WHY (A3-01): the BoundProperties drift guard only proved that every row is readable and
+        /// accepted by GetPropertyChangedSignal, so fourteen rows — ClickDetector, Players,
+        /// UserInputService, MaterialVariant, Tween.PlaybackState, and Humanoid's MoveDirection,
+        /// RootPart and Jump — were accepted and never fired: a script watching them waited forever.
+        /// This drives every mutable row and demands exactly one Changed and one property-signal
+        /// fire per real change, none for the repeated assignment; a new row fails here until it
+        /// has a driver or is listed as immutable.
+        /// </summary>
+        [Test]
+        public void BoundProperties_EveryRowFiresChangedAndItsSignalOncePerRealChange()
+        {
+            HashSet<string> tableRows = new(StringComparer.Ordinal);
+            foreach ((string className, string property) in
+                     LuaCsRbxInstanceBindings.EnumerateBoundProperties())
+            {
+                tableRows.Add(className + "." + property);
+            }
+
+            HashSet<string> covered = new(ImmutableBoundProperties.Keys, StringComparer.Ordinal);
+            foreach ((string Row, string Target, string Drive, int Changes) driver in BoundPropertyDrivers)
+            {
+                Assert.IsTrue(covered.Add(driver.Row), driver.Row + " is listed twice");
+            }
+
+            List<string> uncovered = new();
+            foreach (string row in tableRows)
+            {
+                if (!covered.Contains(row))
+                {
+                    uncovered.Add(row);
+                }
+            }
+
+            List<string> stale = new();
+            foreach (string row in covered)
+            {
+                if (!tableRows.Contains(row))
+                {
+                    stale.Add(row);
+                }
+            }
+
+            CollectionAssert.IsEmpty(uncovered,
+                "every BoundProperties row needs a driver here, or an entry in ImmutableBoundProperties");
+            CollectionAssert.IsEmpty(stale, "these rows are no longer in BoundProperties");
+
+            LuaCsRbxApiBindings roblox = new();
+            roblox.AttachCharacterMotorFactory(_ => new SteerableMotor());
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+            roblox.Players.EnsureActor(roblox.Registry, "drift-actor");
+            // WHY two frames before any watcher: the admitted player's join spawn lands on the next
+            // Advance, and it must not count as a change of Player.Character.
+            roblox.Scheduler.Advance(0d);
+            roblox.Scheduler.Advance(0d);
+
+            System.Text.StringBuilder script = new(@"
+                local function watch(row, target, property)
+                    local isValue = target:IsA('ValueBase')
+                    local changed, signalled = 0, 0
+                    target.Changed:Connect(function(name)
+                        if isValue or name == property then
+                            changed = changed + 1
+                            store_set(row .. '|changed', tostring(changed))
+                        end
+                    end)
+                    target:GetPropertyChangedSignal(property):Connect(function()
+                        signalled = signalled + 1
+                        store_set(row .. '|signal', tostring(signalled))
+                    end)
+                end
+");
+            foreach ((string Row, string Target, string Drive, int Changes) driver in BoundPropertyDrivers)
+            {
+                string property = driver.Row.Substring(driver.Row.IndexOf('.') + 1);
+                script.Append("do local t = ").Append(driver.Target).Append("; watch('")
+                    .Append(driver.Row).Append("', t, '").Append(property).Append("'); ")
+                    .Append(driver.Drive ?? "").Append(" end\n");
+            }
+
+            stack.Runtime.LoadMod("drift", script.ToString());
+            Assert.IsTrue(stack.Runtime.IsLoaded("drift"));
+
+            RbxHumanoid moveProbe = (RbxHumanoid)roblox.Registry.WorldRoot.FindFirstChild("MoveProbe");
+            Assert.IsNotNull(moveProbe, "the MoveDirection probe humanoid exists");
+            SteerableMotor motor = moveProbe.Motor as SteerableMotor;
+            Assert.IsNotNull(motor, "the probe humanoid is driven by the test motor");
+            motor.Direction = new RbxVector3(1f, 0f, 0f);
+            roblox.Players.MaxPlayers = 8;
+            roblox.Players.MaxPlayers = 8;
+            for (int frame = 0; frame < 3; frame++)
+            {
+                roblox.Scheduler.Advance(0d);
+            }
+
+            List<string> wrong = new();
+            foreach ((string Row, string Target, string Drive, int Changes) driver in BoundPropertyDrivers)
+            {
+                string expected = driver.Changes.ToString(CultureInfo.InvariantCulture);
+                string changed = store.Get("drift", driver.Row + "|changed");
+                string signalled = store.Get("drift", driver.Row + "|signal");
+                if (changed != expected || signalled != expected)
+                {
+                    wrong.Add(driver.Row + ": Changed fired " + (changed == "" ? "0" : changed)
+                              + ", the property signal " + (signalled == "" ? "0" : signalled)
+                              + ", expected " + expected);
+                }
+            }
+
+            CollectionAssert.IsEmpty(wrong,
+                "every real change fires Changed and the property signal exactly once");
+        }
+
+        [Test]
+        public void GetPropertyChangedSignal_ARealPropertyCoreAIDoesNotModel_LoadsAndLogsOnce()
+        {
+            // WHY (A3-02, M1-03): only bound and catalogued names were accepted, so a script
+            // watching a real property the catalog has not listed yet — the FloorMaterial idiom of
+            // every footstep script — failed its whole load with "not a valid property name".
+            List<string> log = new();
+            LuaCsRbxApiBindings roblox = new(log: log.Add);
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+
+            stack.Runtime.LoadMod("watcher", @"
+                local h = Instance.new('Humanoid')
+                h.Parent = workspace
+                h:GetPropertyChangedSignal('FloorMaterial'):Connect(function()
+                    store_set('fired', 'yes')
+                end)
+                h:GetPropertyChangedSignal('FloorMaterial')
+                Instance.new('Humanoid'):GetPropertyChangedSignal('FloorMaterial')
+                game:GetService('Players'):GetPropertyChangedSignal('NumPlayers')
+                Instance.new('Part'):GetPropertyChangedSignal('LocalTransparencyModifier')
+                store_set('loaded', 'true')");
+            roblox.Scheduler.Advance(0d);
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("watcher"));
+            Assert.AreEqual("true", store.Get("watcher", "loaded"));
+            Assert.AreEqual("", store.Get("watcher", "fired"), "the unmodelled property's signal never fires");
+            Assert.AreEqual(1, log.FindAll(line =>
+                    line.Contains("Humanoid:GetPropertyChangedSignal(\"FloorMaterial\")")).Count,
+                "one note per class and name, however many humanoids ask");
+            Assert.AreEqual(1, log.FindAll(line => line.Contains("Players.NumPlayers")).Count);
+            Assert.AreEqual(1, log.FindAll(line => line.Contains("Part.LocalTransparencyModifier")).Count);
+        }
+
+        [Test]
+        public void Negative_GetPropertyChangedSignal_ATypoOrANonProperty_IsStillRefused()
+        {
+            // WHY: accepting unknown names must not bring back the silent typo M1-03 fixed — one
+            // edit away from a known property is the typo class, and an event or a method is not a
+            // property at all.
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+
+            stack.Runtime.LoadMod("names", @"
+                local p = Instance.new('Part')
+                local function try(label, target, name)
+                    local ok, err = pcall(function() return target:GetPropertyChangedSignal(name) end)
+                    store_set(label, tostring(ok) .. '|' .. tostring(err))
+                end
+                try('case', p, 'position')
+                try('swap', p, 'Positoin')
+                try('extra', workspace.CurrentCamera, 'CFrameX')
+                try('humanoidCase', Instance.new('Humanoid'), 'walkspeed')
+                try('event', p, 'Touched')
+                try('method', p, 'Destroy')
+                try('long', p, string.rep('Q', 101))
+                try('bound', p, 'Position')
+                try('catalogued', p, 'BrickColor')
+                try('unmodelled', p, 'LocalTransparencyModifier')");
+
+            foreach (string label in new[] { "case", "swap", "extra", "humanoidCase", "event", "method", "long" })
+            {
+                string refused = store.Get("names", label);
+                StringAssert.StartsWith("false|", refused, label + " must be refused");
+                StringAssert.Contains("BAD_ARGUMENT", refused, label);
+                StringAssert.Contains("is not a valid property name.", refused, label);
+            }
+
+            StringAssert.Contains("position is not a valid property name.", store.Get("names", "case"));
+            StringAssert.Contains("\"Position\"", store.Get("names", "case"),
+                "the refusal names the property the author meant");
+            StringAssert.Contains("\"WalkSpeed\"", store.Get("names", "humanoidCase"));
+            foreach (string label in new[] { "bound", "catalogued", "unmodelled" })
+            {
+                StringAssert.StartsWith("true|", store.Get("names", label), label + " must be accepted");
+            }
+        }
+
+        [TestCase("position", "Position", true)]
+        [TestCase("Positoin", "Position", true)]
+        [TestCase("CFrameX", "CFrame", true)]
+        [TestCase("Postion", "Position", true)]
+        [TestCase("Position", "Position", false)]
+        [TestCase("Attachment1", "Attachment0", false)]
+        [TestCase("Color3", "Color", false)]
+        [TestCase("FloorMaterial", "Material", false)]
+        [TestCase("Sit", "Size", false)]
+        public void GetPropertyChangedSignal_NearMissRule(string typed, string known, bool nearMiss)
+        {
+            Assert.AreEqual(nearMiss, LuaCsRbxInstanceBindings.IsOneEditAway(typed, known));
+        }
+
+        [Test]
+        public void GetPropertyChangedSignal_UnmodelledNames_AreNotedAtMostABoundedNumberOfTimes()
+        {
+            // WHY: the names are the script's to invent, so the once-per-name note needs a ceiling
+            // of its own, or a loop over generated names would grow the log and the note set.
+            List<string> log = new();
+            LuaCsRbxApiBindings roblox = new(log: log.Add);
+            LuaCsModStack stack = BuildStack(roblox);
+
+            stack.Runtime.LoadMod("many", @"
+                local p = Instance.new('Part')
+                for i = 1, 300 do
+                    p:GetPropertyChangedSignal('Unmodelled' .. i)
+                end");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("many"));
+            int notes = log.FindAll(line => line.Contains("GetPropertyChangedSignal")).Count;
+            Assert.LessOrEqual(notes, 65, "at most 64 notes and one line saying the rest are not logged");
+            Assert.Greater(notes, 1);
+            Assert.AreEqual(1, log.FindAll(line => line.Contains("are not logged")).Count);
+        }
+
+        // ---- Script-keyed signal tables stay bounded (A3-03) --------------------------------
+
+        [Test]
+        public void TagAndAttributeSignals_TwentyThousandDistinctKeys_KeepTheTablesBounded_AndHeldOnesStillFire()
+        {
+            // WHY (A3-03): every distinct tag passed to GetInstanceAddedSignal/RemovedSignal and
+            // every attribute name passed to GetAttributeChangedSignal kept its signal for the life
+            // of the world, so a loop over generated names grew the host without bound. A signal
+            // the script still holds must still fire once it connects (Roblox semantics).
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+
+            stack.Runtime.LoadMod("keys", @"
+                local cs = game:GetService('CollectionService')
+                local heldAdded = cs:GetInstanceAddedSignal('Held')
+                local heldAttribute = workspace:GetAttributeChangedSignal('Held')
+                for i = 1, 20000 do
+                    cs:GetInstanceAddedSignal('t' .. i)
+                    cs:GetInstanceRemovedSignal('t' .. i)
+                    workspace:GetAttributeChangedSignal('a' .. i)
+                end
+                heldAdded:Connect(function(instance) store_set('added', instance.Name) end)
+                heldAttribute:Connect(function()
+                    store_set('attribute', tostring(workspace:GetAttribute('Held')))
+                end)
+                local p = Instance.new('Part')
+                p.Name = 'Tagged'
+                p.Parent = workspace
+                p:AddTag('Held')
+                workspace:SetAttribute('Held', 7)");
+            roblox.Scheduler.Advance(0d);
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("keys"));
+            Assert.LessOrEqual(roblox.CollectionService.TagSignalStrongCount,
+                2 * KeyedSignalTable.StrongBudget + 2,
+                "40,000 tag signals nobody connected to must not all stay reachable");
+            Assert.LessOrEqual(roblox.Registry.WorldRoot.AttributeSignalStrongCount,
+                KeyedSignalTable.StrongBudget + 1);
+            Assert.AreEqual("Tagged", store.Get("keys", "added"),
+                "a tag signal taken before the loop and connected after it still fires");
+            Assert.AreEqual("7", store.Get("keys", "attribute"),
+                "an attribute signal taken before the loop and connected after it still fires");
+        }
+
+        [Test]
+        public void Tags_AScriptCreatedTagLongerThan100Characters_IsRefused_ALegacyOneStillWorks()
+        {
+            // WHY (A3-03): a tag of any length was accepted and copied into the tag store, the
+            // service's counts and signal tables, and the saved world. A longer tag a world saved
+            // before the limit carries (restored through the C# domain) must stay usable.
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+            RbxInstance legacy = roblox.Registry.Create("Folder");
+            legacy.Name = "L";
+            legacy.Parent = roblox.Registry.WorldRoot;
+            string legacyTag = new('L', 150);
+            legacy.AddTag(legacyTag);
+
+            stack.Runtime.LoadMod("tags", @"
+                local cs = game:GetService('CollectionService')
+                local p = Instance.new('Part')
+                p.Parent = workspace
+                local function try(label, action)
+                    local ok, err = pcall(action)
+                    store_set(label, tostring(ok) .. '|' .. tostring(err))
+                end
+                try('long', function() p:AddTag(string.rep('x', 101)) end)
+                try('serviceLong', function() cs:AddTag(p, string.rep('y', 101)) end)
+                try('signalLong', function() cs:GetInstanceAddedSignal(string.rep('z', 101)) end)
+                try('limit', function() p:AddTag(string.rep('x', 100)) end)
+                local legacy = workspace:FindFirstChild('L')
+                try('legacyHas', function() assert(legacy:HasTag(string.rep('L', 150))) end)
+                try('legacySignal', function() cs:GetInstanceRemovedSignal(string.rep('L', 150)) end)
+                try('legacyRemove', function() legacy:RemoveTag(string.rep('L', 150)) end)");
+
+            foreach (string label in new[] { "long", "serviceLong", "signalLong" })
+            {
+                string refused = store.Get("tags", label);
+                StringAssert.StartsWith("false|", refused, label + " must be refused");
+                StringAssert.Contains("BAD_ARGUMENT", refused, label);
+                StringAssert.Contains("at most 100 characters", refused, label);
+            }
+
+            foreach (string label in new[] { "limit", "legacyHas", "legacySignal", "legacyRemove" })
+            {
+                Assert.AreEqual("true|nil", store.Get("tags", label), label);
+            }
+
+            Assert.IsFalse(legacy.HasTag(legacyTag), "the legacy tag was removed by the script");
+        }
+
+        // ---- MaterialVariant repaint (A3-08) ------------------------------------------------
+
+        /// <summary>An in-memory sink that counts variant repaints.</summary>
+        private sealed class RepaintCountingSink : IPartPropertySink
+        {
+            private readonly InMemoryPartPropertySink _inner = new();
+
+            public List<string> Refreshed { get; } = new();
+
+            public void SetCFrame(InstanceId id, in RbxCFrame cframe) => _inner.SetCFrame(id, in cframe);
+
+            public void SetPosition(InstanceId id, RbxVector3 position) => _inner.SetPosition(id, position);
+
+            public void SetSize(InstanceId id, RbxVector3 size) => _inner.SetSize(id, size);
+
+            public void SetColor(InstanceId id, RbxColor3 color) => _inner.SetColor(id, color);
+
+            public void SetAnchored(InstanceId id, bool anchored) => _inner.SetAnchored(id, anchored);
+
+            public void SetTransparency(InstanceId id, float transparency) =>
+                _inner.SetTransparency(id, transparency);
+
+            public void SetCanCollide(InstanceId id, bool canCollide) => _inner.SetCanCollide(id, canCollide);
+
+            public void SetShape(InstanceId id, RbxPartShape shape) => _inner.SetShape(id, shape);
+
+            public void SetMaterial(InstanceId id, in RbxMaterialId material) =>
+                _inner.SetMaterial(id, in material);
+
+            public void SetMaterialVariant(InstanceId id, string variantName) =>
+                _inner.SetMaterialVariant(id, variantName);
+
+            public void RefreshMaterialVariant(string variantName)
+            {
+                Refreshed.Add(variantName);
+                _inner.RefreshMaterialVariant(variantName);
+            }
+
+            public void SetPartProperties(InstanceId id, in PartProperties properties) =>
+                _inner.SetPartProperties(id, in properties);
+
+            public bool TryGetPartProperties(InstanceId id, out PartProperties properties) =>
+                _inner.TryGetPartProperties(id, out properties);
+
+            public PartProperties GetPartPropertiesOrDefault(InstanceId id) =>
+                _inner.GetPartPropertiesOrDefault(id);
+
+            public void OnPartDestroyed(InstanceId id) => _inner.OnPartDestroyed(id);
+        }
+
+        [Test]
+        public void MaterialVariant_AnEqualWrite_RepaintsNothing_ARealChangeRepaintsOnce()
+        {
+            // WHY (A3-08): every MaterialVariant write asked the sink to repaint the parts wearing
+            // the variant — a walk over the whole world in the GameObject binder — even when the
+            // value was the one the variant already held.
+            RepaintCountingSink sink = new();
+            LuaCsRbxApiBindings roblox = new(partSink: sink);
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+
+            stack.Runtime.LoadMod("variant", @"
+                local v = Instance.new('MaterialVariant')
+                v.Name = 'Worn'
+                v.Parent = game:GetService('MaterialService')");
+            sink.Refreshed.Clear();
+            stack.Runtime.LoadMod("variant-equal", @"
+                local v = game:GetService('MaterialService'):FindFirstChild('Worn')
+                v.BaseMaterial = Enum.Material.Plastic
+                v.ColorMap = ''
+                v.NormalMap = ''
+                v.RoughnessMap = ''
+                v.MetalnessMap = ''
+                v.StudsPerTile = 1");
+            CollectionAssert.IsEmpty(sink.Refreshed, "assigning the values the variant holds repaints nothing");
+
+            stack.Runtime.LoadMod("variant-change", @"
+                local v = game:GetService('MaterialService'):FindFirstChild('Worn')
+                v.StudsPerTile = 4
+                v.StudsPerTile = 4");
+            CollectionAssert.AreEqual(new[] { "Worn" }, sink.Refreshed, "one real change, one repaint");
+        }
+
         // ---- Shared world -------------------------------------------------------------------
 
         [Test]

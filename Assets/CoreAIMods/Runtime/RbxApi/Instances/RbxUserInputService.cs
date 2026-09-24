@@ -31,6 +31,7 @@ namespace CoreAI.Mods.Rbx.Instances
         private static readonly object GameNotProcessed = false;
 
         private RbxEnumRegistry _enums;
+        private RbxEnumItem _mouseBehavior;
         private RbxVector2 _previousMouseLocation;
         private bool _hasPreviousMouseLocation;
 
@@ -56,10 +57,25 @@ namespace CoreAI.Mods.Rbx.Instances
         /// engine-backed source once (like the camera rig).</summary>
         public IInputSource InputSource { get; private set; } = new InMemoryInputSource();
 
-        /// <summary>Enum.MouseBehavior item; state-only in MVP1 (Default until assigned).
+        /// <summary>Enum.MouseBehavior item; state-only in MVP1 (Default until assigned). A change
+        /// fires <c>Changed("MouseBehavior")</c> and its property signal; assigning the item it
+        /// already holds fires nothing.
         /// TODO: route LockCenter/LockCurrentPosition to the host cursor when the pointer-lock
         /// slice lands.</summary>
-        public RbxEnumItem MouseBehavior { get; set; }
+        public RbxEnumItem MouseBehavior
+        {
+            get => _mouseBehavior;
+            set
+            {
+                if (ReferenceEquals(_mouseBehavior, value))
+                {
+                    return;
+                }
+
+                _mouseBehavior = value;
+                NotifyPropertyChanged(nameof(MouseBehavior));
+            }
+        }
 
         /// <summary>Attaches the engine-backed input source; resolved once at composition.</summary>
         public void AttachInputSource(IInputSource source)
