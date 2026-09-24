@@ -3337,7 +3337,10 @@ namespace CoreAI.Ai.LuaCs
         /// <remarks>
         /// WHY an error in a <c>__tostring</c> is not caught: Roblox's warn raises it too, and a budget
         /// trip inside a runaway <c>__tostring</c> travels as the same exception and must reach the
-        /// scheduler instead of being turned into a log line.
+        /// scheduler instead of being turned into a log line. WHY a counted call (audit A2-05): the global
+        /// <c>tostring</c> is whatever the mod assigned. A Lua function that calls <c>warn</c> again nests VM
+        /// runs on the .NET stack whose unwind no budget hook can stop, and <c>tostring = warn</c> makes warn
+        /// call itself with no Lua in between; uncounted, that overflowed the .NET stack and ended the process.
         /// </remarks>
         private static async System.Threading.Tasks.ValueTask<string> DescribeForLog(LuaState state,
             LuaValue value, CancellationToken cancellationToken)
@@ -3348,8 +3351,8 @@ namespace CoreAI.Ai.LuaCs
                 return value.ToString();
             }
 
-            LuaValue[] converted = await state.CallAsync(toString, new[] { value }.AsSpan(),
-                cancellationToken);
+            LuaValue[] converted = await LuaCsSecureEnvironment.CallCountedAsync(state, toString,
+                new[] { value }.AsSpan(), cancellationToken, "warn");
             return converted.Length > 0 && converted[0].Type == LuaValueType.String
                 ? converted[0].Read<string>()
                 : value.ToString();

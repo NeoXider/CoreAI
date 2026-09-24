@@ -1491,9 +1491,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             if (thread.IsDead || thread.Status == RbxScriptThreadStatus.Dead)
             {
-                // WHY the record is still dropped: a thread finished outside the scheduler (a native
-                // coroutine.close) keeps its record until something resumes it; cancelling it is the
-                // author's request to forget it, so its queued work goes without a fault report.
+                // WHY the record is still dropped: a thread finished outside the scheduler, which mod code
+                // can no longer do (the sandbox refuses a raw coroutine.resume of a task thread and this
+                // Lua-CSharp build has no coroutine.close), keeps its record until something resumes it;
+                // cancelling it is the author's request to forget it, so its queued work goes without a
+                // fault report.
                 if (_records.TryGetValue(thread, out ThreadRecord deadRecord))
                 {
                     KillRecord(deadRecord);
@@ -2237,9 +2239,10 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             if (record.Thread.IsDead || record.Thread.Status == RbxScriptThreadStatus.Dead)
             {
-                // WHY a fault and not a throw: the thread was finished outside the scheduler (a native
-                // coroutine.resume or coroutine.close of a task thread). Throwing here aborted the rest
-                // of the frame for every mod, and any mod could repeat it every frame on purpose.
+                // WHY a fault and not a throw: the thread was finished outside the scheduler, which mod code
+                // can no longer do (the sandbox refuses a raw coroutine.resume of a task thread and this
+                // Lua-CSharp build has no coroutine.close); a fault, not a throw, so a host bug cannot abort
+                // every mod's frame.
                 HandleFault(record, RbxError.BadArgument(
                     "scheduler attempted to resume a dead thread owned by mod " + record.OwnerModId,
                     "do not finish or kill a thread outside its owning scheduler; "

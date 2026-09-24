@@ -2300,6 +2300,134 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.IsFalse(log.Exists(line => line.Contains("warn from")));
         }
 
+#if COREAI_LUA
+        /// <summary>
+        /// A mod whose global <c>tostring</c> calls <c>warn</c> again, with its own recursion guard failing at
+        /// <paramref name="modCap"/> levels: stores whether <c>pcall(warn, 1)</c> succeeded, its error and the
+        /// deepest level the mod's <c>tostring</c> reached.
+        /// </summary>
+        private static string WarnReenteredFromTheModsTostring(int modCap)
+        {
+            return "local nativeToString = tostring\n" +
+                   "local depth, deepest = 0, 0\n" +
+                   "tostring = function(x)\n" +
+                   "  depth = depth + 1\n" +
+                   "  if depth > deepest then deepest = depth end\n" +
+                   "  if depth >= " + modCap + " then error('mod cap', 0) end\n" +
+                   "  warn(x)\n" +
+                   "  depth = depth - 1\n" +
+                   "  return ''\n" +
+                   "end\n" +
+                   "local ok, err = pcall(warn, 1)\n" +
+                   "tostring = nativeToString\n" +
+                   "store_set('ok', tostring(ok))\n" +
+                   "store_set('err', tostring(err))\n" +
+                   "store_set('deepest', string.format('%d', deepest))";
+        }
+
+        [Test]
+        [Timeout(120000)]
+        public void Negative_Lua_Warn_ReenteredFromTheModsTostring_StopsAtTheCStackLimitWithOneCatchableLine()
+        {
+            // WHY (A2-05): warn converts each argument with the global tostring, which a mod may replace with a
+            // Lua function that calls warn again. Each such call is a nested VM run on the .NET stack, and it was
+            // not counted against the C-call limit, so the error at the bottom unwound in about N squared with no
+            // instruction running and no budget hook firing: 11 s at a mod-imposed depth of 1,000, 32 s unbounded
+            // under a 10 s budget.
+            // WHY the reference run: the unwind left at the limit is intrinsic to Lua-CSharp and its wall time
+            // depends on the host, so the capped run is timed against the same shape failing on the mod's own
+            // cap at 150 levels, as CallsBackIntoLua_NestedPastTheCStackLimit_FailFastWithOneCatchableLine does.
+            MemoryStore store = new();
+            List<string> log = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(log: log.Add), store);
+            System.Diagnostics.Stopwatch referenceClock = System.Diagnostics.Stopwatch.StartNew();
+            stack.Runtime.LoadMod("reference", WarnReenteredFromTheModsTostring(150));
+            referenceClock.Stop();
+            Assert.AreEqual("false", store.Get("reference", "ok"));
+            Assert.AreEqual("mod cap", store.Get("reference", "err"),
+                "the reference run fails on the mod's own cap, below the C-stack limit");
+
+            System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+            stack.Runtime.LoadMod("deep", WarnReenteredFromTheModsTostring(1000));
+            clock.Stop();
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("deep"), "pcall catches the error, so the mod loads");
+            Assert.AreEqual("false", store.Get("deep", "ok"));
+            string expectedLine = LuaCsSecureEnvironment.CStackOverflowMessage + " (warn: more than "
+                                  + LuaCsSecureEnvironment.MaxCCallDepth
+                                  + " nested calls from library functions back into Lua)";
+            string error = store.Get("deep", "err");
+            Assert.AreEqual(expectedLine, error);
+            LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(error);
+            Assert.AreEqual(LuaCsSecureEnvironment.MaxCCallDepth.ToString(CultureInfo.InvariantCulture),
+                store.Get("deep", "deepest"), "the nesting stops at the limit, not at the mod's own cap of 1,000");
+            Assert.IsFalse(log.Exists(line => line.Contains("warn from")),
+                "no nested warn finished, so none of them logged: " + string.Join(" | ", log));
+            Assert.Less(clock.ElapsedMilliseconds, 4 * referenceClock.ElapsedMilliseconds + 250,
+                "the capped nesting must unwind about as fast as 150 levels do (" + referenceClock.ElapsedMilliseconds
+                + " ms), not quadratically in the mod's own depth");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void Negative_Lua_Warn_UsedAsTostring_StopsAtTheCStackLimitWithOneCatchableLine()
+        {
+            // WHY: with tostring = warn, warn converts its argument by calling itself, with no Lua instruction
+            // in between for a budget hook to stop, so only the C-call limit ends the recursion. Uncounted, it
+            // overflowed the .NET stack: the test host process crashed instead of this test failing.
+            MemoryStore store = new();
+            List<string> log = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(log: log.Add), store);
+
+            stack.Runtime.LoadMod("m", @"
+                local nativeToString = tostring
+                tostring = warn
+                local ok, err = pcall(warn, 1)
+                tostring = nativeToString
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))
+                warn('after the refusal')");
+
+            Assert.AreEqual("false", store.Get("m", "ok"));
+            string error = store.Get("m", "err");
+            Assert.AreEqual(LuaCsSecureEnvironment.CStackOverflowMessage + " (warn: more than "
+                            + LuaCsSecureEnvironment.MaxCCallDepth
+                            + " nested calls from library functions back into Lua)", error);
+            LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(error);
+            CollectionAssert.AreEqual(new[] { "[RbxApi] warn from mod 'm': after the refusal" },
+                log.FindAll(line => line.Contains("warn from")),
+                "no nested warn finished, and the refusal gave back every level it held: " + string.Join(" | ", log));
+        }
+#endif
+
+        [Test]
+        public void Lua_Warn_TostringMetamethodsAndAReplacedTostring_StillConvertTheArguments()
+        {
+            // WHY the negative twin: counting warn's call into tostring must not change what warn logs, for a
+            // __tostring, for a __tostring that warns once itself, or for a mod's own replacement of tostring.
+            List<string> log = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(log: log.Add));
+
+            stack.Runtime.LoadMod("m", @"
+                local labelled = setmetatable({}, {__tostring = function() return 'custom text' end})
+                warn('plain', labelled, 2)
+                local noisy = setmetatable({}, {__tostring = function() warn('inner') return 'outer' end})
+                warn(noisy)
+                local nativeToString = tostring
+                tostring = function(x) return '<' .. nativeToString(x) .. '>' end
+                warn('wrapped', 3)
+                tostring = nativeToString");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+            CollectionAssert.AreEqual(new[]
+            {
+                "[RbxApi] warn from mod 'm': plain custom text 2",
+                "[RbxApi] warn from mod 'm': inner",
+                "[RbxApi] warn from mod 'm': outer",
+                "[RbxApi] warn from mod 'm': <wrapped> <3>"
+            }, log.FindAll(line => line.Contains("warn from")), string.Join(" | ", log));
+        }
+
         [TestCase("BrickColor")]
         [TestCase("NumberSequence")]
         [TestCase("ColorSequence")]
