@@ -86,6 +86,17 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   with `RBX_API_SKILL.md` the coercion rule, `keep_objects` and the cap. The roadmaps close round-trip gap RT4, add
   deviation DEV-17 (the `tostring` text a number becomes) and update the ladder status; `TODO.md` closes what these
   commits fixed and files every follow-up with an owner and a plan.
+- **Round 3's sandbox fixes are documented, and the old trip lines are gone from the docs.**
+  `LUA_SANDBOX_SECURITY.md` states the enclosing-run rule (the innermost run executing on the OS thread, any state;
+  parked runs skipped), steps reaching every ancestor, `mods_call` continuing its caller's count and allowance,
+  the measured native stack per level (CoreCLR Release 2.5–5.8 KB, chains at most 428 KB; Mono about 2.8 times
+  that, about 1.38 MB; IL2CPP and WebGL on the Unity checklist), the yield fence on every counted call and the new
+  trip lines with their typed classification. `TROUBLESHOOTING.md` and `JSON_COMMAND_FORMAT.md` quote
+  `sandbox: EXCEEDED_HARD_LIMIT_STEPS (…)`, `sandbox: Lua exceeded … ms.` and `sandbox: EXCEEDED_MEMORY_BUDGET (…)`
+  instead of the `LuaCsSecureEnvironment:` line. `RBX_API.md`, `mod-authoring.md` and the "Rbx API" skill (still
+  byte-identical) state the yield rule; `tools/portable/LuaTests/README.md` lists the 38 not-executed cases re-derived
+  from a TRX log; `PLAN.md`, the roadmaps and `TODO.md` carry the final status (audit rounds 1–3 complete, MVP3 code
+  complete and closed on the Linux suites, MVP4 next and not started).
 
 ### Tests
 
@@ -93,7 +104,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   `CoreAI.RbxApi.Instances` and `CoreAI.LuauDownlevel` projects (netstandard2.1, C# 9, one per asmdef), and the
   portable suite links 33 test files (388 cases at the time) covering instances, ACL, scheduler, replication,
   networking, the Luau downleveler and datatypes; later waves added more (2137 passed / 0 failed / 3 skipped at
-  `d4d7f95b`, after the third audit round). The engine-free test project compiles as C# 9, like Unity, instead of
+  `055aed29`, after the third audit round). The engine-free test project compiles as C# 9, like Unity, instead of
   `latest`. `.gitignore` now keeps `tools/**/*.csproj`: the capitalised `!Tools/` exception did not
   match on Linux.
 - **Lua-tier EditMode tests run on Linux too** (`tools/portable/LuaTests`, see its README). The Lua runtime, the
@@ -103,10 +114,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   refusing surfaces for everything that needs the engine: a test that reaches one is reported Inconclusive, never
   passed. The Unity Test Framework log rule (an unexpected error log fails the test) and
   `Is.Not.AllocatingGCMemory()` are reproduced. 75 fixture files of `Assets/CoreAIMods/Tests/EditMode` plus
-  `LuaModAutoRepairPolicyEditModeTests` are linked; 31 are excluded with a reason. Result at `d4d7f95b`, after
-  the third audit round: 1790 passed / 0 failed / 37 not executed (Inconclusive `PORTABLE_ENGINE_UNAVAILABLE`,
-  ignored in a `OneTimeSetUp`, or skipped; the README lists them by fixture). The first run found two real
-  runtime bugs (the `pcall` stack-trace leak and a solo `GetServerTimeNow` drift, both fixed) and two
+  `LuaModAutoRepairPolicyEditModeTests` are linked; 31 are excluded with a reason. Result at `055aed29`, after the
+  third audit round, counted from the TRX log: 1837 passed / 0 failed / 38 not executed (33 Inconclusive — 32
+  `PORTABLE_ENGINE_UNAVAILABLE` and one test that declares itself Inconclusive because the composition root is not
+  compiled there — 3 ignored in a `OneTimeSetUp`, 2 skipped; the README lists them by fixture). The first run found
+  two real runtime bugs (the `pcall` stack-trace leak and a solo `GetServerTimeNow` drift, both fixed) and two
   platform-dependent tests (an ICU culture-sensitive tag search and a Lua `tostring` of a non-exact double, made
   platform-independent).
 - **CI job `portable-lua`** runs that suite on every push and fails when fewer than 1,400 cases pass, because an
@@ -170,7 +182,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   Linux runners ran every linked case green; not run anywhere yet: the Hub page tests of `c7397c77` and `3a46a24c`
   (`LuaSyntaxHighlighterEditModeTests`, `CoreAiModsHubBinderFullTierEditModeTests`, inside `#if COREAI_HAS_HUB`),
   the `[UnityTest]` startup-selection cases, and `Reload_ThroughTheInstallersAttributionFacade_HonoursTheMode`,
-  which is Inconclusive on Linux — all on the "Check the tests" list in `TODO.md`.
+  which is Inconclusive on Linux — all on the "Check the tests" list in `TODO.md`. Round 3's sandbox fix
+  (`055aed29`, C3-01…C3-07) adds 44 cases red on the old runtime to `LuaCsGuardFrameAndAllocationEditModeTests` and
+  `LuaCsSecureSandboxEditModeTests`: nested steps at any depth, the innermost executing run across states and frame
+  yields, `mods_call` hops, the native stack of every channel at the cap, `xpcall` after the engine's stack
+  overflow, an allocation-free suspension, the yield fence on every counted call, the typed step trip, qualified
+  names and a coroutine whose body is `coroutine.yield`. All of them pass on Linux; the native-stack measurement
+  uses a `DynamicMethod` and so cannot run in an AOT player.
 
 ## [7.45.0] - 2026-09-24
 

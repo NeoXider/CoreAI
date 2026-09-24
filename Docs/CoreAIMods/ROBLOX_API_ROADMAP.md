@@ -515,8 +515,8 @@ this table: a stub that names "MVP9" means DataStore, which is MVP16 now.
 | MVP2 | Scheduler, signals, clocks, services | surface landed; G10 and `BindToRenderStep` open | L | EM, PL | MVP2 |
 | MVP2.5 | Online foundation + persistence release | landed 7.3.0–7.43.0 (history) | — | EM | MVP2.5 |
 | — | Gameplay services I | landed slice | L | EM, PM, PL | MVP8 |
-| MVP3 | World/place package + two-tier backups (+ spikes S1/S2) | **closing**: code complete, Unity gate pending | S | EM, PM, manual WebGL | MVP3 |
-| MVP4 | Script contexts & client runtime | **next** | M | PL, EM, PT | MVP5 (part) |
+| MVP3 | World/place package + two-tier backups (+ spikes S1/S2) | **closing**: code complete, audits 1–3 done, closed on the Linux suites; Unity gate and tag pending | S | EM, PM, manual WebGL | MVP3 |
+| MVP4 | Script contexts & client runtime | **next**, not started | M | PL, EM, PT | MVP5 (part) |
 | MVP5 | Host mode over a real socket + join snapshot | planned | L | EM, MP, MS | MVP11 |
 | MVP6 | World-state replication + write authority | planned | L | PT, EM, MP | MVP12 |
 | MVP7 | Networked characters & controls | planned | L | PM, MP, EM | MVP10 (part) + new |
@@ -761,11 +761,16 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   every notification, off the main thread (now once per panel update, on it); the IL2CPP/WebGL stack
   checks are on the Unity checklist. A reload now cleans the previous run's startup objects by default
   (`ModReloadMode`, `mod-system.md` §5c), and two budget trips in a row quarantine a mod and suspend its
-  stored package. Portable suites on Linux at `d4d7f95b`: engine-free 2137 passed / 0 failed / 3
-  skipped; Lua tier 1790 passed / 0 failed / 37 not executed (engine-bound cases Inconclusive by design).
+  stored package. Round 3's sandbox fixes (C3F, `055aed29`) made nested-run steps reach every ancestor,
+  took the enclosing run to be the innermost run executing on the OS thread (so `mods_call` continues its
+  caller's call count and allowance), refused yields through every counted call (Luau parity) and gave
+  the guard's trip lines the `sandbox: ` prefix. Audit rounds 1–3 are complete. Portable suites on Linux
+  at `055aed29` (TRX-counted): engine-free 2137 passed / 0 failed / 3 skipped; Lua tier 1837 passed /
+  0 failed / 38 not executed (engine-bound cases Inconclusive by design). MVP3 is code complete and closed
+  on the Linux suites; the release and tag wait for the owner's Unity gate.
 - **To do**:
-  - Audit rounds 1–3 and their fixes are committed except the round-3 sandbox fixes (C3), in flight;
-    the open follow-ups they filed are in `TODO.md`.
+  - Nothing of the audits: rounds 1–3 and their fixes are done; the follow-ups they filed are in
+    `TODO.md`.
   - Run the Unity checklist in `TODO.md` ("Check the tests"): EditMode in the four module legs plus
     `MIRROR`, PlayMode `FastNoLlm`, and the fixtures that have never run.
   - Run the real WebGL page-reload gate (save → reload the page → the bytes and the startup selection

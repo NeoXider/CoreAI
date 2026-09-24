@@ -109,7 +109,7 @@ The real `CoreServicesInstaller` is a VContainer/MessagePipe installer, but the 
 
 Linked from `Assets/CoreAIMods/Tests/EditMode` (75 fixture files, 4 helpers, 1 derived helper), plus `Assets/CoreAiUnity/Tests/EditMode/LuaModAutoRepairPolicyEditModeTests.cs` (a Lua-tier policy tested through public API only). The explicit list is in the project file. 36 files of the same folder already run in the engine-free suite and are not linked again.
 
-Linked fixtures still contain tests that do not run here. Counted on 2026-09-24 at `07264057`, the Lua-tier run is 1575 passed (11 of them the runner self-tests above), 0 failed, 37 not executed:
+Linked fixtures still contain tests that do not run here. Counted from the TRX log on 2026-09-24 at `055aed29`, the Lua-tier run is 1837 passed (11 of them the runner self-tests above), 0 failed, 38 not executed:
 
 | Not executed | Fixture | Tests | Why |
 |---|---|---|---|
@@ -123,10 +123,11 @@ Linked fixtures still contain tests that do not run here. Counted on 2026-09-24 
 | | `RbxApi/Acceptance/Mvp8HumanoidEditModeTests` | 1 | `GameObject.CreatePrimitive` |
 | | `DemoModProductionSurfaceEditModeTests` | 1 | `GameObject` constructor, `GameObject.Find` |
 | | `RbxApi/LuaBindings/RbxTaskSchedulerLuaBindingsEditModeTests` | 1 | `GameObject` constructor |
+| Inconclusive (the test's own `Assert.Inconclusive`) | `LuaCsModRuntimeEditModeTests` | 1 | `Reload_ThroughTheInstallersAttributionFacade_HonoursTheMode` reaches the installer's attribution facade by name, and `Composition/CoreAiModsInstaller.cs` is not compiled here |
 | Ignored in `OneTimeSetUp` | `RbxApi/LiveCheck/RbxApi4BLiveCheckEditModeTests` | 3 | a live-model check, run by hand against a local endpoint |
 | Skipped | `DemoModProductionSurfaceEditModeTests` | 2 | the `CoreAI.Demos` assembly is not part of this build |
 
-That is 32 Inconclusive tests in 10 fixtures, plus 5 the fixtures themselves ignore or skip. The CI job `portable-lua` fails when the TRX log holds fewer than 1400 passed cases or more than 42 not-executed ones (37 when the bound was set, plus 5), so tests that drift one by one into Inconclusive are noticed before the passed floor would absorb them. A change that moves tests out of this table lowers the bound with it.
+That is 33 Inconclusive tests — 32 refused by the shim in 10 fixtures, 1 that declares itself Inconclusive — plus 5 the fixtures themselves ignore or skip. The CI job `portable-lua` fails when the TRX log holds fewer than 1400 passed cases or more than 42 not-executed ones (37 when the bound was set, plus 5), so tests that drift one by one into Inconclusive are noticed before the passed floor would absorb them. A change that moves tests out of this table lowers the bound with it.
 
 Where a fixture's subject is engine-free but a few of its tests drive that subject through the engine, those tests can live in a Unity-only fixture class next to the engine code they need, so the rest of the fixture runs here:
 
@@ -147,7 +148,7 @@ Excluded, by what they need (31 files):
 | GameObject binder, `RbxWorldHost`, camera rig or physics simulation | `AdoptWorldObjectScaleEditModeTests`, `WorldBindingsStudUnitsEditModeTests`, `WorldQuerySceneWalkerEditModeTests`, `RbxApi/Binding/UnityRbxCharacterMotorJumpGravityEditModeTests` (these four compile, but every test reaches a refused engine member), `RbxApi/Acceptance/Mvp1AcceptanceGateEditModeTests` (its SetUp builds `Mvp1AcceptanceWorld`, a real GameObject world, for every test), `RbxApi/Acceptance/Mvp1GoldenTreeFixtureEditModeTests` (7 of its 8 tests build `Mvp1AcceptanceWorld`), `RbxApi/Binding/InstanceGameObjectBinderEditModeTests`, `RbxApi/Binding/PartShapeMaterializationEditModeTests`, `RbxApi/Binding/RbxWorldHostEditModeTests`, `RbxApi/LuaBindings/RbxCameraLuaBindingsEditModeTests` |
 | Materials, shaders, textures (`CoreAI.Mods.Rbx.Rendering`) | `RbxApi/Acceptance/RbxMaterialCatalogQaEditModeTests`, `RbxApi/Unity/RbxMaterialShowcaseRigEditModeTests`, `RbxApi/Unity/RbxMaterialTextureCatalogEditModeTests`, `RbxApi/Unity/RbxMaterialVariantRenderingEditModeTests`, `RbxApi/Unity/RbxProceduralMaterialProviderEditModeTests` |
 | `UnityEditor` or `CoreAI.Editor` | `ResourcesBundledModSourceEditModeTests`, `RbxApi/Acceptance/RbxTextureMaterialsAcceptanceEditModeTests`, `RbxApi/Unity/RbxCc0TextureSetsEditModeTests`, `RbxApi/Unity/RbxMaterialSurfaceProfilesEditModeTests`, `RbxApi/Unity/RbxMaterialTextureCatalogQaEditModeTests` |
-| `[UnityTest]` coroutines and the VContainer installer | `RbxApi/Acceptance/Mvp3WorldPackageFollowUpEditModeTests`: 18 `[UnityTest]` tests wrap their bodies in `UniTask.ToCoroutine`, which only the Unity build of UniTask has, and 2 `[Test]` tests call `RbxWorldStartupSequence`, an internal class of `Composition/CoreAiModsInstaller.cs`. With those 20 left out, the other 65 test cases of the file compile and pass here, so moving the 20 into a Unity-only file is what would link it. |
+| `[UnityTest]` coroutines and the VContainer installer | `RbxApi/Acceptance/Mvp3WorldPackageFollowUpEditModeTests`: 31 `[UnityTest]` tests (at `055aed29`) wrap their bodies in `UniTask.ToCoroutine`, which only the Unity build of UniTask has, and 2 `[Test]` tests call `RbxWorldStartupSequence`, an internal class of `Composition/CoreAiModsInstaller.cs`. The other `[Test]` cases of the file need nothing from Unity, so moving those 33 into a Unity-only file is what would link it (`TODO.md`, "Link `Mvp3WorldPackageFollowUpEditModeTests` into the Lua-tier runner"). |
 | CoreAI.Source host types outside the engine-free slice (`CoreAISettingsAsset`, the VContainer-built G10 composition) | `LuaModsLlmToolSharingEditModeTests`, `G10CancellationClassificationEditModeTests` |
 | The Hub package (whole file inside `#if COREAI_HAS_HUB`) | `CoreAiModsHubBinderFullTierEditModeTests`, `LuaSyntaxHighlighterEditModeTests` |
 

@@ -1,6 +1,9 @@
 # TODO
 
-> Updated 2026-09-24. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-09-24. Status: audit rounds 1–3 complete (round 3 fixed by `7cf2891e`, `d4d7f95b`, `055aed29`);
+> MVP3 code complete and closed on the Linux suites (at `055aed29`: engine-free 2137 passed / 0 failed / 3 skipped,
+> Lua tier 1837 passed / 0 failed / 38 not executed), its release and tag waiting for the owner's Unity gate; MVP4
+> (script contexts) next, not started. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`; the current status in `PLAN.md`.
 > Latest release: 7.45.0 (2026-09-24, all seven packages in lockstep). Earlier: 7.3.1 (2026-09-02, the six
 > packages of that time in lockstep — WebGL tool-turn fix); 7.3.0 (2026-09-02, lockstep — MVP2.5 persistence
@@ -51,8 +54,8 @@ further down are listed by their bold title and stay where they are.
 
 **MVP3 close (current rung)**
 
-- The Unity verification gate, **Check the tests**, the **Real WebGL page-reload gate** and the round-3 sandbox
-  fixes (C3, in flight): the next section.
+- The Unity verification gate, **Check the tests** and the **Real WebGL page-reload gate**: the next section.
+  Audit rounds 1–3 are complete (round 3 fixed by `7cf2891e`, `d4d7f95b`, `055aed29`).
 - [ ] **Spike S1: guarded VM cost on the target runtimes (risk R1).** *Owner:* Lua runtime + performance.
       *Plan:* run the `tools/vmbench` workload and the `tools/ScaleHarness` N=100 workload in an IL2CPP Linux
       server build and a Standalone Mono x64 build; record VM instructions/s per guard batch, the per-resume
@@ -126,8 +129,8 @@ further down are listed by their bold title and stay where they are.
 **MVP9 — scale to ~100 players per room**
 
 - Existing: **MVP6/MVP9 scalability debt** (the O(N) paths); the heap slope in **Final QA verdict (2026-09-02)**;
-  **Allocation-budget follow-ups**; **`mods_call` exports from other callers still get the full handler
-  budget**; **The remote admission budget has no ceiling across senders**. The D5 targets are in
+  **Allocation-budget follow-ups**; **The C-call cap is fixed at 128 for every composition**; **The remote
+  admission budget has no ceiling across senders**. The D5 targets are in
   `ROBLOX_API_ROADMAP.md` §4.3.
 
 **MVP10 — composable framework: one root, presets, host profile**
@@ -201,15 +204,17 @@ whole wave (snapshot `300eb6a4`: A1 world package, A2 Lua runtime and guard, A3 
 multiplayer, A5 tests, docs and conventions) was followed by its own fixes. Audit round 2 (B1 network and bindings,
 B2 world package and mod runtime, B3 sandbox) and audit round 3 (C1 multiplayer and coercion, C2 world package and
 runtime, C3 sandbox; snapshot `02f26388`) each ran over the whole diff, one auditor per area, followed by one fix
-worker; every fix is committed except the round-3 sandbox fixes (C3), which are in flight. IDs are the audits'
+worker; all three rounds are complete and every finding is fixed or filed below (round 3: `7cf2891e`,
+`d4d7f95b`, `055aed29`). IDs are the audits'
 (M1-xx, M2-xx, M8-xx, MP-xx; A1-xx … A5-xx for round 1; B1-xx … B3-xx for round 2; C1-xx … C3-xx for round 3;
 H1–H5 for the Hub-reload follow-ups); the reports themselves are not kept.
 Verified without Unity only: the Roslyn compile gate (C# 9, every asmdef, six configurations plus Mirror, no new
 error against 7.45.0 besides the known false positive of `Rigidbody.linearVelocity`, a Unity 6 member the 2021.3
 reference assemblies lack) and the two portable `dotnet test` suites on Linux — engine-free 2137 passed / 0 failed /
 3 skipped, Lua tier (`tools/portable/LuaTests`, CI job `portable-lua`, floor 1,400 passed, ceiling 42 not
-executed) 1790 passed / 0 failed / 37 not executed, both at `d4d7f95b`. This section records everything landed up
-to `d4d7f95b`.
+executed) 1837 passed / 0 failed / 38 not executed, both at `055aed29` and counted from the TRX logs. MVP3 is code
+complete and closed on those suites; its release and tag wait for the owner's Unity gate, and MVP4 (script
+contexts) is next and not started. This section records everything landed up to `055aed29`.
 
 - [ ] **Unity verification gate (owner/CI), then bump and tag:** full EditMode 0 failed and PlayMode `FastNoLlm`
       0 failed on this tree. Every EditMode fixture named below was written without a Unity run.
@@ -257,7 +262,8 @@ to `d4d7f95b`.
   - [ ] Native stack on IL2CPP and WebGL (from the Hub-crash investigation, `c7397c77`/`c0dd9fa4`/`02f26388`).
         Lua-CSharp's only stack guard is `RuntimeHelpers.TryEnsureSufficientExecutionStack`, which an IL2CPP build
         may answer with a constant `true`; the sandbox's 128-level weighted C-call cap and the downleveler's 200-level
-        nesting cap are sized to stay under ~512 KB for that case, measured on CoreCLR only. In an IL2CPP Standalone
+        nesting cap are sized for that case: a chain at the cap takes at most 428 KB on CoreCLR and about 1.38 MB on
+        .NET's Mono (`LUA_SANDBOX_SECURITY.md`), and IL2CPP and WebGL are unmeasured. In an IL2CPP Standalone
         player and a WebGL player, run as a mod or through `execute_lua`: `local function f() pcall(f) end f()`
         (must end with the catchable `C stack overflow (…)` line, not a crashed player); the `__concat` chain
         (`local mt = {}; mt.__concat = function(a, b) return a .. b end; local _ = setmetatable({}, mt) .. 'x'`,
@@ -265,7 +271,8 @@ to `d4d7f95b`.
         and **Save & run** of `sample_castle3d` three times in a row on the Hub (the castle must not duplicate, the
         editor must stay responsive, no crash). Record the outcome here.
   - [ ] PlayMode `FastNoLlm` (incl. `Mvp8PhysicsPlayModeTests`): 0 failed.
-  - [ ] The 37 Lua-tier cases the Linux runner reports as not executed (listed in `tools/portable/LuaTests/README.md`).
+  - [ ] The 38 Lua-tier cases the Linux runner reports as not executed at `055aed29` (listed in
+        `tools/portable/LuaTests/README.md`).
   - [ ] Guard behaviour on Mono and IL2CPP: a budget trip cannot be caught by `pcall`/`xpcall` and the state stays
         guarded (`LuaCsGuardFrameAndAllocationEditModeTests`, `LuaCsSecureSandboxEditModeTests`,
         `LuaCs_RunawayHandlerAfterAnEarlierTrip_IsStillCut_AndTheStreakQuarantines` in `LuaCsModRuntimeEditModeTests`)
@@ -273,7 +280,12 @@ to `d4d7f95b`.
         fixes of `07264057` (a raw `coroutine.resume` of a handle's thread refused), `02f26388` (`pcall`/`xpcall`
         counted, nested runs held to what their enclosing run has left, the 128-level weighted cap) and `43605d2f`
         (`gsub`/`format` callbacks awaited across `execute_lua` frame yields, the yield fence after a nested resume,
-        the signal runners' captured native yield).
+        the signal runners' captured native yield) and `055aed29` (nested-run steps reaching every ancestor, the
+        innermost executing run on the OS thread as the enclosing run — a per-thread list the C# `[ThreadStatic]`
+        field keeps, which IL2CPP and WebGL must honour — the yield fence on every counted call, the pooled
+        continuation, the `sandbox: ` trip lines). `NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap`
+        (`LuaCsSecureSandboxEditModeTests`) measures the native stack with a `DynamicMethod` and cannot run in an
+        AOT player; on Mono it must stay within its weights (about 1.38 MB for the worst chain at the cap).
   - [ ] A WebGL build smoke of the world package (save → reload the page → load), see the item below.
 - [ ] **Real WebGL page-reload gate** for the world package: save → reload the page → the bytes and the startup
       selection survive (`Docs/CoreAIMods/WORLD_PACKAGE.md`, "Acceptance status").
@@ -538,6 +550,28 @@ to `d4d7f95b`.
       `LUA_SANDBOX_SECURITY.md`, `WORLD_PACKAGE.md`, `mod-system.md` (§5c reload modes, the budget-trip suspension,
       the Hub tabs, the store contract), `mod-authoring.md`, the "Rbx API" skill pair (still byte-identical) with
       `RBX_API_SKILL.md`, the roadmaps (RT4 closed, DEV-17), `PLAN.md` and both changelogs.
+- [x] **Sandbox, audit round 3 (C3-01…C3-07, `055aed29`).** Nested-run steps are charged to every ancestor, not
+      one level up (two levels of raw coroutines ran 3,000,000 steps under a 1,000,000 limit), and
+      `ConsumedSteps` and the observability sink count them; `gsub` is synchronous again (3.1–4.1 KB a callback
+      level instead of 5.8) and the native-stack test measures real stack addresses; the enclosing run of any new
+      run is the innermost run executing on the OS thread, whatever its state, so an `xpcall` in a coroutine no
+      longer catches a trip and `mods_call` continues its caller's call count and allowance (8 hops: 124 levels,
+      351 KB instead of 707 levels, 2.6 MB) — closes "A `mods_call` export on another Lua state starts from that
+      state's own C-call count and budget" and "`mods_call` exports from other callers still get the full handler
+      budget" (A2-10 residual); `xpcall` runs its handler after the engine's own stack overflow; a suspension inside
+      a counted call allocates nothing; yields are refused through every counted call back into Lua (Luau parity,
+      owner decision C3-06); the guard's trip lines read `sandbox: EXCEEDED_HARD_LIMIT_STEPS (N)`, `sandbox:
+      EXCEEDED_MEMORY_BUDGET (N bytes)` and `sandbox: Lua exceeded N ms.` and a step trip is classified by type
+      (`LuaStepBudgetException`) — closes "The guard's own trip lines do not carry the `sandbox: ` prefix yet"
+      (B3-06c); replaced functions name themselves as the native ones do; a coroutine whose body is
+      `coroutine.yield` fails with a Lua line instead of "Index was outside the bounds of the array.". 44 tests
+      red on the old code.
+- [x] **Docs (the C3F pass)** — `LUA_SANDBOX_SECURITY.md` (the enclosing-run rule, steps to every ancestor, the
+      measured native stack per level on CoreCLR and Mono, the yield fence on every counted call, the new trip
+      lines and their typed classification), `RBX_API.md`, `mod-authoring.md`, the skill pair (still
+      byte-identical) with `RBX_API_SKILL.md`, `TROUBLESHOOTING.md` and `JSON_COMMAND_FORMAT.md` (the `sandbox: `
+      trip lines), `tools/portable/LuaTests/README.md` (38 not executed, re-derived from the TRX log), the status
+      lines of `PLAN.md` and the roadmaps, and both changelogs.
 
 ### Open follow-ups from the fix waves
 
@@ -588,11 +622,13 @@ to `d4d7f95b`.
       *Plan:* give scheduler threads the identity of the run that started them, count what a run's own threads
       build during its startup window (up to its first frame, say) as startup objects, and keep objects built
       in handlers out; a test with a `task.spawn`-built castle saved three times.
-- [ ] **A mod can imitate a budget trip** (after `3a46a24c`): the runtime classifies a failure as a budget trip
-      by its typed cause, with a text fallback for scheduler faults, so a mod that raises the trip line itself
-      is counted toward the two-trip quarantine. *Owner:* mods runtime. *Plan:* classify from the typed cause only
-      (`LuaCsHostFunctionException.HostException`, the scheduler's trip record) and drop the text fallback, with a
-      negative test that `error("…EXCEEDED_…")` twice does not suspend the mod.
+- [ ] **A mod can imitate a budget trip on the scheduler path** (after `3a46a24c`; the hook and timer path
+      classifies by type since `055aed29`: `TimeoutException`, `LuaStepBudgetException`, a memory trip): a
+      scheduler fault is still classified by the markers in its `BUDGET_EXCEEDED` line (`BudgetTripLines` in
+      `LuaCsModRuntime.cs`), so a mod that raises such a line in a task thread counts toward the two-trip
+      quarantine. *Owner:* mods runtime. *Plan:* carry the trip kind on the scheduler's fault (the handle already
+      knows it) and drop the text fallback, with a negative test that `error("…EXCEEDED_…")` twice in a task
+      does not suspend the mod.
 - [ ] **A third-party `ILuaModRuntime` wrapper that does not forward the reload mode gets a clean reload**
       (after H2, `d4d7f95b`): `ReloadMod(caller, id, code, ModReloadMode)` has a default body that runs the
       mode-less reload, so a host wrapper written before it silently turns a keep-objects reload into a clean one.
@@ -639,23 +675,35 @@ to `d4d7f95b`.
       below); the in-sandbox fallback — the hook counts frames whose caller instruction is a `CONCAT` once the
       frame count grows and trips the run past the cap — misses a metamethod that tail-calls a helper (the TODO on
       `CountCallsBackIntoLua` in `LuaCsSecureEnvironment.cs`). The IL2CPP/WebGL check is in "Check the tests".
-- [ ] **A `mods_call` export on another Lua state starts from that state's own C-call count and budget**
-      (after `02f26388`; the TODO on `CCallDepths` in `LuaCsSecureEnvironment.cs`). `MaxCrossCallDepth` (8) bounds
-      that nesting today, but 8 × ~474 KB exceeds the 512 KB the weighted cap is sized for. *Owner:* Lua runtime.
-      *Plan:* hand the caller's thread to the export's guard (`LuaCsExecutionGuard.TryGetRemainingAllowance`
-      already reads a caller's budget), so the export continues the caller's count and remaining budgets as a
-      nested handle resume does; a test that nests `mods_call` 8 deep inside 60 `pcall` levels and expects the cap.
-- [ ] **An overflow of the engine's own Lua stack is still reported as `nil`** (audit B3-08 residue, after
-      `02f26388`): `coroutine.resume` returns `false, nil` and a native `xpcall` lets it escape past its handler.
-      *Owner:* Lua runtime. *Plan:* turn Lua-CSharp's stack-overflow exception into the same one-line error value
-      the C-call cap raises, in the guarded `coroutine.resume` and in the counted `xpcall`, with a test per path.
-- [ ] **The guard's own trip lines do not carry the `sandbox: ` prefix yet** (audit B3-06c remainder, after
-      `43605d2f`): `EXCEEDED_HARD_LIMIT_STEPS` and `EXCEEDED_MEMORY_BUDGET` from `LuaCsExecutionGuard.cs` and the
-      `LuaCsSecureEnvironment: …` lines still name a CLR class. *Owner:* Lua runtime. *Plan:* build them on
-      `LuaCsSecureEnvironment.SandboxLinePrefix`, update the pinned texts in `LuaCsModRuntimeEditModeTests`,
-      `LuaCsGuardFrameAndAllocationEditModeTests` and `LuaCsSecureSandboxEditModeTests`, and the quoted lines in
-      `Assets/CoreAiUnity/Docs/TROUBLESHOOTING.md` and `JSON_COMMAND_FORMAT.md`; keep the native `xpcall`'s
-      `got nil))` double parenthesis, which a test pins for byte parity with the VM.
+- [ ] **`coroutine.resume` of a body that overflows the engine's own value stack** (audit B3-08 residue; the
+      `xpcall` half is fixed by `055aed29`, C3-04, and `pcall` already returned the engine's `stack overflow`
+      line): round 2 reported that `coroutine.resume` then returns `false, nil`; round 3 did not re-check it.
+      *Owner:* Lua runtime. *Plan:* a test that resumes `local function f() return 1 + f() end` in a raw
+      coroutine and expects `false` plus a string; if it gets `nil`, map the engine's `LuaStackOverflowException`
+      to its line in the guarded `coroutine.resume` as `CountedXPCall` does.
+- [ ] **The C-call cap is fixed at 128 for every composition** (after `055aed29`). On CoreCLR the worst chain at
+      the cap takes at most 428 KB, on Mono about 1.38 MB (frames about 2.8 times larger), and IL2CPP and WebGL
+      are unmeasured. *Owner:* Lua runtime + composition. *Plan:* make `MaxCCallDepth` configurable per
+      composition (a `LuaCsModStackOptions` field, clamped), and let the Mono and IL2CPP measurements of the
+      "Check the tests" item decide the default for each player type.
+- [ ] **The native-stack measurement test is fragile by design** (after `055aed29`): a `gsub` callback measures
+      3,872 of its 4,096-byte share on CoreCLR tier-0, so a JIT change can turn
+      `NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap` red without a product change, and its
+      `DynamicMethod` probe runs in EditMode only, never in an AOT player. *Owner:* Lua runtime. *Plan:* when it
+      goes red, re-measure and re-weight the channel rather than loosen the bound; keep the IL2CPP evidence in the
+      "Check the tests" item.
+- [ ] **A doubled `))` in bad-argument lines Lua-CSharp builds itself** (audit C3-07b): the sandbox's own
+      wrappers write Lua's single parenthesis, but a line `Lua.dll`'s `BadArgument` builds (native `xpcall`'s
+      `got nil))`) ends in two; a test pins it for byte parity. *Owner:* Lua runtime. *Plan:* fix it upstream in
+      Lua-CSharp with the `IsInHook` report below, or override the affected wrappers in the sandbox, and update
+      the pinned text in the same change.
+- [ ] **`return coroutine.yield(...)` as a coroutine's last statement fails** (after `055aed29`, C3-07):
+      Lua-CSharp cannot suspend a yield with no Lua function below it, so a coroutine whose body is
+      `coroutine.yield` or ends in that tail call fails its resume with `attempt to yield across a C-call
+      boundary (coroutine.yield has no Lua function below it …)`, where Luau runs it; `task.spawn(coroutine.yield,
+      'x')` still reports the engine's own text. *Owner:* Lua runtime. *Plan:* fix it in Lua-CSharp upstream (a
+      yield from the coroutine's entry frame), then drop `GuardedYield`'s refusal and flip
+      `ACoroutineWhoseBodyIsCoroutineYield_FailsItsResumeWithALuaLine_AndAYieldFromLuaStillWorks`.
 - [ ] **`hooks_every(math.huge)` runs every frame** (audit R3 C1-10): the interval is clamped to 0, where
       `task.delay(math.huge)` parks. *Owner:* mods runtime. *Plan:* treat an infinite interval (`math.huge`, `"inf"`)
       as "never fires" — register nothing, or park the timer — with a test beside the `hooks_every` interval tests.
@@ -680,10 +728,6 @@ to `d4d7f95b`.
       `LuaState.IsInHook` only when the hook returns normally. *Owner:* the maintainer. *Plan:* file an issue with
       a reproduction (and a PR resetting the flag in a `finally`) at `nuskey8/Lua-CSharp`; once a fixed release is
       vendored, drop the `EndGuard` `DebugLibrary.SetHook` workaround and keep the regression tests.
-- [ ] **`mods_call` exports from other callers still get the full handler budget** (A2-10 residual, after
-      `53fb23b3`): from a `task.*` thread, the main chunk or a `hooks_on`/`hooks_every` handler an export runs under
-      50,000,000 steps / 10 s. *Owner:* Lua runtime. *Plan:* expose the running guard's remaining budget from
-      `LuaCsCoroutineHandle` and `LuaCsExecutionGuard`, and let `ResolveExportGuard` cap every export at it.
 - [ ] **One number text and one number parser (DEV-17, audit R3 C1-06; MVP13).** Two parsers live in one
       runtime: the sandbox's `tonumber("inf")`, `tonumber("nan")` and hex floats return `nil` (Lua-CSharp parses with
       .NET rules and drops NaN, and string arithmetic like `"10" + 1` uses the same parser) while the host-side

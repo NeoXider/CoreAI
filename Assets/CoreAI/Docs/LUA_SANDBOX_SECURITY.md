@@ -152,74 +152,107 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
 - **String patterns are budgeted per call.** `string.find`/`match`/`gmatch`/`gsub` run on a port of
   Luau's matcher with a step counter — 5,000,000 steps per call, then `EXCEEDED_PATTERN_STEP_BUDGET`
   — and `gsub`/`string.format` results are capped at 1,000,000 characters before the string is built,
-  so a single backtracking pattern can no longer run for seconds inside one resume. A yield inside a
-  `gsub` replacement function, a `string.format` `__tostring` or a `gsub` `__index` raises
-  `attempt to yield across a C-call boundary`, and the refusal holds after the callback resumed a
-  coroutine of its own (a nested `coroutine.resume` used to lift it). A callback that merely runs long is
-  not a yield: under `execute_lua`, whose guard hands the frame back every few milliseconds, the call is
-  awaited and completes (it used to fail with an `ArgumentOutOfRangeException` from the VM's call stack).
+  so a single backtracking pattern can no longer run for seconds inside one resume.
+- **No yield through a library function that called back into Lua** (Luau parity, audit C3-06). A yield
+  inside a `__tostring` run by `tostring`, `print`, `warn` or `string.format`, a `table.sort` comparator,
+  a `__pairs`/`__ipairs` metamethod, a `gsub` replacement function or a `gsub` `__index` raises
+  `attempt to yield across a C-call boundary` (`YieldAcrossCallBoundaryMessage`, Luau's "attempt to yield
+  across metamethod/C-call boundary"), and the thread that tried runs on; a yield across `pcall` still
+  works, as in Luau. The refusal holds after the callback resumed a coroutine of its own (a nested
+  `coroutine.resume` used to lift it). A callback that merely runs long is not a yield: under
+  `execute_lua`, whose guard hands the frame back every few milliseconds, the call is awaited and completes
+  (it used to fail with an `ArgumentOutOfRangeException` from the VM's call stack), and a counted call
+  suspended that way allocates nothing per suspension (a pooled continuation, audit C3-05). A coroutine
+  whose body IS `coroutine.yield`, or ends in `return coroutine.yield(...)`, cannot be suspended by
+  Lua-CSharp (no Lua function below the yield); its resume fails with that same line and the fix
+  (`local r = coroutine.yield(...) return r`) instead of "Index was outside the bounds of the array.", which
+  differs from Luau (`TODO.md`).
 - `coroutine.wrap` is removed from the secured environment (its resumer would bypass the guard hook);
   `coroutine.resume` is replaced by a budget-guarded wrapper that arms the per-resume step, time and
   allocation limits on the coroutine's own state. The allocation limit is the budget of the run that
   resumes the coroutine — a mod's `HandlerMaxAllocatedBytes` for its handlers, task threads and main
   chunk — and a coroutine it resumes in turn inherits it; a fixed 256 MB used to let a mod held to 16 MB
   keep 80 MB alive inside `coroutine.create`.
-- **A nested run borrows from the run it is nested in** (audit B3-02). A raw coroutine under
-  `coroutine.resume`, a scheduler thread `task.spawn` runs at once, and a guarded call re-entering a run
-  on the same Lua state each get their own budget or what the enclosing run has left, whichever is
-  smaller, for steps, time and memory alike; the steps they use are charged back to the enclosing run,
-  and when a limit they borrowed runs out the whole chain ends with a trip no `pcall` inside it can catch.
-  So a raw coroutine inside a task thread is held to that thread's remaining 10,000 steps / 500 ms instead
-  of its own 500,000 / 1 s, a spawned child that exhausts a lent allowance also ends its spawner, and a
-  memory-heavy immediate `task.spawn` in a main chunk can fail the load. The enclosing run is found
-  through registries keyed by Lua state (the guard, the coroutine handles, the raw coroutines), never a
-  thread-static. A thread the scheduler resumes from its own frame still gets its full budget. Before
-  this, twelve nested levels of 12 MB each under a 16 MB guard held 138 MB alive; they are now cut
+- **A nested run borrows from the run it is nested in** (audits B3-02, C3-01, C3-03). A raw coroutine
+  under `coroutine.resume`, a scheduler thread `task.spawn` runs at once, and a guarded call that starts
+  inside a run — re-entering the same state, or a `mods_call` export on another mod's state — each get
+  their own budget or what the enclosing run has left, whichever is smaller, for steps, time and memory
+  alike; the steps they use are charged back to the enclosing run, and when a limit they borrowed runs
+  out the whole chain ends with the enclosing run's trip line, which no `pcall` or `xpcall` inside it can
+  catch. So a raw coroutine inside a task thread is held to that thread's remaining 10,000 steps / 500 ms
+  instead of its own 500,000 / 1 s, a spawned child that exhausts a lent allowance also ends its spawner,
+  a memory-heavy immediate `task.spawn` in a main chunk can fail the load, and a runaway `mods_call`
+  export ends its caller, as a Roblox module call runs in its caller's thread. **The enclosing run** is
+  the innermost guarded run *executing* on the current OS thread, whichever Lua state or thread it
+  belongs to (`LuaCsGuardedRun` in `LuaCsExecutionGuard.cs`): Lua runs on one OS thread, so the run
+  executing when a new one starts is physically below it on the native stack. The runs begun on a thread
+  are kept in a list, not a stack, because an `execute_lua` chunk parked in a frame yield lets other runs
+  begin and end on the same thread: a parked run reports itself as not executing and is skipped, and a
+  run that resumes executing moves to the end of the list. A resume the scheduler drives from its own
+  frame finds no executing run and keeps its full budget. **Steps reach every ancestor** (audit C3-01):
+  what a nested run charges includes what its own nested runs charged to it, and `ConsumedSteps` and the
+  guard's observability record count them once. Before, a run two levels down spent steps nothing above
+  its parent saw (two levels of raw coroutines ran 3,000,000 steps under a 1,000,000 limit), and looking
+  the enclosing run up by Lua state skipped a coroutine's run between a guarded call and its state's
+  guard, so an `xpcall` in the coroutine caught the trip and every `mods_call` hop added a fresh count of
+  calls back into Lua (8 hops: 707 levels, 2.6 MB of native stack; now 124 levels, 351 KB). Before
+  B3-02, twelve nested levels of 12 MB each under a 16 MB guard held 138 MB alive; they are now cut
   within 152 ms.
 - **`coroutine.resume` never touches a scheduler-owned thread.** A task thread, a signal runner or a
   mod's main chunk belongs to its `LuaCsCoroutineHandle`, which runs it with the handle's own token for
   life; the wrapper looks the thread up (`LuaCsCoroutineHandle.IsHandleThread`) and refuses it before
   arming anything, returning `false` and "cannot resume a task or signal-handler thread with
-  coroutine.resume; …" (`SchedulerThreadResumeRefusal`); the wrapper's own argument errors name
-  `resume`, as Lua's do. Resumed raw, such a body ran under a hook
+  coroutine.resume; …" (`SchedulerThreadResumeRefusal`); the wrapper names itself in a bad-argument line
+  as the native one does (`resume` when called from Lua, `coroutine.resume` when called from host code,
+  as in `pcall(coroutine.resume)`; the same for `string.rep`, `string.find` and the other replaced
+  functions, audit C3-07). Resumed raw, such a body ran under a hook
   whose trip cancelled a source the body never reads, so the hook had to throw, `xpcall` swallowed it
   and its handler and every later frame ran unguarded (60 million iterations in the audit probe); the
   thread was also marked dead with live registrations on the handle's token and crashed the .NET
   process when the scheduler later killed it. The rule this keeps: no mod code runs with a token other
   than the one its own hook cancels.
-- **Calls from library functions back into Lua share one cap of 128 weighted levels per chain of nested
-  runs** (`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's `LUAI_MAXCCALLS` scaled to native frame size).
-  A call whose native frames take up to about 4 KB opens one level (`LightCallLevels`): a function run by
-  `pcall` or `xpcall` (whose message handler runs inside the same call) and a `gsub` replacement
-  function. One that takes up to about 8 KB opens two (`HeavyCallLevels`): a `__tostring` run by
-  `tostring`, `print`, `warn` or `string.format` (a mod's own `tostring` included, so `tostring = warn;
-  warn(1)` stops at the cap instead of overflowing the .NET stack and ending the process), a `table.sort`
-  comparator, a `gsub` `__index`, a `__pairs`/`__ipairs` metamethod, a coroutine run by
-  `coroutine.resume`, a scheduler thread `task.spawn` runs at once and a guarded call re-entering a run on
-  the same state. So `pcall` nests 128 deep and `table.sort`, `tostring`, `print`, `pairs` or `ipairs`
-  63. A resumed thread continues the count of the thread that resumes it. The call that would pass the
-  cap raises `C stack overflow (<boundary>: more than 128 levels of nested calls from library functions
-  back into Lua)` (`CStackOverflowMessage`), an ordinary error: a `pcall` past the cap returns `false` and
-  the line, and an `xpcall` hands it to its handler, which gets an eighth more room before "error in error
-  handling" (an `xpcall` recursion no longer hands its handler `nil`, B3-08). `pcall` and `xpcall` are
-  counted calls since audit B3-01: native, with the caller's context, the same error values, no
-  allocation on the success path, and a budget trip still uncatchable — a `Heartbeat` handler recursing
-  through `pcall` held a frame 33 s and now fails in 26 ms. WHY 128 weighted levels: each of these calls
-  is a nested VM run on the .NET stack (measured on CoreCLR x64 at 3.0-3.5 KB a level for `pcall`,
-  `xpcall` and a `gsub` callback, 3.5-5.8 KB for `tostring`, `table.sort` and `coroutine.resume`, 7.4 KB
-  for an immediate `task.spawn`), and the only other bound, `RuntimeHelpers.TryEnsureSufficientExecutionStack`
-  inside Lua-CSharp, may be a constant `true` on IL2CPP, where a deep enough chain would end the process.
-  Weighted, any mix stays under 128 × 4 KB = 512 KB (at most 474 KB measured), safe on a 1 MB IL2CPP main
-  thread and on WebGL; the count used to run 200 per channel and restart in every task thread, and 250
-  nested `task.spawn` levels plus 200 `tostring` levels took 2.56 MB. WHY a cap at all: an error raised N
-  levels deep is rethrown once per level with a growing stack trace, so unwinding cost about N² with no
-  instruction running and no hook able to fire — a comparator re-entering `table.sort` 1,000 deep took
-  8.1 s to fail, and unbounded it ran 64 s under a 10 s budget. Plain Lua recursion and the metamethods
-  the VM runs in its own loop are not counted. Open (`TODO.md`): `__concat`, which the VM calls as a
-  nested run where no sandbox code sits (the guard hook can only end such a run, not raise a catchable
-  error); a guarded call on another state from inside a run (`mods_call`, bounded by `MaxCrossCallDepth`
-  8); host callbacks other than `warn` that re-enter Lua outside `CallCountedAsync`; and an overflow of
-  the engine's own Lua stack, which `coroutine.resume` still reports as `nil`.
+- **Calls from library functions back into Lua share one cap of 128 weighted levels per chain of nested runs**
+  (`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's `LUAI_MAXCCALLS` scaled to native frame size). A call whose
+  native frames take up to about 4 KB opens one level (`LightCallLevels`): a function run by `pcall` or `xpcall`
+  (whose message handler runs inside the same call) and a `gsub` replacement function. One that takes up to
+  about 8 KB opens two (`HeavyCallLevels`): a `__tostring` run by `tostring`, `print`, `warn` or `string.format`
+  (a mod's own `tostring` included, so `tostring = warn; warn(1)` stops at the cap instead of overflowing the
+  .NET stack and ending the process), a `table.sort` comparator, a `gsub` `__index`, a `__pairs`/`__ipairs`
+  metamethod, a coroutine run by `coroutine.resume`, a scheduler thread `task.spawn` runs at once and a guarded
+  call that starts inside a run (re-entering the state, or a `mods_call` export on another). So `pcall` nests
+  128 deep and `table.sort`, `tostring`, `print`, `pairs` or `ipairs` 63. A thread run inside a run continues
+  the count of the run it starts in, so a chain of nested runs is counted as a whole across states (audit
+  C3-03). The call that would pass the cap raises `C stack overflow (<boundary>: more than 128 levels of nested
+  calls from library functions back into Lua)` (`CStackOverflowMessage`), an ordinary error: a `pcall` past the
+  cap returns `false` and the line, and an `xpcall` hands it to its handler, which gets an eighth more room
+  before "error in error handling" (an `xpcall` recursion no longer hands its handler `nil`, B3-08). Plain Lua
+  recursion that fills the engine's own value stack is caught the same way: `pcall` returns `false` and the
+  engine's `stack overflow` line, and an `xpcall` now runs its handler with that line instead of letting the
+  overflow escape and end the run (audit C3-04). `pcall` and `xpcall` are counted calls since audit B3-01:
+  native, with the caller's context, the same error values, no allocation on the success path, and a budget trip
+  still uncatchable — a `Heartbeat` handler recursing through `pcall` held a frame 33 s and now fails in 26 ms.
+  WHY 128 weighted levels: each of these calls is a nested VM run on the .NET stack, and the only other bound,
+  `RuntimeHelpers.TryEnsureSufficientExecutionStack` inside Lua-CSharp, may be a constant `true` on IL2CPP,
+  where a deep enough chain would end the process. **Measured native stack per level** (audit C3-02; the test
+  `NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap` in `LuaCsSecureSandboxEditModeTests` reads the stack
+  address at the cap for 16 channels on a 16 MB thread): on CoreCLR x64, Release, 2,528 B for a `pcall` level,
+  2,960 for `xpcall`, 3,456 for a `gsub` replacement function, 2,928 for `tostring` through `__tostring`, 5,808
+  for `string.format`, 4,144 for `coroutine.resume` and 5,312 for an immediate `task.spawn` (the last four per
+  two levels), so the worst chain of any mix at the cap takes at most 428 KB; unoptimised (tier-0) code, which
+  the test measures, runs 3.4-3.9 KB for the one-level channels. A `gsub` callback took 5.8 KB a level while
+  `gsub` was an async method chain (B3-03); it is synchronous again and continues asynchronously only when the
+  callback did not complete (C3-02). Mono's JIT lays out frames about 2.8 times larger (9,696 B a `pcall`
+  level), so a chain at the cap takes up to about 1.38 MB there, where Unity's Mono stack check turns anything
+  deeper into a catchable engine `stack overflow`; IL2CPP and WebGL are unmeasured (`TODO.md`, "Check the
+  tests"). The count used to run 200 per channel and restart in every task thread, and 250 nested `task.spawn`
+  levels plus 200 `tostring` levels took 2.56 MB. WHY a cap at all: an error raised N levels deep is rethrown
+  once per level with a growing stack trace, so unwinding cost about N² with no instruction running and no hook
+  able to fire — a comparator re-entering `table.sort` 1,000 deep took 8.1 s to fail, and unbounded it ran 64 s
+  under a 10 s budget. Plain Lua recursion and the metamethods the VM runs in its own loop are not counted. Open
+  (`TODO.md`): `__concat`, which the VM calls as a nested run where no sandbox code sits (the guard hook can
+  only end such a run, not raise a catchable error); host callbacks other than `warn` that re-enter Lua outside
+  `CallCountedAsync`; a cap that a composition cannot configure yet; and whether `coroutine.resume` reports an
+  overflow of the engine's own value stack with its line.
 - `execute_lua` (`LuaCsGameToolExecutor`) and `LuaCsAiEnvelopeProcessor` normalize and truncate results:
   the result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** (`LuaCsAiEnvelopeProcessor.MaxResultSummaryLength` / `MaxErrorMessageLength`) before they reach the model or the repair path.
 - **An error value is one line, never a CLR dump.** `LuaCsApiRegistry` (and the Rbx bindings) turn a
@@ -235,11 +268,16 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
   (`LuaCsSecureEnvironment.SandboxLinePrefix`; the codes after it are unchanged), where it used to name the
   CLR class that raised it; `table.concat` names Lua types (`table`, not a CLR type); and a bad argument
   to a sandbox library wrapper reads as Lua's, with one closing parenthesis and `got no value` for a
-  missing one (`bad argument #1 to 'rep' (string expected, got no value)`). The guard's own trip lines
-  (`EXCEEDED_HARD_LIMIT_STEPS`, `EXCEEDED_MEMORY_BUDGET` from `LuaCsExecutionGuard`) do not carry the
-  prefix yet (`TODO.md`). A trip of the guard's step, time or memory budget carries its own one-line
-  error value of the same kind (its text, with no CLR type name), which is the line a host sees; unlike
-  the refusals above, no script ever catches it (next item). C#
+  missing one (`bad argument #1 to 'rep' (string expected, got no value)`; a bad-argument line Lua-CSharp
+  itself builds, such as native `xpcall`'s `got nil))`, still ends in two, `TODO.md`). A trip of the
+  guard's step, time or memory budget carries its own one-line error value of the same kind — since audit
+  C3-07 `sandbox: EXCEEDED_HARD_LIMIT_STEPS (<steps>)`, `sandbox: EXCEEDED_MEMORY_BUDGET (<bytes> bytes)`,
+  `sandbox: Lua exceeded <N> ms.`, and for a coroutine resume `sandbox: Lua coroutine resume exceeded <N>
+  ms.` (they used to start `LuaCsSecureEnvironment:` or carry no prefix) — which is the line a host sees;
+  unlike the refusals above, no script ever catches it (next item). Code classifies a trip by the type of
+  its cause, never by this text: `LuaCsExecutionGuard.IsStepBudgetTrip` (`LuaStepBudgetException`,
+  marker `StepBudgetTripMarker`), `IsMemoryBudgetTrip` (`LuaMemoryBudgetException`) and a
+  `TimeoutException`. C#
   code reaches the original exception through `HostException`, which engine-neutral code reads via
   `IScriptHostFailure` / `ScriptExecutionErrors.NextCause` (the memory-trip classifiers walk the chain
   that way). A Lua error raised inside a registered delegate crosses unchanged. The one path left
@@ -392,6 +430,12 @@ Maintain EditMode tests for attempts to:
   `task.spawn`, and mixes of them): one catchable line, fast; deep plain recursion still allowed; a raw
   coroutine and an immediate `task.spawn` held to what their resumer has left
   (`LuaCsGuardFrameAndAllocationEditModeTests`, `LuaCsSecureSandboxEditModeTests`).
+- Nested runs across states and threads: a guarded call from a raw coroutine, a `mods_call` to another mod or
+  back to the same mod from a coroutine, and a run resumed from a frame yield inside another run — each
+  nested in the innermost executing run, its steps reaching every ancestor, no `xpcall` handler running
+  after a trip, and the call count continuing across hops (`LuaCsGuardFrameAndAllocationEditModeTests`,
+  `LuaCsSecureSandboxEditModeTests`, audit C3-01/C3-03); a yield through every counted call refused while
+  the thread runs on (C3-06).
 - A signal handler that replaces `coroutine.yield`: the signal runners park with the native yield
   captured before any mod code ran, so a mod's override cannot break every `Heartbeat` handler
   (`LuaCsRbxSignalRunner`, audit B3-07).

@@ -99,7 +99,10 @@ Keep these in step with the runtime when the skill text is edited:
   be caught by `pcall`/`xpcall` (only the resumer of a cut `coroutine.create` coroutine sees it),
   that such a coroutine (and a thread `task.spawn` runs at once) gets at most what its resumer has
   left of steps, time and memory, and that library calls back into Lua share one 128-level weighted
-  cap (`pcall` 128 deep, `table.sort`/`tostring` 63) before a catchable "C stack overflow". It also
+  cap (`pcall` 128 deep, `table.sort`/`tostring` 63) before a catchable "C stack overflow", and that a
+  yield (`task.wait`, `coroutine.yield`) inside a `__tostring`, a sort comparator, a `__pairs`/`__ipairs`
+  metamethod, `__index` or a gsub function raises "attempt to yield across a C-call boundary" while one
+  inside `pcall` works (Luau parity, audit C3-06). It also
   states the reload rule: `manage_mods reload` and the Hub's Save & run remove the previous run's
   startup objects first, `keep_objects=true` keeps them, and two budget cuts in a row quarantine the
   mod and keep it from starting with the next game.

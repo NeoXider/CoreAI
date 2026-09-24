@@ -53,11 +53,11 @@ boundary. Functions, closures, and live references never leave a mod's own state
 function in the provider and copies back the result. Nesting is capped (`CrossModTableDepth = 4`), cross-call
 depth is capped (`MaxCrossCallDepth = 8`). See `shared_stats_provider.lua` + `shared_stats_consumer.lua`.
 
-An export runs under the caller's limits: called from a signal handler (a `Heartbeat` handler, say) it gets
-at most that handler's per-resume budget, and it stops as soon as its caller is stopped (the calling mod
-killed, for example).
-Called from a `task.*` thread, the main chunk or a `hooks_on`/`hooks_every` handler it still gets the full
-handler budget (50,000,000 steps / 10 s; tracked in `TODO.md`).
+An export runs under the caller's limits, as a Roblox module call runs in its caller's thread: it gets at most
+what the calling run has left of steps, time and memory — from a `Heartbeat` handler or a `task.*` thread that
+is the rest of its per-resume budget — its steps are charged to the caller, it continues the caller's count
+of nested library calls, and it stops as soon as its caller is stopped (the calling mod killed, for example).
+An export that runs away ends its caller too, and no `pcall` around `mods_call` catches that.
 
 Wrong arguments to these functions fail the way stock Lua reports them — `bad argument #1 to 'store_set' (string
 expected, got table)` — with no CLR type name and no doubled `hooks_on: hooks_on:` prefix. A value that is not
@@ -242,21 +242,29 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   `warn` or `string.format` (your own `tostring` included, so `tostring = warn; warn(1)` raises the catchable
   error below instead of crashing the game), a `table.sort` comparator, a `gsub` `__index`, a
   `__pairs`/`__ipairs` metamethod, a coroutine run by `coroutine.resume`, a thread `task.spawn` runs at once
-  and a guarded call re-entering a run on the same state open two — so `pcall` nests 128 deep and
-  `table.sort` or `tostring` 63. A resumed thread continues its resumer's count. The call past the cap raises
+  and a guarded call that starts inside a run (a `mods_call` export included) open two — so `pcall` nests 128
+  deep and `table.sort` or `tostring` 63. A resumed thread, and a `mods_call` export, continue the count of
+  the run they start in. The call past the cap raises
   `C stack overflow (<function>: more than 128 levels of nested calls from library functions back into Lua)`,
   an ordinary error: `pcall` returns it, `xpcall` hands it to its handler. Plain Lua recursion and the
   metamethods the VM runs itself (`__index` on a table access, arithmetic, comparisons, `__call`) are not
   limited by it.
 - **String patterns are budgeted per call.** `string.find`/`match`/`gmatch`/`gsub` stop after 5,000,000
   matcher steps with `BUDGET_EXCEEDED` (`EXCEEDED_PATTERN_STEP_BUDGET`), and a `gsub` or `string.format`
-  result may not exceed 1,000,000 characters. Pattern semantics are Luau's. Yielding inside a
-  `string.format` `__tostring`, a `gsub` replacement function or an `__index` metamethod raises
-  `attempt to yield across a C-call boundary`, also after the callback resumed a coroutine of its own. A
-  callback that merely runs long is not a yield: under `execute_lua` the frame is handed back inside it and
-  the call completes. Refusals and budget lines the sandbox itself raises start with `sandbox: `
-  (`sandbox: string.rep result would exceed 1000000 chars.`), and its library wrappers report a bad
-  argument as Lua does, a missing one included: `bad argument #1 to 'rep' (string expected, got no value)`.
+  result may not exceed 1,000,000 characters. Pattern semantics are Luau's.
+- **No yield inside a library callback (Luau parity).** Yielding (`task.wait`, `coroutine.yield`) inside a
+  `__tostring` run by `tostring`, `print`, `warn` or `string.format`, a `table.sort` comparator, a
+  `__pairs`/`__ipairs` metamethod, a `gsub` replacement function or `__index` raises `attempt to yield across a
+  C-call boundary` and the thread runs on; yielding inside `pcall` is fine. The refusal holds after the callback
+  resumed a coroutine of its own. A callback that merely runs long is not a yield: under `execute_lua` the frame
+  is handed back inside it and the call completes. A coroutine whose body is `coroutine.yield`, or ends in
+  `return coroutine.yield(...)`, fails its resume here (Luau runs it): write `local r = coroutine.yield(...)
+  return r`.
+- **Sandbox lines start with `sandbox: `.** Refusals and budget lines the sandbox itself raises —
+  `sandbox: string.rep result would exceed 1000000 chars.`, `sandbox: EXCEEDED_HARD_LIMIT_STEPS (<steps>)`,
+  `sandbox: Lua exceeded <N> ms.`, `sandbox: EXCEEDED_MEMORY_BUDGET (<bytes> bytes)` — carry the prefix, and
+  its library wrappers report a bad argument as Lua does, a missing one included: `bad argument #1 to 'rep'
+  (string expected, got no value)`.
 - **The budget is the game's, not CoreAI's.** The host sets both halves on `CoreAiModsLifetimeScope`
   (**Lua coroutine resume budget**; `<= 0` falls back to the defaults) and every resume re-reads them, so a
   game may tighten the budget for untrusted mods or loosen it for a heavy simulation while mods are already

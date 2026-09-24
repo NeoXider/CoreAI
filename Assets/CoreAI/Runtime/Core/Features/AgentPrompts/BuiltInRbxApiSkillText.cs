@@ -82,17 +82,19 @@ Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part propert
   code returns) and start again on the next world load.
 - Budgets are per resume: a thread may loop forever as long as it yields
   (`while true do task.wait() end` is fine); one resume that never yields, or that keeps too much
-  memory alive, is cut with BUDGET_EXCEEDED. The cut CANNOT be caught: `pcall`/`xpcall` inside the
-  cut code let it through (an xpcall handler does not run) — fix the loop, do not wrap it. Only the
-  code that `coroutine.resume`d a `coroutine.create` coroutine that was cut sees `false, err`, and
-  that coroutine is dead. A `coroutine.create` body shares the memory budget of the code that
-  resumes it. `string.find/match/gmatch/gsub` stop after 5,000,000 matcher steps per call and
+  memory alive, is cut with BUDGET_EXCEEDED. The cut CANNOT be caught: `pcall`/`xpcall` inside the cut code let it through (an
+  xpcall handler does not run) — fix the loop, do not wrap it. Only the code that
+  `coroutine.resume`d a `coroutine.create` coroutine that was cut sees `false, err`, and that
+  coroutine is dead. A `coroutine.create` body shares the memory budget of the code that resumes it.
+  `string.find/match/gmatch/gsub` stop after 5,000,000 matcher steps per call and
   `gsub`/`string.format` results are capped at 1,000,000 chars (both catchable errors). Yielding
-  inside a `__tostring`/`__index` or a gsub replacement function raises ""attempt to yield across
-  a C-call boundary"". A `coroutine.create` body (and a thread task.spawn runs at once) gets at most
-  what the code resuming it has left of steps, time and memory. Library functions that call back into
-  your Lua share one cap of 128 levels: a pcall/xpcall body or a gsub function counts 1; a
-  `__tostring` via tostring/print/warn/string.format, a `table.sort` comparator, `__pairs`/`__ipairs`,
+  (task.wait, coroutine.yield) inside a `__tostring`, a `table.sort` comparator, a
+  `__pairs`/`__ipairs` metamethod, `__index` or a gsub replacement function raises ""attempt to yield
+  across a C-call boundary"" (as in Luau); yielding inside pcall is fine. A `coroutine.create` body
+  (and a thread task.spawn runs at once) gets at most what the code resuming it has left of steps,
+  time and memory. Library functions that call back into your Lua share one cap of 128 levels: a
+  pcall/xpcall body or a gsub function counts 1; a `__tostring` via
+  tostring/print/warn/string.format, a `table.sort` comparator, `__pairs`/`__ipairs`,
   `coroutine.resume` or an immediate task.spawn counts 2 (pcall nests 128 deep, sort/tostring 63).
   The next raises a catchable ""C stack overflow (...)"". Plain recursion is not limited this way.
 - Reloading: `manage_mods reload` (and the Hub's Save & run) first removes the previous run's

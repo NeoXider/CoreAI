@@ -123,7 +123,8 @@ When the model decides to invoke a tool, a structure equivalent to the following
 
 **Result:** JSON `{"Success":true,"Output":"…"}` on success (`Output` omitted when the chunk returned nothing), or
 `{"Success":false,"Error":"…"}` — for example `Lua code is required` for whitespace-only code, a sandbox limit
-(`LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (…)`, `Lua exceeded … ms.`), or the Lua error text. The model
+(`sandbox: EXCEEDED_HARD_LIMIT_STEPS (…)`, `sandbox: Lua exceeded … ms.`, `sandbox: EXCEEDED_MEMORY_BUDGET (… bytes)`),
+or the Lua error text. The model
 reads the error and may retry in the same turn.
 
 ### Multi-line Lua example

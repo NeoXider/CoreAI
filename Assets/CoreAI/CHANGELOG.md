@@ -8,7 +8,7 @@ MVP3 (the world/place package) is code complete; its Unity verification gate (Ed
 multiplayer foundation, and the three audit rounds over those waves (audit ids in parentheses — A1-xx world
 package, A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for round 1; B1-xx network and bindings,
 B2-xx world package and mod runtime, B3-xx sandbox for round 2; C1-xx multiplayer and coercion, C2-xx world package
-and runtime for round 3, whose sandbox findings are still being fixed; details in `TODO.md`).
+and runtime, C3-xx sandbox for round 3; details in `TODO.md`).
 
 ### Security
 
@@ -71,7 +71,8 @@ and runtime for round 3, whose sandbox findings are still being fixed; details i
   its steps are charged back, and exhausting a lent limit ends the whole chain (cut in 152 ms). The C-call cap is one
   count of 128 weighted levels per chain of nested runs — `pcall`/`xpcall` bodies and `gsub` callbacks open one,
   every other call back into Lua two — and a resumed thread continues its resumer's count, so any mix stays under
-  about 512 KB of native stack (at most 474 KB measured), which an IL2CPP or WebGL player may not bound itself;
+  about 512 KB of native stack (474 KB measured then, 428 KB after C3-02 below), which an IL2CPP or WebGL player
+  may not bound itself;
   before, the count ran 200 per channel and restarted in every task thread, and 250 nested `task.spawn` levels plus
   200 `tostring` levels took 2.56 MB. `LuaCsSecureEnvironment.LightCallLevels` and `HeavyCallLevels` name the two
   weights.
@@ -88,6 +89,18 @@ and runtime for round 3, whose sandbox findings are still being fixed; details i
   all) and started in the sender's order once its threads end; only past the queue is it dropped, counted
   (`InducedListenerDrops`) and logged once per sender. `Once` is used up only when its handler starts. The host's
   own fires never wait. A coin pickup at 10 per second with a host listener that `task.wait`s now lands 40 of 40.
+- **A chain of nested runs still outran its budget, and `mods_call` escaped the count (C3-01, C3-02, C3-03).** A
+  nested run charged its steps only one level up, so two levels of raw coroutines ran 3,000,000 steps under a
+  1,000,000 limit; the charge now reaches every ancestor, and `ConsumedSteps` and the guard's observability records
+  include it. The enclosing run of a new run was looked up by Lua state, which skipped a coroutine's run between a
+  guarded call and its state's guard: an `xpcall` in the coroutine caught the trip and its handler ran on, and every
+  `mods_call` hop started a fresh count of calls back into Lua on the same native stack (8 hops: 707 levels,
+  2.6 MB). The enclosing run is now the innermost run executing on the OS thread, whatever its state, so a
+  `mods_call` export continues its caller's count and is held to its caller's allowance (8 hops: 124 levels,
+  351 KB), and a runaway export ends its caller uncatchably, as a Roblox module call runs in its caller's thread.
+  `gsub` is synchronous again (B3-03 had made it an async method chain at 5.8 KB of native stack a callback level;
+  it is 3.1–4.1 KB now), and the native-stack test reads real stack addresses for 16 channels at the cap: at most
+  428 KB for any chain on CoreCLR, about 1.38 MB on Mono.
 - **A remote client learned the host's mod ids (B1-05).** Refusal and stop lines sent to a remote caller named the
   host mod; they are fixed lines now, and the host log keeps the details.
 - **A client could write the server's log at its own packet rate (A4-02, A4-12).** Reports of an unknown
@@ -488,7 +501,8 @@ and runtime for round 3, whose sandbox findings are still being fixed; details i
 - **`mods_call` could stall a frame for seconds (A2-10, in part).** An export ran under a fresh handler budget
   (50,000,000 steps, 10 s) with no cancellation, so one call from a `Heartbeat` handler held the frame. It now runs
   with its caller's token (stopping the caller stops the export) and, from a signal handler, within that handler's
-  per-resume budget; from other callers it keeps the handler budget (`TODO.md`).
+  per-resume budget; since audit round 3 (C3-03) every export is nested in its caller's run, whatever the caller,
+  and gets at most what that run has left.
 - **The quota attribution map grew with every mod id ever tried (A2-11);** a failed first load and an unload drop
   their entry.
 - **Instance quota and ceiling refusals carried no code (A3-05).** They were plain `InvalidOperationException`s
@@ -647,9 +661,21 @@ and runtime for round 3, whose sandbox findings are still being fixed; details i
   and `table.sort` call the native function with the caller's context: 1,088 B per 20,000 calls instead of 2.4 MB.
   The sandbox's own refusal and trip lines start with `sandbox: ` instead of a CLR class name (the codes are
   unchanged), `table.concat` names Lua types, and bad-argument lines read like Lua's (one closing parenthesis,
-  `got no value` for a missing argument; `coroutine.resume`'s errors name `resume`). The signal runners park with the native
+  `got no value` for a missing argument). The signal runners park with the native
   `coroutine.yield` captured before any mod code ran, so a mod that replaces `coroutine.yield` no longer breaks every
   `Heartbeat` handler.
+- **Sandbox, round 3 (C3-04 … C3-07).** `xpcall` around plain recursion that fills the engine's value stack runs its
+  handler with the engine's `stack overflow` line, as `pcall` returns it; the overflow used to escape the `xpcall` and
+  end the run (C3-04). A counted call suspended by a yield (`pcall` around `task.wait`) allocates nothing per
+  suspension (a pooled continuation, C3-05). A yield through any counted call back into Lua — `tostring`, `print`,
+  `warn`, `table.sort`, `pairs`, `ipairs`, like `string.format` and `gsub` before — raises `attempt to yield across a
+  C-call boundary`, as in Luau (owner decision C3-06); a yield across `pcall` still works, and an `execute_lua` frame
+  yield is still awaited. The guard's trip lines carry the sandbox prefix — `sandbox: EXCEEDED_HARD_LIMIT_STEPS (N)`,
+  `sandbox: EXCEEDED_MEMORY_BUDGET (N bytes)`, `sandbox: Lua exceeded N ms.`, `sandbox: Lua coroutine resume exceeded
+  N ms.`; the step line used to start `LuaCsSecureEnvironment:` — and a step trip is told by its type
+  (`LuaStepBudgetException`), never by that text; the sandbox's replaced functions name themselves in a bad-argument
+  line as the native ones do (`coroutine.resume`, `string.rep` when called from host code); and a coroutine whose body
+  is `coroutine.yield` gets a Lua line with the fix instead of "Index was outside the bounds of the array." (C3-07).
 - **A reload stacked a second copy of everything the mod built at startup.** Saving a castle-building mod five times
   left six castles. A reload now cleans the previous run's startup objects first (Added: `ModReloadMode`); a reload
   that fails destroys what its own chunk built and puts the previous run's objects back exactly where they were. A
@@ -769,6 +795,8 @@ and runtime for round 3, whose sandbox findings are still being fixed; details i
   and the matching `MaxInducedThreadsPerSender`, `MaxInducedThreadsAllSenders`,
   `MaxDeferredListenerInvocationsPerSender`, `MaxDeferredListenerInvocationsAllSenders`;
   `LuaCsSecureEnvironment.LightCallLevels` (1) and `HeavyCallLevels` (2) (`MaxCCallDepth` is 128 now);
+  `LuaStepBudgetException`, `LuaCsExecutionGuard.StepBudgetTripMarker` and `IsStepBudgetTrip(exception)` (a step
+  trip told by type, like `IsMemoryBudgetTrip`);
   `IStartupAwareWorldMutationGate` (public; `ConfirmedWorldMutationGate` implements it),
   `RbxWorldRuntimeSessionController.StartupRefreshInterval`, `DefaultStartupRefreshInterval` (5 s) and
   `StartupSelectionNote`; `ILuaModSourceAdmission` is public; `LuaModManifest.MaximumLoadOrder` (2^53) and
@@ -779,41 +807,43 @@ and runtime for round 3, whose sandbox findings are still being fixed; details i
 - **Behaviour changes a mod may notice:** `task.cancel` on a finished thread no longer raises; a known Roblox class
   or service raises `NOT_IMPLEMENTED` instead of `BAD_ARGUMENT`/`UNKNOWN_SERVICE`; `GetPropertyChangedSignal`
   refuses a name that is not a property of the class (narrowed after the audit round, below); `CanCollide = false`
-  parts fire `Touched` and are hit by raycasts; parts outside the Workspace are inactive; a mod without `WorldEdit` can no longer `TakeDamage`, tween or
-  schedule Debris, and no mod can do so to another actor's instances; the one-off `execute_lua` surface refuses
-  signal connections; names are truncated at 100 characters; more than 256 attributes or tags, and trees deeper than
-  2,048 levels, are refused; NaN and ±Infinity travel as bare numbers on the remote wire (MP-17; the decoder always
-  read them that way); the quarantine streak counts faulting frames. Later in the same waves: `task.*` accepts a task
-  handle back; a native `coroutine.yield` outside a task, and a wait inside `coroutine.create`, is
-  `CONTEXT_VIOLATION`; an `UnreliableRemoteEvent` over 1,000 bytes is refused in solo too; `CollectionService`'s tag
-  globals ignore holders outside the DataModel; `MouseClick` passes the player; a character is not archivable; a new
-  non-ASCII attribute name is refused; a read-only script sees an `Instance` global whose `Instance.new` raises the
-  capability error; a disconnected actor's mods are unloaded; a load whose chunk kicks its own actor fails; a
-  client's `GetServerTimeNow` is the local clock until its first synchronization; and every error a script receives
-  is one line. After the first audit round: a budget trip can no longer be caught by `pcall`/`xpcall`;
-  `GetPropertyChangedSignal` accepts every name except an event, a method, a near miss of a known property and a
-  name over 100 characters (a real unmodelled property gets a signal that never fires); a new tag is at most 100
-  characters; a world holds at most 256 distinct mod sources; an instance quota refusal is `BUDGET_EXCEEDED`; a
-  mod-API argument error reads `bad argument #n to 'fn' (x expected, got y)`; `task.*` threads started by a
-  remote-started handler count against the sender; `os.time(t)` before 1970 is `nil`; a client sends no remote
-  before its admission; `coroutine.resume` refuses a task, signal-handler or main-chunk thread; and library calls
-  back into Lua count against a nesting cap. After the second and third audit rounds: a client holds its reliable
-  remotes until its admission and sends them right after it (unreliable ones are still dropped); mods restart and
-  restore in their load order; a string parameter or property of either surface takes a number as `tostring` gives
-  it, a number one a numeric string, an Enum one the item's Name or Value, and an integer one truncates (the
-  mod-core ones used to round), while `Random.new({})` is `BAD_ARGUMENT` and `inst[5]` finds the child `"5"`;
-  `FindFirstChild(name, 1)`, `GenerateGUID(0)` and `PostAsync(…, 1)` are refused; `IntValue` refuses values outside
-  [-2^63, 2^63); `warn`, `pcall` and `xpcall` count towards the C-call cap, which is 128 weighted levels per chain
-  of nested runs (63 nested `table.sort` or `tostring` levels, 128 `pcall`s) instead of 200 per channel, with the
-  text `more than 128 levels of nested calls`; a raw coroutine inside a task thread is held to that thread's
-  remaining 10,000 steps / 500 ms (it had its own 500,000 / 1 s), a spawned child that exhausts a lent allowance
-  also ends its spawner, and a memory-heavy immediate `task.spawn` in a main chunk can fail the load; the sandbox's
-  own lines start with `sandbox: `; a signal listener started by a client's remote waits for that client's induced
-  budget instead of running at once or being dropped, and `Once` is used up only when its handler starts; a
-  `RemoteFunction` caller reads a fixed line for a stopped callback and the error value for a failed one; a reload
-  removes the previous run's startup objects unless `KeepObjects` is chosen, and a failed reload destroys what its
-  chunk built; two budget trips in a row suspend a mod; Luau or plain Lua nested past 200 levels is a
-  `syntax error:`.
+  parts fire `Touched` and are hit by raycasts; parts outside the Workspace are inactive; a mod without `WorldEdit`
+  can no longer `TakeDamage`, tween or schedule Debris, and no mod can do so to another actor's instances; the
+  one-off `execute_lua` surface refuses signal connections; names are truncated at 100 characters; more than 256
+  attributes or tags, and trees deeper than 2,048 levels, are refused; NaN and ±Infinity travel as bare numbers on
+  the remote wire (MP-17; the decoder always read them that way); the quarantine streak counts faulting frames.
+  Later in the same waves: `task.*` accepts a task handle back; a native `coroutine.yield` outside a task, and a
+  wait inside `coroutine.create`, is `CONTEXT_VIOLATION`; an `UnreliableRemoteEvent` over 1,000 bytes is refused in
+  solo too; `CollectionService`'s tag globals ignore holders outside the DataModel; `MouseClick` passes the player;
+  a character is not archivable; a new non-ASCII attribute name is refused; a read-only script sees an `Instance`
+  global whose `Instance.new` raises the capability error; a disconnected actor's mods are unloaded; a load whose
+  chunk kicks its own actor fails; a client's `GetServerTimeNow` is the local clock until its first synchronization;
+  and every error a script receives is one line. After the first audit round: a budget trip can no longer be caught
+  by `pcall`/`xpcall`; `GetPropertyChangedSignal` accepts every name except an event, a method, a near miss of a
+  known property and a name over 100 characters (a real unmodelled property gets a signal that never fires); a new
+  tag is at most 100 characters; a world holds at most 256 distinct mod sources; an instance quota refusal is
+  `BUDGET_EXCEEDED`; a mod-API argument error reads `bad argument #n to 'fn' (x expected, got y)`; `task.*` threads
+  started by a remote-started handler count against the sender; `os.time(t)` before 1970 is `nil`; a client sends no
+  remote before its admission; `coroutine.resume` refuses a task, signal-handler or main-chunk thread; and library
+  calls back into Lua count against a nesting cap. After the second and third audit rounds: a client holds its
+  reliable remotes until its admission and sends them right after it (unreliable ones are still dropped); mods
+  restart and restore in their load order; a string parameter or property of either surface takes a number as
+  `tostring` gives it, a number one a numeric string, an Enum one the item's Name or Value, and an integer one
+  truncates (the mod-core ones used to round), while `Random.new({})` is `BAD_ARGUMENT` and `inst[5]` finds the
+  child `"5"`; `FindFirstChild(name, 1)`, `GenerateGUID(0)` and `PostAsync(…, 1)` are refused; `IntValue` refuses
+  values outside [-2^63, 2^63); `warn`, `pcall` and `xpcall` count towards the C-call cap, which is 128 weighted
+  levels per chain of nested runs (63 nested `table.sort` or `tostring` levels, 128 `pcall`s) instead of 200 per
+  channel, with the text `more than 128 levels of nested calls`; a raw coroutine inside a task thread is held to
+  that thread's remaining 10,000 steps / 500 ms (it had its own 500,000 / 1 s), a spawned child that exhausts a lent
+  allowance also ends its spawner, and a memory-heavy immediate `task.spawn` in a main chunk can fail the load; the
+  sandbox's own lines start with `sandbox: `, the guard's trip lines included; a yield through `tostring`, `print`,
+  `warn`, `table.sort`, `pairs` or `ipairs` is refused like one through `string.format`; a `mods_call` export is
+  held to what its caller has left and a runaway export ends its caller; a signal listener started by a client's
+  remote waits for that client's induced budget instead of running at once or being dropped, and `Once` is used up
+  only when its handler starts; a `RemoteFunction` caller reads a fixed line for a stopped callback and the error
+  value for a failed one; a reload removes the previous run's startup objects unless `KeepObjects` is chosen, and a
+  failed reload destroys what its chunk built; two budget trips in a row suspend a mod; Luau or plain Lua nested
+  past 200 levels is a `syntax error:`.
 - **Breaking for hosts that implement the interfaces themselves:** `IHubModService` gained
   `SaveOrReload(id, code, ModReloadMode)` and `NewModTemplate` without default bodies, so an external
   implementation must add them; `ILuaModRuntime.ReloadMod(caller, id, code, ModReloadMode)` has a default body, so
@@ -845,8 +875,9 @@ and runtime for round 3, whose sandbox findings are still being fixed; details i
   surfaces (numbers ↔ numeric strings, integer truncation, strict booleans, Enum Name/Value on instance members,
   `Part.Anchored expects a boolean, got string` as the wrong-type example, `Kick(42)` sending `"42"`), the
   128-level weighted C-call cap and the nested-run budget, the reload rule with `keep_objects`, the two-trip
-  suspension, and the 200-level Luau nesting limit; `RbxApi.txt` and `BuiltInRbxApiSkillText.cs` stay
-  byte-identical.
+  suspension, and the 200-level Luau nesting limit; after round 3's sandbox fixes, that a yield is refused inside
+  a `__tostring`, a sort comparator, a `__pairs`/`__ipairs` metamethod, `__index` or a gsub function; `RbxApi.txt`
+  and `BuiltInRbxApiSkillText.cs` stay byte-identical.
 
 ## [7.45.0] - 2026-09-24
 

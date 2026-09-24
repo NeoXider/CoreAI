@@ -453,8 +453,8 @@ through the Hub page.
 
 **Code complete (2026-09-24); the Unity verification gate is pending.** EditMode (0 failed) and PlayMode
 `FastNoLlm` (0 failed) must still be run in Unity. On Linux, the portable `dotnet test` suites report
-2137 passed / 0 failed / 3 skipped for the engine-free tests and 1790 passed / 0 failed / 37 not
-executed for the Lua tier at `d4d7f95b`, after audit rounds 1–3 (`tools/portable/LuaTests`, which runs
+2137 passed / 0 failed / 3 skipped for the engine-free tests and 1837 passed / 0 failed / 38 not
+executed for the Lua tier at `055aed29`, after audit rounds 1–3 (`tools/portable/LuaTests`, which runs
 `Mvp3WorldPackageEditModeTests` and `Mvp3WorldPackageQaEditModeTests` against a UnityEngine shim; a case
 that reaches the engine, a file-store load included, is Inconclusive by design and counts as not
 executed). MVP3 is not closed until that gate is green and the release is tagged.

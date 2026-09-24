@@ -159,7 +159,7 @@ Lua runs through the `execute_lua` / `manage_mods` tools of `com.neoxider.coreai
 ### Symptoms
 - `[ToolCall] … tool=execute_lua status=FAIL …` in the log, with the Lua error in `result=` (enable **Log Results**)
 - The model repeats `execute_lua` with corrected code, or gives up
-- `LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (…)` or `Lua exceeded … ms.` in the tool result
+- `sandbox: EXCEEDED_HARD_LIMIT_STEPS (…)`, `sandbox: Lua exceeded … ms.` or `sandbox: EXCEEDED_MEMORY_BUDGET (… bytes)` in the tool result
 
 ### Diagnostics
 
@@ -211,11 +211,14 @@ Do NOT use any other functions.
 
 ---
 
-**Type 3: Infinite loop (step limit)**
+**Type 3: Infinite loop (step, time or memory limit)**
 ```
-LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (<max steps>)
-Lua exceeded <N> ms.
+sandbox: EXCEEDED_HARD_LIMIT_STEPS (<max steps>)
+sandbox: Lua exceeded <N> ms.
+sandbox: EXCEEDED_MEMORY_BUDGET (<budget> bytes)
 ```
+
+A raw `coroutine.create` coroutine cut at its own per-resume limit reports `sandbox: Lua coroutine resume exceeded <N> ms.` to the code that resumed it; a mod's scheduler thread reports the same kind of trip as `BUDGET_EXCEEDED` with the bound and the author's line. None of these can be caught by `pcall`/`xpcall` inside the run that tripped. Before the 2026-09-24 audit fixes the step line started `LuaCsSecureEnvironment:` and the time line had no prefix; host code classifies a trip by type (`LuaCsExecutionGuard.IsStepBudgetTrip`, `IsMemoryBudgetTrip`), never by this text.
 
 **Cause:** Lua contains an infinite loop or a very heavy operation.
 

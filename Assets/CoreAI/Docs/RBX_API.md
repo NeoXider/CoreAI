@@ -68,20 +68,25 @@ The reverse is refused as well: `coroutine.resume` of a task, signal-handler or 
 coroutine.resume; …" without touching it — resume a parked task with `task.spawn(t)`.
 
 A run nested inside another — a `coroutine.create` body under `coroutine.resume`, a thread `task.spawn`
-runs at once — gets its own budget or what the enclosing run has left, whichever is smaller, for steps,
-time and memory alike; the steps it uses are charged back to the enclosing run, and when a lent limit runs
-out the whole chain ends, as uncatchably as the enclosing run itself would. A thread the scheduler resumes
-from its own frame still gets its full budget. Calls from library functions back into Lua share one cap
-of 128 levels along a chain of nested runs (`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's
-`LUAI_MAXCCALLS`), weighted by the native stack they take: a `pcall` or `xpcall` body and a `gsub`
-replacement function open one level; a `__tostring` run by `tostring`, `print`, `warn` or
-`string.format`, a `table.sort` comparator, `__pairs`/`__ipairs`, a `gsub` `__index`, `coroutine.resume`,
-a thread `task.spawn` runs at once and a guarded call re-entering a run on the same state open two. So
-`pcall` nests 128 deep and `table.sort` or `tostring` 63, and a resumed thread continues its resumer's
-count. The call past the cap raises `C stack overflow (<function>: more than 128 levels of nested calls
-from library functions back into Lua)`, an ordinary error: `pcall` returns it and `xpcall` hands it to its
-handler. Plain Lua recursion is not limited. The cap keeps any mix of these calls under about 512 KB of
-native stack, which an IL2CPP or WebGL player cannot otherwise bound (`TODO.md`, "Check the tests").
+runs at once, a `mods_call` export — gets its own budget or what the enclosing run has left, whichever is
+smaller, for steps, time and memory alike; the steps it uses are charged back to every run it is nested
+in, and when a lent limit runs out the whole chain ends, as uncatchably as the enclosing run itself would.
+The enclosing run is the innermost run executing Lua when the nested one starts, whichever mod or
+coroutine it belongs to (`LUA_SANDBOX_SECURITY.md`). A thread the scheduler resumes from its own frame
+still gets its full budget. Yielding inside a library callback — a `__tostring` run by `tostring`,
+`print`, `warn` or `string.format`, a `table.sort` comparator, `__pairs`/`__ipairs`, a `gsub` function or
+`__index` — raises `attempt to yield across a C-call boundary`, as in Luau; yielding inside `pcall` works.
+Calls from library functions back into Lua share one cap of 128 levels along a chain of nested runs
+(`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's `LUAI_MAXCCALLS`), weighted by the native stack they take:
+a `pcall` or `xpcall` body and a `gsub` replacement function open one level; a `__tostring` run by
+`tostring`, `print`, `warn` or `string.format`, a `table.sort` comparator, `__pairs`/`__ipairs`, a `gsub`
+`__index`, `coroutine.resume`, a thread `task.spawn` runs at once and a guarded call that starts inside a
+run (a `mods_call` export included) open two. So `pcall` nests 128 deep and `table.sort` or `tostring` 63,
+and a resumed thread continues its resumer's count. The call past the cap raises `C stack overflow
+(<function>: more than 128 levels of nested calls from library functions back into Lua)`, an ordinary
+error: `pcall` returns it and `xpcall` hands it to its handler. Plain Lua recursion is not limited. The
+cap keeps any mix of these calls at most 428 KB of native stack on CoreCLR (about 1.38 MB on Mono, whose
+frames are larger), which an IL2CPP or WebGL player cannot otherwise bound (`TODO.md`, "Check the tests").
 
 ### How arguments and property writes convert
 

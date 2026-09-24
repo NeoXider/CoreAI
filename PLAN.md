@@ -7,12 +7,15 @@ filed under the same rung names.
 
 ## Where we are
 
-- **MVP3 (world/place package) is closing.** Code complete, green on the Linux suites; its release and
-  tag wait for the Unity verification gate. Portable suites at `d4d7f95b`: engine-free 2137 passed /
-  0 failed / 3 skipped; Lua tier 1790 passed / 0 failed / 37 not executed (engine-bound cases
-  Inconclusive by design).
-- **Audit rounds 1–3 are done; their fixes are committed except the round-3 sandbox fixes (C3), in
-  flight.** Round 2: A1-02 load order (`6248fec2`), B1-01/04/06 (`9dc55a68`), B1-07/08/10 Mirror
+- **MVP3 (world/place package) is code complete and closed on the Linux suites; its release and tag
+  wait for the owner's Unity verification gate.** Portable suites at `055aed29` (TRX-counted):
+  engine-free 2137 passed / 0 failed / 3 skipped; Lua tier 1837 passed / 0 failed / 38 not executed
+  (engine-bound cases Inconclusive by design, listed in `tools/portable/LuaTests/README.md`).
+- **Audit rounds 1–3 are complete, and every finding is fixed or filed in `TODO.md`.** Round 3's
+  findings are fixed by C1F (`7cf2891e`), C2F (`d4d7f95b`) and C3F (`055aed29`: nested-run steps reach
+  every ancestor, the enclosing run is the innermost executing run on the OS thread, `mods_call`
+  continues its caller's count and allowance, yields refused through every counted call, `sandbox: `
+  trip lines). Round 2: A1-02 load order (`6248fec2`), B1-01/04/06 (`9dc55a68`), B1-07/08/10 Mirror
   (`e0737b7b`), B2-03/05/08/12 (`f817225b`), B1-02/03/05 (`3f6c18e5`), B2-01…B2-14 (`3d5b62d0`,
   `23f63eaa`), B3-01/02/08 (`02f26388`), B3-03…B3-07 (`43605d2f`). Round 3: C1-01…C1-11 (`7cf2891e`:
   two remote budget pools per sender, deferred listeners), C2-01…C2-09 (`d4d7f95b`). Also landed: one
@@ -24,8 +27,9 @@ filed under the same rung names.
 - **The MVP ladder was revised** for the flagship goal (Studio+Play Roblox-like app, ~100 players per
   room, a general framework): strictly sequential, multiplayer first, plan decisions D1–D8 decided by
   the tech lead (the owner may override).
-- **Out of this session (owner, 2026-09-24):** implementing any rung after MVP3. Finish everything up to
-  MVP3's release, push, report.
+- **MVP4 (new numbering: script contexts & client runtime) is next and not started.** Out of this
+  session (owner, 2026-09-24): implementing any rung after MVP3. Finish everything up to MVP3's release,
+  push, report.
 
 ## Verification available in this wave
 
@@ -40,7 +44,7 @@ filed under the same rung names.
 ## Next three rungs
 
 1. **MVP3 close** (S) — first steps:
-   - land the round-3 sandbox fixes (C3) and document them (`TODO.md`, top section);
+   - audit rounds 1–3 and their fixes are done (`TODO.md`, top section, lists the follow-ups);
    - run the "Check the tests" checklist in Unity 6000.3.14f1 (EditMode in all four legs plus `MIRROR`,
      PlayMode `FastNoLlm`, the never-run fixtures) and fix, never skip, any failure;
    - run the real WebGL page-reload gate;

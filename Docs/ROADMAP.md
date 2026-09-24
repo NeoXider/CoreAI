@@ -185,8 +185,8 @@ on-ramp and an export target.
 
 **Current state.** **MVP3 is code complete (2026-09-24); its Unity verification gate is pending** —
 EditMode 0 failed and PlayMode `FastNoLlm` 0 failed still have to be run in Unity (on Linux the
-portable suites are green: engine-free 2137 passed / 0 failed / 3 skipped, Lua tier 1790 passed / 0
-failed / 37 not executed at `d4d7f95b`, after audit rounds 1–3). Built: the `.world` ZIP place package,
+portable suites are green: engine-free 2137 passed / 0 failed / 3 skipped, Lua tier 1837 passed / 0
+failed / 38 not executed at `055aed29`, after audit rounds 1–3). Built: the `.world` ZIP place package,
 `FileRbxWorldPackageStore` with create-once manual slots (capped at 64 / 256 MiB) and a
 two-phase-durable autosave ring, `ConfirmedWorldMutationGate` in front of every `execute_lua` and
 mutating `manage_mods` action, `RbxWorldRuntimeSessionController` for transactional session
@@ -309,19 +309,19 @@ limits. A room holds ~100 players within the scale targets (§4).
 **Current state.** Lua-CSharp is managed and AOT/WebGL-safe; sandbox budgets and the coroutine guard
 are shipped and adversarially audited (a budget trip cannot be caught by `pcall` and never disarms the
 guard; a nested run gets at most what its enclosing run has left; library calls back into Lua share a
-128-level weighted cap that keeps native stack use under ~512 KB, which an IL2CPP or WebGL player
-cannot otherwise bound; Luau source nested past 200 levels is refused instead of overflowing the stack
-— the IL2CPP/WebGL stack checks are on the Unity checklist in [`TODO.md`](../TODO.md)); WebGL
-persistence is the engine's own automatic `persistentDataPath` synchronization, and
-`CoreAiWebGlPersistence` reports immediately whether it is armed for this page instead of awaiting an
-`FS.syncfs` callback Unity 6.3 no longer delivers (`CoreAIWebGlPersistentDataSyncBuildGuard` fails a
-build whose web template does not arm it); local GGUF models are unavailable in a browser player and
-return a documented limitation message ([KNOWN_ISSUES.md](../Assets/CoreAiUnity/Docs/KNOWN_ISSUES.md));
-the benchmark package (G1–G8, six-dimension scoring, role fitness, model leaderboard) is the standing
-quality instrument. Scale so far is measured in process only: `tools/ScaleHarness` drives 20/50/100/200
-actors over the loopback on CoreCLR
-([`dev-docs/SCALE_CHARACTERIZATION.md`](../dev-docs/SCALE_CHARACTERIZATION.md)); the guarded VM on Mono
-runs about 150 k instructions/s against 24 M on CoreCLR
+128-level weighted cap that keeps native stack use at most 428 KB on CoreCLR and about 1.38 MB on Mono,
+which an IL2CPP or WebGL player cannot otherwise bound; Luau source nested past 200 levels is refused
+instead of overflowing the stack — the IL2CPP/WebGL stack checks are on the Unity checklist in
+[`TODO.md`](../TODO.md)); WebGL persistence is the engine's own automatic `persistentDataPath`
+synchronization, and `CoreAiWebGlPersistence` reports immediately whether it is armed for this page
+instead of awaiting an `FS.syncfs` callback Unity 6.3 no longer delivers
+(`CoreAIWebGlPersistentDataSyncBuildGuard` fails a build whose web template does not arm it); local
+GGUF models are unavailable in a browser player and return a documented limitation message
+([KNOWN_ISSUES.md](../Assets/CoreAiUnity/Docs/KNOWN_ISSUES.md)); the benchmark package (G1–G8,
+six-dimension scoring, role fitness, model leaderboard) is the standing quality instrument. Scale so
+far is measured in process only: `tools/ScaleHarness` drives 20/50/100/200 actors over the loopback on
+CoreCLR ([`dev-docs/SCALE_CHARACTERIZATION.md`](../dev-docs/SCALE_CHARACTERIZATION.md)); the guarded VM
+on Mono runs about 150 k instructions/s against 24 M on CoreCLR
 ([`tools/vmbench/RESULTS.md`](../tools/vmbench/RESULTS.md)), and IL2CPP has not been measured (risk
 R1). Instance ceilings today: 16,384 per desktop world and 2,048 per actor, 4,032 per WebGL world,
 100,000 in the package format.
@@ -352,8 +352,8 @@ ladder (detail: [`ROBLOX_API_ROADMAP.md` §4](CoreAIMods/ROBLOX_API_ROADMAP.md#4
 | MVP2 | Scheduler, signals, clocks, services | surface landed; G10 and `BindToRenderStep` open | L | EM, PL |
 | MVP2.5 | Online foundation + persistence release | landed 7.3.0–7.43.0 (history) | — | EM |
 | — | Gameplay services I (the old MVP8) | landed slice | L | EM, PM, PL |
-| **MVP3** | World/place package + backups (+ spikes S1/S2) | **closing**: Unity gate pending | S | EM, PM, WebGL |
-| **MVP4** | Script contexts & client runtime | **next** | M | PL, EM, PT |
+| **MVP3** | World/place package + backups (+ spikes S1/S2) | **closing**: code complete, audits 1–3 done, Linux suites green; Unity gate and tag pending | S | EM, PM, WebGL |
+| **MVP4** | Script contexts & client runtime | **next**, not started | M | PL, EM, PT |
 | MVP5 | Host mode over a real socket + join snapshot | planned | L | EM, MP, MS |
 | MVP6 | World-state replication + write authority | planned | L | PT, EM, MP |
 | MVP7 | Networked characters & controls | planned | L | PM, MP, EM |
