@@ -1,4 +1,5 @@
 using CoreAI.Mods.Rbx.Binding;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
 using UnityEngine;
@@ -108,6 +109,54 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             float heightMetres = RbxSpace.LengthToUnity((float)JumpHeightStuds);
             Assert.AreEqual(Mathf.Sqrt(2f * 3f * heightMetres), velocityAtLowGravity, Epsilon);
             Assert.AreEqual(Mathf.Sqrt(2f * 27f * heightMetres), velocityAtHighGravity, Epsilon);
+        }
+    }
+
+    /// <summary>
+    /// A motor over a Rigidbody whose GameObject is destroyed retires itself: it stops reporting
+    /// itself available, reads return zero and every drive call is a safe no-op.
+    /// </summary>
+    /// <remarks>
+    /// WHY its own fixture: the fixture above rewires Physics.gravity and builds a floor and a body in
+    /// SetUp, and this test builds its own body and needs none of that.
+    /// </remarks>
+    [TestFixture]
+    public sealed class UnityRbxCharacterMotorLifecycleEditModeTests
+    {
+        [Test]
+        public void MotorLifecycle_DestroyedBody_BecomesUnavailable_WithSafeReads()
+        {
+            GameObject body = new GameObject("Motor lifecycle probe");
+            try
+            {
+                Rigidbody rigidbody = body.AddComponent<Rigidbody>();
+                rigidbody.useGravity = false;
+                UnityRbxCharacterMotor motor = new UnityRbxCharacterMotor(rigidbody);
+                Assert.IsTrue(motor.IsAvailable,
+                    "A motor over a live Rigidbody must report itself available.");
+
+                motor.MoveTo(new RbxVector3(5f, 0f, 0f));
+                motor.Step();
+                Assert.Greater(rigidbody.linearVelocity.magnitude, 0f,
+                    "A live motor must drive velocity toward its MoveTo target.");
+
+                Object.DestroyImmediate(body);
+                Assert.IsFalse(motor.IsAvailable,
+                    "Destroying the body must retire the motor instead of leaving a dead drive.");
+                Assert.AreEqual(RbxVector3.Zero, motor.Position);
+                Assert.AreEqual(RbxVector3.Zero, motor.MoveDirection);
+                Assert.DoesNotThrow(() => motor.Step());
+                Assert.DoesNotThrow(() => motor.Jump(50d, 7.2d, true));
+                Assert.DoesNotThrow(() => motor.MoveTo(null));
+                Assert.DoesNotThrow(() => motor.MoveTo(new RbxVector3(5f, 0f, 0f)));
+            }
+            finally
+            {
+                if (body != null)
+                {
+                    Object.DestroyImmediate(body);
+                }
+            }
         }
     }
 }

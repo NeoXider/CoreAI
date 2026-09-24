@@ -1,11 +1,16 @@
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
+using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 using UnityEngine;
+using Random = System.Random;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Binding
 {
@@ -1361,6 +1366,258 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             Assert.IsFalse(defaults.Anchored);
             Assert.IsTrue(defaults.CanCollide);
             Assert.AreEqual(0f, defaults.Transparency);
+        }
+    }
+
+    /// <summary>
+    /// The binder checked through the layers that drive it rather than through its own API: a Lua
+    /// <c>Position</c> write through the real mod runtime (the RbxSpace golden end to end), Clone
+    /// copying BasePart backing state through <c>CopyBackingState</c>, and a spread of poses and sizes
+    /// whose GameObject output must equal RbxSpace's own numbers (the semantic half of the MVP1
+    /// conversion lint in Mvp1ConversionLintEditModeTests).
+    /// </summary>
+    /// <remarks>
+    /// WHY its own fixture: the Lua runtime needs Unity's SynchronizationContext detached around every
+    /// test, which the binder fixture above does not do. WHY not next to the fixtures these tests
+    /// complete: those are engine-free and run in tools/portable/LuaTests, and these need a real
+    /// binder.
+    /// </remarks>
+    [TestFixture]
+    public sealed class InstanceGameObjectBinderCrossLayerEditModeTests
+    {
+        private SynchronizationContext _savedContext;
+
+        /// <summary>Same sync-over-async hazard as LuaCsModRuntimeEditModeTests: detach Unity's
+        /// SynchronizationContext so VM continuations complete on the thread pool.</summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _savedContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_savedContext);
+        }
+
+        private sealed class MemoryStore : ILuaModStore
+        {
+            private readonly Dictionary<(string ModId, string Key), string> _values = new();
+
+            public string Get(string modId, string key)
+            {
+                return _values.TryGetValue((modId, key), out string value) ? value : "";
+            }
+
+            public void Set(string modId, string key, string value)
+            {
+                if (value == null)
+                {
+                    _values.Remove((modId, key));
+                    return;
+                }
+
+                _values[(modId, key)] = value;
+            }
+
+            public void Clear(string modId)
+            {
+                List<(string ModId, string Key)> keys = new();
+                foreach ((string storedModId, string key) in _values.Keys)
+                {
+                    if (storedModId == modId)
+                    {
+                        keys.Add((storedModId, key));
+                    }
+                }
+
+                foreach ((string ModId, string Key) key in keys)
+                {
+                    _values.Remove(key);
+                }
+            }
+        }
+
+        private sealed class FakeGameLogger : IGameLogger
+        {
+            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+        }
+
+        private static LuaCsModStack BuildStack(LuaCsRbxApiBindings roblox,
+            MemoryStore store = null, LuaCapabilities caps = LuaCapabilities.All)
+        {
+            return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store ?? new MemoryStore(),
+                Capabilities = caps,
+                OneOffCapabilities = caps,
+                RbxApi = roblox
+            });
+        }
+
+        [Test]
+        public void Lua_BasePartPosition_RoundTripsThroughBinder_NoScaleOrChiralityDistortion()
+        {
+            // WHY: golden — a Lua Position write must survive Roblox→Unity→(read) with no double
+            // conversion: GameObject lands 0.28-scaled/Z-mirrored, Lua/registry keeps pure Roblox studs
+            // (mirrors PositionGolden in the binder tests, driven end-to-end through the Lua surface).
+            RbxSpace.ResetForTests(0.28f);
+            GameObject root = new("GoldenRoot");
+            try
+            {
+                InstanceGameObjectBinder binder = new(root.transform);
+                InstanceRegistry registry = new(null, binder);
+                RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+                LuaCsRbxApiBindings roblox = new(registry, game, partSink: binder);
+                LuaCsModStack stack = BuildStack(roblox);
+
+                RbxInstance part = registry.Create("Part");
+                part.Name = "Golden";
+                part.Parent = registry.WorldRoot;
+
+                stack.Runtime.LoadMod("m", @"
+                    local p = workspace:FindFirstChild('Golden')
+                    p.Position = Vector3.new(10, 5, -4)
+                    assert(p.Position == Vector3.new(10, 5, -4), 'Lua must read pure Roblox studs')");
+
+                PartProperties props = binder.GetPartPropertiesOrDefault(part.Id);
+                Assert.AreEqual(10f, props.Position.X, 1e-4f);
+                Assert.AreEqual(5f, props.Position.Y, 1e-4f);
+                Assert.AreEqual(-4f, props.Position.Z, 1e-4f);
+
+                Assert.IsTrue(binder.TryGetBoundObject(part.Id, out GameObject go));
+                Assert.AreEqual(2.8f, go.transform.position.x, 1e-4f);
+                Assert.AreEqual(1.4f, go.transform.position.y, 1e-4f);
+                Assert.AreEqual(1.12f, go.transform.position.z, 1e-4f, "mod-space z = -Unity z (D2)");
+
+                game.Destroy();
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+                RbxSpace.ResetForTests();
+            }
+        }
+
+        /// <summary>MVP1 finding 3 was closed against the FakePartStateBinder of
+        /// R6_5_CloneEditModeTests, not against the binder Unity actually ships — this exercises
+        /// InstanceGameObjectBinder.CopyBackingState directly, on a part materialized into the world
+        /// before it is cloned.</summary>
+        [Test]
+        public void R6_5_ClonesBasePartBackingState_ThroughRealBinder()
+        {
+            GameObject root = new("RealBinderCloneTestRoot");
+            InstanceGameObjectBinder binder = new(root.transform);
+            InstanceRegistry registry = new(null, binder);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            try
+            {
+                RbxInstance part = registry.Create("Part");
+                part.Parent = registry.WorldRoot;
+                binder.SetShape(part.Id, RbxPartShape.Ball);
+                binder.SetSize(part.Id, new RbxVector3(9f, 8f, 7f));
+                binder.SetColor(part.Id, RbxColor3.FromRGB(10f, 20f, 30f));
+                binder.SetAnchored(part.Id, true);
+
+                RbxInstance copy = part.Clone();
+
+                Assert.IsTrue(binder.TryGetPartProperties(copy.Id, out PartProperties copied));
+                Assert.AreEqual(new RbxVector3(9f, 8f, 7f), copied.Size);
+                Assert.AreEqual(RbxColor3.FromRGB(10f, 20f, 30f), copied.Color);
+                Assert.AreEqual(RbxPartShape.Ball, copied.Shape);
+                Assert.IsTrue(copied.Anchored);
+            }
+            finally
+            {
+                game.Destroy();
+                UnityEngine.Object.DestroyImmediate(root);
+            }
+        }
+
+        [Test]
+        public void Lint_BinderOutput_IsExactlyRobloxSpaceOutput()
+        {
+            // WHY: the semantic half of the lint — for a spread of poses/sizes the GameObject
+            // the binder produces must equal RbxSpace's own numbers exactly, proving the
+            // binder delegates instead of re-deriving (a hand-rolled copy would drift here).
+            RbxSpace.ResetForTests(0.28f);
+            GameObject root = new("LintRoot");
+            try
+            {
+                InstanceGameObjectBinder binder = new(root.transform);
+                InstanceRegistry registry = new(null, binder);
+                RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+                RbxInstance part = registry.Create("Part");
+                part.Parent = registry.WorldRoot;
+                Assert.IsTrue(binder.TryGetBoundObject(part.Id, out GameObject partGo));
+
+                Random rng = new(58);
+                for (int i = 0; i < 50; i++)
+                {
+                    RbxCFrame cf = RandomCFrame(rng);
+                    RbxVector3 size = new(NextExtent(rng), NextExtent(rng), NextExtent(rng));
+                    binder.SetCFrame(part.Id, cf);
+                    binder.SetSize(part.Id, size);
+
+                    (Vector3 expectedPos, Quaternion expectedRot) = RbxSpace.ToUnityPose(cf);
+                    Vector3 expectedScale = RbxSpace.SizeToUnity(size);
+
+                    Assert.Less((partGo.transform.position - expectedPos).magnitude, 1e-4f,
+                        $"iteration {i}: binder position diverged from RbxSpace");
+                    Assert.Less(Quaternion.Angle(partGo.transform.rotation, expectedRot), 0.01f,
+                        $"iteration {i}: binder rotation diverged from RbxSpace");
+                    Assert.Less((partGo.transform.localScale - expectedScale).magnitude, 1e-4f,
+                        $"iteration {i}: binder scale diverged from RbxSpace");
+                }
+
+                game.Destroy();
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+                RbxSpace.ResetForTests();
+            }
+        }
+
+        private static float NextCoord(Random rng)
+        {
+            return (float)(rng.NextDouble() * 500.0 - 250.0);
+        }
+
+        private static float NextExtent(Random rng)
+        {
+            return (float)(rng.NextDouble() * 64.0 + 0.05);
+        }
+
+        private static float NextAngle(Random rng)
+        {
+            return (float)(rng.NextDouble() * 720.0 - 360.0);
+        }
+
+        private static RbxCFrame RandomCFrame(Random rng)
+        {
+            RbxCFrame rotation = RbxCFrame.FromEulerAnglesXYZ(
+                NextAngle(rng) * Mathf.Deg2Rad,
+                NextAngle(rng) * Mathf.Deg2Rad,
+                NextAngle(rng) * Mathf.Deg2Rad);
+            return rotation + new RbxVector3(NextCoord(rng), NextCoord(rng), NextCoord(rng));
         }
     }
 }

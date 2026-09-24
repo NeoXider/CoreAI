@@ -1,9 +1,6 @@
 using System.Collections.Generic;
-using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Instances;
-using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
-using UnityEngine;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
@@ -71,55 +68,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.AreEqual(nameAfterNewestOperation, target.Name,
                 "An evicted replay must be rejected before its mutation runs.");
             Assert.AreEqual(2, registry.RetainedMutationOperationCount);
-        }
-
-        [Test]
-        public void Lookup_ByWorldName_LazilyWrapsHostObject_AndEveryKeyResolvesTheSameRecord()
-        {
-            RbxSpace.ResetForTests(0.28f);
-            GameObject hostObject = new("LazyWorldIdentityHost");
-            GameObject worldObject = new("LazyWorldSpawnPad");
-            worldObject.transform.position = new Vector3(0f, 1.8f, 0f);
-            worldObject.SetActive(false);
-            RbxWorldHost host = hostObject.AddComponent<RbxWorldHost>();
-            try
-            {
-                host.Initialize();
-                int countBeforeLookup = host.Registry.Count;
-
-                Assert.IsTrue(host.Registry.TryGetByWorldName(worldObject.name, out RbxInstance byName),
-                    "a scene object must be wrapped on its first world-name lookup without pre-binding");
-                Assert.AreEqual(countBeforeLookup + 1, host.Registry.Count,
-                    "the first lookup creates exactly one host-owned registry record");
-                Assert.AreEqual("Part", byName.ClassName);
-                Assert.AreSame(host.Registry.WorldRoot, byName.Parent);
-                Assert.IsTrue(host.Registry.TryGetRecord(byName.Id, out InstanceRecord record));
-                Assert.AreEqual(worldObject.name, record.WorldName);
-                Assert.IsNull(record.OwnerModId);
-                Assert.IsTrue(host.Binder.TryGetBoundObject(byName.Id, out GameObject backingObject));
-                Assert.AreSame(worldObject, backingObject, "the wrapper must adopt, not duplicate, the host object");
-                Assert.IsFalse(backingObject.activeSelf, "adoption must preserve host-owned activation state");
-
-                PartProperties properties = host.Binder.GetPartPropertiesOrDefault(byName.Id);
-                Assert.AreEqual(1.8f / 0.28f, properties.Position.Y, 1e-3f);
-
-                Assert.IsTrue(host.Registry.TryGet(byName.Id, out RbxInstance byId));
-                Assert.AreSame(byName, byId);
-                host.Registry.BindNetId(byName.Id, 42u);
-                Assert.IsTrue(host.Registry.TryGetByNetId(42u, out RbxInstance byNet));
-                Assert.AreSame(byName, byNet);
-
-                Assert.IsTrue(host.Registry.TryGetByWorldName(worldObject.name, out RbxInstance secondLookup));
-                Assert.AreSame(byName, secondLookup);
-                Assert.AreEqual(countBeforeLookup + 1, host.Registry.Count,
-                    "later lookups must reuse the same lazy record");
-            }
-            finally
-            {
-                Object.DestroyImmediate(hostObject);
-                Object.DestroyImmediate(worldObject);
-                RbxSpace.ResetForTests();
-            }
         }
 
         [Test]

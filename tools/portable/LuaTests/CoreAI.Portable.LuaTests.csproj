@@ -66,6 +66,7 @@
   <ItemGroup>
     <Compile Include="$(TestsRoot)/BundledLuaSamplesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/BundledLuaSamplesEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/BundledModSeederEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/BundledModSeederEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/CoreAiChatExamplesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/CoreAiChatExamplesEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/DemoModProductionSurfaceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/DemoModProductionSurfaceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/FileLuaModSourceStoreEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/FileLuaModSourceStoreEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/FileLuaModStoreEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/FileLuaModStoreEditModeTests.cs" />
@@ -93,7 +94,9 @@
     <Compile Include="$(TestsRoot)/LuauDownlevelerExecutionEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuauDownlevelerExecutionEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuauDownlevelerRbxCorpusEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuauDownlevelerRbxCorpusEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/HttpServiceOneOffRefusalEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/HttpServiceOneOffRefusalEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp1ConversionLintEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp1ConversionLintEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp1RbxSpaceSizeAndDirectionRoundTripEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp1RbxSpaceSizeAndDirectionRoundTripEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp2StanceConformanceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp2StanceConformanceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp3WorldPackageEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp3WorldPackageEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp3WorldPackageQaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp3WorldPackageQaEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp8CollectionServiceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp8CollectionServiceEditModeTests.cs" />
@@ -111,12 +114,16 @@
     <Compile Include="$(TestsRoot)/RbxApi/CompatibilityCorpus/TierACorpusEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/CompatibilityCorpus/TierACorpusEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/CompatibilityCorpus/TierBCorpusCatalog.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/CompatibilityCorpus/TierBCorpusCatalog.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Datatypes/RbxDatatypesFitnessEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxDatatypesFitnessEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Datatypes/RbxSpaceGoldenFixtureEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxSpaceGoldenFixtureEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Datatypes/RbxSpaceRoundTripEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxSpaceRoundTripEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Datatypes/RbxSpaceSceneHandednessGoldenEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/RbxSpaceSceneHandednessGoldenEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Instances/InstanceRegistryEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceRegistryEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Instances/R6_2_DestroyOrderEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_2_DestroyOrderEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Instances/R6_5_CloneEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_5_CloneEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Instances/RbxApiInstancesArchitectureFitnessEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/RbxApiInstancesArchitectureFitnessEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LiveCheck/RbxApi4BLiveCheckEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LiveCheck/RbxApi4BLiveCheckEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LiveCheck/RbxApi4BLiveCheckRunner.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LiveCheck/RbxApi4BLiveCheckRunner.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxApiLuaBindingsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxApiLuaBindingsEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxClickDetectorLuaBindingsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxClickDetectorLuaBindingsEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxClockDefaultSourceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxClockDefaultSourceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxClockLuaBindingsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxClockLuaBindingsEditModeTests.cs" />

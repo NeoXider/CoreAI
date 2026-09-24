@@ -1,13 +1,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
-using CoreAI.Mods.Rbx.Binding;
-using CoreAI.Mods.Rbx.Datatypes;
-using CoreAI.Mods.Rbx.Instances;
-using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
 using UnityEngine;
-using Random = System.Random;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 {
@@ -16,7 +11,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
     /// stud/meter/chirality boundary. Complements the engine-reference fitness test
     /// (RbxDatatypesFitnessEditModeTests) with a source-level scan — no raw scale literal
     /// and no MetersPerStud/StudsPerMeter arithmetic anywhere outside RbxSpace.cs — plus a
-    /// semantic check that the binder's output is bit-for-bit RbxSpace's output.
+    /// semantic check that the binder's output is bit-for-bit RbxSpace's output, which needs a real
+    /// binder and so is <c>Lint_BinderOutput_IsExactlyRobloxSpaceOutput</c> in
+    /// InstanceGameObjectBinderEditModeTests.cs.
     /// </summary>
     [TestFixture]
     public sealed class Mvp1ConversionLintEditModeTests
@@ -312,75 +309,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.IsEmpty(offenders,
                 "an equality comparison against the alias is a legal read, not arithmetic:\n"
                 + string.Join("\n", offenders));
-        }
-
-        [Test]
-        public void Lint_BinderOutput_IsExactlyRobloxSpaceOutput()
-        {
-            // WHY: the semantic half of the lint — for a spread of poses/sizes the GameObject
-            // the binder produces must equal RbxSpace's own numbers exactly, proving the
-            // binder delegates instead of re-deriving (a hand-rolled copy would drift here).
-            RbxSpace.ResetForTests(0.28f);
-            GameObject root = new("LintRoot");
-            try
-            {
-                InstanceGameObjectBinder binder = new(root.transform);
-                InstanceRegistry registry = new(null, binder);
-                RbxDataModel game = DataModelBootstrap.CreateGame(registry);
-                RbxInstance part = registry.Create("Part");
-                part.Parent = registry.WorldRoot;
-                Assert.IsTrue(binder.TryGetBoundObject(part.Id, out GameObject partGo));
-
-                Random rng = new(58);
-                for (int i = 0; i < 50; i++)
-                {
-                    RbxCFrame cf = RandomCFrame(rng);
-                    RbxVector3 size = new(NextExtent(rng), NextExtent(rng), NextExtent(rng));
-                    binder.SetCFrame(part.Id, cf);
-                    binder.SetSize(part.Id, size);
-
-                    (Vector3 expectedPos, Quaternion expectedRot) = RbxSpace.ToUnityPose(cf);
-                    Vector3 expectedScale = RbxSpace.SizeToUnity(size);
-
-                    Assert.Less((partGo.transform.position - expectedPos).magnitude, 1e-4f,
-                        $"iteration {i}: binder position diverged from RbxSpace");
-                    Assert.Less(Quaternion.Angle(partGo.transform.rotation, expectedRot), 0.01f,
-                        $"iteration {i}: binder rotation diverged from RbxSpace");
-                    Assert.Less((partGo.transform.localScale - expectedScale).magnitude, 1e-4f,
-                        $"iteration {i}: binder scale diverged from RbxSpace");
-                }
-
-                game.Destroy();
-            }
-            finally
-            {
-                Object.DestroyImmediate(root);
-                RbxSpace.ResetForTests();
-            }
-        }
-
-        private static float NextCoord(Random rng)
-        {
-            return (float)(rng.NextDouble() * 500.0 - 250.0);
-        }
-
-        private static float NextExtent(Random rng)
-        {
-            return (float)(rng.NextDouble() * 64.0 + 0.05);
-        }
-
-        private static float NextAngle(Random rng)
-        {
-            return (float)(rng.NextDouble() * 720.0 - 360.0);
-        }
-
-        private static RbxCFrame RandomCFrame(Random rng)
-        {
-            RbxCFrame rotation = RbxCFrame.FromEulerAnglesXYZ(
-                NextAngle(rng) * Mathf.Deg2Rad,
-                NextAngle(rng) * Mathf.Deg2Rad,
-                NextAngle(rng) * Mathf.Deg2Rad);
-            return rotation + new RbxVector3(NextCoord(rng), NextCoord(rng), NextCoord(rng));
         }
     }
 }

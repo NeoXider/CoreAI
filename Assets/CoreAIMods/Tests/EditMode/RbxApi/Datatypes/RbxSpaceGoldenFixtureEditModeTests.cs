@@ -1,6 +1,4 @@
-using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
-using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
 using UnityEngine;
@@ -52,33 +50,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
             RbxSpace.ResetForTests(0.28f);
             Vector3 unity = RbxSpace.ToUnity(new RbxVector3(1f, 2f, 3f));
             Assert.Less((unity - new Vector3(0.28f, 0.56f, -0.84f)).magnitude, Epsilon);
-        }
-
-        [Test]
-        public void D3_MeterAuthoredHostObjectReadsAsStuds()
-        {
-            RbxSpace.ResetForTests(0.28f);
-            GameObject hostObject = new("RbxSpaceGoldenWorldHost");
-            GameObject worldObject = new("RbxSpaceGoldenMeterObject");
-            worldObject.transform.position = new Vector3(0f, 1.8f, 0f);
-            RbxWorldHost host = hostObject.AddComponent<RbxWorldHost>();
-            try
-            {
-                host.Initialize();
-
-                Assert.IsTrue(host.Registry.TryGetByWorldName(worldObject.name, out RbxInstance wrapped),
-                    "the golden must traverse the real lazy host-world wrapper path");
-                PartProperties properties = host.Binder.GetPartPropertiesOrDefault(wrapped.Id);
-                Assert.AreEqual(1.8f / 0.28f, properties.Position.Y, 1e-3f,
-                    "a meter-authored object at y=1.8 m reads about 6.43 studs");
-                Assert.AreEqual(0f, properties.Position.X, Epsilon);
-                Assert.AreEqual(0f, properties.Position.Z, Epsilon);
-            }
-            finally
-            {
-                Object.DestroyImmediate(hostObject);
-                Object.DestroyImmediate(worldObject);
-            }
         }
 
         [Test]

@@ -112,4 +112,100 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
                 "Unity must destroy the existing Camera backing object with the host");
         }
     }
+
+    /// <summary>
+    /// A scene object the host never bound is wrapped on its first world-name lookup: every registry
+    /// key resolves to that one record, and a meter-authored position reads back in studs.
+    /// </summary>
+    /// <remarks>
+    /// WHY its own fixture: each test builds its own host next to its own scene object, so the host
+    /// the fixture above creates in SetUp would only put a second world in the scene.
+    /// </remarks>
+    [TestFixture]
+    public sealed class RbxWorldHostLazyWorldWrapEditModeTests
+    {
+        private const float Epsilon = 1e-4f;
+
+        [TearDown]
+        public void RestoreDefaultScale()
+        {
+            RbxSpace.ResetForTests();
+        }
+
+        [Test]
+        public void Lookup_ByWorldName_LazilyWrapsHostObject_AndEveryKeyResolvesTheSameRecord()
+        {
+            RbxSpace.ResetForTests(0.28f);
+            GameObject hostObject = new("LazyWorldIdentityHost");
+            GameObject worldObject = new("LazyWorldSpawnPad");
+            worldObject.transform.position = new Vector3(0f, 1.8f, 0f);
+            worldObject.SetActive(false);
+            RbxWorldHost host = hostObject.AddComponent<RbxWorldHost>();
+            try
+            {
+                host.Initialize();
+                int countBeforeLookup = host.Registry.Count;
+
+                Assert.IsTrue(host.Registry.TryGetByWorldName(worldObject.name, out RbxInstance byName),
+                    "a scene object must be wrapped on its first world-name lookup without pre-binding");
+                Assert.AreEqual(countBeforeLookup + 1, host.Registry.Count,
+                    "the first lookup creates exactly one host-owned registry record");
+                Assert.AreEqual("Part", byName.ClassName);
+                Assert.AreSame(host.Registry.WorldRoot, byName.Parent);
+                Assert.IsTrue(host.Registry.TryGetRecord(byName.Id, out InstanceRecord record));
+                Assert.AreEqual(worldObject.name, record.WorldName);
+                Assert.IsNull(record.OwnerModId);
+                Assert.IsTrue(host.Binder.TryGetBoundObject(byName.Id, out GameObject backingObject));
+                Assert.AreSame(worldObject, backingObject, "the wrapper must adopt, not duplicate, the host object");
+                Assert.IsFalse(backingObject.activeSelf, "adoption must preserve host-owned activation state");
+
+                PartProperties properties = host.Binder.GetPartPropertiesOrDefault(byName.Id);
+                Assert.AreEqual(1.8f / 0.28f, properties.Position.Y, 1e-3f);
+
+                Assert.IsTrue(host.Registry.TryGet(byName.Id, out RbxInstance byId));
+                Assert.AreSame(byName, byId);
+                host.Registry.BindNetId(byName.Id, 42u);
+                Assert.IsTrue(host.Registry.TryGetByNetId(42u, out RbxInstance byNet));
+                Assert.AreSame(byName, byNet);
+
+                Assert.IsTrue(host.Registry.TryGetByWorldName(worldObject.name, out RbxInstance secondLookup));
+                Assert.AreSame(byName, secondLookup);
+                Assert.AreEqual(countBeforeLookup + 1, host.Registry.Count,
+                    "later lookups must reuse the same lazy record");
+            }
+            finally
+            {
+                Object.DestroyImmediate(hostObject);
+                Object.DestroyImmediate(worldObject);
+                RbxSpace.ResetForTests();
+            }
+        }
+
+        [Test]
+        public void D3_MeterAuthoredHostObjectReadsAsStuds()
+        {
+            RbxSpace.ResetForTests(0.28f);
+            GameObject hostObject = new("RbxSpaceGoldenWorldHost");
+            GameObject worldObject = new("RbxSpaceGoldenMeterObject");
+            worldObject.transform.position = new Vector3(0f, 1.8f, 0f);
+            RbxWorldHost host = hostObject.AddComponent<RbxWorldHost>();
+            try
+            {
+                host.Initialize();
+
+                Assert.IsTrue(host.Registry.TryGetByWorldName(worldObject.name, out RbxInstance wrapped),
+                    "the golden must traverse the real lazy host-world wrapper path");
+                PartProperties properties = host.Binder.GetPartPropertiesOrDefault(wrapped.Id);
+                Assert.AreEqual(1.8f / 0.28f, properties.Position.Y, 1e-3f,
+                    "a meter-authored object at y=1.8 m reads about 6.43 studs");
+                Assert.AreEqual(0f, properties.Position.X, Epsilon);
+                Assert.AreEqual(0f, properties.Position.Z, Epsilon);
+            }
+            finally
+            {
+                Object.DestroyImmediate(hostObject);
+                Object.DestroyImmediate(worldObject);
+            }
+        }
+    }
 }

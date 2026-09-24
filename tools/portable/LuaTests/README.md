@@ -30,7 +30,7 @@ Reading a result:
 | Project | Unity asmdef | What is compiled |
 |---|---|---|
 | `../LuaTier/UnityEngine` | UnityEngine (engine) | the shim described below |
-| `../LuaTier/CoreAI.Source` | `CoreAI.Source` | the game-logger contract and console sink, `UnityLog`, persistent-path constants, `CoreAiWebGlPersistence`, world-command envelopes and executor interfaces, the prefab-registry interface; plus `CoreServicesInstaller.Portable.cs` |
+| `../LuaTier/CoreAI.Source` | `CoreAI.Source` | the game-logger contract and console sink, `UnityLog`, persistent-path constants, `CoreAiWebGlPersistence`, world-command envelopes and executor interfaces, the prefab-registry interface, the chat-example prompts (pure data); plus `CoreServicesInstaller.Portable.cs` |
 | `../LuaTier/CoreAI.RbxApi.Unity` | `CoreAI.RbxApi.Unity` | `RbxSpace.cs` and the assembly's `InternalsVisibleTo` file |
 | `../LuaTier/CoreAI.RbxApi.Binding` | `CoreAI.RbxApi.Binding` | the part-property, camera and click-pick seams with their in-memory implementations, `IRbxCharacterMotorProvider`, `WorldQuerySceneWalker`, `UnityRbxCharacterMotor` |
 | `../LuaTier/CoreAI.Mods` | `CoreAI.Mods` | `Scripting/**`, `LuaExecution/**`, `LuaAssets/**`, `Logging/**`, `Infrastructure/**`, `WorldBindings/**` (exclusions below) |
@@ -92,19 +92,32 @@ The real `CoreServicesInstaller` is a VContainer/MessagePipe installer, but the 
 
 ## Coverage
 
-Linked from `Assets/CoreAIMods/Tests/EditMode` (68 fixture files, 4 helpers, 1 derived helper), plus `Assets/CoreAiUnity/Tests/EditMode/LuaModAutoRepairPolicyEditModeTests.cs` (a Lua-tier policy tested through public API only). The explicit list is in the project file. 36 files of the same folder already run in the engine-free suite and are not linked again.
+Linked from `Assets/CoreAIMods/Tests/EditMode` (75 fixture files, 4 helpers, 1 derived helper), plus `Assets/CoreAiUnity/Tests/EditMode/LuaModAutoRepairPolicyEditModeTests.cs` (a Lua-tier policy tested through public API only). The explicit list is in the project file. 36 files of the same folder already run in the engine-free suite and are not linked again.
 
-Excluded, by what they need (38 files):
+A linked fixture holds only tests that run here. Where a fixture's subject is engine-free but a few of its tests drive that subject through the engine, those tests live in a Unity-only fixture class next to the engine code they need, so the rest of the fixture is linked whole:
+
+| Linked fixture | Its engine-bound tests live in |
+|---|---|
+| `RbxApi/LuaBindings/RbxApiLuaBindingsEditModeTests` | `RbxApiLuaBindingsProductionContainerEditModeTests` in `CoreAiModsLifetimeScopeNoNetworkBridgeEditModeTests.cs` (the production VContainer composition: `execute_lua` and the Lua network path); `InstanceGameObjectBinderCrossLayerEditModeTests` in `RbxApi/Binding/InstanceGameObjectBinderEditModeTests.cs` (the Lua position golden through the binder) |
+| `RbxApi/Acceptance/Mvp1ConversionLintEditModeTests`, `RbxApi/Instances/R6_5_CloneEditModeTests` | `InstanceGameObjectBinderCrossLayerEditModeTests` (the binder's output against RbxSpace, Clone through the real binder) |
+| `RbxApi/Instances/InstanceRegistryEditModeTests`, `RbxApi/Datatypes/RbxSpaceGoldenFixtureEditModeTests` | `RbxWorldHostLazyWorldWrapEditModeTests` in `RbxApi/Binding/RbxWorldHostEditModeTests.cs` |
+| `RbxApi/Acceptance/Mvp2StanceConformanceEditModeTests` | `UnityRbxCharacterMotorLifecycleEditModeTests` in `RbxApi/Binding/UnityRbxCharacterMotorJumpGravityEditModeTests.cs` |
+
+A new test that needs the engine goes into such a class, not into a linked fixture: there it would break this build, or report Inconclusive on every run.
+
+Excluded, by what they need (31 files):
 
 | Needs | Files |
 |---|---|
-| VContainer composition (`CoreAiModsLifetimeScope`, `ContainerBuilder`, `RegisterCoreAiMods`) | `CoreAiModsLifetimeScopeNoNetworkBridgeEditModeTests`, `LuaCsEventRoutingProductionPathEditModeTests`, `LuaModsLlmToolEditModeTests`, `MultiplayerFoundationDemoScenarioEditModeTests`, `RbxApi/Binding/RbxCharacterMotorProviderEditModeTests`, `RbxApi/Binding/RbxWorldHostDiWiringEditModeTests`, `RbxApi/LuaBindings/RbxApiLuaBindingsEditModeTests` (about 18 of its 104 tests build the production container and one uses the GameObject binder; the rest are engine-free and would run here if those lived in a separate file) |
-| GameObject binder, `RbxWorldHost`, camera rig or physics simulation | `AdoptWorldObjectScaleEditModeTests`, `WorldBindingsStudUnitsEditModeTests`, `WorldQuerySceneWalkerEditModeTests` (compiles, but every fixture builds a hierarchy), `RbxApi/Acceptance/Mvp1AcceptanceGateEditModeTests`, `RbxApi/Acceptance/Mvp1GoldenTreeFixtureEditModeTests`, `RbxApi/Acceptance/Mvp1ConversionLintEditModeTests`, `RbxApi/Acceptance/Mvp2StanceConformanceEditModeTests` (also needs a helper from `RbxApiLuaBindingsEditModeTests`), `RbxApi/Binding/InstanceGameObjectBinderEditModeTests`, `RbxApi/Binding/PartShapeMaterializationEditModeTests`, `RbxApi/Binding/RbxWorldHostEditModeTests`, `RbxApi/Binding/UnityRbxCharacterMotorJumpGravityEditModeTests`, `RbxApi/Datatypes/RbxSpaceGoldenFixtureEditModeTests`, `RbxApi/Instances/InstanceRegistryEditModeTests`, `RbxApi/Instances/R6_5_CloneEditModeTests`, `RbxApi/LuaBindings/RbxCameraLuaBindingsEditModeTests` |
+| VContainer composition (`CoreAiModsLifetimeScope`, `ContainerBuilder`, `RegisterCoreAiMods`) | `CoreAiModsLifetimeScopeNoNetworkBridgeEditModeTests`, `LuaCsEventRoutingProductionPathEditModeTests`, `LuaModsLlmToolEditModeTests`, `MultiplayerFoundationDemoScenarioEditModeTests`, `RbxApi/Binding/RbxCharacterMotorProviderEditModeTests`, `RbxApi/Binding/RbxWorldHostDiWiringEditModeTests` |
+| GameObject binder, `RbxWorldHost`, camera rig or physics simulation | `AdoptWorldObjectScaleEditModeTests`, `WorldBindingsStudUnitsEditModeTests`, `WorldQuerySceneWalkerEditModeTests`, `RbxApi/Binding/UnityRbxCharacterMotorJumpGravityEditModeTests` (these four compile, but every test reaches a refused engine member), `RbxApi/Acceptance/Mvp1AcceptanceGateEditModeTests` (its SetUp builds `Mvp1AcceptanceWorld`, a real GameObject world, for every test), `RbxApi/Acceptance/Mvp1GoldenTreeFixtureEditModeTests` (7 of its 8 tests build `Mvp1AcceptanceWorld`), `RbxApi/Binding/InstanceGameObjectBinderEditModeTests`, `RbxApi/Binding/PartShapeMaterializationEditModeTests`, `RbxApi/Binding/RbxWorldHostEditModeTests`, `RbxApi/LuaBindings/RbxCameraLuaBindingsEditModeTests` |
 | Materials, shaders, textures (`CoreAI.Mods.Rbx.Rendering`) | `RbxApi/Acceptance/RbxMaterialCatalogQaEditModeTests`, `RbxApi/Unity/RbxMaterialShowcaseRigEditModeTests`, `RbxApi/Unity/RbxMaterialTextureCatalogEditModeTests`, `RbxApi/Unity/RbxMaterialVariantRenderingEditModeTests`, `RbxApi/Unity/RbxProceduralMaterialProviderEditModeTests` |
 | `UnityEditor` or `CoreAI.Editor` | `ResourcesBundledModSourceEditModeTests`, `RbxApi/Acceptance/RbxTextureMaterialsAcceptanceEditModeTests`, `RbxApi/Unity/RbxCc0TextureSetsEditModeTests`, `RbxApi/Unity/RbxMaterialSurfaceProfilesEditModeTests`, `RbxApi/Unity/RbxMaterialTextureCatalogQaEditModeTests` |
-| `[UnityTest]` coroutines | `RbxApi/Acceptance/Mvp3WorldPackageFollowUpEditModeTests` |
-| CoreAI.Source host types outside the engine-free slice (`CoreAISettingsAsset`, chat examples, the VContainer-built G10 composition) | `LuaModsLlmToolSharingEditModeTests`, `CoreAiChatExamplesEditModeTests`, `G10CancellationClassificationEditModeTests` |
+| `[UnityTest]` coroutines and the VContainer installer | `RbxApi/Acceptance/Mvp3WorldPackageFollowUpEditModeTests`: 18 `[UnityTest]` tests wrap their bodies in `UniTask.ToCoroutine`, which only the Unity build of UniTask has, and 2 `[Test]` tests call `RbxWorldStartupSequence`, an internal class of `Composition/CoreAiModsInstaller.cs`. With those 20 left out, the other 65 test cases of the file compile and pass here, so moving the 20 into a Unity-only file is what would link it. |
+| CoreAI.Source host types outside the engine-free slice (`CoreAISettingsAsset`, the VContainer-built G10 composition) | `LuaModsLlmToolSharingEditModeTests`, `G10CancellationClassificationEditModeTests` |
 | The Hub package (whole file inside `#if COREAI_HAS_HUB`) | `CoreAiModsHubBinderFullTierEditModeTests`, `LuaSyntaxHighlighterEditModeTests` |
+
+WHY no `[UnityTest]` twin: Unity steps the enumerator once per editor update and runs the player loop in between, so a twin here would have to emulate that loop, which this suite never does; and `UniTask.ToCoroutine` would still be missing without rewriting the test file.
 
 Runtime files left out of `CoreAI.Mods`: `Composition/**` and `Presentation/**` (VContainer), `Diagnostics/G10/**` (VContainer and the CoreAI.Source LLM stack), `HubIntegration/**` (its own asmdef, Hub package), `Scripting/PlayerLoopScriptFrameYielder.cs` (player loop), `Scripting/LuaCs/LuaCsCoroutineRunner.cs` and `Infrastructure/WorldRestoreGate.cs` (MonoBehaviours nothing linked needs). Left out of `CoreAI.RbxApi.Binding` and `CoreAI.RbxApi.Unity`: the GameObject binder, `RbxWorldHost`, the Unity camera, click-pick, input and physics adapters, and the material and texture providers.
 
