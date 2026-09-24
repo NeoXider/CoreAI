@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Threading.Tasks;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Sandbox.LuaCs;
 using Lua;
 using Lua.Runtime;
 
@@ -118,6 +119,9 @@ namespace CoreAI.Ai.LuaCs
         /// Converts a host exception to the VM error type without decorating the message: the
         /// §5.2.7 "CODE: message | fix: ..." line must stay byte-stable for the AI self-repair
         /// contract, so no function-name prefix is added here (unlike the generic registry path).
+        /// That line is also the whole error value a script's <c>pcall</c>, <c>xpcall</c> or
+        /// <c>coroutine.resume</c> receives, while C# reads <paramref name="ex"/> back from
+        /// <see cref="LuaCsHostFunctionException.HostException"/>.
         /// </summary>
         public static LuaRuntimeException ToLuaError(LuaState state, Exception ex)
         {
@@ -127,7 +131,11 @@ namespace CoreAI.Ai.LuaCs
             }
 
             string message = string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message;
-            return new LuaRuntimeException(state, new InvalidOperationException(message, ex));
+            // WHY not LuaRuntimeException(state, new InvalidOperationException(message, ex)): with an inner
+            // exception set, pcall gives the mod (and through execute_lua the model) that wrapper's
+            // ToString() - CLR type names, the host stack trace, absolute source paths - and
+            // coroutine.resume gives it nil. See LuaCsHostFunctionException.
+            return new LuaCsHostFunctionException(state, message, ex);
         }
 
         private static Exception WithProductionContext(LuaState state, Exception ex,

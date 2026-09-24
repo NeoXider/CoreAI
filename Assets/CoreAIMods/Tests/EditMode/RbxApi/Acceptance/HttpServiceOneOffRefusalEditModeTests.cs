@@ -136,6 +136,86 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 "a loaded mod keeps connecting and firing after the one-off was refused");
         }
 
+        [Test]
+        public async Task OneOffExecuteLua_RefusedHostCall_PcallXpcallAndResumeGetOnlyTheRbxErrorLine()
+        {
+            using Harness harness = new();
+            ActorContext actor = harness.Actor("errtext-actor");
+            const string caught = @"
+                local function connect() return workspace.ChildAdded:Connect(function() end) end
+                local okP, errP = pcall(connect)
+                local okX, errX = xpcall(connect, function(e) return e end)
+                local okR, errR = coroutine.resume(coroutine.create(connect))
+                return table.concat({ tostring(okP), type(errP), tostring(errP), tostring(okX), type(errX),
+                    tostring(errX), tostring(okR), type(errR), tostring(errR) }, '||')";
+
+            LuaTool.LuaResult protectedRun = await harness.Stack.ToolExecutor.ExecuteAsync(
+                caught, actor, CancellationToken.None);
+            LuaTool.LuaResult uncaughtRun = await harness.Stack.ToolExecutor.ExecuteAsync(
+                "workspace.ChildAdded:Connect(function() end)", actor, CancellationToken.None);
+
+            // WHY the uncaught run is the reference: its error is the existing observable the model and
+            // auto-repair classify by code, and it never carried the host exception's ToString().
+            Assert.IsFalse(uncaughtRun.Success, "an uncaught refusal must fail the execute_lua call");
+            StringAssert.StartsWith(
+                "CONTEXT_VIOLATION: Workspace.ChildAdded:Connect requires a persistent owning mod id | fix: ",
+                uncaughtRun.Error, "the uncaught refusal must still read as its RbxError code");
+            AssertIsOnlyTheErrorLine(uncaughtRun.Error);
+
+            Assert.IsTrue(protectedRun.Success, protectedRun.Error);
+            string[] parts = protectedRun.Output.Split(new[] { "||" }, StringSplitOptions.None);
+            Assert.AreEqual(9, parts.Length, protectedRun.Output);
+            string[] paths = { "pcall", "xpcall", "coroutine.resume" };
+            for (int index = 0; index < paths.Length; index++)
+            {
+                Assert.AreEqual("false", parts[index * 3], paths[index] + " must report the failure");
+                Assert.AreEqual("string", parts[index * 3 + 1], paths[index] + " must receive a string error");
+                Assert.AreEqual(uncaughtRun.Error, parts[index * 3 + 2],
+                    paths[index] + " must receive exactly the refusal line, nothing wrapped around it");
+            }
+
+            AssertIsOnlyTheErrorLine(protectedRun.Output);
+        }
+
+        [Test]
+        public void LoadedMod_HostErrors_ReachPcallAndTheTaskThreadFaultAsTheProductionLine()
+        {
+            using Harness harness = new();
+            harness.Stack.Runtime.LoadMod("errtext-mod", @"
+local ok, err = pcall(function() return game:GetService('NoSuchService') end)
+store_set('pcall', tostring(err))
+task.spawn(function()
+    game:GetService('NoSuchService')
+end)");
+
+            const string refusal = "UNKNOWN_SERVICE: NoSuchService is not a valid Service name | fix: ";
+            string caught = harness.Store.Get("errtext-mod", "pcall");
+            StringAssert.StartsWith("[mod:errtext-mod script:main.lua line:2] " + refusal, caught,
+                "pcall must receive the production-prefixed line itself");
+            AssertIsOnlyTheErrorLine(caught);
+
+            IReadOnlyList<LuaModHandlerError> faults =
+                harness.Stack.Runtime.GetRecentHandlerErrors("errtext-mod");
+            Assert.AreEqual(1, faults.Count, "the failing task thread must be reported once");
+            StringAssert.Contains("[mod:errtext-mod script:main.lua line:5] " + refusal, faults[0].Error,
+                "the thread fault must carry the host's code and line, not the nil a protected resume "
+                + "reads from an error built over an inner exception");
+            AssertIsOnlyTheErrorLine(faults[0].Error);
+        }
+
+        /// <summary>
+        /// Fails when <paramref name="text"/> carries anything of the host exception beyond its message:
+        /// a CLR type name, a managed stack frame or an absolute source path.
+        /// </summary>
+        private static void AssertIsOnlyTheErrorLine(string text)
+        {
+            StringAssert.DoesNotContain("Exception", text, "no CLR exception type name may leak: " + text);
+            StringAssert.DoesNotContain("   at ", text, "no managed stack frame may leak: " + text);
+            StringAssert.DoesNotContain("/Assets/", text, "no source path may leak: " + text);
+            StringAssert.DoesNotContain(":\\", text, "no Windows source path may leak: " + text);
+            StringAssert.DoesNotContain("\n", text, "the error must stay one line: " + text);
+        }
+
         private sealed class Harness : IDisposable
         {
             public Harness()

@@ -150,7 +150,9 @@ namespace CoreAI.Sandbox.LuaCs
         /// </summary>
         public static bool IsMemoryBudgetTrip(Exception ex)
         {
-            for (Exception e = ex; e != null; e = e.InnerException)
+            // WHY NextCause: a host function's LuaCsHostFunctionException carries its cause as HostException,
+            // not InnerException, so a plain InnerException walk would stop at it.
+            for (Exception e = ex; e != null; e = LuaCsHostFunctionException.NextCause(e))
             {
                 if (e is LuaMemoryBudgetException)
                 {

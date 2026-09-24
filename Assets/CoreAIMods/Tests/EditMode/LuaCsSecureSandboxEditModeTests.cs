@@ -1,5 +1,7 @@
 #if COREAI_LUA
 using System.Threading;
+using CoreAI.Ai.LuaCs;
+using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Sandbox.LuaCs;
 using Lua;
 using NUnit.Framework;
@@ -193,6 +195,136 @@ namespace CoreAI.Tests.EditMode
                 "A timeout is a real guard and must not be classified as a memory trip.");
             Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(null),
                 "A null exception is not a memory trip.");
+        }
+
+        [Test]
+        public void IsMemoryBudgetTrip_FollowsTheCauseAHostFunctionErrorCarries()
+        {
+            // WHY: a host function's Lua error keeps its cause in HostException, not InnerException, so the
+            // classifier must step through it or a trip that crossed a host function would read as a Lua bug.
+            System.Exception crossed = new LuaCsHostFunctionException(null, "mods_call: budget",
+                new System.InvalidOperationException("wrapped",
+                    new LuaMemoryBudgetException(
+                        $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} (268435456 bytes)")));
+            Assert.IsTrue(LuaCsExecutionGuard.IsMemoryBudgetTrip(crossed),
+                "A memory trip behind a host function error must still be recognised by its type.");
+
+            Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(
+                    new LuaCsHostFunctionException(null,
+                        $"forged {LuaCsExecutionGuard.MemoryBudgetTripMarker}",
+                        new System.InvalidOperationException(LuaCsExecutionGuard.MemoryBudgetTripMarker))),
+                "A host function error whose cause is no trip must not be classified as one, whatever its text.");
+            Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(
+                    new LuaCsHostFunctionException(null, "no cause", null)),
+                "A host function error without a cause is not a memory trip.");
+        }
+
+        /// <summary>
+        /// Lua prelude whose <c>probe(host)</c> calls a failing host function through every protected path a
+        /// script has and returns one "ok|type|text" row per path: pcall of the host function itself, pcall of
+        /// a Lua function calling it, xpcall's handler argument and a protected <c>coroutine.resume</c>.
+        /// </summary>
+        private const string ProtectedPathsProbe =
+            "local function probe(host)\n" +
+            "  local nested = function() return host() end\n" +
+            "  local out = {}\n" +
+            "  local function add(ok, err)\n" +
+            "    out[#out + 1] = tostring(ok) .. '|' .. type(err) .. '|' .. tostring(err)\n" +
+            "  end\n" +
+            "  add(pcall(host))\n" +
+            "  add(pcall(nested))\n" +
+            "  add(xpcall(nested, function(e) return e end))\n" +
+            "  add(coroutine.resume(coroutine.create(nested)))\n" +
+            "  return table.concat(out, '\\n')\n" +
+            "end\n";
+
+        private static void AssertEveryProtectedPathGets(string expected, LuaValue[] probeResult)
+        {
+            string[] rows = probeResult[0].Read<string>().Split('\n');
+            string[] paths = { "pcall(host)", "pcall(lua -> host)", "xpcall handler", "coroutine.resume" };
+            Assert.AreEqual(paths.Length, rows.Length, string.Join(" / ", rows));
+            for (int index = 0; index < paths.Length; index++)
+            {
+                Assert.AreEqual("false|string|" + expected, rows[index],
+                    paths[index] + " must receive exactly the host's error line and nothing wrapped around it");
+            }
+        }
+
+        [Test]
+        public void RbxHostFunctionError_EveryProtectedPathGetsOnlyTheErrorLine_AndCSharpKeepsTheRbxError()
+        {
+            const string expected = "CONTEXT_VIOLATION: refused on purpose | fix: call it from a loaded mod";
+            LuaCsSecureEnvironment env = new();
+            LuaCsApiRegistry registry = new();
+            registry.RegisterCallback("refuse", LuaCsRbxLua.Fn("refuse",
+                _ => throw new RbxError(RbxErrorCode.ContextViolation,
+                    "refused on purpose", "call it from a loaded mod")));
+            LuaState state = env.Create(registry);
+
+            // WHY: an error built over an inner exception gives pcall that exception's ToString() - CLR type
+            // names, the host stack trace and absolute source paths - and gives xpcall and resume nil.
+            AssertEveryProtectedPathGets(expected, env.RunChunk(state, ProtectedPathsProbe + "return probe(refuse)"));
+
+            LuaRuntimeException uncaught = Assert.Catch<LuaRuntimeException>(() => env.RunChunk(state, "refuse()"));
+            Assert.AreEqual(expected, uncaught.Message, "C# callers keep reading the same line from Message");
+            LuaCsHostFunctionException host = uncaught as LuaCsHostFunctionException;
+            Assert.IsNotNull(host, "a failing host function must raise the host-function error type");
+            RbxError error = host.HostException as RbxError;
+            Assert.IsNotNull(error, "the original RbxError must stay reachable from C#");
+            Assert.AreEqual(RbxErrorCode.ContextViolation, error.Code,
+                "C# must still classify the failure by its code");
+        }
+
+        [Test]
+        public void RegistryHostFunctionError_EveryProtectedPathGetsOnlyTheNamedMessage_AndCSharpKeepsTheCause()
+        {
+            System.InvalidOperationException delegateFailure = new("delegate exploded");
+            System.InvalidOperationException callbackFailure = new("callback exploded");
+            LuaCsSecureEnvironment env = new();
+            LuaCsApiRegistry registry = new();
+            registry.Register("explode", new System.Func<double>(() => throw delegateFailure));
+            registry.RegisterVarArgs("explode_varargs", _ => throw callbackFailure);
+            LuaState state = env.Create(registry);
+
+            AssertEveryProtectedPathGets("explode: delegate exploded",
+                env.RunChunk(state, ProtectedPathsProbe + "return probe(explode)"));
+            AssertEveryProtectedPathGets("explode_varargs: callback exploded",
+                env.RunChunk(state, ProtectedPathsProbe + "return probe(explode_varargs)"));
+
+            LuaCsHostFunctionException fromDelegate =
+                Assert.Throws<LuaCsHostFunctionException>(() => env.RunChunk(state, "explode()"));
+            Assert.AreEqual("explode: delegate exploded", fromDelegate.Message);
+            Assert.AreSame(delegateFailure, fromDelegate.HostException,
+                "the delegate's own exception, unwrapped from reflection's wrapper, must stay reachable");
+            LuaCsHostFunctionException fromCallback =
+                Assert.Throws<LuaCsHostFunctionException>(() => env.RunChunk(state, "explode_varargs()"));
+            Assert.AreSame(callbackFailure, fromCallback.HostException);
+        }
+
+        [Test]
+        public void RegistryDelegate_LuaErrorRaisedInside_CrossesTheHostFunctionWithItsOwnErrorValue()
+        {
+            LuaCsSecureEnvironment env = new();
+            LuaCsApiRegistry registry = new();
+            LuaState state = null;
+            registry.Register("rethrow", new System.Func<double>(() =>
+            {
+                LuaTable errorObject = new();
+                errorObject["code"] = 7d;
+                throw new LuaRuntimeException(state, new LuaValue(errorObject), 0);
+            }));
+            state = env.Create(registry);
+
+            // WHY: reflection wraps whatever the delegate throws, so without unwrapping, a Lua error raised
+            // inside one (a nested guarded call's failure) is re-wrapped as a host failure and its error value
+            // flattened to text.
+            LuaValue[] result = env.RunChunk(state,
+                "local ok, err = pcall(rethrow)\n" +
+                "return tostring(ok) .. '|' .. type(err) .. '|' .. " +
+                "(type(err) == 'table' and string.format('%d', err.code) or tostring(err))");
+
+            Assert.AreEqual("false|table|7", result[0].Read<string>(),
+                "the Lua error value must cross the host function unchanged");
         }
 
         [Test]

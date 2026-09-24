@@ -231,6 +231,8 @@ namespace CoreAI.Sandbox.LuaCs
                 }
                 catch (TargetInvocationException ex) when (ex.InnerException != null)
                 {
+                    // WHY: DynamicInvoke wraps whatever the delegate threw, so a Lua error from a nested
+                    // guarded call reaches here instead of the clause above; ToLuaRuntimeException rethrows it.
                     throw ToLuaRuntimeException(ctx.State, name, ex.InnerException);
                 }
                 catch (Exception ex)
@@ -255,15 +257,84 @@ namespace CoreAI.Sandbox.LuaCs
             return args;
         }
 
+        /// <summary>
+        /// Converts a registered host function's failure into the VM error Lua code sees as
+        /// "<c>name: message</c>". A Lua error that crossed the function (a nested guarded call
+        /// unwrapped from <see cref="TargetInvocationException"/>) is returned unchanged, as the
+        /// callback path already rethrows it, so its own error value and budget-trip cause survive.
+        /// </summary>
         private static LuaRuntimeException ToLuaRuntimeException(LuaState state, string name, Exception ex)
         {
+            if (ex is LuaRuntimeException lua)
+            {
+                return lua;
+            }
+
             string message = ex.Message;
             if (string.IsNullOrWhiteSpace(message))
             {
                 message = ex.GetType().Name;
             }
 
-            return new LuaRuntimeException(state, new InvalidOperationException($"{name}: {message}", ex));
+            return new LuaCsHostFunctionException(state, $"{name}: {message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// The Lua error raised when a host (C#) function fails. Lua code receives exactly
+    /// <see cref="Message"/> as a string error value, through <c>pcall</c>, <c>xpcall</c> and a
+    /// protected <c>coroutine.resume</c> alike: the host's own one-line text (on the Roblox surface the
+    /// §5.2.7 <c>[mod:id script:path line:n] CODE: message | fix: ...</c> line), never a CLR type name,
+    /// a managed stack trace or a source path. C# code reads the original exception from
+    /// <see cref="HostException"/>.
+    /// </summary>
+    public sealed class LuaCsHostFunctionException : LuaRuntimeException
+    {
+        private readonly string _message;
+
+        // WHY the error-object base constructor and not LuaRuntimeException(LuaState, Exception): whenever
+        // InnerException is set, Lua-CSharp's pcall hands the script InnerException.ToString() - the host
+        // exception's type names, its managed stack trace and absolute source paths, about 1,600 chars per
+        // refusal, enough for four refusals to overflow execute_lua's result cap - while xpcall and a
+        // protected coroutine.resume read ErrorObject, which that constructor leaves nil. The error-object
+        // constructor gives all three the same text, but it cannot also set InnerException (not virtual,
+        // no setter), so the cause travels as HostException. Level 0 keeps pcall's text free of a
+        // "chunk:line:" position, as Lua reports an error raised by a C function.
+        /// <summary>
+        /// Creates the error for <paramref name="hostException"/>, shown to Lua as <paramref name="message"/>.
+        /// </summary>
+        /// <param name="state">The state whose host function failed; may be null.</param>
+        /// <param name="message">The exact error text Lua code receives.</param>
+        /// <param name="hostException">The exception the host function threw.</param>
+        public LuaCsHostFunctionException(LuaState state, string message, Exception hostException)
+            : base(state, (LuaValue)(message ?? string.Empty), 0)
+        {
+            _message = message ?? string.Empty;
+            HostException = hostException;
+        }
+
+        /// <summary>
+        /// The exception the host function threw (for example an <c>RbxError</c> carrying its code and
+        /// mod context). Not exposed as <see cref="Exception.InnerException"/>: see the constructor's WHY.
+        /// </summary>
+        public Exception HostException { get; }
+
+        /// <summary>
+        /// The Lua-visible error text, identical to the error value, without the "Lua-CSharp: " and
+        /// position decoration the base type adds to an error object's message.
+        /// </summary>
+        public override string Message => _message;
+
+        /// <summary>
+        /// Next link of a cause chain: <see cref="HostException"/> for this type, otherwise
+        /// <see cref="Exception.InnerException"/>. Walkers that classify a failure by the TYPE of a
+        /// wrapped cause step with this so a host function's error does not end the chain.
+        /// </summary>
+        public static Exception NextCause(Exception exception)
+        {
+            return exception is LuaCsHostFunctionException host
+                ? host.HostException
+                : exception?.InnerException;
         }
     }
 }
